@@ -1,0 +1,477 @@
+from __future__ import annotations
+
+from datetime import datetime
+from enum import Enum
+from typing import Annotated, Literal, get_args
+from uuid import UUID
+
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    ConfigDict,
+    Field,
+    JsonValue,
+    model_validator,
+)
+
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdgeIndexes,
+    MappedProviderCallProvenance,
+    TokenCountSource,
+)
+
+PROVIDER_REQUEST_HASH_PATTERN = r"^[0-9a-f]{64}$"
+TRANSCRIPTION_REQUEST_HASH_DESCRIPTION = (
+    "SHA-256 of Eneo's canonical transcription request intent at the provider "
+    "adapter boundary: requested model, provider, effective language, and a "
+    "digest of the audio sent. Retries of the same audio share this hash."
+)
+PROVIDER_REQUEST_HASH_DESCRIPTION = (
+    "SHA-256 of Eneo's canonical non-streaming request intent at the provider "
+    "adapter boundary: requested model, provider, ordered messages, and "
+    "allowlisted controls. Provider-side parameter dropping or transport "
+    "enrichment is not reflected."
+)
+
+PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE: dict[str, JsonValue] = {
+    "items": [
+        {
+            "event_id": "00000000-0000-0000-0000-000000000801",
+            "attempt_id": "00000000-0000-0000-0000-000000000701",
+            "step_id": "00000000-0000-0000-0000-000000000601",
+            "step_order": 1,
+            "attempt_no": 1,
+            "ordinal": 1,
+            "call_kind": "completion",
+            "status": "completed",
+            "request_schema_version": 2,
+            "provider_request_hash": "a" * 64,
+            "requested_model": "gpt-5-mini",
+            "provider": "openai",
+            "response_format": "json_schema",
+            "requested_capabilities": ["structured_output"],
+            "call_reason": "initial",
+            "mapped_execution_mode": "per_item",
+            "mapped_item_index": 1,
+            "mapped_source_id": "source-file-1",
+            "response_model": "gpt-5-mini-2025-08-07",
+            "provider_response_id": "resp_01HZXAMPLE",
+            "num_tokens_input": 824,
+            "num_tokens_output": 167,
+            "input_source": "provider",
+            "output_source": "provider",
+            "requested_at": "2026-07-26T12:00:00Z",
+            "finished_at": "2026-07-26T12:00:01Z",
+        }
+    ],
+    "count": 1,
+    "total_count": 2,
+    "has_more": True,
+    "next_after_event_id": "00000000-0000-0000-0000-000000000801",
+}
+
+
+class ProviderCallKind(str, Enum):
+    COMPLETION = "completion"
+    TRANSCRIPTION = "transcription"
+
+
+class ProviderCallStatus(str, Enum):
+    STARTED = "started"
+    COMPLETED = "completed"
+    REJECTED = "rejected"
+    OUTCOME_UNKNOWN = "outcome_unknown"
+
+
+class ProviderCallResponseFormat(str, Enum):
+    NONE = "none"
+    JSON_OBJECT = "json_object"
+    JSON_SCHEMA = "json_schema"
+    OTHER = "other"
+
+
+class ProviderCallRequestedCapability(str, Enum):
+    IMAGE_INPUT = "image_input"
+    REASONING = "reasoning"
+    STRUCTURED_OUTPUT = "structured_output"
+    TOOL_CALLING = "tool_calling"
+
+
+def _require_canonical_requested_capabilities(
+    capabilities: tuple[ProviderCallRequestedCapability, ...],
+) -> tuple[ProviderCallRequestedCapability, ...]:
+    canonical = tuple(sorted(set(capabilities)))
+    if capabilities != canonical:
+        raise ValueError("Requested provider capabilities must be sorted and unique.")
+    return capabilities
+
+
+ProviderCallRequestedCapabilities = Annotated[
+    tuple[ProviderCallRequestedCapability, ...],
+    AfterValidator(_require_canonical_requested_capabilities),
+]
+
+
+class ProviderCallReason(str, Enum):
+    INITIAL = "initial"
+    RESPONSE_FORMAT_FALLBACK = "response_format_fallback"
+    TOOL_ROUND = "tool_round"
+
+
+class ProviderCallRejectionReason(str, Enum):
+    RESPONSE_FORMAT_REJECTED = "response_format_rejected"
+    PROVIDER_REJECTED = "provider_rejected"
+    BUDGET_EXHAUSTED = "budget_exhausted"
+
+
+class ProviderCallUnknownReason(str, Enum):
+    REQUEST_TIMEOUT = "request_timeout"
+    RUN_CANCELLED = "run_cancelled"
+    WORKER_INTERRUPTED = "worker_interrupted"
+    PROVIDER_ERROR = "provider_error"
+    REQUEST_CANCELLED = "request_cancelled"
+    STALE_STARTED = "stale_started"
+
+
+class SummarizationCallInput(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    round: int = Field(strict=True, ge=1)
+    group_index: int = Field(strict=True, ge=0)
+    record_ids: tuple[Annotated[str, Field(min_length=1)], ...] = Field(min_length=1)
+    input_bytes: int = Field(
+        strict=True,
+        ge=1,
+        description="UTF-8 bytes of the composed record input before input bindings.",
+    )
+    input_sha256: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description="SHA-256 of the composed record input before input bindings.",
+    )
+    reserved_calls: int = Field(strict=True, ge=1)
+    reserved_input_tokens: int = Field(strict=True, ge=0)
+    max_provider_calls: int = Field(strict=True, ge=1)
+    max_input_tokens: int = Field(strict=True, ge=1)
+
+
+DigestCallStage = Literal["map", "reduce", "final"]
+
+
+class DigestCallInput(BaseModel):
+    """The part of a long-material digest one provider call performed.
+
+    ``map`` reads one segment of one source and takes notes; ``reduce``
+    merges notes; ``final`` is the step's own call over the merged notes.
+    Source indexes are the 1-based positions of the step's sources in its
+    ``long_material`` coverage record. A map call names the source it read;
+    a reduce or final call names the sources its notes cite, which is empty
+    when the notes cite none.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    stage: DigestCallStage
+    source_indexes: tuple[Annotated[int, Field(strict=True, ge=1)], ...] = Field(
+        description=(
+            "Sources the call read, ascending: the source of a map call, the "
+            "sources cited by the notes a reduce or final call read."
+        )
+    )
+    segment_index: int | None = Field(default=None, strict=True, ge=1)
+    segment_count: int | None = Field(default=None, strict=True, ge=1)
+
+    @model_validator(mode="after")
+    def validate_stage_shape(self) -> "DigestCallInput":
+        if list(self.source_indexes) != sorted(set(self.source_indexes)):
+            raise ValueError("Digest source indexes must be ascending and unique.")
+        if self.stage == "map":
+            if len(self.source_indexes) != 1:
+                raise ValueError("A map call reads exactly one source.")
+            if (
+                self.segment_index is None
+                or self.segment_count is None
+                or self.segment_index > self.segment_count
+            ):
+                raise ValueError("A map call names its segment within the source.")
+        elif self.segment_index is not None or self.segment_count is not None:
+            raise ValueError("Only a map call reads a segment.")
+        return self
+
+
+class CompletionProviderCallRequest(BaseModel):
+    """Credential-free identity facts for one outbound completion request."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    call_kind: Literal[ProviderCallKind.COMPLETION] = ProviderCallKind.COMPLETION
+    request_schema_version: Literal[2] = 2
+    provider_request_hash: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description=PROVIDER_REQUEST_HASH_DESCRIPTION,
+    )
+    requested_model: str = Field(min_length=1, max_length=255)
+    provider: str | None = Field(default=None, min_length=1, max_length=128)
+    response_format: ProviderCallResponseFormat = ProviderCallResponseFormat.NONE
+    requested_capabilities: ProviderCallRequestedCapabilities
+    call_reason: ProviderCallReason = ProviderCallReason.INITIAL
+    mapped_call: MappedProviderCallProvenance | None = None
+    summarization_input: SummarizationCallInput | None = None
+    digest_call: DigestCallInput | None = None
+
+    @model_validator(mode="after")
+    def validate_capabilities_match_response_format(
+        self,
+    ) -> "CompletionProviderCallRequest":
+        structured_output_requested = (
+            ProviderCallRequestedCapability.STRUCTURED_OUTPUT
+            in self.requested_capabilities
+        )
+        structured_response_format = self.response_format in {
+            ProviderCallResponseFormat.JSON_OBJECT,
+            ProviderCallResponseFormat.JSON_SCHEMA,
+        }
+        if structured_output_requested != structured_response_format:
+            raise ValueError(
+                "Structured-output capability and response format must agree."
+            )
+        return self
+
+
+class TranscriptionProviderCallRequest(BaseModel):
+    """Credential-free identity facts for one outbound transcription request.
+
+    ``audio_seconds`` is the decoded length of the audio this request sends. It
+    is known before the request leaves, so a request whose outcome is never
+    learned still says how much audio it may have been charged for.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    call_kind: Literal[ProviderCallKind.TRANSCRIPTION] = ProviderCallKind.TRANSCRIPTION
+    request_schema_version: Literal[2] = 2
+    provider_request_hash: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description=TRANSCRIPTION_REQUEST_HASH_DESCRIPTION,
+    )
+    requested_model: str = Field(min_length=1, max_length=255)
+    provider: str | None = Field(default=None, min_length=1, max_length=128)
+    audio_seconds: float = Field(ge=0)
+
+
+ProviderCallRequest = Annotated[
+    CompletionProviderCallRequest | TranscriptionProviderCallRequest,
+    Field(discriminator="call_kind"),
+]
+
+
+class ProviderCallCompletion(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    call_kind: Literal[ProviderCallKind.COMPLETION] = ProviderCallKind.COMPLETION
+    response_model: str | None = Field(default=None, max_length=255)
+    provider_response_id: str | None = Field(default=None, max_length=512)
+    num_tokens_input: int | None = Field(default=None, ge=0)
+    num_tokens_output: int | None = Field(default=None, ge=0)
+    input_source: TokenCountSource
+    output_source: TokenCountSource
+
+    @model_validator(mode="after")
+    def validate_token_sources(self) -> "ProviderCallCompletion":
+        for count, source, dimension in (
+            (self.num_tokens_input, self.input_source, "input"),
+            (self.num_tokens_output, self.output_source, "output"),
+        ):
+            if source == "not_applicable":
+                raise ValueError(
+                    f"A completion call always has an {dimension} token dimension."
+                )
+            if (count is None) != (source == "not_reported"):
+                raise ValueError(
+                    f"Provider call {dimension} count must be absent exactly "
+                    "when its source is not_reported."
+                )
+        return self
+
+
+class TranscriptionCallCompletion(BaseModel):
+    """Outcome of a transcription request. Transcription is not metered by tokens."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    call_kind: Literal[ProviderCallKind.TRANSCRIPTION] = ProviderCallKind.TRANSCRIPTION
+    response_model: str | None = Field(default=None, max_length=255)
+    provider_response_id: str | None = Field(default=None, max_length=512)
+
+
+ProviderCallReceiptValue = ProviderCallCompletion | TranscriptionCallCompletion
+
+
+class ProviderCall(BaseModel):
+    model_config = ConfigDict(from_attributes=True, extra="forbid")
+
+    id: UUID
+    flow_step_attempt_id: UUID
+    ordinal: int = Field(ge=1)
+    call_kind: ProviderCallKind
+    status: ProviderCallStatus
+    request_schema_version: Literal[2]
+    provider_request_hash: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description=PROVIDER_REQUEST_HASH_DESCRIPTION,
+    )
+    requested_model: str = Field(min_length=1)
+    provider: str | None = Field(min_length=1)
+    response_format: ProviderCallResponseFormat
+    requested_capabilities: ProviderCallRequestedCapabilities
+    resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes
+    summarization_input: SummarizationCallInput | None = None
+    digest_call: DigestCallInput | None = None
+    call_reason: ProviderCallReason
+    mapped_execution_mode: Literal["per_item", "per_source"] | None
+    mapped_item_index: int | None = Field(default=None, ge=1)
+    mapped_source_index: int | None = Field(default=None, ge=1)
+    mapped_source_id: str | None
+    response_model: str | None
+    provider_response_id: str | None
+    num_tokens_input: int | None = Field(default=None, ge=0)
+    num_tokens_output: int | None = Field(default=None, ge=0)
+    audio_seconds: float | None = Field(default=None, ge=0)
+    input_source: TokenCountSource | None
+    output_source: TokenCountSource | None
+    outcome_reason: ProviderCallRejectionReason | ProviderCallUnknownReason | None
+    requested_at: datetime
+    finished_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+    @model_validator(mode="after")
+    def validate_mapped_context(self) -> "ProviderCall":
+        if self.mapped_execution_mode == "per_item":
+            if self.mapped_item_index is None or self.mapped_source_index is not None:
+                raise ValueError(
+                    "per_item provider calls require only mapped_item_index"
+                )
+        elif self.mapped_execution_mode == "per_source":
+            if self.mapped_source_index is None or self.mapped_item_index is not None:
+                raise ValueError(
+                    "per_source provider calls require only mapped_source_index"
+                )
+        elif (
+            self.mapped_item_index is not None
+            or self.mapped_source_index is not None
+            or self.mapped_source_id is not None
+        ):
+            raise ValueError("unmapped provider calls cannot carry mapped context")
+        return self
+
+
+class ProviderCallEvidence(BaseModel):
+    """Run-scoped ordered read model for one provider-call lifecycle row."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    event_id: UUID
+    summarization_input: SummarizationCallInput | None = None
+    digest_call: DigestCallInput | None = Field(
+        default=None,
+        description=(
+            "Set on the calls of a long-material digest: the stage (map, reduce "
+            "or final), the sources the call read by their index in the step's "
+            "long_material record, and for a map call its segment."
+        ),
+    )
+    attempt_id: UUID
+    step_id: UUID
+    step_order: int = Field(ge=1)
+    attempt_no: int = Field(ge=1)
+    ordinal: int = Field(ge=1)
+    call_kind: ProviderCallKind = Field(
+        description=(
+            "Which provider surface this request went to. A completion call is "
+            "metered in tokens; a transcription call is metered in audio seconds."
+        )
+    )
+    status: ProviderCallStatus
+    request_schema_version: Literal[2]
+    provider_request_hash: str = Field(
+        pattern=PROVIDER_REQUEST_HASH_PATTERN,
+        description=PROVIDER_REQUEST_HASH_DESCRIPTION,
+    )
+    requested_model: str = Field(min_length=1)
+    provider: str | None = Field(min_length=1)
+    response_format: ProviderCallResponseFormat
+    requested_capabilities: ProviderCallRequestedCapabilities = Field(
+        description=(
+            "Sorted request intent for capabilities Eneo attempted in this provider "
+            "request. [] means none were requested. This is not proof of provider "
+            "support, acceptance, or completion."
+        )
+    )
+    call_reason: ProviderCallReason
+    mapped_execution_mode: Literal["per_item", "per_source"] | None
+    mapped_item_index: int | None = Field(default=None, ge=1)
+    mapped_source_index: int | None = Field(default=None, ge=1)
+    mapped_source_id: str | None
+    response_model: str | None
+    provider_response_id: str | None
+    num_tokens_input: int | None = Field(default=None, ge=0)
+    num_tokens_output: int | None = Field(default=None, ge=0)
+    audio_seconds: float | None = Field(
+        default=None,
+        ge=0,
+        description=(
+            "Decoded length of the audio this transcription request sent. Recorded "
+            "when the request starts, so an attempt with an unknown outcome still "
+            "reports what it may have been charged for. Null for completion calls."
+        ),
+    )
+    input_source: TokenCountSource | None
+    output_source: TokenCountSource | None
+    outcome_reason: ProviderCallRejectionReason | ProviderCallUnknownReason | None = (
+        None
+    )
+    requested_at: datetime
+    finished_at: datetime | None
+
+
+class ProviderCallEvidencePage(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        json_schema_extra={"example": PROVIDER_CALL_EVIDENCE_PAGE_EXAMPLE},
+    )
+
+    items: tuple[ProviderCallEvidence, ...]
+    count: int = Field(ge=0)
+    total_count: int = Field(ge=0)
+    total_count_truncated: bool = False
+    has_more: bool
+    next_after_event_id: UUID | None
+
+    @model_validator(mode="after")
+    def validate_page_shape(self) -> "ProviderCallEvidencePage":
+        if self.count != len(self.items):
+            raise ValueError("Provider-call page count must match items.")
+        if self.has_more != (self.next_after_event_id is not None):
+            raise ValueError(
+                "Provider-call page cursor must be present exactly when more rows exist."
+            )
+        return self
+
+
+PROVIDER_CALL_KIND_VALUES = tuple(item.value for item in ProviderCallKind)
+PROVIDER_CALL_STATUS_VALUES = tuple(item.value for item in ProviderCallStatus)
+PROVIDER_CALL_RESPONSE_FORMAT_VALUES = tuple(
+    item.value for item in ProviderCallResponseFormat
+)
+PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES = tuple(
+    item.value for item in ProviderCallRequestedCapability
+)
+PROVIDER_CALL_REASON_VALUES = tuple(item.value for item in ProviderCallReason)
+PROVIDER_CALL_REJECTION_REASON_VALUES = tuple(
+    item.value for item in ProviderCallRejectionReason
+)
+PROVIDER_CALL_UNKNOWN_REASON_VALUES = tuple(
+    item.value for item in ProviderCallUnknownReason
+)
+PROVIDER_CALL_TOKEN_SOURCE_VALUES = get_args(TokenCountSource)

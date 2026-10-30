@@ -11,15 +11,13 @@ Tests cover:
 
 import asyncio
 import json
-import socket
-from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import AsyncIterator
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import httpx
 import pytest
-import uvicorn
 from fastapi import FastAPI, Request, Response
 from mcp import types as mcp_types
 from pydantic import ValidationError
@@ -52,38 +50,25 @@ from eneo.mcp_servers.presentation.models import (
     MCPServerPublic,
     MCPServerUpdate,
 )
+from tests.unit.mcp_test_server import one_tool_app, serve_test_app
 
 
-@asynccontextmanager
-async def _serve_test_app(app: FastAPI) -> AsyncIterator[str]:
-    """Run an ASGI app over a real local TCP socket for transport tests."""
-    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    sock.bind(("127.0.0.1", 0))
-    sock.listen(128)
-    sock.setblocking(False)
-    host, port = sock.getsockname()
-    server = uvicorn.Server(
-        uvicorn.Config(
-            app,
-            log_config=None,
-            lifespan="off",
-            access_log=False,
-            ws="none",
-        )
+@pytest.mark.parametrize("failure", [httpx.ConnectError, httpx.ReadTimeout])
+async def test_a_failed_diagnosis_names_the_server_without_its_path_or_query(failure):
+    # Kills the full-address message in either connection-failure branch.
+    def fail(request):
+        raise failure("unavailable", request=request)
+
+    def factory(**kwargs):
+        return httpx.AsyncClient(transport=httpx.MockTransport(fail), **kwargs)
+
+    message = await mcp_client_module._diagnose_http(
+        "https://tools.example/private-path?token=address-secret",
+        {},
+        http_client_factory=factory,
     )
-    task = asyncio.create_task(server.serve(sockets=[sock]))
-    try:
-        for _ in range(100):
-            if server.started:
-                break
-            await asyncio.sleep(0.01)
-        else:
-            raise RuntimeError("test MCP server did not start")
-        yield f"http://{host}:{port}/mcp"
-    finally:
-        server.should_exit = True
-        await asyncio.wait_for(task, timeout=5)
+    assert "https://tools.example" in message
+    assert "private-path" not in message and "address-secret" not in message
 
 
 # =============================================================================
@@ -293,7 +278,7 @@ class TestMCPClientListToolsErrorPropagation:
                 )
             return Response(status_code=400)
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             server = MCPServer(
                 tenant_id=uuid4(),
                 name="bounded-test",
@@ -362,7 +347,7 @@ class TestMCPClientListToolsErrorPropagation:
                 headers={"Mcp-Session-Id": "control-session"},
             )
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             server = MCPServer(
                 tenant_id=uuid4(),
                 name="control-test",
@@ -420,7 +405,7 @@ class TestMCPClientListToolsErrorPropagation:
                 oversized_response(), media_type="application/octet-stream"
             )
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             client = MCPClient(
                 MCPServer(tenant_id=uuid4(), name="cleanup-test", http_url=url)
             )
@@ -460,7 +445,7 @@ class TestMCPClientListToolsErrorPropagation:
                 media_type="application/octet-stream",
             )
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             client = MCPClient(
                 MCPServer(tenant_id=uuid4(), name="diagnostic-test", http_url=url)
             )
@@ -561,7 +546,7 @@ class TestMCPClientListToolsErrorPropagation:
                 return StreamingResponse(streamed_response(), media_type=media_type)
             return Response(status_code=400)
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             server = MCPServer(
                 tenant_id=uuid4(),
                 name="count-test",
@@ -656,7 +641,7 @@ class TestMCPClientListToolsErrorPropagation:
                 )
             return Response(status_code=400)
 
-        async with _serve_test_app(app) as url:
+        async with serve_test_app(app) as url:
             server = MCPServer(
                 tenant_id=uuid4(),
                 name="syntax-test",
@@ -673,6 +658,120 @@ class TestMCPClientListToolsErrorPropagation:
             "tool_1",
             "tool_2",
         ]
+
+
+class TestMCPClientFollowsNoRedirect:
+    """A registered server that answers with a redirect is not followed."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize("redirected", ["initialize", "tools/call"])
+    async def test_a_redirected_request_does_not_reach_the_target(
+        self, redirected: str
+    ) -> None:
+        # Kills the mutant that leaves the SDK's HTTP client following
+        # redirects: the request, with the server's credential headers, went
+        # on to an address nobody registered (and the call failed afterwards
+        # anyway, in the client's own response hook).
+        reached: list[str] = []
+        location = ""
+
+        def redirect() -> Response:
+            return Response(status_code=307, headers={"location": location})
+
+        async def elsewhere(request: Request) -> Response:
+            reached.append(request.method)
+            return Response(status_code=204)
+
+        if redirected == "initialize":
+            app = FastAPI()
+            app.post("/mcp")(redirect)
+        else:
+            app = one_tool_app(lambda _: redirect())
+        app.post("/elsewhere")(elsewhere)
+        server = MCPServer(tenant_id=uuid4(), name="redirecting", http_url="")
+        async with serve_test_app(app) as url:
+            server.http_url = url
+            origin = url.removesuffix("/mcp")
+            location = (
+                f"{origin.replace('//', '//user:secret@')}/elsewhere?t=secret#secret"
+            )
+            with pytest.raises(MCPClientError) as failure:
+                async with MCPClient(server, tool_call_timeout=5) as client:
+                    await client.call_tool("lookup", {})
+
+        assert reached == []
+        if redirected == "initialize":
+            # Kills the mutants that report the redirect as "reachable, but
+            # the handshake failed", show the target's user info, query or
+            # fragment, or name the server by more than its scheme, host and
+            # port (the message is logged, and a token can be in the path).
+            assert str(failure.value) == (
+                f"Server at {origin} answered with a redirect (HTTP 307) to "
+                f"{origin}/elsewhere. Eneo does not follow redirects: register "
+                "the address the server redirects to."
+            )
+
+    @pytest.mark.asyncio
+    async def test_an_answer_that_only_looks_like_a_redirect_is_not_called_one(
+        self,
+    ) -> None:
+        # Kills the mutant that takes every 3xx status for a redirect: this
+        # one names no address, so there is nothing to register instead.
+        app = FastAPI()
+        app.post("/mcp")(lambda: Response(status_code=300))
+        async with serve_test_app(app) as url:
+            server = MCPServer(tenant_id=uuid4(), name="odd", http_url=url)
+            with pytest.raises(MCPClientError) as failure:
+                async with MCPClient(server):
+                    pass
+
+        assert str(failure.value) == (
+            f"Server at {url.removesuffix('/mcp')} is reachable (HTTP 300) but the "
+            "MCP handshake failed."
+        )
+
+    @pytest.mark.parametrize(
+        ("location", "shown"),
+        [
+            ("/moved", "https://mcp.example.org/moved"),
+            ("//other.example/mcp?key=s3cret", "https://other.example/mcp"),
+            (
+                "http://u:pw@other.example:8443/mcp#part",
+                "http://other.example:8443/mcp",
+            ),
+            # The server chose the text and an administrator reads it: a line
+            # break stays encoded.
+            (
+                "/p%0ASend%20your%20password",
+                "https://mcp.example.org/p%0ASend%20your%20password",
+            ),
+            ("/" + "a" * 300, None),
+            ("http://host:not-a-port/x", None),
+            ("mailto:someone@example.org", None),
+            # What the registration would refuse, or read as another host,
+            # is no address to register.
+            ("http://?key=x", None),
+            ("http:/moved", None),
+            ("http://0x7f.1/x", None),
+            ("", None),
+            ("?again=1", None),
+        ],
+    )
+    def test_a_redirect_target_is_shown_only_as_an_address_to_register(
+        self, location: str, shown: str | None
+    ) -> None:
+        # Kills the mutants that show the target decoded (a line break and a
+        # sentence of the server's own in the administrator's message), of
+        # any length, in a scheme that cannot be registered, or when it is
+        # the registered address itself; and the one that lets a Location
+        # that is no URL turn the message into "unknown reasons".
+        response = httpx.Response(
+            307,
+            headers={"location": location},
+            request=httpx.Request("POST", "https://mcp.example.org/mcp"),
+        )
+
+        assert mcp_client_module._redirect_target(response) == shown
 
 
 class TestMCPToolCatalogPolicyValidation:
@@ -755,6 +854,26 @@ class TestMCPClientAuthenticationErrorMapping:
 
         with pytest.raises(MCPAuthenticationError):
             await client.call_tool("tool", {})
+
+    @pytest.mark.asyncio
+    async def test_a_tool_call_the_server_refuses_with_401_is_an_authentication_error(
+        self,
+    ):
+        # Kills the mutants that re-raise the transport's cancellation (or
+        # report a plain failure) when the server refused the call itself,
+        # and that send a second call on the connection the refusal failed.
+        app = one_tool_app(lambda _: Response(status_code=401))
+        async with serve_test_app(app) as url:
+            server = MCPServer(tenant_id=uuid4(), name="refusing", http_url=url)
+            async with MCPClient(server, tool_call_timeout=5) as client:
+                with pytest.raises(MCPAuthenticationError) as failure:
+                    async with asyncio.timeout(2):
+                        await client.call_tool("lookup", {})
+                with pytest.raises(MCPClientError, match="connection failed"):
+                    await client.call_tool("lookup", {})
+
+        assert str(failure.value) == "Tool call failed: the server answered HTTP 401"
+        assert app.state.requests.count("tools/call") == 1
 
     @pytest.mark.asyncio
     async def test_call_tool_keeps_result_meta_when_present(self):

@@ -46,6 +46,7 @@ def _make_service(*, object_store_configured: bool) -> SettingService:
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=AsyncMock(),
+        data_retention_service=AsyncMock(),
         skill_repo=AsyncMock(),
         object_content=object_content,
     )
@@ -80,3 +81,26 @@ async def test_file_references_enabled_is_independent_of_object_storage(monkeypa
 
     assert settings.file_references_enabled is True
     assert settings.object_store_configured is False
+
+
+async def test_flows_enabled_reports_the_tenant_flows_feature():
+    service = _make_service(object_store_configured=False)
+    service.feature_flag_service.check_is_feature_enabled = AsyncMock(
+        side_effect=lambda feature_name, tenant_id: feature_name == "flows_core"
+    )
+
+    settings = await service.get_settings()
+
+    assert settings.flows_enabled is True
+    assert settings.using_templates is False
+    service.feature_flag_service.check_is_feature_enabled.assert_any_await(
+        feature_name="flows_core", tenant_id=service.user.tenant_id
+    )
+
+
+async def test_flows_enabled_is_false_when_the_feature_is_off():
+    service = _make_service(object_store_configured=False)
+
+    settings = await service.get_settings()
+
+    assert settings.flows_enabled is False

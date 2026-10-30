@@ -1,3 +1,5 @@
+import pytest
+
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.image import ImageMimeTypes
 from eneo.files.text import TextMimeTypes
@@ -6,8 +8,8 @@ from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 
 
-def test_limits_project_one_upload_admission_snapshot() -> None:
-    upload_admission = UploadAdmissionSnapshot(
+def _upload_admission() -> UploadAdmissionSnapshot:
+    return UploadAdmissionSnapshot(
         policy_revision=9,
         new_write_storage_target=StorageKind.OBJECT_STORE,
         session_file_maximum_bytes=11,
@@ -17,7 +19,10 @@ def test_limits_project_one_upload_admission_snapshot() -> None:
         knowledge_audio_maximum_bytes=15,
     )
 
-    limits = LimitService(upload_admission=upload_admission).get_limits()
+
+@pytest.mark.anyio
+async def test_limits_project_one_upload_admission_snapshot() -> None:
+    limits = await LimitService(upload_admission=_upload_admission()).get_limits()
 
     assert {item.size for item in limits.info_blobs.formats} == {14, 15}
     assert {

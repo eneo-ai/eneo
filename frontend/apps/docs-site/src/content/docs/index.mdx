@@ -1,12 +1,20 @@
 # Documentation
 
-Welcome to the Eneo technical documentation! This section covers the core concepts, architecture, and API reference for the Eneo platform.
+This is the technical map of Eneo. Use the linked owner documents and the running
+application's OpenAPI schema for details that change with a release.
 
-## Getting Started
+## Start here
 
-New to Eneo? Start here:
+- [Getting Started](/docs/getting-started) explains local setup and the first
+  configuration steps.
+- [Deploy Eneo](/guides/deployment) describes the reference production
+  deployment, operational configuration, and supported infrastructure choices.
+- [Architecture](/docs/architecture) explains the deployed components and their
+  responsibilities.
+- [API Reference](/docs/api) points to the generated API contract and interactive
+  explorer.
 
-### [Getting Started](/docs/getting-started)
+## Product and operational references
 
 Set up a development instance and find your way around:
 
@@ -15,9 +23,14 @@ Set up a development instance and find your way around:
 - Default login and where each service listens
 - Common issues and where to get help
 
-## Technical Documentation
+- [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant) explains
+  tenant-specific identity-provider configuration.
+- [Authentication Architecture](/docs/authentication-architecture) is the
+  maintainer-facing reference for the OIDC implementation.
+- [SCIM Provisioning](/guides/scim-provisioning) covers user provisioning when
+  an identity provider supports it.
 
-### [Architecture](/docs/architecture)
+## Contributing
 
 Understand how Eneo is built:
 
@@ -26,6 +39,14 @@ Understand how Eneo is built:
 - Database schema and migrations
 - Authentication and authorization
 - Real-time communication (SSE, WebSockets)
+
+### [Eneo Flows](/docs/flows)
+
+Multi-step AI pipelines built inside a space:
+
+- Drafting, publishing, and running a Flow against an immutable published version
+- [Flows for Developers](/docs/flows-for-developers): where Flows sits in Eneo, the run lifecycle, data schema, and failure handling
+- The [Eneo Flows API consumer guide](/guides/flows) for building on published Flows
 
 ### [Authentication Architecture](/docs/authentication-architecture)
 

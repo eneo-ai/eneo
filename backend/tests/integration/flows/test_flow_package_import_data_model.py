@@ -1,0 +1,1978 @@
+from __future__ import annotations
+
+import base64
+import json
+import re
+import zipfile
+from collections.abc import Mapping
+from datetime import datetime, timezone
+from io import BytesIO
+from types import SimpleNamespace
+from typing import cast
+from uuid import UUID, uuid4
+
+import pytest
+import sqlalchemy as sa
+from fastapi import Request
+from fastapi.responses import JSONResponse
+from sqlalchemy import CheckConstraint, ForeignKeyConstraint, Index, UniqueConstraint
+from sqlalchemy.exc import DBAPIError, IntegrityError
+
+from eneo.actors.actors.space_actor import SpaceActor
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.database.database import sessionmanager
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.flow_tables import (
+    FLOW_PACKAGE_IMPORT_SOURCE_VALUES,
+    FLOW_PACKAGE_IMPORT_STATUS_VALUES,
+    FlowPackageImports,
+    Flows,
+    FlowSteps,
+)
+from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_table import Tenants
+from eneo.flow_packages.api import flow_package_router
+from eneo.flow_packages.api.flow_package_models import (
+    FlowPackageExportRequest,
+    FlowPackageImportRequest,
+)
+from eneo.flow_packages.application.flow_package_import_planner import (
+    FlowPackageImportPlannerCandidates,
+)
+from eneo.flow_packages.domain.flow_package_checksum import (
+    compose_content_checksum,
+    hash_json_value,
+)
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_errors import (
+    FlowPackageErrorCode,
+    FlowPackageValidationError,
+)
+from eneo.flow_packages.domain.flow_package_import_plan import (
+    FlowPackageImportPlan,
+    FlowPackageImportPlanSummary,
+    FlowPackageImportTargetState,
+    FlowPackageModelCandidate,
+)
+from eneo.flow_packages.domain.flow_package_import_record import (
+    FlowPackageImportFailurePayload,
+    FlowPackageImportSelection,
+    FlowPackageImportSource,
+    FlowPackageImportStatus,
+)
+from eneo.flow_packages.domain.flow_package_manifest import (
+    FLOW_PACKAGE_PAYLOAD_SCHEMA,
+    EneoPackageKind,
+    FlowPackageManifest,
+)
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
+    FlowPackageModelIdentity,
+    FlowPackageModelKind,
+    FlowPackageModelRequirement,
+    FlowPackageRequirementSet,
+)
+from eneo.flow_packages.infrastructure import flow_package_zip_reader as reader
+from eneo.flow_packages.infrastructure.flow_package_import_repo import (
+    FlowPackageImportRepository,
+)
+from eneo.flows.api.flow_access_context import (
+    FlowAccessContext,
+    FlowSpaceAccessContext,
+)
+from eneo.flows.application.flow_authoring_command import (
+    CreateFlowAuthoringCommand,
+    FlowAuthoringCommandService,
+    FlowPackageAuthoringOrigin,
+)
+from eneo.flows.application.flow_service import FlowService
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.step_item_map import build_step_item_map_config
+from eneo.flows.flow_access_policy import FlowApiAction
+from eneo.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    InputSource,
+    InputType,
+    OutputType,
+    StepSpec,
+)
+from eneo.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
+from eneo.json_types import JsonObject
+from eneo.main.config import Settings, set_settings
+from eneo.main.container.container import Container
+from eneo.main.exceptions import BadRequestException
+from eneo.main.models import ModelId
+from eneo.roles.permissions import Permission
+from eneo.roles.role import RoleCreate
+from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.spaces.space import Space
+from eneo.users.user import UserAdd, UserState
+
+
+@pytest.fixture(autouse=True)
+def _restore_integration_settings_after_mixed_unit_modules(
+    test_settings: Settings,
+) -> None:
+    set_settings(test_settings)
+
+
+def _constraint_names(table: object) -> set[str]:
+    return {
+        constraint.name or ""
+        for constraint in table.__table__.constraints
+        if constraint.name is not None
+    }
+
+
+def _check_constraint_sql(table: object, constraint_name: str) -> str:
+    for constraint in table.__table__.constraints:
+        if (
+            isinstance(constraint, CheckConstraint)
+            and constraint.name == constraint_name
+        ):
+            return str(constraint.sqltext)
+    raise AssertionError(f"Check constraint {constraint_name} was not found.")
+
+
+def _check_constraint_values(table: object, constraint_name: str) -> tuple[str, ...]:
+    return tuple(
+        re.findall(r"'([^']+)'", _check_constraint_sql(table, constraint_name))
+    )
+
+
+def _index_by_name(table: object, index_name: str) -> Index:
+    for index in table.__table__.indexes:
+        if index.name == index_name:
+            return index
+    raise AssertionError(f"Index {index_name} was not found.")
+
+
+def _foreign_key_by_name(
+    table: object,
+    constraint_name: str,
+) -> ForeignKeyConstraint:
+    for constraint in table.__table__.constraints:
+        if (
+            isinstance(constraint, ForeignKeyConstraint)
+            and constraint.name == constraint_name
+        ):
+            return constraint
+    raise AssertionError(f"Foreign key {constraint_name} was not found.")
+
+
+def _unique_constraint_columns(table: object, constraint_name: str) -> tuple[str, ...]:
+    for constraint in table.__table__.constraints:
+        if (
+            isinstance(constraint, UniqueConstraint)
+            and constraint.name == constraint_name
+        ):
+            return tuple(column.name for column in constraint.columns)
+    raise AssertionError(f"Unique constraint {constraint_name} was not found.")
+
+
+async def _create_space(*, session, completion_model_factory, space_factory) -> object:
+    model = await completion_model_factory(
+        session,
+        f"flow-package-import-model-{uuid4()}",
+    )
+    return await space_factory(
+        session,
+        f"Flow package import {uuid4()}",
+        [model.id],
+    )
+
+
+async def _add_space_membership(
+    *,
+    session,
+    space_id: UUID,
+    user_id: UUID,
+    role: SpaceRoleValue = SpaceRoleValue.ADMIN,
+) -> None:
+    await session.execute(
+        sa.text(
+            """
+            INSERT INTO spaces_users (space_id, user_id, role)
+            VALUES (:space_id, :user_id, :role)
+            ON CONFLICT DO NOTHING
+            """
+        ),
+        {
+            "space_id": str(space_id),
+            "user_id": str(user_id),
+            "role": role.value,
+        },
+    )
+
+
+async def _user_with_flow_permissions_token(
+    *,
+    db_container,
+    admin_user,
+    permissions: tuple[Permission, ...],
+) -> tuple[UUID, str]:
+    async with db_container() as container:
+        role = await container.role_repo().create_role(
+            RoleCreate(
+                name=f"flow-package-manage-{uuid4().hex[:8]}",
+                permissions=list(permissions),
+                tenant_id=admin_user.tenant_id,
+            )
+        )
+        user = await container.user_repo().add(
+            UserAdd(
+                email=f"flow-package-manager-{uuid4().hex[:8]}@example.com",
+                username=f"flow_package_manager_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=admin_user.tenant_id,
+                roles=[ModelId(id=role.id)],
+            )
+        )
+        token = container.auth_service().create_access_token_for_user(user)
+    return user.id, token
+
+
+def _import_plan() -> FlowPackageImportPlan:
+    return FlowPackageImportPlan(
+        package_id="se.demo.flow",
+        package_version="1.0.0",
+        kind=EneoPackageKind.FLOW,
+        payload_schema=FLOW_PACKAGE_PAYLOAD_SCHEMA,
+        content_checksum="0" * 64,
+        omissions=[],
+        package_summary=FlowPackageImportPlanSummary(
+            name="Demo Flow",
+            description="Demo package import plan.",
+            spec_hash="1" * 64,
+            steps_count=1,
+            requirements_count=0,
+            requirements_by_kind={},
+        ),
+        target_state=FlowPackageImportTargetState(
+            audio_transcription_required=False,
+            default_transcription_model_id=None,
+        ),
+        transcription_model_available=False,
+    )
+
+
+def _selection() -> FlowPackageImportSelection:
+    return FlowPackageImportSelection()
+
+
+def _failure() -> FlowPackageImportFailurePayload:
+    return FlowPackageImportFailurePayload(
+        code="flow_package_import_unavailable_local_resource",
+        message="Selected model is unavailable.",
+        context={"slot_ref": "model.structured"},
+    )
+
+
+async def _assert_integrity_error(session, row: FlowPackageImports) -> None:
+    with pytest.raises(IntegrityError):
+        async with session.begin_nested():
+            session.add(row)
+            await session.flush()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_successful_import_rejects_flow_identity_mismatches(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session,
+            f"flow-package-scope-model-{uuid4()}",
+        )
+        receipt_space = await space_factory(
+            session,
+            f"Flow package receipt space {uuid4()}",
+            [model.id],
+        )
+        flow_space = await space_factory(
+            session,
+            f"Flow package Flow space {uuid4()}",
+            [model.id],
+        )
+        flow = Flows(
+            name="Cross-space Flow",
+            tenant_id=admin_user.tenant_id,
+            space_id=flow_space.id,
+            created_by_user_id=admin_user.id,
+            owner_user_id=admin_user.id,
+        )
+        session.add(flow)
+        await session.flush()
+
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=admin_user.tenant_id,
+                space_id=receipt_space.id,
+                flow_id=flow.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.cross-space",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.DRAFT_CREATED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
+            ),
+        )
+
+        other_tenant = Tenants(
+            name=f"flow_package_import_tenant_{uuid4()}",
+            display_name=None,
+            slug=f"flow-package-import-{uuid4()}",
+            quota_limit=1024**3,
+        )
+        session.add(other_tenant)
+        await session.flush()
+
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=other_tenant.id,
+                space_id=flow_space.id,
+                flow_id=flow.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.cross-tenant",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.DRAFT_CREATED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
+            ),
+        )
+
+
+class _FakeSpaceActor:
+    def can_edit_flows(self) -> bool:
+        return True
+
+
+class _FakeTargetSpace:
+    def get_marked_default_transcription_model(self) -> None:
+        return None
+
+
+def _request() -> Request:
+    return cast(Request, SimpleNamespace(headers={}))
+
+
+def _package_base64() -> str:
+    return base64.b64encode(_package_bytes()).decode("ascii")
+
+
+def _package_base64_with_model_requirement() -> str:
+    return base64.b64encode(_package_bytes(require_model=True)).decode("ascii")
+
+
+def _import_request(
+    package_base64: str,
+    *,
+    selected_bindings: list[JsonObject] | None = None,
+) -> FlowPackageImportRequest:
+    envelope = reader.read_flow_package(base64.b64decode(package_base64))
+    return FlowPackageImportRequest.model_validate(
+        {
+            "package_base64": package_base64,
+            "expected_content_checksum": envelope.content_checksum,
+            "expected_target_state": {
+                "audio_transcription_required": False,
+                "default_transcription_model_id": None,
+            },
+            "selected_bindings": selected_bindings or [],
+        }
+    )
+
+
+def _package_bytes(*, require_model: bool = False) -> bytes:
+    return _zip_docs(_package_docs(require_model=require_model))
+
+
+def _package_docs(
+    *,
+    require_model: bool = False,
+    contract_field: str | None = None,
+    contract: JsonObject | None = None,
+    producer_contract: JsonObject | None = None,
+) -> dict[str, JsonObject]:
+    model_slot_ref = _model_slot_ref()
+    spec = FlowDraftSpecCore(
+        flow_name="Route Import Demo",
+        steps=[
+            StepSpec(
+                plan_step_ref="summarize",
+                name="Summarize",
+                assistant_spec=AssistantSpec(
+                    instructions="Summarize the input.",
+                    model_ref=model_slot_ref.ref if require_model else None,
+                ),
+                input_source=InputSource.FLOW_INPUT,
+            )
+        ],
+    )
+    if contract_field is not None:
+        spec.steps[0].output_type = OutputType.JSON
+        spec.steps[0].output_contract = producer_contract or {
+            "type": "object",
+            "properties": {"value": {"type": "object"}},
+        }
+        spec.steps.append(
+            StepSpec(
+                plan_step_ref="validate",
+                name="Validate",
+                assistant_spec=spec.steps[0].assistant_spec.model_copy(),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                output_type=OutputType.JSON,
+                input_contract=contract if contract_field == "input_contract" else None,
+                output_contract=contract
+                if contract_field == "output_contract"
+                else None,
+            )
+        )
+    requirements = FlowPackageRequirementSet(
+        schema_version=1,
+        requirements=[
+            FlowPackageModelRequirement(slot_ref=model_slot_ref),
+        ]
+        if require_model
+        else [],
+    )
+    draft = FlowPackageFlowDraft(schema_version=1, spec=spec)
+    provenance = FlowPackageProvenance(
+        schema_version=1,
+        exported_at=datetime(2026, 5, 19, tzinfo=timezone.utc),
+        omissions=[],
+    )
+    manifest = FlowPackageManifest(
+        schema_version=1,
+        kind=EneoPackageKind.FLOW,
+        package_id="se.demo.route-import",
+        package_version="1.0.0",
+        name="Route Import Demo",
+        description="Integration package for route import tests.",
+        content_checksum="0" * 64,
+    )
+    content_checksum = compose_content_checksum(
+        spec_hash=spec.spec_hash(),
+        manifest_hash=hash_json_value(manifest.canonical_hash_input()),
+        requirements_hash=hash_json_value(
+            cast(JsonObject, requirements.model_dump(mode="json"))
+        ),
+        provenance_hash=hash_json_value(
+            cast(JsonObject, provenance.model_dump(mode="json"))
+        ),
+    )
+    manifest = manifest.model_copy(update={"content_checksum": content_checksum})
+    return {
+        reader.MANIFEST_PATH: cast(JsonObject, manifest.model_dump(mode="json")),
+        reader.FLOW_DRAFT_PATH: cast(JsonObject, draft.model_dump(mode="json")),
+        reader.REQUIREMENTS_PATH: cast(
+            JsonObject, requirements.model_dump(mode="json")
+        ),
+        reader.PROVENANCE_PATH: cast(JsonObject, provenance.model_dump(mode="json")),
+    }
+
+
+def _model_slot_ref() -> ResourceSlotRef:
+    return ResourceSlotRef(
+        kind=ResourceSlotKind.MODEL,
+        slot="structured",
+        label="Structured Model",
+    )
+
+
+def _model_binding(model_id: UUID) -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=_model_slot_ref(),
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=model_id,
+    )
+
+
+def _model_binding_request(model_id: UUID) -> JsonObject:
+    return cast(
+        JsonObject,
+        _model_binding(model_id).model_dump(
+            mode="json",
+            exclude={"slot_ref": {"ref"}},
+        ),
+    )
+
+
+def _model_candidate(model_id: UUID) -> FlowPackageModelCandidate:
+    return FlowPackageModelCandidate(
+        local_kind=LocalResourceKind.COMPLETION_MODEL,
+        local_id=model_id,
+        label="Structured Model",
+        model_kind=FlowPackageModelKind.COMPLETION_MODEL,
+        identity=FlowPackageModelIdentity(provider="test", model="structured"),
+        max_input_tokens=64000,
+    )
+
+
+def _zip_docs(docs: Mapping[str, JsonObject]) -> bytes:
+    payloads = {
+        path: json.dumps(value, separators=(",", ":"), ensure_ascii=False).encode()
+        for path, value in docs.items()
+    }
+    buffer = BytesIO()
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as package:
+        for path, payload in payloads.items():
+            package.writestr(path, payload)
+    return buffer.getvalue()
+
+
+def _patch_import_access(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    target_space_id: UUID,
+    candidates: FlowPackageImportPlannerCandidates | None = None,
+) -> None:
+    async def fake_resolve_space_access_context(
+        request: Request,
+        container: Container,
+        *,
+        space_id: UUID,
+        required_access: FlowApiAction = FlowApiAction.VIEW,
+        scope_mismatch_message: str = "",
+        allow_service_key_principals: bool = False,
+    ) -> FlowSpaceAccessContext:
+        assert space_id == target_space_id
+        assert required_access is FlowApiAction.EDIT
+        return FlowSpaceAccessContext(
+            space=cast(Space, _FakeTargetSpace()),
+            actor=cast(SpaceActor, _FakeSpaceActor()),
+            scope_filter=ScopeFilter(),
+        )
+
+    def fake_candidate_loader(space: Space) -> FlowPackageImportPlannerCandidates:
+        return candidates or FlowPackageImportPlannerCandidates()
+
+    monkeypatch.setattr(
+        flow_package_router.flow_access_context,
+        "resolve_space_access_context",
+        fake_resolve_space_access_context,
+    )
+    monkeypatch.setattr(
+        flow_package_router,
+        "build_flow_package_import_planner_candidates_for_space",
+        fake_candidate_loader,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("field", ["input_contract", "output_contract"])
+@pytest.mark.parametrize(
+    ("value_schema", "refused_pointer"),
+    [
+        ({"$ref": "#/$defs/value"}, None),
+        ({"$ref": "https://example.com/schema"}, "/properties/value/$ref"),
+        (
+            {
+                "$schema": "http://json-schema.org/draft-07/schema#",
+                "dependencies": {"x": {"$ref": "https://example.com/schema"}},
+            },
+            "/properties/value/$schema",
+        ),
+    ],
+    ids=["same-document", "remote-reference", "nested-dialect"],
+)
+async def test_import_contract_references_stay_in_document(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch,
+    field,
+    value_schema,
+    refused_pointer,
+) -> None:
+    from eneo.flows.output_processing import validate_against_contract
+
+    refused = refused_pointer is not None
+    contract: JsonObject = {
+        "type": "object",
+        "$defs": {"value": {"type": "object"}},
+        "properties": {"value": value_schema},
+    }
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, f"schema-ref-model-{uuid4()}")
+        space = await space_factory(session, f"Schema refs {uuid4()}", [model.id])
+        await _add_space_membership(
+            session=session, space_id=space.id, user_id=admin_user.id
+        )
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space.id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(model.id)]
+            ),
+        )
+        package = base64.b64encode(
+            _zip_docs(
+                _package_docs(
+                    require_model=True,
+                    contract_field=field,
+                    contract=contract,
+                    producer_contract=contract
+                    if not refused and field == "input_contract"
+                    else None,
+                )
+            )
+        ).decode("ascii")
+        if refused:
+            with pytest.raises(BadRequestException) as exc_info:
+                await flow_package_router.import_flow_package_as_draft(
+                    id=space.id,
+                    import_request=_import_request(
+                        package, selected_bindings=[_model_binding_request(model.id)]
+                    ),
+                    request=_request(),
+                    container=cast(Container, container),
+                )
+            assert exc_info.value.code == FlowPackageErrorCode.FLOW_DRAFT_INVALID.value
+            assert exc_info.value.context == {"reason": f"invalid_{field}_schema"}
+            assert "Step 2" in str(exc_info.value)
+            assert refused_pointer in str(exc_info.value)
+            assert (
+                await session.scalar(
+                    sa.select(sa.func.count(Flows.id)).where(Flows.space_id == space.id)
+                )
+                == 0
+            )
+        else:
+            response = await flow_package_router.import_flow_package_as_draft(
+                id=space.id,
+                import_request=_import_request(
+                    package, selected_bindings=[_model_binding_request(model.id)]
+                ),
+                request=_request(),
+                container=cast(Container, container),
+            )
+            assert not isinstance(response, JSONResponse)
+            service = container.flow_service()
+            flow = await service.get_flow(response.flow_id)
+            assert getattr(flow.steps[1], field) == contract
+            await service.update_flow(flow_id=response.flow_id, steps=flow.steps)
+            published = await service.publish_flow(flow_id=response.flow_id)
+            version = await container.flow_version_repo().get(
+                flow_id=response.flow_id,
+                version=published.published_version,
+                tenant_id=admin_user.tenant_id,
+            )
+            stored_contract = version.definition_json["steps"][1][field]
+            assert stored_contract == contract
+            validate_against_contract({"value": {}}, stored_contract, label="Step 2")
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_package_import_failed_record_survives_draft_savepoint_rollback(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        valid_model = await completion_model_factory(
+            session=session,
+            name=f"flow-package-savepoint-model-{uuid4()}",
+        )
+        space = await space_factory(
+            session,
+            f"Flow package import savepoint {uuid4()}",
+            [valid_model.id],
+        )
+        space_id = space.id
+        await _add_space_membership(
+            session=session,
+            space_id=space_id,
+            user_id=admin_user.id,
+        )
+        missing_model_id = uuid4()
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space_id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(missing_model_id)]
+            ),
+        )
+        response = await flow_package_router.import_flow_package_as_draft(
+            id=space_id,
+            import_request=_import_request(
+                _package_base64_with_model_requirement(),
+                selected_bindings=[_model_binding_request(missing_model_id)],
+            ),
+            request=_request(),
+            container=cast(Container, container),
+        )
+        await session.flush()
+
+        row = await session.scalar(
+            sa.select(FlowPackageImports).where(
+                FlowPackageImports.space_id == space_id,
+                FlowPackageImports.package_id == "se.demo.route-import",
+            )
+        )
+        draft_flow_count = await session.scalar(
+            sa.select(sa.func.count(Flows.id)).where(Flows.space_id == space_id)
+        )
+
+        assert isinstance(response, JSONResponse)
+        assert response.status_code == 400
+        assert row is not None
+        assert row.status == FlowPackageImportStatus.FAILED.value
+        assert row.flow_id is None
+        assert row.failure_json == {
+            "code": "bad_request",
+            "message": "The completion model is not enabled in the space.",
+            "context": {},
+        }
+        assert draft_flow_count == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_package_import_route_persists_failed_install_record(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session=session,
+            name=f"flow-package-roundtrip-model-{uuid4()}",
+        )
+        space = await space_factory(
+            session,
+            f"Flow package roundtrip {uuid4()}",
+            [model.id],
+        )
+        await _add_space_membership(
+            session=session,
+            space_id=space.id,
+            user_id=admin_user.id,
+        )
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space.id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(model.id)]
+            ),
+        )
+
+        class FakeInstallService:
+            async def install_as_draft(self, **kwargs: object) -> object:
+                raise FlowPackageValidationError(
+                    code=FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE,
+                    message="Selected model is unavailable.",
+                    context={"slot_ref": "model.structured"},
+                )
+
+        monkeypatch.setattr(
+            flow_package_router,
+            "FlowPackageInstallService",
+            FakeInstallService,
+        )
+
+        import_request = _import_request(_package_base64())
+        response = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=import_request,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        await session.flush()
+
+        row = await session.scalar(
+            sa.select(FlowPackageImports).where(
+                FlowPackageImports.space_id == space.id,
+                FlowPackageImports.package_id == "se.demo.route-import",
+            )
+        )
+        retry = await FlowPackageImportRepository(session).get_successful_retry(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            content_checksum=import_request.expected_content_checksum,
+            target_state=_import_plan().target_state,
+            selection=_selection(),
+        )
+
+        assert isinstance(response, JSONResponse)
+        assert response.status_code == 400
+        assert row is not None
+        assert row.tenant_id == admin_user.tenant_id
+        assert row.status == FlowPackageImportStatus.FAILED.value
+        assert row.flow_id is None
+        assert row.failure_json == {
+            "code": FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE.value,
+            "message": "Selected model is unavailable.",
+            "context": {"slot_ref": "model.structured"},
+        }
+        assert retry is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_package_name_collision_persists_failed_receipt_and_audit_until_space_delete(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session=session,
+            name=f"flow-package-collision-model-{uuid4()}",
+        )
+        space = await space_factory(
+            session,
+            f"Flow package collision {uuid4()}",
+            [model.id],
+        )
+        await _add_space_membership(
+            session=session,
+            space_id=space.id,
+            user_id=admin_user.id,
+        )
+        session.add(
+            Flows(
+                name="Route Import Demo",
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                created_by_user_id=admin_user.id,
+                owner_user_id=admin_user.id,
+            )
+        )
+        await session.flush()
+
+        async def stale_flow_name_read(*args: object, **kwargs: object) -> list[object]:
+            return []
+
+        monkeypatch.setattr(FlowService, "list_flows", stale_flow_name_read)
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space.id,
+        )
+
+        response = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=_import_request(_package_base64()),
+            request=_request(),
+            container=cast(Container, container),
+        )
+        await session.flush()
+
+        failed_receipt = await session.scalar(
+            sa.select(FlowPackageImports).where(
+                FlowPackageImports.space_id == space.id,
+                FlowPackageImports.status == FlowPackageImportStatus.FAILED.value,
+            )
+        )
+        audit_record = await session.scalar(
+            sa.select(AuditLogTable).where(
+                AuditLogTable.action == ActionType.FLOW_PACKAGE_IMPORT_FAILED.value,
+                AuditLogTable.entity_id == space.id,
+                AuditLogTable.outcome == Outcome.FAILURE.value,
+                AuditLogTable.error_message
+                == "A Flow with this name already exists in the target space.",
+            )
+        )
+        flow_count = await session.scalar(
+            sa.select(sa.func.count(Flows.id)).where(Flows.space_id == space.id)
+        )
+
+        assert isinstance(response, JSONResponse)
+        assert response.status_code == 409
+        assert json.loads(response.body)["code"] == "flow_package_import_name_collision"
+        assert failed_receipt is not None
+        assert failed_receipt.flow_id is None
+        assert failed_receipt.failure_json == {
+            "code": "flow_package_import_name_collision",
+            "message": "A Flow with this name already exists in the target space.",
+            "context": {},
+        }
+        assert flow_count == 1
+        assert audit_record is not None
+        assert audit_record.log_metadata["extra"] == {
+            "import_id": str(failed_receipt.id),
+            "space_id": str(space.id),
+            "package_id": "se.demo.route-import",
+            "package_version": "1.0.0",
+            "content_checksum": failed_receipt.content_checksum,
+            "failure_code": "flow_package_import_name_collision",
+        }
+
+        failed_receipt_id = failed_receipt.id
+        audit_record_id = audit_record.id
+        await session.execute(sa.delete(Spaces).where(Spaces.id == space.id))
+        await session.flush()
+
+        assert (
+            await session.scalar(
+                sa.select(FlowPackageImports).where(
+                    FlowPackageImports.id == failed_receipt_id
+                )
+            )
+            is None
+        )
+        assert (
+            await session.scalar(
+                sa.select(AuditLogTable).where(AuditLogTable.id == audit_record_id)
+            )
+            is not None
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_successful_flow_package_import_cascades_with_created_flow(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session=session,
+            name=f"flow-package-roundtrip-model-{uuid4()}",
+        )
+        space = await space_factory(
+            session,
+            f"Flow package roundtrip {uuid4()}",
+            [model.id],
+        )
+        await _add_space_membership(
+            session=session,
+            space_id=space.id,
+            user_id=admin_user.id,
+        )
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space.id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(model.id)]
+            ),
+        )
+        import_request = _import_request(_package_base64())
+        response = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=import_request,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        await session.flush()
+
+        assert not isinstance(response, JSONResponse)
+        assert response.flow_name == "Route Import Demo"
+        assert response.package_id == "se.demo.route-import"
+        assert response.package_version == "1.0.0"
+        assert response.steps_created == 1
+        assert response.resource_bindings_count == 0
+
+        imported_flow = await session.scalar(
+            sa.select(Flows).where(Flows.id == response.flow_id)
+        )
+        import_record = await session.scalar(
+            sa.select(FlowPackageImports).where(
+                FlowPackageImports.id == response.import_id
+            )
+        )
+        audit_record = await session.scalar(
+            sa.select(AuditLogTable).where(
+                AuditLogTable.action == ActionType.FLOW_PACKAGE_DRAFT_INSTALLED.value,
+                AuditLogTable.entity_id == response.flow_id,
+            )
+        )
+
+        assert imported_flow is not None
+        assert imported_flow.tenant_id == admin_user.tenant_id
+        assert imported_flow.space_id == space.id
+        assert imported_flow.name == "Route Import Demo"
+        assert import_record is not None
+        assert import_record.status == FlowPackageImportStatus.DRAFT_CREATED.value
+        assert import_record.flow_id == response.flow_id
+        assert import_record.failure_json is None
+        assert import_record.package_id == response.package_id
+        assert import_record.package_version == response.package_version
+        assert import_record.content_checksum == response.content_checksum
+        assert import_record.selected_mappings_json == {
+            "selected_bindings": [],
+        }
+        retry_repo = FlowPackageImportRepository(session)
+        matching_retry = await retry_repo.get_successful_retry(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            content_checksum=response.content_checksum,
+            target_state=FlowPackageImportTargetState(
+                audio_transcription_required=False,
+                default_transcription_model_id=None,
+            ),
+            selection=FlowPackageImportSelection(),
+        )
+        changed_target_retry = await retry_repo.get_successful_retry(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            content_checksum=response.content_checksum,
+            target_state=FlowPackageImportTargetState(
+                audio_transcription_required=True,
+                default_transcription_model_id=uuid4(),
+            ),
+            selection=FlowPackageImportSelection(),
+        )
+        assert matching_retry is not None
+        assert matching_retry.flow_id == response.flow_id
+        assert changed_target_retry is None
+        assert audit_record is not None
+        assert audit_record.log_metadata["extra"] == {
+            "import_id": str(response.import_id),
+            "space_id": str(space.id),
+            "flow_id": str(response.flow_id),
+            "package_id": response.package_id,
+            "package_version": response.package_version,
+            "content_checksum": response.content_checksum,
+            "steps_created": response.steps_created,
+            "resource_bindings_count": response.resource_bindings_count,
+        }
+
+        replay = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=import_request,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        await session.flush()
+        flow_count = await session.scalar(
+            sa.select(sa.func.count(Flows.id)).where(Flows.space_id == space.id)
+        )
+        import_count = await session.scalar(
+            sa.select(sa.func.count(FlowPackageImports.id)).where(
+                FlowPackageImports.space_id == space.id
+            )
+        )
+        audit_count = await session.scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.action == ActionType.FLOW_PACKAGE_DRAFT_INSTALLED.value,
+                AuditLogTable.entity_id == response.flow_id,
+            )
+        )
+
+        assert replay == response
+        assert flow_count == 1
+        assert import_count == 1
+        assert audit_count == 1
+
+        imported_flow.deleted_at = datetime.now(timezone.utc)
+        await session.flush()
+        assert (
+            await retry_repo.get_successful_retry(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                content_checksum=response.content_checksum,
+                target_state=FlowPackageImportTargetState(
+                    audio_transcription_required=False,
+                    default_transcription_model_id=None,
+                ),
+                selection=FlowPackageImportSelection(),
+            )
+            is None
+        )
+        imported_flow.deleted_at = None
+        await session.flush()
+
+        await session.execute(
+            sa.delete(FlowSteps).where(FlowSteps.flow_id == response.flow_id)
+        )
+        await session.execute(
+            sa.delete(Assistants).where(Assistants.managing_flow_id == response.flow_id)
+        )
+        await session.execute(sa.delete(Flows).where(Flows.id == response.flow_id))
+        await session.flush()
+
+        remaining_import = await session.scalar(
+            sa.select(FlowPackageImports).where(
+                FlowPackageImports.id == response.import_id
+            )
+        )
+        remaining_audit = await session.scalar(
+            sa.select(AuditLogTable).where(AuditLogTable.id == audit_record.id)
+        )
+        assert remaining_import is None
+        assert remaining_audit is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_package_import_lock_serializes_successful_retry_visibility(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(
+            session=session,
+            name=f"flow-package-lock-model-{uuid4()}",
+        )
+        space = await space_factory(
+            session,
+            f"Flow package lock {uuid4()}",
+            [model.id],
+        )
+        await _add_space_membership(
+            session=session,
+            space_id=space.id,
+            user_id=admin_user.id,
+        )
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=space.id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(model.id)]
+            ),
+        )
+        response = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=_import_request(_package_base64()),
+            request=_request(),
+            container=cast(Container, container),
+        )
+        await session.flush()
+
+        assert not isinstance(response, JSONResponse)
+        tenant_id = admin_user.tenant_id
+        user_id = admin_user.id
+        space_id = space.id
+        flow_id = response.flow_id
+
+    content_checksum = "2" * 64
+    import_plan = _import_plan().model_copy(
+        update={"content_checksum": content_checksum}
+    )
+    selection = FlowPackageImportSelection()
+
+    async with (
+        sessionmanager.session() as first_session,
+        sessionmanager.session() as second_session,
+    ):
+        await first_session.begin()
+        await second_session.begin()
+        first_repo = FlowPackageImportRepository(first_session)
+        second_repo = FlowPackageImportRepository(second_session)
+
+        await first_repo.acquire_space_import_lock(
+            tenant_id=tenant_id,
+            space_id=space_id,
+        )
+        first_import_id = await first_repo.create_draft_created(
+            tenant_id=tenant_id,
+            space_id=space_id,
+            flow_id=flow_id,
+            created_by_user_id=user_id,
+            package_id=import_plan.package_id,
+            package_version=import_plan.package_version,
+            content_checksum=content_checksum,
+            import_plan=import_plan,
+            selection=selection,
+        )
+
+        await second_session.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
+        with pytest.raises(DBAPIError):
+            await second_repo.acquire_space_import_lock(
+                tenant_id=tenant_id,
+                space_id=space_id,
+            )
+        await second_session.rollback()
+
+        await first_session.commit()
+        await second_session.begin()
+        await second_repo.acquire_space_import_lock(
+            tenant_id=tenant_id,
+            space_id=space_id,
+        )
+        visible_retry = await second_repo.get_successful_retry(
+            tenant_id=tenant_id,
+            space_id=space_id,
+            content_checksum=content_checksum,
+            target_state=import_plan.target_state,
+            selection=selection,
+        )
+
+        assert visible_retry is not None
+        assert visible_retry.import_id == first_import_id
+        assert visible_retry.flow_id == flow_id
+        await second_session.rollback()
+
+
+# An item map reads and writes one array of objects.
+_ITEMS_CONTRACT = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {"title": {"type": "string"}},
+                "required": ["title"],
+            },
+        }
+    },
+    "required": ["items"],
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "input_type, input_config",
+    [
+        (InputType.TEXT, {"runtime_input": False, "item_map": False}),
+        (InputType.TEXT, {"runtime_input": {"enabled": False}}),
+        (InputType.DOCUMENT, {"runtime_input": False}),
+        (InputType.DOCUMENT, {"runtime_input": {"enabled": False}}),
+        (InputType.DOCUMENT, None),
+        (
+            InputType.DOCUMENT,
+            {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "document",
+                    "max_files": 3,
+                    "execution_mode": "single_call",
+                    "accepted_mimetypes_override": ["application/pdf"],
+                    "label": "Documents",
+                    "description": "Upload documents.",
+                }
+            },
+        ),
+    ],
+)
+async def test_flow_package_export_import_route_roundtrip_between_tenants_and_container_instances(
+    input_type: InputType,
+    input_config: FlowPersistedJsonObject | None,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    tenant_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def fake_log_flow_package_import(**kwargs: object) -> None:
+        return None
+
+    async def fake_log_flow_package_export(**kwargs: object) -> None:
+        return None
+
+    monkeypatch.setattr(
+        flow_package_router,
+        "_log_flow_package_import",
+        fake_log_flow_package_import,
+    )
+    monkeypatch.setattr(
+        flow_package_router,
+        "_log_flow_package_export",
+        fake_log_flow_package_export,
+    )
+
+    async with db_container() as source_container:
+        source_session = source_container.session()
+        source_model = await completion_model_factory(
+            session=source_session,
+            name=f"flow-package-source-model-{uuid4()}",
+        )
+        source_space = await space_factory(
+            source_session,
+            f"Flow package source {uuid4()}",
+            [source_model.id],
+        )
+        await _add_space_membership(
+            session=source_session,
+            space_id=source_space.id,
+            user_id=admin_user.id,
+        )
+
+        source_spec = FlowDraftSpecCore(
+            flow_name="Cross-instance package demo",
+            steps=[
+                StepSpec(
+                    plan_step_ref="summarize",
+                    name="Summarize",
+                    assistant_spec=AssistantSpec(
+                        instructions="Summarize the input.",
+                        model_ref=_model_slot_ref().ref,
+                    ),
+                    input_source=InputSource.FLOW_INPUT,
+                    output_type=OutputType.JSON,
+                    output_contract=_ITEMS_CONTRACT,
+                ),
+                StepSpec(
+                    plan_step_ref="items",
+                    name="Items",
+                    assistant_spec=AssistantSpec(instructions="Pass through items."),
+                    input_source=InputSource.PREVIOUS_STEP,
+                    input_type=InputType.JSON,
+                    output_type=OutputType.JSON,
+                    input_contract=_ITEMS_CONTRACT,
+                    output_contract=_ITEMS_CONTRACT,
+                    input_config={"item_map": {"enabled": True, "max_items": 12}},
+                ),
+            ],
+        )
+        source_apply = await FlowAuthoringCommandService().apply(
+            command=CreateFlowAuthoringCommand(
+                space_id=source_space.id,
+                spec=source_spec,
+                origin=FlowPackageAuthoringOrigin(
+                    package_id="se.demo.source",
+                    package_version="1.0.0",
+                    content_checksum="sha256:source",
+                ),
+                resource_bindings=(_model_binding(source_model.id),),
+            ),
+            flow_service=source_container.flow_service(),
+        )
+        await source_session.flush()
+
+        exported_flow = await source_container.flow_service().get_flow(
+            source_apply.flow_id
+        )
+
+        await source_container.flow_service().update_flow(
+            flow_id=source_apply.flow_id,
+            steps=[
+                exported_flow.steps[0].model_copy(
+                    update={
+                        "input_type": input_type,
+                        "input_config": input_config,
+                    }
+                ),
+                *exported_flow.steps[1:],
+            ],
+        )
+        exported_flow = await source_container.flow_service().get_flow(
+            source_apply.flow_id
+        )
+        assert exported_flow.steps[0].input_config == input_config
+        source_runtime = build_runtime_input_config(exported_flow.steps[0].input_config)
+
+        async def fake_require_flow_edit_access(
+            request: Request,
+            container: Container,
+            *,
+            flow_id: UUID,
+            allow_service_key_principals: bool = False,
+        ) -> FlowAccessContext:
+            assert flow_id == source_apply.flow_id
+            assert allow_service_key_principals is False
+            return FlowAccessContext(
+                flow=exported_flow,
+                actor=cast(SpaceActor, _FakeSpaceActor()),
+                scope_filter=ScopeFilter(),
+            )
+
+        monkeypatch.setattr(
+            flow_package_router,
+            "require_flow_edit_access",
+            fake_require_flow_edit_access,
+        )
+
+        export_response = await flow_package_router.export_flow_package(
+            id=source_apply.flow_id,
+            export_request=FlowPackageExportRequest(
+                package_id="se.demo.cross-instance",
+                package_version="1.0.0",
+                name="Cross-instance package demo",
+                description="Exported in one tenant and imported into another.",
+            ),
+            request=_request(),
+            container=cast(Container, source_container),
+        )
+        exported_package = export_response.body
+        source_tenant_id = admin_user.tenant_id
+        source_model_id = source_model.id
+        source_flow_id = source_apply.flow_id
+
+    envelope = reader.read_flow_package(exported_package)
+    assert envelope.manifest.schema_version == 1
+    assert len(envelope.content_checksum) == 64
+    serialized_archive = exported_package.decode("latin-1")
+    for private_identifier in (source_tenant_id, source_model_id, source_flow_id):
+        assert str(private_identifier) not in serialized_archive
+    assert "signed_url" not in serialized_archive.lower()
+    assert "credentials" not in serialized_archive.lower()
+
+    async with db_container() as setup_container:
+        setup_session = setup_container.session()
+        target_tenant = await tenant_factory(
+            setup_session,
+            name=f"Flow package target tenant {uuid4()}",
+        )
+        target_role = await setup_container.role_repo().create_role(
+            RoleCreate(
+                name=f"flow-package-target-{uuid4().hex[:8]}",
+                permissions=[Permission.ASSISTANTS, Permission.FLOWS_MANAGE],
+                tenant_id=target_tenant.id,
+            )
+        )
+        target_user_domain = await setup_container.user_repo().add(
+            UserAdd(
+                email=f"flow-package-target-{uuid4().hex[:8]}@example.com",
+                username=f"flow_package_target_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=target_tenant.id,
+                roles=[ModelId(id=target_role.id)],
+            )
+        )
+        target_model = await completion_model_factory(
+            session=setup_session,
+            name=f"flow-package-target-model-{uuid4()}",
+            tenant_id=target_tenant.id,
+        )
+        target_space = await space_factory(
+            setup_session,
+            f"Flow package target {uuid4()}",
+            [target_model.id],
+            tenant_id=target_tenant.id,
+        )
+        await _add_space_membership(
+            session=setup_session,
+            space_id=target_space.id,
+            user_id=target_user_domain.id,
+        )
+        target_tenant_id = target_tenant.id
+        target_user_id = target_user_domain.id
+        target_model_id = target_model.id
+        target_space_id = target_space.id
+        target_tenant_domain = await setup_container.tenant_repo().get(target_tenant_id)
+        assert target_tenant_domain is not None
+
+    async with db_container(
+        user=target_user_domain,
+        tenant=target_tenant_domain,
+    ) as target_container:
+        target_session = target_container.session()
+        _patch_import_access(
+            monkeypatch,
+            target_space_id=target_space_id,
+            candidates=FlowPackageImportPlannerCandidates(
+                models=[_model_candidate(target_model_id)]
+            ),
+        )
+        import_response = await flow_package_router.import_flow_package_as_draft(
+            id=target_space_id,
+            import_request=_import_request(
+                base64.b64encode(exported_package).decode("ascii"),
+                selected_bindings=[_model_binding_request(target_model_id)],
+            ),
+            request=_request(),
+            container=cast(Container, target_container),
+        )
+        await target_session.flush()
+
+        assert not isinstance(import_response, JSONResponse)
+        assert import_response.flow_id != source_flow_id
+        assert import_response.flow_name == "Cross-instance package demo"
+        assert import_response.package_id == "se.demo.cross-instance"
+        assert import_response.package_version == "1.0.0"
+        assert import_response.steps_created == 2
+        assert import_response.resource_bindings_count == 1
+
+        imported_flow = await target_session.scalar(
+            sa.select(Flows).where(Flows.id == import_response.flow_id)
+        )
+        assert imported_flow is not None
+        assert imported_flow.tenant_id == target_tenant_id
+        assert imported_flow.space_id == target_space_id
+        assert imported_flow.owner_user_id == target_user_id
+        assert imported_flow.published_version is None
+
+        imported_step = await target_session.scalar(
+            sa.select(FlowSteps).where(
+                FlowSteps.flow_id == import_response.flow_id,
+                FlowSteps.step_order == 1,
+            )
+        )
+        assert imported_step is not None
+        reloaded = await target_container.flow_service().get_flow(
+            import_response.flow_id
+        )
+        assert (
+            build_runtime_input_config(reloaded.steps[0].input_config) == source_runtime
+        )
+        assert (
+            build_step_item_map_config(reloaded.steps[0].input_config).enabled is False
+        )
+        item_map = build_step_item_map_config(reloaded.steps[1].input_config)
+        assert item_map.enabled is True
+        assert item_map.max_items == 12
+        imported_assistant = await target_session.get(
+            Assistants,
+            imported_step.assistant_id,
+        )
+        assert imported_assistant is not None
+        assert imported_assistant.completion_model_id == target_model_id
+        assert imported_assistant.completion_model_id != source_model_id
+
+        import_records = (
+            await target_session.scalars(
+                sa.select(FlowPackageImports).where(
+                    FlowPackageImports.tenant_id == target_tenant_id,
+                    FlowPackageImports.space_id == target_space_id,
+                    FlowPackageImports.status
+                    == FlowPackageImportStatus.DRAFT_CREATED.value,
+                )
+            )
+        ).all()
+        assert [record.flow_id for record in import_records] == [
+            import_response.flow_id
+        ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_package_export_route_requires_space_edit_access(
+    client,
+    db_container,
+    admin_user,
+    patch_auth_service_jwt,
+) -> None:
+    _ = patch_auth_service_jwt
+    _, owner_token = await _user_with_flow_permissions_token(
+        db_container=db_container,
+        admin_user=admin_user,
+        permissions=(Permission.SHARED_SPACES, Permission.FLOWS_MANAGE),
+    )
+    viewer_user_id, viewer_token = await _user_with_flow_permissions_token(
+        db_container=db_container,
+        admin_user=admin_user,
+        permissions=(Permission.FLOWS_MANAGE,),
+    )
+
+    space_response = await client.post(
+        "/api/v1/spaces/",
+        json={"name": f"flow-package-export-auth-{uuid4().hex[:8]}"},
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert space_response.status_code == 201, space_response.text
+    space_id = space_response.json()["id"]
+
+    flow_response = await client.post(
+        "/api/v1/flows/",
+        json={
+            "space_id": space_id,
+            "name": "Export auth boundary",
+            "description": "Export must require space edit access.",
+        },
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+    assert flow_response.status_code == 201, flow_response.text
+    flow_id = flow_response.json()["id"]
+
+    async with db_container() as container:
+        await _add_space_membership(
+            session=container.session(),
+            space_id=UUID(space_id),
+            user_id=viewer_user_id,
+            role=SpaceRoleValue.VIEWER,
+        )
+
+    response = await client.post(
+        f"/api/v1/flows/{flow_id}/package-exports/",
+        json={
+            "package_id": "se.demo.export-auth",
+            "package_version": "1.0.0",
+            "name": "Export Auth Boundary",
+        },
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+
+    assert response.status_code == 403, response.text
+    body = response.json()
+    assert body["code"] == "insufficient_space_permission"
+    assert body["context"] == {"auth_layer": "space_membership"}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_package_import_rejects_invalid_terminal_shapes(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        space = await _create_space(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+        )
+        flow = Flows(
+            name="Terminal-shape Flow",
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            created_by_user_id=admin_user.id,
+            owner_user_id=admin_user.id,
+        )
+        session.add(flow)
+        await session.flush()
+
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.DRAFT_CREATED.value,
+                import_plan_json=_import_plan().model_dump(
+                    mode="json",
+                    exclude={"can_publish_after_import"},
+                ),
+                selected_mappings_json=_selection().model_dump(mode="json"),
+            ),
+        )
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                flow_id=flow.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.DRAFT_CREATED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
+                failure_json=_failure().model_dump(mode="json"),
+            ),
+        )
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                flow_id=flow.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.FAILED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
+                failure_json=_failure().model_dump(mode="json"),
+            ),
+        )
+        await _assert_integrity_error(
+            session,
+            FlowPackageImports(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                created_by_user_id=admin_user.id,
+                package_id="se.demo.flow",
+                package_version="1.0.0",
+                content_checksum="0" * 64,
+                source=FlowPackageImportSource.FILE_UPLOAD.value,
+                status=FlowPackageImportStatus.FAILED.value,
+                import_plan_json=_import_plan().storage_json(),
+                selected_mappings_json=_selection().storage_json(),
+            ),
+        )
+
+
+def test_flow_package_import_metadata_matches_import_record_contract() -> None:
+    assert FLOW_PACKAGE_IMPORT_SOURCE_VALUES == (
+        FlowPackageImportSource.FILE_UPLOAD.value,
+    )
+    assert FLOW_PACKAGE_IMPORT_STATUS_VALUES == (
+        FlowPackageImportStatus.DRAFT_CREATED.value,
+        FlowPackageImportStatus.FAILED.value,
+    )
+    assert (
+        _check_constraint_values(
+            FlowPackageImports,
+            "ck_flow_package_imports_source",
+        )
+        == FLOW_PACKAGE_IMPORT_SOURCE_VALUES
+    )
+    assert (
+        _check_constraint_values(
+            FlowPackageImports,
+            "ck_flow_package_imports_status",
+        )
+        == FLOW_PACKAGE_IMPORT_STATUS_VALUES
+    )
+    assert "ck_flow_package_imports_content_checksum" in _constraint_names(
+        FlowPackageImports
+    )
+    assert "ck_flow_package_imports_terminal_shape" in _constraint_names(
+        FlowPackageImports
+    )
+    assert _unique_constraint_columns(Flows, "uq_flows_id_tenant_id") == (
+        "id",
+        "tenant_id",
+    )
+    assert _unique_constraint_columns(
+        Flows,
+        "uq_flows_id_tenant_id_space_id",
+    ) == ("id", "tenant_id", "space_id")
+
+    flow_foreign_key = _foreign_key_by_name(
+        FlowPackageImports,
+        "fk_flow_package_imports_flow_tenant_space",
+    )
+    assert tuple(column.name for column in flow_foreign_key.columns) == (
+        "flow_id",
+        "tenant_id",
+        "space_id",
+    )
+    assert flow_foreign_key.ondelete == "CASCADE"
+    assert flow_foreign_key.onupdate == "NO ACTION"
+    assert flow_foreign_key.match is None
+    assert tuple(element.target_fullname for element in flow_foreign_key.elements) == (
+        "flows.id",
+        "flows.tenant_id",
+        "flows.space_id",
+    )
+    assert [
+        constraint.name
+        for constraint in FlowPackageImports.__table__.foreign_key_constraints
+        if constraint.referred_table.name == "flows"
+    ] == ["fk_flow_package_imports_flow_tenant_space"]
+
+    flow_id_index = _index_by_name(
+        FlowPackageImports,
+        "ix_flow_package_imports_flow_id",
+    )
+    assert tuple(column.name for column in flow_id_index.columns) == ("flow_id",)
+
+    tenant_space_index = _index_by_name(
+        FlowPackageImports,
+        "ix_flow_package_imports_tenant_space_created",
+    )
+    assert tuple(column.name for column in tenant_space_index.columns) == (
+        "tenant_id",
+        "space_id",
+        "created_at",
+    )
+
+    checksum_index = _index_by_name(
+        FlowPackageImports,
+        "ix_flow_package_imports_space_checksum_created",
+    )
+    assert tuple(column.name for column in checksum_index.columns) == (
+        "space_id",
+        "content_checksum",
+        "created_at",
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("size_failure", [False, True])
+async def test_word_package_late_failure_rolls_back_files_and_retry_replays_one_asset(
+    size_failure: bool,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from eneo.database.tables.files_table import Files
+    from eneo.database.tables.flow_tables import FlowTemplateAssets
+    from eneo.flow_packages.infrastructure.flow_package_zip_writer import (
+        write_flow_package,
+    )
+    from eneo.main.exceptions import BadRequestException, FileTooLargeException
+    from eneo.server.dependencies.container import load_container_upload_admission
+    from tests.unittests.flow_packages.test_flow_package_templates import (
+        _template_envelope,
+    )
+
+    envelope = _template_envelope(shared=True)
+    payload = _import_request(base64.b64encode(write_flow_package(envelope)).decode())
+    async with db_container() as container:
+        await load_container_upload_admission(container)
+        session = container.session()
+        space = await _create_space(
+            session=session,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+        )
+        await _add_space_membership(
+            session=session, space_id=space.id, user_id=admin_user.id
+        )
+        _patch_import_access(monkeypatch, target_space_id=space.id)
+
+        async def counts() -> tuple[int, int, int]:
+            values = []
+            for table in (Files, FlowTemplateAssets, Flows):
+                value = await session.scalar(
+                    sa.select(sa.func.count(table.id)).where(
+                        table.tenant_id == admin_user.tenant_id
+                    )
+                )
+                values.append(int(value or 0))
+            return tuple(values)
+
+        before = await counts()
+        original = FlowService.replace_resource_bindings
+
+        async def fail_after_template_upload(self, **kwargs: object) -> None:
+            if size_failure:
+                raise FileTooLargeException(
+                    "The configured upload limit was exceeded.",
+                    file_size=4096,
+                    max_size=1024,
+                )
+            raise BadRequestException("Simulated late package failure.")
+
+        monkeypatch.setattr(
+            FlowService, "replace_resource_bindings", fail_after_template_upload
+        )
+        failed = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=payload,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        assert isinstance(failed, JSONResponse)
+        assert failed.status_code == 400
+        if size_failure:
+            assert json.loads(failed.body)["code"] == "file_too_large"
+        assert await counts() == before
+
+        monkeypatch.setattr(FlowService, "replace_resource_bindings", original)
+        imported = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=payload,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        assert not isinstance(imported, JSONResponse)
+        after = await counts()
+        assert after == tuple(count + 1 for count in before)
+        flow = await container.flow_service().get_flow(flow_id=imported.flow_id)
+        assert len(flow.steps) == 2
+        assert (
+            flow.steps[0].output_config["template_asset_id"]
+            == flow.steps[1].output_config["template_asset_id"]
+        )
+
+        replayed = await flow_package_router.import_flow_package_as_draft(
+            id=space.id,
+            import_request=payload,
+            request=_request(),
+            container=cast(Container, container),
+        )
+        assert not isinstance(replayed, JSONResponse)
+        assert replayed.flow_id == imported.flow_id
+        assert await counts() == after
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_word_replacement_json_file_exceeds_multipart_text_limit(
+    client,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    admin_user,
+    patch_auth_service_jwt,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from eneo.flow_packages.infrastructure.flow_package_zip_writer import (
+        write_flow_package,
+    )
+    from tests.unittests.flow_packages.test_flow_package_templates import (
+        _template_envelope,
+    )
+
+    _ = patch_auth_service_jwt
+    async with db_container() as container:
+        space = await _create_space(
+            session=container.session(),
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+        )
+        token = container.auth_service().create_access_token_for_user(admin_user)
+        space_id = space.id
+        await container.session().commit()
+    _patch_import_access(monkeypatch, target_space_id=space_id)
+    original = next(iter(_template_envelope().template_payloads.values()))
+    payload = BytesIO()
+    with (
+        zipfile.ZipFile(BytesIO(original)) as source,
+        zipfile.ZipFile(payload, "w", zipfile.ZIP_STORED) as target,
+    ):
+        for name in source.namelist():
+            target.writestr(name, source.read(name))
+        target.writestr("word/media/package-size-test.bin", b"x" * (1024 * 1024))
+    uploads = json.dumps(
+        [
+            {
+                "template_ref": "template_asset.report",
+                "filename": "Large.docx",
+                "content_base64": base64.b64encode(payload.getvalue()).decode(),
+            }
+        ]
+    ).encode()
+    assert len(uploads) > 1024 * 1024
+    response = await client.post(
+        f"/api/v1/spaces/{space_id}/flow-packages/import-plan/",
+        headers={"Authorization": f"Bearer {token}"},
+        files={
+            "package_file": (
+                "report.eneopkg",
+                write_flow_package(_template_envelope(included=False)),
+                "application/vnd.eneo.package+zip",
+            ),
+            "template_uploads": ("templates.json", uploads, "application/json"),
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["can_install_as_draft"] is True
+    assert (
+        response.json()["dependency_resolutions"][0]["upload_filename"] == "Large.docx"
+    )

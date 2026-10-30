@@ -5,12 +5,12 @@ import { Card } from "@astryxdesign/core/Card";
 import { DateInput } from "@astryxdesign/core/DateInput";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { revealProblems } from "@/components/composites/field-problem";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useInfiniteQuery, useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import {
   BarChart3,

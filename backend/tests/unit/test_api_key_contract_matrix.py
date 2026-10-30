@@ -166,6 +166,20 @@ class TestPublicEndpoints:
         assert crawler_route is not None, "/api/healthz/crawler route not found"
         assert route_has_dependency_named(crawler_route, "authenticate_super_api_key")
 
+    def test_flow_healthz_endpoint_requires_only_super_api_key(self):
+        from eneo.server.main import get_application
+
+        app = get_application()
+        flow_route = None
+        for route in app.routes:
+            if getattr(route, "path", None) == "/api/healthz/flows":
+                flow_route = route
+                break
+
+        assert flow_route is not None, "/api/healthz/flows route not found"
+        assert route_has_dependency_named(flow_route, "authenticate_super_api_key")
+        assert not route_has_dependency_named(flow_route, "get_current_active_user")
+
 
 class TestAuthPrecedence:
     """Documents which auth method wins when both are present.

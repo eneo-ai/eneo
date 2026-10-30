@@ -4,19 +4,13 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 ENV_FILE="${REPO_ROOT}/backend/.env"
 BASELINE="eneo_develop"
+source "${REPO_ROOT}/scripts/lib/resolve-devcontainer.sh"
 
-PROJECT="$(docker ps --filter label=com.docker.compose.service=eneo \
-                     --format '{{.Label "com.docker.compose.project"}}' | head -1)"
-if [ -z "$PROJECT" ]; then
-  echo "Error: no running compose project with an 'eneo' service. Is the devcontainer up?" >&2
-  exit 1
-fi
+APP_CONTAINER="$(resolve_eneo_devcontainer "${REPO_ROOT}")"
+PROJECT="$(docker inspect -f '{{index .Config.Labels "com.docker.compose.project"}}' "${APP_CONTAINER}")"
 DB_CONTAINER="$(docker ps --filter label=com.docker.compose.project="$PROJECT" \
                           --filter label=com.docker.compose.service=db \
-                          --format '{{.Names}}' | head -1)"
-APP_CONTAINER="$(docker ps --filter label=com.docker.compose.project="$PROJECT" \
-                           --filter label=com.docker.compose.service=eneo \
-                           --format '{{.Names}}' | head -1)"
+                          --format '{{.Names}}')"
 if [ -z "$DB_CONTAINER" ] || [ -z "$APP_CONTAINER" ]; then
   echo "Error: could not discover db/eneo containers in project '$PROJECT'." >&2
   exit 1

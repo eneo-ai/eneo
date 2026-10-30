@@ -35,7 +35,13 @@
 
   --text-primary: var(--color-ui-grey-100); /* Main text colour */
   --text-secondary: var(--color-ui-grey-200); /* Text colour for paragraphs with less emphasis */
-  --text-muted: var(--color-ui-grey-300); /* Text colour for e.g. placeholders */
+  --text-muted: var(
+    --color-ui-grey-300
+  ); /* Dim de-emphasis colour; placeholders use --text-placeholder */
+  /* Placeholder text: grey-300 already renders at ~4.9:1 on the soil-500
+     page background, so dark mode keeps the existing shade under the
+     dedicated token. */
+  --text-placeholder: var(--color-ui-grey-300);
   --text-on-fill: var(--color-ui-grey-50); /* Text on a coloured background */
 
   --border-strongest: oklch(from var(--color-soil-100) l c h / 55%);
@@ -43,6 +49,15 @@
   --border-default: oklch(from var(--color-soil-100) l c h / 15%);
   --border-dimmer: oklch(from var(--color-soil-100) l c h / 5%);
   --border-on-fill: var(--color-white);
+
+  /* Checkbox control tokens; see light.css. Dark needs a resting fill to
+     separate the box from the surface, and `accent-default` is only
+     2.84:1 here, so the checked boundary steps up to `accent-stronger`
+     at 6.83:1 for the 3:1 that WCAG 1.4.11 asks of a state. */
+  --control-checkbox-fill: oklch(from var(--color-input, oklch(61.87% 0.005 56.33)) l c h / 30%);
+  --control-checkbox-checked-border: var(--accent-stronger);
+  --control-checkbox-invalid-border: oklch(from var(--negative-default) l c h / 50%);
+  --control-checkbox-invalid-ring: oklch(from var(--negative-default) l c h / 40%);
 
   /* Colors */
   --brand-eneo: var(--text-primary);

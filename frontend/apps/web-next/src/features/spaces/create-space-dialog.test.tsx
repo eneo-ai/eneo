@@ -3,7 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { CreateSpaceDialog } from "./create-space-dialog";
 
 const router = vi.hoisted(() => ({ push: vi.fn() }));
@@ -25,8 +25,8 @@ function Harness() {
   );
 }
 
-async function openDialog() {
-  renderInApp(<Harness />);
+async function openDialog(queryClient = testQueryClient()) {
+  renderInApp(<Harness />, { queryClient });
   const opener = screen.getByRole("button", { name: "Ny yta" });
   opener.focus();
   fireEvent.click(opener);
@@ -77,6 +77,23 @@ it("creates the space, opens its overview and leaves no form behind", async () =
   await waitFor(() => expect(router.push).toHaveBeenCalledWith("/spaces/new-space/overview"));
   expect(api.POST).toHaveBeenCalledWith("/api/v1/spaces/", { body: { name: "Upphandling" } });
   expect(screen.queryByLabelText(/Namn/)).toBeNull();
+});
+
+it("refreshes the list of spaces, not the spaces already loaded", async () => {
+  api.POST.mockResolvedValue({ data: { id: "new-space" }, response: new Response(null) });
+  const queryClient = testQueryClient();
+  const keys = [["spaces"], ["spaces", "space-1"], ["spaces", "space-1", "applications"]];
+  for (const key of keys) queryClient.setQueryData(key, {});
+  const { dialog } = await openDialog(queryClient);
+  fireEvent.change(within(dialog).getByLabelText(/Namn/), { target: { value: "Upphandling" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Skapa yta" }));
+
+  await waitFor(() => expect(router.push).toHaveBeenCalledWith("/spaces/new-space/overview"));
+  expect(keys.map((key) => queryClient.getQueryState(key)?.isInvalidated)).toEqual([
+    true,
+    false,
+    false
+  ]);
 });
 
 it("keeps focus on the busy Skapa yta and ignores a second press", async () => {

@@ -1,0 +1,1808 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager, nullcontext
+from datetime import datetime, timezone
+from hashlib import sha256
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, create_autospec
+from uuid import UUID, uuid4
+
+import httpx
+import pytest
+
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.principal_types import PrincipalType
+from eneo.files.audio import AudioDecodeLimits
+from eneo.files.file_models import File, FileInfo, FileType
+from eneo.files.file_service import FileService
+from eneo.files.transcriber import TranscribedAudio, Transcriber
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.flow_input_limits import FlowInputLimits, resolve_flow_input_limits
+from eneo.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    FlowRunInputEnvelopePatch,
+)
+from eneo.flows.runtime.executor import (
+    FlowRunExecutor,
+    RunExecutionState,
+    RuntimeStep,
+)
+from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.service_transcription import RegistryFlowTranscriber
+from eneo.flows.runtime.transcription import FlowTranscribers, FlowTranscriptionResult
+from eneo.flows.runtime.transcription_runtime import (
+    AudioRuntimeDeps,
+    AudioRuntimeRequest,
+    resolve_transcribe_and_attach_audio_input,
+)
+from eneo.main.exceptions import NotFoundException, TypedIOValidationException
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    EmptyTranscriptionInterval,
+)
+from tests.unittests.flows import audio_spool_test_support
+
+spool_contract = audio_spool_test_support.spool_contract
+
+# The speaker service a space offers unless a test says otherwise, and the
+# flow's choice of it: a flow labels speakers only with the service it chose.
+_SPEAKER_SERVICE = SimpleNamespace(id=uuid4(), name="Vemsa", can_access=True)
+_SPEAKER_CHOICE = {"id": str(_SPEAKER_SERVICE.id)}
+_SWITCHED_OFF_SERVICE = SimpleNamespace(id=uuid4(), name="Vemsa", can_access=False)
+
+
+def _transcribers(engine) -> FlowTranscribers:
+    """One double for the model and the speaker-labelling engine: these tests
+    are about what the engine returns, not which one the step picks."""
+    return FlowTranscribers(
+        model=engine, with_speaker_service=AsyncMock(return_value=engine)
+    )
+
+
+def _chunked_transcriber(monkeypatch, tmp_path, chunk_texts):
+    from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transcription import (
+        TRANSPORT,
+        _adapter,
+        _audio,
+    )
+
+    responses = iter(text for file_texts in chunk_texts for text in file_texts)
+    monkeypatch.setattr(
+        TRANSPORT,
+        AsyncMock(side_effect=lambda **kwargs: SimpleNamespace(text=next(responses))),
+    )
+    files = iter(chunk_texts)
+
+    @asynccontextmanager
+    async def to_wav(filepath, *, limits=None):
+        texts = next(files)
+        yield _audio(tmp_path, [300.7] * (len(texts) - 1) + [60.0], monkeypatch)
+
+    monkeypatch.setattr("eneo.files.transcriber.audio.to_wav", to_wav)
+    transcriber = Transcriber(file_service=AsyncMock())
+    monkeypatch.setattr(
+        transcriber, "prepare_transcription", AsyncMock(return_value=_adapter())
+    )
+    return RegistryFlowTranscriber(transcriber)
+
+
+@pytest.mark.parametrize("chunk_text", ["", " \n\t "])
+async def test_empty_provider_chunks_fail_typed_through_processing(
+    spool_contract, monkeypatch, tmp_path, chunk_text
+):
+    from eneo.flows.runtime.transcription import transcribe_audio_input
+
+    file = _audio_file(name="empty.wav")
+    transcriber = _chunked_transcriber(monkeypatch, tmp_path, [[chunk_text] * 3])
+    with pytest.raises(TypedIOValidationException) as exc:
+        await transcribe_audio_input(
+            files=[file],
+            transcriber=transcriber,
+            transcription_model=SimpleNamespace(id=uuid4(), name="whisper-1"),
+            language="sv",
+            step_order=1,
+            max_files=5,
+            max_inline_text_bytes=100_000,
+            open_audio_download=spool_contract.downloads([file]),
+        )
+
+    assert exc.value.code == "typed_io_transcription_empty"
+
+
+@pytest.mark.parametrize(
+    ("chunk_texts", "expected_text", "missing"),
+    [
+        (
+            [["first", "", "last"]],
+            "### 0:00 - 5:00\n\nfirst\n\n### 10:01 - 11:01\n\nlast",
+            [(0, 300.7, 601.4)],
+        ),
+        (
+            [[" \n", "middle", ""]],
+            "### 5:00 - 10:01\n\nmiddle",
+            [(0, 0.0, 300.7), (0, 601.4, 661.4)],
+        ),
+        (
+            [["first"], [""], ["last"]],
+            "### 0:00 - 1:00\n\nfirst\n\n### 0:00 - 1:00\n\nlast",
+            [(1, 0.0, 60.0)],
+        ),
+    ],
+    ids=["middle", "leading_and_trailing", "empty_file"],
+)
+async def test_empty_chunk_intervals_reach_audio_runtime_diagnostics(
+    spool_contract, user, monkeypatch, tmp_path, chunk_texts, expected_text, missing
+):
+    files = [_audio_file(name=f"part-{index}.wav") for index in range(len(chunk_texts))]
+    model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
+    space_repo = AsyncMock()
+    space_repo.one.return_value = _SpaceStub([model], model)
+    flow_run_repo = AsyncMock()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=AudioRuntimeRequest(
+            run=run,
+            step=_runtime_step(),
+            context={"flow_input": {}},
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_speaker_service": _SPEAKER_CHOICE,
+                    "transcription_model": {"id": str(model.id)},
+                    "transcription_language": "sv",
+                }
+            },
+            files=files,
+            requested_ids=[file.id for file in files],
+            max_audio_files=5,
+            max_inline_text_bytes=100_000,
+        ),
+        deps=AudioRuntimeDeps(
+            transcribers=_transcribers(
+                _chunked_transcriber(monkeypatch, tmp_path, chunk_texts)
+            ),
+            flow_repo=AsyncMock(),
+            space_repo=space_repo,
+            flow_run_repo=flow_run_repo,
+            audit_service=None,
+            actor=FlowRunActor.from_user(user=user),
+            open_audio_download=spool_contract.downloads(files),
+            apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
+            commit=AsyncMock(),
+            stage_transcript_source=lambda reference, source: None,
+            stage_run_transcript=lambda reference, transcript: None,
+        ),
+    )
+
+    assert result.text == expected_text
+    assert [(item.code, item.message) for item in result.diagnostics] == [
+        (
+            "audio_transcription_empty_interval",
+            f"Step 1: no transcription text returned from {start} to {end} seconds "
+            f"in file '{files[index].id}'.",
+        )
+        for index, start, end in missing
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["capacity", "provider"])
+async def test_remote_failure_facts_survive_executor_terminalization(
+    spool_contract, user, monkeypatch, failure_kind
+):
+    from eneo.files.transcript import TranscriptSegment
+    from eneo.flows.api.flow_models import FlowRunPublic
+    from eneo.flows.domain.flow import FlowStepResult
+    from eneo.flows.flow_run_error import dump_flow_run_error, parse_flow_run_error
+    from eneo.flows.runtime import remote_transcription
+    from eneo.flows.runtime.service_transcription import ServiceFlowTranscriber
+    from eneo.flows.runtime.transcription import transcribe_audio_input
+    from eneo.transcription_services.client import TranscriptionServiceClient
+
+    reason = "No GPU capacity. " * 100 if failure_kind == "capacity" else None
+    observer = AsyncMock(operation_scope="tenant/run/step/attempt-1")
+    observer.started.return_value = uuid4()
+
+    def handle(request):
+        if request.method == "POST":
+            return httpx.Response(202, json={"job_id": "job-1"})
+        if request.url.path.endswith("/result"):
+            raise httpx.ReadTimeout("result download timed out", request=request)
+        return httpx.Response(
+            200,
+            json={
+                "status": "failed" if failure_kind == "capacity" else "completed",
+                "stage": "transcribing",
+                "failure_kind": "capacity",
+                "error": reason,
+            },
+        )
+
+    remote = remote_transcription.RemoteFlowTranscriber(
+        TranscriptionServiceClient(
+            base_url="http://transcription.test",
+            api_key="test",
+            submit_timeout_seconds=10,
+            result_timeout_seconds=10,
+            transport=httpx.MockTransport(handle),
+        ),
+        poll_interval_seconds=0.001,
+    )
+    registry = AsyncMock()
+    registry.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(
+            text="Hej.",
+            duration_seconds=1.0,
+            segments=(TranscriptSegment(text="Hej.", start=0.0, end=1.0),),
+        )
+    )
+    file = _audio_file(name="audio.wav")
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await transcribe_audio_input(
+            files=[FileInfo.model_validate(file, from_attributes=True)],
+            transcriber=ServiceFlowTranscriber(registry, remote),
+            transcription_model=SimpleNamespace(model_name="whisper-1"),
+            language="sv",
+            step_order=1,
+            max_files=1,
+            max_inline_text_bytes=1024,
+            open_audio_download=spool_contract.downloads([file]),
+            transcription_call_observer=observer,
+        )
+    executor, _, _, _, _ = _build_executor(user, spool_contract=spool_contract)
+    executor._terminalize_run = AsyncMock()
+    run = _run(user=user)
+    step = _runtime_step()
+    now = datetime.now(timezone.utc)
+    claimed = FlowStepResult(
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=step.step_id,
+        step_order=1,
+        status="running",
+        created_at=now,
+        updated_at=now,
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+    )
+    error = executor._terminalize_run.await_args.kwargs["error"]
+    public = FlowRunPublic.model_validate(
+        run.model_copy(
+            update={
+                "status": FlowRunStatus.FAILED,
+                "error": parse_flow_run_error(dump_flow_run_error(error)),
+            }
+        ),
+        from_attributes=True,
+    )
+    # The model wrote the text; the speaker service failed on it, so the run
+    # names the speaker service, with the same failure facts.
+    assert public.error.code.value == "typed_io_speaker_identification_failed"
+    assert public.error.retryable is False
+    assert public.error.details.phase.value == "transcription"
+    assert public.error.details.transcription_failure_kind.value == failure_kind
+    assert public.error.details.transcription_service_reason == (
+        reason[:512] if reason else None
+    )
+    if failure_kind == "provider":
+        observer.outcome_unknown.assert_awaited_once_with(
+            observer.started.return_value, "provider_error"
+        )
+        assert exc_info.value.__cause__.details["retryable"] is True
+
+
+def _transcribed(text: str, *, duration_seconds: float = 30.0) -> TranscribedAudio:
+    """The transcriber's own result type, so the double cannot drift from it."""
+
+    return TranscribedAudio(text=text, duration_seconds=duration_seconds)
+
+
+def _audio_file(
+    *,
+    name: str,
+    file_id: UUID | None = None,
+    transcription: str | None = None,
+    size: int = 1024,
+) -> File:
+    """Build a runtime audio upload as the real `File` model, fully validated.
+
+    Using the production model rather than a look-alike means a new required
+    field on `File` fails here at construction, instead of surfacing later as a
+    runtime error in whichever code first trusts it.
+    """
+    resolved_id = file_id if file_id is not None else uuid4()
+    return File(
+        id=resolved_id,
+        name=name,
+        checksum=sha256(resolved_id.bytes).hexdigest(),
+        size=size,
+        mimetype="audio/wav",
+        file_type=FileType.AUDIO,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
+        tenant_id=uuid4(),
+        blob=b"audio-bytes",
+        transcription=transcription,
+    )
+
+
+class _SpaceStub:
+    def __init__(
+        self,
+        models: list[object],
+        default_model: object | None = None,
+        speaker_services: list[object] | None = None,
+    ):
+        self.transcription_models = models
+        self._default_model = default_model
+        self.linked_transcription_services = (
+            [_SPEAKER_SERVICE] if speaker_services is None else speaker_services
+        )
+
+    def get_default_transcription_model(self):
+        return self._default_model
+
+    def usable_transcription_service(self, connection_id):
+        return next(
+            (
+                s
+                for s in self.linked_transcription_services
+                if s.can_access and s.id == connection_id
+            ),
+            None,
+        )
+
+
+def _run(*, user, payload: dict | None = None) -> FlowRun:
+    now = datetime.now(timezone.utc)
+    return FlowRun(
+        id=uuid4(),
+        flow_id=uuid4(),
+        flow_version=1,
+        principal_type=PrincipalType.USER,
+        principal_user_id=user.id,
+        tenant_id=user.tenant_id,
+        trace_id=uuid4(),
+        status=FlowRunStatus.RUNNING,
+        cancelled_at=None,
+        input_payload_json=payload if payload is not None else {"text": "hello"},
+        output_payload_json=None,
+        job_id=None,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _runtime_step(
+    *, input_type: str = "audio", input_source: str = "flow_input"
+) -> RuntimeStep:
+    input_config = (
+        {
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "audio",
+                "required": True,
+            }
+        }
+        if input_type == "audio" and input_source == "flow_input"
+        else None
+    )
+    return RuntimeStep(
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source=input_source,
+        input_bindings=None,
+        input_config=input_config,
+        output_mode="pass_through",
+        output_config=None,
+        output_type="text",
+        output_contract=None,
+        input_type=input_type,
+        input_contract=None,
+    )
+
+
+def _patch_run_input_payload(flow_run_repo: AsyncMock, run: FlowRun) -> None:
+    async def _update_input_payload(
+        *,
+        run_id,
+        tenant_id,
+        input_payload_patch: FlowRunInputEnvelopePatch,
+    ):
+        assert run_id == run.id
+        assert tenant_id == run.tenant_id
+        return input_payload_patch.apply_to(run.input_payload_json)
+
+    flow_run_repo.update_input_payload = AsyncMock(side_effect=_update_input_payload)
+
+
+def _build_executor(
+    user,
+    *,
+    spool_contract,
+    max_inline_text_bytes: int = 1024,
+    max_audio_files: int = 10,
+):
+    flow_repo = AsyncMock()
+    session = AsyncMock()
+    session.commit = AsyncMock()
+    session.rollback = AsyncMock()
+    flow_run_repo = AsyncMock()
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+    flow_run_repo.list_step_results.return_value = []
+    # Finalization of a run without step results: completed, without an output.
+    flow_run_repo.list_step_result_annotations.return_value = []
+    flow_run_repo.read_last_completed_output_payload.return_value = None
+    flow_run_repo.list_retained_input_file_ids.return_value = []
+    flow_version_repo = AsyncMock()
+    flow_run_review_checkpoint_repo = AsyncMock()
+    space_repo = AsyncMock()
+    completion_service = AsyncMock()
+    file_repo = AsyncMock()
+    file_repo.get_content_references.return_value = []
+    file_content_loader = AsyncMock()
+    file_service = create_autospec(FileService, instance=True)
+    file_service.repo = file_repo
+
+    def _staged_files() -> list[File]:
+        return list(file_service.get_files_by_ids.return_value or [])
+
+    async def _owned_file_infos(file_ids, **_kwargs):
+        # The audio path identifies files without their bytes, so the double
+        # must hand back identities — never the blob-bearing File. A step that
+        # regressed to reading content up front fails here.
+        requested = set(file_ids)
+        return [
+            FileInfo(
+                id=staged.id,
+                created_at=staged.created_at,
+                updated_at=staged.updated_at,
+                name=staged.name,
+                checksum=staged.checksum,
+                size=staged.size,
+                mimetype=staged.mimetype,
+                file_type=staged.file_type,
+                owner_type=staged.owner_type,
+                owner_user_id=staged.owner_user_id,
+                owner_service_id=staged.owner_service_id,
+                tenant_id=staged.tenant_id,
+            )
+            for staged in _staged_files()
+            if staged.id in requested
+        ]
+
+    async def _get_file_content(file_id, **_kwargs):
+        for staged in _staged_files():
+            if staged.id == file_id:
+                assert staged.file_type is not FileType.AUDIO, (
+                    "Audio must use its download stream"
+                )
+                return staged
+        raise AssertionError(f"unstaged file content requested: {file_id}")
+
+    file_service.get_owned_file_infos.side_effect = _owned_file_infos
+    file_service.get_file_content.side_effect = _get_file_content
+    file_service.get_audio_download = spool_contract.downloads(_staged_files)
+    template_asset_repo = AsyncMock()
+    encryption_service = AsyncMock()
+    transcriber = AsyncMock()
+    executor = FlowRunExecutor(
+        # The worker opens this on a session of its own; here the executor's audit service serves.
+        read_audit_service=lambda: nullcontext(executor.audit_service),
+        runtime_actor=FlowRunActor.from_user(user=user),
+        session=session,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        space_repo=space_repo,
+        completion_service=completion_service,
+        file_repo=file_repo,
+        file_content_loader=file_content_loader,
+        file_service=file_service,
+        template_asset_repo=template_asset_repo,
+        encryption_service=encryption_service,
+        flow_run_terminalizer=AsyncMock(),
+        max_inline_text_bytes=max_inline_text_bytes,
+        max_audio_files=max_audio_files,
+        input_limits=FlowInputLimits(
+            file_max_size_bytes=12_000_000,
+            audio_max_size_bytes=25_000_000,
+        ),
+        transcribers=_transcribers(transcriber),
+    )
+    return executor, flow_run_repo, space_repo, file_service, transcriber
+
+
+def _state() -> RunExecutionState:
+    return RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_transcribes_in_request_order_and_stages_transcript(
+    spool_contract, user
+):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    file_id_1 = uuid4()
+    file_id_2 = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_1 = _audio_file(file_id=file_id_1, name="a.wav")
+    file_2 = _audio_file(file_id=file_id_2, name="b.wav")
+    file_service.get_files_by_ids.return_value = [file_1, file_2]
+
+    model = SimpleNamespace(
+        id=uuid4(),
+        name="kb-whisper-large",
+        model_name="kb-whisper-large",
+        can_access=True,
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+
+    async def _tx(
+        file_obj,
+        transcription_model,
+        *,
+        file_id,
+        language=None,
+        diarize=True,
+        persist_cache_to_file,
+        max_speakers=None,
+        observer=None,
+    ):
+        assert persist_cache_to_file is False
+        return _transcribed(f"tx:{file_obj.filename}:{language or 'auto'}")
+
+    transcriber.transcribe = AsyncMock(side_effect=_tx)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        requested_file_ids=[file_id_2, file_id_1],
+    )
+
+    ordered_names = [
+        call.args[0].filename for call in transcriber.transcribe.await_args_list
+    ]
+    assert ordered_names == ["b.wav", "a.wav"]
+    assert [
+        call.kwargs["persist_cache_to_file"]
+        for call in transcriber.transcribe.await_args_list
+    ] == [False, False]
+    assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY]["text"] == resolved.text
+    assert context["flow_input"][FLOW_INPUT_TRANSCRIPTION_KEY] == resolved.text
+    assert resolved.text.startswith("tx:b.wav:sv")
+    # The inline transcript is written on the run row when the attempt is
+    # activated, not while the input is resolved.
+    flow_run_repo.update_input_payload.assert_not_awaited()
+    staged = executor._pending_transcript_sources[(run.id, step.step_id, 1)]
+    assert staged.run_transcript is not None
+    assert staged.run_transcript.text == resolved.text
+    assert resolved.transcription_metadata is not None
+    assert resolved.transcription_metadata["files_count"] == 2
+    assert resolved.transcription_metadata["language"] == "sv"
+
+
+@pytest.mark.asyncio
+async def test_null_tenant_audio_limit_executes_with_default_capacity(
+    spool_contract, user
+) -> None:
+    limits = resolve_flow_input_limits(
+        {"input_limits": {"audio_max_files_per_run": None}},
+        defaults=SimpleNamespace(
+            session_file_maximum_bytes=12_000_000,
+            session_audio_maximum_bytes=25_000_000,
+        ),
+    )
+    executor, _, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract,
+        user=user,
+        max_audio_files=limits.audio_max_files_per_run,
+    )
+    files = [_audio_file(name=f"audio-{index}.wav") for index in range(11)]
+    file_ids = [file.id for file in files]
+    file_service.get_files_by_ids.return_value = files
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    run = _run(user=user, payload={})
+
+    with pytest.raises(TypedIOValidationException, match="11, max 10") as exc_info:
+        await executor._resolve_step_input(
+            step=_runtime_step(),
+            context=executor.variable_resolver.build_context(
+                run.input_payload_json, []
+            ),
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_speaker_service": _SPEAKER_CHOICE,
+                    "transcription_model": {"id": str(model.id)},
+                    "transcription_language": "sv",
+                }
+            },
+            requested_file_ids=file_ids,
+        )
+
+    assert exc_info.value.code == "typed_io_audio_too_many_files"
+    transcriber.transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_passes_no_language_for_auto(spool_contract, user):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_1 = _audio_file(file_id=file_id, name="a.wav")
+    file_service.get_files_by_ids.return_value = [file_1]
+
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
+
+    await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "auto",
+            }
+        },
+        requested_file_ids=[file_id],
+    )
+
+    assert transcriber.transcribe.await_args.kwargs["language"] is None
+    assert transcriber.transcribe.await_args.kwargs["persist_cache_to_file"] is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored_choice", "diarize"), [({}, True), ({"speaker_labels": False}, False)]
+)
+async def test_audio_resolve_lets_the_runs_speaker_choice_replace_the_flow_default(
+    spool_contract, user, stored_choice, diarize
+):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    file = _audio_file(name="meeting.wav")
+    file_service.get_files_by_ids.return_value = [file]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
+    run = _run(user=user, payload=stored_choice)
+    _patch_run_input_payload(flow_run_repo, run)
+
+    await executor._resolve_step_input(
+        step=_runtime_step(),
+        context=executor.variable_resolver.build_context(run.input_payload_json, []),
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_diarization": True,
+            }
+        },
+        requested_file_ids=[file.id],
+    )
+
+    assert transcriber.transcribe.await_args.kwargs["diarize"] is diarize
+
+
+def _speaker_engines(executor) -> tuple[AsyncMock, AsyncMock]:
+    """Separate model and speaker-labelling engines, to see which one a step
+    uses and whether a speaker service was connected at all."""
+    model_engine = AsyncMock()
+    model_engine.transcribe = AsyncMock(return_value=_transcribed("ok"))
+    with_speaker_service = AsyncMock(return_value=AsyncMock())
+    executor.transcribers = FlowTranscribers(
+        model=model_engine, with_speaker_service=with_speaker_service
+    )
+    return model_engine, with_speaker_service
+
+
+async def _resolve_meeting(executor, flow_run_repo, file_service, user, wizard):
+    file = _audio_file(name="meeting.wav")
+    file_service.get_files_by_ids.return_value = [file]
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    return await executor._resolve_step_input(
+        step=_runtime_step(),
+        context=executor.variable_resolver.build_context(run.input_payload_json, []),
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={"wizard": {"transcription_enabled": True, **wizard}},
+        requested_file_ids=[file.id],
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("speaker_services", "pick", "reason"),
+    [
+        ([], None, "not_chosen"),
+        # Nothing is chosen for the flow, even when the space has one service.
+        ([_SPEAKER_SERVICE], None, "not_chosen"),
+        ([_SWITCHED_OFF_SERVICE], _SWITCHED_OFF_SERVICE.id, "picked_unavailable"),
+        ([_SPEAKER_SERVICE], uuid4(), "picked_unavailable"),
+    ],
+    ids=["no_pick_no_service", "no_pick_one_service", "switched_off", "revoked_pick"],
+)
+async def test_labels_without_the_flows_own_usable_service_are_refused_before_audio(
+    spool_contract, user, speaker_services, pick, reason
+):
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    model_engine, with_speaker_service = _speaker_engines(executor)
+    model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub([model], model, speaker_services=speaker_services)
+    )
+    wizard = {
+        "transcription_model": {"id": str(model.id)},
+        "transcription_diarization": True,
+    }
+    if pick is not None:
+        wizard["transcription_speaker_service"] = {"id": str(pick)}
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _resolve_meeting(executor, flow_run_repo, file_service, user, wizard)
+
+    assert exc_info.value.code == "typed_io_speaker_service_unavailable"
+    assert exc_info.value.context == {"speaker_service_gap": reason}
+    model_engine.transcribe.assert_not_awaited()
+    with_speaker_service.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_a_service_removed_before_its_key_is_read_is_the_same_refusal(
+    spool_contract, user
+):
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    model_engine, with_speaker_service = _speaker_engines(executor)
+    with_speaker_service.side_effect = NotFoundException("gone")
+    model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub([model], model, speaker_services=[_SPEAKER_SERVICE])
+    )
+    wizard: dict[str, object] = {
+        "transcription_model": {"id": str(model.id)},
+        "transcription_diarization": True,
+        "transcription_speaker_service": _SPEAKER_CHOICE,
+    }
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _resolve_meeting(executor, flow_run_repo, file_service, user, wizard)
+
+    assert exc_info.value.code == "typed_io_speaker_service_unavailable"
+    assert exc_info.value.context == {"speaker_service_gap": "picked_unavailable"}
+    model_engine.transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("speaker_services", "choice"),
+    [
+        ([], {}),
+        # The author chose none: a service the space has is not asked.
+        ([_SPEAKER_SERVICE], {"transcription_speaker_service": None}),
+    ],
+    ids=["no_choice_no_service", "chose_none"],
+)
+async def test_labels_off_without_a_chosen_service_connect_no_service(
+    spool_contract, user, speaker_services, choice
+):
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    model_engine, with_speaker_service = _speaker_engines(executor)
+    model = SimpleNamespace(id=uuid4(), name="whisper-1", can_access=True)
+    # Labels off need no speaker service, so none in the space is no refusal.
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub([model], model, speaker_services=speaker_services)
+    )
+
+    resolved = await _resolve_meeting(
+        executor,
+        flow_run_repo,
+        file_service,
+        user,
+        {
+            "transcription_model": {"id": str(model.id)},
+            "transcription_diarization": False,
+            **choice,
+        },
+    )
+
+    model_engine.transcribe.assert_awaited_once()
+    assert model_engine.transcribe.await_args.kwargs["diarize"] is False
+    with_speaker_service.assert_not_awaited()
+    assert "word_timing" not in resolved.transcription_metadata
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "bound"),
+    [
+        ({"max_speakers": 3}, b"3"),
+        ({"max_speakers": None}, None),
+        ({}, None),
+    ],
+)
+async def test_vemsa_receives_the_speaker_bound_the_run_settled(
+    spool_contract, user, stored, bound
+):
+    import httpx
+
+    from eneo.files.transcript import TranscriptSegment
+    from eneo.flows.runtime.remote_transcription import RemoteFlowTranscriber
+    from eneo.flows.runtime.service_transcription import ServiceFlowTranscriber
+    from tests.unit.transcription_services.scripted_service import (
+        RESULT_BODY,
+        ScriptedService,
+        accepted,
+        make_client,
+        status,
+    )
+
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    vemsa = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        # A diarize job echoes the flow's own model.
+        result_responses=[
+            httpx.Response(200, json={**RESULT_BODY, "model": "whisper-1"})
+        ],
+    )
+    remote = RemoteFlowTranscriber(
+        make_client(vemsa, base_url="http://vemsa.test"), poll_interval_seconds=0.001
+    )
+    registry = AsyncMock()
+    registry.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(
+            text="Hej och välkomna.",
+            duration_seconds=5.2,
+            segments=(TranscriptSegment(text="Hej och välkomna.", start=0.0, end=5.2),),
+        )
+    )
+    with_speaker_service = AsyncMock(
+        return_value=ServiceFlowTranscriber(registry, remote)
+    )
+    executor.transcribers = FlowTranscribers(
+        model=AsyncMock(), with_speaker_service=with_speaker_service
+    )
+    file = _audio_file(name="meeting.wav")
+    file_service.get_files_by_ids.return_value = [file]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    run = _run(user=user, payload=stored)
+    _patch_run_input_payload(flow_run_repo, run)
+
+    resolved = await executor._resolve_step_input(
+        step=_runtime_step(),
+        context=executor.variable_resolver.build_context(run.input_payload_json, []),
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_diarization": True,
+            }
+        },
+        requested_file_ids=[file.id],
+    )
+
+    # The step connects the speaker service its flow chose, and its evidence
+    # names the service that labelled it.
+    with_speaker_service.assert_awaited_once_with(_SPEAKER_SERVICE)
+    assert resolved.transcription_metadata is not None
+    assert (
+        resolved.transcription_metadata["speaker_service"],
+        resolved.transcription_metadata["speaker_service_id"],
+    ) == ("Vemsa", str(_SPEAKER_SERVICE.id))
+    # A diarize job labels the speakers; it is no word-timing job.
+    assert "word_timing" not in resolved.transcription_metadata
+    submitted = vemsa.requests[0].read()
+    assert b'name="task"\r\n\r\ndiarize' in submitted
+    if bound is None:
+        assert b'name="max_speakers"' not in submitted
+    else:
+        assert b'name="max_speakers"\r\n\r\n' + bound in submitted
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_ignores_shared_file_transcription_cache(
+    spool_contract, user
+):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_1 = _audio_file(
+        file_id=file_id, name="cached.wav", transcription="stale shared transcript"
+    )
+    file_service.get_files_by_ids.return_value = [file_1]
+
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+
+    async def _tx(
+        file_obj,
+        transcription_model,
+        *,
+        file_id,
+        language=None,
+        diarize=True,
+        persist_cache_to_file,
+        max_speakers=None,
+        observer=None,
+    ):
+        assert file_obj.path.read_bytes() == file_1.blob
+        assert file_id == file_1.id
+        assert transcription_model is model
+        assert language is None
+        assert persist_cache_to_file is False
+        return _transcribed("fresh flow transcript")
+
+    transcriber.transcribe = AsyncMock(side_effect=_tx)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "auto",
+            }
+        },
+        requested_file_ids=[file_id],
+    )
+
+    assert resolved.text == "fresh flow transcript"
+    assert file_1.transcription == "stale shared transcript"
+    assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY]["text"] == (
+        "fresh flow transcript"
+    )
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_missing_wizard_model_fails_strictly(spool_contract, user):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_1 = _audio_file(file_id=file_id, name="default.wav")
+    file_service.get_files_by_ids.return_value = [file_1]
+
+    model = SimpleNamespace(
+        id=uuid4(),
+        name="kb-whisper-large",
+        model_name="kb-whisper-large",
+        can_access=True,
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_language": "sv",
+                }
+            },
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value.code == "typed_io_transcription_model_missing"
+    transcriber.transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_selected_model_unavailable_fails_without_fallback(
+    spool_contract, user
+):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_1 = _audio_file(file_id=file_id, name="default.wav")
+    file_service.get_files_by_ids.return_value = [file_1]
+
+    default_model = SimpleNamespace(
+        id=uuid4(),
+        name="kb-whisper-large",
+        model_name="kb-whisper-large",
+        can_access=True,
+    )
+    selected_but_missing = uuid4()
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[default_model], default_model=default_model)
+    )
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("ok"))
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(selected_but_missing)},
+                    "transcription_language": "sv",
+                }
+            },
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value.code == "typed_io_transcription_model_unavailable"
+    transcriber.transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_near_cap_adds_warning_diagnostic(spool_contract, user):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=100
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="near.wav")
+    ]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    transcriber.transcribe = AsyncMock(return_value=_transcribed("x" * 90))
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        requested_file_ids=[file_id],
+    )
+
+    assert any(
+        item.code == "typed_io_transcript_near_limit" for item in resolved.diagnostics
+    )
+    assert resolved.transcription_metadata is not None
+    assert resolved.transcription_metadata["transcript_bytes"] >= 90
+    assert resolved.transcription_metadata["estimated_tokens"] > 0
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_carries_empty_interval_diagnostics(spool_contract, user):
+    """The executor's resolved input carries the intervals the adapter measured."""
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=100_000
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="gap.wav")
+    ]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    transcriber.transcribe = AsyncMock(
+        return_value=TranscribedAudio(
+            text="### 00:00:00 - 00:05:00\n\nHej.",
+            duration_seconds=600.0,
+            empty_intervals=(EmptyTranscriptionInterval(300.0, 600.0),),
+        )
+    )
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        requested_file_ids=[file_id],
+    )
+
+    assert [
+        (item.code, item.message)
+        for item in resolved.diagnostics
+        if item.code == "audio_transcription_empty_interval"
+    ] == [
+        (
+            "audio_transcription_empty_interval",
+            "Step 1: no transcription text returned from 300.0 to 600.0 seconds "
+            f"in file '{file_id}'.",
+        )
+    ]
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_multifile_near_cap_keeps_request_order(
+    spool_contract, user
+):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=100
+    )
+    file_id_1 = uuid4()
+    file_id_2 = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_1 = _audio_file(file_id=file_id_1, name="a.wav")
+    file_2 = _audio_file(file_id=file_id_2, name="b.wav")
+    file_service.get_files_by_ids.return_value = [file_1, file_2]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+
+    async def _tx(
+        file_obj,
+        transcription_model,
+        *,
+        file_id,
+        language=None,
+        diarize=True,
+        persist_cache_to_file,
+        max_speakers=None,
+        observer=None,
+    ):
+        assert persist_cache_to_file is False
+        if file_obj.filename == "b.wav":
+            return _transcribed("b" * 40, duration_seconds=12.5)
+        return _transcribed("a" * 43, duration_seconds=17.5)
+
+    transcriber.transcribe = AsyncMock(side_effect=_tx)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        requested_file_ids=[file_id_2, file_id_1],
+    )
+
+    # 40 + 2 separator + 43 = 85 bytes => exactly 85% of 100-byte cap.
+    assert resolved.transcription_metadata is not None
+    assert resolved.transcription_metadata["transcript_bytes"] == 85
+    # The step reports the decoded length of every file it transcribed, together
+    # with the model that read them, because it consumes no tokens to report.
+    assert resolved.transcription_metadata["audio_seconds"] == 30.0
+    assert resolved.transcription_metadata["model"] == "whisper-1"
+    assert resolved.transcription_metadata["model_id"] == str(model.id)
+    # No labelling call was made, so no speaker service is named.
+    assert resolved.transcription_metadata["speaker_service"] is None
+    assert resolved.transcription_metadata["speaker_service_id"] is None
+    assert resolved.text.startswith("b" * 40)
+    assert resolved.text.endswith("a" * 43)
+    assert any(
+        item.code == "typed_io_transcript_near_limit" for item in resolved.diagnostics
+    )
+    ordered_names = [
+        call.args[0].filename for call in transcriber.transcribe.await_args_list
+    ]
+    assert ordered_names == ["b.wav", "a.wav"]
+
+
+@pytest.mark.asyncio
+async def test_audio_step_reads_one_payload_at_a_time(spool_contract, user):
+    """A step's memory cost must be its largest audio file, not their sum.
+
+    The step resolves against metadata and reads each file's bytes only while
+    that file is being transcribed, so ten permitted 200 MiB uploads cannot
+    materialize together in one worker.
+    """
+
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=1000
+    )
+    file_id_1 = uuid4()
+    file_id_2 = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id_1, name="a.wav"),
+        _audio_file(file_id=file_id_2, name="b.wav"),
+    ]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+
+    events: list[str] = []
+
+    async def _tx(file_obj, transcription_model, *, language=None, **_kwargs):
+        events.append(f"transcribe {file_obj.filename}")
+        return _transcribed(f"text for {file_obj.filename}")
+
+    staged_names = {
+        file.id: file.name for file in file_service.get_files_by_ids.return_value
+    }
+    original_download = file_service.get_audio_download
+
+    async def _recorded_download(file_id):
+        events.append(f"load {staged_names[file_id]}")
+        return await original_download(file_id)
+
+    file_service.get_audio_download = _recorded_download
+    transcriber.transcribe = AsyncMock(side_effect=_tx)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        requested_file_ids=[file_id_1, file_id_2],
+    )
+
+    # The step never asks for content-bearing files at all...
+    file_service.get_files_by_ids.assert_not_awaited()
+    assert file_service.get_owned_file_infos.await_count == 2
+    # ...and each payload is read immediately before its own transcription, so
+    # a prefetching implementation ("load a, load b, transcribe a, ...") fails.
+    assert events == [
+        "load a.wav",
+        "transcribe a.wav",
+        "load b.wav",
+        "transcribe b.wav",
+    ]
+    # An audio step contributes no content-bearing files to the model channel.
+    assert resolved.files is None
+    assert resolved.runtime_input_metadata is not None
+    assert [file["name"] for file in resolved.runtime_input_metadata["files"]] == [
+        "a.wav",
+        "b.wav",
+    ]
+    # Evidence identity is the contract most exposed by leaving files empty.
+    staged = {file.id: file for file in file_service.get_files_by_ids.return_value}
+    runtime_edges = [
+        edge for edge in resolved.edges if edge.source.kind == "runtime_file"
+    ]
+    assert [edge.source.file_id for edge in runtime_edges] == [file_id_1, file_id_2]
+    assert [edge.source.checksum for edge in runtime_edges] == [
+        staged[file_id_1].checksum,
+        staged[file_id_2].checksum,
+    ]
+    assert [edge.source.byte_size for edge in runtime_edges] == [
+        staged[file_id_1].size,
+        staged[file_id_2].size,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_audio_payload_lost_between_identify_and_read_is_a_missing_file(
+    spool_contract, user
+):
+    """Deferred reads must keep the missing-file failure, not blame transcription."""
+
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="deleted-midway.wav")
+    ]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    file_service.get_audio_download.error = NotFoundException()
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_speaker_service": _SPEAKER_CHOICE,
+                    "transcription_model": {"id": str(model.id)},
+                    "transcription_language": "sv",
+                }
+            },
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value.code == "typed_io_file_not_found"
+    transcriber.transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_audio_payload_read_failure_stays_inside_the_typed_contract(
+    spool_contract, user
+):
+    """Every way a deferred read can fail must reach the caller as a flow error."""
+
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="unreadable.wav")
+    ]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    # Not a missing file: storage unreachable, ownership raced, bytes failed
+    # verification. None of these may escape as an untyped exception.
+    file_service.get_audio_download.error = RuntimeError("object content down")
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_speaker_service": _SPEAKER_CHOICE,
+                    "transcription_model": {"id": str(model.id)},
+                    "transcription_language": "sv",
+                }
+            },
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value.code == "typed_io_transcription_failed"
+    transcriber.transcribe.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_multifile_overflow_spills_once_in_request_order(
+    spool_contract, user
+):
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        spool_contract=spool_contract, user=user, max_inline_text_bytes=1024
+    )
+    file_id_1 = uuid4()
+    file_id_2 = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_1 = _audio_file(file_id=file_id_1, name="a.wav")
+    file_2 = _audio_file(file_id=file_id_2, name="b.wav")
+    file_service.get_files_by_ids.return_value = [file_1, file_2]
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper-1", model_name="whisper-1", can_access=True
+    )
+    space_repo.one = AsyncMock(
+        return_value=_SpaceStub(models=[model], default_model=model)
+    )
+    transcriber.transcribe = AsyncMock(
+        side_effect=[_transcribed("b" * 550), _transcribed("a" * 550)]
+    )
+
+    file_service.save_generated_file.return_value = SimpleNamespace(id=uuid4())
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        state=_state(),
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        requested_file_ids=[file_id_2, file_id_1],
+    )
+
+    assert resolved.text == "b" * 550 + "\n\n" + "a" * 550
+    file_service.save_generated_file.assert_awaited_once()
+    assert run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY]["file_id"] == str(
+        file_service.save_generated_file.return_value.id
+    )
+    ordered_names = [
+        call.args[0].filename for call in transcriber.transcribe.await_args_list
+    ]
+    assert ordered_names == ["b.wav", "a.wav"]
+
+
+@pytest.mark.asyncio
+async def test_audio_resolve_requires_space_transcription_model(spool_contract, user):
+    executor, flow_run_repo, space_repo, file_service, _ = _build_executor(
+        user, spool_contract=spool_contract
+    )
+    file_id = uuid4()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    file_service.get_files_by_ids.return_value = [
+        _audio_file(file_id=file_id, name="a.wav")
+    ]
+    space_repo.one = AsyncMock(return_value=_SpaceStub(models=[], default_model=None))
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(uuid4())},
+                    "transcription_language": "sv",
+                }
+            },
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value.code == "typed_io_transcription_model_unavailable"
+
+
+@pytest.mark.asyncio
+async def test_resolve_transcribe_attach_updates_payload_context_and_audits(
+    spool_contract, user, monkeypatch
+):
+    flow_run_repo = AsyncMock()
+    audit_service = AsyncMock()
+    transcribers = AsyncMock()
+    space_repo = AsyncMock()
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = {"flow_input": {}}
+
+    from eneo.flows.runtime.transcription import TranscriptSourcePreparation
+
+    transcription_result = FlowTranscriptionResult(
+        source_preparation=TranscriptSourcePreparation(
+            files_count=1,
+            segments=[],
+            speaker_review=None,
+            words=[],
+            words_omitted_reason=None,
+        ),
+        text="transcribed text",
+        file_ids=[uuid4()],
+        model_id=uuid4(),
+        model_name="kb-whisper-large",
+        language="sv",
+        transcript_bytes=16,
+        estimated_tokens=4,
+        audio_seconds=95.5,
+        elapsed_ms=1234,
+        files_count=1,
+        near_inline_limit=True,
+    )
+    resolver = AsyncMock(return_value=transcription_result)
+    monkeypatch.setattr(
+        "eneo.flows.runtime.transcription_runtime.resolve_and_transcribe_audio_for_step",
+        resolver,
+    )
+
+    request = AudioRuntimeRequest(
+        run=run,
+        step=step,
+        context=context,
+        version_metadata={"wizard": {}},
+        files=[],
+        requested_ids=[],
+        max_audio_files=10,
+        max_inline_text_bytes=1024,
+        decode_limits=AudioDecodeLimits(
+            max_duration_seconds=3600, max_decoded_bytes=2**31
+        ),
+    )
+    staged = []
+    deps = AudioRuntimeDeps(
+        stage_transcript_source=lambda reference, source: None,
+        stage_run_transcript=lambda reference, transcript: staged.append(transcript),
+        commit=AsyncMock(),
+        apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
+        transcribers=transcribers,
+        flow_repo=AsyncMock(),
+        space_repo=space_repo,
+        flow_run_repo=flow_run_repo,
+        audit_service=audit_service,
+        actor=FlowRunActor.from_user(user=user),
+        open_audio_download=spool_contract.downloads([]),
+    )
+
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=request,
+        deps=deps,
+    )
+
+    assert result.text == "transcribed text"
+    # The tenant's longest recording reaches the decoder.
+    assert resolver.await_args.kwargs["decode_limits"] == request.decode_limits
+    # The model's space is the run's flow's, not a step assistant's.
+    assert resolver.await_args.kwargs["flow_id"] == run.flow_id
+    assert resolver.await_args.kwargs["tenant_id"] == run.tenant_id
+    assert "assistant_id" not in resolver.await_args.kwargs
+    assert result.transcription_metadata["language"] == "sv"
+    assert result.near_inline_limit_message is not None
+    assert (
+        run.input_payload_json[FLOW_INPUT_TRANSCRIPTION_KEY]["text"]
+        == "transcribed text"
+    )
+    assert context[FLOW_INPUT_TRANSCRIPTION_KEY] == "transcribed text"
+    assert context["flow_input"][FLOW_INPUT_TRANSCRIPTION_KEY] == "transcribed text"
+    flow_run_repo.update_input_payload.assert_not_awaited()
+    assert [transcript.text for transcript in staged] == ["transcribed text"]
+    audit_service.log_async.assert_awaited_once()
+    call = audit_service.log_async.await_args.kwargs
+    assert call["action"] == ActionType.FLOW_RUN_AUDIO_TRANSCRIBED
+    assert call["entity_type"] == EntityType.FLOW_RUN
+    assert call["entity_id"] == run.id
+    assert call["outcome"] == Outcome.SUCCESS
+    metadata = call["metadata"]
+    assert metadata["extra"]["step_order"] == step.step_order
+    assert metadata["extra"]["language"] == "sv"
+    assert metadata["extra"]["files_count"] == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_transcribe_attach_swallow_audit_errors(
+    spool_contract, user, monkeypatch
+):
+    flow_run_repo = AsyncMock()
+    audit_service = AsyncMock()
+    audit_service.log_async = AsyncMock(side_effect=RuntimeError("audit down"))
+    step = _runtime_step()
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+    context = {"flow_input": {}}
+
+    from eneo.flows.runtime.transcription import TranscriptSourcePreparation
+
+    transcription_result = FlowTranscriptionResult(
+        source_preparation=TranscriptSourcePreparation(
+            files_count=1,
+            segments=[],
+            speaker_review=None,
+            words=[],
+            words_omitted_reason=None,
+        ),
+        text="transcribed text",
+        file_ids=[uuid4()],
+        model_id=uuid4(),
+        model_name="kb-whisper-large",
+        language="sv",
+        transcript_bytes=16,
+        estimated_tokens=4,
+        audio_seconds=95.5,
+        elapsed_ms=1234,
+        files_count=1,
+        near_inline_limit=False,
+    )
+    monkeypatch.setattr(
+        "eneo.flows.runtime.transcription_runtime.resolve_and_transcribe_audio_for_step",
+        AsyncMock(return_value=transcription_result),
+    )
+
+    request = AudioRuntimeRequest(
+        run=run,
+        step=step,
+        context=context,
+        version_metadata={"wizard": {}},
+        files=[],
+        requested_ids=[],
+        max_audio_files=10,
+        max_inline_text_bytes=1024,
+    )
+    staged = []
+    deps = AudioRuntimeDeps(
+        stage_transcript_source=lambda reference, source: None,
+        stage_run_transcript=lambda reference, transcript: staged.append(transcript),
+        commit=AsyncMock(),
+        apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
+        transcribers=AsyncMock(),
+        flow_repo=AsyncMock(),
+        space_repo=AsyncMock(),
+        flow_run_repo=flow_run_repo,
+        audit_service=audit_service,
+        actor=FlowRunActor.from_user(user=user),
+        open_audio_download=spool_contract.downloads([]),
+    )
+
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=request,
+        deps=deps,
+    )
+
+    assert result.text == "transcribed text"
+    flow_run_repo.update_input_payload.assert_not_awaited()
+    assert [transcript.text for transcript in staged] == ["transcribed text"]
+    audit_service.log_async.assert_awaited_once()

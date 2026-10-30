@@ -15,7 +15,7 @@ import {
 import Link from "@/lib/link";
 import { useFormatter, useTranslations } from "use-intl";
 import { useId, useState } from "react";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { cn } from "@/lib/utils";
 import type { IntegrationKnowledge } from "../../knowledge";
 import {

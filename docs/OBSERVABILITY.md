@@ -10,9 +10,9 @@ Eneo emits OpenTelemetry-shaped structured logs and distributed traces. The appl
 ## 1. What You Get
 
 - **Structured logs** as NDJSON on STDOUT, one JSON object per line, with stable top-level fields (`timestamp`, `severity_text`, `severity_number`, `body`, `trace_id`, `span_id`, `trace_flags`, `resource`, `attributes`).
-- **Distributed traces** with a real `TracerProvider`. A root span is created for every HTTP request (FastAPI auto-instrumentation), and child spans for SQLAlchemy queries, Redis operations, and outbound HTTP via `httpx` and `aiohttp`. ARQ background jobs create their own root traces.
+- **Distributed traces** with a real `TracerProvider`. A root span is created for every instrumented HTTP request, which is all but `/api/healthz*` (FastAPI auto-instrumentation), with client child spans for SQLAlchemy connection checkouts (`connect`), Redis commands, and outbound HTTP via `httpx` and `aiohttp`. SQLAlchemy statements are not traced today (see §6, *SQLAlchemy spans*). Platform ARQ jobs and Flow runs create their own root traces.
 - **W3C TraceContext propagation**. The `traceparent` header is honored on inbound requests and propagated on outbound backend-to-backend calls.
-- **Support header to the frontend**: `X-Trace-Id` is set on every HTTP response, including 4xx and 5xx, and exposed via CORS. `X-Correlation-ID` is emitted in parallel as a legacy alias during the migration period.
+- **Support header to the frontend**: `X-Trace-Id` is set on every instrumented HTTP response, including 4xx and 5xx, and exposed via CORS. `X-Correlation-ID` is emitted in parallel as a legacy alias during the migration period.
 - **Built-in redaction** of authorization headers, cookies, and sensitive query parameters (tokens, secrets, OAuth `code`/`state`) from both stdout logs and span attributes.
 
 What v1 does not do is listed in §10.
@@ -37,13 +37,18 @@ Backend (FastAPI) │                                                           
   OTELJSONFormatter         ──►  STDOUT NDJSON with trace_id/span_id          │
                   │                                                           │
                   ▼                                                           │
-  Auto-instrumented child spans: SQLAlchemy, Redis, httpx, aiohttp            │
+  Auto-instrumented child spans: SQLAlchemy connect, Redis, httpx, aiohttp    │
   Outbound HTTP: traceparent header is added (W3C propagation)                │
                   │                                                           │
                   ▼                                                           │
 Worker (ARQ)                                                                  │
-  init_observability() runs before lifespan.startup so engines/pools          │
-  are patched. Each job creates its own root trace (v1 decision).             │
+  init_observability() runs before lifespan.startup so Redis and HTTP         │
+  clients are patched. Each job creates its own root trace (v1 decision).     │
+                  │                                                           │
+                  ▼                                                           │
+Platform Task Worker (ARQ)                                                    │
+  init_observability() runs before worker child DB/aiohttp resources          │
+  start. Flow run and step spans carry low-cardinality Flow attributes.        │
                   │                                                           │
                   ▼                                                           │
 Container STDOUT  ─►  Log collector (Fluent Bit / Vector / Alloy / ...)       │
@@ -58,6 +63,7 @@ Key files:
 2. [backend/src/eneo/main/logging.py](../backend/src/eneo/main/logging.py) `OTELJSONFormatter` and severity mapping.
 3. [backend/src/eneo/server/middleware/trace_id.py](../backend/src/eneo/server/middleware/trace_id.py) pure-ASGI middleware that injects `X-Trace-Id` on response start.
 4. [backend/src/eneo/server/middleware/request_context.py](../backend/src/eneo/server/middleware/request_context.py) populates the per-request contextvars from the active span.
+5. [backend/src/eneo/flows/runtime/flow_runtime_trace.py](../backend/src/eneo/flows/runtime/flow_runtime_trace.py) Flow runtime span helpers and Flow-safe span attributes.
 
 ---
 
@@ -72,6 +78,8 @@ All behavior is controlled via environment variables. No code change is required
 | `OTEL_DEPLOYMENT_ENVIRONMENT` | `production` | `resource.deployment.environment.name` | OTel semantic conventions ≥ 1.24 use the `.name` suffix. Set to `development`, `staging`, etc. as appropriate. |
 | `LOGLEVEL` | `INFO` | Python logging threshold | Existing variable, retained. |
 | `JSON_LOGS` | `true` | Output format toggle | Set to `false` for human-readable output during local development. |
+| `OTEL_TRACES_SAMPLER` | `parentbased_always_on` | `TracerProvider` sampler | Standard OpenTelemetry SDK variable, read when the `TracerProvider` is created. See *Trace sampling* below. |
+| `OTEL_TRACES_SAMPLER_ARG` | unset | Sampling ratio for `traceidratio` / `parentbased_traceidratio` | A number from `0.0` to `1.0`. When unset or not a number the SDK uses `1.0`. |
 
 Variables are read once at process start. To pin `service.version` for a build:
 
@@ -81,6 +89,23 @@ ENV OTEL_SERVICE_VERSION=${GIT_SHA}
 ```
 
 Existing deployment templates ([docs/deployment/env_backend.template](deployment/env_backend.template)) document the OTel block alongside other backend settings.
+
+### Trace sampling
+
+Eneo does not set a sampler in code, so the OpenTelemetry SDK default applies: `parentbased_always_on` records every new root trace (a request without an incoming `traceparent`) and otherwise follows the incoming parent's sampled flag (see below). The SDK accepts `always_on`, `always_off`, `traceidratio`, `parentbased_always_on`, `parentbased_always_off`, and `parentbased_traceidratio`. For example, to record about 10 % of new traces:
+
+```bash
+OTEL_TRACES_SAMPLER=parentbased_traceidratio
+OTEL_TRACES_SAMPLER_ARG=0.1
+```
+
+What sampling changes and what it keeps:
+
+- **Support and log correlation are kept.** An unsampled request still gets a valid trace ID: `X-Trace-Id` and `X-Correlation-ID` are set on every instrumented response (`/api/healthz*` is excluded from instrumentation and gets neither header), and log lines carry the same `trace_id`. Log `trace_flags` is `00` instead of `01` for unsampled requests. (Measured on 200, 401, 404, 422, and 500 responses at ratios `0.1` and `0.0`.)
+- **`parentbased_*` samplers follow the incoming parent.** A request whose `traceparent` is marked sampled (`-01`) is recorded even at ratio `0.0` or with `parentbased_always_off`, so a caller can force recording of its own requests. A request whose `traceparent` is marked unsampled (`-00`) is dropped by every `parentbased_*` sampler, the default `parentbased_always_on` included, so a caller can also suppress recording. The plain `traceidratio` and `always_off` samplers ignore the parent's decision. An incoming trace ID is adopted in all cases.
+- **Scope is set by the deployment.** API and worker processes both build their `TracerProvider` in `init_observability()`, so the variables apply to every process that receives them. If the API and workers share one environment file, a ratio also drops worker `flow.run.execute` / `flow.step.execute` spans. Set the variables only on the API service if workers should keep recording.
+
+Cost (observation, not a guarantee): on polled Flow read routes, all OpenTelemetry work measured about 0.76 ms of 12.7 ms CPU per request (6 %). Sampling recovered only 0.08 ms (ratio `0.1`) to 0.15 ms (ratio `0.0`), about 1 %, because the server middleware collects attributes and resolves the route before the sampling decision, and spans are not exported in v1. Sampling matters more once an exporter is added (§10).
 
 ---
 
@@ -145,7 +170,7 @@ Eneo uses three distinct IDs. They are not interchangeable.
 | ID | Where it lives | Purpose |
 |---|---|---|
 | `trace_id` | Top-level log field, `X-Trace-Id` response header, OTel span context | Primary correlation ID. Links every log line and span produced by a single request. |
-| `error_id` | Response body for unhandled exceptions, log attribute on the corresponding error line | Stable 8-char identifier given to end users so support can locate the failure. |
+| `error_id` | Optional `GeneralError` response field for explicit or unhandled internal errors; log attribute on the corresponding error line | Stable 8-char identifier given to end users so support can locate the failure. |
 | `correlation_id` | Top-level log field (aliased to `trace_id`), `X-Correlation-ID` response header | Legacy alias for `trace_id` kept during the migration period. |
 
 ### Migration path for `correlation_id`
@@ -160,16 +185,19 @@ Removal of `correlation_id` and `X-Correlation-ID` is deferred until support flo
 
 ### `error_id`
 
-Unhandled exceptions produce a response body of the form:
+Explicit and unhandled internal errors use the platform `GeneralError` envelope:
 
 ```json
 {
-  "error_id": "a1b2c3d4",
-  "message": "An unexpected error occurred. Please try again or contact support with the error_id."
+  "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
+  "eneo_error_code": 9024,
+  "code": "internal_error",
+  "request_id": "req-123",
+  "error_id": "a1b2c3d4"
 }
 ```
 
-The same `error_id` appears in the log line for the originating exception. `error_id` is short (8 chars) and stable across the response and the logs so it can be quoted by an end user. Unlike `trace_id`, it does not exist on successful responses.
+The same `error_id` appears in the log line for the originating exception. `error_id` is short (8 chars) and stable across the response and the logs so it can be quoted by an end user. `request_id` is included when supplied by the caller. Unlike `trace_id`, `error_id` does not exist on successful responses.
 
 ---
 
@@ -179,13 +207,19 @@ The same `error_id` appears in the log line for the originating exception. `erro
 
 The OTel FastAPI instrumentation creates a server span for each request. If the incoming request carries a `traceparent` header (W3C TraceContext), the new span continues that trace; otherwise a new trace is started.
 
-`TraceIdResponseMiddleware` sets `X-Trace-Id` (and `X-Correlation-ID`) on `http.response.start`, which guarantees the headers are present on every status code including 4xx and 5xx. The middleware is pure-ASGI rather than `BaseHTTPMiddleware`, which would create a context-copy boundary that loses the active server span.
+`TraceIdResponseMiddleware` sets `X-Trace-Id` (and `X-Correlation-ID`) on `http.response.start`, which guarantees the headers are present on every status code of an instrumented request, including 4xx and 5xx. The middleware is pure-ASGI rather than `BaseHTTPMiddleware`, which would create a context-copy boundary that loses the active server span.
 
-CORS exposes both headers via `Access-Control-Expose-Headers`. The list is defined once, as `CORS_OPTIONS["expose_headers"]` in [backend/src/eneo/server/middleware/cors.py](../backend/src/eneo/server/middleware/cors.py). The CORS middleware and `add_cors_headers`, which the unhandled-error handler uses for 500 responses, both read it.
+CORS exposes both trace headers and the conditional Flow-package response header via `Access-Control-Expose-Headers`. The list is defined once, as `CORS_OPTIONS["expose_headers"]` in [backend/src/eneo/server/middleware/cors.py](../backend/src/eneo/server/middleware/cors.py). The CORS middleware and `add_cors_headers`, which the unhandled-error handler uses for 500 responses, both read it.
 
 ### Outbound backend-to-backend calls
 
 `httpx` and `aiohttp` are auto-instrumented. Any call made through them inherits the active span as parent and adds a `traceparent` header to the outbound request. The receiving backend (Eneo or otherwise, if it supports W3C TraceContext) continues the same trace.
+
+### SQLAlchemy spans
+
+`SQLAlchemyInstrumentor().instrument()` runs in `init_observability()`, but it only traces statements on engines built through the `create_async_engine` it patches. [database.py](../backend/src/eneo/database/database.py) imports `create_async_engine` at module import, which happens before `init_observability()` in both the API and the workers, so the engine is created with the unpatched function and has no statement listeners. What is active is the instrumentor's class-level `Engine.connect` wrapper: one `connect` client span per connection checkout (one or two per request), with no `SELECT`/`INSERT` child spans.
+
+Enabling statement spans is a deliberate decision, not an import-order fix: on polled Flow read routes it added about 1.4 ms CPU per request (+10 %, about 14 statement spans), and sampling removes little of that because the statement hook builds the span before it checks whether the span is recorded.
 
 ### Log correlation
 
@@ -194,6 +228,57 @@ Every log call inside an active span receives the span's `trace_id` and `span_id
 ### ARQ background jobs (v1)
 
 ARQ has no built-in metadata envelope separate from job kwargs, so injecting `traceparent` into job arguments would mix trace context with domain parameters. v1 decision: each ARQ job creates its own root trace. Consequence: there is no end-to-end waterfall from an HTTP request to the ARQ job it enqueues. All log entries within a job correlate via the job's own `trace_id`. Request-to-job propagation is planned for a future version once a clean metadata mechanism is available.
+
+### Flow platform task runs (v1)
+
+Flow execution and maintenance use the platform ARQ runtime. Platform worker processes initialize observability before DB and aiohttp resources start, so Redis, `httpx`, and `aiohttp` instrumentation and the SQLAlchemy `connect` spans are active inside the worker (statements are not traced; see *SQLAlchemy spans*).
+
+Flow runs and steps create custom root spans named `flow.run.execute` and `flow.step.execute`. These spans use low-cardinality attributes such as `flow.run.id`, `flow.id`, `flow.tenant.id`, `flow.task.id`, and `flow.run.result.status`. After the run row is loaded, the persisted Flow run `trace_id` is emitted as `flow.run.trace_id` on spans and worker log attributes. This value is the Flow API/evidence/export correlation token; it is not the OpenTelemetry protocol `trace_id`.
+
+ARQ job arguments do not carry `traceparent`, so Flow execution-worker spans
+are independent worker-root traces. Correlate execution-worker logs and spans
+by `flow.run.id` and `flow.run.trace_id`.
+
+### Flow troubleshooting files and review evidence
+
+Use **Download debug data** when sharing a Flow failure with support. The
+`debug_export` object (`eneo.flow.debug-export.v3`) contains an explicit selection
+of technical metadata: run and step identifiers, status, timing, model and provider
+identifiers, error codes, finish reasons, available token counts and retrieval
+counts. It excludes prompts, inputs, answers, free-form error messages, flow
+definitions, schema examples, file names and retrieved source text. Missing
+provider measurements remain unknown; a missing count is not a zero-token call.
+
+When a provider response is rejected for truncation or an output-contract failure,
+the failed attempt retains its completion identity and native usage where the
+provider-call records support it. This does not accept the incomplete output or
+retry the provider request. Use the finish reason and error code to distinguish
+output exhaustion from an invalid structured answer before deciding how to recover.
+
+**Evidence containing run content** is a separate, authorized review/export
+surface. Credential masking does not remove personal or case data from that
+evidence. Its `knowledge_traces` field contains the current attempt's source
+review details, subject to the existing passage-disclosure policy; the diagnostic
+export carries counts only. Repairing a step's instructions needs the authorized
+run and the flow definition themselves, which the flow's authoring chat reads
+through its `read_run` and `read_flow` tools. A metadata export alone cannot
+establish whether an answer is factually correct or supply the content needed to
+repair its instructions.
+
+Evidence exports use `flow-evidence-export.v18` for this layout: current-attempt
+source review moves from `bundle.debug_export.steps[].rag` to
+`bundle.knowledge_traces`, and the full definition remains at
+`bundle.definition_snapshot`. Since v18 a step's
+`input_lineage.upstream_step_orders` and `upstream_step_labels` are `null` when
+its recorded `input_source` is unrecognised (lineage unknown, not "reads no
+earlier step"). Consumers must check the export schema version;
+the diagnostic artifact also has its own `schema_version`.
+
+Older `debug_export` versions can contain source content. The frontend does not
+offer them as content-free troubleshooting files. Updating the application does
+not sanitize files that have already been downloaded. Technical identifiers can
+still be access-sensitive operational information; handle them under the
+organization's sharing policy.
 
 ---
 
@@ -349,9 +434,10 @@ The following are explicitly **not** part of v1:
 - **No frontend OTel SDK.** The browser does not generate, export, or propagate spans.
 - **No WebSocket or SSE tracing.** SSE requests can produce extremely long-lived spans without special handling and need a dedicated solution.
 - **No request-to-ARQ-job trace propagation.** See §6.
+- **No request-to-Flow-task trace propagation.** See §6.
 - **No metrics export** (Prometheus, OTLP metrics).
 - **No Sentry initialization.** The Sentry SDK remains a declared dependency but is not initialized.
-- **No custom spans** beyond what auto-instrumentation provides.
+- **No custom spans outside the Flow runtime.** Flow run and step execution use custom spans with low-cardinality Flow attributes.
 - **No vendor-specific log management integration** beyond what the OTel format and stdout enable.
 
 ---

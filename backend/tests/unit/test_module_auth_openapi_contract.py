@@ -35,6 +35,23 @@ def test_module_handoff_and_admin_openapi_use_public_module_key():
     assert not any(path.startswith("/api/v1/modules") for path in paths)
     assert "/api/v1/admin/modules/" in paths
 
+    service_key_list = paths["/api/v1/admin/modules/service-keys/"]["get"]
+    service_key_parameters = {
+        parameter["name"]: parameter for parameter in service_key_list["parameters"]
+    }
+    assert service_key_parameters["limit"]["schema"]["maximum"] == 100
+    assert set(service_key_parameters) == {"limit", "cursor", "search"}
+    assert service_key_list["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ApiKeyListResponse"}
+
+    service_key_get = paths["/api/v1/admin/modules/service-keys/{service_key_id}/"][
+        "get"
+    ]
+    assert service_key_get["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/ApiKeyV2"}
+
     installation = schemas["ModuleInstallation"]
     assert "tenant_id" not in installation["properties"]
     assert set(installation["properties"]) == {

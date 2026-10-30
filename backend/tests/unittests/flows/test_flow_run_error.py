@@ -1,0 +1,691 @@
+from __future__ import annotations
+
+import json
+from datetime import datetime, timezone
+from typing import get_type_hints
+from uuid import uuid4
+
+import pytest
+from pydantic import ValidationError
+
+from eneo.authentication.principal_types import PrincipalType
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import (
+    FLOW_RUN_TERMINAL_ERROR_CODES,
+    FLOW_RUN_TERMINAL_ERROR_RETRYABILITY,
+    FlowApiErrorCode,
+)
+from eneo.flows.flow_run_error import (
+    FlowRunDispatchError,
+    FlowRunDispatchErrorKind,
+    FlowRunError,
+    FlowRunErrorDetails,
+    dump_flow_run_error,
+    parse_flow_run_error,
+)
+from eneo.flows.transcription_config import SpeakerServiceGap
+from eneo.mcp_servers.domain.unattended_tool_refusal import UnattendedToolRefusal
+
+
+def test_flow_run_error_from_source_requires_public_error_code() -> None:
+    assert get_type_hints(FlowRunError.from_source)["code"] is FlowApiErrorCode
+
+
+def test_terminal_error_retryability_covers_exact_current_catalog() -> None:
+    assert len(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == 108
+    assert FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.RUN_ABANDONED] is False
+    # A step the stopped worker was executing may have had effects.
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.RUN_WORKER_SHUTDOWN
+    ]
+    assert set(FLOW_RUN_TERMINAL_ERROR_RETRYABILITY) == FLOW_RUN_TERMINAL_ERROR_CODES
+    assert {
+        code
+        for code, retryable in FLOW_RUN_TERMINAL_ERROR_RETRYABILITY.items()
+        if retryable
+    } == {
+        FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        FlowApiErrorCode.STEP_ATTEMPT_START_FAILED,
+        FlowApiErrorCode.PROVIDER_RATE_LIMITED,
+    }
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.SUMMARIZATION_NON_CONVERGENT
+    ]
+    # A spent step budget may leave a provider request in flight, so a new
+    # run can duplicate work and spend.
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[FlowApiErrorCode.STEP_TIMEOUT]
+    # The same definition refuses again until the step's timeout is lowered.
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.PROVIDER_UNAVAILABLE
+    ]
+    # Like a failed transcription, a failed speaker service is not retried by
+    # starting another run automatically.
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.TYPED_IO_SPEAKER_IDENTIFICATION_FAILED
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.LLM_OUTPUT_TRUNCATED
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.LLM_OUTPUT_WHITESPACE_ABORT
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT
+    ]
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[
+        FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT
+    ]
+
+
+def test_flow_run_error_from_source_preserves_machine_code_and_step_context() -> None:
+    step_id = uuid4()
+
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+        code=FlowApiErrorCode.REVIEW_POLICY_INVALID,
+        message="Step 3 (Analysera bakgrund): review_policy is invalid.",
+        step_id=step_id,
+        step_order=3,
+        details=FlowRunErrorDetails(step_description="Analysera bakgrund"),
+    )
+
+    assert error == FlowRunError(
+        code=FlowApiErrorCode.REVIEW_POLICY_INVALID,
+        message="Step 3 (Analysera bakgrund): review_policy is invalid.",
+        source=FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+        step_id=step_id,
+        step_order=3,
+        details={"step_description": "Analysera bakgrund"},
+    )
+
+
+def test_flow_run_error_exposes_retryability_without_changing_persisted_dump() -> None:
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.EXECUTOR_FAILED,
+        code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        message="Step output was not valid JSON.",
+    )
+
+    assert error.retryable is False
+    assert error.model_dump(mode="json")["retryable"] is False
+    assert "retryable" not in (dump_flow_run_error(error) or {})
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        FlowApiErrorCode.RUN_WORKER_STALLED,
+        FlowApiErrorCode.RUN_WORKER_SHUTDOWN,
+    ],
+)
+def test_flow_run_error_accepts_only_matching_public_retryability(
+    code: FlowApiErrorCode,
+) -> None:
+    error = FlowRunError(code=code, message="Terminal run error.")
+    payload = error.model_dump(mode="json")
+
+    assert FlowRunError.model_validate(payload) == error
+
+    for retryable in (not error.retryable, 0, 1, "true", "false"):
+        with pytest.raises(ValidationError):
+            FlowRunError.model_validate({**payload, "retryable": retryable})
+
+    with pytest.raises(ValidationError):
+        FlowRunError.model_validate({**payload, "secret_token": "must not leak"})
+
+
+def test_dispatch_and_terminal_retryability_have_distinct_public_semantics() -> None:
+    dispatch_error = FlowRunDispatchError.from_kind(
+        FlowRunDispatchErrorKind.EXECUTION_BACKEND_FAILURE
+    )
+    terminal_error = FlowRunError.from_source(
+        FlowRunLifecycleSource.DISPATCH_FAILURE,
+        code=FlowApiErrorCode.RUN_DISPATCH_FAILED,
+        message="Flow run dispatch exhausted its bounded attempts.",
+    )
+    dispatch_description = FlowRunDispatchError.model_json_schema()["properties"][
+        "retryable"
+    ]["description"]
+    terminal_description = FlowRunError.model_json_schema(mode="serialization")[
+        "properties"
+    ]["retryable"]["description"]
+
+    assert dispatch_error.retryable is terminal_error.retryable is True
+    assert "current dispatch epoch" in dispatch_description
+    assert "new logical run" in terminal_description
+    assert "automatically" in dispatch_description
+    assert "automatically" in terminal_description
+
+
+def test_dump_flow_run_error_returns_openapi_safe_json_object() -> None:
+    step_id = uuid4()
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.EXECUTOR_FAILED,
+        code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        message="Step output was not valid JSON.",
+        step_id=step_id,
+        step_order=4,
+    )
+
+    assert dump_flow_run_error(error) == {
+        "schema_version": 1,
+        "code": "typed_io_output_parse_failed",
+        "message": "Step output was not valid JSON.",
+        "source": "executor_failed",
+        "step_id": str(step_id),
+        "step_order": 4,
+    }
+
+
+def test_flow_run_error_details_keep_only_public_step_context() -> None:
+    details = FlowRunErrorDetails.from_bad_request_context(
+        {
+            "step_description": "Analysera bakgrund",
+            "secret_token": "must not leak",
+        }
+    )
+
+    assert details == FlowRunErrorDetails(step_description="Analysera bakgrund")
+    assert details.model_dump(exclude_none=True) == {
+        "step_description": "Analysera bakgrund"
+    }
+
+
+def test_flow_run_error_details_truncate_step_description_budget() -> None:
+    details = FlowRunErrorDetails.from_bad_request_context(
+        {"step_description": "x" * 300}
+    )
+
+    assert details is not None
+    assert details.step_description == "x" * 256
+
+
+def test_flow_run_error_details_reject_unknown_public_keys() -> None:
+    with pytest.raises(ValidationError):
+        FlowRunErrorDetails.model_validate({"secret_token": "must not leak"})
+
+
+def _assert_corrupt_run_error(error: FlowRunError | None) -> None:
+    assert error == FlowRunError(
+        code=FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID,
+        message="Persisted flow run error payload is invalid.",
+    )
+
+
+@pytest.mark.parametrize(
+    "payload,leaked_text",
+    [
+        ("Step review_policy is invalid.", "review_policy"),
+        ({"schema_version": 1, "code": "flow_task_failure"}, "flow_task_failure"),
+        (
+            {
+                "schema_version": 2,
+                "code": "flow_task_failure",
+                "message": "Unsupported schema with secret-token.",
+            },
+            "secret-token",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "code": "flow_task_failure",
+                "message": "Invalid source with secret-token.",
+                "source": "not-a-source",
+            },
+            "secret-token",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "code": "flow_task_failure",
+                "message": "Extra hidden schema with secret-token.",
+                "secret_token": "must not leak",
+            },
+            "secret_token",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "code": "flow_task_failure",
+                "message": "Stored payload injected a derived field.",
+                "retryable": True,
+            },
+            "injected a derived field",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "code": FlowApiErrorCode.RUN_WORKER_STALLED.value,
+                "message": "Stored payload included matching false retryability.",
+                "retryable": False,
+            },
+            "matching false retryability",
+        ),
+        (
+            {
+                "schema_version": 1,
+                "code": FlowApiErrorCode.RUN_DISPATCH_FAILED.value,
+                "message": "Stored payload included matching true retryability.",
+                "retryable": True,
+            },
+            "matching true retryability",
+        ),
+    ],
+)
+def test_parse_flow_run_error_sanitizes_corrupt_persisted_values(
+    payload: object,
+    leaked_text: str,
+) -> None:
+    error = parse_flow_run_error(payload)
+
+    _assert_corrupt_run_error(error)
+    serialized = json.dumps(dump_flow_run_error(error), sort_keys=True)
+    assert leaked_text not in serialized
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        "legacy_uncataloged_code",
+        FlowApiErrorCode.FLOW_NOT_PUBLISHED.value,
+    ],
+)
+def test_parse_flow_run_error_sanitizes_non_terminal_or_uncataloged_codes(
+    code: str,
+) -> None:
+    error = parse_flow_run_error(
+        {
+            "schema_version": 1,
+            "code": code,
+            "message": "Stored before the run-error taxonomy was closed.",
+            "source": "executor_failed",
+        }
+    )
+
+    _assert_corrupt_run_error(error)
+    serialized = json.dumps(dump_flow_run_error(error), sort_keys=True)
+    assert code not in serialized
+
+
+def test_parse_flow_run_error_accepts_terminal_string_codes() -> None:
+    error = parse_flow_run_error(
+        {
+            "schema_version": 1,
+            "code": FlowApiErrorCode.RUN_TASK_FAILURE.value,
+            "message": "Task failed before run completion.",
+            "source": "task_failure",
+        }
+    )
+
+    assert error is not None
+    assert error.code == FlowApiErrorCode.RUN_TASK_FAILURE
+    assert dump_flow_run_error(error) == {
+        "schema_version": 1,
+        "code": FlowApiErrorCode.RUN_TASK_FAILURE.value,
+        "message": "Task failed before run completion.",
+        "source": "task_failure",
+    }
+
+
+def test_flow_run_read_model_sanitizes_corrupt_persisted_error_json() -> None:
+    now = datetime.now(timezone.utc)
+
+    run = FlowRun.model_validate(
+        {
+            "id": uuid4(),
+            "flow_id": uuid4(),
+            "flow_version": 1,
+            "principal_type": PrincipalType.USER,
+            "principal_user_id": uuid4(),
+            "tenant_id": uuid4(),
+            "trace_id": uuid4(),
+            "revision": 1,
+            "status": FlowRunStatus.FAILED,
+            "error_json": "Step review_policy is invalid.",
+            "created_at": now,
+            "updated_at": now,
+        }
+    )
+
+    _assert_corrupt_run_error(run.error)
+
+
+def test_flow_run_error_requires_cataloged_code() -> None:
+    with pytest.raises(ValidationError):
+        FlowRunError.model_validate(
+            {
+                "code": "Invalid Code With Spaces",
+                "message": "Invalid error code.",
+                "source": FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+                "retryable": False,
+            }
+        )
+
+
+def test_flow_run_error_requires_terminal_code() -> None:
+    with pytest.raises(ValidationError):
+        FlowRunError.model_validate(
+            {
+                "code": FlowApiErrorCode.FLOW_NOT_PUBLISHED,
+                "message": "Request-time code cannot be used as a terminal run error.",
+                "source": FlowRunLifecycleSource.INVALID_FLOW_DEFINITION,
+                "retryable": False,
+            }
+        )
+
+
+def test_run_error_payload_invalid_code_is_terminal() -> None:
+    assert FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID in FLOW_RUN_TERMINAL_ERROR_CODES
+
+
+def test_flow_run_error_from_source_truncates_unbounded_messages() -> None:
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.EXECUTOR_FAILED,
+        code=FlowApiErrorCode.RUN_TASK_FAILURE,
+        message="x" * 5000,
+    )
+
+    assert len(error.message) == 4096
+    assert error.message.endswith("... [truncated]")
+
+
+def test_republish_refusal_is_not_retryable() -> None:
+    code = FlowApiErrorCode("flow_assistant_snapshot_republish_required")
+    assert not FLOW_RUN_TERMINAL_ERROR_RETRYABILITY[code]
+
+
+@pytest.mark.parametrize("completed,total", [(0, 3), (1, 3), (3, 3)])
+def test_timeout_details_round_trip_with_observed_facts(completed, total):
+    details = FlowRunErrorDetails.model_validate(
+        {
+            "phase": "provider_request",
+            "completed_items": completed,
+            "total_items": total,
+            "provider_work_may_have_completed": True,
+        }
+    )
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.EXECUTOR_FAILED,
+        code=FlowApiErrorCode.STEP_TIMEOUT,
+        message="Step budget exhausted.",
+        details=details,
+    )
+    persisted = dump_flow_run_error(error)
+    assert persisted["details"] == {
+        "phase": "provider_request",
+        "completed_items": completed,
+        "total_items": total,
+        "provider_work_may_have_completed": True,
+    }
+    assert parse_flow_run_error(persisted) == error
+    assert not error.retryable
+
+
+@pytest.mark.parametrize("completed,total", [(-1, 3), (4, 3), (0, -1)])
+def test_timeout_details_reject_invalid_progress(completed, total):
+    with pytest.raises(ValidationError):
+        FlowRunErrorDetails.model_validate(
+            {"completed_items": completed, "total_items": total}
+        )
+
+
+def test_old_timeout_error_has_no_unobserved_facts():
+    payload = {"code": "flow_step_timeout", "message": "Budget exhausted."}
+    assert parse_flow_run_error(payload).details is None
+    assert "details" not in dump_flow_run_error(parse_flow_run_error(payload))
+
+
+_CONTRACT_CONTEXT: dict[str, object] = {
+    "json_pointer": "/summary/items/0",
+    "schema_rule": "required",
+    "contract_side": "output",
+}
+
+
+def test_contract_violation_context_persists_as_a_typed_fact():
+    details = FlowRunErrorDetails.from_budget_context(
+        {**_CONTRACT_CONTEXT, "completed_items": 2, "total_items": 3}
+    )
+    error = FlowRunError.from_source(
+        FlowRunLifecycleSource.EXECUTOR_FAILED,
+        code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION,
+        message="Step 2: output does not match the step output contract.",
+        step_order=2,
+        details=details,
+    )
+
+    persisted = dump_flow_run_error(error)
+    assert persisted["details"] == {
+        "contract_violation": {
+            "side": "output",
+            "schema_rule": "required",
+            "json_pointer": "/summary/items/0",
+        },
+        "completed_items": 2,
+        "total_items": 3,
+    }
+    assert parse_flow_run_error(json.loads(json.dumps(persisted))) == error
+
+
+def test_root_contract_violation_round_trips_as_the_empty_pointer():
+    details = FlowRunErrorDetails.from_budget_context(
+        {**_CONTRACT_CONTEXT, "json_pointer": "", "contract_side": "input"}
+    )
+
+    assert details is not None
+    assert details.model_dump(mode="json", exclude_none=True) == {
+        "contract_violation": {
+            "side": "input",
+            "schema_rule": "required",
+            "json_pointer": "",
+        }
+    }
+
+
+@pytest.mark.parametrize(
+    "override",
+    [
+        {"contract_side": None},
+        {"contract_side": "both"},
+        {"contract_side": 1},
+        {"schema_rule": None},
+        {"schema_rule": "not a rule"},
+        {"schema_rule": "r" * 81},
+        {"schema_rule": ""},
+        {"schema_rule": ["required"]},
+        {"json_pointer": None},
+        {"json_pointer": 7},
+        {"json_pointer": "summary"},
+        {"json_pointer": "/a~2b"},
+        {"json_pointer": "/a~"},
+        {"json_pointer": "/a\x00b"},
+        {"json_pointer": "/a\nb"},
+        {"json_pointer": "/a\x1fb"},
+        {"json_pointer": "/" + "k" * 400},
+        {"json_pointer": {"nested": "/a"}},
+    ],
+)
+def test_incomplete_or_malformed_contract_context_yields_no_fact(override):
+    context = {**_CONTRACT_CONTEXT, **override}
+    context = {key: value for key, value in context.items() if value is not None}
+
+    assert FlowRunErrorDetails.from_budget_context(context) is None
+    counted = FlowRunErrorDetails.from_budget_context({**context, "total_items": 1})
+    assert counted == FlowRunErrorDetails(total_items=1)
+
+
+def test_contract_fact_carries_exactly_its_three_parts():
+    details = FlowRunErrorDetails.from_budget_context(
+        {**_CONTRACT_CONTEXT, "instance": "Private value", "secret_token": "x"}
+    )
+
+    assert details is not None
+    serialized = json.dumps(details.model_dump(mode="json", exclude_none=True))
+    assert "Private value" not in serialized
+    assert "secret_token" not in serialized
+    assert FlowRunErrorDetails.from_budget_context({"unknown": "/a"}) is None
+
+
+def test_schema_document_pointer_without_a_side_is_not_a_run_fact():
+    # validate_schema_syntax names a location in the schema, not in a value.
+    assert (
+        FlowRunErrorDetails.from_budget_context(
+            {"json_pointer": "/properties/a/$ref", "schema_rule": "$ref"}
+        )
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "persisted",
+    [
+        {
+            "schema_version": 1,
+            "code": "typed_io_contract_violation",
+            "message": "Step 3: A submitted or generated value does not match "
+            "the step output contract (typed_io_contract_violation)",
+            "source": "executor_failed",
+            "step_order": 3,
+        },
+        {
+            "schema_version": 1,
+            "code": "typed_io_contract_violation",
+            "message": "Step 1: mapped output failed.",
+            "source": "executor_failed",
+            "step_order": 1,
+            "details": {"completed_items": 1, "total_items": 4},
+        },
+    ],
+)
+def test_pre_change_contract_errors_round_trip_identically(persisted):
+    assert dump_flow_run_error(parse_flow_run_error(persisted)) == persisted
+
+
+def test_persisted_malformed_contract_fact_is_an_invalid_payload():
+    error = parse_flow_run_error(
+        {
+            "schema_version": 1,
+            "code": "typed_io_contract_violation",
+            "message": "Step 1 failed.",
+            "details": {
+                "contract_violation": {
+                    "side": "output",
+                    "schema_rule": "required",
+                    "json_pointer": "summary",
+                }
+            },
+        }
+    )
+
+    _assert_corrupt_run_error(error)
+
+
+@pytest.mark.parametrize("gap", list(SpeakerServiceGap))
+def test_a_missing_speaker_service_is_reported_as_a_typed_detail(
+    gap: SpeakerServiceGap,
+) -> None:
+    details = FlowRunErrorDetails.from_budget_context(
+        {"speaker_service_gap": gap.value}
+    )
+
+    assert details is not None
+    assert details.speaker_service_gap is gap
+
+
+def test_an_unknown_speaker_service_gap_is_not_reported() -> None:
+    assert (
+        FlowRunErrorDetails.from_budget_context({"speaker_service_gap": "other"})
+        is None
+    )
+
+
+def test_a_possible_tool_call_makes_a_retryable_code_not_retryable() -> None:
+    # Kills the mutant that reads retryable from the code alone: a new run
+    # after a tool step calls the tool again. A stored error without the fact
+    # reads as it did before the fact existed.
+    stored = {
+        "schema_version": 1,
+        "code": FlowApiErrorCode.PROVIDER_RATE_LIMITED.value,
+        "message": "Flow step 2 was rate-limited by the provider.",
+        "source": "executor_failed",
+    }
+
+    before = parse_flow_run_error(stored)
+    after = parse_flow_run_error({**stored, "details": {"tool_call_possible": True}})
+
+    assert before is not None and after is not None
+    assert (before.retryable, after.retryable) == (True, False)
+    assert after.code is FlowApiErrorCode.PROVIDER_RATE_LIMITED
+
+
+def test_a_stored_tool_refusal_the_enum_no_longer_has_reads_as_no_refusal() -> None:
+    # Kills the mutant that types the stored value by the MCP module's enum
+    # alone: when a value leaves the enum, every stored error that names it
+    # would lose its code, message and step.
+    error = parse_flow_run_error(
+        {
+            "schema_version": 1,
+            "code": FlowApiErrorCode.TYPED_IO_TOOL_NOT_ALLOWED.value,
+            "message": "Step 2: the tool is not marked for flows.",
+            "step_order": 2,
+            "details": {"tool_refusal": "tool_not_marked", "phase": "input_resolution"},
+        }
+    )
+
+    assert error is not None
+    assert (error.code, error.message, error.step_order) == (
+        FlowApiErrorCode.TYPED_IO_TOOL_NOT_ALLOWED,
+        "Step 2: the tool is not marked for flows.",
+        2,
+    )
+    assert error.details is not None
+    assert (error.details.tool_refusal, error.details.phase) == (
+        None,
+        "input_resolution",
+    )
+
+
+def test_the_tool_refusals_a_run_error_stores_are_these_thirteen_values() -> None:
+    # Kills the mutant that renames a refusal in the MCP module's enum: the
+    # value is stored in run errors, so a rename orphans what is stored.
+    assert sorted(refusal.value for refusal in UnattendedToolRefusal) == [
+        "server_below_space_classification",
+        "server_credential_needs_https",
+        "server_disabled",
+        "server_forwards_identity",
+        "server_not_found",
+        "server_not_general",
+        "server_not_in_space",
+        "space_is_personal",
+        "tool_not_found",
+        "tool_removed_at_server",
+        "tool_switched_off",
+        "tool_switched_off_in_space",
+        "tool_waiting_for_review",
+    ]
+
+
+def test_a_tool_error_text_longer_than_the_detail_holds_is_cut() -> None:
+    # Kills the mutant that hands a context's text to the detail uncut: a
+    # longer text would fail the detail's own bound and with it the run's
+    # terminalization.
+    details = FlowRunErrorDetails.from_budget_context({"tool_error_text": "x" * 600})
+
+    assert details is not None and details.tool_error_text == "x" * 512

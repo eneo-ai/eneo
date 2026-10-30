@@ -10,7 +10,8 @@ import type { CallContext } from "../types";
 // Eneo's signed original-download link: /api/v1/files/{id}/original/download/?token=…
 const FILE_PATH = /^\/api\/v1\/files\/([0-9a-f-]{36})\/original\/download\/?$/;
 // Eneo's signed link to a document template of the organisation's library.
-const TEMPLATE_PATH = /^\/api\/v1\/document-templates\/[0-9a-f-]{36}\/original\/download\/?$/;
+const TEMPLATE_PATH =
+  /^\/api\/v1\/document-templates\/[0-9a-f-]{36}\/original\/download\/?$/;
 
 const extensionList = (extensions: readonly string[]) =>
   extensions.map((extension) => `.${extension}`).join(" and ");
@@ -30,7 +31,9 @@ function referenceTo(extensions: readonly string[], checkedInTool = false) {
         .string()
         .min(1)
         .max(8192)
-        .describe("The file's signed Eneo URL, exactly as given in the attachment reference."),
+        .describe(
+          "The file's signed Eneo URL, exactly as given in the attachment reference.",
+        ),
       filename: z
         .string()
         .max(200)
@@ -43,13 +46,24 @@ function referenceTo(extensions: readonly string[], checkedInTool = false) {
     .strict();
 }
 export const TABULAR_EXTENSIONS = ["csv", "tsv", "xlsx"] as const;
-/** A table source: CSV or XLSX. */
+/** A table source for charts and spreadsheets: CSV or XLSX. */
 export const fileReference = referenceTo(TABULAR_EXTENSIONS);
+/** JSON Lines: one record per line, a table without a tree. */
+export const JSON_LINES_EXTENSIONS = ["jsonl", "ndjson"] as const;
+/** A JSON document: a tree, read by its structure and by path, never as sheets. */
+export const JSON_EXTENSIONS = ["json"] as const;
+/** What the table tools read: delimited text, workbooks and JSON Lines. */
+export const TABLE_FILE_EXTENSIONS = [
+  ...TABULAR_EXTENSIONS,
+  ...JSON_LINES_EXTENSIONS,
+] as const;
 /**
  * A table source as the table tools take it: the tools are the first the model reaches for
  * to read an attached file, so a file of another kind is refused with the way to read it.
  */
-export const tabularReference = referenceTo(TABULAR_EXTENSIONS, true);
+export const tabularReference = referenceTo(TABLE_FILE_EXTENSIONS, true);
+/** A JSON document whose values query_json reads by path. */
+export const jsonReference = referenceTo(JSON_EXTENSIONS, true);
 
 /** Refuses a file whose name does not end in one of `extensions`, naming the tools that would read it. */
 export function requireExtension(
@@ -114,7 +128,10 @@ export async function fetchReference(
   try {
     url = new URL(ref.url);
   } catch {
-    throw new ToolError("INVALID_URL", "Pass the attachment's signed URL unchanged.");
+    throw new ToolError(
+      "INVALID_URL",
+      "Pass the attachment's signed URL unchanged.",
+    );
   }
   const origin = ctx.fileOrigin;
   if (!origin)
@@ -122,7 +139,10 @@ export async function fetchReference(
       "FILE_ORIGIN_UNKNOWN",
       "Eneo did not say where its file links point. Set FILE_REFERENCE_BASE_URL (or PUBLIC_ORIGIN) on the Eneo backend.",
     );
-  if (access.allowedFileOrigins.length && !access.allowedFileOrigins.includes(origin))
+  if (
+    access.allowedFileOrigins.length &&
+    !access.allowedFileOrigins.includes(origin)
+  )
     throw new ToolError(
       "FILE_ORIGIN_NOT_ALLOWED",
       "Eneo's file origin is not in this runtime's TOOL_RUNTIME_FILE_ORIGINS. Align the two settings.",
@@ -149,7 +169,11 @@ export async function fetchReference(
   checkCancellation();
   const cache = ctx.tenantId && ctx.userId ? fileCache() : undefined;
   const identity = createHash("sha256")
-    .update([ctx.tenantId, ctx.userId, origin, url.pathname.replace(/\/$/, "")].join("\n"))
+    .update(
+      [ctx.tenantId, ctx.userId, origin, url.pathname.replace(/\/$/, "")].join(
+        "\n",
+      ),
+    )
     .digest("hex");
   const file = cache
     ? await cache.fetch(identity, (options) =>
@@ -158,7 +182,10 @@ export async function fetchReference(
     : await (access.download ?? downloadFile)(ref.url, policy);
   checkCancellation();
   if (file.bytes.length > access.maxBytes)
-    throw new ToolError("FILE_TOO_LARGE", "File exceeds this tool's upload size limit.");
+    throw new ToolError(
+      "FILE_TOO_LARGE",
+      "File exceeds this tool's upload size limit.",
+    );
   return {
     bytes: file.bytes,
     contentType: file.contentType,

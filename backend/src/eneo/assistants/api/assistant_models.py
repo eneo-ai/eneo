@@ -92,13 +92,13 @@ class ModelInfo(BaseModel):
     """Information about the model used by the assistant."""
 
     name: str
-    max_input_tokens: int
-    max_output_tokens: int
+    max_input_tokens: int | None
+    max_output_tokens: int | None
     prompt_tokens: Optional[int] = None
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def token_limit(self) -> int:
+    def token_limit(self) -> int | None:
         """Backward-compat: exposed in JSON responses for frontend."""
         return self.max_input_tokens
 
@@ -211,6 +211,7 @@ _DEPRECATED_JSON_SCHEMA: dict[str, JsonValue] = {"deprecated": True}
 class AssistantCreatePublic(AssistantBase):
     enabled_capabilities: list[CapabilityPurpose] | None = None
     space_id: UUID
+    hidden: bool = False
     prompt: Optional[PromptCreate] = Field(
         default=None,
         description=_DEPRECATED_DESCRIPTION,
@@ -260,6 +261,17 @@ class AssistantCreatePublic(AssistantBase):
 
 @partial_model
 class AssistantUpdatePublic(AssistantCreatePublic):
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "name": "Flow Step Assistant",
+                "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+                "metadata_json": {"origin": "flow_managed"},
+                "icon_id": "00000000-0000-0000-0000-000000000099",
+            }
+        }
+    )
+
     enabled_capabilities: list[CapabilityPurpose] | None = None
     document_template: Optional[DocumentTemplateChoicePublic] = Field(
         default=None,

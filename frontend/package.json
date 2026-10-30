@@ -66,8 +66,8 @@
   "patchedDependencies": {
     "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch",
     "sonner@2.0.8": "patches/sonner@2.0.8.patch",
-    "@astryxdesign/core@0.6.4": "patches/@astryxdesign%2Fcore@0.6.4.patch",
     "braces@3.0.3": "patches/braces@3.0.3.patch",
-    "mermaid@11.16.1": "patches/mermaid@11.16.1.patch"
+    "mermaid@11.16.1": "patches/mermaid@11.16.1.patch",
+    "@astryxdesign/core@0.7.3": "patches/@astryxdesign%2Fcore@0.7.3.patch"
   }
 }

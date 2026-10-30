@@ -1,0 +1,6295 @@
+"""TDD tests for typed I/O in the flow executor — RED phase.
+
+These tests exercise the typed pipeline: JSON output, PDF/DOCX rendering,
+input contract validation, file resolution, canary flag, error propagation.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import math
+import time
+from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import httpx
+import pytest
+
+import eneo.flows.runtime.executor as executor_module
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.outcome import Outcome
+from eneo.completion_models.domain.model_capacity import ModelCapacity
+from eneo.completion_models.domain.model_kwargs_capabilities import SupportedModelKwargs
+from eneo.files.file_models import FileType
+from eneo.files.text import (
+    PDF_TEXT_LIKELY_REVERSED_WARNING,
+    TEXT_EXTRACTION_WARNINGS,
+    TextExtractor,
+)
+from eneo.flows.application.flow_run_export_json import (
+    _build_step_output_summary,
+)
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+from eneo.flows.domain.flow import (
+    FlowRunStatus,
+    FlowStepResultStatus,
+)
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
+from eneo.flows.domain.step_output import interpret_step_text
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_input_limits import FlowInputLimits
+from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
+from eneo.flows.runtime.executor import (
+    RunExecutionState,
+    StepInputValue,
+)
+from eneo.flows.runtime.http_orchestration import deliver_webhook
+from eneo.flows.runtime.output_formats import resolve_format_spec
+from eneo.flows.runtime.output_formats.base import append_output_format_instructions
+from eneo.flows.runtime.step_execution_runtime import (
+    build_output_payload,
+    json_mode_cache_key,
+)
+from eneo.flows.runtime.step_failure_evidence import failure_evidence
+from eneo.flows.runtime.step_input_resolution import (
+    RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
+    RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
+    _build_runtime_input_metadata,
+)
+from eneo.flows.runtime.step_input_validation import validate_input_contract
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    ProviderCapabilityRejectedException,
+    TypedIOValidationException,
+)
+from eneo.object_content.content import ObjectContentUnavailableError
+from tests.unittests.flows.executor_test_support import (
+    build_step_executor as _build_executor,
+)
+from tests.unittests.flows.executor_test_support import (
+    completed_step_result as _completed_step_result,
+)
+from tests.unittests.flows.executor_test_support import (
+    context_preflight as _context_preflight,
+)
+from tests.unittests.flows.executor_test_support import flow_run as _run
+from tests.unittests.flows.executor_test_support import (
+    mock_assistant_for_execute_step as _mock_assistant_for_execute_step,
+)
+from tests.unittests.flows.executor_test_support import runtime_step as _runtime_step
+from tests.unittests.flows.test_http_orchestration import _make_deps as _webhook_deps
+from tests.unittests.flows.test_http_orchestration import _Run as _WebhookRun
+from tests.unittests.flows.test_http_orchestration import _Step as _WebhookStep
+
+_LIKELY_REVERSED_PDF_TEXT = (
+    "[PAGE 1]\n" + "hco tta ted ned mos dem llit relle aks rah nak etni " * 4
+)
+
+
+def _runtime_file(*, file_id, text: str, name: str | None = None) -> SimpleNamespace:
+    return SimpleNamespace(
+        id=file_id,
+        text=text,
+        name=name,
+        checksum=f"checksum-{file_id}",
+        size=len(text.encode("utf-8")),
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mapped_preview", [False, True])
+async def test_runtime_admits_all_retained_files_before_first_hydration(
+    user, mapped_preview
+):
+    from eneo.files.file_models import FileContentVariant
+
+    executor, _, run_repo, _ = _build_executor(user, max_inline_text_bytes=1000)
+    executor.input_limits = FlowInputLimits(
+        file_max_size_bytes=10_000, audio_max_size_bytes=10_000
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(input_type="document")
+    if mapped_preview:
+        source_fields = {
+            "source_label": {"type": "string"},
+            "source_file_id": {"type": "string"},
+            "extraction_warnings": {
+                "type": "array",
+                "items": {
+                    "type": "string",
+                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                },
+            },
+        }
+        step = _runtime_step(
+            input_type="document",
+            output_type="json",
+            input_config={
+                "runtime_input": {
+                    "enabled": True,
+                    "input_format": "document",
+                    "execution_mode": "per_source",
+                    "max_files": 2,
+                }
+            },
+            output_contract={
+                "type": "object",
+                "properties": {
+                    "documents": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": source_fields,
+                            "required": list(source_fields),
+                            "additionalProperties": False,
+                        },
+                    }
+                },
+                "required": ["documents"],
+                "additionalProperties": False,
+            },
+        )
+        executor._load_assistant = AsyncMock(
+            return_value=_mock_assistant_for_execute_step()
+        )
+    files = [
+        SimpleNamespace(
+            id=uuid4(),
+            name="source.pdf",
+            file_type=FileType.DOCUMENT,
+            size=40,
+            mimetype="application/pdf",
+            text="short",
+            checksum="x",
+            transcription=None,
+        )
+        for _ in range(2)
+    ]
+    run_repo.list_step_input_file_ids.return_value = [file.id for file in files]
+    run_repo.list_retained_input_file_ids.return_value = [file.id for file in files]
+    executor.file_service.get_owned_file_infos.side_effect = None
+    executor.file_service.get_owned_file_infos.return_value = files
+    executor.file_service.get_files_by_ids.return_value = [files[0]]
+    executor.file_service.repo = AsyncMock()
+    executor.file_service.repo.get_content_references.return_value = [
+        SimpleNamespace(file_id=file.id, variant=variant, size_bytes=size)
+        for file in files
+        for variant, size in (
+            (FileContentVariant.ORIGINAL, 40),
+            (FileContentVariant.EXTRACTED_TEXT, 600),
+        )
+    ]
+    with pytest.raises(TypedIOValidationException) as error:
+        if mapped_preview:
+            await executor._execute_step(
+                step=step,
+                run=run,
+                state=RunExecutionState({}, [], {}, {}, {}),
+                attempt_no=1,
+            )
+        else:
+            await executor._resolve_step_input(
+                step=step,
+                context={},
+                run=run,
+                prior_results=[],
+                state=RunExecutionState({}, [], {}, {}, {}),
+                requested_file_ids=[files[0].id],
+            )
+    assert error.value.code == "flow_run_input_exceeds_limit"
+    assert error.value.context["kind"] == "inline_text"
+    assert error.value.context["measured"] >= 1200
+    assert error.value.context["ceiling"] == 1000
+    executor.file_service.get_files_by_ids.assert_not_awaited()
+    executor.file_service.get_file_content.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["per_item", "per_source"])
+@pytest.mark.parametrize("title_chars,completed", [(1500, 2), (4000, 1)])
+async def test_mapped_structured_budget_refuses_enriched_output_with_evidence(
+    user, mode, title_chars, completed
+):
+    executor, _, run_repo, _ = _build_executor(user, max_inline_text_bytes=6000)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    file_ids = [uuid4() for _ in range(3)]
+    source_label = "a" * 80 + ".pdf"
+    files = {
+        file_id: SimpleNamespace(
+            id=file_id,
+            text="source",
+            name=source_label,
+            checksum="x",
+            size=6,
+            mimetype="application/pdf",
+            file_type=FileType.TEXT,
+            transcription=None,
+        )
+        for file_id in file_ids
+    }
+
+    async def get_files(*, file_ids, **kwargs):
+        return [files[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files
+    executor.file_service.get_owned_file_infos.side_effect = get_files
+    run_repo.list_step_input_file_ids.return_value = file_ids
+    assistant = _mock_assistant_for_execute_step(
+        response_text=json.dumps(
+            {"documents": [{"title": "å" * title_chars}]}, ensure_ascii=False
+        ),
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._retrieve_rag_chunks = AsyncMock(
+        side_effect=lambda **kwargs: ([], {"status": "success", "references": []}, []),
+    )
+    properties = {
+        "title": {"type": "string"},
+        "source_label": {"type": "string"},
+        "source_file_id": {"type": "string"},
+    }
+    if mode == "per_source":
+        properties["extraction_warnings"] = {
+            "type": "array",
+            "items": {"type": "string", "enum": sorted(TEXT_EXTRACTION_WARNINGS)},
+        }
+    contract = {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": list(properties),
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["documents"],
+        "additionalProperties": False,
+    }
+    state = RunExecutionState({}, [], {}, {}, {})
+    if mode == "per_item":
+        previous = _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="",
+            structured={
+                "documents": [
+                    {"source_label": source_label, "source_file_id": str(file_id)}
+                    for file_id in file_ids
+                ]
+            },
+        )
+        state.append_completed(previous)
+    step = _runtime_step(
+        step_order=2 if mode == "per_item" else 1,
+        input_source="previous_step" if mode == "per_item" else "flow_input",
+        input_type="json" if mode == "per_item" else "document",
+        input_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                }
+            },
+            "required": ["documents"],
+        }
+        if mode == "per_item"
+        else None,
+        output_type="json",
+        output_contract=contract,
+        input_config={"item_map": {"enabled": True, "max_items": 3}}
+        if mode == "per_item"
+        else {
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 3,
+            }
+        },
+    )
+
+    with pytest.raises(TypedIOValidationException) as error:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert error.value.code == "typed_io_structured_output_exceeds_limit"
+    assert error.value.context["completed_items"] == completed
+    assert error.value.context["total_items"] == 3
+    assert error.value.context["measured_bytes"] > 6000
+    assert error.value.context["ceiling_bytes"] == 6000
+    assert assistant.get_response.await_count == completed
+    evidence = failure_evidence(error.value).rag_metadata
+    assert len(evidence["items" if mode == "per_item" else "sources"]) == completed
+    run_repo.update_step_result.assert_not_awaited()
+    assert run.output_payload_json is None
+    if mode == "per_source":
+        executor.file_service.repo.get_content_references.assert_awaited_once()
+        run_repo.list_step_results.assert_not_awaited()
+
+
+def _prompt_for_output_format(
+    *,
+    output_type: str,
+    output_contract: dict[str, object] | None,
+    prompt: str,
+) -> str:
+    spec = resolve_format_spec(output_type)
+    return append_output_format_instructions(
+        prompt, spec.prompt_instructions(output_contract)
+    )
+
+
+# --- RuntimeStep extended fields ---
+
+
+# --- StepInputValue dataclass ---
+
+
+# --- _resolve_step_input async + JSON structured ---
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_parses_structured(user):
+    """When input_type=json, resolve should parse structured data from text."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": '{"name": "Alice"}'},
+    )
+    step = _runtime_step(input_type="json")
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    assert isinstance(resolved, StepInputValue)
+    assert resolved.structured == {"name": "Alice"}
+    assert resolved.text == '{"name": "Alice"}'
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_to_json_prefers_structured(user):
+    """When chaining json->json, prefer structured from previous step over text."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="truncated...",  # simulates output cap truncation
+            structured={"full": "data", "not_truncated": True},
+            text_overflow={
+                "generated_file_ids": [str(uuid4())],
+                "inline_text_bytes": 12,
+                "full_text_bytes": 8192,
+            },
+        )
+    ]
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="json")
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.structured == {"full": "data", "not_truncated": True}
+    assert resolved.text == json.dumps(
+        {"full": "data", "not_truncated": True}, ensure_ascii=False
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_question_binding_overrides_previous_structured(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="Transkription med mötesinnehåll.",
+        ),
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=2,
+            text='{"final_report":"Saknar underlag"}',
+            structured={"final_report": "Saknar underlag"},
+        ),
+    ]
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_bindings={
+            "question": (
+                "Slutrapport: {{ step_2.output.structured.final_report }}\n\n"
+                "Transkribering: {{ step_1.output.text }}"
+            )
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == (
+        "Slutrapport: Saknar underlag\n\n"
+        "Transkribering: Transkription med mötesinnehåll."
+    )
+    assert resolved.structured is None
+    assert resolved.used_question_binding is True
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert len(summaries) == 1
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_question_binding_rejects_missing_text_artifact(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="truncated",
+            text_overflow={
+                "generated_file_ids": [str(uuid4())],
+                "inline_text_bytes": 9,
+                "full_text_bytes": 8192,
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="flow_input",
+        input_type="text",
+        input_bindings={"question": "Transkribering: {{ step_1.output.text }}"},
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc.value.code == "typed_io_file_not_found"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_compose_source_refs_render_item_template_without_json(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="source section json",
+            structured={
+                "source_sections": [
+                    {
+                        "section_title": "Examensarbete om unga",
+                        "section_body": "Färdig avsnittstext.",
+                        "source_label": "FULLTEXT01.pdf",
+                    },
+                    {
+                        "section_title": "Socialpsykologi",
+                        "section_body": "Andra avsnittet.",
+                        "source_label": "Socialpsykologi.pdf",
+                    },
+                ],
+                "report_title": "Rapporttitel",
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "question": "# {{ step_1.output.structured.report_title }}",
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "source_sections",
+                    "item_template": "## {section_title}\n\n{section_body}\n\nKälla: {source_label}",
+                }
+            ],
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == (
+        "# Rapporttitel\n\n"
+        "## Examensarbete om unga\n\n"
+        "Färdig avsnittstext.\n\n"
+        "Källa: FULLTEXT01.pdf\n\n"
+        "## Socialpsykologi\n\n"
+        "Andra avsnittet.\n\n"
+        "Källa: Socialpsykologi.pdf"
+    )
+    assert '{"' not in resolved.text
+    assert "source_sections" not in resolved.text
+    assert resolved.used_question_binding is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("warnings", "expected_section"),
+    [
+        (
+            [],
+            "## FULLTEXT01.pdf\n\nSammanfattning: Klar text.",
+        ),
+        (
+            ["pdf_text_likely_reversed"],
+            "## FULLTEXT01.pdf\n\n"
+            'Extraktionsvarningar: ["pdf_text_likely_reversed"]\n\n'
+            "Sammanfattning: Klar text.",
+        ),
+    ],
+)
+async def test_resolve_step_input_item_template_drops_lines_whose_values_are_empty(
+    user, warnings, expected_section
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="source records",
+            structured={
+                "documents": [
+                    {
+                        "source_label": "FULLTEXT01.pdf",
+                        "source_file_id": str(uuid4()),
+                        "extraction_warnings": warnings,
+                        "sammanfattning": "Klar text.",
+                        "diarienummer": None,
+                    }
+                ]
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "documents",
+                    "item_template": (
+                        "## {source_label}\n\n"
+                        "Extraktionsvarningar: {extraction_warnings}\n\n"
+                        "Sammanfattning: {sammanfattning}\n\n"
+                        "Diarienummer: {diarienummer}"
+                    ),
+                }
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == expected_section
+    assert "[]" not in resolved.text
+    assert "Diarienummer" not in resolved.text
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_item_template_keeps_json_lists_and_whitespace(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="records",
+            structured={"records": [{"title": "Rad", "tags": ["A, B", "C"]}]},
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "records",
+                    "item_template": "## {title}\n\n\n\nTaggar: {tags}",
+                }
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == '## Rad\n\n\n\nTaggar: ["A, B", "C"]'
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_compose_source_refs_serialize_typed_values(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="typed report values",
+            structured={
+                "confidence": 0.8,
+                "report_metadata": {"owner": "Case team"},
+                "tags": ["urgent", "reviewed"],
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": field_name,
+                    "label": label,
+                }
+                for field_name, label in (
+                    ("confidence", "Confidence"),
+                    ("report_metadata", "Report metadata"),
+                    ("tags", "Tags"),
+                )
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.text == (
+        'Confidence:\n0.8\n\nReport metadata:\n{"owner": "Case team"}'
+        '\n\nTags:\n["urgent", "reviewed"]'
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_compose_source_ref_rejects_missing_text_artifact(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="preview",
+            text_overflow={
+                "generated_file_ids": [str(uuid4())],
+                "inline_text_bytes": 7,
+                "full_text_bytes": 8192,
+            },
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="flow_input",
+        input_type="text",
+        output_mode="compose_text",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "text",
+                }
+            ],
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_previous_step_parses_text_when_structured_missing(
+    user,
+):
+    """json previous_step should parse JSON text when structured is absent."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text='{"k": 1}',
+            structured=None,
+        )
+    ]
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="json")
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.source_text == '{"k": 1}'
+    assert resolved.structured == {"k": 1}
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_previous_step_structured_only_emits_underlag_summary(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="",
+            structured={"k": 1},
+        )
+    ]
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="json")
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.source_text == ""
+    assert resolved.text == json.dumps({"k": 1}, ensure_ascii=False)
+    assert not any(d.code == "empty_prior_step_input" for d in resolved.diagnostics)
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert len(summaries) == 1
+    assert summaries[0].severity == "info"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("section_processing", "implicit_previous_output"),
+    [(False, None), (True, None), (True, "pruned_raw"), (True, "structured_only")],
+)
+async def test_resolve_step_input_json_source_refs_build_exact_structured_projection(
+    user,
+    section_processing,
+    implicit_previous_output,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="first",
+            structured={
+                "meeting": {
+                    "summary": "Grounded summary",
+                    "unused": "drop nested",
+                },
+                "unused": "drop me",
+            },
+        ),
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=2,
+            text="second",
+            structured={"decisions": ["Approve"], "unused": "drop me too"},
+        ),
+    ]
+    # The structured projection of step 1's meeting summary and step 2's
+    # decisions, as an author binds it.
+    input_bindings = {
+        "source_refs": [
+            {
+                "step_ref": "step_a",
+                "output": "structured",
+                "field_path": "meeting.summary",
+                "label": "summary",
+            },
+            {
+                "step_ref": "step_b",
+                "output": "structured",
+                "field_path": "decisions",
+                "label": "decisions",
+            },
+        ]
+    }
+    input_contract = {
+        "type": "object",
+        "properties": {
+            "meeting": {
+                "type": "object",
+                "properties": {"summary": {"type": "string"}},
+                "required": ["summary"],
+                "additionalProperties": False,
+            },
+            "decisions": {"type": "array", "items": {"type": "string"}},
+        },
+        "additionalProperties": False,
+        "required": ["meeting", "decisions"],
+    }
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_bindings=input_bindings,
+        input_contract=input_contract,
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+    state = RunExecutionState(
+        completed_by_order={1: prior[0], 2: prior[1]},
+        prior_results=prior,
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_a": 1, "step_b": 2},
+    )
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+        state=state,
+    )
+
+    assert resolved.structured == {
+        "meeting": {"summary": "Grounded summary"},
+        "decisions": ["Approve"],
+    }
+    assert json.loads(resolved.text) == resolved.structured
+    assert "unused" not in resolved.text
+    assert len(resolved.edges) == 2
+    assert await validate_input_contract(
+        step_order=3,
+        input_type="json",
+        input_contract=input_contract,
+        text=resolved.text,
+        structured=resolved.structured,
+        binding_context="input_bindings.source_refs",
+    ) == {
+        "schema_type_hint": "object",
+        "parse_attempted": False,
+        "parse_succeeded": True,
+        "candidate_type": "dict",
+    }
+
+    if section_processing:
+        from tests.unittests.flows.test_text_sections import _case
+
+        executor, _, assistant, run, material_state, section_step, text, _, _, _ = (
+            _case(user, prompt="Material:\n{{step_3.output.text}}\nDone.")
+        )
+        material = material_state.prior_results[0].model_copy(update={"step_order": 3})
+        state.prior_results = [*prior, material]
+        state.completed_by_order[3] = material
+        section_step = replace(
+            section_step,
+            step_order=4,
+            input_type="json",
+            input_bindings={
+                "source_refs": [
+                    {
+                        **ref,
+                        "step_ref": f"step_{state.step_ref_mapping[ref['step_ref']]}",
+                    }
+                    for ref in input_bindings["source_refs"]
+                ]
+            },
+            input_contract=input_contract,
+        )
+        if implicit_previous_output is not None:
+            previous = _completed_step_result(
+                run_id=run.id,
+                flow_id=run.flow_id,
+                tenant_id=run.tenant_id,
+                step_order=4,
+                text=json.dumps({**resolved.structured, "unused": "pruned"})
+                if implicit_previous_output == "pruned_raw"
+                else "",
+                structured=resolved.structured,
+            )
+            state.prior_results.append(previous)
+            state.completed_by_order[4] = previous
+            section_step = replace(section_step, step_order=5, input_bindings=None)
+
+        with pytest.raises(TypedIOValidationException) as caught:
+            await executor._execute_step(
+                step=section_step, run=run, state=state, attempt_no=1
+            )
+        assert (
+            caught.value.code
+            == FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+        )
+        assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_source_refs_require_input_contract(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="first",
+            structured={"summary": "Grounded summary"},
+        )
+    ]
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "summary",
+                }
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_source_refs_reject_path_collision(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=step_order,
+            text=f"source {step_order}",
+            structured={"summary": f"summary {step_order}"},
+        )
+        for step_order in (1, 2)
+    ]
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={"type": "object"},
+        input_bindings={
+            "source_refs": [
+                {
+                    "step_ref": "step_1",
+                    "output": "structured",
+                    "field_path": "summary",
+                },
+                {
+                    "step_ref": "step_2",
+                    "output": "structured",
+                    "field_path": "summary",
+                },
+            ]
+        },
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(
+        TypedIOValidationException,
+        match="source_ref path collision at 'summary'",
+    ):
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_json_previous_step_summary_counts_resolved_input_bytes(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    compact_text = '{"a":1}'
+    structured = {"a": 1}
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text=compact_text,
+            structured=structured,
+        )
+    ]
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="json")
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    expected_text = json.dumps(structured, ensure_ascii=False)
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert resolved.source_text == '{"a":1}'
+    assert resolved.text == expected_text
+    assert len(summaries) == 1
+    assert f"{len(expected_text.encode('utf-8'))} bytes" in summaries[0].message
+    assert f"{len(compact_text.encode('utf-8'))} bytes" not in summaries[0].message
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_document_loads_files(user):
+    """When input_type=document with file_ids, files are loaded and text is extracted."""
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": "fallback"},
+    )
+    fake_file = SimpleNamespace(
+        id=file_id,
+        text="Extracted document text",
+        name="underlag.pdf",
+        checksum="checksum-1",
+        size=128,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
+
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        requested_file_ids=[file_id],
+    )
+
+    labeled_text = "[SOURCE 1]\nfile_name: underlag.pdf\n\nExtracted document text"
+    assert resolved.files == [fake_file]
+    assert resolved.text == f"{labeled_text}\n\nfallback"
+    assert resolved.runtime_input_metadata == {
+        "text": labeled_text,
+        "file_ids": [str(file_id)],
+        "files_count": 1,
+        "files": [
+            {
+                "id": str(file_id),
+                "name": "underlag.pdf",
+                "checksum": "checksum-1",
+                "size": 128,
+                "mimetype": "application/pdf",
+                "file_type": "document",
+                "text_length": len("Extracted document text"),
+                "has_text": True,
+                "has_transcription": False,
+                "extraction_warnings": [],
+            }
+        ],
+        "source_headers": [
+            {
+                "source_number": 1,
+                "source_label": "underlag.pdf",
+                "source_marker": "[SOURCE 1]",
+                "file_id": str(file_id),
+                "file_name": "underlag.pdf",
+                "has_file_name": True,
+                "has_text": True,
+                "text_length": len("Extracted document text"),
+                "extraction_warnings": [],
+            }
+        ],
+        "total_file_size": 128,
+        "extracted_text_length": len(labeled_text),
+        "input_format": "document",
+        "capture_mode": "runtime_input",
+    }
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_document_labels_multiple_files_in_requested_order(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    first_file = SimpleNamespace(
+        id=first_file_id,
+        text="[PAGE 1]\nFirst file text",
+        name="first.pdf",
+        checksum="checksum-1",
+        size=100,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    second_file = SimpleNamespace(
+        id=second_file_id,
+        text="[PAGE 1]\nSecond file text",
+        name="second.pdf",
+        checksum="checksum-2",
+        size=200,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    executor.file_service.get_files_by_ids.return_value = [second_file, first_file]
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        requested_file_ids=[first_file_id, second_file_id],
+    )
+
+    assert resolved.files == [first_file, second_file]
+    assert resolved.text == (
+        "[SOURCE 1]\n"
+        "file_name: first.pdf\n\n"
+        "[PAGE 1]\n"
+        "First file text\n\n"
+        "[SOURCE 2]\n"
+        "file_name: second.pdf\n\n"
+        "[PAGE 1]\n"
+        "Second file text"
+    )
+    assert resolved.runtime_input_metadata is not None
+    assert resolved.runtime_input_metadata["text"] == resolved.text
+    assert resolved.runtime_input_metadata["file_ids"] == [
+        str(first_file_id),
+        str(second_file_id),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_document_preserves_empty_source_slot(
+    user,
+    caplog,
+):
+    executor, _, _, _ = _build_executor(user)
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    first_file = SimpleNamespace(
+        id=first_file_id,
+        text="First file text",
+        name="first.pdf",
+        checksum="checksum-1",
+        size=100,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    second_file = SimpleNamespace(
+        id=second_file_id,
+        text="   ",
+        name="second.pdf",
+        checksum="checksum-2",
+        size=200,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    executor.file_service.get_files_by_ids.return_value = [first_file, second_file]
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with caplog.at_level("WARNING"):
+        resolved = await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            requested_file_ids=[first_file_id, second_file_id],
+        )
+
+    assert resolved.text == (
+        "[SOURCE 1]\n"
+        "file_name: first.pdf\n\n"
+        "First file text\n\n"
+        "[SOURCE 2]\n"
+        "file_name: second.pdf\n\n"
+        f"{RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER}"
+    )
+    assert resolved.runtime_input_metadata is not None
+    assert resolved.runtime_input_metadata["text"] == resolved.text
+    assert resolved.runtime_input_metadata["files"][1]["has_text"] is False
+    assert len(resolved.diagnostics) == 1
+    diagnostic = resolved.diagnostics[0]
+    assert diagnostic.code == RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE
+    assert diagnostic.severity == "warning"
+    assert "[SOURCE 2] (second.pdf)" in diagnostic.message
+    assert "flow_executor.runtime_input_source_text_unavailable" in caplog.text
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_document_warns_when_pdf_text_looks_reversed(
+    user,
+    caplog,
+):
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    fake_file = SimpleNamespace(
+        id=file_id,
+        text=_LIKELY_REVERSED_PDF_TEXT,
+        name="reversed.pdf",
+        checksum="checksum-1",
+        size=128,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with caplog.at_level("WARNING"):
+        resolved = await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            requested_file_ids=[file_id],
+        )
+
+    assert len(resolved.diagnostics) == 1
+    diagnostic = resolved.diagnostics[0]
+    assert diagnostic.code == PDF_TEXT_LIKELY_REVERSED_WARNING
+    assert diagnostic.severity == "warning"
+    assert "[SOURCE 1] (reversed.pdf)" in diagnostic.message
+    assert "looks reversed or garbled" in diagnostic.message
+    assert resolved.runtime_input_metadata is not None
+    assert resolved.runtime_input_metadata["files"][0]["extraction_warnings"] == [
+        PDF_TEXT_LIKELY_REVERSED_WARNING
+    ]
+    assert resolved.runtime_input_metadata["source_headers"][0][
+        "extraction_warnings"
+    ] == [PDF_TEXT_LIKELY_REVERSED_WARNING]
+    assert resolved.text == (
+        "[SOURCE 1]\n"
+        "file_name: reversed.pdf\n"
+        f'extraction_warnings: ["{PDF_TEXT_LIKELY_REVERSED_WARNING}"]\n\n'
+        f"{_LIKELY_REVERSED_PDF_TEXT.strip()}"
+    )
+    assert "flow_executor.runtime_input_source_extraction_warning" in caplog.text
+
+
+def test_runtime_input_metadata_rejects_explicit_warning_cardinality_mismatch() -> None:
+    file_id = uuid4()
+
+    with pytest.raises(ValueError):
+        _build_runtime_input_metadata(
+            text="Source text",
+            requested_ids=[file_id],
+            input_format="document",
+            files=[_runtime_file(file_id=file_id, text="Source text")],
+            capture_mode="runtime_input",
+            extraction_warnings=[],
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_document_rejects_extracted_text_over_inline_cap(user):
+    """Document extraction larger than max inline bytes should fail deterministically."""
+    executor, _, _, _ = _build_executor(user, max_inline_text_bytes=8)
+    file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    fake_file = _runtime_file(
+        file_id=file_id,
+        text="detta ar mycket langre an atta bytes",
+    )
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
+
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value.code == "flow_run_input_exceeds_limit"
+    executor.file_service.get_files_by_ids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_reports_missing_or_inaccessible_file(user):
+    executor, _, _, _ = _build_executor(user)
+    file_id_1 = uuid4()
+    file_id_2 = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": "x"},
+    )
+    # Only return one of the two requested files
+    fake_file = SimpleNamespace(id=file_id_1, text="doc")
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
+
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(
+        TypedIOValidationException, match="not found or not accessible"
+    ) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            requested_file_ids=[file_id_1, file_id_2],
+        )
+
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_sanitizes_and_logs_missing_hydrated_content(
+    user,
+    caplog,
+):
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    missing_content_error = NotFoundException(f"File {file_id} has no durable content")
+    executor.file_service.get_files_by_ids.side_effect = missing_content_error
+
+    with caplog.at_level("WARNING"):
+        with pytest.raises(TypedIOValidationException) as exc:
+            await executor._resolve_step_input(
+                step=_runtime_step(input_type="document"),
+                context={},
+                run=_run(status=FlowRunStatus.RUNNING, user=user),
+                prior_results=[],
+                requested_file_ids=[file_id],
+            )
+
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value
+    assert str(missing_content_error) not in str(exc.value)
+    log_record = next(
+        record
+        for record in caplog.records
+        if "flow_executor.runtime_input_file_content_unavailable" in record.getMessage()
+    )
+    assert str(file_id) in log_record.getMessage()
+    assert log_record.exc_info is not None
+    assert log_record.exc_info[1] is missing_content_error
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_propagates_object_content_outage(user):
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    outage = ObjectContentUnavailableError(
+        "Durable object content is temporarily unavailable"
+    )
+    executor.file_service.get_files_by_ids.side_effect = outage
+
+    with pytest.raises(ObjectContentUnavailableError) as exc:
+        await executor._resolve_step_input(
+            step=_runtime_step(input_type="document"),
+            context={},
+            run=_run(status=FlowRunStatus.RUNNING, user=user),
+            prior_results=[],
+            requested_file_ids=[file_id],
+        )
+
+    assert exc.value is outage
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_ignores_removed_top_level_file_ids(user):
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": "fallback", "file_ids": [str(file_id)]},
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    assert resolved.files is None
+    assert resolved.text == "fallback"
+    executor.file_service.get_files_by_ids.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_uses_relational_selection_over_stale_payload(user):
+    executor, _, _, _ = _build_executor(user)
+    old_file_id = uuid4()
+    new_file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    execution_payload = {
+        "case_id": "after",
+        "step_inputs": {str(step.step_id): {"file_ids": [str(old_file_id)]}},
+    }
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload=execution_payload,
+    )
+    fake_file = SimpleNamespace(
+        id=new_file_id,
+        text="Replacement file text",
+        name="replacement.pdf",
+        checksum="checksum-new",
+        size=128,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        requested_file_ids=[new_file_id],
+    )
+
+    assert resolved.source_text == '{"case_id": "after"}'
+    assert resolved.files == [fake_file]
+    assert resolved.runtime_input_metadata is not None
+    assert resolved.runtime_input_metadata["file_ids"] == [str(new_file_id)]
+    assert str(old_file_id) not in json.dumps(
+        resolved.runtime_input_metadata,
+        ensure_ascii=False,
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_null_payload_safe(user):
+    """input_payload_json=None doesn't crash file resolution."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload=None)
+    step = _runtime_step(input_type="document")
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    assert resolved.files is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("input_source", ["previous_step", "all_previous_steps"])
+async def test_resolve_step_input_step_one_rejects_previous_sources(
+    user, input_source: str
+):
+    """Legacy snapshots should still reject step 1 chaining-only input sources at runtime."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
+    step = _runtime_step(step_order=1, input_source=input_source, input_type="text")
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+        )
+
+    assert exc.value.code == "typed_io_invalid_input_source_position"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_all_previous_steps_json_rejected_with_specific_code(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="x",
+        )
+    ]
+    step = _runtime_step(
+        step_order=2, input_source="all_previous_steps", input_type="json"
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc.value.code == "typed_io_invalid_input_source_combination"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_previous_step_missing_prior_returns_empty_text(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="text")
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    assert resolved.input_source == "previous_step"
+    assert resolved.source_text == ""
+    assert resolved.text == ""
+    assert len(resolved.diagnostics) == 1
+    assert resolved.diagnostics[0].code == "empty_prior_step_input"
+    assert "resolved to empty text" in resolved.diagnostics[0].message
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_all_previous_steps_empty_content_sets_warning(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="",
+        )
+    ]
+    step = _runtime_step(
+        step_order=2, input_source="all_previous_steps", input_type="text"
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.input_source == "all_previous_steps"
+    assert len(resolved.diagnostics) == 1
+    assert resolved.diagnostics[0].code == "empty_prior_step_input"
+    assert "resolved to empty text" in resolved.diagnostics[0].message
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_previous_step_with_content_emits_underlag_summary_info(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="Hello world",
+        )
+    ]
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="text")
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert resolved.source_text == "Hello world"
+    assert not any(d.code == "empty_prior_step_input" for d in resolved.diagnostics)
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert len(summaries) == 1
+    assert summaries[0].severity == "info"
+    assert "previous_step" in summaries[0].message
+    assert "step 1" in summaries[0].message
+    assert "11 bytes" in summaries[0].message
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_previous_step_rejects_missing_text_artifact(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="truncated",
+            text_overflow={
+                "generated_file_ids": [str(uuid4())],
+                "inline_text_bytes": 9,
+                "full_text_bytes": 8192,
+            },
+        )
+    ]
+    step = _runtime_step(step_order=2, input_source="previous_step", input_type="text")
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc.value.code == "typed_io_file_not_found"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_all_previous_steps_prefers_state_accumulator(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="fallback",
+        )
+    ]
+    cached = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="cached",
+    )
+    state = RunExecutionState(
+        completed_by_order={1: cached},
+        prior_results=[cached],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2, input_source="all_previous_steps", input_type="text"
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+        state=state,
+    )
+
+    assert resolved.source_text == "<step_1_output>\ncached\n</step_1_output>\n"
+    assert resolved.text == "<step_1_output>\ncached\n</step_1_output>\n"
+    summaries = [d for d in resolved.diagnostics if d.code == "flow_underlag_summary"]
+    assert len(summaries) == 1
+    assert summaries[0].severity == "info"
+    assert "all_previous_steps" in summaries[0].message
+    assert "1 prior step" in summaries[0].message
+    assert f"{len(resolved.text.encode('utf-8'))} bytes" in summaries[0].message
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_all_previous_steps_rejects_missing_state_artifact(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    cached = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="truncated",
+        text_overflow={
+            "generated_file_ids": [str(uuid4())],
+            "inline_text_bytes": 9,
+            "full_text_bytes": 8192,
+        },
+    )
+    state = RunExecutionState(
+        completed_by_order={1: cached},
+        prior_results=[cached],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2, input_source="all_previous_steps", input_type="text"
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [cached])
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[cached],
+            state=state,
+        )
+
+    assert exc.value.code == "typed_io_file_not_found"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_all_previous_steps_excludes_current_and_future_results(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="ONE",
+        ),
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=3,
+            text="CURRENT",
+        ),
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=4,
+            text="FUTURE",
+        ),
+    ]
+    step = _runtime_step(
+        step_order=3, input_source="all_previous_steps", input_type="text"
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=prior,
+    )
+
+    assert "<step_1_output>\nONE\n</step_1_output>" in resolved.source_text
+    assert "CURRENT" not in resolved.source_text
+    assert "FUTURE" not in resolved.source_text
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_all_previous_steps_rejects_text_over_inline_cap(user):
+    """Chained all_previous input exceeding inline cap should fail before LLM invocation."""
+    executor, _, _, _ = _build_executor(user, max_inline_text_bytes=16)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    prior = [
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="detta steg ar langt",
+        ),
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=2,
+            text="och detta steg ar ocksa langt",
+        ),
+    ]
+    step = _runtime_step(
+        step_order=3, input_source="all_previous_steps", input_type="text"
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, prior)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=prior,
+        )
+
+    assert exc.value.code == "typed_io_input_too_large"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_http_get_uses_interpolated_url_and_timeout(user):
+    """http_get should interpolate URL templates and propagate timeout config."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": "budget", "request_id": "42"},
+    )
+    step = _runtime_step(
+        input_source="http_get",
+        input_type="text",
+        input_config={
+            "url": "https://example.org/items/{{flow_input.request_id}}?q={{flow_input.text}}",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 7,
+        },
+    )
+    request = httpx.Request("GET", "https://example.org/items/42?q=budget")
+    executor.http_runtime.send_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="remote text")
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    assert resolved.text == "remote text"
+    assert resolved.source_text == "remote text"
+    assert resolved.input_source == "http_get"
+    executor.http_runtime.send_request.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_http_get_timeout_maps_typed_error(user):
+    """http_get timeout should map to deterministic typed_io_http_timeout code."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
+    step = _runtime_step(
+        input_source="http_get",
+        input_type="text",
+        input_config={"url": "https://example.org", "auth": {"mode": "none"}},
+    )
+    executor.http_runtime.send_request = AsyncMock(
+        side_effect=httpx.TimeoutException("timeout")
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+        )
+
+    assert exc.value.code == "typed_io_http_timeout"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_http_get_non_200_maps_typed_error(user):
+    """http_get non-success responses should fail with typed_io_http_non_success."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
+    step = _runtime_step(
+        input_source="http_get",
+        input_type="text",
+        input_config={"url": "https://example.org", "auth": {"mode": "none"}},
+    )
+    request = httpx.Request("GET", "https://example.org")
+    executor.http_runtime.send_request = AsyncMock(
+        return_value=httpx.Response(503, request=request, text="service unavailable")
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+        )
+
+    assert exc.value.code == "typed_io_http_non_success"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_http_json_malformed_response_maps_typed_error(user):
+    """json input over HTTP should fail deterministically on malformed JSON response."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
+    step = _runtime_step(
+        input_source="http_get",
+        input_type="json",
+        input_config={"url": "https://example.org/json", "auth": {"mode": "none"}},
+    )
+    request = httpx.Request("GET", "https://example.org/json")
+    executor.http_runtime.send_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="not-json")
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+        )
+
+    assert exc.value.code == "typed_io_http_malformed_response"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_rejects_legacy_http_post_before_send(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"request_id": "42"},
+    )
+    step = _runtime_step(
+        input_source="http_post",
+        input_type="text",
+        input_config={
+            "url": "https://example.org/mutate/{{flow_input.request_id}}",
+            "auth": {"mode": "none"},
+        },
+    )
+    executor.http_runtime.send_request = AsyncMock()
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(BadRequestException, match="Unsupported input source"):
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+        )
+
+    executor.http_runtime.send_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_rejects_literal_step_input_substring_when_runtime_input_enabled(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    file = _runtime_file(file_id=uuid4(), text="transkriberat innehåll")
+    executor.file_service.get_files_by_ids.return_value = [file]
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    step = _runtime_step(
+        step_order=1,
+        input_source="flow_input",
+        input_type="document",
+        input_bindings={"question": "Literal step_input.text marker"},
+        input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    with pytest.raises(TypedIOValidationException, match="step_input"):
+        await executor._resolve_step_input(
+            step=step,
+            context=context,
+            run=run,
+            prior_results=[],
+            requested_file_ids=[file.id],
+        )
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_runtime_input_does_not_append_internal_orchestration_metadata():
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4(), active_api_key=None)
+    executor, _, _, _ = _build_executor(user)
+    file = _runtime_file(file_id=uuid4(), text="runtime step upload test")
+    executor.file_service.get_files_by_ids.return_value = [file]
+    step = _runtime_step(
+        step_order=1,
+        input_source="flow_input",
+        input_type="document",
+        input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
+    )
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"expected_flow_version": 9},
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        requested_file_ids=[file.id],
+    )
+
+    assert resolved.source_text == ""
+    assert resolved.text == "[SOURCE 1]\n\nruntime step upload test"
+
+
+@pytest.mark.asyncio
+async def test_resolve_step_input_adds_underlag_summary_diagnostic(user):
+    executor, _, _, _ = _build_executor(user)
+    file = _runtime_file(file_id=uuid4(), text="transkriberat innehåll")
+    executor.file_service.get_files_by_ids.return_value = [file]
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    step = _runtime_step(
+        step_order=1,
+        input_source="flow_input",
+        input_type="document",
+        input_bindings={"question": "UNDERLAG:\n{{ step_input.text }}"},
+        input_config={"runtime_input": {"enabled": True, "input_format": "document"}},
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    resolved = await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+        requested_file_ids=[file.id],
+    )
+
+    assert any(d.code == "flow_underlag_summary" for d in resolved.diagnostics)
+
+
+# --- Runtime guards for unsupported types ---
+
+
+@pytest.mark.asyncio
+async def test_audio_input_previous_step_rejected_runtime(user):
+    """Audio input is flow_input-only at runtime."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _runtime_step(input_type="audio", input_source="previous_step", step_order=2)
+    prev = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="prior output",
+    )
+    run_state = RunExecutionState(
+        completed_by_order={1: prev},
+        prior_results=[prev],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, state=run_state, attempt_no=1)
+
+    assert exc.value.code == "typed_io_audio_source_unsupported"
+
+
+# --- Typed validation tests ---
+
+
+@pytest.mark.asyncio
+async def test_empty_document_extraction_uses_source_marker_not_payload_fallback(user):
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    step = _runtime_step(input_type="document")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": "fallback payload text"},
+    )
+    fake_file = _runtime_file(file_id=file_id, text="", name="empty.pdf")
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
+    executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert output.input_text == (
+        "[SOURCE 1]\n"
+        "file_name: empty.pdf\n\n"
+        f"{RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER}\n\n"
+        "fallback payload text"
+    )
+    assert output.input_text != "fallback payload text"
+    assert output.diagnostics[0].code == RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE
+    assert output.runtime_input_metadata is not None
+    assert output.runtime_input_metadata["files"][0]["has_text"] is False
+
+
+@pytest.mark.asyncio
+async def test_file_input_uses_extracted_file_text(user):
+    """File input should use extracted file text and pass extraction guard."""
+    executor, _, _, _ = _build_executor(user)
+    file_id = uuid4()
+    step = _runtime_step(input_type="file")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    fake_file = _runtime_file(file_id=file_id, text="Extracted file text")
+    executor.file_service.get_files_by_ids.return_value = [fake_file]
+    executor.flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert output.input_text == "[SOURCE 1]\n\nExtracted file text"
+    assert output.full_text == "ok"
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_executes_one_model_call_per_file_and_sets_identity(
+    user,
+    monkeypatch,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3
+    )
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    first_file = SimpleNamespace(
+        id=first_file_id,
+        text=_LIKELY_REVERSED_PDF_TEXT,
+        name="alpha.pdf",
+        checksum="checksum-a",
+        size=100,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    second_file = SimpleNamespace(
+        id=second_file_id,
+        text="Beta document text",
+        name="alpha.pdf",
+        checksum="checksum-b",
+        size=200,
+        mimetype="application/pdf",
+        file_type="document",
+        transcription=None,
+    )
+    files_by_id = {first_file_id: first_file, second_file_id: second_file}
+    pdf_text_quality_warnings = MagicMock(wraps=TextExtractor.pdf_text_quality_warnings)
+    monkeypatch.setattr(
+        TextExtractor,
+        "pdf_text_quality_warnings",
+        pdf_text_quality_warnings,
+    )
+
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
+    flow_run_repo.list_step_input_file_ids = AsyncMock(
+        return_value=[first_file_id, second_file_id]
+    )
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                completion=(
+                    '{"documents":[{"source_label":"uploaded_source_1",'
+                    '"source_file_id":"unspecified","title":"Alpha"}]}'
+                ),
+                total_token_count=11,
+            ),
+            SimpleNamespace(
+                completion=(
+                    '{"documents":[{"source_label":"uploaded_source_2",'
+                    '"source_file_id":"unspecified","title":"Beta"}]}'
+                ),
+                total_token_count=13,
+            ),
+        ]
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._prepare_assistant_step = AsyncMock(
+        side_effect=AssertionError("mapped execution must reuse previewed input")
+    )
+    output_contract = {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "description": "One record per uploaded source.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_label": {"type": "string"},
+                        "source_file_id": {"type": "string"},
+                        "extraction_warnings": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                            },
+                        },
+                        "title": {"type": "string"},
+                    },
+                    "required": [
+                        "source_label",
+                        "source_file_id",
+                        "extraction_warnings",
+                        "title",
+                    ],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["documents"],
+        "additionalProperties": False,
+    }
+    published_contract_json = json.dumps(
+        output_contract, ensure_ascii=False, separators=(",", ":")
+    )
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract=output_contract,
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    assert assistant.get_response.await_count == 2
+    executor._prepare_assistant_step.assert_not_awaited()
+    flow_run_repo.activate_step_attempt.assert_awaited_once()
+    activation = flow_run_repo.activate_step_attempt.await_args.kwargs
+    runtime_file_ids = {
+        edge.source.file_id
+        for edge in activation["resolved_input_edges"].edges
+        if edge.source.kind == "runtime_file"
+    }
+    assert runtime_file_ids == {first_file_id, second_file_id}
+    assert executor.file_service.get_files_by_ids.await_count == 2
+    assert state.mapped_admission_by_step[step.step_id].prospective_provider_calls == 2
+    questions = [
+        call.kwargs["question"] for call in assistant.get_response.await_args_list
+    ]
+    attempt_input = activation["attempt_input"]
+    assert attempt_input.execution_inputs is not None
+    assert [item.question for item in attempt_input.execution_inputs] == questions
+    schema_marker = "Follow this JSON Schema exactly:\n"
+    provider_contracts = [
+        json.loads(item.effective_prompt.rsplit(schema_marker, maxsplit=1)[-1])
+        for item in attempt_input.execution_inputs
+    ]
+    assert provider_contracts[0] == provider_contracts[1]
+    for provider_contract in provider_contracts:
+        documents_contract = provider_contract["properties"]["documents"]
+        assert documents_contract["minItems"] == 1
+        assert documents_contract["maxItems"] == 1
+        assert documents_contract["description"] == (
+            "Exactly one document object for the current uploaded source. Runtime "
+            "combines one object from each uploaded source."
+        )
+        assert set(documents_contract["items"]["properties"]) == {"title"}
+    assert (
+        json.dumps(output_contract, ensure_ascii=False, separators=(",", ":"))
+        == published_contract_json
+    )
+    assert (
+        json.dumps(step.output_contract, ensure_ascii=False, separators=(",", ":"))
+        == published_contract_json
+    )
+    assert attempt_input.completion_configuration is not None
+    assert (
+        attempt_input.model_dump_json(exclude_none=True).count(
+            '"preferred_model_parameters"'
+        )
+        == 1
+    )
+    warning_line = f'extraction_warnings: ["{PDF_TEXT_LIKELY_REVERSED_WARNING}"]'
+    assert warning_line in questions[0]
+    assert warning_line not in questions[1]
+    assert _LIKELY_REVERSED_PDF_TEXT.strip() in questions[0]
+    assert any("Beta document text" in question for question in questions)
+    assert not any("source_label" in question for question in questions)
+    assert not any("source_file_id" in question for question in questions)
+    assert not any(
+        _LIKELY_REVERSED_PDF_TEXT.strip() in question
+        and "Beta document text" in question
+        for question in questions
+    )
+    assert pdf_text_quality_warnings.call_count == 2
+    assert output.structured_output == {
+        "documents": [
+            {
+                "title": "Alpha",
+                "source_label": "alpha.pdf",
+                "source_file_id": str(first_file_id),
+                "extraction_warnings": [PDF_TEXT_LIKELY_REVERSED_WARNING],
+            },
+            {
+                "title": "Beta",
+                "source_label": "alpha.pdf (2)",
+                "source_file_id": str(second_file_id),
+                "extraction_warnings": [],
+            },
+        ]
+    }
+    assert output.runtime_input_metadata is not None
+    assert output.runtime_input_metadata["capture_mode"] == "runtime_input_per_source"
+    assert output.runtime_input_metadata["file_ids"] == [
+        str(first_file_id),
+        str(second_file_id),
+    ]
+    assert "source_headers" not in output.runtime_input_metadata
+    assert len(output.runtime_input_metadata["per_source_calls"]) == 2
+    assert [
+        (call["source_number"], call["file_id"])
+        for call in output.runtime_input_metadata["per_source_calls"]
+    ] == [(1, str(first_file_id)), (2, str(second_file_id))]
+    extraction_diagnostics = [
+        diagnostic
+        for diagnostic in output.diagnostics
+        if diagnostic.code == PDF_TEXT_LIKELY_REVERSED_WARNING
+    ]
+    assert len(extraction_diagnostics) == 1
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_applies_aggregate_minimum_after_three_calls(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=4
+    )
+    file_ids = [uuid4(), uuid4(), uuid4()]
+    files_by_id = {
+        file_id: _runtime_file(
+            file_id=file_id,
+            text=f"Source {index} text",
+            name=f"source-{index}.pdf",
+        )
+        for index, file_id in enumerate(file_ids, start=1)
+    }
+
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=file_ids)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                completion=json.dumps({"documents": [{"title": f"Source {index}"}]}),
+                total_token_count=3,
+            )
+            for index in range(1, 4)
+        ]
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    output_contract = {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "description": "One record per uploaded source.",
+                "minItems": 3,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_label": {"type": "string"},
+                        "source_file_id": {"type": "string"},
+                        "extraction_warnings": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                            },
+                        },
+                        "title": {"type": "string"},
+                    },
+                    "required": [
+                        "source_label",
+                        "source_file_id",
+                        "extraction_warnings",
+                        "title",
+                    ],
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["documents"],
+        "additionalProperties": False,
+    }
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract=output_contract,
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 3,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert assistant.get_response.await_count == 3
+    assert output_contract["properties"]["documents"]["minItems"] == 3
+    assert [item["title"] for item in output.structured_output["documents"]] == [
+        "Source 1",
+        "Source 2",
+        "Source 3",
+    ]
+
+
+@pytest.mark.parametrize("document_count", [0, 2])
+@pytest.mark.asyncio
+async def test_per_source_reader_rejects_not_exactly_one_document_per_source(
+    user,
+    document_count,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3
+    )
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    files_by_id = {
+        first_file_id: _runtime_file(
+            file_id=first_file_id,
+            text="Contract source text",
+            name="contract-source.pdf",
+        ),
+        second_file_id: _runtime_file(
+            file_id=second_file_id,
+            text="Unreached source text",
+            name="unreached-source.pdf",
+        ),
+    }
+
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
+    flow_run_repo.list_step_input_file_ids = AsyncMock(
+        return_value=[first_file_id, second_file_id]
+    )
+    documents = [{"title": f"Record {index}"} for index in range(document_count)]
+    assistant = _mock_assistant_for_execute_step(
+        response_text=json.dumps({"documents": documents})
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                            "title": {"type": "string"},
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                            "title",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assert str(exc_info.value) == (
+        "Step 1: per-source reader source 1 (contract-source.pdf) returned "
+        f"{document_count} documents; expected exactly one."
+    )
+    assistant.get_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_reuses_json_capability_rejection_across_calls(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3
+    )
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    files_by_id = {
+        first_file_id: SimpleNamespace(
+            id=first_file_id,
+            text="Alpha document text",
+            name="alpha.pdf",
+            checksum="checksum-a",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        ),
+        second_file_id: SimpleNamespace(
+            id=second_file_id,
+            text="Beta document text",
+            name="beta.pdf",
+            checksum="checksum-b",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        ),
+    }
+
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
+    flow_run_repo.list_step_input_file_ids = AsyncMock(
+        return_value=[first_file_id, second_file_id]
+    )
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(
+        side_effect=[
+            ProviderCapabilityRejectedException(
+                "The provider rejected JSON mode.",
+                capability="response_format",
+                retry_without_capability_safe=True,
+                code="provider_capability_rejected",
+            ),
+            SimpleNamespace(
+                completion='{"documents":[{"title":"Alpha"}]}',
+                total_token_count=11,
+            ),
+            SimpleNamespace(
+                completion='{"documents":[{"title":"Beta"}]}',
+                total_token_count=13,
+            ),
+        ]
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                            "title": {"type": "string"},
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                            "title",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+
+    await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert assistant.get_response.await_count == 3
+    sent_kwargs = [
+        call.kwargs["model_kwargs"] for call in assistant.get_response.await_args_list
+    ]
+    assert [kwargs.response_format for kwargs in sent_kwargs] == [
+        {"type": "json_object"},
+        None,
+        None,
+    ]
+    assert [
+        call.kwargs["provider_call_reason"]
+        for call in assistant.get_response.await_args_list
+    ] == ["initial", "capability_fallback", "capability_fallback"]
+    assert state.json_mode_supported[json_mode_cache_key(assistant)] is False
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_reserves_one_json_fallback_before_provider_dispatch(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=2
+    )
+    first_file_id = uuid4()
+    second_file_id = uuid4()
+    files_by_id = {
+        first_file_id: SimpleNamespace(
+            id=first_file_id,
+            text="Alpha document text",
+            name="alpha.pdf",
+            checksum="checksum-a",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        ),
+        second_file_id: SimpleNamespace(
+            id=second_file_id,
+            text="Beta document text",
+            name="beta.pdf",
+            checksum="checksum-b",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        ),
+    }
+
+    async def get_files_by_id(*, file_ids, **_kwargs):
+        return [files_by_id[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files_by_id
+    flow_run_repo.list_step_input_file_ids = AsyncMock(
+        return_value=[first_file_id, second_file_id]
+    )
+    assistant = _mock_assistant_for_execute_step(
+        response_text='{"documents":[{"title":"Result"}]}'
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    # The call ceiling of 2 admits only 1 item (one call is reserved for the
+    # native-JSON fallback), so two files are rejected as too many inputs
+    # before any provider work happens.
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_rejects_textless_file_before_provider_dispatch(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    file_id = uuid4()
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    executor.file_service.get_files_by_ids.return_value = [
+        SimpleNamespace(
+            id=file_id,
+            text=None,
+            name="scan.pdf",
+            checksum="checksum-scan",
+            size=100,
+            mimetype="application/pdf",
+            file_type="document",
+            transcription=None,
+        )
+    ]
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                        ],
+                    },
+                }
+            },
+            "required": ["documents"],
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value
+    assistant.preflight_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_rejects_zero_sources_before_provider_dispatch(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                        ],
+                    },
+                }
+            },
+            "required": ["documents"],
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value
+    assistant.preflight_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_validates_contract_before_zero_sources(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[])
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"summary": {"type": "string"}},
+            "required": ["summary"],
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 2,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assistant.preflight_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_rejects_missing_extraction_warnings_before_preview(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    file_id = uuid4()
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    executor.file_service.get_files_by_ids.return_value = [
+        _runtime_file(file_id=file_id, text="Source text")
+    ]
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "title": {"type": "string"},
+                        },
+                        "required": ["source_label", "source_file_id", "title"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assert "extraction_warnings" in str(exc_info.value)
+    assistant.preflight_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "warning_items",
+    [
+        pytest.param({"type": "string"}, id="missing-enum"),
+        pytest.param(
+            {
+                "type": "string",
+                "enum": [PDF_TEXT_LIKELY_REVERSED_WARNING, "authored_warning"],
+            },
+            id="widened-enum",
+        ),
+        pytest.param(
+            {"type": "string", "enum": ["authored_warning"]},
+            id="changed-enum",
+        ),
+    ],
+)
+@pytest.mark.asyncio
+async def test_per_source_reader_rejects_open_extraction_warning_enum_before_preview(
+    user,
+    warning_items,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    file_id = uuid4()
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    executor.file_service.get_files_by_ids.return_value = [
+        _runtime_file(file_id=file_id, text="Source text")
+    ]
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": warning_items,
+                            },
+                            "title": {"type": "string"},
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                            "title",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assert "extraction_warnings" in str(exc_info.value)
+    assistant.preflight_response_context.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_rejects_max_plus_one_before_assistant_prepare(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    # Ceiling 2 admits one item; two inputs are max-plus-one.
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=2
+    )
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[uuid4(), uuid4()])
+    executor._prepare_assistant_step = AsyncMock()
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                }
+            },
+            "required": ["documents"],
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    executor._prepare_assistant_step.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_source_config_fails_closed_when_step_is_not_document_reader(user):
+    executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(
+        input_type="document",
+        output_type="text",
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc.value.code == "typed_io_contract_violation"
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_derives_input_array_and_echoes_runtime_source_identity(
+    user,
+):
+    executor, _, _, _ = _build_executor(user)
+    assistant = _mock_assistant_for_execute_step(
+        response_text=(
+            '{"source_sections":[{"section_title":"Human title",'
+            '"section_body":"Finished section text",'
+            '"extraction_warnings":["authored_warning"]}]}'
+        )
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"records":[]}',
+        structured={
+            "records": [
+                {
+                    "title": "Human title",
+                    "summary": "Source summary",
+                    "source_label": "source-a.pdf",
+                    "source_file_id": "file-a",
+                }
+            ]
+        },
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {
+                "records": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                }
+            },
+            "required": ["records"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "source_sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "section_title": {"type": "string"},
+                            "section_body": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                        },
+                        "required": [
+                            "section_title",
+                            "section_body",
+                            "extraction_warnings",
+                            "source_label",
+                            "source_file_id",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["source_sections"],
+            "additionalProperties": False,
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 1}},
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    assert output.structured_output == {
+        "source_sections": [
+            {
+                "section_title": "Human title",
+                "section_body": "Finished section text",
+                "extraction_warnings": ["authored_warning"],
+                "source_label": "source-a.pdf",
+                "source_file_id": "file-a",
+            }
+        ]
+    }
+    question = assistant.get_response.await_args.kwargs["question"]
+    assert '"records":' in question
+    assert '"documents":' not in question
+    assert output.runtime_input_metadata is not None
+    assert output.runtime_input_metadata["input_array"] == "records"
+    assert output.runtime_input_metadata["output_array"] == "source_sections"
+    assert output.runtime_input_metadata["per_item_calls"][0]["source_label"] == (
+        "source-a.pdf"
+    )
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_refuses_the_next_item_once_the_step_budget_is_spent(
+    user, monkeypatch
+):
+    """Mapped items spend from the attempt's one budget: the item that would
+    start after it ran out is never sent, and the refusal says how many
+    completed. A fake clock advances one second per provider call so the
+    boundary, not a provider wait, is what fires."""
+    from eneo.flows.runtime import step_deadline as step_deadline_module
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 1.5
+    documents = [
+        {
+            "title": f"Document {index}",
+            "summary": f"document-{index:02d}",
+            "source_label": f"source-{index:02d}.pdf",
+            "source_file_id": f"file-{index:02d}",
+        }
+        for index in range(1, 4)
+    ]
+    assistant = _mock_assistant_for_execute_step()
+
+    async def _respond(**_kwargs):
+        clock["now"] += 1.0
+        return SimpleNamespace(
+            completion='{"sections":[{"heading":"h","body":"b"}]}',
+            total_token_count=3,
+        )
+
+    assistant.get_response = AsyncMock(side_effect=_respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": documents},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                        "required": ["heading", "body"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["sections"],
+            "additionalProperties": False,
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 40}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert exc_info.value.code == "flow_step_timeout"
+    assert assistant.get_response.await_count == 2
+    assert "mapped item 3 of 3" in str(exc_info.value)
+    assert "2 of 3 items completed" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("timeout_item", [1, 2])
+async def test_per_item_map_timeout_inside_a_request_reports_completed_items(
+    user, monkeypatch, timeout_item
+):
+    """Interrupted mapped calls retain progress and unknown provider outcome."""
+    from eneo.flows.runtime import step_deadline as step_deadline_module
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline_module, "_now", lambda: clock["now"])
+    monkeypatch.setattr(
+        step_deadline_module, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 30.0
+    )
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 1.5
+    documents = [
+        {
+            "title": f"Document {index}",
+            "summary": f"document-{index:02d}",
+            "source_label": f"source-{index:02d}.pdf",
+            "source_file_id": f"file-{index:02d}",
+        }
+        for index in range(1, 4)
+    ]
+    assistant = _mock_assistant_for_execute_step()
+    calls = {"n": 0}
+
+    async def _respond(**_kwargs):
+        step_deadline_module.mark_provider_request_in_flight(True)
+        calls["n"] += 1
+        clock["now"] += 1.0
+        if calls["n"] == timeout_item:
+            clock["now"] = 2.0
+            # Keep the request pending until the real wait timer cancels it.
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                step_deadline_module.settle_provider_request(known=False)
+                raise
+        step_deadline_module.settle_provider_request(known=True)
+        return SimpleNamespace(
+            completion='{"sections":[{"heading":"h","body":"b"}]}',
+            total_token_count=3,
+        )
+
+    assistant.get_response = AsyncMock(side_effect=_respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": documents},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                        "required": ["heading", "body"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["sections"],
+            "additionalProperties": False,
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 40}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert exc_info.value.code == "flow_step_timeout"
+    message = str(exc_info.value)
+    assert "during provider request" in message
+    assert f"{timeout_item - 1} of 3 items completed" in message
+    assert "may still complete" in message
+    assert assistant.get_response.await_count == timeout_item
+    assert exc_info.value.step_phase.value == "provider_request"
+    assert exc_info.value.completed_items == timeout_item - 1
+    assert exc_info.value.total_items == 3
+    assert exc_info.value.provider_work_may_have_completed is True
+
+    from eneo.flows.api.flow_models import FlowRunPublic
+    from eneo.flows.flow_run_error import dump_flow_run_error
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+
+    executor._terminalize_run = AsyncMock()
+    claimed = previous.model_copy(update={"step_id": step.step_id, "step_order": 2})
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+        state=state,
+    )
+    assert (
+        flow_run_repo.finish_attempt.await_args.kwargs["error_code"]
+        == "flow_step_timeout"
+    )
+    error = executor._terminalize_run.await_args.kwargs["error"]
+    persisted = dump_flow_run_error(error)
+    assert persisted["details"] == {
+        "phase": "provider_request",
+        "completed_items": timeout_item - 1,
+        "total_items": 3,
+        "provider_work_may_have_completed": True,
+    }
+    row = SimpleNamespace(
+        **{
+            **run.model_dump(exclude={"error"}),
+            "status": FlowRunStatus.FAILED,
+            "error_json": persisted,
+        }
+    )
+    session = AsyncMock()
+    session.scalar.return_value = row
+    reread = await FlowRunRepository(session=session).get(
+        run_id=run.id, tenant_id=run.tenant_id
+    )
+    public = FlowRunPublic.model_validate(reread, from_attributes=True)
+    assert public.error.details == error.details
+    assert public.error.retryable is False
+    assert "provider may still complete" in public.error.message
+    assert "may or may not have started" not in public.error.message
+
+
+@pytest.mark.asyncio
+async def test_per_item_prompts_read_complete_material_once_per_attempt(user):
+    from tests.unittests.flows.test_resolved_input_runtime import _file_backed_material
+
+    executor, _, run_repo, _ = _build_executor(user)
+    executor.max_inline_text_bytes = 2048
+    text = "Complete mapped prompt material.\n" * 200
+    material_result, file, reference = _file_backed_material(text)
+    executor.file_service.get_owned_file_infos.side_effect = None
+    executor.file_service.get_owned_file_infos.return_value = [file]
+    executor.file_service.repo.get_content_references.return_value = [reference]
+    executor.file_service.get_file_content.return_value = file
+    assistant = _mock_assistant_for_execute_step(response_text='{"sections":[]}')
+    assistant.get_prompt_text.return_value = "Read {{step_1.output.text}}"
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    documents = [{"title": "One"}, {"title": "Two"}]
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=2,
+        text='{"documents":[]}',
+        structured={"documents": documents},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: material_result, 2: previous},
+        prior_results=[material_result, previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 2}},
+    )
+
+    for attempt_no in (1, 2):
+        result = await executor._execute_step(
+            step=step, run=run, state=state, attempt_no=attempt_no
+        )
+        assert result.output.structured_output == {"sections": []}
+        calls = assistant.get_response.await_args_list[-2:]
+        assert len(calls) == 2
+        for call, document in zip(calls, documents, strict=True):
+            assert text in call.kwargs["prompt_override"]
+            assert document["title"] in call.kwargs["question"]
+        execution_inputs = run_repo.activate_step_attempt.await_args.kwargs[
+            "attempt_input"
+        ].execution_inputs
+        assert len(execution_inputs) == 2
+        for execution, document in zip(execution_inputs, documents, strict=True):
+            assert document["title"] in execution.question
+            assert execution.material_aliases[0].file_id == file.id
+        assert executor.file_service.get_file_content.await_count == attempt_no
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_executes_one_model_call_per_previous_document_at_scale(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    documents = [
+        {
+            "title": f"Document {index}",
+            "summary": f"document-{index:02d}-unique-marker",
+            "source_label": f"source-{index:02d}.pdf",
+            "source_file_id": f"file-{index:02d}",
+        }
+        for index in range(1, 41)
+    ]
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(
+        side_effect=[
+            SimpleNamespace(
+                completion=(
+                    '{"sections":[{"heading":"Document '
+                    f'{index}","body":"Section {index}"}}]}}'
+                ),
+                total_token_count=index,
+            )
+            for index in range(1, 41)
+        ]
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._prepare_assistant_step = AsyncMock(
+        side_effect=AssertionError("mapped execution must reuse previewed input")
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": documents},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {"type": "object"},
+                }
+            },
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "heading": {"type": "string"},
+                            "body": {"type": "string"},
+                        },
+                        "required": ["heading", "body"],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["sections"],
+            "additionalProperties": False,
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 40}},
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    assert assistant.get_response.await_count == 40
+    executor._prepare_assistant_step.assert_not_awaited()
+    flow_run_repo.activate_step_attempt.assert_awaited_once()
+    activation = flow_run_repo.activate_step_attempt.await_args.kwargs
+    resolved_edges = activation["resolved_input_edges"].edges
+    assert len(resolved_edges) == 40
+    assert {
+        edge.source.source_step_id
+        for edge in resolved_edges
+        if edge.source.kind == "step_result"
+    } == {previous.step_id}
+    assert {
+        edge.source.source_attempt_no
+        for edge in resolved_edges
+        if edge.source.kind == "step_result"
+    } == {1}
+    first_source = resolved_edges[0].source
+    last_source = resolved_edges[-1].source
+    assert first_source.kind == "step_result"
+    assert last_source.kind == "step_result"
+    assert first_source.selector.path == ("output", "structured", "documents", 0)
+    assert last_source.selector.path == (
+        "output",
+        "structured",
+        "documents",
+        39,
+    )
+    assert resolved_edges[0].selection.sha256 == canonical_json_hash(documents[0])
+    attempt_input = activation["attempt_input"]
+    assert attempt_input.execution_inputs is not None
+    assert [item.question for item in attempt_input.execution_inputs] == [
+        call.kwargs["question"] for call in assistant.get_response.await_args_list
+    ]
+    assert attempt_input.completion_configuration is not None
+    assert [
+        call.kwargs["provider_call_observer"].resolved_input_edge_indexes
+        for call in assistant.get_response.await_args_list
+    ] == [(index,) for index in range(40)]
+    questions = [
+        call.kwargs["question"] for call in assistant.get_response.await_args_list
+    ]
+    for index, question in enumerate(questions, start=1):
+        assert f"document-{index:02d}-unique-marker" in question
+        for other_index in range(1, 41):
+            if other_index == index:
+                continue
+            assert f"document-{other_index:02d}-unique-marker" not in question
+    assert output.structured_output == {
+        "sections": [
+            {"heading": f"Document {index}", "body": f"Section {index}"}
+            for index in range(1, 41)
+        ]
+    }
+    assert output.model_parameters_json["item_map_execution_mode"] == "per_item"
+    assert output.model_parameters_json["per_item_call_count"] == 40
+    assert output.num_tokens_input == sum(range(1, 41))
+    assert output.runtime_input_metadata is not None
+    assert output.runtime_input_metadata["capture_mode"] == "previous_step_item_map"
+    assert output.runtime_input_metadata["item_count"] == 40
+    assert len(output.runtime_input_metadata["per_item_calls"]) == 40
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "preferred_tokens,fallback_tokens,ceiling",
+    [(6, (6, 6), 10), (144, (176, 177), 320)],
+)
+async def test_per_item_map_rejects_many_small_packages_before_provider_dispatch(
+    user, preferred_tokens, fallback_tokens, ceiling
+):
+    executor, _, _, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3,
+        max_estimated_input_tokens_per_mapped_step=ceiling,
+    )
+    assistant = _mock_assistant_for_execute_step(response_text='{"sections":[]}')
+    assistant.preflight_response_context = AsyncMock(
+        side_effect=[
+            replace(
+                _context_preflight(preferred_tokens),
+                fallback=_context_preflight(tokens).preferred,
+            )
+            for tokens in fallback_tokens
+        ]
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={
+            "documents": [
+                {"title": "One", "source_file_id": "file-1"},
+                {"title": "Two", "source_file_id": "file-2"},
+            ]
+        },
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 2}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assert assistant.preflight_response_context.await_count == 2
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_reserves_one_json_fallback_before_provider_dispatch(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=2
+    )
+    assistant = _mock_assistant_for_execute_step(
+        response_text='{"sections":[{"heading":"Result","body":"Done"}]}'
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": [{"title": "One"}, {"title": "Two"}]},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 2}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    # A call ceiling of 2 admits only 1 item (one call reserved for the
+    # native-JSON fallback), so two items are rejected as too many inputs
+    # before any provider work happens.
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_uses_exact_call_count_when_json_mode_is_unsupported(user):
+    executor, _, _, _ = _build_executor(user)
+    # Ceiling 3 admits 2 items (one call stays reserved for the fallback).
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3
+    )
+    assistant = _mock_assistant_for_execute_step(
+        response_text='{"sections":[{"heading":"Result","body":"Done"}]}'
+    )
+    assistant.completion_model_kwargs = ModelKwargs(
+        response_format={"type": "stored_provider_format"}
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": [{"title": "One"}, {"title": "Two"}]},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={json_mode_cache_key(assistant): False},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 2}},
+    )
+
+    output = (
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    ).output
+
+    assert assistant.get_response.await_count == 2
+    assert all(
+        call.kwargs["model_kwargs"].response_format is None
+        for call in assistant.get_response.await_args_list
+    )
+    assert state.mapped_admission_by_step[step.step_id].prospective_provider_calls == 2
+    assert output.model_parameters_json["per_item_call_count"] == 2
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_rejects_over_window_package_before_provider_dispatch(user):
+    executor, _, _, _ = _build_executor(user)
+    # Ceiling 2 admits the single item; this test targets the token window.
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=2,
+        max_estimated_input_tokens_per_mapped_step=100,
+    )
+    assistant = _mock_assistant_for_execute_step()
+    preflight = _context_preflight(101)
+    refused_package = replace(preflight.preferred, output_cap_tokens=255)
+    assistant.preflight_response_context = AsyncMock(
+        return_value=replace(
+            preflight,
+            capacity=ModelCapacity(356, 4000),
+            preferred=refused_package,
+            fallback=refused_package,
+            refusal="current_request_input_does_not_fit",
+        )
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"documents":[]}',
+        structured={"documents": [{"title": "One"}]},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 1}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert (
+        exc_info.value.code
+        == FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value
+    )
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_rejects_max_plus_one_before_assistant_prepare(user):
+    executor, _, _, _ = _build_executor(user)
+    # Ceiling 2 admits one item; two items are max-plus-one.
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=2
+    )
+    executor._prepare_assistant_step = AsyncMock()
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    previous = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text='{"records":[]}',
+        structured={"records": [{"value": "one"}, {"value": "two"}]},
+    )
+    state = RunExecutionState(
+        completed_by_order={1: previous},
+        prior_results=[previous],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    step = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="json",
+        input_contract={
+            "type": "object",
+            "properties": {"records": {"type": "array", "items": {"type": "object"}}},
+            "required": ["records"],
+        },
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 1}},
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(
+            step=step,
+            run=run,
+            state=state,
+            attempt_no=1,
+        )
+
+    assert exc.value.code == FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value
+    executor._prepare_assistant_step.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_per_item_map_config_fails_closed_when_step_is_not_previous_json(user):
+    executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(
+        input_source="flow_input",
+        input_type="text",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {"sections": {"type": "array", "items": {"type": "object"}}},
+            "required": ["sections"],
+        },
+        input_config={"item_map": {"enabled": True, "max_items": 1}},
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc.value.code == "typed_io_contract_violation"
+
+
+@pytest.mark.asyncio
+async def test_document_previous_step_rejected_with_specific_code(user):
+    """Legacy snapshots using previous_step+document should fail deterministically."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _runtime_step(
+        step_order=2, input_source="previous_step", input_type="document"
+    )
+    # Build state with one completed previous result.
+    from eneo.flows.runtime.executor import RunExecutionState
+
+    prev = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="prior output",
+    )
+    run_state = RunExecutionState(
+        completed_by_order={1: prev},
+        prior_results=[prev],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, state=run_state, attempt_no=1)
+
+    assert exc.value.code == "typed_io_document_source_unsupported"
+
+
+@pytest.mark.asyncio
+async def test_image_requires_valid_files(user):
+    """Image input with no image files raises typed_io_missing_required_files."""
+    executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(input_type="image")
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": "x"},
+    )
+
+    mock_assistant = MagicMock()
+    mock_assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=mock_assistant)
+
+    with pytest.raises(TypedIOValidationException, match="not yet supported|requires"):
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+
+@pytest.mark.asyncio
+async def test_audio_step_does_not_forward_audio_files_to_llm(user):
+    """Audio input uses transcribed text; raw audio files should not be forwarded to LLM."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    step = _runtime_step(input_type="audio")
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="Transcribed text",
+            source_text="Transcribed text",
+            files=[SimpleNamespace(id=uuid4(), mimetype="audio/wav")],
+            input_source="flow_input",
+        )
+    )
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert output.input_text == "Transcribed text"
+    assert assistant.get_response.await_args.kwargs["files"] == []
+
+
+@pytest.mark.asyncio
+async def test_audio_transcribe_only_skips_llm_and_rag(user):
+    """Audio + transcribe_only should return transcript directly without LLM/RAG."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    step = _runtime_step(
+        input_type="audio",
+        output_type="text",
+        output_mode="transcribe_only",
+    )
+    assistant = _mock_assistant_for_execute_step(response_text="should_not_be_used")
+    assistant.get_prompt_text.return_value = "ignore this prompt"
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="Raw transcript text",
+            source_text="Raw transcript text",
+            files=[SimpleNamespace(id=uuid4(), mimetype="audio/wav")],
+            input_source="flow_input",
+            transcription_metadata={"model": "whisper-1", "language": "sv"},
+        )
+    )
+    executor._retrieve_rag_chunks = AsyncMock(
+        return_value=([], {"status": "should_not_run"}, [])
+    )
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assistant.get_response.assert_not_awaited()
+    executor._retrieve_rag_chunks.assert_not_awaited()
+    assert output.full_text == "Raw transcript text"
+    assert output.persisted_text == "Raw transcript text"
+    assert output.num_tokens_input == 0
+    assert output.num_tokens_output == 0
+    assert output.transcription_metadata == {"model": "whisper-1", "language": "sv"}
+    assert any(d.code == "audio_transcribe_only_used" for d in output.diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_render_verbatim_renders_input_text_without_llm_or_rag(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.document_render_service = SimpleNamespace(
+        render_document=lambda text, output_type, step_order, title: (
+            f"{output_type}:{text}".encode("utf-8"),
+            "application/pdf",
+        ),
+        render_structured_document=MagicMock(
+            side_effect=AssertionError("structured rendering is not used here")
+        ),
+        limits=DocumentRenderLimits(),
+    )
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={},
+    )
+    step = _runtime_step(
+        input_type="text",
+        output_type="pdf",
+        output_mode="render_verbatim",
+    )
+    assistant = _mock_assistant_for_execute_step(response_text="should_not_be_used")
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="Final report body",
+            source_text="Final report body",
+            input_source="previous_step",
+        )
+    )
+    executor._retrieve_rag_chunks = AsyncMock(
+        return_value=([], {"status": "should_not_run"}, [])
+    )
+    stored_file = SimpleNamespace(id=uuid4())
+    executor.file_service.save_generated_file = AsyncMock(return_value=stored_file)
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assistant.get_response.assert_not_awaited()
+    executor._retrieve_rag_chunks.assert_not_awaited()
+    assert output.full_text == "Final report body"
+    assert output.persisted_text == "Final report body"
+    assert output.num_tokens_input == 0
+    assert output.num_tokens_output == 0
+    assert output.model_parameters_json == {"mode": "render_verbatim"}
+    assert output.artifacts is not None
+    assert output.artifacts[0]["file_id"] == str(stored_file.id)
+    executor.file_service.save_generated_file.assert_awaited_once()
+    assert any(d.code == "render_verbatim_used" for d in output.diagnostics)
+
+
+@pytest.mark.asyncio
+async def test_failed_step_without_a_completion_model_records_no_prompt(user):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+
+    def refuse_render(text, output_type, step_order, title):
+        raise TypedIOValidationException(
+            "Step 1: the document could not be rendered.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        )
+
+    executor.document_render_service = SimpleNamespace(
+        render_document=refuse_render,
+        render_structured_document=MagicMock(),
+        limits=DocumentRenderLimits(),
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(
+        input_type="text",
+        output_type="pdf",
+        output_mode="render_verbatim",
+    )
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = "Never sent to a model"
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="Final report body",
+            source_text="Final report body",
+            input_source="previous_step",
+        )
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    executor._terminalize_run = AsyncMock()
+    claimed = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="",
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+    )
+
+    failed = flow_run_repo.save_step_result.await_args.args[1]
+    assert failed.status == FlowStepResultStatus.FAILED
+    assert failed.effective_prompt == ""
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("output_mode", "input_type", "output_type"),
+    [
+        ("compose_text", "text", "text"),
+        ("render_verbatim", "text", "pdf"),
+        ("transcribe_only", "audio", "text"),
+    ],
+)
+async def test_an_attempt_of_a_step_without_a_completion_model_names_no_model_or_prompt(
+    user, output_mode, input_type, output_type
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.document_render_service = SimpleNamespace(
+        render_document=lambda text, output_type, step_order, title: (
+            b"rendered",
+            "application/pdf",
+        ),
+        render_structured_document=MagicMock(),
+        limits=DocumentRenderLimits(),
+    )
+    executor.file_service.save_generated_file = AsyncMock(
+        return_value=SimpleNamespace(id=uuid4())
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(
+        input_type=input_type,
+        output_type=output_type,
+        output_mode=output_mode,
+    )
+    # The step's assistant has a completion model and a prompt, as every
+    # assistant does; this step kind never sends either anywhere.
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = "Never sent to a model"
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="What the step read",
+            source_text="What the step read",
+            input_source="flow_input",
+        )
+    )
+
+    await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assistant.get_response.assert_not_awaited()
+    recorded = flow_run_repo.activate_step_attempt.await_args.kwargs["attempt_input"]
+    assert recorded.completion_configuration is None
+    assert recorded.execution_inputs is None
+    assert recorded.start.model_dump(exclude_none=True) == {
+        "resolved_timeout_seconds": recorded.start.resolved_timeout_seconds,
+        "input_text_length": len("What the step read"),
+    }
+    assert recorded.resolved_input["text"] == "What the step read"
+
+
+@pytest.mark.asyncio
+async def test_completion_evidence_is_refused_for_a_step_without_a_completion_model(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(output_mode="compose_text")
+    state = RunExecutionState({}, [], {}, {}, {})
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text="What the step read",
+            source_text="What the step read",
+            input_source="flow_input",
+        )
+    )
+    # The mapped path freezes a completion call for whatever step it is given.
+    prepared = await executor._preview_assistant_step(
+        step=step, run=run, state=state, version_metadata=None, attempt_no=1
+    )
+
+    with pytest.raises(FlowRuntimeInvariantError, match="calls no completion model"):
+        await executor._activate_prepared_assistant_steps(
+            run, step, state, 1, (prepared,)
+        )
+
+    flow_run_repo.activate_step_attempt.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_json_input_contract_rejects_unparseable_json(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": "not valid json"},
+    )
+    step = _runtime_step(
+        input_type="json",
+        input_contract={"type": "object"},
+    )
+    mock_assistant = MagicMock()
+    mock_assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=mock_assistant)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc.value.code == "typed_io_invalid_json_input"
+
+
+@pytest.mark.asyncio
+async def test_text_input_contract_accepts_json_object_string(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": '{"title":"Sakerhetsanalys"}'},
+    )
+    step = _runtime_step(
+        input_type="text",
+        input_contract={
+            "type": "object",
+            "required": ["title"],
+            "properties": {"title": {"type": "string"}},
+        },
+    )
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert output.input_text == '{"title":"Sakerhetsanalys"}'
+    assert output.full_text == "ok"
+    assert output.contract_validation == {
+        "schema_type_hint": "object",
+        "parse_attempted": True,
+        "parse_succeeded": True,
+        "candidate_type": "dict",
+    }
+
+
+@pytest.mark.asyncio
+async def test_text_input_contract_rejects_non_json_for_object_schema(user):
+    executor, _, _, _ = _build_executor(user)
+    raw_text = "not json at all"
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": raw_text},
+    )
+    step = _runtime_step(
+        input_type="text",
+        input_contract={
+            "type": "object",
+            "required": ["title"],
+            "properties": {"title": {"type": "string"}},
+        },
+    )
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc.value.code == "typed_io_contract_violation"
+    assert raw_text not in str(exc.value)
+    assert len(str(exc.value)) < 200
+
+
+@pytest.mark.asyncio
+async def test_text_input_contract_rejects_extra_properties(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": '{"title":"Sakerhetsanalys","extra":"nope"}'},
+    )
+    step = _runtime_step(
+        input_type="text",
+        input_contract={
+            "type": "object",
+            "required": ["title"],
+            "properties": {"title": {"type": "string"}},
+            "additionalProperties": False,
+        },
+    )
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc.value.code == "typed_io_contract_violation"
+    assert "Additional properties are not allowed" in str(exc.value)
+
+
+@pytest.mark.asyncio
+async def test_text_input_contract_string_schema_keeps_string_behavior(user):
+    executor, _, _, _ = _build_executor(user)
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": '{"title":"still a string"}'},
+    )
+    step = _runtime_step(
+        input_type="text",
+        input_contract={"type": "string"},
+    )
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step()
+    )
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert output.input_text == '{"title":"still a string"}'
+    assert output.full_text == "ok"
+    assert output.contract_validation == {
+        "schema_type_hint": "string",
+        "parse_attempted": False,
+        "parse_succeeded": False,
+        "candidate_type": "str",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("output_type", "expected_mimetype", "expected_ext"),
+    [
+        ("pdf", "application/pdf", ".pdf"),
+        (
+            "docx",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".docx",
+        ),
+    ],
+)
+async def test_document_outputs_generate_downloadable_artifacts(
+    user, output_type: str, expected_mimetype: str, expected_ext: str
+):
+    """PDF/DOCX output types should persist artifact files with download metadata."""
+    executor, _, _, _ = _build_executor(user)
+    executor.document_render_service = SimpleNamespace(
+        render_document=lambda text, output_type, step_order, title: (
+            f"{output_type}:{text}".encode("utf-8"),
+            expected_mimetype,
+        ),
+        render_structured_document=MagicMock(
+            side_effect=AssertionError("structured rendering is not used here")
+        ),
+        limits=DocumentRenderLimits(),
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _runtime_step(output_type=output_type)
+
+    stored_file = SimpleNamespace(id=uuid4())
+    executor.file_service.save_generated_file = AsyncMock(return_value=stored_file)
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(response_text="Rapport")
+    )
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert output.artifacts is not None
+    assert len(output.artifacts) == 1
+    artifact = output.artifacts[0]
+    assert artifact["file_id"] == str(stored_file.id)
+    assert artifact["mimetype"] == expected_mimetype
+    assert artifact["name"].endswith(expected_ext)
+    assert artifact["size"] > 0
+    executor.file_service.save_generated_file.assert_awaited_once_with(
+        payload=f"{output_type}:Rapport".encode(),
+        name=f"Nämndmöte 2026-09-23{expected_ext}",
+        mimetype=expected_mimetype,
+        file_type=FileType.DOCUMENT,
+    )
+
+
+@pytest.mark.usefixtures("shared_document_runtime")
+@pytest.mark.asyncio
+async def test_docx_output_handles_empty_assistant_response(user):
+    """Empty markdown output should still create a valid DOCX artifact."""
+    executor, _, _, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _runtime_step(output_type="docx")
+
+    stored_file = SimpleNamespace(id=uuid4())
+    executor.file_service.save_generated_file = AsyncMock(return_value=stored_file)
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(response_text="")
+    )
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert output.artifacts is not None
+    assert output.artifacts[0]["file_id"] == str(stored_file.id)
+    assert (
+        output.artifacts[0]["mimetype"]
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    executor.file_service.save_generated_file.assert_awaited_once()
+
+
+# --- Audit logging tests for HTTP input ---
+
+
+@pytest.mark.asyncio
+async def test_http_input_audit_logged_on_success(user):
+    audit_service = AsyncMock()
+    audit_service.log_async = AsyncMock(return_value=None)
+    executor, _, _, _ = _build_executor(user)
+    executor.audit_service = audit_service
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "hello"})
+    step = _runtime_step(
+        input_source="http_get",
+        input_type="text",
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
+    )
+    request = httpx.Request("GET", "https://example.org/data")
+    executor.http_runtime.send_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="fetched")
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    audit_service.log_async.assert_awaited_once()
+    call_kwargs = audit_service.log_async.await_args.kwargs
+    assert call_kwargs["action"] == ActionType.FLOW_HTTP_OUTBOUND_CALL
+    assert call_kwargs["outcome"] == Outcome.SUCCESS
+    extra = call_kwargs["metadata"]["extra"]
+    assert extra["call_type"] == "http_input"
+    assert extra["http_method"] == "GET"
+    assert extra["status_code"] == 200
+    assert "duration_ms" in extra
+
+
+# --- Encrypted header tests for HTTP input ---
+
+
+@pytest.mark.asyncio
+async def test_resolve_http_input_decrypts_authored_header_secrets(user):
+    executor, _, _, _ = _build_executor(user)
+    executor.encryption_service.is_encrypted = MagicMock(
+        side_effect=lambda v: v.startswith("enc:")
+    )
+    executor.encryption_service.decrypt = MagicMock(
+        side_effect=lambda v: v[len("enc:") :]
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "x"})
+    step = _runtime_step(
+        input_source="http_get",
+        input_type="text",
+        input_config={
+            "url": "https://example.org/data",
+            "auth": {
+                "mode": "bearer_token",
+                "token": "enc:token456",
+            },
+            "custom_headers": [
+                {"name": "X-Plain", "value": "visible", "secret": False}
+            ],
+        },
+    )
+    request = httpx.Request("GET", "https://example.org/data")
+    executor.http_runtime.send_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="ok")
+    )
+    context = executor.variable_resolver.build_context(run.input_payload_json, [])
+
+    await executor._resolve_step_input(
+        step=step,
+        context=context,
+        run=run,
+        prior_results=[],
+    )
+
+    executor.http_runtime.send_request.assert_awaited_once()
+    headers = executor.http_runtime.send_request.await_args.kwargs["headers"]
+    assert headers["Authorization"] == "Bearer token456"
+    assert headers["X-Plain"] == "visible"
+    executor.encryption_service.decrypt.assert_called_once_with("enc:token456")
+
+
+def test_document_output_prompt_instructs_model_to_return_markdown_not_binary() -> None:
+    prompt = _prompt_for_output_format(
+        output_type="pdf",
+        output_contract=None,
+        prompt="Generera en PDF-rapport",
+    )
+
+    assert "system will render" in prompt
+    assert "document body as Markdown" in prompt
+    assert "%PDF-" in prompt
+
+
+def test_document_output_prompt_with_contract_requests_validated_json() -> None:
+    prompt = _prompt_for_output_format(
+        output_type="pdf",
+        output_contract={"type": "object"},
+        prompt="Return report data",
+    )
+
+    assert "render it into a PDF file" in prompt
+    assert "Return ONLY valid JSON" in prompt
+    assert "Use plain text for JSON string values" in prompt
+    assert "Follow this JSON Schema exactly" in prompt
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "duration,override,succeeds",
+    [
+        (5400, None, True),
+        (15000, None, False),
+        (5400, 7200, True),
+        (5400, 3600, False),
+    ],
+)
+async def test_each_step_spends_its_effective_budget_at_the_provider_boundary(
+    user, monkeypatch, duration, override, succeeds
+):
+    from dataclasses import replace
+
+    import litellm
+
+    from eneo.flows.runtime import step_deadline
+    from eneo.model_providers.infrastructure import litellm_transport
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(step_deadline, "_now", lambda: clock["now"])
+    from eneo.flows.flow_runtime_policy import default_flow_runtime_policy
+    from eneo.main.config import get_settings
+
+    monkeypatch.setattr(get_settings(), "task_execution_timeout_seconds", 14400)
+    executor, _, _, _ = _build_executor(user)
+    policy = default_flow_runtime_policy()
+    assistant = _mock_assistant_for_execute_step()
+    timeouts = []
+
+    async def provider(**kwargs):
+        timeouts.append(kwargs["timeout"])
+        clock["now"] += duration
+        return SimpleNamespace(completion="done", total_token_count=3)
+
+    async def respond(**kwargs):
+        return await litellm_transport.acompletion(model="test", messages=[])
+
+    monkeypatch.setattr(litellm, "acompletion", provider)
+    assistant.get_response = AsyncMock(side_effect=respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "hello"})
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    for order in range(1, 3 if succeeds else 2):
+        step = replace(_runtime_step(step_order=order), timeout_seconds=override)
+        if succeeds:
+            await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+        else:
+            with pytest.raises(TypedIOValidationException, match="execution budget"):
+                await executor._execute_step(
+                    step=step, run=run, state=state, attempt_no=1
+                )
+    assert timeouts == [float(override or policy.default_step_timeout_seconds)] * (
+        2 if succeeds else 1
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("override", [None, 500])
+async def test_later_step_uses_remaining_invocation_budget(user, monkeypatch, override):
+    import litellm
+
+    from eneo.flows.runtime import step_deadline
+    from eneo.main.config import get_settings
+    from eneo.model_providers.infrastructure import litellm_transport
+
+    clock = {"now": 1000.0}
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: clock["now"])
+    monkeypatch.setattr(get_settings(), "task_execution_timeout_seconds", 600)
+    executor, _, _, _ = _build_executor(user, invocation_deadline=1600.0)
+    assistant = _mock_assistant_for_execute_step()
+    timeouts = []
+    deadlines = []
+
+    async def provider(**kwargs):
+        timeouts.append(kwargs["timeout"])
+        scope = step_deadline.current_step_deadline_scope()
+        assert scope is not None
+        deadlines.append(scope.deadline)
+        clock["now"] += 480 if len(timeouts) == 1 else 30
+        return SimpleNamespace(completion="done", total_token_count=3)
+
+    async def respond(**kwargs):
+        return await litellm_transport.acompletion(model="test", messages=[])
+
+    monkeypatch.setattr(litellm, "acompletion", provider)
+    assistant.get_response = AsyncMock(side_effect=respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    for order in (1, 2):
+        step = replace(_runtime_step(step_order=order), timeout_seconds=override)
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert timeouts == [540.0 if override is None else 500.0, 60.0]
+    assert [deadline.budget_seconds for deadline in deadlines] == timeouts
+    assert all(deadline.expires_at <= 1540.0 for deadline in deadlines)
+
+
+@pytest.mark.asyncio
+async def test_smallest_task_timeout_funds_a_step(user, monkeypatch):
+    from eneo.main.config import Settings, get_settings
+
+    settings = Settings.model_validate(
+        {**get_settings().model_dump(), "task_execution_timeout_seconds": 65}
+    )
+    monkeypatch.setattr(
+        get_settings(),
+        "task_execution_timeout_seconds",
+        settings.task_execution_timeout_seconds,
+    )
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: 1000.0)
+    executor, _, _, _ = _build_executor(user, invocation_deadline=1065.0)
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+
+    await executor._execute_step(step=_runtime_step(), run=run, attempt_no=1)
+
+    assert executor.runtime_policy.default_step_timeout_seconds == 5
+    assistant.get_response.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("remaining", [59.0, 60.0, -1.0])
+async def test_step_refuses_before_handler_when_invocation_buffer_is_reached(
+    user, monkeypatch, remaining
+):
+    from eneo.flows.api.flow_models import FlowRunPublic
+    from eneo.flows.enums import FlowStepPhase
+    from eneo.flows.runtime.step_deadline import StepDeadlineExceeded
+
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: 1000.0)
+    executor, _, _, _ = _build_executor(user, invocation_deadline=1000.0 + remaining)
+    handler = SimpleNamespace(execute=AsyncMock())
+    executor._build_step_handler = MagicMock(return_value=handler)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _runtime_step()
+
+    with pytest.raises(StepDeadlineExceeded) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    assert exc_info.value.code == FlowApiErrorCode.STEP_TIMEOUT.value
+    assert exc_info.value.step_phase is FlowStepPhase.STEP_EXECUTION
+    assert exc_info.value.provider_work_may_have_completed is False
+    assert exc_info.value.completed_items is None
+    assert exc_info.value.total_items is None
+    handler.execute.assert_not_awaited()
+
+    executor._terminalize_run = AsyncMock()
+    claimed = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="",
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+    )
+    error = executor._terminalize_run.await_args.kwargs["error"]
+    public = FlowRunPublic.model_validate(
+        run.model_copy(update={"status": FlowRunStatus.FAILED, "error": error}),
+        from_attributes=True,
+    )
+    assert public.error.code == FlowApiErrorCode.STEP_TIMEOUT
+    assert public.error.details.phase is FlowStepPhase.STEP_EXECUTION
+    assert public.error.details.provider_work_may_have_completed is False
+    assert public.error.retryable is False
+    assert "No provider request was sent." in public.error.message
+    assert "run's total budget was exhausted" in public.error.message
+    assert "Raise the step's timeout_seconds" not in public.error.message
+    assert "may or may not have started" not in public.error.message
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "phase", ["input_resolution", "retrieval", "provider_request", "finalization"]
+)
+async def test_backstop_preserves_the_observed_phase_and_provider_outcome(
+    user, monkeypatch, phase
+):
+    from eneo.flows.runtime import step_deadline
+
+    monkeypatch.setattr(step_deadline, "STEP_DEADLINE_BACKSTOP_GRACE_SECONDS", 0)
+    executor, _, _, _ = _build_executor(user)
+    executor._step_deadline_seconds = lambda step: 1.0
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+
+    async def stalled(*args, **kwargs):
+        await asyncio.Event().wait()
+
+    async def dispatched_request(**kwargs):
+        step_deadline.mark_provider_request_in_flight(True)
+        try:
+            await stalled()
+        except asyncio.CancelledError:
+            step_deadline.settle_provider_request(known=False)
+            raise
+
+    if phase == "input_resolution":
+        executor._load_assistant = AsyncMock(side_effect=stalled)
+    elif phase == "retrieval":
+        executor._retrieve_rag_chunks = AsyncMock(side_effect=stalled)
+    elif phase == "provider_request":
+        assistant.get_response = AsyncMock(side_effect=dispatched_request)
+    else:
+        executor._process_typed_output = AsyncMock(side_effect=stalled)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={"text": "hello"})
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=_runtime_step(), run=run, attempt_no=1)
+    assert exc_info.value.step_phase.value == phase
+    assert exc_info.value.provider_work_may_have_completed is (
+        phase == "provider_request"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invocation_limited", [False, True])
+async def test_receipt_exhausting_budget_has_no_provider_work_in_terminal_error(
+    user, monkeypatch, invocation_limited
+):
+    import litellm
+
+    from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+        TenantModelAdapter,
+    )
+    from eneo.flows.api.flow_models import FlowRunPublic
+
+    clock = {"now": 0.0}
+    monkeypatch.setattr(asyncio.get_running_loop(), "time", lambda: clock["now"])
+    executor, _, flow_run_repo, _ = _build_executor(
+        user, invocation_deadline=61.0 if invocation_limited else None
+    )
+    executor._step_deadline_seconds = lambda step: 2.0
+    call_id = uuid4()
+
+    async def prepare_receipt(request):
+        clock["now"] = 2.0
+        return call_id
+
+    observer = SimpleNamespace(
+        started=AsyncMock(side_effect=prepare_receipt),
+        completed=AsyncMock(),
+        rejected=AsyncMock(),
+        outcome_unknown=AsyncMock(),
+    )
+    monkeypatch.setattr(
+        executor_module, "FlowProviderCallRecorder", lambda **kwargs: observer
+    )
+    request = AsyncMock()
+    monkeypatch.setattr(litellm, "acompletion", request)
+    adapter = object.__new__(TenantModelAdapter)
+    adapter.litellm_model = "openai/test-model"
+    adapter.provider_type = "openai"
+    adapter.model = SimpleNamespace(token_limit=8000, max_output_tokens=4000)
+
+    async def respond(**kwargs):
+        return await adapter._observed_provider_call(
+            messages=[],
+            litellm_kwargs={},
+            observer=kwargs["provider_call_observer"],
+            reason="initial",
+            retry_without_capability_safe=True,
+        )
+
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_response = AsyncMock(side_effect=respond)
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    step = _runtime_step()
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    request.assert_not_awaited()
+    observer.started.assert_awaited_once()
+    observer.rejected.assert_awaited_once_with(call_id, "budget_exhausted")
+    observer.outcome_unknown.assert_not_awaited()
+    observer.completed.assert_not_awaited()
+    executor._terminalize_run = AsyncMock()
+    claimed = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text="",
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=exc_info.value,
+        failed_input_payload=None,
+        state=state,
+    )
+    assert (
+        flow_run_repo.finish_attempt.await_args.kwargs["error_code"]
+        == "flow_step_timeout"
+    )
+    error = executor._terminalize_run.await_args.kwargs["error"]
+    public = FlowRunPublic.model_validate(
+        run.model_copy(update={"status": FlowRunStatus.FAILED, "error": error}),
+        from_attributes=True,
+    )
+    assert error.details.provider_work_may_have_completed is False
+    assert public.error.details.provider_work_may_have_completed is False
+    assert "may or may not have started" not in public.error.message
+    assert "No provider request was in flight" in public.error.message
+    if invocation_limited:
+        assert "run's total budget was exhausted" in public.error.message
+        assert "Raise the step's timeout_seconds" not in public.error.message
+    else:
+        assert "Raise the step's timeout_seconds" in public.error.message
+        assert "run's total budget was exhausted" not in public.error.message
+
+
+# --- a model-written key that differs from the contract key only by diacritics or case ---
+
+
+def _string_fields_contract(names: list[str], *, nullable: bool = False) -> dict:
+    leaf: dict = {"type": ["string", "null"] if nullable else "string"}
+    return {
+        "type": "object",
+        "properties": {name: dict(leaf) for name in names},
+        "required": list(names),
+    }
+
+
+def _array_contract(array_key: str, item_contract: dict) -> dict:
+    return {
+        "type": "object",
+        "properties": {array_key: {"type": "array", "items": item_contract}},
+        "required": [array_key],
+        "additionalProperties": False,
+    }
+
+
+def _closed(contract: dict) -> dict:
+    return {**contract, "additionalProperties": False}
+
+
+async def _completed_json_step(user, *, output_contract: dict, response: dict | str):
+    """Run one real single-call JSON step; return what its readers see."""
+    executor, _, _, _ = _build_executor(user)
+    response_text = response if isinstance(response, str) else json.dumps(response)
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(response_text=response_text)
+    )
+    step = _runtime_step(output_type="json", output_contract=output_contract)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+    payload = build_output_payload(output)
+    persisted = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=1,
+        text=payload["text"],
+        structured=payload.get("structured"),
+    )
+    return executor, run, output, payload, persisted
+
+
+async def _execute_json_step(user, *, output_contract: dict, response: dict | str):
+    return (
+        await _completed_json_step(
+            user, output_contract=output_contract, response=response
+        )
+    )[2]
+
+
+_DRIFT_SHAPES = {
+    # Open root, one required key spelled with a diacritic.
+    "root": (
+        _string_fields_contract(["krav", "omrade", "bedomning", "iakttagelser"]),
+        {"krav": "K", "omrade": "O", "bedömning": "Avvikelse", "iakttagelser": "I"},
+        {"krav": "K", "omrade": "O", "bedomning": "Avvikelse", "iakttagelser": "I"},
+    ),
+    # Items 0-3 use the contract key, items 4-7 the diacritic spelling.
+    "late_items": (
+        _array_contract(
+            "avstandskontroller",
+            _closed(
+                _string_fields_contract(
+                    ["krav", "underlag_och_osakerhet"], nullable=True
+                )
+            ),
+        ),
+        {
+            "avstandskontroller": [
+                {
+                    "krav": f"K{index}",
+                    (
+                        "underlag_och_osakerhet"
+                        if index < 4
+                        else "underlag_och_osäkerhet"
+                    ): f"U{index}",
+                }
+                for index in range(8)
+            ]
+        },
+        {
+            "avstandskontroller": [
+                {"krav": f"K{index}", "underlag_och_osakerhet": f"U{index}"}
+                for index in range(8)
+            ]
+        },
+    ),
+    # Item 0 is right, items 1-3 drift.
+    "later_items": (
+        _array_contract(
+            "avvikelser",
+            _closed(
+                _string_fields_contract(
+                    ["avvikelse", "vad_vi_avser_att_forelagga_om"], nullable=True
+                )
+            ),
+        ),
+        {
+            "avvikelser": [
+                {"avvikelse": "A0", "vad_vi_avser_att_forelagga_om": "V0"},
+                *(
+                    {
+                        "avvikelse": f"A{index}",
+                        "vad_vi_avser_att_forelägga_om": f"V{index}",
+                    }
+                    for index in (1, 2, 3)
+                ),
+            ]
+        },
+        {
+            "avvikelser": [
+                {"avvikelse": f"A{index}", "vad_vi_avser_att_forelagga_om": f"V{index}"}
+                for index in range(4)
+            ]
+        },
+    ),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("shape", sorted(_DRIFT_SHAPES))
+async def test_json_step_keeps_the_value_of_a_key_that_differs_only_by_diacritics(
+    user, shape
+):
+    contract, model_output, expected = _DRIFT_SHAPES[shape]
+
+    _, _, output, payload, _ = await _completed_json_step(
+        user, output_contract=contract, response=model_output
+    )
+
+    assert output.structured_output == expected
+    assert [
+        diagnostic.code
+        for diagnostic in output.diagnostics
+        if diagnostic.code.startswith("typed_output_")
+    ] == ["typed_output_keys_renamed"]
+    # One view of the output: the persisted text is the conformed value, not
+    # the model's spelling.
+    assert output.full_text == json.dumps(expected, ensure_ascii=False)
+    assert payload["text"] == output.full_text
+    assert payload["structured"] == expected
+
+
+_LAST_MILE_CONTRACT = _string_fields_contract(["krav", "bedomning"])
+_LAST_MILE_RESPONSE = {"krav": "K1", "bedömning": "Avvikelse"}
+_LAST_MILE_CONFORMED = {"krav": "K1", "bedomning": "Avvikelse"}
+
+
+@pytest.mark.asyncio
+async def test_webhook_body_is_the_conformed_output(user):
+    _, _, _, payload, _ = await _completed_json_step(
+        user, output_contract=_LAST_MILE_CONTRACT, response=_LAST_MILE_RESPONSE
+    )
+    # The delivery reads the persisted text exactly like this and posts it as the
+    # body when the webhook config has no body of its own.
+    text_payload = interpret_step_text(payload).text
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(
+            200, request=httpx.Request("POST", "https://example.org/webhook")
+        )
+    )
+    deps = _webhook_deps(send_http_request=send_http_request)
+
+    await deliver_webhook(
+        step=_WebhookStep(
+            step_order=2,
+            step_id="step-2",
+            input_type="text",
+            input_source="previous_step",
+            output_config={
+                "url": "https://example.org/webhook",
+                "auth": {"mode": "none"},
+            },
+        ),
+        text_payload=text_payload,
+        run=_WebhookRun(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+        context={},
+        deps=deps,
+        idempotency_key="run-1:step-2:1:webhook",
+        sends_end_at=math.inf,
+    )
+
+    body = send_http_request.await_args.kwargs["body_bytes"]
+    assert json.loads(body) == _LAST_MILE_CONFORMED
+
+
+@pytest.mark.asyncio
+async def test_step_output_text_variable_shows_the_conformed_output(user):
+    executor, run, _, _, persisted = await _completed_json_step(
+        user, output_contract=_LAST_MILE_CONTRACT, response=_LAST_MILE_RESPONSE
+    )
+    context = executor.variable_resolver.build_context(
+        run.input_payload_json, [persisted]
+    )
+
+    rendered = executor.variable_resolver.interpolate("{{step_1.output.text}}", context)
+
+    assert json.loads(rendered) == _LAST_MILE_CONFORMED
+
+
+@pytest.mark.asyncio
+async def test_text_input_with_a_contract_receives_the_conformed_output(user):
+    executor, run, _, _, persisted = await _completed_json_step(
+        user, output_contract=_LAST_MILE_CONTRACT, response=_LAST_MILE_RESPONSE
+    )
+    state = RunExecutionState(
+        completed_by_order={1: persisted},
+        prior_results=[persisted],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+    reader = _runtime_step(
+        step_order=2,
+        input_source="previous_step",
+        input_type="text",
+        input_contract=_LAST_MILE_CONTRACT,
+    )
+
+    output = (
+        await executor._execute_step(step=reader, run=run, state=state, attempt_no=1)
+    ).output
+
+    assert json.loads(output.input_text) == _LAST_MILE_CONFORMED
+    assert output.contract_validation is not None
+    assert output.contract_validation["parse_succeeded"] is True
+
+
+@pytest.mark.asyncio
+async def test_run_export_preview_shows_the_conformed_output(user):
+    _, _, _, payload, _ = await _completed_json_step(
+        user, output_contract=_LAST_MILE_CONTRACT, response=_LAST_MILE_RESPONSE
+    )
+
+    preview = _build_step_output_summary(payload)
+
+    assert preview is not None
+    assert json.loads(preview["preview"]) == _LAST_MILE_CONFORMED
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("contract", "raw_text"),
+    [
+        # Exact keys, in the model's own layout.
+        (
+            _LAST_MILE_CONTRACT,
+            json.dumps(_LAST_MILE_CONFORMED, indent=2, ensure_ascii=False),
+        ),
+        # A pruned extra key is not a rename: the model text stays as written.
+        (
+            _closed(_LAST_MILE_CONTRACT),
+            '{"krav":"K1",   "bedomning":"Avvikelse", "extra":"dropped"}',
+        ),
+        # A second spelling next to the declared key is left as it always was.
+        (
+            _closed(_LAST_MILE_CONTRACT),
+            '{"krav":"K1","bedomning":"Avvikelse","bedömning":"Godkänd"}',
+        ),
+    ],
+)
+async def test_json_step_text_is_byte_identical_when_no_key_was_renamed(
+    user, contract, raw_text
+):
+    _, _, output, payload, _ = await _completed_json_step(
+        user, output_contract=contract, response=raw_text
+    )
+
+    assert output.full_text == raw_text
+    assert payload["text"] == raw_text
+    assert "typed_output_keys_renamed" not in {d.code for d in output.diagnostics}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "object_rule",
+    [
+        # Each rule reads the whole object, so a rename of an optional key would
+        # turn this passing output into a failure.
+        {"propertyNames": {"pattern": "^[A-Z]"}},
+        {"dependentRequired": {"antal": ["enhet"]}},
+        {"patternProperties": {"^a": {"type": "string"}}},
+    ],
+)
+async def test_json_step_that_passed_before_still_passes_when_an_optional_key_is_respelled(
+    user, object_rule
+):
+    contract = {
+        "type": "object",
+        "properties": {"antal": {"type": "integer"}},
+        **object_rule,
+    }
+    raw_text = '{"Antal": 3}'
+
+    _, _, output, payload, _ = await _completed_json_step(
+        user, output_contract=contract, response=raw_text
+    )
+
+    assert output.structured_output == {"Antal": 3}
+    assert payload["text"] == raw_text
+    assert "typed_output_keys_renamed" not in {d.code for d in output.diagnostics}
+
+
+@pytest.mark.asyncio
+async def test_json_step_still_fails_on_a_misspelling_that_is_not_a_respelling(user):
+    contract = _array_contract(
+        "utgaaende_tillgangar",
+        _closed(_string_fields_contract(["tillgang", "varde"])),
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _execute_json_step(
+            user,
+            output_contract=contract,
+            response={"utgaaande_tillgangar": [{"tillgang": "Konto", "varde": "1"}]},
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value
+    assert "'utgaaende_tillgangar' is a required property" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_json_step_does_not_let_a_drifted_key_overwrite_the_contract_key(user):
+    contract = _closed(_string_fields_contract(["krav", "bedomning"]))
+
+    output = await _execute_json_step(
+        user,
+        output_contract=contract,
+        response={"krav": "K", "bedomning": "Avvikelse", "bedömning": "Godkänd"},
+    )
+
+    assert output.structured_output == {"krav": "K", "bedomning": "Avvikelse"}
+    assert [
+        diagnostic.code
+        for diagnostic in output.diagnostics
+        if diagnostic.code.startswith("typed_output_")
+    ] == ["typed_output_extra_properties_dropped"]
+
+
+@pytest.mark.asyncio
+async def test_per_source_reader_keeps_the_value_of_a_key_that_differs_only_by_diacritics(
+    user,
+):
+    executor, _, flow_run_repo, _ = _build_executor(user)
+    executor.mapped_execution_policy = FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=3
+    )
+    file_id = uuid4()
+    executor.file_service.get_files_by_ids.side_effect = None
+    executor.file_service.get_files_by_ids.return_value = [
+        _runtime_file(file_id=file_id, text="Kontrollrapport", name="kontroll.pdf")
+    ]
+    flow_run_repo.list_step_input_file_ids = AsyncMock(return_value=[file_id])
+    model_document = {
+        "avvikelser": [
+            {"vad_vi_avser_att_forelagga_om": "V0"},
+            {"vad_vi_avser_att_forelägga_om": "V1"},
+        ]
+    }
+    assistant = _mock_assistant_for_execute_step(
+        response_text=json.dumps({"documents": [model_document]})
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type="document",
+        output_type="json",
+        output_contract={
+            "type": "object",
+            "properties": {
+                "documents": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "source_label": {"type": "string"},
+                            "source_file_id": {"type": "string"},
+                            "extraction_warnings": {
+                                "type": "array",
+                                "items": {
+                                    "type": "string",
+                                    "enum": sorted(TEXT_EXTRACTION_WARNINGS),
+                                },
+                            },
+                            "avvikelser": {
+                                "type": "array",
+                                "items": _closed(
+                                    _string_fields_contract(
+                                        ["vad_vi_avser_att_forelagga_om"]
+                                    )
+                                ),
+                            },
+                        },
+                        "required": [
+                            "source_label",
+                            "source_file_id",
+                            "extraction_warnings",
+                            "avvikelser",
+                        ],
+                        "additionalProperties": False,
+                    },
+                }
+            },
+            "required": ["documents"],
+            "additionalProperties": False,
+        },
+        input_config={
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 1,
+            }
+        },
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assistant.get_response.assert_awaited_once()
+    assert output.structured_output == {
+        "documents": [
+            {
+                "avvikelser": [
+                    {"vad_vi_avser_att_forelagga_om": "V0"},
+                    {"vad_vi_avser_att_forelagga_om": "V1"},
+                ],
+                "source_label": "kontroll.pdf",
+                "source_file_id": str(file_id),
+                "extraction_warnings": [],
+            }
+        ]
+    }
+    assert json.loads(output.full_text) == output.structured_output
+    assert "typed_output_keys_renamed" in {
+        diagnostic.code for diagnostic in output.diagnostics
+    }
+
+
+# --- Contract violation fact on the terminal run error ---
+
+_FACT_CONTRACT = {
+    "type": "object",
+    "required": ["summary"],
+    "properties": {
+        "summary": {
+            "type": "object",
+            "required": ["verdict"],
+            "properties": {"verdict": {"type": "string"}, "note": {"type": "string"}},
+        }
+    },
+}
+_FACT_PRIVATE_VALUE = "Privat anteckning 4711"
+
+
+async def _terminal_run_error(executor, *, run, step, typed_exc):
+    executor._terminalize_run = AsyncMock()
+    claimed = _completed_step_result(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_order=step.step_order,
+        text="",
+    )
+    await executor._handle_typed_step_failure(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        step=step,
+        attempt_no=1,
+        claimed=claimed,
+        typed_exc=typed_exc,
+        failed_input_payload=None,
+    )
+    return executor._terminalize_run.await_args.kwargs["error"]
+
+
+@pytest.mark.asyncio
+async def test_output_violation_fact_is_identical_for_every_model_route(user):
+    from eneo.flows.api.flow_models import FlowRunPublic
+    from eneo.flows.flow_run_error import FlowRunContractViolation, dump_flow_run_error
+
+    facts = []
+    for name, route in (
+        ("luna6", "hosted_vllm/luna6"),
+        ("gemma4-31b-it", "gemini/gemma-4-31b-it"),
+    ):
+        executor, _, _, _ = _build_executor(user)
+        assistant = _mock_assistant_for_execute_step(
+            response_text=json.dumps({"summary": {"note": _FACT_PRIVATE_VALUE}})
+        )
+        assistant.completion_model = SimpleNamespace(
+            id=uuid4(),
+            name=name,
+            provider_type="hosted",
+            litellm_model_name=route,
+            supported_model_kwargs=SupportedModelKwargs(),
+        )
+        executor._load_assistant = AsyncMock(return_value=assistant)
+        step = _runtime_step(output_type="json", output_contract=_FACT_CONTRACT)
+        run = _run(status=FlowRunStatus.RUNNING, user=user)
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await executor._execute_step(step=step, run=run, attempt_no=1)
+
+        error = await _terminal_run_error(
+            executor, run=run, step=step, typed_exc=exc_info.value
+        )
+        public = FlowRunPublic.model_validate(
+            run.model_copy(update={"status": FlowRunStatus.FAILED, "error": error}),
+            from_attributes=True,
+        )
+        assert public.error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+        assert _FACT_PRIVATE_VALUE not in json.dumps(dump_flow_run_error(error))
+        facts.append(public.error.details.contract_violation)
+
+    assert (
+        facts
+        == [
+            FlowRunContractViolation(
+                side="output", schema_rule="required", json_pointer="/summary"
+            )
+        ]
+        * 2
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("input_type", "output_mode"),
+    [("json", "pass_through"), ("text", "pass_through"), ("json", "copy_input")],
+)
+async def test_input_violation_fact_names_the_input_side(user, input_type, output_mode):
+    from eneo.flows.flow_run_error import FlowRunContractViolation
+
+    executor, _, _, _ = _build_executor(user)
+    assistant = _mock_assistant_for_execute_step()
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    step = _runtime_step(
+        input_type=input_type,
+        input_contract=_FACT_CONTRACT,
+        output_mode=output_mode,
+        output_type="json" if output_mode == "copy_input" else "text",
+    )
+    run = _run(
+        status=FlowRunStatus.RUNNING,
+        user=user,
+        input_payload={"text": json.dumps({"summary": {"note": "x"}})},
+    )
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    error = await _terminal_run_error(
+        executor, run=run, step=step, typed_exc=exc_info.value
+    )
+    assert error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+    assert error.details.contract_violation == FlowRunContractViolation(
+        side="input", schema_rule="required", json_pointer="/summary"
+    )
+    assistant.get_response.assert_not_awaited()
+
+
+def _mapped_fact_case(user, *, mode):
+    executor, _, run_repo, _ = _build_executor(user)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    file_ids = [uuid4() for _ in range(3)]
+    files = {
+        file_id: SimpleNamespace(
+            id=file_id,
+            text="source",
+            name=f"source-{index}.pdf",
+            checksum="x",
+            size=6,
+            mimetype="application/pdf",
+            file_type=FileType.TEXT,
+            transcription=None,
+        )
+        for index, file_id in enumerate(file_ids)
+    }
+
+    async def get_files(*, file_ids, **kwargs):
+        return [files[file_id] for file_id in file_ids]
+
+    executor.file_service.get_files_by_ids.side_effect = get_files
+    executor.file_service.get_owned_file_infos.side_effect = get_files
+    run_repo.list_step_input_file_ids.return_value = file_ids
+    assistant = _mock_assistant_for_execute_step(
+        response_text=json.dumps({"documents": [{"title": "T"}]})
+    )
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._retrieve_rag_chunks = AsyncMock(
+        side_effect=lambda **kwargs: ([], {"status": "success", "references": []}, []),
+    )
+    properties = {
+        "title": {"type": "string"},
+        "source_label": {"type": "string"},
+        "source_file_id": {"type": "string"},
+    }
+    if mode == "per_source":
+        properties["extraction_warnings"] = {
+            "type": "array",
+            "items": {"type": "string", "enum": sorted(TEXT_EXTRACTION_WARNINGS)},
+        }
+    # Each call returns one record, so only the assembled output breaks maxItems.
+    contract = {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "maxItems": 2,
+                "items": {
+                    "type": "object",
+                    "properties": properties,
+                    "required": list(properties),
+                    "additionalProperties": False,
+                },
+            }
+        },
+        "required": ["documents"],
+        "additionalProperties": False,
+    }
+    state = RunExecutionState({}, [], {}, {}, {})
+    if mode == "per_item":
+        state.append_completed(
+            _completed_step_result(
+                run_id=run.id,
+                flow_id=run.flow_id,
+                tenant_id=run.tenant_id,
+                step_order=1,
+                text="",
+                structured={
+                    "documents": [
+                        {"source_label": files[fid].name, "source_file_id": str(fid)}
+                        for fid in file_ids
+                    ]
+                },
+            )
+        )
+    step = _runtime_step(
+        step_order=2 if mode == "per_item" else 1,
+        input_source="previous_step" if mode == "per_item" else "flow_input",
+        input_type="json" if mode == "per_item" else "document",
+        input_contract={
+            "type": "object",
+            "properties": {"documents": {"type": "array", "items": {"type": "object"}}},
+            "required": ["documents"],
+        }
+        if mode == "per_item"
+        else None,
+        output_type="json",
+        output_contract=contract,
+        input_config={"item_map": {"enabled": True, "max_items": 3}}
+        if mode == "per_item"
+        else {
+            "runtime_input": {
+                "enabled": True,
+                "input_format": "document",
+                "execution_mode": "per_source",
+                "max_files": 3,
+            }
+        },
+    )
+    return executor, run, state, step, assistant
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mode", ["per_item", "per_source"])
+async def test_assembled_mapped_output_violation_records_the_fact(user, mode):
+    from eneo.flows.flow_run_error import FlowRunContractViolation
+
+    executor, run, state, step, assistant = _mapped_fact_case(user, mode=mode)
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert assistant.get_response.await_count == 3
+    error = await _terminal_run_error(
+        executor, run=run, step=step, typed_exc=exc_info.value
+    )
+    assert error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+    assert error.details.contract_violation == FlowRunContractViolation(
+        side="output", schema_rule="maxItems", json_pointer="/documents"
+    )
+
+
+@pytest.mark.asyncio
+async def test_assembled_section_output_violation_records_the_fact(user):
+    from eneo.flows.flow_run_error import FlowRunContractViolation
+    from tests.unittests.flows.test_text_sections import _case
+
+    executor, _, assistant, run, state, step, *_ = _case(user)
+    contract = json.loads(json.dumps(step.output_contract))
+    # Each section call is held to one record, so only the assembly breaks this.
+    contract["properties"]["records"]["maxItems"] = 2
+    step = replace(step, output_contract=contract)
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert assistant.get_response.await_count > 2
+    error = await _terminal_run_error(
+        executor, run=run, step=step, typed_exc=exc_info.value
+    )
+    assert error.details.contract_violation == FlowRunContractViolation(
+        side="output", schema_rule="maxItems", json_pointer="/records"
+    )
+
+
+@pytest.mark.asyncio
+async def test_output_violation_beyond_the_pointer_bound_keeps_code_without_a_fact(
+    user,
+):
+    key = "k" * 450
+    executor, _, _, _ = _build_executor(user)
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(
+            response_text=json.dumps({key: 1})
+        )
+    )
+    step = _runtime_step(
+        output_type="json",
+        output_contract={"type": "object", "properties": {key: {"type": "string"}}},
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await executor._execute_step(step=step, run=run, attempt_no=1)
+
+    error = await _terminal_run_error(
+        executor, run=run, step=step, typed_exc=exc_info.value
+    )
+    assert error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+    assert error.details is None or error.details.contract_violation is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "context",
+    [
+        {"json_pointer": 1, "schema_rule": "required", "contract_side": "output"},
+        {"json_pointer": "/a", "schema_rule": "not a rule", "contract_side": "output"},
+        {"json_pointer": "/a~9", "schema_rule": "type", "contract_side": "output"},
+        {
+            "json_pointer": "/" + "a" * 5000,
+            "schema_rule": "type",
+            "contract_side": "input",
+        },
+        {"json_pointer": "/a", "schema_rule": "type", "contract_side": ["output"]},
+        {"json_pointer": "/a", "schema_rule": "type"},
+        {"unknown": {"json_pointer": "/a"}},
+    ],
+)
+async def test_hostile_contract_context_still_terminalizes_without_a_fact(
+    user, context
+):
+    executor, _, _, _ = _build_executor(user)
+    step = _runtime_step(output_type="json", output_contract=_FACT_CONTRACT)
+    run = _run(status=FlowRunStatus.RUNNING, user=user)
+    typed_exc = TypedIOValidationException(
+        "Step 1 output at /a: rejected.",
+        code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        context=context,
+    )
+
+    error = await _terminal_run_error(executor, run=run, step=step, typed_exc=typed_exc)
+
+    assert error.code == FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+    assert error.details is None
+    assert executor._terminalize_run.await_args.kwargs["target_status"] == (
+        FlowRunStatus.FAILED
+    )
+
+
+@pytest.mark.parametrize(
+    ("value", "contract", "ceiling", "failure"),
+    [
+        pytest.param(
+            {
+                "Case_ID": "Å-17",
+                "extra": {"fält": [None, True, 2.5]},
+                "unlisted": "漢字",
+            },
+            {"type": "object", "properties": {"Case_ID": {"type": "string"}}},
+            4096,
+            None,
+            id="whole-object-keys-unicode",
+        ),
+        pytest.param(
+            [{"x": "å"}, None, False, 2.5],
+            {"type": "array"},
+            4096,
+            None,
+            id="whole-array",
+        ),
+        pytest.param(
+            {"count": "five"},
+            {"properties": {"count": {"type": "integer"}}},
+            4096,
+            "typed_io_contract_violation",
+            id="wrong-output-value",
+        ),
+        pytest.param(
+            {"Case_ID": "x"},
+            {"properties": {"case_id": {"type": "string"}}, "required": ["case_id"]},
+            4096,
+            "typed_io_contract_violation",
+            id="key-not-renamed-to-contract",
+        ),
+        pytest.param(
+            {},
+            {"type": "missing"},
+            4096,
+            "typed_io_contract_violation",
+            id="unevaluable-output-schema",
+        ),
+        pytest.param(
+            [0] * 430,
+            {"type": "array"},
+            1200,
+            "typed_io_structured_output_exceeds_limit",
+            id="encoded-output-cap",
+        ),
+        *[
+            pytest.param(
+                {"nested": [number]},
+                None,
+                4096,
+                "typed_io_invalid_json_input",
+                id=f"nonfinite-{label}",
+            )
+            for label, number in [
+                ("nan", float("nan")),
+                ("positive-infinity", float("inf")),
+                ("negative-infinity", -float("inf")),
+            ]
+        ],
+        pytest.param(
+            None, None, 4096, "typed_io_invalid_json_input", id="no-container"
+        ),
+    ],
+)
+async def test_copy_input_preserves_the_container_without_a_model(
+    user, value, contract, ceiling, failure
+) -> None:
+    # Kills model dispatch, JSON field normalization, skipped direct output
+    # validation (even with no compiled validator), and skipped byte admission.
+    executor, _, _, _ = _build_executor(user, max_inline_text_bytes=ceiling)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    raw = json.dumps(value, ensure_ascii=False, separators=(",", ":"))
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text=raw, source_text=raw, structured=value, input_source="flow_input"
+        )
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    step = _runtime_step(
+        input_type="json",
+        output_type="json",
+        output_mode="copy_input",
+        output_contract=contract,
+    )
+    if failure:
+        with pytest.raises(TypedIOValidationException) as refused:
+            await executor._execute_step(step=step, run=run, attempt_no=1)
+        assert refused.value.code == failure
+        if refused.value.context and failure == "typed_io_contract_violation":
+            assert refused.value.context["contract_side"] == "output"
+    else:
+        output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+        assert output.structured_output == value
+        assert json.loads(output.full_text) == value
+        assert json.loads(output.persisted_text) == value
+        assert output.model_parameters_json == {"mode": "copy_input"}
+        assert output.num_tokens_input == output.num_tokens_output == 0
+        assert output.generated_file_ids == []
+    assistant.get_response.assert_not_awaited()
+
+
+@pytest.mark.parametrize("side", ["input", "output"])
+async def test_copy_input_checks_a_backtracking_contract_off_the_event_loop(
+    user, monkeypatch, side
+) -> None:
+    # Kills an in-process contract check on either side of a copy step: Python's
+    # re holds the GIL on this pattern for seconds, so the loop stops beating
+    # and the step ends with a pattern violation instead of at the limit.
+    from eneo.flows.runtime import tool_argument_check
+
+    monkeypatch.setattr(tool_argument_check, "CONTRACT_CHECK_TIMEOUT_SECONDS", 0.5)
+    executor, _, _, _ = _build_executor(user)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    contract = {"properties": {"code": {"pattern": "^(a+)+$"}}}
+    step = _runtime_step(
+        input_type="json",
+        output_type="json",
+        output_mode="copy_input",
+        **{f"{side}_contract": contract},
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    def copy_of(value: dict[str, object]) -> AsyncMock:
+        raw = json.dumps(value)
+        return AsyncMock(
+            return_value=StepInputValue(
+                text=raw, source_text=raw, structured=value, input_source="flow_input"
+            )
+        )
+
+    beats: list[float] = []
+
+    async def heartbeat() -> None:
+        while True:
+            beats.append(time.monotonic())
+            await asyncio.sleep(0.01)
+
+    executor._resolve_step_input = copy_of({"code": "a" * 27 + "!"})
+    beating = asyncio.create_task(heartbeat())
+    started = time.monotonic()
+    try:
+        with pytest.raises(TypedIOValidationException) as refused:
+            await executor._execute_step(step=step, run=run, attempt_no=1)
+    finally:
+        ended = time.monotonic()
+        beating.cancel()
+    marks = [started, *beats, ended]
+    assert max(b - a for a, b in zip(marks, marks[1:])) < 0.25
+    assert ended - started < 3.0
+    assert refused.value.code == "typed_io_contract_not_checked"
+
+    executor._resolve_step_input = copy_of({"code": "aaa"})
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+    assert output.structured_output == {"code": "aaa"}
+    assistant.get_response.assert_not_awaited()
+
+
+async def test_copy_input_checks_a_large_valid_value_past_the_tool_argument_limit(
+    user, monkeypatch
+) -> None:
+    # Kills copy contract checks bound by the tool-argument limit: a valid
+    # value at the step's byte ceiling whose check takes longer than that
+    # limit would fail the step although it fits the contract.
+    from eneo.flows.runtime import tool_argument_check
+
+    monkeypatch.setattr(
+        tool_argument_check, "TOOL_ARGUMENT_CHECK_TIMEOUT_SECONDS", 0.01
+    )
+    value = [[index] for index in range(20_000)]
+    raw = json.dumps(value)
+    executor, _, _, _ = _build_executor(user, max_inline_text_bytes=len(raw))
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = ""
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text=raw, source_text=raw, structured=value, input_source="flow_input"
+        )
+    )
+    contract = {
+        "type": "array",
+        "items": {"type": "array", "items": {"type": "integer", "minimum": 0}},
+    }
+    step = _runtime_step(
+        input_type="json",
+        output_type="json",
+        output_mode="copy_input",
+        input_contract=contract,
+        output_contract=contract,
+    )
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+
+    output = (await executor._execute_step(step=step, run=run, attempt_no=1)).output
+
+    assert output.structured_output == value
+
+
+_BACKTRACKING = {"properties": {"code": {"pattern": "^(a+)+$"}}}
+
+
+@pytest.mark.parametrize(
+    "site",
+    [
+        {"output_type": "json", "output_contract": _BACKTRACKING},
+        {"output_type": "docx", "output_contract": _BACKTRACKING},
+        {"input_type": "json", "input_contract": _BACKTRACKING},
+        {"input_contract": {"type": "string", "pattern": "^(a+)+$"}},
+    ],
+    ids=["json-output", "document-output", "json-input", "scalar-text-input"],
+)
+async def test_a_model_step_checks_a_backtracking_contract_off_the_event_loop(
+    user, monkeypatch, site
+) -> None:
+    # Kills an in-process contract check at each check site of a model step,
+    # and a check that skips a scalar (the text input): Python's re holds the
+    # GIL on this pattern for seconds, so the loop stops beating and the step
+    # ends with a pattern violation instead of at the limit.
+    from eneo.flows.runtime import tool_argument_check
+
+    monkeypatch.setattr(tool_argument_check, "CONTRACT_CHECK_TIMEOUT_SECONDS", 0.5)
+    slow = {"code": "a" * 27 + "!"}
+    executor, _, _, _ = _build_executor(user)
+    executor._load_assistant = AsyncMock(
+        return_value=_mock_assistant_for_execute_step(response_text=json.dumps(slow))
+    )
+    step = _runtime_step(**site)
+    text = json.dumps(slow) if step.input_type == "json" else slow["code"]
+    executor._resolve_step_input = AsyncMock(
+        return_value=StepInputValue(
+            text=text,
+            source_text=text,
+            structured=slow if step.input_type == "json" else None,
+            input_source="flow_input",
+        )
+    )
+    beats: list[float] = []
+
+    async def heartbeat() -> None:
+        while True:
+            beats.append(time.monotonic())
+            await asyncio.sleep(0.01)
+
+    beating = asyncio.create_task(heartbeat())
+    started = time.monotonic()
+    try:
+        with pytest.raises(TypedIOValidationException) as refused:
+            await executor._execute_step(
+                step=step,
+                run=_run(status=FlowRunStatus.RUNNING, user=user),
+                attempt_no=1,
+            )
+    finally:
+        ended = time.monotonic()
+        beating.cancel()
+    marks = [started, *beats, ended]
+    assert max(b - a for a, b in zip(marks, marks[1:])) < 0.25
+    assert ended - started < 3.0
+    assert refused.value.code == "typed_io_contract_not_checked"
+
+
+async def test_a_model_answer_that_is_not_json_fails_as_output(user) -> None:
+    # Kills the input side's code for a value the output's contract check
+    # cannot write as JSON: Python's reader takes NaN, JSON does not.
+    with pytest.raises(TypedIOValidationException) as refused:
+        await _execute_json_step(
+            user, output_contract={"type": "object"}, response='{"score": NaN}'
+        )
+
+    assert refused.value.code == "typed_io_output_parse_failed"
+
+
+@pytest.mark.parametrize(
+    "prompt",
+    [
+        "{{ step_1.output.text }}",
+        "x" * 2000 + "{{ step_1.output.text }}",
+        "{{ step_1.output.text }} {{ flow_input.missing }}",
+    ],
+    ids=["reads-earlier-file", "oversize", "missing-reference"],
+)
+async def test_copy_input_ignores_its_leftover_prompt_during_input_resolution(
+    user, prompt
+) -> None:
+    # Kills input resolution that receives the prompt of a step without a
+    # completion model (the unused prompt would select file-based earlier
+    # material, count against the input byte limit, or fail the step on a
+    # reference only it makes) and model format instructions added to such a
+    # step (they would push this value past the limit).
+    executor, _, _, _ = _build_executor(user, max_inline_text_bytes=1024)
+    assistant = _mock_assistant_for_execute_step()
+    assistant.get_prompt_text.return_value = prompt
+    executor._load_assistant = AsyncMock(return_value=assistant)
+    run = _run(status=FlowRunStatus.RUNNING, user=user, input_payload={})
+    value = {"case": "A-17", "note": "x" * 880}
+    state = RunExecutionState({}, [], {}, {}, {})
+    state.append_completed(
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=1,
+            text="earlier",
+            text_overflow={
+                "generated_file_ids": [str(uuid4())],
+                "inline_text_bytes": 7,
+                "full_text_bytes": 12,
+            },
+        )
+    )
+    state.append_completed(
+        _completed_step_result(
+            run_id=run.id,
+            flow_id=run.flow_id,
+            tenant_id=run.tenant_id,
+            step_order=2,
+            text=json.dumps(value),
+            structured=value,
+        )
+    )
+    step = _runtime_step(
+        step_order=3,
+        input_source="previous_step",
+        input_type="json",
+        output_type="json",
+        output_mode="copy_input",
+        output_contract={"type": "object"},
+    )
+
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+
+    assert result.output.structured_output == value
+    assert result.output.effective_prompt == ""
+    executor.file_service.get_owned_file_infos.assert_not_awaited()
+    executor.file_service.get_files_by_ids.assert_not_awaited()
+    assistant.get_response.assert_not_awaited()

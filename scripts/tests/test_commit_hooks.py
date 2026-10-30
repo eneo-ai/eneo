@@ -1,18 +1,44 @@
 from __future__ import annotations
 
+import ast
+import importlib.util
+import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 COMMIT_MSG_CHECK = REPO_ROOT / "scripts" / "commit_msg_check.py"
 COMMIT_PREFLIGHT = REPO_ROOT / "scripts" / "commit_preflight.py"
 PRE_PUSH_CHECK = REPO_ROOT / "scripts" / "pre_push_check.py"
 ROUTE_METADATA_CHECK = REPO_ROOT / "scripts" / "check_route_metadata.py"
+
+
+def load_pre_push_check_module():
+    sys.path.insert(0, str(PRE_PUSH_CHECK.parent))
+    spec = importlib.util.spec_from_file_location("pre_push_check", PRE_PUSH_CHECK)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def required_settings_env_keys() -> set[str]:
+    tree = ast.parse((REPO_ROOT / "backend" / "src" / "eneo" / "main" / "config.py").read_text())
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "Settings":
+            return {
+                item.target.id.upper()
+                for item in node.body
+                if isinstance(item, ast.AnnAssign)
+                and isinstance(item.target, ast.Name)
+                and item.value is None
+            }
+    raise AssertionError("Settings class not found")
 
 
 def run_script(
@@ -123,6 +149,44 @@ class CommitHookTests(unittest.TestCase):
         self.assertEqual(result.returncode, 2)
         self.assertIn("High-confidence secret", result.stderr)
 
+    def test_commit_preflight_flags_eneo_service_key_pattern(self) -> None:
+        root = self.make_repo()
+        (root / ".gitignore").write_text("", encoding="utf-8")
+        target = root / "backend" / "src" / "eneo" / "service_key_pattern_demo.py"
+        generated_hex_length = 64 * 2
+        candidate = "".join(("s", "k", "_", "a" * generated_hex_length))
+        target.write_text(f'value = "{candidate}"\n', encoding="utf-8")
+        subprocess.run(
+            ["git", "add", str(target.relative_to(root))],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        result = run_script(COMMIT_PREFLIGHT, "--repo-root", str(root))
+
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn("High-confidence secret", result.stderr)
+
+    def test_commit_preflight_allows_short_eneo_service_key_placeholder(self) -> None:
+        root = self.make_repo()
+        (root / ".gitignore").write_text("", encoding="utf-8")
+        target = root / "backend" / "src" / "eneo" / "service_key_placeholder.py"
+        placeholder = "".join(("s", "k", "_", "test"))
+        target.write_text(f'value = "{placeholder}"\n', encoding="utf-8")
+        subprocess.run(
+            ["git", "add", str(target.relative_to(root))],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        result = run_script(COMMIT_PREFLIGHT, "--repo-root", str(root))
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_pre_push_check_blocks_protected_branch_without_override(self) -> None:
         root = self.make_repo(branch="develop")
         target = root / "README.md"
@@ -180,12 +244,35 @@ class CommitHookTests(unittest.TestCase):
         root = self.make_repo()
         bin_dir = root / "bin"
         schema = root / "frontend" / "packages" / "eneo-js" / "src" / "types" / "schema.d.ts"
+        schema_env = root / "schema-env.json"
         bin_dir.mkdir()
         schema.parent.mkdir(parents=True, exist_ok=True)
         schema.write_text("export type Schema = 'current';\n", encoding="utf-8")
 
         uv = bin_dir / "uv"
-        uv.write_text("#!/usr/bin/env sh\nexit 0\n", encoding="utf-8")
+        uv.write_text(
+            "#!/usr/bin/env python3\n"
+            "import json, os, pathlib, sys\n"
+            f"marker = pathlib.Path({str(schema_env)!r})\n"
+            "if 'sort_keys=True' not in sys.argv[-1]:\n"
+            "    sys.exit(3)\n"
+            "keys = [\n"
+            "    'POSTGRES_USER',\n"
+            "    'POSTGRES_PORT',\n"
+            "    'UPLOAD_FILE_TO_SESSION_MAX_SIZE',\n"
+            "    'UPLOAD_IMAGE_TO_SESSION_MAX_SIZE',\n"
+            "    'UPLOAD_MAX_FILE_SIZE',\n"
+            "    'TRANSCRIPTION_MAX_FILE_SIZE',\n"
+            "    'TASK_EXECUTION_TIMEOUT_SECONDS',\n"
+            "    'TASK_MAINTENANCE_TIMEOUT_SECONDS',\n"
+            "    'JWT_EXPIRY_TIME',\n"
+            "    'JWT_SECRET',\n"
+            "    'ENCRYPTION_KEY',\n"
+            "]\n"
+            "marker.write_text(json.dumps({key: os.environ.get(key) for key in keys}), encoding='utf-8')\n"
+            "sys.exit(0)\n",
+            encoding="utf-8",
+        )
         uv.chmod(0o755)
 
         bun = bin_dir / "bun"
@@ -221,6 +308,39 @@ class CommitHookTests(unittest.TestCase):
         result = run_script(PRE_PUSH_CHECK, cwd=root, env=env)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn("running schema drift", result.stderr)
+
+        dump_env = json.loads(schema_env.read_text(encoding="utf-8"))
+        self.assertEqual(dump_env["POSTGRES_USER"], "placeholder")
+        self.assertEqual(dump_env["JWT_SECRET"], "ci-test-jwt-secret-not-for-production-0123456789")
+        self.assertEqual(dump_env["ENCRYPTION_KEY"], "yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=")
+        for key in (
+            "POSTGRES_PORT",
+            "UPLOAD_FILE_TO_SESSION_MAX_SIZE",
+            "UPLOAD_IMAGE_TO_SESSION_MAX_SIZE",
+            "UPLOAD_MAX_FILE_SIZE",
+            "TRANSCRIPTION_MAX_FILE_SIZE",
+            "TASK_EXECUTION_TIMEOUT_SECONDS",
+            "TASK_MAINTENANCE_TIMEOUT_SECONDS",
+            "JWT_EXPIRY_TIME",
+        ):
+            self.assertRegex(dump_env[key], r"^\d+$", key)
+        self.assertGreater(int(dump_env["TASK_EXECUTION_TIMEOUT_SECONDS"]), 0)
+        self.assertGreater(int(dump_env["TASK_MAINTENANCE_TIMEOUT_SECONDS"]), 0)
+
+    def test_pre_push_schema_drift_env_covers_required_settings(self) -> None:
+        pre_push_check = load_pre_push_check_module()
+
+        missing = required_settings_env_keys() - set(pre_push_check.SCHEMA_DRIFT_ENV)
+
+        self.assertEqual(missing, set())
+
+    def test_ci_schema_drift_dump_uses_canonical_key_order(self) -> None:
+        workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
+
+        self.assertIn(
+            "json.dump(app.openapi(), open('/tmp/openapi.gen.json', 'w'), sort_keys=True)",
+            workflow,
+        )
 
     def test_pre_push_check_blocks_schema_drift(self) -> None:
         root = self.make_repo()

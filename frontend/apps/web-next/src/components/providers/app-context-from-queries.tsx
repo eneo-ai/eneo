@@ -4,6 +4,7 @@ import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { browserApi } from "@/lib/api/browser";
 import { sessionQueries } from "@/lib/api/session";
+import { flowsAvailable } from "@/features/flows/flows-api";
 import { WhatsNewProvider } from "@/features/whats-new/whats-new-provider";
 import { AppContextProvider, type AppContextData } from "./app-context";
 
@@ -47,6 +48,7 @@ export function QueryAppContextProvider({
       settings,
       federationStatus,
       limits,
+      featureFlags: { flows: flowsAvailable(settings, user) },
       links: env.links,
       versions: { frontend: env.frontendVersion, backend: env.backendVersion }
     }),

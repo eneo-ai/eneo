@@ -90,6 +90,7 @@ class FileContentLoader:
         metadata: Sequence[FileMetadata],
         *,
         include_transcription: bool = True,
+        include_text_original_bytes: bool = False,
     ) -> dict[UUID, File]:
         """Load each referenced content object at most once.
 
@@ -109,6 +110,7 @@ class FileContentLoader:
             references,
             legacy_infos,
             include_transcription=include_transcription,
+            include_text_original_bytes=include_text_original_bytes,
         )
 
     async def _load_from_facts(
@@ -118,12 +120,14 @@ class FileContentLoader:
         legacy_infos: list[LegacyFileInfoRecord],
         *,
         include_transcription: bool,
+        include_text_original_bytes: bool = False,
     ) -> dict[UUID, File]:
         selections = await self._select_content_from_facts(
             metadata,
             references,
             legacy_infos,
             include_transcription=include_transcription,
+            include_text_original_bytes=include_text_original_bytes,
         )
         return await self._hydrate_selected_files(metadata, selections)
 
@@ -134,6 +138,7 @@ class FileContentLoader:
         legacy_infos: list[LegacyFileInfoRecord],
         *,
         include_transcription: bool,
+        include_text_original_bytes: bool = False,
     ) -> dict[UUID, _FileContentSelection]:
         by_file: defaultdict[UUID, list[FileContentReferenceRecord]] = defaultdict(list)
         for reference in references:
@@ -147,6 +152,7 @@ class FileContentLoader:
                 file_references,
                 legacy_info_by_file.get(file.id),
                 include_transcription=include_transcription,
+                include_text_original_bytes=include_text_original_bytes,
             )
             if requested:
                 legacy_requests[file.id] = requested
@@ -183,7 +189,20 @@ class FileContentLoader:
                         f"File {file.id} has no readable text content"
                     )
                 hydrated_reference = text_reference
-                blob_reference = None
+                # Generic attachment consumers need extracted text only. A
+                # caller that must preserve a parsed document's exact bytes,
+                # such as DOCX template compilation, opts into the additional
+                # projection explicitly so ordinary text is not duplicated in
+                # memory.
+                blob_reference = (
+                    self._first_content(
+                        file_references,
+                        file_legacy_content,
+                        FileContentVariant.ORIGINAL,
+                    )
+                    if include_text_original_bytes
+                    else None
+                )
             else:
                 text_reference = None
                 blob_reference = self._preferred_binary_reference(
@@ -281,7 +300,9 @@ class FileContentLoader:
                 text=text,
                 blob=blob,
                 transcription=transcription,
-                user_id=file.user_id,
+                owner_type=file.owner_type,
+                owner_user_id=file.owner_user_id,
+                owner_service_id=file.owner_service_id,
                 tenant_id=file.tenant_id,
                 parent_file_id=file.parent_file_id,
                 revises_file_id=file.revises_file_id,
@@ -479,6 +500,7 @@ class FileContentLoader:
         legacy_info: LegacyFileInfoRecord | None,
         *,
         include_transcription: bool,
+        include_text_original_bytes: bool = False,
     ) -> set[FileContentVariant]:
         requested: set[FileContentVariant] = set()
         if legacy_info is None:
@@ -492,6 +514,16 @@ class FileContentLoader:
                 is None
             ):
                 requested.add(FileContentVariant.EXTRACTED_TEXT)
+            if (
+                include_text_original_bytes
+                and legacy_info.original_available
+                and FileContentLoader._first_reference(
+                    references,
+                    FileContentVariant.ORIGINAL,
+                )
+                is None
+            ):
+                requested.add(FileContentVariant.ORIGINAL)
         elif select_binary_file_reference(file.file_type, references) is None:
             requested.add(
                 legacy_primary_file_variant(

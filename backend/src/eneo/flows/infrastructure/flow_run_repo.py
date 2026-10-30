@@ -1,0 +1,4085 @@
+from __future__ import annotations
+
+import logging
+from contextvars import ContextVar
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta, timezone
+from typing import Any, Collection, Sequence, TypedDict, cast
+from uuid import UUID, uuid4
+
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import Mapper, aliased
+
+from eneo.authentication.auth_models import ApiKeyPermission
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
+    FlowRunReviewCheckpoints,
+    FlowRuns,
+    FlowRunStepInputFiles,
+    FlowRunStepResultFiles,
+    Flows,
+    FlowStepAttemptResolvedInputs,
+    FlowStepAttempts,
+    FlowStepResults,
+)
+from eneo.database.tables.tenant_table import Tenants
+from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
+from eneo.files.file_repo import (
+    FileContentReferenceRecord,
+    FileRepository,
+    project_file_info,
+    select_primary_file_reference,
+)
+from eneo.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    FlowRun,
+    FlowRunStatus,
+    FlowRunStatusSnapshot,
+    FlowStepAttempt,
+    FlowStepAttemptStatus,
+    FlowStepResult,
+    FlowStepResultAnnotation,
+    FlowStepResultStatus,
+)
+from eneo.flows.domain.flow_run_exceptions import (
+    FlowExecutionOwnershipLost,
+    FlowRunNotFoundError,
+    FlowRunPersistenceInvariantError,
+)
+from eneo.flows.domain.flow_run_listing import FlowRunListing
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FLOW_DISPATCH_MAX_ATTEMPTS,
+    FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS,
+    FLOW_QUEUED_REDISPATCH_AFTER_SECONDS,
+    FLOW_RUN_ABANDONMENT_AFTER,
+    FlowRunAbandonmentWait,
+    FlowRunRecoveryKind,
+    flow_dispatch_retry_delay_seconds,
+    flow_run_abandonment_deadline,
+    require_flow_run_wait_before_deadline,
+    start_flow_dispatch_epoch,
+)
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptInput,
+    FlowStepAttemptToolCallResult,
+    FlowStepAttemptToolCallStart,
+    FlowStepAttemptToolCallWrite,
+    merge_flow_step_attempt_input,
+    parse_flow_step_attempt_input,
+)
+from eneo.flows.domain.forwarding_facts import (
+    ForwardingFacts,
+    parse_forwarding_facts,
+)
+from eneo.flows.domain.step_output import (
+    FileBackedStepText,
+    InlineTranscript,
+    RejectedCompletion,
+)
+from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
+from eneo.flows.enums import (
+    ACTIVE_FLOW_RUN_STATUSES,
+    ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES,
+    CANCELLABLE_FLOW_RUN_STATUSES,
+    NON_TERMINAL_FLOW_RUN_STATUS_VALUES,
+    OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES,
+    TERMINAL_FLOW_RUN_STATUSES,
+    FlowRunPurpose,
+    FlowRunReviewCheckpointState,
+)
+from eneo.flows.flow_run_error import (
+    FlowRunAbandonmentFacts,
+    FlowRunDispatchError,
+    FlowRunError,
+    dump_flow_run_dispatch_error,
+    dump_flow_run_error,
+)
+from eneo.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    SPEAKER_LABELS_KEY,
+    FlowRunInputEnvelopePatch,
+    speaker_labels_choice,
+)
+from eneo.flows.flow_run_provenance import (
+    FlowImportedAttemptProvenance,
+    FlowResolvedInputEdge,
+    FlowResolvedInputEdges,
+    FlowResolvedInputEdgesConflictError,
+    FlowResolvedInputEdgesParseResult,
+    FlowResolvedInputEdgesUnavailableError,
+    FlowResolvedInputStepResultSource,
+    FlowResolvedInputToolAnswerSource,
+    parse_resolved_input_edges,
+    resolve_attempt_terminalization_evidence,
+    tool_answer_source,
+)
+from eneo.flows.flow_run_step_input_file import (
+    FlowRunStepInputFileMetadata,
+    FlowRunStepInputFileRef,
+)
+from eneo.flows.flow_run_step_inputs import FlowRunStepInputFileProjection
+from eneo.flows.flow_run_step_result_file import (
+    FlowRunStepResultFile,
+    FlowRunStepResultFileAvailability,
+    FlowRunStepResultFileSource,
+    FlowStepResultFileReference,
+)
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
+    FlowStepUsageReceipt,
+)
+from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
+    FlowRunAuditOutboxRepository,
+)
+from eneo.flows.infrastructure.flow_run_list_query import (
+    run_list_order,
+    run_search_clause,
+)
+from eneo.flows.infrastructure.flow_run_staleness import (
+    flow_run_awaits_webhook_delivery,
+    stale_running_flow_run_predicate,
+)
+from eneo.flows.infrastructure.flow_run_step_input_file_rows import (
+    build_step_input_file_rows,
+    insert_step_input_file_rows,
+)
+from eneo.flows.infrastructure.flow_step_attempt_numbering import (
+    next_step_attempt_no,
+)
+from eneo.flows.principal import FlowPrincipal
+from eneo.object_content.content import ContentState
+
+logger = logging.getLogger(__name__)
+
+
+class PreseedStep(TypedDict):
+    step_id: UUID
+    assistant_id: UUID
+    step_order: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunExecutionOwner:
+    run_id: UUID
+    tenant_id: UUID
+    revision: int
+
+
+flow_run_execution_owner: ContextVar[FlowRunExecutionOwner | None] = ContextVar(
+    "flow_run_execution_owner", default=None
+)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunRecoveryCandidate:
+    id: UUID
+    tenant_id: UUID
+    revision: int
+    anchor_at: datetime
+    kind: FlowRunRecoveryKind
+    checkpoint_id: UUID | None = None
+    cursor_at: datetime | None = None
+
+    @property
+    def cursor(self) -> tuple[datetime, UUID]:
+        return (self.cursor_at or self.anchor_at, self.id)
+
+    @property
+    def abandonment(self) -> FlowRunAbandonmentFacts | None:
+        if self.kind not in (
+            FlowRunRecoveryKind.APPROVED_REVIEW,
+            FlowRunRecoveryKind.EXHAUSTED_DISPATCH,
+        ):
+            return None
+        return FlowRunAbandonmentFacts(
+            wait=FlowRunAbandonmentWait(self.kind.value),
+            anchor_at=self.anchor_at,
+            deadline=flow_run_abandonment_deadline(self.anchor_at),
+            checkpoint_id=self.checkpoint_id,
+        )
+
+
+def _run_recovery_candidates_query(
+    *,
+    limit: int,
+    tenant_id: UUID | None = None,
+    after: tuple[datetime, UUID] | None = None,
+    through: tuple[datetime, UUID] | None = None,
+    descending: bool = False,
+    kinds: Collection[FlowRunRecoveryKind] | None = None,
+) -> sa.Subquery:
+    deadline_anchor = sa.func.statement_timestamp() - FLOW_RUN_ABANDONMENT_AFTER
+    heartbeat = sa.select(
+        FlowRuns.id,
+        FlowRuns.tenant_id,
+        FlowRuns.revision,
+        FlowRuns.execution_heartbeat_at.label("anchor_at"),
+        sa.literal(FlowRunRecoveryKind.EXECUTION_HEARTBEAT_EXPIRED.value).label("kind"),
+        sa.cast(sa.null(), sa.Uuid()).label("checkpoint_id"),
+    ).where(stale_running_flow_run_predicate())
+    exhausted = sa.select(
+        FlowRuns.id,
+        FlowRuns.tenant_id,
+        FlowRuns.revision,
+        FlowRuns.dispatch_pending_since.label("anchor_at"),
+        sa.literal(FlowRunRecoveryKind.EXHAUSTED_DISPATCH.value).label("kind"),
+        sa.cast(sa.null(), sa.Uuid()).label("checkpoint_id"),
+    ).where(
+        FlowRuns.status == FlowRunStatus.QUEUED.value,
+        FlowRuns.dispatch_exhausted_at.is_not(None),
+        FlowRuns.dispatch_pending_since <= deadline_anchor,
+    )
+    reviews = sa.select(
+        FlowRuns.id,
+        FlowRuns.tenant_id,
+        FlowRuns.revision,
+        # Page parents before inspecting checkpoints, including healthy reviews.
+        FlowRuns.created_at.label("anchor_at"),
+        sa.literal(FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION.value).label(
+            "kind"
+        ),
+        sa.cast(sa.null(), sa.Uuid()).label("checkpoint_id"),
+    ).where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
+    # PostgreSQL may sort every UNION input before applying an outer LIMIT.
+    bounded: list[sa.Select[Any]] = []
+    branches = {
+        FlowRunRecoveryKind.EXECUTION_HEARTBEAT_EXPIRED: heartbeat,
+        FlowRunRecoveryKind.EXHAUSTED_DISPATCH: exhausted,
+        FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION: reviews,
+    }
+    for kind, branch in branches.items():
+        if kinds is not None and kind not in kinds:
+            continue
+        anchor = branch.selected_columns.anchor_at
+        run_id = branch.selected_columns.id
+        if tenant_id is not None:
+            branch = branch.where(branch.selected_columns.tenant_id == tenant_id)
+        if after is not None:
+            branch = branch.where(sa.tuple_(anchor, run_id) > after)
+        if through is not None:
+            branch = branch.where(sa.tuple_(anchor, run_id) <= through)
+        order = (
+            (anchor.desc(), run_id.desc())
+            if descending
+            else (anchor.asc(), run_id.asc())
+        )
+        bounded.append(sa.select(branch.order_by(*order).limit(limit).subquery()))
+    return sa.union_all(*bounded).subquery("recovery")
+
+
+def _recorded_passage_byte_expressions() -> tuple[Any, Any]:
+    """The one SQL reading of the persisted passage-byte aggregate.
+
+    Returns (bytes, is_corrupt). Absent RAG measures zero — a run without
+    retrieval holds no passages. A malformed or negative value is corruption:
+    it must never measure as zero, because zero would let unreadable evidence
+    slip under an exact size budget, and it must never reach a bare cast,
+    because that fails the whole statement. Both readers share this expression
+    so the two cannot drift apart again.
+    """
+    raw = sa.func.jsonb_extract_path_text(
+        FlowStepAttempts.provenance_json,
+        "rag",
+        "recorded_passage_bytes",
+    )
+    is_numeric = raw.op("~")(sa.literal(r"^[0-9]{1,15}$"))
+    passage_bytes = sa.case(
+        (is_numeric, sa.cast(raw, sa.BigInteger)),
+        else_=sa.literal(0, sa.BigInteger),
+    )
+    is_corrupt = sa.and_(raw.is_not(None), sa.not_(is_numeric))
+    return passage_bytes, is_corrupt
+
+
+def _jsonb_evidence_logical_bytes(*columns: Any) -> Any:
+    return sum(
+        (
+            sa.func.coalesce(sa.func.octet_length(sa.cast(column, sa.Text)), 0)
+            for column in columns
+        ),
+        start=sa.literal(0),
+    )
+
+
+def _scalar_evidence_logical_bytes(*columns: Any) -> Any:
+    return sum(
+        (
+            sa.func.coalesce(
+                sa.func.octet_length(sa.cast(sa.func.to_jsonb(column), sa.Text)),
+                0,
+            )
+            for column in columns
+        ),
+        start=sa.literal(0),
+    )
+
+
+def _step_result_evidence_logical_bytes() -> Any:
+    # Paired with `FlowStepResult.model_validate`: every unbounded value in the
+    # emitted projection participates in both preflight and view admission.
+    return _jsonb_evidence_logical_bytes(
+        FlowStepResults.input_payload_json,
+        FlowStepResults.output_payload_json,
+        FlowStepResults.model_parameters_json,
+    ) + _scalar_evidence_logical_bytes(
+        FlowStepResults.effective_prompt,
+        FlowStepResults.error_code,
+        FlowStepResults.error_message,
+        FlowStepResults.flow_step_execution_hash,
+    )
+
+
+def step_result_annotation_select(*, run_id: UUID, tenant_id: UUID) -> sa.Select[Any]:
+    """The columns a run-pinned graph annotates nodes with: status facts only.
+
+    Polled while a run is active, so it must never select the content columns
+    (prompts, input and output payloads, model parameters).
+    """
+    return (
+        sa.select(
+            FlowStepResults.step_id,
+            FlowStepResults.step_order,
+            FlowStepResults.status,
+            FlowStepResults.num_tokens_input,
+            FlowStepResults.num_tokens_output,
+            FlowStepResults.error_message,
+        )
+        .where(FlowStepResults.flow_run_id == run_id)
+        .where(FlowStepResults.tenant_id == tenant_id)
+        .order_by(FlowStepResults.step_order.asc())
+    )
+
+
+def _file_evidence_logical_bytes() -> Any:
+    return _scalar_evidence_logical_bytes(Files.name, Files.mimetype)
+
+
+def _attempt_evidence_logical_bytes() -> Any:
+    # Paired with `_dump_attempt_record`, including every emitted unbounded text
+    # scalar and exact resolved-input lineage so escaping expansion cannot
+    # bypass the budget.
+    return _jsonb_evidence_logical_bytes(
+        FlowStepAttempts.provenance_json,
+        FlowStepAttempts.input_payload_json,
+        FlowStepAttempts.output_payload_json,
+        FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+    ) + _scalar_evidence_logical_bytes(
+        FlowStepAttempts.dispatch_task_id,
+        FlowStepAttempts.error_code,
+        FlowStepAttempts.error_message,
+        FlowStepAttempts.requested_model,
+        FlowStepAttempts.response_model,
+        FlowStepAttempts.provider,
+        FlowStepAttempts.finish_reason,
+        FlowStepAttempts.provider_response_id,
+        FlowStepAttempts.flow_step_execution_hash,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FlowStepResultMetrics:
+    flow_run_id: UUID
+    step_id: UUID
+    step_order: int
+    status: str
+    error_code: str | None
+    started_at: datetime | None
+    finished_at: datetime | None
+    # Provider receipts of the current attempt; None when it recorded no
+    # completion call at all.
+    usage_receipt: FlowStepUsageReceipt | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowStepLineage:
+    flow_run_id: UUID
+    step_id: UUID
+    edges: FlowResolvedInputEdgesParseResult
+
+
+@dataclass(frozen=True, slots=True)
+class StepAttemptPage:
+    """One snapshot's admitted attempts and the counts that qualify them.
+
+    `current_total` and `current_admitted` exist so a caller can say when a
+    step's current attempt was excluded by a budget — silently missing current
+    evidence would read as the step never having retrieved anything. When
+    `count_truncated` is true, every count and
+    `current_step_orders_not_loaded` is conservative evidence from the bounded
+    candidate relation: counts are lower bounds and the step orders are a known
+    subset, not an exhaustive list.
+    """
+
+    attempts: list[FlowStepAttempt]
+    total_count: int
+    current_total: int
+    current_admitted: int
+    count_truncated: bool
+    current_step_orders_not_loaded: tuple[int, ...] = ()
+    corrupt_passage_aggregates: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class StepAttemptEvidenceSize:
+    """How much attempt evidence a run holds, measured without loading it.
+
+    The two byte measures answer different questions and must not be
+    conflated. `recorded_passage_bytes` sums the exact aggregate each RAG
+    payload stores about its own passages — the right measure for a
+    passage-size limit. `stored_provenance_bytes` is the stored size of the
+    whole provenance object, RAG or not — a materialization-cost measure,
+    where TOAST compression makes it a floor, never a passage count.
+    """
+
+    attempt_count: int
+    stored_provenance_bytes: int
+    recorded_passage_bytes: int
+    stored_json_bytes: int = 0
+    logical_json_bytes: int = 0
+    corrupt_passage_aggregates: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunEvidenceMeasurements:
+    run_row_count: int
+    run_stored_json_bytes: int
+    run_logical_json_bytes: int
+    step_result_row_count: int
+    step_result_stored_json_bytes: int
+    step_result_logical_json_bytes: int
+    result_file_row_count: int
+    result_file_logical_json_bytes: int
+    runtime_input_file_row_count: int
+    runtime_input_file_logical_json_bytes: int
+
+    @classmethod
+    def empty(cls) -> "FlowRunEvidenceMeasurements":
+        return cls(
+            run_row_count=0,
+            run_stored_json_bytes=0,
+            run_logical_json_bytes=0,
+            step_result_row_count=0,
+            step_result_stored_json_bytes=0,
+            step_result_logical_json_bytes=0,
+            result_file_row_count=0,
+            result_file_logical_json_bytes=0,
+            runtime_input_file_row_count=0,
+            runtime_input_file_logical_json_bytes=0,
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunEvidenceRowCounts:
+    step_results: int
+    step_attempts: int
+    result_files: int
+    runtime_input_files: int
+
+
+def _bounded_step_result_evidence_count_statement(
+    *, run_id: UUID, tenant_id: UUID, ceiling: int
+) -> sa.Select[tuple[int]]:
+    candidates = (
+        sa.select(FlowStepResults.id)
+        .where(FlowStepResults.flow_run_id == run_id)
+        .where(FlowStepResults.tenant_id == tenant_id)
+        .limit(ceiling + 1)
+        .subquery()
+    )
+    return sa.select(sa.func.count()).select_from(candidates)
+
+
+def _bounded_step_result_evidence_size_statement(
+    *, run_id: UUID, tenant_id: UUID, candidate_limit: int
+) -> sa.Select[Any]:
+    stored = sum(
+        (
+            sa.func.coalesce(sa.func.pg_column_size(column), 0)
+            for column in (
+                FlowStepResults.input_payload_json,
+                FlowStepResults.output_payload_json,
+                FlowStepResults.model_parameters_json,
+            )
+        ),
+        start=sa.literal(0),
+    )
+    candidates = (
+        sa.select(
+            stored.label("stored_json_bytes"),
+            _step_result_evidence_logical_bytes().label("logical_json_bytes"),
+        )
+        .where(FlowStepResults.flow_run_id == run_id)
+        .where(FlowStepResults.tenant_id == tenant_id)
+        .limit(candidate_limit)
+        .subquery()
+    )
+    return sa.select(
+        sa.func.count().label("row_count"),
+        sa.func.coalesce(sa.func.sum(candidates.c.stored_json_bytes), 0).label(
+            "stored_json_bytes"
+        ),
+        sa.func.coalesce(sa.func.sum(candidates.c.logical_json_bytes), 0).label(
+            "logical_json_bytes"
+        ),
+    ).select_from(candidates)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunDispatchRedriveGenerationConflict:
+    current_dispatch_exhausted_at: datetime | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowStepResultIdentity:
+    id: UUID
+    step_id: UUID
+    step_order: int
+    status: FlowStepResultStatus
+    current_attempt_no: int | None
+    imported_review_established: bool | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunPrefixMeasurement:
+    step_count: int
+    logical_bytes: int
+
+
+def _current_step_attempt_pairs_by_result_id(
+    step_results: Sequence[FlowStepResult | FlowStepResultIdentity],
+) -> tuple[dict[tuple[UUID, int], UUID], list[tuple[UUID, int]]]:
+    step_result_id_by_step_attempt: dict[tuple[UUID, int], UUID] = {}
+    current_attempt_pairs: list[tuple[UUID, int]] = []
+    for result in step_results:
+        if result.id is None or result.current_attempt_no is None:
+            continue
+        pair = (result.step_id, result.current_attempt_no)
+        step_result_id_by_step_attempt[pair] = result.id
+        current_attempt_pairs.append(pair)
+    return step_result_id_by_step_attempt, current_attempt_pairs
+
+
+_CANCELLABLE_RUN_STATUSES = tuple(
+    status.value for status in CANCELLABLE_FLOW_RUN_STATUSES
+)
+
+_FLOW_RUN_STATUS_COLUMNS = (
+    FlowRuns.id,
+    FlowRuns.flow_id,
+    FlowRuns.flow_version,
+    FlowRuns.principal_type,
+    FlowRuns.principal_user_id,
+    FlowRuns.principal_service_id,
+    FlowRuns.tenant_id,
+    FlowRuns.trace_id,
+    FlowRuns.revision,
+    FlowRuns.purpose,
+    FlowRuns.status,
+    FlowRuns.dispatch_pending_since,
+    FlowRuns.dispatch_attempt_count,
+    FlowRuns.dispatch_last_attempt_at,
+    FlowRuns.dispatch_last_error,
+    FlowRuns.dispatch_next_attempt_at,
+    FlowRuns.dispatched_at,
+    FlowRuns.dispatch_exhausted_at,
+    FlowRuns.cancelled_at,
+    FlowRuns.started_at,
+    FlowRuns.finished_at,
+    FlowRuns.job_id,
+    FlowRuns.evidence_classification_level,
+    FlowRuns.run_label,
+    FlowRuns.run_date,
+    FlowRuns.created_at,
+    FlowRuns.updated_at,
+)
+
+
+def _listed_runs(
+    stmt: Any,
+    *,
+    tenant_id: UUID,
+    flow_id: UUID | None,
+    principal_user_id: UUID | None,
+    principal_service_id: UUID | None,
+    search: str | None,
+) -> Any:
+    """``stmt`` narrowed to the runs a run list shows, before any status filter."""
+    stmt = stmt.where(FlowRuns.tenant_id == tenant_id)
+    if flow_id is not None:
+        stmt = stmt.where(FlowRuns.flow_id == flow_id)
+    if principal_user_id is not None:
+        stmt = stmt.where(FlowRuns.principal_user_id == principal_user_id)
+    if principal_service_id is not None:
+        stmt = stmt.where(FlowRuns.principal_service_id == principal_service_id)
+    if search:
+        stmt = stmt.where(run_search_clause(search))
+    return stmt
+
+
+class FlowRunRepository:
+    """Tenant-scoped repository for flow run lifecycle and run evidence.
+
+    Purpose is written only at creation; readers do not yet filter by purpose.
+    """
+
+    _ACTIVE_STATUSES = tuple(status.value for status in ACTIVE_FLOW_RUN_STATUSES)
+
+    def __init__(
+        self,
+        session: AsyncSession,
+        audit_outbox_repo: FlowRunAuditOutboxRepository | None = None,
+    ):
+        self.session = session
+        self.audit_outbox_repo = audit_outbox_repo or FlowRunAuditOutboxRepository(
+            session=session
+        )
+
+    async def create(
+        self,
+        *,
+        flow_id: UUID,
+        flow_version: int,
+        principal_type: str = "user",
+        principal_user_id: UUID | None = None,
+        principal_service_id: UUID | None = None,
+        created_by_api_key_id: UUID | None = None,
+        runtime_service_permission: ApiKeyPermission | None = None,
+        tenant_id: UUID,
+        input_payload_json: dict[str, Any] | None,
+        preseed_steps: Sequence["PreseedStep"],
+        step_input_files: Sequence[FlowRunStepInputFileProjection] | None = None,
+        idempotency_key: str | None = None,
+        request_fingerprint: str | None = None,
+        run_label: str | None = None,
+        run_date: date | None = None,
+        purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
+    ) -> FlowRun:
+        now_utc = datetime.now(timezone.utc)
+        principal = FlowPrincipal(
+            principal_type=PrincipalType(principal_type),
+            principal_user_id=principal_user_id,
+            principal_service_id=principal_service_id,
+            actor_api_key_id=created_by_api_key_id,
+        )
+        run_row = await self.session.scalar(
+            sa.insert(FlowRuns)
+            .values(
+                flow_id=flow_id,
+                flow_version=flow_version,
+                principal_type=principal.principal_type.value,
+                principal_user_id=principal.principal_user_id,
+                principal_service_id=principal.principal_service_id,
+                created_by_api_key_id=principal.actor_api_key_id,
+                runtime_service_permission=(
+                    runtime_service_permission.value
+                    if runtime_service_permission is not None
+                    else None
+                ),
+                tenant_id=tenant_id,
+                trace_id=uuid4(),
+                idempotency_key=idempotency_key,
+                request_fingerprint=request_fingerprint,
+                run_label=run_label,
+                run_date=run_date,
+                purpose=purpose.value,
+                status=FlowRunStatus.QUEUED.value,
+                **start_flow_dispatch_epoch(now_utc),
+                input_payload_json=input_payload_json,
+            )
+            .returning(FlowRuns)
+        )
+        if run_row is None:
+            raise FlowRunPersistenceInvariantError(
+                operation="create_flow_run",
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+
+        preseed_rows = [
+            {
+                "flow_run_id": run_row.id,
+                "flow_id": flow_id,
+                "tenant_id": tenant_id,
+                "step_id": step["step_id"],
+                "step_order": step["step_order"],
+                "assistant_id": step["assistant_id"],
+                "status": FlowStepResultStatus.PENDING.value,
+            }
+            for step in sorted(preseed_steps, key=lambda item: int(item["step_order"]))
+        ]
+        if preseed_rows:
+            await self.session.execute(sa.insert(FlowStepResults).values(preseed_rows))
+
+        step_input_file_rows = build_step_input_file_rows(
+            flow_run_id=run_row.id,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            attempt_no=1,
+            projections=step_input_files,
+        )
+        await insert_step_input_file_rows(
+            session=self.session,
+            rows=step_input_file_rows,
+        )
+
+        return FlowRun.model_validate(run_row)
+
+    async def seed_validated_prefix(
+        self,
+        *,
+        run: FlowRun,
+        seed: FlowRunPrefixSeed,
+    ) -> None:
+        """Import a validated prefix; the caller commits its required creation audit."""
+        from eneo.flows.domain.transcript_source import (
+            MissingTranscriptSourceError,
+            transcript_source_reference,
+            with_transcript_source_reference,
+        )
+        from eneo.flows.infrastructure.flow_transcript_source_repo import (
+            FlowTranscriptSourceRepository,
+        )
+
+        now = datetime.now(timezone.utc)
+        imported_step_ids = frozenset(source.step_id for source in seed.results)
+        for source in seed.results:
+            if source.id is None or source.current_attempt_no is None:
+                raise ValueError("Imported step results require a persisted attempt.")
+            input_payload = source.input_payload_json
+            parent_attempt = await self.get_step_attempt(
+                run_id=seed.source_run_id,
+                step_id=source.step_id,
+                attempt_no=source.current_attempt_no,
+                tenant_id=run.tenant_id,
+            )
+            reference = transcript_source_reference(
+                parent_attempt.input_payload_json
+                if parent_attempt is not None
+                else None
+            )
+            snapshot = seed.transcript_sources.get(source.step_id)
+            if reference is None and (
+                snapshot is not None
+                or transcript_source_reference(input_payload) is not None
+            ):
+                raise ValueError(
+                    "Imported transcript reference is missing from its source attempt."
+                )
+            if reference is not None:
+                if (reference.run_id, reference.step_id, reference.attempt_no) != (
+                    seed.source_run_id,
+                    source.step_id,
+                    source.current_attempt_no,
+                ):
+                    raise ValueError(
+                        "Imported transcript reference does not belong to the source attempt."
+                    )
+                sources = FlowTranscriptSourceRepository(session=self.session)
+                if snapshot is None:
+                    snapshot = await sources.get_for_attempt(
+                        tenant_id=run.tenant_id,
+                        run_id=reference.run_id,
+                        step_id=reference.step_id,
+                        attempt_no=reference.attempt_no,
+                    )
+                if snapshot is None:
+                    raise MissingTranscriptSourceError(reference)
+                child_reference = reference.model_copy(
+                    update={"run_id": run.id, "attempt_no": 1}
+                )
+                await sources.insert(
+                    tenant_id=run.tenant_id,
+                    flow_id=run.flow_id,
+                    reference=child_reference,
+                    source=snapshot,
+                )
+                input_payload = with_transcript_source_reference(
+                    input_payload, child_reference
+                )
+            provenance = FlowImportedAttemptProvenance(
+                kind=seed.kind,
+                source_run_id=seed.source_run_id,
+                source_step_result_id=source.id,
+                source_step_id=source.step_id,
+                source_attempt_no=source.current_attempt_no,
+                request_hash=seed.provenance["request_hash"],
+                review_established=source.step_id in seed.review_established_step_ids,
+            ).to_payload()
+            values = dict(
+                status=FlowStepResultStatus.COMPLETED.value,
+                current_attempt_no=1,
+                input_payload_json=input_payload,
+                output_payload_json=source.output_payload_json,
+                model_parameters_json={
+                    "mode": seed.kind,
+                    "source_run_id": str(seed.source_run_id),
+                },
+                flow_step_execution_hash=source.flow_step_execution_hash,
+                num_tokens_input=0,
+                num_tokens_output=0,
+                started_at=now,
+                finished_at=now,
+            )
+            updated = await self.session.execute(
+                sa.update(FlowStepResults)
+                .where(FlowStepResults.flow_run_id == run.id)
+                .where(FlowStepResults.tenant_id == run.tenant_id)
+                .where(FlowStepResults.step_id == source.step_id)
+                .values(**values)
+                .returning(FlowStepResults.id)
+            )
+            updated.scalar_one()
+            attempt_id = await self.session.scalar(
+                sa.insert(FlowStepAttempts)
+                .values(
+                    flow_run_id=run.id,
+                    flow_id=run.flow_id,
+                    tenant_id=run.tenant_id,
+                    step_id=source.step_id,
+                    step_order=source.step_order,
+                    attempt_no=1,
+                    status=FlowStepResultStatus.COMPLETED.value,
+                    input_payload_json=input_payload,
+                    output_payload_json=source.output_payload_json,
+                    flow_step_execution_hash=source.flow_step_execution_hash,
+                    provenance_json=provenance,
+                    num_tokens_input=0,
+                    num_tokens_output=0,
+                    started_at=now,
+                    finished_at=now,
+                )
+                .returning(FlowStepAttempts.id)
+            )
+            if parent_attempt is not None:
+                await self._copy_tool_answer_evidence(
+                    parent_attempt_id=parent_attempt.id,
+                    attempt_id=attempt_id,
+                    tenant_id=run.tenant_id,
+                    imported_step_ids=imported_step_ids,
+                )
+        # The imported steps are evidence the source run produced, at the
+        # level it recorded (or at an unknown one), so the new run starts from
+        # that level, which its own claims can only raise.
+        source_run = aliased(FlowRuns)
+        await self.session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run.id)
+            .where(FlowRuns.tenant_id == run.tenant_id)
+            .values(
+                evidence_classification_level=sa.select(
+                    source_run.evidence_classification_level
+                )
+                .where(source_run.id == seed.source_run_id)
+                .where(source_run.tenant_id == run.tenant_id)
+                .scalar_subquery()
+            )
+        )
+
+    async def _copy_tool_answer_evidence(
+        self,
+        *,
+        parent_attempt_id: UUID,
+        attempt_id: UUID | None,
+        tenant_id: UUID,
+        imported_step_ids: frozenset[UUID],
+    ) -> None:
+        """Give an imported attempt the resolved-input edges of the attempt it
+        was imported from when that attempt read a tool: the ``tool_answer``
+        edge keeps the level its answer was counted at, which a run that
+        takes the step over counts it at again, without reading the server.
+
+        An edge from an earlier step names that step's attempt; in the run
+        the import creates every imported step is attempt 1, and a tool
+        step's arguments read earlier steps only, which the import takes
+        over with it.
+        """
+        parsed = await self.get_resolved_input_edges(
+            attempt_id=parent_attempt_id, tenant_id=tenant_id
+        )
+        if parsed is None or tool_answer_source(parsed) is None:
+            return
+        assert parsed.aggregate is not None and attempt_id is not None
+        edges: list[FlowResolvedInputEdge] = []
+        for edge in parsed.aggregate.edges:
+            source = edge.source
+            if isinstance(source, FlowResolvedInputStepResultSource):
+                if source.source_step_id not in imported_step_ids:
+                    raise ValueError(
+                        "Imported tool evidence reads a step the import does not take over."
+                    )
+                source = source.model_copy(update={"source_attempt_no": 1})
+            edges.append(edge.model_copy(update={"source": source}))
+        await self.session.execute(
+            sa.insert(FlowStepAttemptResolvedInputs).values(
+                flow_step_attempt_id=attempt_id,
+                resolved_input_edges_jsonb=parsed.aggregate.model_copy(
+                    update={"edges": tuple(edges)}
+                ).model_dump(mode="json"),
+            )
+        )
+
+    async def get(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> FlowRun:
+        stmt = (
+            sa.select(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+
+        run_row = await self.session.scalar(stmt)
+        if run_row is None:
+            raise FlowRunNotFoundError(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+        return FlowRun.model_validate(run_row)
+
+    async def get_status(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> FlowRunStatusSnapshot:
+        stmt = (
+            sa.select(*_FLOW_RUN_STATUS_COLUMNS)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+
+        row = (await self.session.execute(stmt)).mappings().one_or_none()
+        if row is None:
+            raise FlowRunNotFoundError(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+        return FlowRunStatusSnapshot.model_validate(row)
+
+    async def get_status_with_speaker_labels(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> tuple[FlowRunStatusSnapshot, bool | None]:
+        """The status projection and the run's speaker-label setting, without
+        loading the rest of its input payload: the graph poll reads only this."""
+        speaker_labels = FlowRuns.input_payload_json[SPEAKER_LABELS_KEY].label(
+            "speaker_labels"
+        )
+        stmt = (
+            sa.select(*_FLOW_RUN_STATUS_COLUMNS, speaker_labels)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+
+        row = (await self.session.execute(stmt)).mappings().one_or_none()
+        if row is None:
+            raise FlowRunNotFoundError(
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+        status = {key: value for key, value in row.items() if key != "speaker_labels"}
+        return (
+            FlowRunStatusSnapshot.model_validate(status),
+            speaker_labels_choice(row["speaker_labels"]),
+        )
+
+    async def get_idempotent_run(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID,
+        idempotency_key: str,
+        principal: FlowPrincipal,
+    ) -> tuple[FlowRun, str | None] | None:
+        stmt = (
+            sa.select(FlowRuns)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.idempotency_key == idempotency_key)
+            .where(FlowRuns.principal_type == principal.principal_type.value)
+        )
+        if principal.principal_user_id is not None:
+            stmt = stmt.where(FlowRuns.principal_user_id == principal.principal_user_id)
+        if principal.principal_service_id is not None:
+            stmt = stmt.where(
+                FlowRuns.principal_service_id == principal.principal_service_id
+            )
+        row = await self.session.scalar(stmt)
+        if row is None:
+            return None
+        return FlowRun.model_validate(row), row.request_fingerprint
+
+    async def count_active_runs(self, *, tenant_id: UUID) -> int:
+        count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowRuns)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status.in_(self._ACTIVE_STATUSES))
+        )
+        return int(count or 0)
+
+    async def list_active_runs_of_deleted_flows(
+        self, *, limit: int
+    ) -> list[tuple[UUID, UUID]]:
+        """(run id, tenant id) of non-terminal runs whose flow is deleted, oldest first."""
+        rows = await self.session.execute(
+            sa.select(FlowRuns.id, FlowRuns.tenant_id)
+            .join(Flows, Flows.id == FlowRuns.flow_id)
+            .where(Flows.deleted_at.is_not(None))
+            .where(FlowRuns.status.in_(NON_TERMINAL_FLOW_RUN_STATUS_VALUES))
+            .order_by(FlowRuns.created_at, FlowRuns.id)
+            .limit(limit)
+        )
+        return [(run_id, tenant_id) for run_id, tenant_id in rows]
+
+    async def acquire_tenant_run_creation_lock(self, *, tenant_id: UUID) -> None:
+        """Serialize this tenant's run creations until the transaction ends.
+
+        FOR NO KEY UPDATE: it excludes the next creation's lock, but not the
+        FOR KEY SHARE every foreign-key check on the tenant takes, so the
+        tenant's other writes (step results, outbox rows, uploads, audit
+        entries) do not wait for a run to be created."""
+        await self.session.execute(
+            sa.select(Tenants.id)
+            .where(Tenants.id == tenant_id)
+            .with_for_update(key_share=True)
+        )
+
+    async def list_statuses(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID | None = None,
+        statuses: Sequence[FlowRunStatus] | None = None,
+        principal_user_id: UUID | None = None,
+        principal_service_id: UUID | None = None,
+        limit: int | None = None,
+        offset: int | None = None,
+        listing: FlowRunListing | None = None,
+    ) -> list[FlowRunStatusSnapshot]:
+        listing = listing or FlowRunListing()
+        stmt = _listed_runs(
+            sa.select(*_FLOW_RUN_STATUS_COLUMNS),
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            principal_user_id=principal_user_id,
+            principal_service_id=principal_service_id,
+            search=listing.search,
+        ).order_by(*run_list_order(listing))
+        if statuses:
+            stmt = stmt.where(
+                FlowRuns.status.in_(tuple(status.value for status in statuses))
+            )
+        if offset is not None:
+            stmt = stmt.offset(offset)
+        if limit is not None:
+            stmt = stmt.limit(limit)
+
+        rows = (await self.session.execute(stmt)).mappings().all()
+        return [FlowRunStatusSnapshot.model_validate(row) for row in rows]
+
+    async def count_statuses(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID | None = None,
+        principal_user_id: UUID | None = None,
+        principal_service_id: UUID | None = None,
+        search: str | None = None,
+    ) -> dict[FlowRunStatus, int]:
+        """How many listed runs have each status, every status included."""
+        stmt = _listed_runs(
+            sa.select(FlowRuns.status, sa.func.count()),
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            principal_user_id=principal_user_id,
+            principal_service_id=principal_service_id,
+            search=search,
+        ).group_by(FlowRuns.status)
+        counts = {status: 0 for status in FlowRunStatus}
+        for status, count in (await self.session.execute(stmt)).all():
+            counts[FlowRunStatus(status)] = int(count)
+        return counts
+
+    async def list_dispatchable_queued_runs(
+        self,
+        *,
+        tenant_id: UUID,
+        due_at: datetime,
+        flow_id: UUID | None = None,
+        run_id: UUID | None = None,
+        limit: int = 25,
+    ) -> list[FlowRun]:
+        stmt = (
+            sa.select(FlowRuns)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.dispatch_next_attempt_at <= due_at)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .order_by(
+                FlowRuns.dispatch_next_attempt_at.asc(),
+                FlowRuns.id.asc(),
+            )
+            .limit(limit)
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+        if run_id is not None:
+            stmt = stmt.where(FlowRuns.id == run_id)
+
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return [FlowRun.model_validate(row) for row in rows]
+
+    async def recovery_sweep_boundary(
+        self, *, kinds: Collection[FlowRunRecoveryKind] | None = None
+    ) -> tuple[datetime, UUID] | None:
+        candidates = _run_recovery_candidates_query(
+            limit=1, descending=True, kinds=kinds
+        )
+        row = (
+            await self.session.execute(
+                sa.select(candidates.c.anchor_at, candidates.c.id)
+                .order_by(candidates.c.anchor_at.desc(), candidates.c.id.desc())
+                .limit(1)
+            )
+        ).first()
+        return (row[0], row[1]) if row is not None else None
+
+    async def list_recovery_candidates(
+        self,
+        *,
+        tenant_id: UUID | None = None,
+        limit: int = 25,
+        after: tuple[datetime, UUID] | None = None,
+        through: tuple[datetime, UUID] | None = None,
+        kinds: Collection[FlowRunRecoveryKind] | None = None,
+    ) -> list[FlowRunRecoveryCandidate]:
+        """`kinds` names discovery branches; the review branch may come back
+        refined to an approved or missing checkpoint."""
+        if limit < 1:
+            return []
+        candidates = _run_recovery_candidates_query(
+            limit=limit, tenant_id=tenant_id, after=after, through=through, kinds=kinds
+        )
+        stmt = (
+            sa.select(candidates)
+            .order_by(candidates.c.anchor_at.asc(), candidates.c.id.asc())
+            .limit(limit)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        review_rows = [
+            row
+            for row in rows
+            if row.kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION.value
+        ]
+        checkpoints = {}
+        if review_rows:
+            checkpoint_rows = await self.session.execute(
+                sa.select(
+                    FlowRunReviewCheckpoints.id,
+                    FlowRuns.id.label("flow_run_id"),
+                    FlowRuns.tenant_id,
+                    FlowRunReviewCheckpoints.state,
+                    FlowRunReviewCheckpoints.approved_at,
+                    (
+                        FlowRunReviewCheckpoints.approved_at
+                        <= sa.func.statement_timestamp() - FLOW_RUN_ABANDONMENT_AFTER
+                    ).label("abandonment_due"),
+                )
+                .select_from(FlowRuns)
+                .outerjoin(
+                    FlowRunReviewCheckpoints,
+                    sa.and_(
+                        FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id,
+                        FlowRunReviewCheckpoints.tenant_id == FlowRuns.tenant_id,
+                        FlowRunReviewCheckpoints.state.in_(
+                            (
+                                FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+                                FlowRunReviewCheckpointState.EDITED.value,
+                                FlowRunReviewCheckpointState.APPROVED.value,
+                            )
+                        ),
+                    ),
+                )
+                .where(
+                    sa.tuple_(FlowRuns.id, FlowRuns.tenant_id).in_(
+                        [(row.id, row.tenant_id) for row in review_rows]
+                    ),
+                    FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value,
+                    # The creation-time range keeps ID probes on the ordered review index.
+                    sa.tuple_(FlowRuns.created_at, FlowRuns.id)
+                    >= (review_rows[0].anchor_at, review_rows[0].id),
+                    sa.tuple_(FlowRuns.created_at, FlowRuns.id)
+                    <= (review_rows[-1].anchor_at, review_rows[-1].id),
+                )
+            )
+            checkpoints = {
+                (row.flow_run_id, row.tenant_id): row for row in checkpoint_rows.all()
+            }
+        result: list[FlowRunRecoveryCandidate] = []
+        for row in rows:
+            candidate = FlowRunRecoveryCandidate(
+                id=row.id,
+                tenant_id=row.tenant_id,
+                revision=row.revision,
+                anchor_at=row.anchor_at,
+                kind=FlowRunRecoveryKind(row.kind),
+                checkpoint_id=row.checkpoint_id,
+            )
+            if candidate.kind == FlowRunRecoveryKind.REVIEW_CHECKPOINT_INSPECTION:
+                checkpoint = checkpoints.get((row.id, row.tenant_id))
+                if checkpoint is not None and checkpoint.id is None:
+                    candidate = replace(
+                        candidate, kind=FlowRunRecoveryKind.MISSING_REVIEW_CHECKPOINT
+                    )
+                elif (
+                    checkpoint is not None
+                    and checkpoint.state == FlowRunReviewCheckpointState.APPROVED.value
+                    and checkpoint.abandonment_due
+                ):
+                    candidate = replace(
+                        candidate,
+                        kind=FlowRunRecoveryKind.APPROVED_REVIEW,
+                        anchor_at=checkpoint.approved_at,
+                        checkpoint_id=checkpoint.id,
+                        cursor_at=row.anchor_at,
+                    )
+            result.append(candidate)
+        return result
+
+    async def renew_execution_heartbeats(
+        self, *, owners: Sequence[FlowRunExecutionOwner]
+    ) -> set[FlowRunExecutionOwner]:
+        """Renew the leases of the owners whose run rows no other transaction
+        holds. A held row is skipped, not waited for: an owner left out may
+        still hold its lease (``has_execution_ownership`` tells)."""
+        if not owners:
+            return set()
+        lease = (
+            sa.tuple_(FlowRuns.id, FlowRuns.tenant_id, FlowRuns.revision).in_(
+                [(owner.run_id, owner.tenant_id, owner.revision) for owner in owners]
+            ),
+            FlowRuns.status == FlowRunStatus.RUNNING.value,
+            FlowRuns.execution_heartbeat_at
+            > sa.func.clock_timestamp()
+            - timedelta(seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS),
+        )
+        # NO KEY UPDATE is the lock the update takes: a child row's foreign key
+        # check (KEY SHARE) does not make a run row look held.
+        free = (
+            sa.select(FlowRuns.id)
+            .where(*lease)
+            .with_for_update(key_share=True, skip_locked=True)
+            .correlate(None)
+        )
+        rows = await self.session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id.in_(free), *lease)
+            .values(
+                execution_heartbeat_at=sa.func.clock_timestamp(),
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns.id, FlowRuns.tenant_id, FlowRuns.revision)
+        )
+        return {FlowRunExecutionOwner(*row) for row in rows.all()}
+
+    async def has_execution_ownership(self, *, owner: FlowRunExecutionOwner) -> bool:
+        return (
+            await self.session.scalar(
+                sa.select(FlowRuns.id).where(
+                    FlowRuns.id == owner.run_id,
+                    FlowRuns.tenant_id == owner.tenant_id,
+                    FlowRuns.revision == owner.revision,
+                    FlowRuns.status == FlowRunStatus.RUNNING.value,
+                    FlowRuns.execution_heartbeat_at
+                    > sa.func.clock_timestamp()
+                    - timedelta(seconds=FLOW_EXECUTION_HEARTBEAT_EXPIRY_SECONDS),
+                )
+            )
+            is not None
+        )
+
+    async def lock_execution_ownership(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        session: AsyncSession | None = None,
+        owner: FlowRunExecutionOwner | None = None,
+    ) -> None:
+        owner = owner or flow_run_execution_owner.get()
+        if owner is None:
+            return
+        db_session = session or self.session
+        if owner.run_id == run_id and owner.tenant_id == tenant_id:
+            locked_id = await db_session.scalar(
+                sa.select(FlowRuns.id)
+                .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
+                .with_for_update()
+            )
+            # Evaluate the lease after acquiring the lock, including any lock wait.
+            if locked_id is not None and await FlowRunRepository(
+                session=db_session
+            ).has_execution_ownership(owner=owner):
+                return
+        await db_session.rollback()
+        raise FlowExecutionOwnershipLost()
+
+    async def claim_queued_run_for_dispatch(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        now: datetime,
+        flow_id: UUID | None = None,
+    ) -> FlowRun | None:
+        stmt = (
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_next_attempt_at <= now)
+            .where(FlowRuns.dispatch_attempt_count < FLOW_DISPATCH_MAX_ATTEMPTS)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+        )
+        if flow_id is not None:
+            stmt = stmt.where(FlowRuns.flow_id == flow_id)
+
+        claimed = await self.session.scalar(
+            stmt.values(
+                dispatch_attempt_count=FlowRuns.dispatch_attempt_count + 1,
+                dispatch_last_attempt_at=now,
+                dispatch_last_error=None,
+                dispatched_at=sa.case(
+                    (
+                        sa.and_(
+                            FlowRuns.dispatch_attempt_count > 0,
+                            FlowRuns.dispatch_last_error.is_(None),
+                            FlowRuns.dispatched_at.is_(None),
+                        ),
+                        now,
+                    ),
+                    else_=FlowRuns.dispatched_at,
+                ),
+                dispatch_next_attempt_at=now
+                + timedelta(seconds=FLOW_QUEUED_REDISPATCH_AFTER_SECONDS),
+                updated_at=FlowRuns.updated_at,
+            ).returning(FlowRuns)
+        )
+        if claimed is None:
+            return None
+        return FlowRun.model_validate(claimed)
+
+    async def mark_dispatch_exhausted_if_due(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        now: datetime,
+    ) -> FlowRun | None:
+        exhausted = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_next_attempt_at <= now)
+            .where(FlowRuns.dispatch_attempt_count >= FLOW_DISPATCH_MAX_ATTEMPTS)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .values(
+                dispatch_next_attempt_at=None,
+                dispatch_exhausted_at=now,
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns)
+        )
+        if exhausted is None:
+            return None
+        return FlowRun.model_validate(exhausted)
+
+    async def rearm_exhausted_accepted_dispatch_for_redrive(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        expected_dispatch_exhausted_at: datetime | None,
+        now: datetime,
+    ) -> FlowRun | FlowRunDispatchRedriveGenerationConflict | None:
+        """Start a fresh bounded epoch for accepted or outcome-unknown exhaustion."""
+
+        row = await self.session.scalar(
+            sa.select(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.revision == expected_revision)
+            .with_for_update()
+        )
+        if row is None:
+            return None
+        if row.status != FlowRunStatus.QUEUED.value:
+            return None
+        current_dispatch_exhausted_at = row.dispatch_exhausted_at
+        if (
+            expected_dispatch_exhausted_at is not None
+            and expected_dispatch_exhausted_at != current_dispatch_exhausted_at
+        ):
+            return FlowRunDispatchRedriveGenerationConflict(
+                current_dispatch_exhausted_at=current_dispatch_exhausted_at
+            )
+        accepted_or_outcome_unknown_exhaustion = (
+            current_dispatch_exhausted_at is not None
+            and (row.dispatched_at is not None or row.dispatch_last_error is None)
+        )
+        if not accepted_or_outcome_unknown_exhaustion:
+            return None
+        assert current_dispatch_exhausted_at is not None
+        if row.dispatch_pending_since is not None:
+            require_flow_run_wait_before_deadline(
+                wait=FlowRunAbandonmentWait.EXHAUSTED_DISPATCH,
+                anchor_at=row.dispatch_pending_since,
+                now=max(now, datetime.now(timezone.utc)),
+            )
+        if expected_dispatch_exhausted_at != current_dispatch_exhausted_at:
+            return FlowRunDispatchRedriveGenerationConflict(
+                current_dispatch_exhausted_at=current_dispatch_exhausted_at
+            )
+
+        rearmed = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(
+                sa.or_(
+                    FlowRuns.dispatched_at.is_not(None),
+                    FlowRuns.dispatch_last_error.is_(None),
+                )
+            )
+            .where(FlowRuns.dispatch_exhausted_at == expected_dispatch_exhausted_at)
+            .values(
+                **start_flow_dispatch_epoch(now),
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns)
+        )
+        if rearmed is None:
+            return None
+        return FlowRun.model_validate(rearmed)
+
+    async def record_dispatch_accepted(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        expected_attempt_count: int,
+        now: datetime,
+    ) -> FlowRun | None:
+        accepted = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_attempt_count == expected_attempt_count)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .values(
+                dispatched_at=sa.func.coalesce(FlowRuns.dispatched_at, now),
+                dispatch_next_attempt_at=now
+                + timedelta(
+                    seconds=flow_dispatch_retry_delay_seconds(
+                        attempt_no=expected_attempt_count
+                    )
+                ),
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns)
+        )
+        if accepted is None:
+            return None
+        return FlowRun.model_validate(accepted)
+
+    async def record_dispatch_outcome_unknown(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        expected_attempt_count: int,
+        now: datetime,
+    ) -> FlowRun | None:
+        """Preserve a transport-ambiguous attempt without inventing a rejection."""
+
+        values: dict[str, Any] = {
+            "dispatch_last_error": None,
+            "dispatched_at": sa.func.coalesce(FlowRuns.dispatched_at, now),
+            "updated_at": FlowRuns.updated_at,
+        }
+        if expected_attempt_count >= FLOW_DISPATCH_MAX_ATTEMPTS:
+            values.update(
+                dispatch_next_attempt_at=None,
+                dispatch_exhausted_at=now,
+            )
+        run = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_attempt_count == expected_attempt_count)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .values(**values)
+            .returning(FlowRuns)
+        )
+        if run is None:
+            return None
+        return FlowRun.model_validate(run)
+
+    async def record_dispatch_failure(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        expected_attempt_count: int,
+        error: FlowRunDispatchError,
+        now: datetime,
+    ) -> FlowRun | None:
+        exhausted = (
+            not error.retryable or expected_attempt_count >= FLOW_DISPATCH_MAX_ATTEMPTS
+        )
+        next_attempt_at = None
+        if not exhausted:
+            next_attempt_at = now + timedelta(
+                seconds=flow_dispatch_retry_delay_seconds(
+                    attempt_no=expected_attempt_count
+                )
+            )
+        failed = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .where(FlowRuns.dispatch_attempt_count == expected_attempt_count)
+            .where(FlowRuns.dispatch_exhausted_at.is_(None))
+            .values(
+                dispatch_last_error=dump_flow_run_dispatch_error(error),
+                dispatch_next_attempt_at=next_attempt_at,
+                dispatch_exhausted_at=now if exhausted else None,
+                updated_at=FlowRuns.updated_at,
+            )
+            .returning(FlowRuns)
+        )
+        if failed is None:
+            return None
+        return FlowRun.model_validate(failed)
+
+    async def terminalize_abandoned_run_status(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+        facts: FlowRunAbandonmentFacts,
+        error: FlowRunError,
+    ) -> FlowRun | None:
+        # Review decisions lock the parent before the checkpoint. Re-read eligibility
+        # in a new statement after that lock wait, including the dispatch epoch anchor.
+        await self.session.scalar(
+            sa.select(FlowRuns.id)
+            .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        stmt = sa.update(FlowRuns).where(
+            FlowRuns.id == run_id,
+            FlowRuns.tenant_id == tenant_id,
+            FlowRuns.revision == expected_revision,
+            sa.literal(facts.deadline) <= sa.func.statement_timestamp(),
+        )
+        if facts.wait == FlowRunAbandonmentWait.APPROVED_REVIEW:
+            stmt = stmt.where(
+                FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value,
+                sa.exists().where(
+                    FlowRunReviewCheckpoints.id == facts.checkpoint_id,
+                    FlowRunReviewCheckpoints.flow_run_id == FlowRuns.id,
+                    FlowRunReviewCheckpoints.tenant_id == FlowRuns.tenant_id,
+                    FlowRunReviewCheckpoints.state
+                    == FlowRunReviewCheckpointState.APPROVED.value,
+                    FlowRunReviewCheckpoints.approved_at == facts.anchor_at,
+                ),
+            )
+        else:
+            stmt = stmt.where(
+                FlowRuns.status == FlowRunStatus.QUEUED.value,
+                FlowRuns.dispatch_exhausted_at.is_not(None),
+                FlowRuns.dispatch_pending_since == facts.anchor_at,
+            )
+        row = await self.session.scalar(
+            stmt.values(
+                status=FlowRunStatus.FAILED.value,
+                error_json=dump_flow_run_error(error),
+                finished_at=sa.func.statement_timestamp(),
+            ).returning(FlowRuns)
+        )
+        return FlowRun.model_validate(row) if row is not None else None
+
+    async def terminalize_run_status(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        target_status: FlowRunStatus,
+        error: FlowRunError | None = None,
+        output_payload_json: FlowPersistedJsonObject | None = None,
+        cancelled_at: datetime | None = None,
+        stale_running_revision: int | None = None,
+        interrupted_owner: FlowRunExecutionOwner | None = None,
+    ) -> FlowRun | None:
+        """``interrupted_owner`` ends a run its worker stopped executing: only
+        while that owner still holds it and it waits on no outbound delivery."""
+        await self.lock_execution_ownership(
+            run_id=run_id, tenant_id=tenant_id, owner=interrupted_owner
+        )
+        if target_status not in TERMINAL_FLOW_RUN_STATUSES:
+            raise ValueError("target_status must be terminal")
+
+        if stale_running_revision is not None:
+            # A new statement after the lock wait sees delivery intents committed
+            # by the preceding parent-lock owner under READ COMMITTED.
+            await self.session.scalar(
+                sa.select(FlowRuns.id)
+                .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
+                .with_for_update()
+            )
+
+        values: dict[str, Any] = {
+            "status": target_status.value,
+            "error_json": dump_flow_run_error(error),
+            "output_payload_json": output_payload_json,
+            "finished_at": datetime.now(timezone.utc),
+        }
+        if cancelled_at is not None:
+            values["cancelled_at"] = cancelled_at
+
+        source_statuses = (
+            _CANCELLABLE_RUN_STATUSES
+            if target_status == FlowRunStatus.CANCELLED
+            else self._ACTIVE_STATUSES
+        )
+        stmt = (
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status.in_(source_statuses))
+        )
+        if stale_running_revision is not None:
+            stmt = stmt.where(
+                stale_running_flow_run_predicate(),
+                FlowRuns.revision == stale_running_revision,
+            )
+        if interrupted_owner is not None:
+            stmt = stmt.where(~flow_run_awaits_webhook_delivery())
+        run_row = await self.session.scalar(stmt.values(**values).returning(FlowRuns))
+        if run_row is None:
+            return None
+        return FlowRun.model_validate(run_row)
+
+    async def count_active_step_results(self, *, run_id: UUID, tenant_id: UUID) -> int:
+        count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.status.in_(ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES))
+        )
+        return int(count or 0)
+
+    async def count_open_step_attempts(self, *, run_id: UUID, tenant_id: UUID) -> int:
+        count = await self.session.scalar(
+            sa.select(sa.func.count())
+            .select_from(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
+        )
+        return int(count or 0)
+
+    async def has_step_attempts(self, *, run_id: UUID, tenant_id: UUID) -> bool:
+        """Whether the run holds any step attempt, its own or imported: every
+        step's evidence (input, output, passages, provider calls) hangs off one."""
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    sa.exists()
+                    .where(FlowStepAttempts.flow_run_id == run_id)
+                    .where(FlowStepAttempts.tenant_id == tenant_id)
+                )
+            )
+        )
+
+    async def close_active_step_results_for_terminal_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        target_status: FlowStepResultStatus,
+        error_code: str | None,
+        error_message: str | None = None,
+    ) -> int:
+        result = await self.session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.status.in_(ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES))
+            .values(
+                status=target_status.value,
+                error_code=error_code,
+                error_message=error_message,
+                finished_at=datetime.now(timezone.utc),
+            )
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def close_open_step_attempts_for_terminal_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        target_status: FlowStepAttemptStatus,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> int:
+        result = await self.session.execute(
+            sa.update(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
+            .values(
+                status=target_status.value,
+                error_code=error_code,
+                error_message=error_message,
+                finished_at=datetime.now(timezone.utc),
+            )
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
+    async def record_evidence_classification_level(
+        self, *, run_id: UUID, tenant_id: UUID, level: int, has_completed_steps: bool
+    ) -> None:
+        """Record the level of the evidence the run is about to produce.
+
+        A recorded level only rises: the run's earlier evidence keeps the level
+        it was produced at when a resume or a retry finds the space or a model
+        classified lower. A run without a recorded level gets one only while
+        none of its steps has completed; steps that completed without one
+        produced evidence of a level nobody recorded, so the run stays unknown.
+        """
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        statement = (
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            # PostgreSQL's GREATEST skips NULL, so an unrecorded level takes
+            # `level`; the filter below keeps an unknown run unknown.
+            .values(
+                evidence_classification_level=sa.func.greatest(
+                    FlowRuns.evidence_classification_level, level
+                )
+            )
+        )
+        if has_completed_steps:
+            statement = statement.where(
+                FlowRuns.evidence_classification_level.is_not(None)
+            )
+        await self.session.execute(statement)
+
+    async def update_input_payload(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        input_payload_patch: FlowRunInputEnvelopePatch,
+    ) -> FlowPersistedJsonObject:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        current_payload = await self.session.scalar(
+            sa.select(FlowRuns.input_payload_json)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        updated_payload = input_payload_patch.apply_to(current_payload)
+        transcript = input_payload_patch.to_merge_dict().get(
+            FLOW_INPUT_TRANSCRIPTION_KEY
+        )
+        if (
+            isinstance(transcript, dict)
+            and cast(dict[str, object], transcript).get("kind") == "inline_transcript"
+        ):
+            InlineTranscript.model_validate(transcript)
+        elif isinstance(transcript, dict):
+            reference = FileBackedStepText.model_validate(transcript)
+            result_row = await self.session.scalar(
+                sa.select(FlowStepResults)
+                .join(
+                    FlowStepAttempts,
+                    sa.and_(
+                        FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                        FlowStepAttempts.step_id == FlowStepResults.step_id,
+                        FlowStepAttempts.tenant_id == FlowStepResults.tenant_id,
+                    ),
+                )
+                .where(FlowStepResults.flow_run_id == run_id)
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.step_id == reference.source_step_id)
+                .where(FlowStepAttempts.attempt_no == reference.source_attempt_no)
+            )
+            if result_row is None or reference.source_attempt_no is None:
+                raise FlowRunPersistenceInvariantError(
+                    operation="persist_transcript_file",
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                )
+            await self._replace_step_result_file_rows(
+                db_session=self.session,
+                result_row=result_row,
+                result_file_references=[
+                    FlowStepResultFileReference(
+                        file_id=reference.file_id, source="generated_output"
+                    )
+                ],
+                attempt_no=reference.source_attempt_no,
+            )
+        await self.session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .values(input_payload_json=updated_payload)
+        )
+        return updated_payload
+
+    async def list_step_result_metrics(
+        self, *, tenant_id: UUID, run_ids: Sequence[UUID]
+    ) -> list[FlowStepResultMetrics]:
+        """Status, error code, timing and provider receipt per step for many runs.
+
+        One statement and no payload columns: a review over a cohort of runs
+        must not pull step inputs and outputs it never reads.
+        """
+        if not run_ids:
+            return []
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepResults.flow_run_id,
+                    FlowStepResults.step_id,
+                    FlowStepResults.step_order,
+                    FlowStepResults.status,
+                    FlowStepResults.error_code,
+                    FlowStepResults.started_at,
+                    FlowStepResults.finished_at,
+                )
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.flow_run_id.in_(tuple(run_ids)))
+                .order_by(FlowStepResults.flow_run_id, FlowStepResults.step_order)
+            )
+        ).all()
+        receipts = await FlowProviderCallRepository(
+            self.session
+        ).list_step_usage_receipts(run_ids=run_ids, tenant_id=tenant_id)
+        return [
+            FlowStepResultMetrics(
+                flow_run_id=row.flow_run_id,
+                step_id=row.step_id,
+                step_order=row.step_order,
+                status=row.status,
+                error_code=row.error_code,
+                started_at=row.started_at,
+                finished_at=row.finished_at,
+                usage_receipt=receipts.get((row.flow_run_id, row.step_id)),
+            )
+            for row in rows
+        ]
+
+    async def list_current_attempt_lineage(
+        self, *, tenant_id: UUID, run_ids: Sequence[UUID]
+    ) -> list[FlowStepLineage]:
+        """Resolved-input edges of every step result's current attempt, for many runs."""
+        if not run_ids:
+            return []
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepResults.flow_run_id,
+                    FlowStepResults.step_id,
+                    FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                )
+                .select_from(FlowStepResults)
+                .join(
+                    FlowStepAttempts,
+                    sa.and_(
+                        FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                        FlowStepAttempts.step_id == FlowStepResults.step_id,
+                        FlowStepAttempts.attempt_no
+                        == FlowStepResults.current_attempt_no,
+                    ),
+                )
+                .join(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.flow_run_id.in_(tuple(run_ids)))
+            )
+        ).all()
+        return [
+            FlowStepLineage(
+                flow_run_id=run_id,
+                step_id=step_id,
+                edges=parse_resolved_input_edges(raw_edges),
+            )
+            for run_id, step_id, raw_edges in rows
+        ]
+
+    async def list_completed_tool_answers(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> dict[int, FlowResolvedInputToolAnswerSource]:
+        """The tool steps the run has completed: by step order, the source of
+        the ``tool_answer`` edge on the attempt behind each completed step
+        result, which the attempt recorded when it read its tool, or which
+        ``seed_validated_prefix`` copied onto an imported attempt. One
+        statement; a completed step whose attempt holds no such edge is not
+        in the answer."""
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepResults.step_order,
+                    FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                )
+                .select_from(FlowStepResults)
+                .join(
+                    FlowStepAttempts,
+                    sa.and_(
+                        FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                        FlowStepAttempts.step_id == FlowStepResults.step_id,
+                        FlowStepAttempts.attempt_no
+                        == FlowStepResults.current_attempt_no,
+                    ),
+                )
+                .join(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.flow_run_id == run_id)
+                .where(FlowStepResults.status == FlowStepResultStatus.COMPLETED.value)
+            )
+        ).all()
+        answers: dict[int, FlowResolvedInputToolAnswerSource] = {}
+        for step_order, raw_edges in rows:
+            source = tool_answer_source(parse_resolved_input_edges(raw_edges))
+            if source is not None:
+                answers[step_order] = source
+        return answers
+
+    async def list_step_result_identities(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> list[FlowStepResultIdentity]:
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepResults.id,
+                    FlowStepResults.step_id,
+                    FlowStepResults.step_order,
+                    FlowStepResults.status,
+                    FlowStepResults.current_attempt_no,
+                    FlowStepAttempts.provenance_json["kind"].astext.label(
+                        "import_kind"
+                    ),
+                    FlowStepAttempts.provenance_json["review_established"].label(
+                        "review_established"
+                    ),
+                )
+                .outerjoin(
+                    FlowStepAttempts,
+                    sa.and_(
+                        FlowStepAttempts.tenant_id == FlowStepResults.tenant_id,
+                        FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                        FlowStepAttempts.step_id == FlowStepResults.step_id,
+                        FlowStepAttempts.attempt_no
+                        == FlowStepResults.current_attempt_no,
+                    ),
+                )
+                .where(
+                    FlowStepResults.flow_run_id == run_id,
+                    FlowStepResults.tenant_id == tenant_id,
+                )
+                .order_by(FlowStepResults.step_order.asc())
+            )
+        ).all()
+        return [
+            FlowStepResultIdentity(
+                id=row.id,
+                step_id=row.step_id,
+                step_order=row.step_order,
+                status=FlowStepResultStatus(row.status),
+                current_attempt_no=row.current_attempt_no,
+                imported_review_established=(
+                    row.review_established is True
+                    if row.import_kind is not None
+                    else None
+                ),
+            )
+            for row in rows
+        ]
+
+    async def measure_prefix_results(
+        self, *, run_id: UUID, tenant_id: UUID, step_orders: Sequence[int]
+    ) -> FlowRunPrefixMeasurement:
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count(),
+                    sa.func.coalesce(
+                        sa.func.sum(_step_result_evidence_logical_bytes()),
+                        0,
+                    ),
+                ).where(
+                    FlowStepResults.flow_run_id == run_id,
+                    FlowStepResults.tenant_id == tenant_id,
+                    FlowStepResults.step_order.in_(tuple(step_orders)),
+                )
+            )
+        ).one()
+        return FlowRunPrefixMeasurement(
+            step_count=int(row[0]), logical_bytes=int(row[1])
+        )
+
+    async def list_step_results(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
+    ) -> list[FlowStepResult]:
+        stmt = (
+            sa.select(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .order_by(FlowStepResults.step_order.asc())
+        )
+        if limit is not None and logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowStepResults.id.label("row_id"),
+                    FlowStepResults.step_order.label("step_order"),
+                    _step_result_evidence_logical_bytes().label("logical_bytes"),
+                )
+                .where(FlowStepResults.flow_run_id == run_id)
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .order_by(FlowStepResults.step_order.asc(), FlowStepResults.id.asc())
+                .limit(limit + 1)
+                .subquery()
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number()
+                .over(order_by=(candidates.c.step_order, candidates.c.row_id))
+                .label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=(candidates.c.step_order, candidates.c.row_id))
+                .label("cumulative_logical"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowStepResults.id.in_(
+                    sa.select(ranked.c.row_id).where(
+                        ranked.c.row_rank <= limit,
+                        ranked.c.cumulative_logical <= logical_byte_budget,
+                    )
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return [FlowStepResult.model_validate(row) for row in rows]
+
+    async def list_step_result_annotations(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> list[FlowStepResultAnnotation]:
+        """Status, token counts and error per step, never the content columns."""
+        rows = (
+            await self.session.execute(
+                step_result_annotation_select(run_id=run_id, tenant_id=tenant_id)
+            )
+        ).all()
+        return [FlowStepResultAnnotation.model_validate(row) for row in rows]
+
+    async def read_last_completed_output_payload(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowPersistedJsonObject | None:
+        """The output of the run's highest-order completed step: what a
+        completed run returns. One payload, never the other steps' content."""
+        return await self.session.scalar(
+            sa.select(FlowStepResults.output_payload_json)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.status == FlowStepResultStatus.COMPLETED.value)
+            .order_by(FlowStepResults.step_order.desc())
+            .limit(1)
+        )
+
+    async def list_step_results_by_orders(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step_orders: Sequence[int],
+    ) -> list[FlowStepResult]:
+        named_orders = tuple(sorted(set(step_orders)))
+        if not named_orders:
+            return []
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowStepResults)
+                    .where(FlowStepResults.flow_run_id == run_id)
+                    .where(FlowStepResults.tenant_id == tenant_id)
+                    .where(FlowStepResults.step_order.in_(named_orders))
+                    .order_by(FlowStepResults.step_order.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [FlowStepResult.model_validate(row) for row in rows]
+
+    async def measure_evidence_row_counts(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        ceiling: int,
+        count_step_attempts: bool = True,
+    ) -> FlowRunEvidenceRowCounts:
+        """Read at most ceiling+1 identities for each emitted fan-out.
+
+        A caller that sizes attempts some other way passes
+        ``count_step_attempts=False`` to skip that count; ``step_attempts`` is
+        then reported as 0 and must not be read.
+        """
+        candidate_limit = ceiling + 1
+        step_attempts = (
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .limit(candidate_limit)
+            .subquery()
+        )
+        result_files = (
+            sa.select(FlowRunStepResultFiles.id)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .limit(candidate_limit)
+            .subquery()
+        )
+        runtime_input_files = (
+            sa.select(FlowRunStepInputFiles.id)
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.flow_run_id == FlowRunStepInputFiles.flow_run_id,
+                    FlowStepResults.tenant_id == FlowRunStepInputFiles.tenant_id,
+                    FlowStepResults.step_id == FlowRunStepInputFiles.step_id,
+                    FlowStepResults.current_attempt_no
+                    == FlowRunStepInputFiles.attempt_no,
+                ),
+            )
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+            .limit(candidate_limit)
+            .subquery()
+        )
+        step_result_count = int(
+            await self.session.scalar(
+                _bounded_step_result_evidence_count_statement(
+                    run_id=run_id, tenant_id=tenant_id, ceiling=ceiling
+                )
+            )
+            or 0
+        )
+        counts: list[int] = []
+        for candidates in (
+            step_attempts if count_step_attempts else None,
+            result_files,
+            runtime_input_files,
+        ):
+            if candidates is None:
+                counts.append(0)
+                continue
+            counts.append(
+                int(
+                    await self.session.scalar(
+                        sa.select(sa.func.count()).select_from(candidates)
+                    )
+                    or 0
+                )
+            )
+        return FlowRunEvidenceRowCounts(step_result_count, *counts)
+
+    async def measure_evidence_sections(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowRunEvidenceMeasurements:
+        run_stored = sum(
+            (
+                sa.func.coalesce(sa.func.pg_column_size(column), 0)
+                for column in (
+                    FlowRuns.dispatch_last_error,
+                    FlowRuns.input_payload_json,
+                    FlowRuns.output_payload_json,
+                    FlowRuns.error_json,
+                )
+            ),
+            start=sa.literal(0),
+        )
+        run_logical = sum(
+            (
+                sa.func.coalesce(sa.func.octet_length(sa.cast(column, sa.Text)), 0)
+                for column in (
+                    FlowRuns.dispatch_last_error,
+                    FlowRuns.input_payload_json,
+                    FlowRuns.output_payload_json,
+                    FlowRuns.error_json,
+                )
+            ),
+            start=sa.literal(0),
+        )
+        run_measurement = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(sa.func.sum(run_stored), 0).label(
+                        "stored_json_bytes"
+                    ),
+                    sa.func.coalesce(sa.func.sum(run_logical), 0).label(
+                        "logical_json_bytes"
+                    ),
+                )
+                .where(FlowRuns.id == run_id)
+                .where(FlowRuns.tenant_id == tenant_id)
+            )
+        ).one()
+
+        result_measurement = (
+            await self.session.execute(
+                _bounded_step_result_evidence_size_statement(
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    candidate_limit=candidate_limit or 2_147_483_647,
+                )
+            )
+        ).one()
+
+        # Paired with `_result_file_from_rows`: file names and MIME types are
+        # the only variable-width values that projection adds to the link row.
+        result_file_stmt = (
+            sa.select(FlowRunStepResultFiles.id)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            result_file_stmt = result_file_stmt.limit(candidate_limit)
+        result_file_candidates = result_file_stmt.subquery()
+        result_file_measurement = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(_file_evidence_logical_bytes()),
+                        0,
+                    ).label("logical_json_bytes"),
+                )
+                .select_from(FlowRunStepResultFiles)
+                .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+                .where(FlowRunStepResultFiles.flow_run_id == run_id)
+                .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+                .where(
+                    FlowRunStepResultFiles.id.in_(
+                        sa.select(result_file_candidates.c.id)
+                    )
+                )
+            )
+        ).one()
+        # Paired with `list_current_step_input_file_metadata_by_step_result_id`:
+        # runtime-file metadata emits the same unbounded file text fields.
+        runtime_input_stmt = (
+            sa.select(FlowRunStepInputFiles.id)
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.flow_run_id == FlowRunStepInputFiles.flow_run_id,
+                    FlowStepResults.tenant_id == FlowRunStepInputFiles.tenant_id,
+                    FlowStepResults.step_id == FlowRunStepInputFiles.step_id,
+                    FlowStepResults.current_attempt_no
+                    == FlowRunStepInputFiles.attempt_no,
+                ),
+            )
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            runtime_input_stmt = runtime_input_stmt.limit(candidate_limit)
+        runtime_input_candidates = runtime_input_stmt.subquery()
+        runtime_input_file_measurement = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(_file_evidence_logical_bytes()),
+                        0,
+                    ).label("logical_json_bytes"),
+                )
+                .select_from(FlowRunStepInputFiles)
+                .join(Files, Files.id == FlowRunStepInputFiles.file_id)
+                .join(
+                    FlowStepResults,
+                    sa.and_(
+                        FlowStepResults.flow_run_id
+                        == FlowRunStepInputFiles.flow_run_id,
+                        FlowStepResults.tenant_id == FlowRunStepInputFiles.tenant_id,
+                        FlowStepResults.step_id == FlowRunStepInputFiles.step_id,
+                        FlowStepResults.current_attempt_no
+                        == FlowRunStepInputFiles.attempt_no,
+                    ),
+                )
+                .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                .where(
+                    FlowRunStepInputFiles.id.in_(
+                        sa.select(runtime_input_candidates.c.id)
+                    )
+                )
+            )
+        ).one()
+        return FlowRunEvidenceMeasurements(
+            run_row_count=int(run_measurement.row_count),
+            run_stored_json_bytes=int(run_measurement.stored_json_bytes),
+            run_logical_json_bytes=int(run_measurement.logical_json_bytes),
+            step_result_row_count=int(result_measurement.row_count),
+            step_result_stored_json_bytes=int(result_measurement.stored_json_bytes),
+            step_result_logical_json_bytes=int(result_measurement.logical_json_bytes),
+            result_file_row_count=int(result_file_measurement.row_count),
+            result_file_logical_json_bytes=int(
+                result_file_measurement.logical_json_bytes
+            ),
+            runtime_input_file_row_count=int(runtime_input_file_measurement.row_count),
+            runtime_input_file_logical_json_bytes=int(
+                runtime_input_file_measurement.logical_json_bytes
+            ),
+        )
+
+    async def measure_step_attempt_evidence(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> StepAttemptEvidenceSize:
+        """Size a run's attempt evidence without materializing any of it.
+
+        One aggregate over the run's attempts, so a caller can refuse or narrow
+        the work before the JSON is fetched, decoded and copied. `pg_column_size`
+        reports the *stored* size, which TOAST may have compressed, so treat it
+        as a floor on the serialized cost rather than an exact byte count.
+        """
+        # Every RAG payload stores its own passage-byte aggregate, so the exact
+        # passage total is one jsonb field extraction away — no payload is
+        # decoded or materialized to measure it. The shared guarded expression
+        # keeps a malformed persisted value from failing the statement, and
+        # counts it as corruption instead of silently measuring zero.
+        recorded_passage_bytes, is_corrupt = _recorded_passage_byte_expressions()
+        candidate_stmt = (
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            candidate_stmt = candidate_stmt.limit(candidate_limit)
+        candidates = candidate_stmt.subquery()
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("attempt_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.func.pg_column_size(FlowStepAttempts.provenance_json)
+                        ),
+                        0,
+                    ).label("provenance_bytes"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sum(
+                                (
+                                    sa.func.coalesce(sa.func.pg_column_size(column), 0)
+                                    for column in (
+                                        FlowStepAttempts.provenance_json,
+                                        FlowStepAttempts.input_payload_json,
+                                        FlowStepAttempts.output_payload_json,
+                                        FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                                    )
+                                ),
+                                start=sa.literal(0),
+                            )
+                        ),
+                        0,
+                    ).label("stored_json_bytes"),
+                    sa.func.coalesce(
+                        sa.func.sum(_attempt_evidence_logical_bytes()),
+                        0,
+                    ).label("logical_json_bytes"),
+                    sa.func.coalesce(sa.func.sum(recorded_passage_bytes), 0).label(
+                        "passage_bytes"
+                    ),
+                    sa.func.coalesce(
+                        sa.func.sum(sa.case((is_corrupt, 1), else_=0)), 0
+                    ).label("corrupt_aggregates"),
+                )
+                .select_from(FlowStepAttempts)
+                .outerjoin(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(FlowStepAttempts.flow_run_id == run_id)
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+                .where(FlowStepAttempts.id.in_(sa.select(candidates.c.id)))
+            )
+        ).one()
+        return StepAttemptEvidenceSize(
+            attempt_count=int(row.attempt_count),
+            stored_provenance_bytes=int(row.provenance_bytes),
+            recorded_passage_bytes=int(row.passage_bytes),
+            stored_json_bytes=int(row.stored_json_bytes),
+            logical_json_bytes=int(row.logical_json_bytes),
+            corrupt_passage_aggregates=int(row.corrupt_aggregates),
+        )
+
+    async def list_step_attempts(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
+        passage_byte_budget: int | None = None,
+    ) -> StepAttemptPage:
+        """Attempts for a run, oldest first, with snapshot-consistent totals.
+
+        With `limit`, one statement bounds current and recent candidates to
+        `limit + 1`, deduplicates their overlap, then ranks current attempts
+        first and history newest first. The extra candidate is a truncation
+        sentinel. Admitted rows must also fit both cumulative budgets: logical
+        attempt JSON bytes bound what materialization expands to, and exact
+        recorded passage bytes independently bound retained passage text.
+        Counts ride in the same statement even when nothing is admitted.
+        """
+        base = (
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+        )
+        if limit is None:
+            rows = (
+                (
+                    await self.session.execute(
+                        base.order_by(
+                            FlowStepAttempts.step_order.asc(),
+                            FlowStepAttempts.attempt_no.asc(),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            attempts = [FlowStepAttempt.model_validate(row) for row in rows]
+            # An unlimited read loads everything, so no current attempt can be
+            # excluded and the current counts carry no signal.
+            return StepAttemptPage(
+                attempts=attempts,
+                total_count=len(attempts),
+                current_total=0,
+                current_admitted=0,
+                count_truncated=False,
+            )
+
+        if limit < 0:
+            raise ValueError("Step attempt limit must be non-negative.")
+        candidate_limit = limit + 1
+        # Candidate branches project every value needed for admission while
+        # their index-backed LIMIT is active. No later aggregate or window may
+        # reopen the full attempt table merely to measure candidate evidence.
+        logical_bytes = _attempt_evidence_logical_bytes()
+        passage_bytes, is_corrupt = _recorded_passage_byte_expressions()
+
+        current_candidates = (
+            sa.select(
+                FlowStepAttempts.id.label("attempt_id"),
+                FlowStepAttempts.step_order.label("step_order"),
+                FlowStepAttempts.attempt_no.label("attempt_no"),
+                sa.literal(0).label("is_current"),
+                logical_bytes.label("logical_bytes"),
+                passage_bytes.label("passage_bytes"),
+                is_corrupt.label("is_corrupt"),
+            )
+            .select_from(FlowStepResults)
+            .join(
+                FlowStepAttempts,
+                sa.and_(
+                    FlowStepAttempts.flow_run_id == FlowStepResults.flow_run_id,
+                    FlowStepAttempts.step_id == FlowStepResults.step_id,
+                    FlowStepAttempts.attempt_no == FlowStepResults.current_attempt_no,
+                ),
+            )
+            .outerjoin(
+                FlowStepAttemptResolvedInputs,
+                FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                == FlowStepAttempts.id,
+            )
+            .where(
+                FlowStepResults.flow_run_id == run_id,
+                FlowStepResults.tenant_id == tenant_id,
+                FlowStepResults.current_attempt_no.is_not(None),
+                FlowStepAttempts.flow_run_id == run_id,
+                FlowStepAttempts.tenant_id == tenant_id,
+            )
+            .order_by(
+                FlowStepResults.step_order.desc(),
+                FlowStepAttempts.attempt_no.desc(),
+            )
+            .limit(candidate_limit)
+        )
+        recent_candidates = (
+            sa.select(
+                FlowStepAttempts.id.label("attempt_id"),
+                FlowStepAttempts.step_order.label("step_order"),
+                FlowStepAttempts.attempt_no.label("attempt_no"),
+                sa.literal(1).label("is_current"),
+                logical_bytes.label("logical_bytes"),
+                passage_bytes.label("passage_bytes"),
+                is_corrupt.label("is_corrupt"),
+            )
+            .select_from(FlowStepAttempts)
+            .outerjoin(
+                FlowStepAttemptResolvedInputs,
+                FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                == FlowStepAttempts.id,
+            )
+            .where(
+                FlowStepAttempts.flow_run_id == run_id,
+                FlowStepAttempts.tenant_id == tenant_id,
+            )
+            .order_by(
+                FlowStepAttempts.step_order.desc(),
+                FlowStepAttempts.attempt_no.desc(),
+            )
+            .limit(candidate_limit)
+        )
+        candidate_branches = current_candidates.union_all(recent_candidates).subquery()
+        deduplicated_candidates = (
+            sa.select(
+                candidate_branches.c.attempt_id,
+                candidate_branches.c.step_order,
+                candidate_branches.c.attempt_no,
+                candidate_branches.c.is_current,
+                candidate_branches.c.logical_bytes,
+                candidate_branches.c.passage_bytes,
+                candidate_branches.c.is_corrupt,
+            )
+            .distinct(candidate_branches.c.attempt_id)
+            .order_by(
+                candidate_branches.c.attempt_id,
+                candidate_branches.c.is_current.asc(),
+            )
+            .subquery()
+        )
+        candidates = (
+            sa.select(
+                deduplicated_candidates.c.attempt_id,
+                deduplicated_candidates.c.step_order,
+                deduplicated_candidates.c.attempt_no,
+                deduplicated_candidates.c.is_current,
+                deduplicated_candidates.c.logical_bytes,
+                deduplicated_candidates.c.passage_bytes,
+                deduplicated_candidates.c.is_corrupt,
+            )
+            .order_by(
+                deduplicated_candidates.c.is_current.asc(),
+                deduplicated_candidates.c.step_order.desc(),
+                deduplicated_candidates.c.attempt_no.desc(),
+            )
+            .limit(candidate_limit)
+            .subquery()
+        )
+        admission_order = (
+            candidates.c.is_current.asc(),
+            candidates.c.step_order.desc(),
+            candidates.c.attempt_no.desc(),
+        )
+        ranked = (
+            sa.select(
+                candidates.c.attempt_id,
+                candidates.c.step_order,
+                candidates.c.is_current,
+                sa.case((candidates.c.is_corrupt, 1), else_=0).label("is_corrupt"),
+                sa.func.row_number().over(order_by=admission_order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=admission_order)
+                .label("cumulative_logical"),
+                sa.func.sum(candidates.c.passage_bytes)
+                .over(order_by=admission_order)
+                .label("cumulative_passages"),
+            )
+            .select_from(candidates)
+            .subquery()
+        )
+        admitted = sa.select(ranked.c.attempt_id, ranked.c.is_current).where(
+            ranked.c.row_rank <= limit
+        )
+        if logical_byte_budget is not None:
+            admitted = admitted.where(
+                ranked.c.cumulative_logical <= logical_byte_budget
+            )
+        if passage_byte_budget is not None:
+            # A corrupt aggregate has an unknowable logical size; admitting it
+            # under a size budget would be a silent bypass, so it is excluded
+            # and reported instead.
+            admitted = admitted.where(
+                ranked.c.cumulative_passages <= passage_byte_budget
+            ).where(ranked.c.is_corrupt == 0)
+        admitted_sq = admitted.subquery()
+        excluded_currents = (
+            sa.select(
+                sa.func.coalesce(
+                    sa.func.array_agg(sa.distinct(ranked.c.step_order)).filter(
+                        ranked.c.is_current == 0
+                    ),
+                    sa.literal([], sa.ARRAY(sa.Integer)),
+                ).label("step_orders")
+            )
+            .select_from(
+                ranked.outerjoin(
+                    admitted_sq, admitted_sq.c.attempt_id == ranked.c.attempt_id
+                )
+            )
+            .where(admitted_sq.c.attempt_id.is_(None))
+            .subquery()
+        )
+        totals = (
+            sa.select(
+                sa.func.count().label("total_count"),
+                sa.func.coalesce(sa.func.sum(1 - ranked.c.is_current), 0).label(
+                    "current_total"
+                ),
+                sa.func.coalesce(sa.func.sum(ranked.c.is_corrupt), 0).label(
+                    "corrupt_aggregates"
+                ),
+            )
+            .select_from(ranked)
+            .subquery()
+        )
+        admitted_attempt_lookup = (
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.id == admitted_sq.c.attempt_id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .limit(1)
+            .lateral("admitted_attempt")
+        )
+        admitted_attempt = aliased(FlowStepAttempts, admitted_attempt_lookup)
+        # The totals row always exists, so zero admission still reports the
+        # run's counts from the same statement and snapshot.
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    totals.c.total_count,
+                    totals.c.current_total,
+                    totals.c.corrupt_aggregates,
+                    excluded_currents.c.step_orders,
+                    admitted_attempt,
+                    admitted_sq.c.is_current,
+                )
+                .select_from(totals)
+                .outerjoin(excluded_currents, sa.literal(True))
+                .outerjoin(admitted_sq, sa.literal(True))
+                .outerjoin(
+                    admitted_attempt_lookup,
+                    sa.literal(True),
+                )
+            )
+        ).all()
+        total_count = int(rows[0][0]) if rows else 0
+        current_total = int(rows[0][1]) if rows else 0
+        corrupt_aggregates = int(rows[0][2]) if rows else 0
+        raw_excluded_orders = cast(
+            "Sequence[int]", rows[0][3] if rows and rows[0][3] is not None else ()
+        )
+        excluded_current_orders = tuple(
+            sorted(int(order) for order in raw_excluded_orders)
+        )
+        attempts_with_flag = [
+            (FlowStepAttempt.model_validate(row[4]), int(row[5]))
+            for row in rows
+            if row[4] is not None
+        ]
+        current_admitted = sum(1 for _, flag in attempts_with_flag if flag == 0)
+        attempts = [attempt for attempt, _ in attempts_with_flag]
+        attempts.sort(key=lambda item: (item.step_order, item.attempt_no))
+        return StepAttemptPage(
+            attempts=attempts,
+            total_count=total_count,
+            current_total=current_total,
+            current_admitted=current_admitted,
+            count_truncated=total_count > limit,
+            current_step_orders_not_loaded=excluded_current_orders,
+            corrupt_passage_aggregates=corrupt_aggregates,
+        )
+
+    async def list_step_input_file_ids(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+    ) -> list[UUID]:
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunStepInputFiles.file_id)
+                    .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                    .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                    .where(FlowRunStepInputFiles.step_id == step_id)
+                    .where(FlowRunStepInputFiles.attempt_no == attempt_no)
+                    .order_by(FlowRunStepInputFiles.ordinal.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return list(rows)
+
+    async def list_retained_input_file_ids(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> list[UUID]:
+        rows = await self.session.execute(
+            sa.select(FlowRunStepInputFiles.file_id)
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.flow_run_id == FlowRunStepInputFiles.flow_run_id,
+                    FlowStepResults.tenant_id == FlowRunStepInputFiles.tenant_id,
+                    FlowStepResults.step_id == FlowRunStepInputFiles.step_id,
+                    FlowRunStepInputFiles.attempt_no
+                    == sa.func.coalesce(FlowStepResults.current_attempt_no, 1),
+                ),
+            )
+            .where(
+                FlowRunStepInputFiles.flow_run_id == run_id,
+                FlowRunStepInputFiles.tenant_id == tenant_id,
+            )
+            .order_by(FlowRunStepInputFiles.step_order, FlowRunStepInputFiles.ordinal)
+        )
+        return list(rows.scalars().all())
+
+    async def list_current_step_input_file_ids_by_step_result_id(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step_results: Sequence[FlowStepResult | FlowStepResultIdentity],
+    ) -> dict[UUID, Sequence[UUID]]:
+        step_result_id_by_step_attempt, current_attempt_pairs = (
+            _current_step_attempt_pairs_by_result_id(step_results)
+        )
+        if not current_attempt_pairs:
+            return {}
+
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowRunStepInputFiles.step_id,
+                    FlowRunStepInputFiles.attempt_no,
+                    FlowRunStepInputFiles.file_id,
+                )
+                .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                .where(
+                    sa.tuple_(
+                        FlowRunStepInputFiles.step_id,
+                        FlowRunStepInputFiles.attempt_no,
+                    ).in_(current_attempt_pairs)
+                )
+                .order_by(
+                    FlowRunStepInputFiles.step_order.asc(),
+                    FlowRunStepInputFiles.attempt_no.asc(),
+                    FlowRunStepInputFiles.ordinal.asc(),
+                )
+            )
+        ).all()
+
+        file_ids_by_step_result_id: dict[UUID, list[UUID]] = {}
+        for step_id, attempt_no, file_id in rows:
+            step_result_id = step_result_id_by_step_attempt.get((step_id, attempt_no))
+            if step_result_id is None:
+                continue
+            file_ids_by_step_result_id.setdefault(step_result_id, []).append(file_id)
+
+        return {
+            step_result_id: tuple(file_ids)
+            for step_result_id, file_ids in file_ids_by_step_result_id.items()
+        }
+
+    async def list_current_step_input_file_refs_by_step_result_id(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step_results: Sequence[FlowStepResult | FlowStepResultIdentity],
+    ) -> dict[UUID, tuple[FlowRunStepInputFileRef, ...]]:
+        """Every current-attempt input file in step order, with the name and
+        MIME type of its file row when the row is in the run's tenant."""
+        step_result_id_by_step_attempt, current_attempt_pairs = (
+            _current_step_attempt_pairs_by_result_id(step_results)
+        )
+        if not current_attempt_pairs:
+            return {}
+
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowRunStepInputFiles.step_id,
+                    FlowRunStepInputFiles.attempt_no,
+                    FlowRunStepInputFiles.file_id,
+                    Files.name,
+                    Files.mimetype,
+                )
+                .outerjoin(
+                    Files,
+                    sa.and_(
+                        Files.id == FlowRunStepInputFiles.file_id,
+                        Files.tenant_id == tenant_id,
+                    ),
+                )
+                .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                .where(
+                    sa.tuple_(
+                        FlowRunStepInputFiles.step_id,
+                        FlowRunStepInputFiles.attempt_no,
+                    ).in_(current_attempt_pairs)
+                )
+                .order_by(
+                    FlowRunStepInputFiles.step_order.asc(),
+                    FlowRunStepInputFiles.attempt_no.asc(),
+                    FlowRunStepInputFiles.ordinal.asc(),
+                )
+            )
+        ).all()
+
+        refs_by_step_result_id: dict[UUID, list[FlowRunStepInputFileRef]] = {}
+        for step_id, attempt_no, file_id, name, mimetype in rows:
+            step_result_id = step_result_id_by_step_attempt.get((step_id, attempt_no))
+            if step_result_id is None:
+                continue
+            refs_by_step_result_id.setdefault(step_result_id, []).append(
+                FlowRunStepInputFileRef(file_id=file_id, name=name, mimetype=mimetype)
+            )
+
+        return {
+            step_result_id: tuple(refs)
+            for step_result_id, refs in refs_by_step_result_id.items()
+        }
+
+    async def list_current_step_input_file_metadata_by_step_result_id(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        step_results: Sequence[FlowStepResult],
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
+    ) -> dict[UUID, tuple[FlowRunStepInputFileMetadata, ...]]:
+        step_result_id_by_step_attempt, current_attempt_pairs = (
+            _current_step_attempt_pairs_by_result_id(step_results)
+        )
+        if not current_attempt_pairs:
+            return {}
+
+        stmt = (
+            sa.select(
+                FlowRunStepInputFiles.step_id,
+                FlowRunStepInputFiles.attempt_no,
+                FlowRunStepInputFiles.file_id,
+            )
+            .join(Files, Files.id == FlowRunStepInputFiles.file_id)
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+            .where(
+                sa.tuple_(
+                    FlowRunStepInputFiles.step_id,
+                    FlowRunStepInputFiles.attempt_no,
+                ).in_(current_attempt_pairs)
+            )
+            .order_by(
+                FlowRunStepInputFiles.step_order.asc(),
+                FlowRunStepInputFiles.attempt_no.asc(),
+                FlowRunStepInputFiles.ordinal.asc(),
+            )
+        )
+        if limit is not None and logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowRunStepInputFiles.id.label("row_id"),
+                    FlowRunStepInputFiles.step_order.label("step_order"),
+                    FlowRunStepInputFiles.attempt_no.label("attempt_no"),
+                    FlowRunStepInputFiles.ordinal.label("ordinal"),
+                    _file_evidence_logical_bytes().label("logical_bytes"),
+                )
+                .join(Files, Files.id == FlowRunStepInputFiles.file_id)
+                .where(FlowRunStepInputFiles.flow_run_id == run_id)
+                .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+                .where(
+                    sa.tuple_(
+                        FlowRunStepInputFiles.step_id,
+                        FlowRunStepInputFiles.attempt_no,
+                    ).in_(current_attempt_pairs)
+                )
+                .order_by(
+                    FlowRunStepInputFiles.step_order.asc(),
+                    FlowRunStepInputFiles.attempt_no.asc(),
+                    FlowRunStepInputFiles.ordinal.asc(),
+                    FlowRunStepInputFiles.id.asc(),
+                )
+                .limit(limit + 1)
+                .subquery()
+            )
+            order = (
+                candidates.c.step_order,
+                candidates.c.attempt_no,
+                candidates.c.ordinal,
+                candidates.c.row_id,
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number().over(order_by=order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=order)
+                .label("cumulative_logical"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowRunStepInputFiles.id.in_(
+                    sa.select(ranked.c.row_id).where(
+                        ranked.c.row_rank <= limit,
+                        ranked.c.cumulative_logical <= logical_byte_budget,
+                    )
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).all()
+        ordered_file_ids = list(dict.fromkeys(row.file_id for row in rows))
+        if not ordered_file_ids:
+            return {}
+
+        file_repo = FileRepository(self.session)
+        files = await file_repo.get_by_ids(ordered_file_ids)
+        file_by_id = {file.id: file for file in files}
+        references = await file_repo.get_content_references(ordered_file_ids)
+        references_by_file_id: dict[UUID, list[FileContentReferenceRecord]] = {
+            file_id: [] for file_id in ordered_file_ids
+        }
+        for reference in references:
+            references_by_file_id[reference.file_id].append(reference)
+
+        metadata_by_step_result_id: dict[UUID, list[FlowRunStepInputFileMetadata]] = {}
+        for row in rows:
+            step_result_id = step_result_id_by_step_attempt.get(
+                (row.step_id, row.attempt_no)
+            )
+            if step_result_id is None:
+                continue
+            file = file_by_id.get(row.file_id)
+            if file is None:
+                continue
+            file_references = references_by_file_id[row.file_id]
+            primary_reference = select_primary_file_reference(
+                file.file_type,
+                file_references,
+            )
+            if primary_reference is None:
+                continue
+            file_info = project_file_info(file, file_references)
+            text_reference = next(
+                (
+                    reference
+                    for reference in file_references
+                    if reference.variant is FileContentVariant.EXTRACTED_TEXT
+                ),
+                None,
+            )
+            if text_reference is None and file.file_type is FileType.TEXT:
+                text_reference = primary_reference
+            transcription_reference = next(
+                (
+                    reference
+                    for reference in file_references
+                    if reference.variant is FileContentVariant.TRANSCRIPTION
+                ),
+                None,
+            )
+            metadata_by_step_result_id.setdefault(step_result_id, []).append(
+                FlowRunStepInputFileMetadata(
+                    file_id=row.file_id,
+                    name=file_info.name,
+                    checksum=file_info.checksum,
+                    size=file_info.size,
+                    mimetype=file_info.mimetype,
+                    file_type=file_info.file_type,
+                    text_size_bytes=(
+                        text_reference.size_bytes
+                        if text_reference is not None
+                        else None
+                    ),
+                    has_text=(
+                        text_reference is not None and text_reference.size_bytes > 0
+                    ),
+                    has_transcription=(
+                        transcription_reference is not None
+                        and transcription_reference.size_bytes > 0
+                    ),
+                )
+            )
+
+        return {
+            step_result_id: tuple(metadata)
+            for step_result_id, metadata in metadata_by_step_result_id.items()
+        }
+
+    async def list_step_orders_with_result_files(
+        self, *, run_id: UUID, tenant_id: UUID
+    ) -> set[int]:
+        result = await self.session.scalars(
+            sa.select(FlowRunStepResultFiles.step_order)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .distinct()
+        )
+        return set(result.all())
+
+    async def list_result_files(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
+    ) -> list[FlowRunStepResultFile]:
+        stmt = (
+            sa.select(FlowRunStepResultFiles, Files)
+            .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .order_by(
+                FlowRunStepResultFiles.step_order.asc(),
+                FlowRunStepResultFiles.attempt_no.asc(),
+                FlowRunStepResultFiles.ordinal.asc(),
+            )
+        )
+        if limit is not None and logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowRunStepResultFiles.id.label("row_id"),
+                    FlowRunStepResultFiles.step_order.label("step_order"),
+                    FlowRunStepResultFiles.attempt_no.label("attempt_no"),
+                    FlowRunStepResultFiles.ordinal.label("ordinal"),
+                    _file_evidence_logical_bytes().label("logical_bytes"),
+                )
+                .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+                .where(FlowRunStepResultFiles.flow_run_id == run_id)
+                .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+                .order_by(
+                    FlowRunStepResultFiles.step_order.asc(),
+                    FlowRunStepResultFiles.attempt_no.asc(),
+                    FlowRunStepResultFiles.ordinal.asc(),
+                    FlowRunStepResultFiles.id.asc(),
+                )
+                .limit(limit + 1)
+                .subquery()
+            )
+            order = (
+                candidates.c.step_order,
+                candidates.c.attempt_no,
+                candidates.c.ordinal,
+                candidates.c.row_id,
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number().over(order_by=order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=order)
+                .label("cumulative_logical"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowRunStepResultFiles.id.in_(
+                    sa.select(ranked.c.row_id).where(
+                        ranked.c.row_rank <= limit,
+                        ranked.c.cumulative_logical <= logical_byte_budget,
+                    )
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).all()
+        return await self._project_result_file_rows(rows)
+
+    async def recording_seconds_by_run_ids(
+        self,
+        *,
+        run_ids: Sequence[UUID],
+        tenant_id: UUID,
+    ) -> dict[UUID, float]:
+        """Measured audio length per run, summed over its transcription steps'
+        current attempts. Runs without a measured transcription are absent."""
+        unique_run_ids = list(dict.fromkeys(run_ids))
+        if not unique_run_ids:
+            return {}
+        # Explicit operators: JSONB subscripting needs PostgreSQL 14, and the
+        # oldest supported server is older than that.
+        audio_seconds_text = cast(
+            Any,
+            FlowStepResults.input_payload_json.op("->")("transcription").op("->>")(
+                "audio_seconds"
+            ),
+        )
+        seconds: sa.ColumnElement[float | None] = sa.cast(audio_seconds_text, sa.Float)
+        stmt: sa.Select[tuple[UUID, float | None]] = (
+            sa.select(FlowStepResults.flow_run_id, sa.func.sum(seconds))
+            .where(FlowStepResults.flow_run_id.in_(unique_run_ids))
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(seconds.isnot(None))
+            .group_by(FlowStepResults.flow_run_id)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {run_id: float(total) for run_id, total in rows if total is not None}
+
+    async def list_result_files_for_runs(
+        self,
+        *,
+        run_ids: Sequence[UUID],
+        tenant_id: UUID,
+    ) -> list[FlowRunStepResultFile]:
+        unique_run_ids = list(dict.fromkeys(run_ids))
+        if not unique_run_ids:
+            return []
+        stmt = (
+            sa.select(FlowRunStepResultFiles, Files)
+            .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.id == FlowRunStepResultFiles.step_result_id,
+                    FlowStepResults.flow_run_id == FlowRunStepResultFiles.flow_run_id,
+                    FlowStepResults.step_id == FlowRunStepResultFiles.step_id,
+                    FlowStepResults.current_attempt_no
+                    == FlowRunStepResultFiles.attempt_no,
+                ),
+            )
+            .where(FlowRunStepResultFiles.flow_run_id.in_(unique_run_ids))
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .order_by(
+                FlowRunStepResultFiles.flow_run_id.asc(),
+                FlowRunStepResultFiles.step_order.asc(),
+                FlowRunStepResultFiles.ordinal.asc(),
+            )
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return await self._project_result_file_rows(rows)
+
+    async def get_result_file(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        file_id: UUID,
+    ) -> FlowRunStepResultFile | None:
+        stmt = (
+            sa.select(FlowRunStepResultFiles, Files)
+            .join(Files, Files.id == FlowRunStepResultFiles.file_id)
+            .where(FlowRunStepResultFiles.flow_run_id == run_id)
+            .where(FlowRunStepResultFiles.tenant_id == tenant_id)
+            .where(FlowRunStepResultFiles.file_id == file_id)
+            .order_by(
+                FlowRunStepResultFiles.step_order.asc(),
+                FlowRunStepResultFiles.attempt_no.asc(),
+                FlowRunStepResultFiles.ordinal.asc(),
+            )
+            .limit(1)
+        )
+        row = (await self.session.execute(stmt)).first()
+        if row is None:
+            return None
+        projected = await self._project_result_file_rows([row])
+        return projected[0]
+
+    async def is_step_input_file(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        file_id: UUID,
+    ) -> bool:
+        """Whether ``file_id`` was submitted as runtime input to any step attempt
+        of this run."""
+        stmt = (
+            sa.select(FlowRunStepInputFiles.id)
+            .where(FlowRunStepInputFiles.flow_run_id == run_id)
+            .where(FlowRunStepInputFiles.tenant_id == tenant_id)
+            .where(FlowRunStepInputFiles.file_id == file_id)
+            .limit(1)
+        )
+        return (await self.session.execute(stmt)).first() is not None
+
+    async def _project_result_file_rows(
+        self,
+        rows: Sequence[Any],
+    ) -> list[FlowRunStepResultFile]:
+        file_ids = list(dict.fromkeys(file_row.id for _, file_row in rows))
+        references = await FileRepository(self.session).get_content_references(file_ids)
+        references_by_file_id: dict[UUID, list[FileContentReferenceRecord]] = {
+            file_id: [] for file_id in file_ids
+        }
+        for reference in references:
+            references_by_file_id[reference.file_id].append(reference)
+
+        projected: list[FlowRunStepResultFile] = []
+        for result_file_row, file_row in rows:
+            projected.append(
+                _result_file_from_rows(
+                    result_file_row,
+                    FileMetadata.model_validate(file_row),
+                    references_by_file_id[file_row.id],
+                )
+            )
+        return projected
+
+    async def mark_running_if_claimable(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        expected_revision: int,
+    ) -> bool:
+        now_utc = datetime.now(timezone.utc)
+        result = await self.session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.QUEUED.value)
+            .where(FlowRuns.revision == expected_revision)
+            .values(
+                status=FlowRunStatus.RUNNING.value,
+                execution_heartbeat_at=sa.func.clock_timestamp(),
+                started_at=sa.func.coalesce(FlowRuns.started_at, now_utc),
+                dispatched_at=sa.func.coalesce(FlowRuns.dispatched_at, now_utc),
+                dispatch_next_attempt_at=None,
+            )
+        )
+        return bool(getattr(result, "rowcount", 0))
+
+    async def get_step_result(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        tenant_id: UUID,
+        for_update: bool = False,
+    ) -> FlowStepResult | None:
+        statement = (
+            sa.select(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.step_id == step_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+        )
+        if for_update:
+            statement = statement.with_for_update()
+        row = await self.session.scalar(statement)
+        if row is None:
+            return None
+        return FlowStepResult.model_validate(row)
+
+    async def get_step_attempt(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+    ) -> FlowStepAttempt | None:
+        row = await self.session.scalar(
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+        )
+        if row is None:
+            return None
+        return FlowStepAttempt.model_validate(row)
+
+    async def save_step_result(
+        self,
+        flow_run_id: UUID,
+        result: FlowStepResult,
+        tenant_id: UUID,
+        *,
+        session: AsyncSession | None = None,
+        attempt_no: int | None,
+        result_file_references: Sequence[FlowStepResultFileReference] | None = None,
+    ) -> FlowStepResult | None:
+        """Persist a step result and optionally replace this attempt's file rows.
+
+        Returns the persisted result, or None when the parent run is already terminal.
+        None leaves file rows untouched; a sequence replaces output files,
+        retaining runtime text.
+        """
+        db_session = session or self.session
+        await self.lock_execution_ownership(
+            run_id=flow_run_id, tenant_id=tenant_id, session=db_session
+        )
+
+        if result.status == FlowStepResultStatus.COMPLETED and attempt_no is None:
+            raise ValueError("attempt_no is required for completed Flow step results.")
+        result_file_attempt_no: int | None = None
+        if result_file_references is not None and attempt_no is None:
+            raise ValueError("attempt_no is required for Flow step result files.")
+        if result_file_references is not None:
+            result_file_attempt_no = attempt_no
+
+        payload: dict[str, Any] = {
+            "flow_run_id": flow_run_id,
+            "flow_id": result.flow_id,
+            "tenant_id": tenant_id,
+            "step_id": result.step_id,
+            "step_order": result.step_order,
+            "assistant_id": result.assistant_id,
+            "input_payload_json": result.input_payload_json,
+            "effective_prompt": result.effective_prompt,
+            "output_payload_json": result.output_payload_json,
+            "model_parameters_json": result.model_parameters_json,
+            "num_tokens_input": result.num_tokens_input,
+            "num_tokens_output": result.num_tokens_output,
+            "status": result.status.value,
+            "error_code": result.error_code,
+            "error_message": result.error_message,
+            "flow_step_execution_hash": result.flow_step_execution_hash,
+        }
+
+        if result.status in (
+            FlowStepResultStatus.COMPLETED,
+            FlowStepResultStatus.FAILED,
+            FlowStepResultStatus.CANCELLED,
+        ):
+            payload["finished_at"] = datetime.now(timezone.utc)
+        if result.status == FlowStepResultStatus.COMPLETED:
+            payload["current_attempt_no"] = attempt_no
+
+        active_run_exists = (
+            sa.select(sa.literal(1))
+            .select_from(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status.in_(self._ACTIVE_STATUSES))
+            .exists()
+        )
+
+        step_result_mapper = cast(Mapper[FlowStepResults], sa.inspect(FlowStepResults))
+        insert_values = (
+            cast(
+                sa.ColumnElement[object],
+                sa.bindparam(
+                    column_name,
+                    cast(object, value),
+                    type_=step_result_mapper.columns[column_name].type,
+                ),
+            )
+            for column_name, value in payload.items()
+        )
+        insert_projection = sa.select(*insert_values).where(active_run_exists)
+        stmt = (
+            pg_insert(FlowStepResults)
+            .from_select(tuple(payload), insert_projection)
+            .on_conflict_do_update(
+                constraint="uq_flow_step_results_run_step",
+                set_=payload,
+                where=active_run_exists,
+            )
+            .returning(FlowStepResults)
+        )
+        saved = await db_session.scalar(stmt)
+        if saved is None:
+            return None
+        if result_file_references is not None:
+            assert result_file_attempt_no is not None
+            await self._replace_step_result_file_rows(
+                db_session=db_session,
+                result_row=saved,
+                result_file_references=result_file_references,
+                attempt_no=result_file_attempt_no,
+            )
+        return FlowStepResult.model_validate(saved)
+
+    @staticmethod
+    def _runtime_text_file_reference(
+        result_row: FlowStepResults, attempt_no: int
+    ) -> FlowStepResultFileReference | None:
+        runtime_input = (result_row.input_payload_json or {}).get("runtime_input")
+        if not isinstance(runtime_input, dict):
+            return None
+        text = cast(FlowPersistedJsonObject, runtime_input).get("text")
+        if isinstance(text, dict):
+            transcript = FileBackedStepText.model_validate(text)
+            if (
+                transcript.source_step_id == result_row.step_id
+                and transcript.source_attempt_no == attempt_no
+            ):
+                return FlowStepResultFileReference(
+                    file_id=transcript.file_id, source="generated_output"
+                )
+        return None
+
+    async def _replace_step_result_file_rows(
+        self,
+        *,
+        db_session: AsyncSession,
+        result_row: FlowStepResults,
+        result_file_references: Sequence[FlowStepResultFileReference],
+        attempt_no: int,
+    ) -> None:
+        references = {
+            reference.file_id: reference for reference in result_file_references
+        }
+        runtime_text = self._runtime_text_file_reference(result_row, attempt_no)
+        if runtime_text is not None:
+            references.setdefault(runtime_text.file_id, runtime_text)
+        result_file_references = sorted(
+            references.values(), key=lambda reference: str(reference.file_id)
+        )
+        await db_session.execute(
+            sa.delete(FlowRunStepResultFiles)
+            .where(FlowRunStepResultFiles.step_result_id == result_row.id)
+            .where(FlowRunStepResultFiles.tenant_id == result_row.tenant_id)
+            .where(FlowRunStepResultFiles.attempt_no == attempt_no)
+        )
+        if not result_file_references:
+            return
+
+        rows = [
+            {
+                "flow_run_id": result_row.flow_run_id,
+                "flow_id": result_row.flow_id,
+                "tenant_id": result_row.tenant_id,
+                "step_result_id": result_row.id,
+                "step_id": result_row.step_id,
+                "step_order": result_row.step_order,
+                "attempt_no": attempt_no,
+                "file_id": reference.file_id,
+                "ordinal": ordinal,
+                "source": reference.source,
+            }
+            for ordinal, reference in enumerate(result_file_references)
+        ]
+        await db_session.execute(sa.insert(FlowRunStepResultFiles).values(rows))
+
+    async def claim_step_result(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowStepResult | None:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        run_status = await self.session.scalar(
+            sa.select(FlowRuns.status)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if run_status not in self._ACTIVE_STATUSES:
+            return None
+
+        now_utc = datetime.now(timezone.utc)
+        row = await self.session.scalar(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == run_id)
+            .where(FlowStepResults.step_id == step_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(
+                FlowStepResults.status.in_(
+                    (
+                        FlowStepResultStatus.PENDING.value,
+                        FlowStepResultStatus.FAILED.value,
+                    )
+                )
+            )
+            .values(
+                status=FlowStepResultStatus.RUNNING.value,
+                error_code=None,
+                error_message=None,
+                started_at=sa.func.coalesce(FlowStepResults.started_at, now_utc),
+                finished_at=None,
+            )
+            .returning(FlowStepResults)
+        )
+        if row is None:
+            return None
+        return FlowStepResult.model_validate(row)
+
+    async def allocate_next_attempt_no(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_run_id: UUID,
+        step_id: UUID,
+    ) -> int:
+        return await next_step_attempt_no(
+            self.session,
+            tenant_id=tenant_id,
+            flow_run_id=flow_run_id,
+            step_id=step_id,
+        )
+
+    async def create_or_get_attempt_started(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+        step_id: UUID,
+        step_order: int,
+        attempt_no: int,
+        dispatch_task_id: str | None,
+    ) -> FlowStepAttempt:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        run_status = await self.session.scalar(
+            sa.select(FlowRuns.status)
+            .where(FlowRuns.id == run_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if run_status not in self._ACTIVE_STATUSES:
+            raise FlowRunPersistenceInvariantError(
+                operation="create_flow_step_attempt",
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+
+        started_at = datetime.now(timezone.utc)
+        insert_stmt = (
+            pg_insert(FlowStepAttempts)
+            .values(
+                flow_run_id=run_id,
+                flow_id=flow_id,
+                tenant_id=tenant_id,
+                step_id=step_id,
+                step_order=step_order,
+                attempt_no=attempt_no,
+                dispatch_task_id=dispatch_task_id,
+                status=FlowStepAttemptStatus.STARTED.value,
+                started_at=started_at,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_flow_step_attempts_run_step_attempt",
+            )
+            .returning(FlowStepAttempts)
+        )
+        row = await self.session.scalar(insert_stmt)
+        if row is None:
+            row = await self.session.scalar(
+                sa.select(FlowStepAttempts)
+                .where(FlowStepAttempts.flow_run_id == run_id)
+                .where(FlowStepAttempts.step_id == step_id)
+                .where(FlowStepAttempts.attempt_no == attempt_no)
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+            )
+        if row is None:
+            raise FlowRunPersistenceInvariantError(
+                operation="create_flow_step_attempt",
+                run_id=run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+        return FlowStepAttempt.model_validate(row)
+
+    async def activate_step_attempt(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        resolved_input_edges: FlowResolvedInputEdges,
+        attempt_input: FlowStepAttemptInput | None,
+    ) -> FlowStepAttempt | None:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        row = await self.session.scalar(
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        if row is None:
+            return None
+        merged_attempt_input: FlowStepAttemptInput | None = None
+        if attempt_input is not None:
+            merged_attempt_input = merge_flow_step_attempt_input(
+                row.input_payload_json,
+                attempt_input,
+                run_id=run_id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+                tenant_id=tenant_id,
+            )
+        created = await self._record_resolved_input_edges_for_locked_attempt(
+            attempt_id=row.id,
+            attempt_status=row.status,
+            tenant_id=tenant_id,
+            aggregate=resolved_input_edges,
+        )
+        if created is None:
+            return None
+        if merged_attempt_input is not None:
+            row.input_payload_json = merged_attempt_input.to_payload()
+            if merged_attempt_input.start is not None:
+                row.requested_model = merged_attempt_input.start.requested_model
+                row.provider = merged_attempt_input.start.provider
+        await self.session.flush()
+        # The locked row holds what was just stored; only the server-set
+        # updated_at is read back, not the payloads.
+        await self.session.refresh(row, attribute_names=["updated_at"])
+        return FlowStepAttempt.model_validate(row)
+
+    async def write_attempt_tool_call_evidence(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        start: FlowStepAttemptToolCallStart,
+        result: FlowStepAttemptToolCallResult | None = None,
+    ) -> FlowStepAttemptToolCallWrite:
+        """Store the start, or the start and the result, of the attempt's tool
+        call. Only those two fields change: never the resolved-input edges or
+        anything activation records.
+
+        The run row and then the attempt row are locked, in the order run
+        terminalization takes them. An attempt that is already closed is left
+        as it is, whoever holds the run now: its stored start stays the
+        evidence of a call that was interrupted. On an open attempt the
+        execution lease is then asserted (FlowExecutionOwnershipLost when it
+        is gone), so a worker that lost the run writes nothing.
+        """
+        locked_run_id = await self.session.scalar(
+            sa.select(FlowRuns.id)
+            .where(FlowRuns.id == run_id, FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        row = await self.session.scalar(
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        if locked_run_id is None or row is None:
+            raise FlowRunPersistenceInvariantError(
+                operation="write_attempt_tool_call_evidence",
+                run_id=run_id,
+                tenant_id=tenant_id,
+            )
+        if row.status not in OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES:
+            return "attempt_closed"
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        merged = merge_flow_step_attempt_input(
+            row.input_payload_json,
+            FlowStepAttemptInput(tool_call_start=start, tool_call_result=result),
+            run_id=run_id,
+            step_id=step_id,
+            attempt_no=attempt_no,
+            tenant_id=tenant_id,
+        )
+        row.input_payload_json = merged.to_payload()
+        await self.session.flush()
+        return "written"
+
+    async def get_resolved_input_edges(
+        self,
+        *,
+        attempt_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowResolvedInputEdgesParseResult | None:
+        row = (
+            await self.session.execute(
+                sa.select(FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb)
+                .select_from(FlowStepAttempts)
+                .outerjoin(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(FlowStepAttempts.id == attempt_id)
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return parse_resolved_input_edges(row[0])
+
+    async def list_resolved_input_edges_by_attempt_id(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        attempt_ids: Sequence[UUID],
+    ) -> dict[UUID, FlowResolvedInputEdgesParseResult]:
+        """Read exact lineage for an admitted attempt set in one statement."""
+        if not attempt_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepAttempts.id,
+                    FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                )
+                .select_from(FlowStepAttempts)
+                .outerjoin(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(FlowStepAttempts.flow_run_id == run_id)
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+                .where(FlowStepAttempts.id.in_(attempt_ids))
+            )
+        ).all()
+        return {
+            attempt_id: parse_resolved_input_edges(raw_resolved_inputs)
+            for attempt_id, raw_resolved_inputs in rows
+        }
+
+    async def record_forwarding_facts(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        facts: ForwardingFacts,
+    ) -> bool:
+        """Store the forwarding facts of an attempt on its resolved inputs.
+
+        Written once: a retry, or a second writer, finds the facts in place and
+        changes nothing. An attempt without resolved inputs, or of another
+        tenant, is left alone. Returns whether this call wrote the facts.
+        """
+        attempt_id = (
+            sa.select(FlowStepAttempts.id)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .scalar_subquery()
+        )
+        written = await self.session.scalar(
+            sa.update(FlowStepAttemptResolvedInputs)
+            .where(FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt_id)
+            .where(FlowStepAttemptResolvedInputs.forwarding_facts_jsonb.is_(None))
+            .values(forwarding_facts_jsonb=facts.model_dump(mode="json"))
+            .returning(FlowStepAttemptResolvedInputs.flow_step_attempt_id)
+        )
+        return written is not None
+
+    async def list_forwarding_facts_by_attempt_id(
+        self,
+        *,
+        tenant_id: UUID,
+        attempt_ids: Sequence[UUID],
+    ) -> dict[UUID, ForwardingFacts]:
+        """The forwarding facts of the given attempts of one tenant, in one
+        statement. An attempt without facts, of another tenant, or whose facts
+        no longer parse is absent from the result."""
+        if not attempt_ids:
+            return {}
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id,
+                    FlowStepAttemptResolvedInputs.forwarding_facts_jsonb,
+                )
+                .join(
+                    FlowStepAttempts,
+                    FlowStepAttempts.id
+                    == FlowStepAttemptResolvedInputs.flow_step_attempt_id,
+                )
+                .where(FlowStepAttempts.tenant_id == tenant_id)
+                .where(FlowStepAttempts.id.in_(attempt_ids))
+                .where(
+                    FlowStepAttemptResolvedInputs.forwarding_facts_jsonb.is_not(None)
+                )
+            )
+        ).all()
+        facts_by_attempt: dict[UUID, ForwardingFacts] = {}
+        for attempt_id, raw_facts in rows:
+            facts = parse_forwarding_facts(raw_facts)
+            if facts is None:
+                logger.warning(
+                    "flow_run_repo.forwarding_facts_unreadable attempt_id=%s",
+                    attempt_id,
+                )
+                continue
+            facts_by_attempt[attempt_id] = facts
+        return facts_by_attempt
+
+    async def _record_resolved_input_edges_for_locked_attempt(
+        self,
+        *,
+        attempt_id: UUID,
+        attempt_status: str,
+        tenant_id: UUID,
+        aggregate: FlowResolvedInputEdges,
+    ) -> bool | None:
+        raw_existing = await self.session.scalar(
+            sa.select(FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb).where(
+                FlowStepAttemptResolvedInputs.flow_step_attempt_id == attempt_id
+            )
+        )
+        existing = parse_resolved_input_edges(raw_existing)
+        if existing.status == "corrupt":
+            assert existing.marker is not None
+            raise FlowResolvedInputEdgesUnavailableError(
+                attempt_id=attempt_id,
+                tenant_id=tenant_id,
+                error_code=existing.marker.error_code,
+            )
+        if existing.status == "tracked":
+            assert existing.aggregate is not None
+            if existing.aggregate == aggregate:
+                return False
+            raise FlowResolvedInputEdgesConflictError(
+                attempt_id=attempt_id,
+                tenant_id=tenant_id,
+            )
+        if attempt_status not in OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES:
+            return None
+
+        await self.session.execute(
+            sa.insert(FlowStepAttemptResolvedInputs).values(
+                flow_step_attempt_id=attempt_id,
+                resolved_input_edges_jsonb=aggregate.model_dump(mode="json"),
+            )
+        )
+        return True
+
+    async def finish_attempt(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        status: FlowStepAttemptStatus,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        requested_model: str | None = None,
+        response_model: str | None = None,
+        provider: str | None = None,
+        finish_reason: str | None = None,
+        provider_response_id: str | None = None,
+        num_tokens_input: int | None = None,
+        num_tokens_output: int | None = None,
+        rejected_completion: RejectedCompletion | None = None,
+        provenance_json: dict[str, Any] | None = None,
+        attempt_input: FlowStepAttemptInput | None = None,
+        output_payload_json: FlowPersistedJsonObject | None = None,
+    ) -> FlowStepAttempt | None:
+        await self.lock_execution_ownership(run_id=run_id, tenant_id=tenant_id)
+        if rejected_completion is not None and status != FlowStepAttemptStatus.FAILED:
+            raise ValueError("Rejected completions can only finish a failed attempt.")
+        if rejected_completion is not None and any(
+            value is not None
+            for value in (
+                response_model,
+                provider_response_id,
+                num_tokens_input,
+                num_tokens_output,
+                finish_reason,
+            )
+        ):
+            raise ValueError("Rejected completion diagnostics come from call receipts.")
+        row = await self.session.scalar(
+            sa.select(FlowStepAttempts)
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.step_id == step_id)
+            .where(FlowStepAttempts.attempt_no == attempt_no)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepAttempts.status.in_(OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES))
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        if row is None:
+            return None
+        if rejected_completion is not None:
+            receipt = await FlowProviderCallRepository(
+                self.session
+            ).get_attempt_completion_receipt(
+                attempt_id=row.id,
+                provider_response_id=rejected_completion.provider_response_id,
+            )
+            response_model = receipt.response_model
+            provider_response_id = receipt.provider_response_id
+            num_tokens_input = receipt.num_tokens_input
+            num_tokens_output = receipt.num_tokens_output
+            finish_reason = rejected_completion.finish_reason
+        terminalization_evidence = resolve_attempt_terminalization_evidence(
+            row.provenance_json,
+            provenance_json,
+        )
+        merged_attempt_input = (
+            merge_flow_step_attempt_input(
+                row.input_payload_json,
+                attempt_input,
+                run_id=run_id,
+                step_id=step_id,
+                attempt_no=attempt_no,
+                tenant_id=tenant_id,
+            )
+            if attempt_input is not None
+            and terminalization_evidence.write_runtime_payloads
+            else None
+        )
+        canonical_attempt_input = merged_attempt_input
+        if canonical_attempt_input is None:
+            canonical_attempt_input = parse_flow_step_attempt_input(
+                row.input_payload_json
+            ).attempt_input
+        canonical_start = (
+            canonical_attempt_input.start
+            if canonical_attempt_input is not None
+            else None
+        )
+        row.status = status.value
+        row.error_code = error_code
+        row.error_message = error_message
+        row.requested_model = (
+            canonical_start.requested_model
+            if canonical_start is not None
+            else requested_model
+        )
+        row.response_model = response_model
+        row.provider = (
+            canonical_start.provider if canonical_start is not None else provider
+        )
+        row.finish_reason = finish_reason
+        row.provider_response_id = provider_response_id
+        row.num_tokens_input = num_tokens_input
+        row.num_tokens_output = num_tokens_output
+        row.provenance_json = terminalization_evidence.provenance_json
+        if terminalization_evidence.write_runtime_payloads:
+            if merged_attempt_input is not None:
+                row.input_payload_json = merged_attempt_input.to_payload()
+            row.output_payload_json = output_payload_json
+        row.finished_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        await self.session.refresh(row, attribute_names=["updated_at"])
+        return FlowStepAttempt.model_validate(row)
+
+
+def _result_file_from_rows(
+    result_file_row: FlowRunStepResultFiles,
+    file: FileMetadata,
+    references: list[FileContentReferenceRecord],
+) -> FlowRunStepResultFile:
+    primary = select_primary_file_reference(file.file_type, references)
+    if primary is None:
+        raise FlowRunPersistenceInvariantError(
+            operation="project_flow_result_file_content",
+            run_id=result_file_row.flow_run_id,
+            tenant_id=result_file_row.tenant_id,
+            flow_id=result_file_row.flow_id,
+        )
+    info = project_file_info(file, references)
+    availability: FlowRunStepResultFileAvailability = (
+        "available" if primary.state is ContentState.AVAILABLE else "content_purged"
+    )
+    return FlowRunStepResultFile(
+        flow_run_id=result_file_row.flow_run_id,
+        flow_id=result_file_row.flow_id,
+        tenant_id=result_file_row.tenant_id,
+        step_result_id=result_file_row.step_result_id,
+        step_id=result_file_row.step_id,
+        step_order=result_file_row.step_order,
+        attempt_no=result_file_row.attempt_no,
+        file_id=result_file_row.file_id,
+        ordinal=result_file_row.ordinal,
+        source=cast(FlowRunStepResultFileSource, result_file_row.source),
+        name=info.name,
+        checksum=info.checksum,
+        size=info.size,
+        mimetype=info.mimetype,
+        file_type=info.file_type,
+        availability=availability,
+    )

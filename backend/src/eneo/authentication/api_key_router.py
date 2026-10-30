@@ -20,9 +20,11 @@ from eneo.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from eneo.authentication.api_key_policy import ApiKeyPolicyService
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router_helpers import (
+    FLOW_MANAGED_ASSISTANT_SCOPE_NOTE,
     api_key_cursor_for,
     build_api_key_usage_page,
     build_api_key_usage_summary,
+    flow_managed_assistant_refusal,
     paginate_keys,
     raise_api_key_http_error,
 )
@@ -68,7 +70,10 @@ from eneo.main.config import get_settings
 from eneo.main.container.container import Container
 from eneo.main.exceptions import BadRequestException
 from eneo.roles.permissions import Permission
-from eneo.server.dependencies.container import get_container
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
 from eneo.server.protocol import responses
 from eneo.users.user import UserInDB
 
@@ -79,9 +84,15 @@ _API_KEY_POLICY_ACCESS_REASON = (
 _API_KEY_NOTIFICATION_ACCESS_REASON = (
     "Notification preferences and subscriptions are scoped to the authenticated user."
 )
-ApiKeyMutationContainer = Annotated[
-    Container,
-    Depends(get_container(with_user=True, transaction_scope="function")),
+
+# A successful response here describes state the caller is entitled to act on
+# immediately: a usable secret, a dead key, or a saved preference. The default
+# container commits at dependency teardown — after the response has been sent —
+# so the caller's next request can race that commit and miss the state it was
+# just told about. These endpoints own their transaction and commit before
+# replying.
+ContainerWithUserExplicitTransactionDep = Annotated[
+    Container, Depends(get_container_for_explicit_transaction(with_user=True))
 ]
 
 _API_KEY_EXAMPLE = {
@@ -536,45 +547,46 @@ async def update_notification_preferences(
         ApiKeyNotificationPreferencesUpdate,
         Body(examples=[{"enabled": True, "days_before_expiry": [30, 14, 7, 3, 1]}]),
     ],
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationPreferencesResponse:
     user: UserInDB = container.user()
     session = cast(AsyncSession, container.session())
     policy = _notification_policy_for_user(user)
-    current_preferences, subscriptions = await _load_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        policy=policy,
-    )
+    async with session.begin():
+        current_preferences, subscriptions = await _load_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            policy=policy,
+        )
 
-    merged_preferences = current_preferences.model_dump(mode="python")
-    merged_preferences.update(request.model_dump(exclude_unset=True))
-    validated_preferences = ApiKeyNotificationPreferencesResponse.model_validate(
-        merged_preferences
-    )
-    updated_preferences = ApiKeyNotificationPreferencesResponse(
-        enabled=validated_preferences.enabled and policy.enabled,
-        days_before_expiry=_normalize_days_against_policy(
-            validated_preferences.days_before_expiry,
-            policy,
-        ),
-        auto_follow_published_assistants=(
-            validated_preferences.auto_follow_published_assistants
-            and policy.allow_auto_follow_published_assistants
-        ),
-        auto_follow_published_apps=(
-            validated_preferences.auto_follow_published_apps
-            and policy.allow_auto_follow_published_apps
-        ),
-    )
+        merged_preferences = current_preferences.model_dump(mode="python")
+        merged_preferences.update(request.model_dump(exclude_unset=True))
+        validated_preferences = ApiKeyNotificationPreferencesResponse.model_validate(
+            merged_preferences
+        )
+        updated_preferences = ApiKeyNotificationPreferencesResponse(
+            enabled=validated_preferences.enabled and policy.enabled,
+            days_before_expiry=_normalize_days_against_policy(
+                validated_preferences.days_before_expiry,
+                policy,
+            ),
+            auto_follow_published_assistants=(
+                validated_preferences.auto_follow_published_assistants
+                and policy.allow_auto_follow_published_assistants
+            ),
+            auto_follow_published_apps=(
+                validated_preferences.auto_follow_published_apps
+                and policy.allow_auto_follow_published_apps
+            ),
+        )
 
-    await _save_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        preferences=updated_preferences,
-        subscriptions=subscriptions,
-    )
+        await _save_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            preferences=updated_preferences,
+            subscriptions=subscriptions,
+        )
     return updated_preferences
 
 
@@ -627,7 +639,7 @@ async def list_notification_subscriptions(
 async def upsert_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
@@ -636,44 +648,45 @@ async def upsert_notification_subscription(
     session = cast(AsyncSession, container.session())
     notification_policy = _notification_policy_for_user(user)
 
-    await _validate_notification_follow_target(
-        target_type=target_type,
-        target_id=target_id,
-        tenant_id=user.tenant_id,
-        repo=repo,
-        policy=policy,
-    )
+    async with session.begin():
+        await _validate_notification_follow_target(
+            target_type=target_type,
+            target_id=target_id,
+            tenant_id=user.tenant_id,
+            repo=repo,
+            policy=policy,
+        )
 
-    preferences, current_subscriptions = await _load_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        policy=notification_policy,
-    )
-    updated = {
-        (subscription.target_type.value, subscription.target_id): subscription
-        for subscription in current_subscriptions
-    }
-    new_subscription = ApiKeyNotificationSubscription(
-        target_type=target_type,
-        target_id=target_id,
-    )
-    updated[(new_subscription.target_type.value, new_subscription.target_id)] = (
-        new_subscription
-    )
-    subscriptions = sorted(
-        updated.values(),
-        key=lambda subscription: (
-            subscription.target_type.value,
-            str(subscription.target_id),
-        ),
-    )
+        preferences, current_subscriptions = await _load_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            policy=notification_policy,
+        )
+        updated = {
+            (subscription.target_type.value, subscription.target_id): subscription
+            for subscription in current_subscriptions
+        }
+        new_subscription = ApiKeyNotificationSubscription(
+            target_type=target_type,
+            target_id=target_id,
+        )
+        updated[(new_subscription.target_type.value, new_subscription.target_id)] = (
+            new_subscription
+        )
+        subscriptions = sorted(
+            updated.values(),
+            key=lambda subscription: (
+                subscription.target_type.value,
+                str(subscription.target_id),
+            ),
+        )
 
-    await _save_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        preferences=preferences,
-        subscriptions=subscriptions,
-    )
+        await _save_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            preferences=preferences,
+            subscriptions=subscriptions,
+        )
     return ApiKeyNotificationSubscriptionListResponse(items=subscriptions)
 
 
@@ -696,32 +709,33 @@ async def upsert_notification_subscription(
 async def delete_notification_subscription(
     target_type: ApiKeyNotificationTargetType,
     target_id: UUID,
-    container: Annotated[Container, Depends(get_container(with_user=True))],
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.WRITE)),
 ) -> ApiKeyNotificationSubscriptionListResponse:
     user: UserInDB = container.user()
     session = cast(AsyncSession, container.session())
     policy = _notification_policy_for_user(user)
-    preferences, current_subscriptions = await _load_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        policy=policy,
-    )
-    subscriptions = [
-        subscription
-        for subscription in current_subscriptions
-        if not (
-            subscription.target_type == target_type
-            and subscription.target_id == target_id
+    async with session.begin():
+        preferences, current_subscriptions = await _load_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            policy=policy,
         )
-    ]
+        subscriptions = [
+            subscription
+            for subscription in current_subscriptions
+            if not (
+                subscription.target_type == target_type
+                and subscription.target_id == target_id
+            )
+        ]
 
-    await _save_api_key_notification_settings(
-        session=session,
-        user_id=user.id,
-        preferences=preferences,
-        subscriptions=subscriptions,
-    )
+        await _save_api_key_notification_settings(
+            session=session,
+            user_id=user.id,
+            preferences=preferences,
+            subscriptions=subscriptions,
+        )
     return ApiKeyNotificationSubscriptionListResponse(items=subscriptions)
 
 
@@ -947,13 +961,17 @@ async def get_api_key_usage(
     status_code=status.HTTP_201_CREATED,
     tags=["API Keys"],
     summary="Create API key",
-    description="Create a v2 API key with scoped permission, guardrails, and optional rate limits.",
+    description=(
+        "Create a v2 API key with scoped permission, guardrails, and optional "
+        f"rate limits. {FLOW_MANAGED_ASSISTANT_SCOPE_NOTE}"
+    ),
     responses={
         201: {
             "description": "API key created successfully. Secret is shown once.",
             "content": {"application/json": {"example": _API_KEY_CREATED_EXAMPLE}},
         },
         **responses.get_responses([400, 401, 403, 429]),
+        **flow_managed_assistant_refusal(400, "Creating"),
     },
 )
 @endpoint_access(
@@ -963,7 +981,7 @@ async def get_api_key_usage(
 )
 async def create_api_key(
     payload: Annotated[ApiKeyCreateRequest, Body(examples=[_CREATE_API_KEY_EXAMPLE])],
-    container: ApiKeyMutationContainer,
+    container: ContainerWithUserExplicitTransactionDep,
     # Defense-in-depth: The SESSION policy rejects API-key callers first, so
     # these never fire for legitimate traffic. Kept so the route-coverage gate
     # (tests/unit/test_api_key_route_coverage.py) stays green and so a future
@@ -971,13 +989,14 @@ async def create_api_key(
     _api_key_guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     _user_for_creation: None = Depends(require_user_for_creation),
 ) -> ApiKeyCreatedResponse:
-    lifecycle = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.create_key(
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.create_key(
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.get(
@@ -1174,17 +1193,18 @@ async def update_api_key(
             ],
         ),
     ],
-    container: ApiKeyMutationContainer,
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.update_key(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.update_key(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.delete(
@@ -1208,16 +1228,17 @@ async def update_api_key(
 )
 async def revoke_api_key_deprecated(
     id: UUID,
-    container: ApiKeyMutationContainer,
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        await lifecycle.revoke_key(
-            key_id=id,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            await lifecycle.revoke_key(
+                key_id=id,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1244,21 +1265,22 @@ async def revoke_api_key_deprecated(
 )
 async def revoke_api_key(
     id: UUID,
-    container: ApiKeyMutationContainer,
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
         Body(examples=[_STATE_CHANGE_EXAMPLE]),
     ] = None,
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.revoke_key(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.revoke_key(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.post(
@@ -1266,13 +1288,17 @@ async def revoke_api_key(
     response_model=ApiKeyCreatedResponse,
     tags=["API Keys"],
     summary="Rotate API key",
-    description="Rotate an API key, issuing a new secret and starting the grace overlap window.",
+    description=(
+        "Rotate an API key, issuing a new secret and starting the grace overlap "
+        f"window. {FLOW_MANAGED_ASSISTANT_SCOPE_NOTE}"
+    ),
     responses={
         200: {
             "description": "Rotated API key and one-time secret.",
             "content": {"application/json": {"example": _API_KEY_CREATED_EXAMPLE}},
         },
         **responses.get_responses([400, 401, 403, 404, 429]),
+        **flow_managed_assistant_refusal(403, "Rotating"),
     },
 )
 @endpoint_access(
@@ -1282,18 +1308,19 @@ async def revoke_api_key(
 )
 async def rotate_api_key(
     id: UUID,
-    container: ApiKeyMutationContainer,
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[ApiKeyRotateRequest | None, Body()] = None,
 ) -> ApiKeyCreatedResponse:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.rotate_key(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.rotate_key(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.post(
@@ -1324,17 +1351,18 @@ async def extend_api_key_expiration(
         ApiKeyExtendRequest,
         Body(examples=[{"expires_at": "2030-01-01T00:00:00Z"}]),
     ],
-    container: ApiKeyMutationContainer,
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.extend_expiration(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.extend_expiration(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.post(
@@ -1360,16 +1388,17 @@ async def extend_api_key_expiration(
 )
 async def purge_api_key(
     id: UUID,
-    container: ApiKeyMutationContainer,
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> Response:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        await lifecycle.purge_key(
-            key_id=id,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            await lifecycle.purge_key(
+                key_id=id,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1398,21 +1427,22 @@ async def purge_api_key(
 )
 async def suspend_api_key(
     id: UUID,
-    container: ApiKeyMutationContainer,
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
     payload: Annotated[
         ApiKeyStateChangeRequest | None,
         Body(examples=[_STATE_CHANGE_EXAMPLE]),
     ] = None,
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.suspend_key(
-            key_id=id,
-            request=payload,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.suspend_key(
+                key_id=id,
+                request=payload,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)
 
 
 @router.post(
@@ -1420,13 +1450,17 @@ async def suspend_api_key(
     response_model=ApiKeyV2,
     tags=["API Keys"],
     summary="Reactivate API key",
-    description="Reactivate a previously suspended API key.",
+    description=(
+        "Reactivate a previously suspended API key. "
+        f"{FLOW_MANAGED_ASSISTANT_SCOPE_NOTE}"
+    ),
     responses={
         200: {
             "description": "Reactivated API key.",
             "content": {"application/json": {"example": _API_KEY_EXAMPLE}},
         },
         **responses.get_responses([400, 401, 403, 404, 429]),
+        **flow_managed_assistant_refusal(403, "Reactivating"),
     },
 )
 @endpoint_access(
@@ -1436,13 +1470,14 @@ async def suspend_api_key(
 )
 async def reactivate_api_key(
     id: UUID,
-    container: ApiKeyMutationContainer,
+    container: ContainerWithUserExplicitTransactionDep,
     _guard: None = Depends(require_api_key_permission(ApiKeyPermission.ADMIN)),
 ) -> ApiKeyV2:
-    lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
-    try:
-        return await lifecycle.reactivate_key(
-            key_id=id,
-        )
-    except ApiKeyValidationError as exc:
-        raise_api_key_http_error(exc)
+    async with cast(AsyncSession, container.session()).begin():
+        lifecycle: ApiKeyLifecycleService = container.api_key_lifecycle_service()
+        try:
+            return await lifecycle.reactivate_key(
+                key_id=id,
+            )
+        except ApiKeyValidationError as exc:
+            raise_api_key_http_error(exc)

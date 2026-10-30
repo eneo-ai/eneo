@@ -5,8 +5,8 @@ import { Text } from "@astryxdesign/core/Text";
 import { useFormatter, useTranslations } from "use-intl";
 import { useId } from "react";
 import { flushSync } from "react-dom";
-import { QuietBanner } from "@/components/astryx/banner";
-import { TextInput } from "@/components/astryx/text-input";
+import { Banner } from "@astryxdesign/core/Banner";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import type { FederationView } from "./federation";
 
 /**
@@ -75,7 +75,7 @@ export function ClientSecretField({
       </Text>
       <Text type="supporting">{t("federation_admin_secret_saved", { date: savedAt })}</Text>
       {view.encryption_status === "plaintext" ? (
-        <QuietBanner status="warning" title={t("federation_admin_secret_plaintext")} />
+        <Banner status="warning" title={t("federation_admin_secret_plaintext")} />
       ) : null}
       <Button
         ref={replaceRef}

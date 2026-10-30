@@ -1,0 +1,288 @@
+"""Speaker labels in diarized transcripts.
+
+The external transcription service renders one line per segment:
+``[HH:MM:SS - HH:MM:SS] SPEAKER_00: text``. Labels are assigned per audio
+file, so a multi-file transcript must be renumbered before any label can be
+treated as one person. Everything here is pure text processing.
+"""
+
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping, Sequence
+from dataclasses import replace
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from eneo.files.transcript import TranscriptSegment
+
+SPEAKER_LINE_RE = re.compile(
+    r"^(?P<prefix>\[\d{2}:\d{2}:\d{2} - \d{2}:\d{2}:\d{2}\] )"
+    r"(?P<label>SPEAKER_\d{2,}): (?P<text>.*)$"
+)
+SPEAKER_LABEL_RE = re.compile(r"^SPEAKER_\d{2,}$")
+
+INVENTORY_SAMPLE_LINES = 3
+INVENTORY_SAMPLE_CHARS = 160
+OPENING_EXCERPT_LINES = 40
+OPENING_EXCERPT_CHARS = 6000
+# Opening lines keep far more than an inventory sample: a host's handover
+# ("Anna, du är på plats") tends to close a long monologue, so a short cap
+# cuts exactly the cue the mapping model is told to rely on.
+OPENING_EXCERPT_LINE_CHARS = 600
+
+# Fixed JSON contract for a speaker-mapping step's structured output. Set on
+# the runtime step by the definition parser so typed-output processing, the
+# review checkpoint and review edits all validate against the same schema.
+SPEAKER_MAPPING_OUTPUT_CONTRACT: dict[str, Any] = {
+    "type": "object",
+    "required": ["speakers"],
+    "additionalProperties": False,
+    "properties": {
+        "speakers": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "required": ["label", "name", "confidence"],
+                "additionalProperties": False,
+                "properties": {
+                    "label": {"type": "string", "pattern": "^SPEAKER_\\d{2,}$"},
+                    "name": {"type": ["string", "null"]},
+                    "confidence": {"enum": ["low", "medium", "high"]},
+                    # Optional evidence may be absent or null; mapping normalizes it to text.
+                    "evidence": {"type": ["string", "null"]},
+                },
+            },
+        }
+    },
+}
+
+
+def _format_label(index: int) -> str:
+    return f"SPEAKER_{index:02d}"
+
+
+def build_label_renumbering(
+    text: str, offset: int, *, segments: Sequence["TranscriptSegment"] = ()
+) -> dict[str, str]:
+    """This file's labels mapped to ``SPEAKER_{offset + n}`` in order of first
+    appearance in the text."""
+    mapping: dict[str, str] = {}
+    for segment in segments:
+        if segment.speaker and segment.speaker not in mapping:
+            mapping[segment.speaker] = _format_label(offset + len(mapping))
+    for line in text.split("\n"):
+        match = SPEAKER_LINE_RE.match(line)
+        if match is None:
+            continue
+        label = match.group("label")
+        if label not in mapping:
+            mapping[label] = _format_label(offset + len(mapping))
+    return mapping
+
+
+def renumber_speaker_labels(text: str, offset: int) -> tuple[str, int]:
+    """Rewrite this file's labels to ``SPEAKER_{offset + n}`` in order of first
+    appearance. Returns the text and how many distinct labels it had."""
+    mapping = build_label_renumbering(text, offset)
+    lines: list[str] = []
+    for line in text.split("\n"):
+        match = SPEAKER_LINE_RE.match(line)
+        if match is None:
+            lines.append(line)
+            continue
+        label = mapping[match.group("label")]
+        lines.append(f"{match.group('prefix')}{label}: {match.group('text')}")
+    return "\n".join(lines), len(mapping)
+
+
+def renumber_segment_speakers(
+    segments: Sequence["TranscriptSegment"], mapping: Mapping[str, str]
+) -> list["TranscriptSegment"]:
+    """The same renumbering applied to the structured segments behind the text,
+    so a label means the same person in both views. Labels the text never
+    showed (the service's text is the contract) stay as they are."""
+    return [
+        replace(segment, speaker=mapping.get(segment.speaker, segment.speaker))
+        if segment.speaker is not None
+        else segment
+        for segment in segments
+    ]
+
+
+def build_speaker_inventory(
+    text: str,
+    *,
+    file_index: int = 0,
+    file_id: str | None = None,
+    segments: Sequence["TranscriptSegment"] = (),
+) -> list[dict[str, Any]]:
+    """One entry per label, in order of first appearance, with sample lines."""
+    entries: dict[str, dict[str, Any]] = {}
+    if segments:
+        for segment in segments:
+            if not segment.speaker:
+                continue
+            entry = entries.setdefault(
+                segment.speaker,
+                {
+                    "label": segment.speaker,
+                    "file_index": file_index,
+                    "file_id": file_id,
+                    "line_count": 0,
+                    "samples": [],
+                    "clean_example_available": False,
+                },
+            )
+            entry["line_count"] += 1
+            if segment.speaker_attribution != "provisional":
+                entry["clean_example_available"] = True
+                if (
+                    segment.text.strip()
+                    and len(entry["samples"]) < INVENTORY_SAMPLE_LINES
+                ):
+                    entry["samples"].append(
+                        segment.text.strip()[:INVENTORY_SAMPLE_CHARS]
+                    )
+        return list(entries.values())
+    for line in text.split("\n"):
+        match = SPEAKER_LINE_RE.match(line)
+        if match is None:
+            continue
+        label = match.group("label")
+        entry = entries.setdefault(
+            label,
+            {
+                "label": label,
+                "file_index": file_index,
+                "file_id": file_id,
+                "line_count": 0,
+                "samples": [],
+            },
+        )
+        entry["line_count"] += 1
+        samples: list[str] = entry["samples"]
+        sample = match.group("text").strip()
+        if sample and len(samples) < INVENTORY_SAMPLE_LINES:
+            samples.append(sample[:INVENTORY_SAMPLE_CHARS])
+    return list(entries.values())
+
+
+def merge_speaker_inventories(
+    entries: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """One entry per label for a recording whose parts share labels: the first
+    part that heard the speaker, all their lines, and the first samples."""
+    merged: dict[str, dict[str, Any]] = {}
+    for entry in entries:
+        current = merged.get(entry["label"])
+        if current is None:
+            merged[entry["label"]] = {**entry, "samples": list(entry["samples"])}
+            continue
+        current["line_count"] += entry["line_count"]
+        current["samples"].extend(
+            entry["samples"][: INVENTORY_SAMPLE_LINES - len(current["samples"])]
+        )
+        if "clean_example_available" in current:
+            current["clean_example_available"] |= bool(
+                entry.get("clean_example_available")
+            )
+    return list(merged.values())
+
+
+def build_opening_excerpt(text: str) -> list[str]:
+    """The first diarized lines in order as ``LABEL: text`` (no timestamps),
+    where introductions and greetings usually reveal who is who. Bounded by
+    line count, characters per line and total characters."""
+    lines: list[str] = []
+    total = 0
+    for line in text.split("\n"):
+        if len(lines) >= OPENING_EXCERPT_LINES:
+            break
+        match = SPEAKER_LINE_RE.match(line)
+        if match is None:
+            continue
+        spoken = match.group("text").strip()
+        if not spoken:
+            continue
+        rendered = f"{match.group('label')}: {spoken[:OPENING_EXCERPT_LINE_CHARS]}"
+        if total + len(rendered) > OPENING_EXCERPT_CHARS:
+            break
+        lines.append(rendered)
+        total += len(rendered)
+    return lines
+
+
+def apply_speaker_names(text: str, names: Mapping[str, str]) -> str:
+    """Replace the ``SPEAKER_NN:`` token on matching lines; unmapped labels stay."""
+    lines: list[str] = []
+    for line in text.split("\n"):
+        match = SPEAKER_LINE_RE.match(line)
+        if match is None:
+            lines.append(line)
+            continue
+        name = names.get(match.group("label"))
+        if not name:
+            lines.append(line)
+            continue
+        lines.append(f"{match.group('prefix')}{name}: {match.group('text')}")
+    return "\n".join(lines)
+
+
+def effective_speaker_names(
+    base: Mapping[str, str], overrides: Mapping[str, str | None]
+) -> dict[str, str]:
+    """The names a transcript shows: ``base`` (a speaker-naming step's) under
+    ``overrides`` (a person's, kept with the transcript corrections). A string
+    overrides, None removes the base name, and an absent label inherits it."""
+    names = dict(base)
+    for label, name in overrides.items():
+        if name is None:
+            names.pop(label, None)
+        else:
+            names[label] = name
+    return names
+
+
+def parse_participants(value: object) -> list[str]:
+    """Names from a form field: a list of strings, or free text split on
+    newlines, commas and semicolons. Stripped and deduplicated, order kept."""
+    raw: Sequence[object]
+    if isinstance(value, str):
+        raw = re.split(r"[\n,;]+", value)
+    elif isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        raw = cast(Sequence[object], value)
+    else:
+        return []
+    names: list[str] = []
+    for item in raw:
+        if not isinstance(item, str):
+            continue
+        name = item.strip()
+        if name and name not in names:
+            names.append(name)
+    return names
+
+
+def format_clock(seconds: float) -> str:
+    """``HH:MM:SS`` (floored) as the rendered transcript lines carry it."""
+    whole = max(0, int(seconds))
+    hours, remainder = divmod(whole, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
+def render_line_prefix(start: float, end: float) -> str:
+    """The ``[HH:MM:SS - HH:MM:SS] `` prefix ``SPEAKER_LINE_RE`` recognises."""
+    return f"[{format_clock(start)} - {format_clock(end)}] "
+
+
+def render_segments(segments: Sequence["TranscriptSegment"]) -> str:
+    from eneo.flows.domain.speaker_review import attribution_text
+
+    return "\n".join(
+        f"{render_line_prefix(segment.start, segment.end)}"
+        f"{attribution_text({'speaker': segment.speaker, 'speaker_attribution': segment.speaker_attribution})}"
+        f"{segment.text}"
+        for segment in segments
+    )

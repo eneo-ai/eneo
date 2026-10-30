@@ -8,8 +8,10 @@ repos:
         stages: [pre-commit]
         args: [--maxkb=750]
         # Generated OpenAPI schemas exceed the cap by design (~1 MB); the
-        # schema-drift CI job keeps them in sync with the backend.
-        exclude: ^frontend/(packages/eneo-js/src/types|apps/web-next/src/lib/api)/schema\.d\.ts$
+        # schema-drift CI job keeps them in sync with the backend. web-next's
+        # message catalogs are generated from apps/web's (bun run
+        # i18n:convert) and outgrow it too; its lint keeps them in sync.
+        exclude: ^frontend/((packages/eneo-js/src/types|apps/web-next/src/lib/api)/schema\.d\.ts|apps/web-next/src/lib/i18n/messages/(sv|en)\.json)$
       - id: check-merge-conflict
         stages: [pre-commit]
       - id: detect-private-key

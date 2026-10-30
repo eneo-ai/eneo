@@ -240,7 +240,7 @@ async def _seed_legacy_payloads(
         WITH inserted AS (
             INSERT INTO files (
                 id, name, text, blob, checksum, size, mimetype, file_type,
-                transcription, user_id, tenant_id, parent_file_id
+                transcription, owner_user_id, tenant_id, parent_file_id
             )
             SELECT
                 gen_random_uuid(),

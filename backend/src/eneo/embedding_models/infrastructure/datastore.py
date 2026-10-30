@@ -24,7 +24,6 @@ from eneo.integration.domain.entities.integration_knowledge import (
 )
 from eneo.main.logging import get_logger
 from eneo.tokens.token_utils import count_tokens
-from eneo.users.user import UserInDB
 
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
@@ -80,12 +79,12 @@ class Datastore:
     def __init__(
         self,
         *,
-        user: UserInDB,
+        tenant_id: UUID,
         info_blob_chunk_repo: InfoBlobChunkRepo,
         create_embeddings_service: "CreateEmbeddingsService",
     ) -> None:
         super().__init__()
-        self.user = user
+        self.tenant_id = tenant_id
         self.chunk_repo = info_blob_chunk_repo
         self.create_embeddings_service = create_embeddings_service
 
@@ -123,7 +122,7 @@ class Datastore:
                 chunk_no=i,
                 text=chunk.strip(),
                 info_blob_id=info_blob.id,
-                tenant_id=self.user.tenant_id,
+                tenant_id=self.tenant_id,
             )
             for i, chunk in enumerate(splitter.split_text(info_blob.text))
             if chunk.strip()

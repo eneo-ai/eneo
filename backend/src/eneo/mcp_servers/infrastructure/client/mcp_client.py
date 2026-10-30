@@ -2,10 +2,20 @@
 
 import asyncio
 import json
-from collections.abc import AsyncGenerator
-from contextlib import asynccontextmanager
+from collections.abc import AsyncGenerator, Coroutine
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from dataclasses import dataclass, field
 from types import TracebackType
-from typing import Any, Callable, Optional, cast
+from typing import (
+    Annotated,
+    Any,
+    Callable,
+    Literal,
+    Optional,
+    Protocol,
+    TypeVar,
+    cast,
+)
 from urllib.parse import urlsplit
 
 import httpx
@@ -19,15 +29,22 @@ from mcp.client.streamable_http import (
 from mcp.shared.message import SessionMessage
 from mcp.types import (
     LATEST_PROTOCOL_VERSION,
+    CallToolRequest,
+    CallToolRequestParams,
+    ClientRequest,
     ServerNotification,
     TextResourceContents,
     ToolListChangedNotification,
 )
-from pydantic import AnyUrl
+from pydantic import AnyUrl, BaseModel, Field, TypeAdapter, ValidationError
 
 from eneo.files.file_reference import file_reference_base_url
 from eneo.main.config import LOOPBACK_HOSTS, get_settings
-from eneo.main.exceptions import MCPAuthenticationError, MCPClientError
+from eneo.main.exceptions import (
+    MCPAuthenticationError,
+    MCPClientError,
+    MCPToolAnswerTooLarge,
+)
 from eneo.main.logging import get_logger
 from eneo.mcp_servers.domain.credential_transport import (
     CREDENTIAL_TRANSPORT_REQUIREMENT,
@@ -38,6 +55,10 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     bundled_tool_name,
     is_builtin_provider,
     is_bundled_server,
+)
+from eneo.mcp_servers.domain.server_address import (
+    MCPServerAddress,
+    loggable_server_address,
 )
 from eneo.mcp_servers.infrastructure.client.mcp_ui_session import (
     UiCapableClientSession,
@@ -106,11 +127,46 @@ def transport_read_timeout(tool_call_timeout: float) -> float:
     return max(MCP_SSE_READ_TIMEOUT_SECONDS, float(tool_call_timeout))
 
 
+_Result = TypeVar("_Result")
+
+
 MCPStreams = tuple[
     MemoryObjectReceiveStream[SessionMessage | Exception],
     MemoryObjectSendStream[SessionMessage],
     GetSessionIdCallback,
 ]
+
+
+class MCPHttpClientFactory(Protocol):
+    """Builds the HTTP client an ``MCPClient`` sends every request through,
+    the diagnosis of a failed connect included. Whoever builds the client
+    decides which addresses its connections may reach."""
+
+    def __call__(
+        self, *, headers: dict[str, str], timeout: httpx.Timeout
+    ) -> httpx.AsyncClient: ...
+
+    def refused_a_connection(self) -> bool:
+        """Whether the factory's own rule refused a connection that one of
+        its clients was to open."""
+        ...
+
+
+class SdkHttpClientFactory:
+    """The MCP SDK's HTTP client, which refuses no connection itself."""
+
+    def __call__(
+        self, *, headers: dict[str, str], timeout: httpx.Timeout
+    ) -> httpx.AsyncClient:
+        # The SDK's create_mcp_http_client sets only headers and timeout and
+        # takes no mounts; this client is the same plus the loopback bypass,
+        # and it does not follow redirects.
+        return httpx.AsyncClient(
+            headers=headers, timeout=timeout, mounts=_LOOPBACK_DIRECT
+        )
+
+    def refused_a_connection(self) -> bool:
+        return False
 
 
 def _session_class() -> type[ClientSession]:
@@ -272,6 +328,58 @@ def _extract_sse_data(buffer: bytearray, event_end: int) -> bytearray | None:
     return data if found_data else None
 
 
+# Requests whose refusal the client reports as a failure of that request.
+_REFUSABLE_METHODS = frozenset({"tools/call", "resources/read"})
+
+
+@dataclass
+class _RequestRefusal:
+    """The HTTP status the server refused a waiting request with, by method.
+
+    A refusal (an error status or a redirect) fails the SDK's transport, which
+    then cancels the request that waits for the answer. The status tells that
+    cancellation apart from a cancelled caller.
+    """
+
+    statuses: dict[str, int] = field(default_factory=dict[str, int])
+    # The status of the refusal that failed the transport. The connection
+    # takes no further request then: its scope stays cancelled, so another
+    # request would be cancelled with no status of its own.
+    failed_with: int | None = None
+
+    def refuse_on_failed_connection(self, operation: str) -> None:
+        if self.failed_with is not None:
+            raise MCPClientError(
+                f"{operation} failed: the connection failed after the server "
+                f"answered HTTP {self.failed_with}"
+            )
+
+
+@dataclass
+class _ToolAnswerCeiling:
+    """The largest tool answer one client accepts, shared by its streams.
+
+    A server may send the answer to ``tools/call`` on the response to that
+    request, on the stream the client keeps open to listen, or on a stream
+    the client opens again after the server closed one. So every response
+    stream of the client that has no ceiling of its own (the handshake, the
+    catalog and the end of a session have one) counts against this one: each
+    stream all its bytes, from the first to the last, whatever they carry
+    (the client cannot tell an answer from anything else a server sends
+    before it has decoded it). A stream that passes ``max_bytes`` is closed
+    and the tool call that waits fails as too large. A compressed stream is
+    closed unread and that call fails as any other failed call, unless the
+    stream also declares a size over ``max_bytes``: that one is too large.
+    """
+
+    max_bytes: int
+    # The JSON-RPC id of the tools/call request that is out, so that a stream
+    # other than its own response can fail it. None while no call waits.
+    waiting_request_id: str | int | None = None
+    # Set by the stream that failed the waiting call for its size.
+    answer_too_large: bool = False
+
+
 class _BoundedMCPResponseStream(httpx.AsyncByteStream):
     """Stop a bounded MCP response before the SDK can decode it."""
 
@@ -285,6 +393,8 @@ class _BoundedMCPResponseStream(httpx.AsyncByteStream):
         request_id: object,
         content_type: str,
         reject_immediately: bool = False,
+        tool_answer_ceiling: _ToolAnswerCeiling | None = None,
+        compressed_tool_answer: bool = False,
     ) -> None:
         self._stream = stream
         self._method = method
@@ -293,6 +403,30 @@ class _BoundedMCPResponseStream(httpx.AsyncByteStream):
         self._request_id = request_id
         self._is_sse = content_type.lower().startswith("text/event-stream")
         self._reject_immediately = reject_immediately
+        self._tool_answer_ceiling = tool_answer_ceiling
+        self._compressed_tool_answer = compressed_tool_answer
+
+    def _stopped(self, *, compressed: bool = False) -> bytes | None:
+        """What the SDK reads in place of the response that was stopped.
+
+        A stream that counts against a tool answer ceiling fails the tool
+        call that waits. When none does there is nobody to tell (None): the
+        stream just ends.
+        """
+        ceiling = self._tool_answer_ceiling
+        if ceiling is None:
+            return self._error_response()
+        if ceiling.waiting_request_id is None:
+            return None
+        if compressed:
+            return self._error_response(
+                f"MCP {self._method} response is compressed although an "
+                "identity encoding was asked for"
+            )
+        # The SDK only sees a JSON-RPC error, which the server could send as
+        # well; the flag is how the client knows it was the ceiling.
+        ceiling.answer_too_large = True
+        return self._error_response()
 
     def _error_response(self, message: str | None = None) -> bytes:
         if message is None:
@@ -300,10 +434,13 @@ class _BoundedMCPResponseStream(httpx.AsyncByteStream):
                 f"MCP {self._method} wire response exceeds the configured "
                 f"maximum of {self._max_bytes} bytes"
             )
+        ceiling = self._tool_answer_ceiling
         payload = json.dumps(
             {
                 "jsonrpc": "2.0",
-                "id": self._request_id,
+                "id": self._request_id
+                if ceiling is None
+                else ceiling.waiting_request_id,
                 "error": {"code": -32000, "message": message},
             },
             separators=(",", ":"),
@@ -315,16 +452,20 @@ class _BoundedMCPResponseStream(httpx.AsyncByteStream):
     async def __aiter__(self) -> AsyncGenerator[bytes]:
         buffered = bytearray()
         received_bytes = 0
-        if self._reject_immediately:
+        if self._reject_immediately or self._compressed_tool_answer:
             await self._stream.aclose()
-            yield self._error_response()
+            stopped = self._stopped(compressed=self._compressed_tool_answer)
+            if stopped is not None:
+                yield stopped
             return
 
         async for chunk in self._stream:
             received_bytes += len(chunk)
             if received_bytes > self._max_bytes:
                 await self._stream.aclose()
-                yield self._error_response()
+                stopped = self._stopped()
+                if stopped is not None:
+                    yield stopped
                 return
 
             buffered.extend(chunk)
@@ -388,9 +529,17 @@ def _json_rpc_request_payload(request: httpx.Request) -> dict[str, object] | Non
 
 
 async def _bound_mcp_response(
-    response: httpx.Response, *, tools_max_bytes: int, tools_max_count: int
+    response: httpx.Response,
+    *,
+    tools_max_bytes: int,
+    tools_max_count: int,
+    tool_answer_ceiling: _ToolAnswerCeiling | None = None,
 ) -> None:
-    """Install method-specific pre-decode ceilings on untrusted MCP responses."""
+    """Install method-specific pre-decode ceilings on untrusted MCP responses.
+
+    With ``tool_answer_ceiling``, every response without a ceiling of its own
+    counts against that one.
+    """
     if response.request.method == "DELETE":
         # The SDK terminates a server-assigned session with a plain (buffering)
         # ``client.delete()`` on transport teardown and only reads the status
@@ -406,33 +555,41 @@ async def _bound_mcp_response(
             )
         return
 
-    request_payload = _json_rpc_request_payload(response.request)
-    if request_payload is None:
-        return
+    # A request without a JSON-RPC body is the client listening (GET).
+    request_payload = _json_rpc_request_payload(response.request) or {}
     method = request_payload.get("method")
-    if not isinstance(method, str):
-        return
+    ceiling: _ToolAnswerCeiling | None = None
     if method == "tools/list":
+        bounded_method = "tools/list"
         max_bytes = tools_max_bytes
         max_count: int | None = tools_max_count
     elif method == "initialize":
+        bounded_method = "initialize"
         max_bytes = MCP_INITIALIZE_RESPONSE_MAX_BYTES
         max_count = None
     elif method == "resources/read":
+        bounded_method = "resources/read"
         max_bytes = MCP_RESOURCES_READ_RESPONSE_MAX_BYTES
+        max_count = None
+    elif tool_answer_ceiling is not None:
+        ceiling = tool_answer_ceiling
+        bounded_method = "tools/call"
+        max_bytes = ceiling.max_bytes
         max_count = None
     else:
         return
 
-    reject_immediately = False
-    content_encoding = response.headers.get("content-encoding", "identity").lower()
-    if content_encoding not in {"", "identity"}:
+    compressed = response.headers.get("content-encoding", "identity").lower() not in {
+        "",
+        "identity",
+    }
+    if compressed:
         # The stream ceiling counts bytes before HTTPX decoding. Requiring an
         # identity body prevents a small compressed response from expanding
         # beyond the configured bound during SDK JSON parsing.
-        reject_immediately = True
         del response.headers["content-encoding"]
 
+    declared_too_large = False
     content_length = response.headers.get("content-length")
     if content_length is not None:
         try:
@@ -440,20 +597,31 @@ async def _bound_mcp_response(
         except ValueError:
             declared_bytes = None
         if declared_bytes is not None and declared_bytes > max_bytes:
-            reject_immediately = True
+            declared_too_large = True
 
-    if reject_immediately and "content-length" in response.headers:
+    # A tool answer has an outcome of its own for "too large", so one that is
+    # only compressed is refused as that. The handshake and the catalog have
+    # one refusal for both.
+    compressed_tool_answer = (
+        compressed and ceiling is not None and not declared_too_large
+    )
+    reject_immediately = declared_too_large or (compressed and ceiling is None)
+    if (
+        reject_immediately or compressed_tool_answer
+    ) and "content-length" in response.headers:
         del response.headers["content-length"]
 
     if isinstance(response.stream, httpx.AsyncByteStream):
         response.stream = _BoundedMCPResponseStream(
             response.stream,
-            method=method,
+            method=bounded_method,
             max_bytes=max_bytes,
             max_count=max_count,
             request_id=request_payload.get("id"),
             content_type=response.headers.get("content-type", "application/json"),
             reject_immediately=reject_immediately,
+            tool_answer_ceiling=ceiling,
+            compressed_tool_answer=compressed_tool_answer,
         )
 
 
@@ -521,14 +689,20 @@ async def _open_streamable_http_client(
     read_timeout_seconds: float = MCP_SSE_READ_TIMEOUT_SECONDS,
     tool_catalog_max_count: int,
     tool_catalog_max_bytes: int,
+    tool_answer_ceiling: _ToolAnswerCeiling | None = None,
+    request_refusal: _RequestRefusal | None = None,
+    terminate_on_close: bool = True,
+    http_client_factory: MCPHttpClientFactory,
 ) -> AsyncGenerator[MCPStreams]:
     timeout = httpx.Timeout(timeout_seconds, read=read_timeout_seconds)
     http_headers = {"Accept-Encoding": "identity", **headers}
-    # The SDK's create_mcp_http_client sets only headers and timeout and takes
-    # no mounts; this client is the same plus the loopback bypass.
-    async with httpx.AsyncClient(
-        headers=http_headers, timeout=timeout, mounts=_LOOPBACK_DIRECT
+    async with http_client_factory(
+        headers=http_headers, timeout=timeout
     ) as http_client:
+        # The SDK's client follows redirects. No MCP client of Eneo does: a
+        # redirect would take the request, and credential headers with it,
+        # to an address that nobody registered.
+        http_client.follow_redirects = False
         wire_max_bytes = tool_catalog_max_bytes + MCP_TOOL_LIST_PROTOCOL_OVERHEAD_BYTES
         # This coarse pre-decode bound measures server-encoded HTTP/SSE bytes;
         # validate_tool_catalog later enforces the compact semantic definition
@@ -539,12 +713,40 @@ async def _open_streamable_http_client(
                 response,
                 tools_max_bytes=wire_max_bytes,
                 tools_max_count=tool_catalog_max_count,
+                tool_answer_ceiling=tool_answer_ceiling,
             )
 
         http_client.event_hooks["response"].append(bound_mcp_response)
+        if tool_answer_ceiling is not None:
+            ceiling = tool_answer_ceiling
+
+            async def note_waiting_tool_call(request: httpx.Request) -> None:
+                # Noted when the request leaves, not when it is answered: the
+                # server may send the answer on another stream first.
+                payload = _json_rpc_request_payload(request) or {}
+                request_id = payload.get("id")
+                if payload.get("method") == "tools/call" and isinstance(
+                    request_id, (str, int)
+                ):
+                    ceiling.waiting_request_id = request_id
+
+            http_client.event_hooks["request"].append(note_waiting_tool_call)
+        if request_refusal is not None:
+            refusal = request_refusal
+
+            async def note_refused_request(response: httpx.Response) -> None:
+                if not (response.is_error or response.has_redirect_location):
+                    return
+                payload = _json_rpc_request_payload(response.request) or {}
+                method = payload.get("method")
+                if isinstance(method, str) and method in _REFUSABLE_METHODS:
+                    refusal.statuses[method] = response.status_code
+
+            http_client.event_hooks["response"].append(note_refused_request)
         async with streamable_http_client(
             url,
             http_client=http_client,
+            terminate_on_close=terminate_on_close,
         ) as streams:
             yield streams
 
@@ -595,6 +797,9 @@ def _extract_error_message(exc: BaseException) -> str:
                 return msg
         return str(exc)  # type: ignore
 
+    if isinstance(exc, httpx.HTTPStatusError):
+        return _diagnose_response(exc.response)
+
     # Skip noise exceptions
     if isinstance(exc, (GeneratorExit, KeyboardInterrupt, SystemExit)):
         return ""
@@ -604,7 +809,77 @@ def _extract_error_message(exc: BaseException) -> str:
     return str(exc)
 
 
-async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
+# The longest redirect target an error message quotes; a longer one is left out.
+MCP_REDIRECT_TARGET_MAX_LENGTH = 200
+_REGISTERED_ADDRESS = TypeAdapter[MCPServerAddress](MCPServerAddress)
+
+
+def _address(url: httpx.URL) -> str:
+    """A URL without user info, query and fragment, still percent-encoded."""
+    path = url.raw_path.split(b"?", 1)[0].decode("ascii")
+    return f"{url.scheme}://{url.netloc.decode('ascii')}{path}"
+
+
+def _redirect_target(response: httpx.Response) -> str | None:
+    """Where a redirect points, when that is an address an administrator
+    can register instead as it is written; None otherwise.
+
+    The server chose this text and an administrator reads it, so it is shown
+    percent-encoded (no line break or control character can come through),
+    without user info, query and fragment, and of a bounded length. The type
+    that reads a registered address decides the rest: a text it refuses
+    (another scheme, no host) or reads as another address (a host taken from
+    the path, a number read as an IP address) names no target. Nor does the
+    address that was asked.
+    """
+    try:
+        target = response.url.join(response.headers["location"])
+    except httpx.InvalidURL:
+        return None
+    address = _address(target)
+    if len(address) > MCP_REDIRECT_TARGET_MAX_LENGTH:
+        return None
+    try:
+        registered = _REGISTERED_ADDRESS.validate_python(address)
+    except ValidationError:
+        return None
+    if str(registered) != address:
+        return None
+    return None if address == _address(response.url) else address
+
+
+def _diagnose_response(response: httpx.Response) -> str:
+    """Describe the HTTP result without disclosing request or redirect secrets."""
+    server = loggable_server_address(str(response.request.url))
+    if response.status_code == 401:
+        return "Authentication failed (401 Unauthorized). Check your bearer token."
+    if response.has_redirect_location:
+        target = _redirect_target(response)
+        return (
+            f"Server at {server} answered with a redirect "
+            f"(HTTP {response.status_code})"
+            f"{f' to {target}' if target else ''}. Eneo does not "
+            "follow redirects: register the address the server "
+            "redirects to."
+        )
+    if response.status_code == 403:
+        return "Access denied (403 Forbidden). Check your credentials."
+    if response.status_code >= 500:
+        return f"Server error (HTTP {response.status_code})."
+    if response.status_code >= 400:
+        return f"Server returned HTTP {response.status_code}."
+    return (
+        f"Server at {server} is reachable "
+        f"(HTTP {response.status_code}) but the MCP handshake failed."
+    )
+
+
+async def _diagnose_http(
+    url: str,
+    headers: dict[str, str],
+    *,
+    http_client_factory: MCPHttpClientFactory,
+) -> str:
     """Quick HTTP request to diagnose the real error when MCP protocol fails.
 
     The MCP library's anyio TaskGroups can swallow the actual HTTP error
@@ -614,19 +889,24 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
     Any HTTP status is diagnostic signal here: auth is evaluated before
     method dispatch, so a 401/403 is trustworthy even from a server that
     rejects the probe body itself.
+
+    A message names the server by ``loggable_server_address``: it is logged,
+    and the path or query of the address can carry a token.
     """
+    server = loggable_server_address(url)
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(5.0), mounts=_LOOPBACK_DIRECT
+        async with http_client_factory(
+            headers=headers, timeout=httpx.Timeout(5.0)
         ) as client:
             async with client.stream(
                 "POST",
                 url,
                 headers={
-                    **headers,
                     "Content-Type": "application/json",
                     "Accept": "application/json, text/event-stream",
                 },
+                # The redirect is what this request may have to report.
+                follow_redirects=False,
                 json={
                     "jsonrpc": "2.0",
                     "method": "initialize",
@@ -638,25 +918,11 @@ async def _diagnose_http(url: str, headers: dict[str, str]) -> str:
                     },
                 },
             ) as response:
-                if response.status_code == 401:
-                    return (
-                        "Authentication failed (401 Unauthorized). "
-                        "Check your bearer token."
-                    )
-                if response.status_code == 403:
-                    return "Access denied (403 Forbidden). Check your credentials."
-                if response.status_code >= 500:
-                    return f"Server error (HTTP {response.status_code})."
-                if response.status_code >= 400:
-                    return f"Server returned HTTP {response.status_code}."
-                return (
-                    f"Server at {url} is reachable "
-                    f"(HTTP {response.status_code}) but the MCP handshake failed."
-                )
+                return _diagnose_response(response)
     except httpx.ConnectError:
-        return f"Could not connect to {url}. Verify the URL and that the server is running."
+        return f"Could not connect to {server}. Verify the URL and that the server is running."
     except httpx.TimeoutException:
-        return f"Connection to {url} timed out."
+        return f"Connection to {server} timed out."
     except Exception:
         pass
     return "Connection failed for unknown reasons."
@@ -817,16 +1083,14 @@ class _ConnectionHost:
         client = self._client
         session: ClientSession | None = None
         try:
-            async with _open_streamable_http_client(
-                url=client.endpoint_url,
-                headers=self._headers,
-                timeout_seconds=float(client.timeout),
-                read_timeout_seconds=transport_read_timeout(client.tool_call_timeout),
-                tool_catalog_max_count=client.mcp_server.tool_catalog_max_count,
-                tool_catalog_max_bytes=client.mcp_server.tool_catalog_max_bytes,
-            ) as (read, write, get_session_id):
+            async with client.open_transport(self._headers) as (
+                read,
+                write,
+                get_session_id,
+            ):
                 logger.debug(
-                    f"Streamable HTTP transport connected to {client.endpoint_url}"
+                    "Streamable HTTP transport connected to %s",
+                    loggable_server_address(client.endpoint_url),
                 )
                 async with _session_class()(
                     read, write, message_handler=self._message_handler
@@ -914,6 +1178,52 @@ async def drain_connection_hosts(timeout: float) -> int:
     return len(hosts)
 
 
+@dataclass(frozen=True)
+class MCPToolAnswer:
+    """A tool's answer as the server sent it, for a caller that reads it as data.
+
+    ``text_blocks`` holds each text block as sent, in order. ``other_blocks``
+    counts the content blocks that are not text (images, audio, resources,
+    resource links, and any kind this client does not know): their content is
+    not part of this answer, and the count is how the caller knows that there
+    was more. ``structured`` is the structured content as sent: nothing has
+    checked it against the tool's output schema, the caller validates the
+    answer against its own contract. ``is_error`` is the tool's own statement
+    that it failed, not a failed call. The result's ``_meta`` is not part of
+    an answer.
+    """
+
+    text_blocks: tuple[str, ...]
+    other_blocks: int
+    structured: dict[str, object] | None
+    is_error: bool
+
+
+class _TextBlock(BaseModel):
+    type: Literal["text"]
+    text: str
+
+
+class _OtherBlock(BaseModel):
+    type: str
+
+
+class _ToolCallResult(BaseModel):
+    """The result of ``tools/call``, read as far as an answer goes.
+
+    The SDK's own model refuses a whole result for one content block of a
+    kind it does not know. Here such a block is one more that is not text.
+    """
+
+    content: list[
+        Annotated[_TextBlock | _OtherBlock, Field(union_mode="left_to_right")]
+    ]
+    structured: dict[str, object] | None = Field(
+        default=None, alias="structuredContent"
+    )
+    is_error: bool = Field(default=False, alias="isError")
+
+
 class MCPClient:
     """Client for interacting with HTTP-based MCP servers.
 
@@ -930,6 +1240,9 @@ class MCPClient:
         tool_call_timeout: int | None = None,
         on_tools_list_changed: Callable[[], None] | None = None,
         identity_headers: dict[str, str] | None = None,
+        tool_call_max_bytes: int | None = None,
+        terminate_session_on_close: bool = True,
+        http_client_factory: MCPHttpClientFactory | None = None,
     ):
         """
         Initialize MCP client.
@@ -941,6 +1254,21 @@ class MCPClient:
             identity_headers: Acting user/tenant X-Eneo-* headers. Sent on every
                 request for bundled servers (opaque IDs only). External servers
                 require ``forward_identity=True`` for identity egress.
+            tool_call_max_bytes: The largest tool answer this client accepts,
+                counted as it arrives and before it is decoded, on every
+                stream the server can send it on (see ``_ToolAnswerCeiling``).
+                None accepts any size; give it on a client that makes one
+                call at a time, because a stopped answer is reported for the
+                call in flight.
+            terminate_session_on_close: Whether closing asks the server to end
+                the session it assigned. That is one more request, whose
+                answer the close waits for up to the transport's read
+                timeout. False for a caller that has to be done within its
+                time; the server's session then expires on its own.
+            http_client_factory: Builds the HTTP client every request of
+                this client goes through. The SDK's by default; a caller
+                that may reach only addresses it vetted gives one whose
+                connections are vetted.
             on_tools_list_changed: Fired (best-effort) when the server pushes a
                 ``notifications/tools/list_changed``. Progressive-discovery
                 servers emit this after a tool like ``load_tools`` activates new
@@ -956,6 +1284,14 @@ class MCPClient:
         self.tool_call_timeout = tool_call_timeout or MCP_TOOL_CALL_TIMEOUT_DEFAULT
         self._on_tools_list_changed = on_tools_list_changed
         self.identity_headers = identity_headers or {}
+        self._tool_answer_ceiling = (
+            _ToolAnswerCeiling(tool_call_max_bytes)
+            if tool_call_max_bytes is not None
+            else None
+        )
+        self._request_refusal = _RequestRefusal()
+        self._terminate_session_on_close = terminate_session_on_close
+        self._http_client_factory = http_client_factory or SdkHttpClientFactory()
         # Set when a tools/list_changed notification arrives on this session.
         # The proxy also re-lists the servers it just called, so this flag is a
         # protocol-correct optimization rather than the sole trigger.
@@ -1071,6 +1407,23 @@ class MCPClient:
 
         return headers
 
+    def open_transport(
+        self, headers: dict[str, str]
+    ) -> AbstractAsyncContextManager[MCPStreams]:
+        """Configure the transport; its connection host owns entering and closing it."""
+        return _open_streamable_http_client(
+            url=self.endpoint_url,
+            headers=headers,
+            timeout_seconds=float(self.timeout),
+            read_timeout_seconds=transport_read_timeout(self.tool_call_timeout),
+            tool_catalog_max_count=self.mcp_server.tool_catalog_max_count,
+            tool_catalog_max_bytes=self.mcp_server.tool_catalog_max_bytes,
+            tool_answer_ceiling=self._tool_answer_ceiling,
+            request_refusal=self._request_refusal,
+            terminate_on_close=self._terminate_session_on_close,
+            http_client_factory=self._http_client_factory,
+        )
+
     async def connect(self) -> None:
         """Connect to the HTTP-based MCP server.
 
@@ -1085,7 +1438,14 @@ class MCPClient:
             raise
         except BaseException as e:
             error_msg = _extract_error_message(e)
-            if not error_msg:
+            if not error_msg and self._http_client_factory.refused_a_connection():
+                # Asking the server why would resolve its name again, and an
+                # answer the rule allows then would not explain this failure.
+                error_msg = (
+                    "The address the server's name answered is not one this "
+                    "client may connect to."
+                )
+            elif not error_msg:
                 # Cancel scope or other unhelpful error — do a direct HTTP
                 # request to surface the real issue (e.g. 401).
                 try:
@@ -1094,7 +1454,11 @@ class MCPClient:
                     # Still produce a diagnostic if auth header construction
                     # fails for any unexpected reason.
                     diagnostic_headers = {}
-                error_msg = await _diagnose_http(self.endpoint_url, diagnostic_headers)
+                error_msg = await _diagnose_http(
+                    self.endpoint_url,
+                    diagnostic_headers,
+                    http_client_factory=self._http_client_factory,
+                )
             logger.error(
                 f"Failed to connect to MCP server {self.mcp_server.name}: {error_msg}"
             )
@@ -1108,7 +1472,8 @@ class MCPClient:
 
         Every connection is fresh: open the transport, run ``initialize()``,
         and let the SDK terminate any server-assigned protocol session on
-        teardown. Servers that hold cross-turn state key it to explicit
+        teardown unless the caller explicitly keeps the transport session.
+        Servers that hold cross-turn state key it to explicit
         handles returned in tool results, not to the transport session.
 
         Idempotent: while a host is attached and running, connecting again
@@ -1195,6 +1560,24 @@ class MCPClient:
                 _extract_error_message(exc) or exc,
             )
 
+    async def _send_request(self, request: Coroutine[Any, Any, _Result]) -> _Result:
+        """End a pending RPC when its separately owned connection ends."""
+        host = self._host
+        if host is None:
+            return await request
+        pending = asyncio.create_task(request)
+        try:
+            await asyncio.wait(
+                {pending, host.task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            if pending.done():
+                return pending.result()
+            raise MCPClientError("MCP connection closed before the request completed")
+        finally:
+            if not pending.done():
+                pending.cancel()
+            await asyncio.gather(pending, return_exceptions=True)
+
     async def list_tools(self) -> list[dict[str, Any]]:
         """
         List all available tools from the MCP server.
@@ -1207,7 +1590,7 @@ class MCPClient:
 
         try:
             async with asyncio.timeout(self.list_tools_timeout):
-                response = await self.session.list_tools()
+                response = await self._send_request(self.session.list_tools())
             if len(response.tools) > self.mcp_server.tool_catalog_max_count:
                 raise MCPClientError(
                     "MCP tool catalog exceeds the configured maximum of "
@@ -1272,6 +1655,67 @@ class MCPClient:
             )
             raise MCPClientError(f"Failed to list tools: {error_msg}") from e
 
+    async def call_tool_as_sent(
+        self, tool_name: str, arguments: dict[str, object]
+    ) -> MCPToolAnswer:
+        """Call a tool and return its answer as the server sent it.
+
+        For a caller that reads the answer as data. ``call_tool`` is chat's:
+        it hands on the content blocks for a model and does not read the
+        structured content. Exactly one request is sent, ``tools/call``.
+
+        The wait for the answer has no time limit of its own: the caller
+        bounds the whole exchange, the connect and the close included (see
+        ``UnattendedToolCaller``), and a second clock here would only ever
+        end after that one.
+        """
+        if not self.session:
+            raise MCPClientError("Not connected to MCP server")
+
+        ceiling = self._tool_answer_ceiling
+        try:
+            # Not the session's call_tool: that follows the call with a
+            # request for the tool list, which can hang or fail on its own,
+            # and fails the call on the tool's output schema. The caller
+            # checks the answer against its own contract.
+            response = await self._send_request(
+                self.session.send_request(
+                    ClientRequest(
+                        CallToolRequest(
+                            params=CallToolRequestParams(
+                                name=tool_name, arguments=dict(arguments)
+                            )
+                        )
+                    ),
+                    _ToolCallResult,
+                )
+            )
+        except Exception as e:
+            if ceiling is not None and ceiling.answer_too_large:
+                raise MCPToolAnswerTooLarge(
+                    "Tool call failed: the server sent more than "
+                    f"{ceiling.max_bytes} bytes in one response"
+                ) from e
+            raise MCPClientError(
+                f"Tool call failed: {_extract_error_message(e) or str(e)}"
+            ) from e
+        finally:
+            if ceiling is not None:
+                # No call waits any more: a stream stopped from here on has
+                # nobody to tell, and the next call starts with nothing found.
+                ceiling.waiting_request_id = None
+                ceiling.answer_too_large = False
+
+        text_blocks = tuple(
+            block.text for block in response.content if isinstance(block, _TextBlock)
+        )
+        return MCPToolAnswer(
+            text_blocks=text_blocks,
+            other_blocks=len(response.content) - len(text_blocks),
+            structured=response.structured,
+            is_error=response.is_error,
+        )
+
     async def call_tool(
         self, tool_name: str, arguments: dict[str, Any]
     ) -> dict[str, Any]:
@@ -1285,12 +1729,16 @@ class MCPClient:
         Returns:
             Tool execution result
         """
+        self._request_refusal.refuse_on_failed_connection("Tool call")
         if not self.session:
             raise MCPClientError("Not connected to MCP server")
 
+        self._request_refusal.statuses.pop("tools/call", None)
         try:
             async with asyncio.timeout(self.tool_call_timeout):
-                response = await self.session.call_tool(tool_name, arguments=arguments)
+                response = await self._send_request(
+                    self.session.call_tool(tool_name, arguments=arguments)
+                )
 
             # Extract content from response
             content_list: list[dict[str, Any]] = []
@@ -1404,15 +1852,20 @@ class MCPClient:
             return result
 
         except asyncio.CancelledError:
-            # As in list_tools: a cancelled caller is not a failed tool call,
-            # and counting it would trip the server's circuit breaker.
             raise
         except asyncio.TimeoutError as e:
             raise MCPClientError(
                 f"Tool call failed: request timed out after {self.tool_call_timeout}s"
             ) from e
         except MCPClientError:
-            raise
+            refused = self._request_refusal.statuses.get("tools/call")
+            if refused is None:
+                raise
+            self._request_refusal.failed_with = refused
+            message = f"Tool call failed: the server answered HTTP {refused}"
+            if refused in (401, 403):
+                raise MCPAuthenticationError(message) from None
+            raise MCPClientError(message) from None
         except BaseException as e:
             error_msg = _extract_error_message(e) or str(e)
             lowered = error_msg.lower()
@@ -1434,12 +1887,16 @@ class MCPClient:
         (the wire response is separately pre-bounded before SDK decoding); the
         general 8 KiB embedded-resource cap deliberately does not apply here.
         """
+        self._request_refusal.refuse_on_failed_connection("Resource read")
         if not self.session:
             raise MCPClientError("Not connected to MCP server")
 
+        self._request_refusal.statuses.pop("resources/read", None)
         try:
             async with asyncio.timeout(self.tool_call_timeout):
-                result = await self.session.read_resource(AnyUrl(uri))
+                result = await self._send_request(
+                    self.session.read_resource(AnyUrl(uri))
+                )
             if not result.contents:
                 raise MCPClientError(f"Resource {uri} returned no contents")
             first = result.contents[0]
@@ -1457,13 +1914,21 @@ class MCPClient:
                 "mime_type": first.mimeType,
                 "meta": raw_meta if isinstance(raw_meta, dict) else None,
             }
+        except asyncio.CancelledError:
+            raise
         except asyncio.TimeoutError as e:
             raise MCPClientError(
                 "Failed to read resource: request timed out after "
                 f"{self.tool_call_timeout}s"
             ) from e
         except MCPClientError:
-            raise
+            refused = self._request_refusal.statuses.get("resources/read")
+            if refused is None:
+                raise
+            self._request_refusal.failed_with = refused
+            raise MCPClientError(
+                f"Resource read failed: the server answered HTTP {refused}"
+            ) from None
         except BaseException as e:
             error_msg = _extract_error_message(e) or str(e)
             logger.error(

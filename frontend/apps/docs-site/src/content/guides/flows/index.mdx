@@ -1,0 +1,30 @@
+# Eneo Flows for API consumers
+
+This section is for teams that use Eneo Flows inside their own service or web app, and it helps you choose the right guide before you design, run, or troubleshoot a flow.
+
+You are at the start of the consumer journey: design the flow, integrate the runtime calls, then use the FAQ and reference when questions come up.
+
+**Building an application on Flows? Start with [Integrating Flows](/guides/flows/integrating-flows).** It shows the common runtime workflow with `curl` and TypeScript examples. Use the runtime reference and your deployment's `/openapi.json` for the full contract.
+
+## Journey map
+
+| Page                  | Use it for                                                                                                        | Link                                    |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| Integrating Flows     | Build an application on the runtime API: upload, create, poll, human review, cancel, retry, and download outputs. | [Open](/guides/flows/integrating-flows) |
+| Designing Flows       | Understand the published flow shapes the runtime supports, before you commit to a design.                         | [Open](/guides/flows/designing-flows)   |
+| Run-History Retention | Configure Organization, Space, and Flow policies and understand what can and cannot delete data.                  | [Open](/guides/flows/retention-policy)  |
+| Flows FAQ             | Answer common capability and operations questions without reading the reference.                                  | [Open](/guides/flows/flows-faq)         |
+| Reference             | Look up Flow error handling.                                                                                      | [Open](/guides/flows/reference/errors)  |
+
+## Reference owners
+
+- [Integrating Flows](/guides/flows/integrating-flows) owns the runtime lifecycle: the call order, the state machine, and the rules a client must follow.
+- [Flow Runtime API Reference](/guides/flows-api-guide) owns the full runtime API field catalog.
+- [Flow run-history retention](/guides/flows/retention-policy) owns hierarchy, modes, review-queue behavior, and administrator endpoints.
+- [Flow error reference](/guides/flows/reference/errors) owns machine-readable error handling.
+- The pages in this section link to those references instead of duplicating request and response shapes.
+- The live contract for the deployment you target is served from its own origin at `/openapi.json`, with interactive documentation at `/docs`. When a page and the deployment disagree, the deployment is right.
+
+Flows themselves are created by people in the Eneo flow editor. Nothing in this section asks you to author one.
+
+Next: [Integrating Flows](/guides/flows/integrating-flows).

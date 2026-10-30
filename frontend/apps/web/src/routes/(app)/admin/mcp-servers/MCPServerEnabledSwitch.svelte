@@ -34,7 +34,13 @@
   const isProvider = $derived(isCapabilityPurpose(mcpServer.purpose));
   const isOn = $derived(isProvider ? !!mcpServer.is_enabled : mcpServer.is_org_enabled);
 
+  // The switch ignores input during its own save but stays focusable: a disabled
+  // one would drop keyboard focus.
+  let saving = $state(false);
+
   async function toggleEnabled() {
+    if (saving) return;
+    saving = true;
     onAttempt?.();
     try {
       if (isProvider) {
@@ -64,6 +70,8 @@
             .join(" ")
         : detail;
       if (message) onError?.(message);
+    } finally {
+      saving = false;
     }
   }
 
@@ -84,8 +92,9 @@
       {#snippet child({ props })}
         <div {...props}>
           <Switch
-            checked={isOn}
-            onCheckedChange={() => toggleEnabled()}
+            bind:checked={() => isOn, () => toggleEnabled()}
+            aria-busy={saving ? "true" : undefined}
+            class="aria-busy:opacity-60"
             aria-label={mcpServer.name}
           />
         </div>

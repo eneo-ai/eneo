@@ -1,0 +1,396 @@
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+
+from eneo.database.tables.flow_tables import FlowLiveTranscripts
+from eneo.files.transcriber import TranscribedAudio
+from eneo.files.transcript import TranscriptSegment, TranscriptWord
+from eneo.flows.flow_run_error import TranscriptionFailureKind
+from eneo.flows.runtime.audio_spool import SpooledAudio
+from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.live_transcription.repository import LiveTranscriptRepository
+from eneo.flows.runtime.service_transcription import (
+    RegistryFlowTranscriber,
+    ServiceFlowTranscriber,
+)
+from eneo.flows.runtime.transcription import (
+    FlowTranscribers,
+    TranscriptionFailure,
+    TranscriptionProviderRejectedError,
+)
+from eneo.flows.runtime.transcription_runtime import (
+    AudioRuntimeDeps,
+    AudioRuntimeRequest,
+    resolve_transcribe_and_attach_audio_input,
+)
+from eneo.transcription_services.client import TranscriptionJobResult
+from tests.unittests.flows import audio_spool_test_support
+from tests.unittests.flows.test_flow_transcription import (
+    _SPEAKER_CHOICE,
+    _audio_file,
+    _patch_run_input_payload,
+    _run,
+    _runtime_step,
+    _SpaceStub,
+    _transcribers,
+)
+
+spool_contract = audio_spool_test_support.spool_contract
+
+
+@pytest.fixture
+def live_audio(user, monkeypatch, spool_contract):
+    file = _audio_file(name="live.wav")
+    step = _runtime_step()
+    model = SimpleNamespace(id=uuid4(), name="Whisper", model_name="whisper-1")
+    transcript_id = uuid4()
+    run = _run(
+        user=user,
+        payload={
+            "step_inputs": {
+                str(step.step_id): {"live_transcript_id": str(transcript_id)}
+            },
+            "speaker_labels": False,
+            "max_speakers": 3,
+        },
+    )
+    row = FlowLiveTranscripts(
+        id=transcript_id,
+        tenant_id=run.tenant_id,
+        user_id=run.principal_user_id,
+        flow_id=run.flow_id,
+        flow_version=run.flow_version,
+        step_id=step.step_id,
+        model_id=model.id,
+        recording_id="recording_123",
+        bound_file_id=file.id,
+        text="Live text.",
+        segments=[{"text": "Live text.", "start": 0.0, "end": 42.0}],
+        received_audio_seconds=42.0,
+        expires_at=datetime.now(timezone.utc) + timedelta(days=1),
+    )
+    lookup = AsyncMock(return_value=row)
+    monkeypatch.setattr(LiveTranscriptRepository, "get", lookup)
+    registry = SimpleNamespace(
+        transcribe_from_filepath=AsyncMock(
+            return_value=TranscribedAudio(
+                "Batch text.", 42.0, segments=(TranscriptSegment("Batch text.", 0, 42),)
+            )
+        )
+    )
+    remote = SimpleNamespace(
+        label_speakers=AsyncMock(
+            return_value=TranscriptionJobResult(
+                text="Live text.",
+                duration_seconds=42.0,
+                model="whisper-1",
+                language="sv",
+                alignment="forced",
+                segments=(
+                    TranscriptSegment("Live text.", 0, 42, speaker="SPEAKER_00"),
+                ),
+            )
+        ),
+        time_words=AsyncMock(
+            return_value=TranscriptionJobResult(
+                text="[00:00:00 - 00:00:42] Live text.",
+                duration_seconds=42.0,
+                model="whisper-1",
+                language="sv",
+                alignment="forced",
+                segments=(
+                    TranscriptSegment(
+                        "Live text.",
+                        0,
+                        42,
+                        words=(
+                            TranscriptWord("Live", 0.0, 0.6),
+                            TranscriptWord("text.", 0.7, 1.2),
+                        ),
+                    ),
+                ),
+            )
+        ),
+    )
+    space_repo = AsyncMock()
+    space_repo.one.return_value = _SpaceStub([model], model)
+    run_repo = AsyncMock()
+    _patch_run_input_payload(run_repo, run)
+    staged = []
+    request = AudioRuntimeRequest(
+        run=run,
+        step=step,
+        context={"flow_input": {}},
+        version_metadata={
+            "wizard": {
+                "transcription_enabled": True,
+                "transcription_speaker_service": _SPEAKER_CHOICE,
+                "transcription_model": {"id": str(model.id)},
+                "transcription_language": "sv",
+            }
+        },
+        files=[file],
+        requested_ids=[file.id],
+        max_audio_files=5,
+        max_inline_text_bytes=100_000,
+    )
+    deps = AudioRuntimeDeps(
+        transcribers=_transcribers(ServiceFlowTranscriber(registry, remote)),
+        flow_repo=AsyncMock(),
+        space_repo=space_repo,
+        flow_run_repo=run_repo,
+        audit_service=None,
+        actor=FlowRunActor.from_user(user=user),
+        open_audio_download=spool_contract.downloads([file]),
+        apply_output_cap=AsyncMock(side_effect=lambda **kw: (kw["text"], [])),
+        commit=AsyncMock(),
+        stage_transcript_source=lambda reference, source: staged.append(
+            (reference, source)
+        ),
+        stage_run_transcript=lambda reference, transcript: None,
+    )
+    return SimpleNamespace(
+        row=row,
+        lookup=lookup,
+        registry=registry,
+        remote=remote,
+        request=request,
+        deps=deps,
+        staged=staged,
+    )
+
+
+async def test_live_segments_skip_asr_and_have_their_words_timed(
+    live_audio, spool_contract
+):
+    case = live_audio
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=case.request, deps=case.deps
+    )
+    case.registry.transcribe_from_filepath.assert_not_awaited()
+    case.remote.label_speakers.assert_not_awaited()
+    # Without labels the flow's service times the streamed passages' words.
+    assert case.remote.time_words.await_args.kwargs["segments"] == (
+        TranscriptSegment("Live text.", 0, 42),
+    )
+    assert result.text == "Live text."
+    assert result.transcription_metadata["transcript_origin"] == "live"
+    assert result.transcription_metadata["word_timing"] == {"status": "done"}
+    assert "live_fallback_reason" not in result.transcription_metadata
+    reference, prepared = case.staged[0]
+    assert result.transcription_metadata["source"] == reference.model_dump(mode="json")
+    assert prepared.source.segments == [
+        {
+            "file_index": 0,
+            "start": 0.0,
+            "end": 42.0,
+            "speaker": None,
+            "text": "Live text.",
+        }
+    ]
+    assert prepared.words == [
+        {
+            "segment_index": 0,
+            "words": [
+                {"word": "Live", "start": 0.0, "end": 0.6, "probability": None},
+                {"word": "text.", "start": 0.7, "end": 1.2, "probability": None},
+            ],
+        }
+    ]
+    assert sum(spool_contract.duration_calls.values()) == 1
+
+
+@pytest.mark.parametrize("service", ["timing_fails", "none_chosen"])
+async def test_live_passages_stay_as_streamed_without_word_times(live_audio, service):
+    case = live_audio
+    if service == "timing_fails":
+        case.remote.time_words.side_effect = TranscriptionProviderRejectedError(
+            "refused", failure_kind=TranscriptionFailureKind.INTERNAL
+        )
+    else:
+        case.request.version_metadata["wizard"]["transcription_speaker_service"] = None
+        case.deps = replace(
+            case.deps,
+            transcribers=FlowTranscribers(
+                model=RegistryFlowTranscriber(case.registry),
+                with_speaker_service=AsyncMock(side_effect=AssertionError("none")),
+            ),
+        )
+
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=case.request, deps=case.deps
+    )
+
+    assert result.text == "Live text."
+    assert result.transcription_metadata.get("word_timing") == (
+        {"status": "failed", "reason": "failed"} if service == "timing_fails" else None
+    )
+    _, prepared = case.staged[0]
+    assert [segment["text"] for segment in prepared.source.segments] == ["Live text."]
+    assert prepared.words is None
+    if service == "none_chosen":
+        case.remote.time_words.assert_not_awaited()
+
+
+@pytest.mark.parametrize("alignment", ["forced", "segment_split", "segment_only"])
+async def test_live_speaker_enrichment_uses_live_segments_and_run_bound(
+    live_audio, alignment
+):
+    case = live_audio
+    case.request.run.input_payload_json["speaker_labels"] = True
+    case.remote.label_speakers.return_value = replace(
+        case.remote.label_speakers.return_value, alignment=alignment
+    )
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=case.request, deps=case.deps
+    )
+    case.registry.transcribe_from_filepath.assert_not_awaited()
+    case.remote.label_speakers.assert_awaited_once()
+    assert case.remote.label_speakers.await_args.kwargs["segments"] == (
+        TranscriptSegment("Live text.", 0, 42),
+    )
+    assert case.remote.label_speakers.await_args.kwargs["max_speakers"] == 3
+    assert result.transcription_metadata["transcript_origin"] == "live"
+    assert result.transcription_metadata["alignment"] == alignment
+    assert (result.diarization_reduced_precision_message is not None) == (
+        alignment != "forced"
+    )
+
+
+@pytest.mark.parametrize("labels", [True, False])
+async def test_streamed_passages_are_trimmed_and_empty_ones_dropped(live_audio, labels):
+    # Streamed deltas start with the space that joined them to the text before; the
+    # speaker service's aligner refuses leading whitespace, and a blank passage is no text.
+    case = live_audio
+    case.request.run.input_payload_json["speaker_labels"] = labels
+    case.row.segments = [
+        {"text": " Hej", "start": 0.0, "end": 2.0},
+        {"text": "  ", "start": 2.0, "end": 3.0},
+        {"text": " och välkomna.", "start": 3.0, "end": 42.0},
+    ]
+    await resolve_transcribe_and_attach_audio_input(
+        request=case.request, deps=case.deps
+    )
+    case.registry.transcribe_from_filepath.assert_not_awaited()
+    expected = (
+        TranscriptSegment("Hej", 0, 2),
+        TranscriptSegment("och välkomna.", 3, 42),
+    )
+    job = case.remote.label_speakers if labels else case.remote.time_words
+    assert job.await_args.kwargs["segments"] == expected
+
+
+@pytest.mark.parametrize(
+    "condition,reason,labels",
+    [
+        ("duration", "duration_mismatch", False),
+        ("no_segments", "no_timing", False),
+        ("no_segments", "no_timing", True),
+        ("missing", "unavailable", False),
+        ("different_file", "unavailable", False),
+    ],
+)
+async def test_unusable_live_transcript_calls_batch_once(
+    live_audio, monkeypatch, condition, reason, labels
+):
+    case = live_audio
+    measured: list[object] = []
+    original_measure = SpooledAudio.measure_duration
+
+    async def measure(self: SpooledAudio) -> float:
+        measured.append(self)
+        return await original_measure(self)
+
+    monkeypatch.setattr(SpooledAudio, "measure_duration", measure)
+    case.request.run.input_payload_json["speaker_labels"] = labels
+    if condition == "duration":
+        case.row.received_audio_seconds = 45
+    elif condition == "no_segments":
+        case.row.segments = None
+    elif condition == "missing":
+        case.lookup.return_value = None
+    else:
+        case.row.bound_file_id = uuid4()
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=case.request, deps=case.deps
+    )
+    case.registry.transcribe_from_filepath.assert_awaited_once()
+    if condition == "no_segments" and not labels:
+        assert measured == [], "no timing is known before any decode"
+    assert result.transcription_metadata["transcript_origin"] == "batch"
+    assert result.transcription_metadata["live_fallback_reason"] == reason
+    if labels:
+        case.remote.label_speakers.assert_awaited_once()
+        assert (
+            case.remote.label_speakers.await_args.kwargs["segments"][0].text
+            == "Batch text."
+        )
+    else:
+        assert result.text == "Batch text."
+        case.remote.label_speakers.assert_not_awaited()
+        assert (
+            case.remote.time_words.await_args.kwargs["segments"][0].text
+            == "Batch text."
+        )
+
+
+async def test_an_expired_transcript_bound_to_this_file_is_still_used(live_audio):
+    # Expiry limits how long an unbound transcript waits; a retry of a run over
+    # the same file keeps using it.
+    case = live_audio
+    case.row.expires_at = datetime.now(timezone.utc) - timedelta(days=1)
+    result = await resolve_transcribe_and_attach_audio_input(
+        request=case.request, deps=case.deps
+    )
+    case.registry.transcribe_from_filepath.assert_not_awaited()
+    assert result.transcription_metadata["transcript_origin"] == "live"
+
+
+async def test_live_enrichment_failure_keeps_batch_error_mapping_without_asr(
+    live_audio,
+):
+    case = live_audio
+    case.request.run.input_payload_json["speaker_labels"] = True
+    case.remote.label_speakers.side_effect = TranscriptionProviderRejectedError(
+        "refused",
+        failure_kind=TranscriptionFailureKind.INPUT,
+        service_reason="invalid_audio",
+    )
+    with pytest.raises(TranscriptionFailure) as error:
+        await resolve_transcribe_and_attach_audio_input(
+            request=case.request, deps=case.deps
+        )
+    case.registry.transcribe_from_filepath.assert_not_awaited()
+    case.remote.label_speakers.assert_awaited_once()
+    assert (
+        error.value.run_error_details.transcription_failure_kind
+        is TranscriptionFailureKind.INPUT
+    )
+    assert error.value.run_error_details.transcription_service_reason == "invalid_audio"
+
+
+@pytest.mark.parametrize("marked", [True, False])
+async def test_the_run_tells_transcription_whether_the_files_are_one_recording(
+    live_audio, monkeypatch, marked
+):
+    from eneo.flows.runtime import transcription_runtime
+
+    step_id = str(live_audio.request.step.step_id)
+    live_audio.request.run.input_payload_json["step_inputs"] = (
+        {step_id: {"single_recording": True}} if marked else {}
+    )
+    transcribe = AsyncMock(side_effect=RuntimeError("stop here"))
+    monkeypatch.setattr(
+        transcription_runtime, "resolve_and_transcribe_audio_for_step", transcribe
+    )
+
+    with pytest.raises(RuntimeError, match="stop here"):
+        await resolve_transcribe_and_attach_audio_input(
+            request=live_audio.request, deps=live_audio.deps
+        )
+
+    assert transcribe.await_args.kwargs["single_recording"] is marked

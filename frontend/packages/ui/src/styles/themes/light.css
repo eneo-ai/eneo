@@ -33,14 +33,32 @@
 
   --text-primary: var(--color-black); /* Main text colour */
   --text-secondary: var(--color-ui-grey-500); /* Text colour for paragraphs with less emphasis */
-  --text-muted: var(--color-ui-grey-200); /* Text colour for e.g. placeholders */
+  --text-muted: var(
+    --color-ui-grey-200
+  ); /* Dim de-emphasis colour; fails AA for body text — placeholders use --text-placeholder */
+  /* Placeholder text. A dedicated step between grey-200 (2.7:1, fails every
+     text target) and grey-500 (6:1, indistinguishable from helper text):
+     ~4.65:1 against the white page background per the EN 301 549-oriented
+     review, while staying clearly lighter than entered input text. */
+  --text-placeholder: oklch(56% 0.005 78.28);
   --text-on-fill: var(--color-white); /* Text on a coloured background */
 
-  --border-strongest: oklch(from var(--color-ui-grey-900) l c h / 45%);
+  /* 48%, not 45%: this is the step a control boundary uses, and 45%
+     measures 2.96:1 on white, just under the 3:1 that WCAG 1.4.11
+     asks of anything required to identify a component. */
+  --border-strongest: oklch(from var(--color-ui-grey-900) l c h / 48%);
   --border-stronger: oklch(from var(--color-ui-grey-900) l c h / 25%);
   --border-default: oklch(from var(--color-ui-grey-900) l c h / 15%);
   --border-dimmer: oklch(from var(--color-ui-grey-900) l c h / 5%);
   --border-on-fill: var(--color-white);
+
+  /* Checkbox control tokens. The eslint rule is right that a `dark:`
+     variant bypasses this system, so each theme states its own value:
+     the resting fill, the checked boundary, and the invalid boundary. */
+  --control-checkbox-fill: transparent;
+  --control-checkbox-checked-border: var(--accent-default);
+  --control-checkbox-invalid-border: var(--negative-default);
+  --control-checkbox-invalid-ring: oklch(from var(--negative-default) l c h / 20%);
 
   /* Colors */
   --brand-eneo: var(--text-primary);

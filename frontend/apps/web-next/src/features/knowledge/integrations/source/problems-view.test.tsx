@@ -92,7 +92,7 @@ describe("ProblemsView", () => {
         onRetry={() => {}}
       />
     );
-    expect(screen.getByRole("status").textContent).toContain("Laddar...");
+    expect(screen.getByRole("status").textContent).toContain("Laddar…");
   });
 
   it("says so when nothing is wrong", () => {
@@ -200,7 +200,7 @@ describe("ProblemsView", () => {
     expect(screen.queryByRole("link", { name: "Gå till Integrationer" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Kopiera länk till administratören" }));
     expect(writeText).toHaveBeenCalledWith(ADMIN_URL);
-    await waitFor(() => expect(screen.getByRole("button", { name: "Kopierad!" })).toBeTruthy());
+    await waitFor(() => expect(screen.getByRole("button", { name: "Kopierat" })).toBeTruthy());
   });
 
   it("names the folders whose skipped files could not be loaded and retries them", () => {

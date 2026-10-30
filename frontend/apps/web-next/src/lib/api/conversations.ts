@@ -1,7 +1,14 @@
-import { queryOptions, type QueryClient, type QueryKey } from "@tanstack/react-query";
+import {
+  queryOptions,
+  type InfiniteData,
+  type QueryClient,
+  type QueryFilters,
+  type QueryKey
+} from "@tanstack/react-query";
 import type { EneoClient } from "./browser";
 import { unwrap } from "./errors";
 import type { Schema } from "./models";
+import type { CursorPage } from "./pagination";
 
 export type RecentConversation = Schema<"RecentConversation">;
 
@@ -53,4 +60,31 @@ export function invalidateConversationLists(queryClient: QueryClient, historyKey
     queryClient.invalidateQueries({ queryKey: historyKey }),
     queryClient.invalidateQueries({ queryKey: RECENT_CONVERSATIONS_KEY })
   ]);
+}
+
+/**
+ * Shows a rename (the new `name`) or a delete (`null`) at once in the lists a
+ * conversation shows up in: its partner's history (`historyFilters`, every loaded
+ * page) and the recent list. A list that is not loaded stays unloaded; the
+ * refetch `invalidateConversationLists` starts follows.
+ */
+export function patchConversationLists(
+  queryClient: QueryClient,
+  historyFilters: QueryFilters,
+  id: string,
+  name: string | null
+) {
+  const patch = <Item extends { id: string; name: string }>(items: Item[]) =>
+    name === null
+      ? items.filter((item) => item.id !== id)
+      : items.map((item) => (item.id === id ? { ...item, name } : item));
+  queryClient.setQueriesData<InfiniteData<CursorPage<{ id: string; name: string }>>>(
+    historyFilters,
+    (data) =>
+      data && { ...data, pages: data.pages.map((page) => ({ ...page, items: patch(page.items) })) }
+  );
+  queryClient.setQueriesData<RecentConversation[]>(
+    { queryKey: RECENT_CONVERSATIONS_KEY },
+    (data) => data && patch(data)
+  );
 }

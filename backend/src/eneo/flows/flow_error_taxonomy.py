@@ -1,0 +1,2086 @@
+from __future__ import annotations
+
+import re
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Literal, assert_never
+
+from eneo.flows.flow_api_error_code import (
+    FLOW_RUN_TERMINAL_ERROR_CODES,
+    FLOW_TYPED_IO_ERROR_CODES,
+    FlowApiErrorCode,
+)
+
+FlowErrorCategory = Literal[
+    "Flow access",
+    "Flow authoring",
+    "Flow settings",
+    "Run input",
+    "Run lifecycle",
+    "Evidence and artifacts",
+    "Published definition",
+    "Step runtime",
+    "Typed input/output",
+    "Review checkpoint",
+    "Template asset",
+]
+
+FlowErrorSurface = Literal[
+    "API error response",
+    "Run error payload",
+    "API response and run error payload",
+]
+FlowErrorHandlingPhase = Literal[
+    "Request path",
+    "Run execution",
+    "Request path or run execution",
+]
+
+_MAX_FIELD_LENGTH = 180
+_SENTENCE_END_PATTERN = re.compile(r"[.!?]")
+
+
+@dataclass(frozen=True, slots=True)
+class FlowErrorTaxonomyEntry:
+    category: FlowErrorCategory
+    surfaced_through: FlowErrorSurface
+    cause: str
+    consumer_action: str
+    user_action: str
+
+    @property
+    def handling_phase(self) -> FlowErrorHandlingPhase:
+        surface = self.surfaced_through
+        if surface == "API error response":
+            return "Request path"
+        if surface == "Run error payload":
+            return "Run execution"
+        if surface == "API response and run error payload":
+            return "Request path or run execution"
+        assert_never(surface)
+
+
+def _entry(
+    category: FlowErrorCategory,
+    surfaced_through: FlowErrorSurface,
+    cause: str,
+    consumer_action: str,
+    user_action: str,
+) -> FlowErrorTaxonomyEntry:
+    return FlowErrorTaxonomyEntry(
+        category=category,
+        surfaced_through=surfaced_through,
+        cause=cause,
+        consumer_action=consumer_action,
+        user_action=user_action,
+    )
+
+
+FLOW_ERROR_TAXONOMY: dict[FlowApiErrorCode, FlowErrorTaxonomyEntry] = {
+    FlowApiErrorCode.DOCUMENT_RUNTIME_REQUIRED: _entry(
+        category="Flow settings",
+        surfaced_through="API error response",
+        cause="The flow has document steps and the shared tool runtime is not configured.",
+        consumer_action="Configure the shared tool runtime before publishing or starting a run.",
+        user_action="Ask an administrator to configure document rendering.",
+    ),
+    FlowApiErrorCode.STEP_READ_LOST_PRODUCER: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A change removes, renames or moves a step another step reads, or moves the reader before it.",
+        consumer_action="Change the read named by reason, step_id, site and reads_step in the error context, or keep each step before the steps that read it.",
+        user_action="Change what the step reads first, or keep each step before the steps that use it.",
+    ),
+    FlowApiErrorCode.UNPUBLISH_REQUIRED: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The draft or one of its step assistants was changed while the flow is published.",
+        consumer_action="Unpublish the flow, then send the change again with the new draft_revision.",
+        user_action="Unpublish the flow before you change it.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_STILL_READ: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A change removes a run form field that a step still reads.",
+        consumer_action="Change the reads the error context lists under readers first, or rename the field with form_field_renames.",
+        user_action="Change what the steps read first, or rename the field instead of removing it.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_RENAME_INVALID: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="form_field_renames names a field or a new name the forms do not have, or a name another field keeps.",
+        consumer_action="Rename each saved field once, to its name in the new form; problem in the error context says what is wrong.",
+        user_action="Reload the flow and rename the field again.",
+    ),
+    FlowApiErrorCode.SUGGESTION_STALE: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The draft no longer has the suggestion the fingerprint names: a change since it was read fixed it or removed its premise.",
+        consumer_action="Read the suggestions again and apply one of those, or none if the list no longer has it.",
+        user_action="Reload the suggestions; this one no longer applies.",
+    ),
+    FlowApiErrorCode.SUGGESTION_NOT_PATCHABLE: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The suggestion the fingerprint names has no mechanical fix: its fix kind is assisted or advice.",
+        consumer_action="Make the change it describes as an editor update instead; fix_kind in the error context says which kind it is.",
+        user_action="Make the change yourself in the editor, or ask the flow assistant to make it.",
+    ),
+    FlowApiErrorCode.AUTHORING_CHAT_NO_MODEL: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The space has no model the flow chat can use: none that is enabled, meets the space's classification and supports tools.",
+        consumer_action="Enable a model that supports tools in the space, then open the chat again.",
+        user_action="Ask a space administrator to enable a model that supports tools.",
+    ),
+    FlowApiErrorCode.AUTHORING_MODEL_NOT_IN_SPACE: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The chosen model is not enabled in the flow's space, or the organisation turned it off.",
+        consumer_action="Choose one of the space's enabled models, or send null to follow the default.",
+        user_action="Choose another model, or use the default.",
+    ),
+    FlowApiErrorCode.AUTHORING_MODEL_BELOW_CLASSIFICATION: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The chosen model's security classification is below the space's.",
+        consumer_action="Choose a model that meets the space's security classification, or send null to follow the default.",
+        user_action="Choose a model approved for this space's classification.",
+    ),
+    FlowApiErrorCode.AUTHORING_MODEL_WITHOUT_TOOLS: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The chosen model does not support tool calling, which the flow chat needs to read and change the flow.",
+        consumer_action="Choose a model whose supports_tool_calling is true.",
+        user_action="Choose a model that supports tools.",
+    ),
+    FlowApiErrorCode.AUTHORING_MODEL_UNAVAILABLE: _entry(
+        category="Flow settings",
+        surfaced_through="API error response",
+        cause="The default model for flow chats is not one of the organisation's enabled models.",
+        consumer_action="Choose an enabled completion model of the organisation, or send null to remove the default.",
+        user_action="Choose an enabled model.",
+    ),
+    FlowApiErrorCode.AUTHORING_REASONING_EFFORT_UNSUPPORTED: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The reasoning effort is not a level the chat's model offers.",
+        consumer_action="Send a level the model's supported_model_kwargs offer for reasoning_effort, or null for the model's default.",
+        user_action="Choose a level the model offers.",
+    ),
+    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A live transcript was submitted without exactly one audio file for its step.",
+        consumer_action="Submit one audio file for the step or omit live_transcript_id.",
+        user_action="Use one recording or transcribe the uploaded files again.",
+    ),
+    FlowApiErrorCode.RUN_SINGLE_RECORDING_REQUIRES_AUDIO_STEP: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="single_recording was set on a step that does not take audio.",
+        consumer_action="Set single_recording only on audio steps.",
+        user_action="Start the run again; if it keeps failing, contact support.",
+    ),
+    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_NOT_FOUND: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The live transcript is unavailable for this run.",
+        consumer_action="Omit live_transcript_id to transcribe the uploaded audio.",
+        user_action="Start the run with the uploaded recording again.",
+    ),
+    FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The live transcript is already bound to a different file.",
+        consumer_action="Reuse the original file or omit live_transcript_id for another file.",
+        user_action="Use the original uploaded recording or transcribe the new file.",
+    ),
+    FlowApiErrorCode.FLOW_NOT_PUBLISHED: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="The caller used a runtime action before the flow had a published version, or unpublished a flow that is not published.",
+        consumer_action="Publish the flow or refetch the runtime contract before retrying.",
+        user_action="Publish the flow, then start the run again.",
+    ),
+    FlowApiErrorCode.FLOW_DELETED: _entry(
+        category="Flow access",
+        surfaced_through="Run error payload",
+        cause="The flow was deleted while the run was queued or executing.",
+        consumer_action="Stop polling this run and require a restored or new flow before retrying.",
+        user_action="Restore or recreate the flow before starting another run.",
+    ),
+    FlowApiErrorCode.OWNER_REQUIRED: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="The draft mutation needs an owner, tenant admin, or space owner.",
+        consumer_action="Retry with a principal that can own or administer the draft.",
+        user_action="Ask an owner or administrator to change the flow.",
+    ),
+    FlowApiErrorCode.FLOW_MANAGED_ASSISTANT: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause=(
+            "A step of the flow, or a run that has not finished, still uses the "
+            "flow-managed assistant being deleted."
+        ),
+        consumer_action=(
+            "Remove or replace the step that uses the assistant, or retry after "
+            "the unfinished run ends."
+        ),
+        user_action=(
+            "Remove or replace the step, or wait for the running flow to finish, "
+            "before you delete its assistant."
+        ),
+    ),
+    FlowApiErrorCode.FLOW_NAME_TAKEN: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="Another active flow in the space already has this name.",
+        consumer_action="Send another name, or rename or delete the other flow first.",
+        user_action="Choose another name for the flow.",
+    ),
+    FlowApiErrorCode.SERVICE_KEY_ADMIN_REQUIRED: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="A service key tried to read a draft definition without admin role.",
+        consumer_action="Use an admin service key or call the published runtime endpoint.",
+        user_action="Use an administrator service key or the published runtime contract.",
+    ),
+    FlowApiErrorCode.SERVICE_KEY_PRINCIPAL_NOT_SUPPORTED: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="The endpoint requires a user principal rather than a service-key principal.",
+        consumer_action="Call with a user session or choose a service-key-supported runtime endpoint.",
+        user_action="Sign in as a user with access.",
+    ),
+    FlowApiErrorCode.SERVICE_KEY_SPACE_ID_REQUIRED: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="A service key listed flows without naming a space; it has no memberships to list.",
+        consumer_action="Send space_id for the space the key is scoped to.",
+        user_action="Choose the space to list flows from.",
+    ),
+    FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The retry key is empty or longer than the accepted limit.",
+        consumer_action="Send a stable idempotency key between 1 and 255 characters.",
+        user_action="Retry the request with a valid retry key.",
+    ),
+    FlowApiErrorCode.RUN_STALE_VERSION: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The published flow version changed before the run was accepted.",
+        consumer_action="Refetch the runtime contract and submit against the current version.",
+        user_action="Reload the flow and submit again.",
+    ),
+    FlowApiErrorCode.RUN_RETRY_SOURCE_NOT_FAILED: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="The source run is not failed.",
+        consumer_action="Retry a failed run or create a new run.",
+        user_action="Choose a failed run or start a new run.",
+    ),
+    FlowApiErrorCode.RUN_RETRY_SOURCE_VERSION_STALE: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="The source run no longer uses the current published flow version.",
+        consumer_action="Create a new run against the current published version.",
+        user_action="Reload the flow and start a new run.",
+    ),
+    FlowApiErrorCode.RUN_RETRY_NOTHING_TO_REUSE: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="The failed run has no contiguous completed prefix.",
+        consumer_action="Create a new run; no completed prefix can be reused.",
+        user_action="Start a new run because no completed steps can be reused.",
+    ),
+    FlowApiErrorCode.RUN_RETRY_PREFIX_UNSUPPORTED: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="The prefix contains file-backed output, an unapproved checkpoint or unsupported step state.",
+        consumer_action="Inspect the step order and reason in the error context, then create a new run if the prefix cannot be reused.",
+        user_action="Start a new run because the completed steps cannot be reused.",
+    ),
+    FlowApiErrorCode.RUN_REQUIRED_STEP_INPUT_MISSING: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="One or more required runtime files were not attached to a step.",
+        consumer_action="Read the run contract and attach files to every required runtime-input step.",
+        user_action="Add the required files and start the run again.",
+    ),
+    FlowApiErrorCode.RUN_RUNTIME_INPUT_DISABLED: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A request attached files to a step that does not accept runtime input.",
+        consumer_action="Refetch the run contract and only attach files to compatible steps.",
+        user_action="Attach files to a step that accepts runtime files.",
+    ),
+    FlowApiErrorCode.RUN_TOP_LEVEL_FILE_IDS_NOT_SUPPORTED: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The request used the removed top-level file_ids shape.",
+        consumer_action="Send files through step_inputs keyed by runtime step id.",
+        user_action="Use the current file-upload flow and try again.",
+    ),
+    FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause=(
+            "The idempotency key was already used for a different request: other "
+            "run input, or another review checkpoint of the run."
+        ),
+        consumer_action=(
+            "Send the new request with a new idempotency key; the original request "
+            "with its own key returns its first result."
+        ),
+        user_action="Reload the page and try again.",
+    ),
+    FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The tenant or flow already has too many active runs.",
+        consumer_action="Back off and retry after another run reaches a terminal status.",
+        user_action="Wait for another run to finish, then try again.",
+    ),
+    FlowApiErrorCode.RUN_REDISPATCH_CONFLICT: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="The accepted dispatch-exhaustion generation is missing or changed.",
+        consumer_action="Refresh the run and retry with its current dispatch_exhausted_at value.",
+        user_action="Refresh the run before requesting redispatch again.",
+    ),
+    FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE: _entry(
+        category="Run lifecycle",
+        surfaced_through="API error response",
+        cause="Required audit logging was unavailable, so the redispatch was not armed.",
+        consumer_action="Retry later with the same observed dispatch_exhausted_at value.",
+        user_action="Wait and try redispatch again later.",
+    ),
+    FlowApiErrorCode.RUN_INVALID_STEP_INPUTS: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The step_inputs payload has invalid shape or file identifiers.",
+        consumer_action="Validate step_inputs against the runtime contract before submitting.",
+        user_action="Check the selected files and try again.",
+    ),
+    FlowApiErrorCode.RUN_UNKNOWN_STEP_INPUT: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The request references a step id outside the published run contract.",
+        consumer_action="Refetch the runtime contract and remove stale step ids.",
+        user_action="Reload the flow contract and try again.",
+    ),
+    FlowApiErrorCode.RUN_STEP_INPUT_MAX_FILES_EXCEEDED: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A runtime-input step received more files than its policy allows.",
+        consumer_action="Limit attached files per step to the contract max_files value.",
+        user_action="Remove extra files and try again.",
+    ),
+    FlowApiErrorCode.RUN_FILE_NOT_ACCESSIBLE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The caller cannot read one or more selected runtime files.",
+        consumer_action="Upload the file through the same caller context or choose an accessible file.",
+        user_action="Upload the files again or choose files you can access.",
+    ),
+    FlowApiErrorCode.RUN_FILE_NOT_BOUND_TO_FLOW: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A selected runtime file belongs to another flow.",
+        consumer_action="Upload files through the target flow before binding them to a run.",
+        user_action="Upload the file through this flow and try again.",
+    ),
+    FlowApiErrorCode.RUN_FILE_ACCESS_AUDIT_UNAVAILABLE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="Required audit logging could not commit before a run-file download URL was minted.",
+        consumer_action="Retry later; the failed response contains no usable signed URL.",
+        user_action="Try the download again later.",
+    ),
+    FlowApiErrorCode.RUN_STEP_INPUT_FILE_TOO_LARGE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="An attached runtime file exceeds the step size limit.",
+        consumer_action="Check max file size in the run contract before upload or binding.",
+        user_action="Choose a smaller file.",
+    ),
+    FlowApiErrorCode.RUN_UPLOAD_PDF_EXCEEDS_LIMIT: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="PDF text extraction exceeds a deployment page, extracted-byte, or time ceiling.",
+        consumer_action="Split the PDF or ask an administrator to review the PDF ceilings.",
+        user_action="Split the PDF or ask an administrator to review the PDF ceilings.",
+    ),
+    FlowApiErrorCode.RUN_AUDIO_EXCEEDS_LIMIT: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="An audio upload or one recording's parts run past the tenant's longest recording.",
+        consumer_action=(
+            "Keep the recording and split it, or ask an administrator to raise the limit."
+        ),
+        user_action="Split the recording, or ask an administrator to raise the limit.",
+    ),
+    FlowApiErrorCode.RUN_AUDIO_UNREADABLE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The audio decoder cannot read an uploaded audio file.",
+        consumer_action="Export the audio again in a supported format and upload it.",
+        user_action="Save the recording again in a common audio format and upload it.",
+    ),
+    FlowApiErrorCode.RUN_AUDIO_MEASUREMENT_BUSY: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="Eneo could not measure an uploaded audio file within its deadline.",
+        consumer_action="Retry the upload after a short wait.",
+        user_action="Try the upload again in a moment.",
+    ),
+    FlowApiErrorCode.RUN_STEP_INPUT_MIMETYPE_REJECTED: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="An attached runtime file has a MIME type the step rejects.",
+        consumer_action="Check accepted MIME types in the run contract before upload or binding.",
+        user_action="Choose a compatible file type.",
+    ),
+    FlowApiErrorCode.RUN_AGGREGATE_MAX_FILES_EXCEEDED: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The run exceeds the total runtime-file count allowed across steps.",
+        consumer_action="Reduce the total attached files before creating a new run.",
+        user_action="Remove files and try again.",
+    ),
+    FlowApiErrorCode.RUN_RESERVED_INPUT_PAYLOAD_KEY: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The input payload used a key reserved for Flow orchestration.",
+        consumer_action="Rename caller-owned payload fields that collide with reserved keys.",
+        user_action="Rename the input field and try again.",
+    ),
+    FlowApiErrorCode.RUN_SPEAKER_LABELS_NOT_SELECTABLE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The run chose speaker labels, but the run contract offers no such choice for this flow.",
+        consumer_action="Send speaker_labels only when the run contract marks speaker labels as selectable.",
+        user_action="Reload the flow and start the run again.",
+    ),
+    FlowApiErrorCode.RUN_INVALID_LABEL: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The run label is not one line of 1 to 120 characters after trimming.",
+        consumer_action="Send a one-line run_label of 1 to 120 characters or omit it; the reason in the error context names the rule it broke.",
+        user_action="Give the run a shorter name on one line, or leave the name empty.",
+    ),
+    FlowApiErrorCode.RUN_MAX_SPEAKERS_NOT_AVAILABLE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The run bounded the speaker count, but it does not label speakers.",
+        consumer_action=(
+            "Send max_speakers only when the run contract offers a speaker count "
+            "and the run labels speakers."
+        ),
+        user_action="Reload the flow and start the run again.",
+    ),
+    FlowApiErrorCode.RUN_INPUT_PAYLOAD_TOO_LARGE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The submitted run input payload exceeds the allowed size.",
+        consumer_action="Reduce text, JSON fields, or file-derived payload before retrying.",
+        user_action="Submit less text or fewer fields.",
+    ),
+    FlowApiErrorCode.RUN_INPUT_EXCEEDS_LIMIT: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause="The combined inline text or binary inputs exceed the input byte ceiling before file content is loaded.",
+        consumer_action="Reduce the combined input size across all steps before retrying.",
+        user_action="Submit less text or fewer or smaller files.",
+    ),
+    FlowApiErrorCode.INPUT_REQUIRED_FIELD_MISSING: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A required form field is absent from the run input payload.",
+        consumer_action="Read the form schema and send every required field before retrying.",
+        user_action="Complete the required field and try again.",
+    ),
+    FlowApiErrorCode.INPUT_REQUIRED_FIELD_EMPTY: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A required form field is empty after input normalization.",
+        consumer_action="Send a non-empty value that matches the field contract.",
+        user_action="Enter a value in the required field and try again.",
+    ),
+    FlowApiErrorCode.INPUT_TYPE_MISMATCH: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A form field value has a different type than its field contract.",
+        consumer_action="Send the field value using the type declared in the form schema.",
+        user_action="Correct the field value and try again.",
+    ),
+    FlowApiErrorCode.INPUT_INVALID_NUMBER: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A number field cannot be parsed as a finite number.",
+        consumer_action="Send a finite integer or decimal value for the number field.",
+        user_action="Enter a valid number and try again.",
+    ),
+    FlowApiErrorCode.INPUT_INVALID_DATE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A date field is not a valid ISO date.",
+        consumer_action="Send the date in YYYY-MM-DD format.",
+        user_action="Enter a valid date and try again.",
+    ),
+    FlowApiErrorCode.INPUT_INVALID_OPTION: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A select or multiselect field contains an option outside its contract.",
+        consumer_action="Send only options listed in the published form schema.",
+        user_action="Choose one of the available options and try again.",
+    ),
+    FlowApiErrorCode.INPUT_INVALID_MULTISELECT_VALUE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A multiselect field contains a value that is not a string.",
+        consumer_action="Send every multiselect value as a string.",
+        user_action="Correct the selected values and try again.",
+    ),
+    FlowApiErrorCode.INPUT_INVALID_MULTISELECT_TYPE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A multiselect field has neither an array nor comma-separated string value.",
+        consumer_action="Send an array of strings or a comma-separated string.",
+        user_action="Correct the selected values and try again.",
+    ),
+    FlowApiErrorCode.INPUT_INVALID_LIST_VALUE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="A list field contains a value that is not a string.",
+        consumer_action="Send every list value as a string.",
+        user_action="Correct the entered values and try again.",
+    ),
+    FlowApiErrorCode.INPUT_INVALID_LIST_TYPE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause=(
+            "A list field has neither an array nor a newline/comma/semicolon "
+            "separated string value."
+        ),
+        consumer_action="Send an array of strings or a delimited string.",
+        user_action="Correct the entered values and try again.",
+    ),
+    FlowApiErrorCode.RUN_ACCESS_DENIED: _entry(
+        category="Flow access",
+        surfaced_through="API error response",
+        cause="The caller cannot access the requested run.",
+        consumer_action="Check tenant, space, service-key scope, and run ownership before retrying.",
+        user_action="Ask for access to the run.",
+    ),
+    FlowApiErrorCode.RUN_CANCELLED: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The run reached cancelled before all steps completed.",
+        consumer_action="Stop polling and create a new run only if the user still needs output.",
+        user_action="Start a new run if you still need the result.",
+    ),
+    FlowApiErrorCode.RUN_USER_CANCELLED: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="A user cancelled the run while it was active.",
+        consumer_action="Treat the terminal state as intentional and do not auto-retry.",
+        user_action="Start a new run if you still need the result.",
+    ),
+    FlowApiErrorCode.RUN_DISPATCH_FAILED: _entry(
+        category="Run lifecycle",
+        surfaced_through="API response and run error payload",
+        cause="The run could not be queued for worker execution.",
+        consumer_action="Retry with backoff when retryable is true, and alert an operator if dispatch keeps failing.",
+        user_action="Retry the run or contact an administrator.",
+    ),
+    FlowApiErrorCode.RUN_MISSING_PRINCIPAL: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The runtime could not resolve the principal that owns execution.",
+        consumer_action="Check service-key ownership and tenant principal state before retrying.",
+        user_action="Ask an administrator to check flow ownership.",
+    ),
+    FlowApiErrorCode.RUN_SERVICE_PRINCIPAL_DISABLED: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The service principal for the run is disabled.",
+        consumer_action="Choose an enabled service principal or re-enable the configured one.",
+        user_action="Ask an administrator to enable the service principal.",
+    ),
+    FlowApiErrorCode.RUN_RUNTIME_ACTOR_INVALID: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The runtime actor resolved from the run is no longer valid.",
+        consumer_action="Refresh service-key or owner configuration before retrying.",
+        user_action="Ask an administrator to check execution permissions.",
+    ),
+    FlowApiErrorCode.RUN_TASK_TIMEOUT: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The worker task exceeded its execution deadline.",
+        consumer_action="Inspect external effects and worker limits before creating a new run with smaller input.",
+        user_action="Check what ran before starting a new run with smaller input.",
+    ),
+    FlowApiErrorCode.RUN_TASK_FAILURE: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The worker task failed outside a more specific Flow error.",
+        consumer_action="Inspect run logs and trace ids before retrying or escalating.",
+        user_action="Retry the run or contact support with the run ID.",
+    ),
+    FlowApiErrorCode.RUN_WORKER_STALLED: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The worker stopped updating an active run within the recovery window.",
+        consumer_action=(
+            "Inspect worker health and earlier external effects before retrying an "
+            "eligible failed run or creating a new run; escalate recurring stalls."
+        ),
+        user_action="Check the run history or contact support before starting another run.",
+    ),
+    FlowApiErrorCode.RUN_WORKER_SHUTDOWN: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The worker shut down while the run was executing, so the run failed at once.",
+        # Not requeued: a step that was executing may already have had effects.
+        consumer_action=(
+            "Inspect earlier external effects, then retry the failed run from its "
+            "failed step where eligible or start a new run; nothing is requeued."
+        ),
+        user_action="Check the run's steps before you retry it or start a new run.",
+    ),
+    FlowApiErrorCode.RUN_ABANDONED: _entry(
+        category="Run lifecycle",
+        surfaced_through="API response and run error payload",
+        cause="An approved review or exhausted queued dispatch exceeded its 30-day wait.",
+        consumer_action=(
+            "Inspect the retained history and any earlier external effects before "
+            "submitting a new run; automatic retry is unsafe and retryable is false."
+        ),
+        user_action="Check the run history or contact support before starting another run.",
+    ),
+    FlowApiErrorCode.RUN_ERROR_PAYLOAD_INVALID: _entry(
+        category="Run lifecycle",
+        surfaced_through="Run error payload",
+        cause="The stored run error payload is invalid or no longer matches the public contract.",
+        consumer_action="Treat the run as failed and contact support with the run ID.",
+        user_action="Contact support with the run ID.",
+    ),
+    FlowApiErrorCode.RUN_EVIDENCE_FORBIDDEN: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The caller lacks permission to view run evidence.",
+        consumer_action="Request evidence access with a principal allowed by run and policy checks.",
+        user_action="Ask for permission to view run evidence.",
+    ),
+    FlowApiErrorCode.RUN_EVIDENCE_EXPORT_DISABLED: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="Evidence export is turned off for the flow that owns the run.",
+        consumer_action="Allow evidence export in the flow's metadata, unpublishing the flow first if it is published.",
+        user_action="Ask whoever manages the flow to allow evidence export in the flow's settings.",
+    ),
+    FlowApiErrorCode.RUN_EVIDENCE_RAW_EXPORT_FORBIDDEN: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="Policy blocks raw evidence export for this run.",
+        consumer_action="Use the allowed evidence view or request a policy change.",
+        user_action="Use the available evidence view or ask an administrator.",
+    ),
+    FlowApiErrorCode.RUN_ARTIFACT_NOT_FOUND: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The requested artifact is absent from the run or not visible to the caller.",
+        consumer_action="Refresh run evidence and only request listed artifact ids.",
+        user_action="Reload the run and choose an available artifact.",
+    ),
+    FlowApiErrorCode.RUN_ARTIFACT_CONTENT_UNAVAILABLE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The artifact content was purged or is otherwise unavailable.",
+        consumer_action="Show retention-aware messaging and avoid retry loops for purged content.",
+        user_action="The artifact content is no longer available.",
+    ),
+    FlowApiErrorCode.RUN_INPUT_FILE_NOT_FOUND: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause=(
+            "The requested file was not submitted as step input to the run, or "
+            "the run is not visible to the caller."
+        ),
+        consumer_action=(
+            "Only request file ids listed in a step result's runtime_input_file_ids."
+        ),
+        user_action="Reload the run; the recording it received is listed there.",
+    ),
+    FlowApiErrorCode.RUN_INPUT_FILE_CONTENT_UNAVAILABLE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The input file's original content was purged or is unavailable.",
+        consumer_action=(
+            "Show retention-aware messaging and avoid retry loops for purged content."
+        ),
+        user_action="The recording is no longer available; the transcript remains.",
+    ),
+    FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH: _entry(
+        category="Published definition",
+        surfaced_through="API response and run error payload",
+        cause="The stored published snapshot no longer matches its recorded checksum.",
+        consumer_action=(
+            "Do not retry the pinned version; publish a valid version, start a new "
+            "run, and retain the old run for evidence."
+        ),
+        user_action=(
+            "Ask a flow editor to publish a valid version, then start a new run."
+        ),
+    ),
+    FlowApiErrorCode.DEFINITION_INVALID: _entry(
+        category="Published definition",
+        surfaced_through="Run error payload",
+        cause="The published flow definition failed runtime validation.",
+        consumer_action="Block new runs until an editor fixes and republishes the flow.",
+        user_action="Ask a flow editor to fix and republish the flow.",
+    ),
+    FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_MISSING: _entry(
+        category="Published definition",
+        surfaced_through="API response and run error payload",
+        cause="The published definition is missing its schema version.",
+        consumer_action=(
+            "Require republish through the current editor, then start a new run "
+            "against the new version."
+        ),
+        user_action="Ask a flow editor to republish the flow, then start a new run.",
+    ),
+    FlowApiErrorCode.DEFINITION_SCHEMA_VERSION_UNSUPPORTED: _entry(
+        category="Published definition",
+        surfaced_through="API response and run error payload",
+        cause="The published definition uses a schema version this runtime cannot execute.",
+        consumer_action=(
+            "Republish with the current editor or upgrade runtime support, then "
+            "start a new run."
+        ),
+        user_action=(
+            "Ask a flow editor to republish with the current editor, then start "
+            "a new run."
+        ),
+    ),
+    FlowApiErrorCode.DEFINITION_FLOW_ID_INVALID: _entry(
+        category="Published definition",
+        surfaced_through="API response and run error payload",
+        cause="The published snapshot references an invalid flow id.",
+        consumer_action=(
+            "Treat the publication as corrupt, republish a valid version, then "
+            "start a new run."
+        ),
+        user_action="Ask a flow editor to republish the flow, then start a new run.",
+    ),
+    FlowApiErrorCode.DEFINITION_STEPS_INVALID: _entry(
+        category="Published definition",
+        surfaced_through="API response and run error payload",
+        cause="The published snapshot has invalid step definitions.",
+        consumer_action=(
+            "Block the pinned version, fix and republish the steps, then start a "
+            "new run."
+        ),
+        user_action=(
+            "Ask a flow editor to fix and republish the steps, then start a new run."
+        ),
+    ),
+    FlowApiErrorCode.DEFINITION_NO_EXECUTABLE_STEPS: _entry(
+        category="Published definition",
+        surfaced_through="Run error payload",
+        cause="The published snapshot contains no executable steps.",
+        consumer_action="Prevent run creation until at least one executable step is published.",
+        user_action="Add an executable step, republish, and run again.",
+    ),
+    FlowApiErrorCode.ASSISTANT_SNAPSHOT_RESOURCE_INVALID: _entry(
+        category="Published definition",
+        surfaced_through="Run error payload",
+        cause="A frozen assistant resource is missing, outside the tenant, inactive, or has a different checksum.",
+        consumer_action="Restore the pinned resource or republish the flow before starting another run.",
+        user_action="Restore the resource or republish the flow and start a new run.",
+    ),
+    FlowApiErrorCode.ASSISTANT_MODEL_PROVIDER_REQUIRED: _entry(
+        category="Published definition",
+        surfaced_through="API response and run error payload",
+        cause=(
+            "The step assistant uses a model without a provider binding, or a step "
+            "that calls a completion model has none."
+        ),
+        consumer_action="Select a provider-backed model for the step assistant before publishing.",
+        user_action="Select a model connected to a provider before publishing the flow.",
+    ),
+    FlowApiErrorCode.ASSISTANT_SNAPSHOT_REPUBLISH_REQUIRED: _entry(
+        category="Published definition",
+        surfaced_through="API response and run error payload",
+        cause="The published flow has a missing or unsupported assistant snapshot.",
+        consumer_action="Republish the flow before starting another run.",
+        user_action="Publish the flow again and start a new run.",
+    ),
+    FlowApiErrorCode.ASSISTANT_SNAPSHOT_DRIFT: _entry(
+        category="Published definition",
+        surfaced_through="Run error payload",
+        cause="An assistant snapshot changed relative to the published flow snapshot.",
+        consumer_action="Republish the flow so runtime dependencies match the stored snapshot.",
+        user_action="Republish the flow and start a new run.",
+    ),
+    FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE: _entry(
+        category="Published definition",
+        surfaced_through="API response and run error payload",
+        cause="A step input contract conflicts with its authored question binding.",
+        consumer_action=(
+            "Remove the conflicting contract or question binding, republish the "
+            "flow, then start a new run."
+        ),
+        user_action=(
+            "Ask a flow editor to fix the step input settings, republish, and "
+            "start a new run."
+        ),
+    ),
+    FlowApiErrorCode.REQUEST_BODY_TOO_LARGE: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause="An authoring request carried more bytes than a flow's steps may take.",
+        consumer_action="Send fewer or shorter steps, then send the request again.",
+        user_action="Shorten the longest prompts or split the work into several flows.",
+    ),
+    FlowApiErrorCode.STEP_LIMIT_EXCEEDED: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause="A flow was saved, published, imported or previewed with more steps than a flow can have.",
+        consumer_action="Remove steps or split the work into several flows, then send the request again.",
+        user_action="Remove steps or split the work into several flows.",
+    ),
+    FlowApiErrorCode.STEP_SECURITY_CLASSIFICATION_MISMATCH: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause=(
+            "A step's model is cleared for a lower level than the data the step "
+            "reads or the knowledge it uses."
+        ),
+        consumer_action=(
+            "Choose one of the qualifying_model_ids in the error context, or change "
+            "what the step reads, then save again."
+        ),
+        user_action=(
+            "Choose a model cleared for the required level, or change what the "
+            "step reads."
+        ),
+    ),
+    FlowApiErrorCode.STEP_OUTPUT_CLASSIFICATION_WRITE_DOWN: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause=(
+            "A step's output classification override is lower than the level its "
+            "output already carries."
+        ),
+        consumer_action=(
+            "Raise the override to the required_level in the error context or "
+            "remove it, then save again."
+        ),
+        user_action=(
+            "Choose the same or a higher level for the result, or let it inherit."
+        ),
+    ),
+    FlowApiErrorCode.STEP_TOOL_ARGUMENTS_CLASSIFICATION_WRITE_DOWN: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause=(
+            "A step sends data from earlier steps to a tool whose server has a "
+            "lower security classification than that data, or none."
+        ),
+        consumer_action=(
+            "Bind the arguments to steps at or below the server's level, or choose "
+            "a tool whose server has the required_level in the error context."
+        ),
+        user_action=(
+            "Change what the tool's arguments read, or choose a tool whose "
+            "server has the required level."
+        ),
+    ),
+    FlowApiErrorCode.STEP_MISSING: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause="The runtime referenced a step missing from the published snapshot.",
+        consumer_action="Require republish and do not retry the stale run.",
+        user_action="Ask a flow editor to republish the flow.",
+    ),
+    FlowApiErrorCode.STEP_ATTEMPT_START_FAILED: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause="The executor could not start the next step attempt.",
+        consumer_action="Inspect run diagnostics and retry only after transient storage issues clear.",
+        user_action="Retry the run or contact support with the run ID.",
+    ),
+    FlowApiErrorCode.STEP_EXECUTION_FAILED: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause=(
+            "A step handler failed without a more specific typed error; provider "
+            "work may or may not have started in provider-calling modes."
+        ),
+        consumer_action=(
+            "Do not auto-retry provider-calling failures: another run can repeat provider "
+            "work and spend; inspect step details first."
+        ),
+        user_action=(
+            "Open the failed step before starting another run; another run can repeat provider work "
+            "and spend."
+        ),
+    ),
+    FlowApiErrorCode.PROVIDER_RATE_LIMITED: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause="The provider rejected the step request because its rate limit was reached.",
+        consumer_action="Wait before submitting a new logical run; the runtime does not retry automatically.",
+        user_action="Wait before starting a new run.",
+    ),
+    FlowApiErrorCode.PROVIDER_UNAVAILABLE: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause=(
+            "The provider was unavailable while the step request was being "
+            "attempted, so its remote outcome may be unknown."
+        ),
+        consumer_action=(
+            "Do not retry automatically; inspect provider-call evidence before "
+            "deciding whether to start a new logical run."
+        ),
+        user_action=(
+            "Check the run before starting another because provider work may have "
+            "occurred."
+        ),
+    ),
+    FlowApiErrorCode.PROVIDER_CALL_EVIDENCE_PERSISTENCE_FAILED: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause=(
+            "The runtime could not durably record a provider-call lifecycle fact "
+            "after bounded persistence retries while the remote outcome and local "
+            "evidence gap remain explicitly separate."
+        ),
+        consumer_action=(
+            "Inspect the provider-call page and the evidence gap in the run error before "
+            "deciding whether to repeat a call whose remote outcome may be known."
+        ),
+        user_action="Contact support with the run ID before starting another run.",
+    ),
+    FlowApiErrorCode.WEBHOOK_DELIVERY_FAILED: _entry(
+        category="Step runtime",
+        surfaced_through="Run error payload",
+        cause="The run completed but outbound webhook delivery failed.",
+        consumer_action="Read the result through run and step endpoints because delivery retries are exhausted and no public redelivery endpoint exists.",
+        user_action="Check the webhook destination, then read the result in Eneo.",
+    ),
+    FlowApiErrorCode.RUNTIME_FILE_EMPTY: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The uploaded runtime file has no content.",
+        consumer_action="Reject empty files client-side before uploading when possible.",
+        user_action="Choose a file with content and upload it again.",
+    ),
+    FlowApiErrorCode.RUNTIME_FILE_ATTACHED: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The runtime file is already attached to persisted run state.",
+        consumer_action="Do not delete files that are bound to run history.",
+        user_action="Keep the file or purge the related run history through retention policy.",
+    ),
+    FlowApiErrorCode.LIVE_TRANSCRIPTION_UNAVAILABLE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause=(
+            "Live preview needs the flow's own transcription model to transcribe, with "
+            "realtime support, and the error context names the missing condition."
+        ),
+        consumer_action=(
+            "Record without live preview and upload the file; the run transcribes it."
+        ),
+        user_action="Record as usual; the text is created when the recording is done.",
+    ),
+    FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="Evidence access could not be audited before returning protected data.",
+        consumer_action="Retry later and alert operators if audit logging remains unavailable.",
+        user_action="Try again later.",
+    ),
+    FlowApiErrorCode.EVIDENCE_EXPORT_REASON_REQUIRED: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="Raw evidence export was requested without an audit reason.",
+        consumer_action="Collect and send a specific export reason with the request.",
+        user_action="Enter a specific reason before exporting raw evidence.",
+    ),
+    FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause=(
+            "The run exceeds a row, stored-byte, logical-byte, passage, "
+            "provider-call, or evidence-integrity limit named in the error context."
+        ),
+        consumer_action=(
+            "Use the section and limit context fields to page supported evidence "
+            "or direct the caller to the bounded run view."
+        ),
+        user_action=(
+            "Open the run view to inspect the bounded evidence available there."
+        ),
+    ),
+    FlowApiErrorCode.REVIEW_HISTORY_TOO_LARGE: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The comparison baseline and next history revision exceed the page byte limit.",
+        consumer_action="Report the obstructing revision; reducing the row limit cannot make this comparison fit.",
+        user_action="Use the evidence export to inspect this revision if the export fits its size limit.",
+    ),
+    FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The selected model is missing an input or output token limit.",
+        consumer_action="Stop retrying until an administrator configures both model token limits.",
+        user_action="Ask an administrator to configure the model token limits, then start a new run.",
+    ),
+    FlowApiErrorCode.LLM_OUTPUT_TRUNCATED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The model reported truncated output (finish_reason=length).",
+        consumer_action="Do not consume the incomplete output or automatically retry the completed provider call.",
+        user_action="Reduce the input or requested output, or ask an administrator to review the model token limits before starting a new run.",
+    ),
+    FlowApiErrorCode.LLM_OUTPUT_WHITESPACE_ABORT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The native JSON response reached the whitespace progress limit outside JSON strings.",
+        consumer_action="Inspect the retained partial output before retrying because the provider outcome is unknown and a new request can incur additional cost.",
+        user_action="Ask an administrator to review the model's JSON output before starting a new run.",
+    ),
+    FlowApiErrorCode.LLM_REQUEST_TIMEOUT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause=(
+            "The model request exceeded the runtime timeout, but the provider may "
+            "still have received or completed it."
+        ),
+        consumer_action=(
+            "Do not auto-retry: another run can duplicate provider work and spend; "
+            "inspect the run before choosing smaller input or a faster model."
+        ),
+        user_action=(
+            "Check the run before retrying; a retry can duplicate provider work and "
+            "spend."
+        ),
+    ),
+    FlowApiErrorCode.STEP_TIMEOUT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause=(
+            "The step's execution budget (timeout_seconds or the deployment default) "
+            "ran out in the phase the message names, possibly with a provider "
+            "request still in flight."
+        ),
+        consumer_action=(
+            "Do not auto-retry because an in-flight provider request may still "
+            "complete and bill; inspect the run, then raise the step's "
+            "timeout_seconds or reduce the input before a new run."
+        ),
+        user_action=(
+            "Check the run before retrying and ask the flow author to raise the "
+            "step's time budget or reduce the input."
+        ),
+    ),
+    FlowApiErrorCode.STEP_TIMEOUT_EXCEEDS_TENANT_MAX: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause=(
+            "The step's timeout_seconds is above the organisation's maximum step "
+            "timeout, so the save or publish is refused or the run does not start "
+            "the step."
+        ),
+        consumer_action=(
+            "Lower the step's timeout_seconds to the maximum the message names and "
+            "save again; after a failed run, publish again and start a new run."
+        ),
+        user_action=(
+            "Ask a flow editor to lower the step's time limit, or an administrator "
+            "to raise the maximum."
+        ),
+    ),
+    FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="Runtime files were attached but the step input did not reference them.",
+        consumer_action="Update the authored step to consume step_input data or omit the files.",
+        user_action="Ask a flow editor to connect the uploaded files to the step.",
+    ),
+    FlowApiErrorCode.UNSUPPORTED_OUTPUT_MODE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The step uses an output mode the runtime cannot execute.",
+        consumer_action="Change the output mode and republish before starting another run.",
+        user_action="Ask a flow editor to choose a supported output mode.",
+    ),
+    FlowApiErrorCode.UNSUPPORTED_OUTPUT_TYPE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The step uses an output type the runtime cannot render.",
+        consumer_action="Choose a supported output type and republish the flow.",
+        user_action="Ask a flow editor to choose a supported output type.",
+    ),
+    FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause="A submitted or generated value does not match the step output contract.",
+        consumer_action="Fix the JSON shape against the contract before saving or starting a new run.",
+        user_action="Fix the structured output and save again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_CONTRACT_NOT_CHECKED: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause="A step's input or output, its tool call's arguments, or a review edit could not be checked against its contract in time, or at all.",
+        consumer_action="Send a smaller value or simplify the contract, then retry the review edit or start a new run.",
+        user_action="Ask a flow editor to simplify the step's format, or use less material.",
+    ),
+    FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The step input or output failed validation without a more specific code.",
+        consumer_action="Open step diagnostics and correct the input, schema, or configuration.",
+        user_action="Open the step details, fix input or configuration, and start a new run.",
+    ),
+    FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="A runtime variable reference names a missing or invalid path.",
+        consumer_action="Use the precise run error to correct the variable path, then republish and start a new run.",
+        user_action="Ask a flow editor to correct the variable reference and republish.",
+    ),
+    FlowApiErrorCode.TYPED_IO_AUDIO_INVALID_FILE_TYPE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="An audio step received a file type it cannot transcribe.",
+        consumer_action="Validate accepted audio types before upload or starting a new run.",
+        user_action="Upload a supported audio file and start again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_AUDIO_MISSING_FILE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="An audio step expected a runtime file but none was available.",
+        consumer_action="Attach the required audio file to the step before creating the run.",
+        user_action="Attach the required audio file and start again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_AUDIO_SOURCE_UNSUPPORTED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="An audio step uses an input source that runtime does not support.",
+        consumer_action="Configure the step for runtime files or a supported previous step output.",
+        user_action="Ask a flow editor to change the audio input source.",
+    ),
+    FlowApiErrorCode.TYPED_IO_AUDIO_TOO_MANY_FILES: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="An audio step received more files than it can process.",
+        consumer_action="Attach exactly the allowed number of audio files before starting the run.",
+        user_action="Remove extra audio files and start again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_AUDIO_EXCEEDS_LIMIT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause=(
+            "An audio input exceeds a deployment duration or decoded-byte ceiling; "
+            "decoding stopped before submitting the recording."
+        ),
+        consumer_action=(
+            "Do not retry the same recording; split it or ask an administrator "
+            "to review the audio ceilings."
+        ),
+        user_action=(
+            "Split the recording or ask an administrator to review the audio ceilings."
+        ),
+    ),
+    FlowApiErrorCode.TYPED_IO_DOCUMENT_SOURCE_UNSUPPORTED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="A document step uses an input source runtime cannot read.",
+        consumer_action="Configure the document step for a supported runtime input source.",
+        user_action="Ask a flow editor to change the document input source.",
+    ),
+    FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="Text extraction produced no readable content from the submitted file.",
+        consumer_action="Prompt the user for a readable file before starting a new run.",
+        user_action="Use a file with readable content and start again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="A required runtime file could not be found during step execution.",
+        consumer_action="Upload the file again and bind it through the current run contract.",
+        user_action="Upload the file again and start a new run.",
+    ),
+    FlowApiErrorCode.TYPED_IO_FILE_SOURCE_UNSUPPORTED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="A file step uses an input source runtime cannot read.",
+        consumer_action="Configure the file step for runtime files or a supported previous output.",
+        user_action="Ask a flow editor to change the file input source.",
+    ),
+    FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The HTTP step could not connect to the target service.",
+        consumer_action="Check target availability, DNS, and network allow rules before starting another run.",
+        user_action="Check the target service and try again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The authored HTTP step configuration is invalid.",
+        consumer_action="Fix URL, method, headers, body, authentication, or response settings.",
+        user_action="Ask a flow editor to fix the HTTP step configuration.",
+    ),
+    FlowApiErrorCode.TYPED_IO_HTTP_INVALID_URL: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The HTTP step URL is not a valid absolute http or https URL.",
+        consumer_action="Store a valid absolute URL and republish the flow.",
+        user_action="Ask a flow editor to fix the HTTP URL.",
+    ),
+    FlowApiErrorCode.TYPED_IO_HTTP_MALFORMED_RESPONSE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The HTTP response could not be parsed into the expected format.",
+        consumer_action="Adjust the endpoint response or the step response parser settings.",
+        user_action="Ask a flow editor to check the HTTP response format.",
+    ),
+    FlowApiErrorCode.TYPED_IO_HTTP_NON_SUCCESS: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The HTTP step received a non-success status code.",
+        consumer_action="Handle the upstream status or change the target endpoint behavior.",
+        user_action="Check the target endpoint and try again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The HTTP response exceeded the step response-size limit.",
+        consumer_action="Request less data or expose a narrower endpoint for the flow.",
+        user_action="Ask a flow editor to reduce the HTTP response size.",
+    ),
+    FlowApiErrorCode.TYPED_IO_HTTP_SSRF_BLOCKED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The HTTP URL was blocked by network safety rules.",
+        consumer_action="Use an allowed public endpoint or request an administrator policy review.",
+        user_action="Use an allowed endpoint or ask an administrator.",
+    ),
+    FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The HTTP request exceeded the step timeout.",
+        consumer_action="Reduce the request scope or increase upstream responsiveness before starting another run.",
+        user_action="Try again later or ask a flow editor to reduce the request.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_ANSWER_TOO_LARGE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The tool's answer was larger than a step may take as input.",
+        consumer_action="Call the tool with arguments that select less, or ask the server's owner for a narrower tool.",
+        user_action="Ask a flow editor to make the tool's arguments select less.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_CHANGED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The tool's name or approved input schema differs from what the published flow pinned.",
+        consumer_action="Publish the flow again so that it pins the tool as it is now.",
+        user_action="Ask a flow editor to publish the flow again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_CLASSIFICATION_CHANGED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The security classification of the tool's server changed after the run started.",
+        consumer_action="Start the run again: a new run counts the server's classification as it is now.",
+        user_action="Start the run again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_CONNECTION_ERROR: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The tool's MCP server could not be reached, or the call failed.",
+        consumer_action="Check that the MCP server is up and reachable from the worker before starting another run.",
+        user_action="Try again later or ask an administrator to check the tool's server.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_DESTINATION_BLOCKED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The address of the tool's MCP server is not one flows may connect to.",
+        consumer_action="Register the MCP server on an allowed address or ask the operator about the private-network setting for flow tools.",
+        user_action="Ask an administrator to check the address of the tool's server.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_INVALID_ARGUMENTS: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The resolved tool arguments do not fit the tool's approved input schema, or cannot be written as JSON text.",
+        consumer_action="Bind each argument to a value of the type the tool's input schema declares.",
+        user_action="Ask a flow editor to check the step's tool arguments.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_INVALID_CONFIG: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause="The step's tool input configuration is invalid.",
+        consumer_action="Store the server id, the tool id and arguments that are each a fixed value or one whole reference.",
+        user_action="Ask a flow editor to check the selected tool and its arguments.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_INVALID_SCHEMA: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause="The tool's input schema is invalid, of an unsupported draft or has a reference that does not resolve.",
+        consumer_action="Leave the step as it is and publish or run again once the MCP server gives a valid input schema and an administrator has approved it.",
+        user_action="Ask the instance administrator to take the tool's input schema up with whoever runs the MCP server, or choose another tool.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_MALFORMED_ANSWER: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The tool's answer was empty, held content that is not text, or was not in the format the step's input type expects.",
+        consumer_action="Use input type text for a tool that answers with text, or a tool that answers with a JSON object or array.",
+        user_action="Ask a flow editor to check the step's input type against the tool's answer.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_NOT_ALLOWED: _entry(
+        category="Typed input/output",
+        surfaced_through="API response and run error payload",
+        cause="The instance or the space does not allow the step's tool in the flow's space.",
+        consumer_action="Read tool_refusal in the run error details, or refusal in the API error context, then publish or run again once that level allows the tool.",
+        user_action="Ask the administrator of the level that refuses the tool, or choose another tool.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_REPORTED_ERROR: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The tool answered that it failed.",
+        consumer_action="Read the tool's own text in the run error details and correct the arguments or the server.",
+        user_action="Check the values sent to the tool or ask a flow editor.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TOOL_TIMEOUT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The tool did not answer within the time the step had for the call.",
+        consumer_action="Raise the step's timeout, make the call select less, or check the MCP server's responsiveness.",
+        user_action="Try again later or ask a flow editor to raise the step's time limit.",
+    ),
+    FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The packaged step input exceeds the selected model context window.",
+        consumer_action="Use a larger-context model, split the source document, or reduce the step input before starting a new run.",
+        user_action="Use a smaller source, split the document, or ask a flow editor to choose a larger-context model.",
+    ),
+    FlowApiErrorCode.SUMMARIZATION_NON_CONVERGENT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="Summarization did not reduce both record count and bytes, or cannot finish within its finite aggregate limits.",
+        consumer_action="Inspect summarization rounds, records and bytes; reduce the input or request more concise records before starting a new run.",
+        user_action="Use less material or ask the flow editor for more concise intermediate records.",
+    ),
+    FlowApiErrorCode.LONG_MATERIAL_PARTIAL_COVERAGE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="A step that read long material in parts covered only part of it: time ran out, calls failed or met a ceiling, or notes were cut.",
+        consumer_action="Read the long_material record in the failed step's input payload for the reasons and the sources left out before changing the timeout, model or input.",
+        user_action="Use less material, or ask a flow editor to raise the step's time limit, choose a larger-context model or add a review.",
+    ),
+    FlowApiErrorCode.MAPPED_PROVIDER_CALL_LIMIT_EXCEEDED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The mapped step may need more provider calls than the organization ceiling allows.",
+        consumer_action="Reduce mapped inputs or ask an administrator to raise the provider-call ceiling before starting a new run.",
+        user_action="Use fewer items or files, or ask an administrator to raise the limit.",
+    ),
+    FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The step input exceeds the runtime processing limit.",
+        consumer_action="Reduce text, files, extracted content, or prompt context before starting a new run.",
+        user_action="Submit smaller input and try again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_STRUCTURED_OUTPUT_EXCEEDS_LIMIT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The enriched structured output exceeds the inline byte ceiling.",
+        consumer_action="Reduce the output or mapped item count before starting a new run; completed provider calls will repeat.",
+        user_action="Request shorter output or process fewer items.",
+    ),
+    FlowApiErrorCode.TYPED_IO_INVALID_FILE_TYPE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="A runtime file has a type unsupported by the step.",
+        consumer_action="Validate file type against the step contract before upload or starting a new run.",
+        user_action="Upload a compatible file and start again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The step combines input sources that cannot run together.",
+        consumer_action="Change the step input-source settings and republish.",
+        user_action="Ask a flow editor to fix the input sources.",
+    ),
+    FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_POSITION: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The step reads from a prior step position that cannot supply the input.",
+        consumer_action="Reorder or reconfigure the flow before republishing.",
+        user_action="Ask a flow editor to fix the step order or input source.",
+    ),
+    FlowApiErrorCode.TYPED_IO_INVALID_JSON_INPUT: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The step expected JSON but received invalid JSON input.",
+        consumer_action="Validate the JSON value before starting a new run.",
+        user_action="Fix the JSON input and try again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_INVALID_OUTPUT_MODE_COMBINATION: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The output mode conflicts with the current step input or output settings.",
+        consumer_action="Change the output mode combination and republish the flow.",
+        user_action="Ask a flow editor to adjust the output settings.",
+    ),
+    FlowApiErrorCode.TYPED_IO_INVALID_SCHEMA: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The step output schema is invalid.",
+        consumer_action="Fix the JSON schema and republish before starting a new run.",
+        user_action="Ask a flow editor to fix the output schema.",
+    ),
+    FlowApiErrorCode.TYPED_IO_MISSING_REQUIRED_FILES: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="A typed runtime step did not receive required files.",
+        consumer_action="Attach required files according to the step contract before starting a new run.",
+        user_action="Attach the required files and start again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The model's output, or a step's output value, is not JSON the platform can read (malformed, or nested too deep).",
+        consumer_action="Adjust the prompt or schema, republish, then start a new run.",
+        user_action="Ask a flow editor to adjust the prompt or schema.",
+    ),
+    FlowApiErrorCode.TYPED_IO_RENDER_FAILED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The generated document or rich output could not be rendered.",
+        consumer_action="Inspect output content and document settings before starting a new run.",
+        user_action="Ask a flow editor to check output formatting.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The DOCX template changed after the flow was published.",
+        consumer_action="Republish the flow with the current template before starting a new run.",
+        user_action="Republish the flow with the current template.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The DOCX template could not be rendered with the step output.",
+        consumer_action="Check placeholders and referenced step outputs before starting a new run.",
+        user_action="Ask a flow editor to fix the template placeholders.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TRANSCRIPT_TOO_LARGE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The audio transcript is too large for the step.",
+        consumer_action="Use shorter audio or split the task into smaller runs.",
+        user_action="Use a shorter recording or split the audio.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_CONFIG_INVALID: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The transcription step has invalid language or model settings.",
+        consumer_action="Fix transcription settings and republish before starting a new run.",
+        user_action="Ask a flow editor to fix transcription settings.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_EMPTY: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="Transcription completed but produced no text.",
+        consumer_action="Ask for audio with clear speech before starting a new run.",
+        user_action="Use an audio file with speech and start again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The transcription provider failed while processing audio.",
+        consumer_action="Use transcription_failure_kind in error details to diagnose the failure; check retryable before starting another run.",
+        user_action="Check the reported transcription failure and earlier run effects before trying again.",
+    ),
+    FlowApiErrorCode.TYPED_IO_SPEAKER_IDENTIFICATION_FAILED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause=(
+            "The transcription model wrote the text, then the speaker "
+            "identification service failed while labelling it."
+        ),
+        consumer_action="Use transcription_failure_kind in error details to diagnose the failure; check retryable before starting another run.",
+        user_action="Try again later, or run without speaker identification; an administrator can test the service connection.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_MISSING: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The transcription step has no configured model.",
+        consumer_action="Choose an available transcription model and republish.",
+        user_action="Ask a flow editor to choose a transcription model.",
+    ),
+    FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_MODEL_UNAVAILABLE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The configured transcription model is unavailable.",
+        consumer_action="Choose another model or retry after provider recovery.",
+        user_action="Choose another model or try again later.",
+    ),
+    FlowApiErrorCode.TYPED_IO_SPEAKER_SERVICE_UNAVAILABLE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause=(
+            "The run labels speakers but the flow chose no speaker identification "
+            "service, or the one it chose is not usable in the space, so it is "
+            "refused before any audio is sent."
+        ),
+        consumer_action=(
+            "Read the speaker_service_gap detail (not_chosen, picked_unavailable), "
+            "then choose a service the space can use in the flow and republish, "
+            "or run without speaker labels."
+        ),
+        user_action=(
+            "Ask a flow editor to choose a speaker identification service the "
+            "space can use, or run the flow without speaker labels."
+        ),
+    ),
+    FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_NOT_ENABLED: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="Transcription is disabled for the tenant or step.",
+        consumer_action="Enable transcription or change the step input type before republish.",
+        user_action="Enable transcription or ask a flow editor to change the step.",
+    ),
+    FlowApiErrorCode.TYPED_IO_UNSUPPORTED_TYPE: _entry(
+        category="Typed input/output",
+        surfaced_through="Run error payload",
+        cause="The step uses an input type runtime cannot execute.",
+        consumer_action="Change the input type and republish the flow.",
+        user_action="Ask a flow editor to choose a supported input type.",
+    ),
+    FlowApiErrorCode.PUBLISHED_FORM_SCHEMA_INVALID: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause="The published flow form configuration is invalid.",
+        consumer_action="Ask an editor to fix form fields and republish before running.",
+        user_action="Ask a flow editor to fix the form fields.",
+    ),
+    FlowApiErrorCode.REVIEW_POLICY_INVALID: _entry(
+        category="Review checkpoint",
+        surfaced_through="API response and run error payload",
+        cause="A reviewed step has an invalid review policy.",
+        consumer_action=(
+            "Fix the review policy on the executable step, republish the flow, "
+            "then start a new run."
+        ),
+        user_action=(
+            "Ask a flow editor to fix review settings, republish, and start a new run."
+        ),
+    ),
+    FlowApiErrorCode.REVIEW_STALE_REVISION: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The checkpoint changed after the caller loaded it.",
+        consumer_action="Refetch the checkpoint and retry with the latest revision.",
+        user_action="Reload the review and try again.",
+    ),
+    FlowApiErrorCode.REVIEW_EXPIRED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API response and run error payload",
+        cause="The checkpoint deadline passed before the review finished.",
+        consumer_action="Refetch the run and stop attempting review actions on the expired checkpoint.",
+        user_action="Reload the run because the review deadline passed.",
+    ),
+    FlowApiErrorCode.REVIEW_NOT_ACTIVE: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The checkpoint is no longer in a state that accepts this action.",
+        consumer_action="Reload the run and branch on the latest checkpoint state.",
+        user_action="Reload the run before continuing.",
+    ),
+    FlowApiErrorCode.REVIEW_STEP_RESULT_NOT_FOUND: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The step result linked to the checkpoint is no longer available.",
+        consumer_action="Reload evidence and avoid editing or approving a missing result.",
+        user_action="Reload the run and try again.",
+    ),
+    FlowApiErrorCode.REVIEW_EDIT_NOT_ALLOWED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause=(
+            "The reviewed step was opened for viewing, or produces a PDF or DOCX "
+            "artifact, so its output cannot be edited."
+        ),
+        consumer_action=(
+            "Read `review_mode` and `output_type` from the checkpoint and offer "
+            "approve or reject instead of edit."
+        ),
+        user_action="Approve or reject this step; its output cannot be edited.",
+    ),
+    FlowApiErrorCode.REVIEW_EDIT_FILE_BACKED_UNSUPPORTED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The reviewed output exceeded inline storage and lives in a generated file.",
+        consumer_action=(
+            "Offer approve or reject; a file-backed output cannot be replaced "
+            "through the review edit endpoint."
+        ),
+        user_action="Approve or reject this step; the output is too large to edit here.",
+    ),
+    FlowApiErrorCode.REVIEW_EDIT_OUTPUT_TOO_LARGE: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The edited value renders to text larger than the inline output limit.",
+        consumer_action=(
+            "Shorten the edited value below the reported inline byte limit and retry."
+        ),
+        user_action="Shorten the edited output and try again.",
+    ),
+    FlowApiErrorCode.REVIEW_CHECKPOINT_NOT_FOUND: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The requested review checkpoint id does not exist for the run.",
+        consumer_action="Refetch run review links and use a current checkpoint id.",
+        user_action="Reload the run and try again.",
+    ),
+    FlowApiErrorCode.REVIEW_REJECT_REASON_REQUIRED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The reject request did not include a non-empty reason.",
+        consumer_action="Require a review rejection reason before submitting.",
+        user_action="Enter a reason before rejecting the review.",
+    ),
+    FlowApiErrorCode.REVIEW_REJECT_REASON_TOO_LONG: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The rejection reason exceeded the accepted length.",
+        consumer_action="Truncate or ask the user to shorten the reject reason.",
+        user_action="Shorten the rejection reason and try again.",
+    ),
+    FlowApiErrorCode.REVIEW_IDEMPOTENCY_KEY_REQUIRED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The resume request did not include an idempotency key.",
+        consumer_action="Generate a stable retry key for each resume request.",
+        user_action="Reload the run and try again.",
+    ),
+    FlowApiErrorCode.REVIEW_NOT_APPROVED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The checkpoint has not been approved and cannot resume.",
+        consumer_action="Submit approve before resume, then retry resume with a retry key.",
+        user_action="Approve the review before resuming.",
+    ),
+    FlowApiErrorCode.REVIEW_ALREADY_RESUMED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The approved checkpoint was already resumed.",
+        consumer_action="Treat duplicate resume as completed and reload the run status.",
+        user_action="Reload the run to see the latest status.",
+    ),
+    FlowApiErrorCode.REVIEW_REJECTED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API response and run error payload",
+        cause="The checkpoint was rejected and the run cannot continue.",
+        consumer_action="Stop resume attempts and show the rejection reason if available.",
+        user_action="The review was rejected and the run cannot resume.",
+    ),
+    FlowApiErrorCode.REVIEW_CANCELLED: _entry(
+        category="Review checkpoint",
+        surfaced_through="API error response",
+        cause="The checkpoint was cancelled by run terminalization or cancellation.",
+        consumer_action="Reload the run and stop actions against the cancelled checkpoint.",
+        user_action="Reload the run before continuing.",
+    ),
+    FlowApiErrorCode.REVIEW_OPEN_ACTIVE_CONFLICT_INVARIANT: _entry(
+        category="Review checkpoint",
+        surfaced_through="Run error payload",
+        cause="The run already had an active checkpoint when runtime tried to open another.",
+        consumer_action="Reload the run and escalate with the run ID if the conflict remains.",
+        user_action="Reload the run and contact support if the problem remains.",
+    ),
+    FlowApiErrorCode.REVIEW_OPEN_STEP_RESULT_INCOMPLETE_INVARIANT: _entry(
+        category="Review checkpoint",
+        surfaced_through="Run error payload",
+        cause="Runtime tried to open review before the step result was complete.",
+        consumer_action="Reload the run and escalate with the run ID if the state remains invalid.",
+        user_action="Reload the run and contact support if the problem remains.",
+    ),
+    FlowApiErrorCode.REVIEW_OPEN_MULTIPLE_ACTIVE_CHECKPOINTS_INVARIANT: _entry(
+        category="Review checkpoint",
+        surfaced_through="Run error payload",
+        cause="The run had multiple active checkpoints during review opening.",
+        consumer_action="Reload the run and escalate with the run ID if multiple active rows remain.",
+        user_action="Reload the run and contact support if the problem remains.",
+    ),
+    FlowApiErrorCode.TEMPLATE_INVALID_ARCHIVE: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The uploaded file is not a valid DOCX archive.",
+        consumer_action="Validate DOCX archives before upload when possible.",
+        user_action="Choose a valid DOCX file and try again.",
+    ),
+    FlowApiErrorCode.TEMPLATE_NO_CONTROLS: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The selected DOCX template contains no supported content controls.",
+        consumer_action="Replace text placeholders with tagged Word content controls, upload the template again, update bindings and republish.",
+        user_action="Add tagged content controls in Word, replace text placeholders and upload the template again.",
+    ),
+    FlowApiErrorCode.TEMPLATE_CONTROL_UNTAGGED: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="A content control does not have a tag.",
+        consumer_action="Assign a unique tag in each content control's properties in Word.",
+        user_action="Give every content control a unique tag in Word.",
+    ),
+    FlowApiErrorCode.TEMPLATE_CONTROL_PLACEMENT: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="A content control is outside the supported body or paragraph placement.",
+        consumer_action="Place rich controls between body paragraphs and text controls inside body paragraphs, outside tables, headers and footers.",
+        user_action="Move content controls into body paragraphs or between them, outside tables, headers and footers.",
+    ),
+    FlowApiErrorCode.TEMPLATE_CONTROL_NESTED: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="A content control contains another content control.",
+        consumer_action="Move nested controls outside their parent content controls.",
+        user_action="Move the inner content control outside its parent in Word.",
+    ),
+    FlowApiErrorCode.TEMPLATE_CONTROL_MAPPED: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="A content control is mapped to XML data.",
+        consumer_action="Remove the control's XML data binding before uploading the template.",
+        user_action="Remove the XML data mapping in Word before uploading the template.",
+    ),
+    FlowApiErrorCode.TEMPLATE_CONTROL_UNSUPPORTED: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The template contains an unsupported type of content control.",
+        consumer_action="Use rich-text controls for sections and text controls for fields.",
+        user_action="Replace unsupported controls with rich-text section controls or text fields in Word.",
+    ),
+    FlowApiErrorCode.TEMPLATE_CONTROL_DUPLICATE: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="Multiple content controls have the same tag.",
+        consumer_action="Give every content control a unique tag in Word.",
+        user_action="Change duplicate tags so every content control has a unique tag in Word.",
+    ),
+    FlowApiErrorCode.TEMPLATE_CORRUPTED_ARCHIVE: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The DOCX archive appears corrupted.",
+        consumer_action="Ask the user to reopen and resave the file before upload.",
+        user_action="Open and save the file again in Word, then retry.",
+    ),
+    FlowApiErrorCode.TEMPLATE_MACRO_NOT_ALLOWED: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The uploaded template is macro-enabled and not allowed.",
+        consumer_action="Accept only non-macro DOCX templates for Flow templates.",
+        user_action="Save the file as DOCX without macros and try again.",
+    ),
+    FlowApiErrorCode.TEMPLATE_MISSING_REQUIRED_PARTS: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The DOCX file lacks required document parts.",
+        consumer_action="Reject the file and ask for a complete Word document template.",
+        user_action="Choose a complete DOCX template and try again.",
+    ),
+    FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The template file is not accessible to the caller or runtime actor.",
+        consumer_action="Use a template stored in the flow or space with the right permissions.",
+        user_action="Choose a template you can access.",
+    ),
+    FlowApiErrorCode.TEMPLATE_READ_ONLY: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The caller can run the flow but cannot replace its template.",
+        consumer_action="Hide template replacement for read-only callers.",
+        user_action="Ask a flow editor to change the template.",
+    ),
+    FlowApiErrorCode.TEMPLATE_UNSUPPORTED_EXTENSION: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The uploaded template file extension is not supported.",
+        consumer_action="Allow only DOCX files for template upload.",
+        user_action="Choose a DOCX file and try again.",
+    ),
+    FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_STALE_REVISION: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The step's transcript corrections changed after the caller loaded them.",
+        consumer_action="Refetch the corrections and retry with the latest revision.",
+        user_action="Reload the transcript and try the correction again.",
+    ),
+    FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_SEGMENTS_UNAVAILABLE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="The step stored no structured transcript lines to anchor corrections to.",
+        consumer_action="Offer the transcript read-only when the step metadata has no segments.",
+        user_action="This transcript cannot be corrected because it has no structured lines.",
+    ),
+    FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_OCCURRENCE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="A submitted correction does not match the stored transcript text.",
+        consumer_action="Rebuild the occurrence anchors from the current segments and retry.",
+        user_action="Reload the transcript and apply the correction again.",
+    ),
+    FlowApiErrorCode.TRANSCRIPT_CORRECTIONS_INVALID_SPEAKER_EDIT: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="A submitted speaker edit does not match the stored transcript.",
+        consumer_action="Rebuild the speaker-edit anchors from the current segments and retry.",
+        user_action="Reload the transcript and apply the speaker change again.",
+    ),
+    FlowApiErrorCode.TEMPLATE_MISSING_CONTENT: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The selected template record has no readable binary content.",
+        consumer_action="Ask for a new upload or restore the template file content.",
+        user_action="Choose or upload the template again.",
+    ),
+    FlowApiErrorCode.TEMPLATE_IN_USE: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="A published flow definition still references the template asset.",
+        consumer_action="Keep the template asset available while published versions can use it.",
+        user_action="Unpublish or replace the published flow template before deleting it.",
+    ),
+    FlowApiErrorCode.TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The required audit record could not commit, so no download URL was minted.",
+        consumer_action="Retry later; do not treat the failed response as a usable download.",
+        user_action="Try the download again later.",
+    ),
+    FlowApiErrorCode.PACKAGE_EXPORT_AUDIT_UNAVAILABLE: _entry(
+        category="Evidence and artifacts",
+        surfaced_through="API error response",
+        cause="Required audit logging failed before the Flow package export committed.",
+        consumer_action="Retry later; the failed response contains no package bytes.",
+        user_action="Try the export again later.",
+    ),
+    FlowApiErrorCode.SETTINGS_INVALID_PAYLOAD: _entry(
+        category="Flow settings",
+        surfaced_through="API error response",
+        cause="The settings request is empty, contradicts itself or holds a value its section does not accept.",
+        consumer_action="Send at least one field, keep every value in its documented range and do not combine a restore with a new value.",
+        user_action="Check the values and save again.",
+    ),
+    FlowApiErrorCode.DEFAULT_TIMEOUT_EXCEEDS_TENANT_MAX: _entry(
+        category="Flow settings",
+        surfaced_through="API error response",
+        cause="The default step timeout is higher than the maximum step timeout, or than the deployment ceiling when no maximum is set.",
+        consumer_action="Set default_step_timeout_seconds at or below max_step_timeout_seconds from the error context.",
+        user_action="Lower the normal step time limit and save again.",
+    ),
+    FlowApiErrorCode.TENANT_MAX_EXCEEDS_ENV_HARD_CEILING: _entry(
+        category="Flow settings",
+        surfaced_through="API error response",
+        cause="The maximum step timeout is higher than the hard ceiling of the deployment.",
+        consumer_action="Set max_step_timeout_seconds at or below hard_ceiling_seconds from the error context.",
+        user_action="Choose a lower maximum step runtime or ask whoever operates Eneo to raise the deployment limit.",
+    ),
+    FlowApiErrorCode.MAX_CONCURRENT_RUNS_EXCEEDS_SERVER_CAPACITY: _entry(
+        category="Flow settings",
+        surfaced_through="API error response",
+        cause="The requested limit for concurrent runs is higher than the server capacity.",
+        consumer_action="Set max_concurrent_runs at or below max_concurrent_runs_capacity from the error context.",
+        user_action="Choose a value within the server capacity shown on the settings page.",
+    ),
+    FlowApiErrorCode.MAPPED_EXECUTION_PUBLISHED_CEILING_REQUIRED: _entry(
+        category="Published definition",
+        surfaced_through="API error response",
+        cause="A step that runs once per file was published without a ceiling on the number of files.",
+        consumer_action="Republish the flow with an explicit ceiling for the mapped step before starting a run.",
+        user_action="Ask a flow editor to set the file limit for the step and publish the flow again.",
+    ),
+    FlowApiErrorCode.STEP_NAME_RESERVED_VARIABLE: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A step has a name that is reserved for a runtime variable.",
+        consumer_action="Rename the step named in the error context to a name outside reserved_aliases.",
+        user_action="Rename the step so that the name describes what it does.",
+    ),
+    FlowApiErrorCode.STEP_NAME_STEP_ALIAS: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A step has a name with the form of an automatic step alias such as step_1.",
+        consumer_action="Rename the step named in the error context to a name that is not a step alias.",
+        user_action="Rename the step so that the name describes what it does.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_NAME_NAMESPACE_HEAD: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A form field has a name that is reserved as a variable namespace.",
+        consumer_action="Rename the form field at field_index in the error context to a name outside the reserved namespaces.",
+        user_action="Choose a more specific technical name for the form field.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_NAME_PRIMARY_INPUT_KEY: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A form field has a name that the runtime input payload already uses.",
+        consumer_action="Rename the form field at field_index in the error context to a name the runtime input does not use.",
+        user_action="Choose another technical name for the form field.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_NAME_STEP_ALIAS: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A form field has a name with the form of an automatic step alias such as step_1.",
+        consumer_action="Rename the form field at field_index in the error context to a name that is not a step alias.",
+        user_action="Choose another technical name for the form field.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_NAME_EMPTY: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A form field has no name.",
+        consumer_action="Give the form field at field_index in the error context a name.",
+        user_action="Give every form field a technical name.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_NAME_DUPLICATE: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="Two form fields have the same name once case and surrounding spaces are ignored.",
+        consumer_action="Give the form field at field_index in the error context a name no other field uses.",
+        user_action="Give each form field its own technical name.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_NAME_DOT: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A form field has a name that contains a dot.",
+        consumer_action="Rename the form field at field_index in the error context without a dot.",
+        user_action="Use an underscore instead of a dot in the technical name.",
+    ),
+    FlowApiErrorCode.FORM_FIELD_NAME_TEMPLATE_DELIMITERS: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A form field has a name that contains the template delimiters, two opening or two closing curly brackets.",
+        consumer_action="Rename the form field at field_index in the error context without double curly brackets.",
+        user_action="Use a plain technical name without double curly brackets.",
+    ),
+    FlowApiErrorCode.TOOL_OPTIONS_TOO_LARGE: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The general MCP servers the space has activated offer more tools, or more text in them, than one list answer may hold.",
+        consumer_action="Do not retry unchanged; the error context gives both limits.",
+        user_action="Ask a space administrator to switch off the MCP servers the flows in this space do not need.",
+    ),
+    FlowApiErrorCode.TEMPLATE_TOO_LARGE: _entry(
+        category="Template asset",
+        surfaced_through="API error response",
+        cause="The DOCX archive has too many entries or is too large when unpacked.",
+        consumer_action="Upload a DOCX template within both archive limits.",
+        user_action="Use a smaller or simpler Word template.",
+    ),
+    FlowApiErrorCode.STALE_REVISION: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The flow draft changed after the revision the request was based on.",
+        consumer_action="Reload the flow and send the change again against the current draft.",
+        user_action="Reload the page and redo your latest change.",
+    ),
+    FlowApiErrorCode.UNKNOWN_STEP_ID: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The flow update names a step id that the stored draft does not have.",
+        consumer_action="Reload the flow and send only step ids from the current draft.",
+        user_action="Reload the page and redo your latest change.",
+    ),
+    FlowApiErrorCode.DUPLICATE_STEP_ID: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="The flow update names the same step id more than once.",
+        consumer_action="Send each stored step id at most once in a flow update.",
+        user_action="Reload the page and redo your latest change.",
+    ),
+    FlowApiErrorCode.SENTINEL_SECRET_REQUIRES_STEP_ID: _entry(
+        category="Flow authoring",
+        surfaced_through="API error response",
+        cause="A step without an id asks to keep a stored secret, which only an existing step has.",
+        consumer_action="Send the real secret for a step without an id, since the masked placeholder only keeps the secret of an existing step.",
+        user_action="Enter the secret value again for the new step.",
+    ),
+    FlowApiErrorCode.UNSUPPORTED_MEDIA_TYPE: _entry(
+        category="Run input",
+        surfaced_through="API error response",
+        cause="The declared or detected type of the uploaded file is not accepted for the flow input.",
+        consumer_action="Upload a file whose type is in accepted_mimetypes; the 415 answer lists them and names received_type in its context.",
+        user_action="Choose a file of a type the flow accepts.",
+    ),
+}
+
+
+def validate_flow_error_taxonomy(
+    entries: Mapping[object, FlowErrorTaxonomyEntry] | None = None,
+) -> None:
+    selected_entries = FLOW_ERROR_TAXONOMY if entries is None else entries
+    selected_keys = set(selected_entries)
+    enum_keys = {key for key in selected_keys if isinstance(key, FlowApiErrorCode)}
+    expected_keys = set(FlowApiErrorCode)
+    missing = sorted(code.value for code in expected_keys - enum_keys)
+    stale = sorted(str(key) for key in selected_keys - enum_keys)
+    if missing or stale:
+        raise ValueError(
+            "Flow error taxonomy must match FlowApiErrorCode. "
+            f"missing={missing}; stale={stale}"
+        )
+
+    for code, entry in selected_entries.items():
+        if not isinstance(code, FlowApiErrorCode):
+            continue
+        if code in FLOW_TYPED_IO_ERROR_CODES and entry.category != "Typed input/output":
+            raise ValueError(f"Flow error taxonomy category mismatch for {code.value}")
+        if (
+            code in FLOW_RUN_TERMINAL_ERROR_CODES
+            and "run error payload" not in entry.surfaced_through.lower()
+        ):
+            raise ValueError(f"Flow error taxonomy surface mismatch for {code.value}")
+        if (
+            code not in FLOW_RUN_TERMINAL_ERROR_CODES
+            and "run error payload" in entry.surfaced_through.lower()
+        ):
+            raise ValueError(f"Flow error taxonomy surface mismatch for {code.value}")
+        _validate_short_sentence(code, "cause", entry.cause)
+        _validate_short_sentence(code, "consumer_action", entry.consumer_action)
+        _validate_short_sentence(code, "user_action", entry.user_action)
+
+
+def _validate_short_sentence(
+    code: FlowApiErrorCode,
+    field_name: str,
+    value: str,
+) -> None:
+    if "\n" in value or len(value) > _MAX_FIELD_LENGTH:
+        raise ValueError(
+            f"Flow error taxonomy {field_name} for {code.value} must be one sentence"
+        )
+    if len(_SENTENCE_END_PATTERN.findall(value)) > 1:
+        raise ValueError(
+            f"Flow error taxonomy {field_name} for {code.value} must be one sentence"
+        )
+
+
+validate_flow_error_taxonomy()

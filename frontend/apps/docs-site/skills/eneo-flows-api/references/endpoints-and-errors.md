@@ -1,0 +1,106 @@
+# Endpoints and errors
+
+Paths are relative to the deployment API base. Prefer `runtime_paths` from `GET /flows/{flow_id}/published/`; it makes a client portable across configured prefixes.
+
+## Runtime endpoint map
+
+| Purpose                             | Method and path                                                            |
+| ----------------------------------- | -------------------------------------------------------------------------- |
+| Status behavior                     | `GET /flows/runs/status-capabilities/`                                     |
+| Capacity snapshot                   | `GET /flows/runs/capacity/`                                                |
+| List published Flows                | `GET /flows/?space_id={space_id}&limit={limit}&offset={offset}`            |
+| List across the user's spaces       | `GET /flows/?published_only=true&limit={limit}&offset={offset}`            |
+| Published projection and paths      | `GET /flows/{flow_id}/published/`                                          |
+| Current run contract                | `GET /flows/{flow_id}/run-contract/`                                       |
+| Runtime-safe graph                  | `GET /flows/{flow_id}/graph/`                                              |
+| Upload a step input                 | `POST /flows/{flow_id}/steps/{step_id}/runtime-files/`                     |
+| Delete an abandoned upload          | `DELETE /flows/{flow_id}/runtime-files/{file_id}/`                         |
+| Live text ticket                    | `POST /flows/{flow_id}/steps/{step_id}/live-transcription-sessions/`       |
+| Live text socket                    | WebSocket at the ticket's `websocket_path`, resolved against the origin    |
+| Create or list runs                 | `POST` or `GET /flows/{flow_id}/runs/`                                     |
+| List the caller's own runs          | `GET /flows/{flow_id}/runs/?mine=true`                                     |
+| Poll content-free status            | `GET /flows/{flow_id}/runs/{run_id}/status/`                               |
+| Read audited run detail             | `GET /flows/{flow_id}/runs/{run_id}/`                                      |
+| Cancel                              | `POST /flows/{flow_id}/runs/{run_id}/cancel/`                              |
+| Redispatch a stale queued run       | `POST /flows/{flow_id}/runs/{run_id}/redispatch/`                          |
+| Active review                       | `GET /flows/{flow_id}/runs/{run_id}/review-checkpoints/active/`            |
+| Edit review                         | `PATCH /flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/` |
+| Approve, reject, or resume          | `POST` the corresponding `.../{checkpoint_id}/{action}/` path              |
+| Approve and continue in one request | `POST .../{checkpoint_id}/approve-and-continue/` with `Idempotency-Key`    |
+| Step outputs                        | `GET /flows/{flow_id}/runs/{run_id}/steps/`                                |
+| Retry a failed run                  | `POST /flows/{flow_id}/runs/{run_id}/retry/`                               |
+| Artifact authorization              | `POST /flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/`      |
+| Evidence                            | `GET /flows/{flow_id}/runs/{run_id}/evidence/`                             |
+| Provider calls                      | `GET /flows/{flow_id}/runs/{run_id}/provider-calls/`                       |
+| Evidence export                     | `GET /flows/{flow_id}/runs/{run_id}/evidence/export` (no trailing slash)   |
+
+Run creation returns a content-bearing run. Run lists and status return summaries. Detail is the audited content-bearing read.
+
+Cancel on a terminal run is a successful no-op and returns the unchanged terminal status. Read the body instead of assuming `cancelled`.
+
+## Retry a failed run
+
+`POST /flows/{flow_id}/runs/{run_id}/retry/` creates a child run, with no request body and a required `Idempotency-Key`. The source must be `failed`, belong to the same principal, and use the currently published Flow version.
+
+The source must have a non-empty, contiguous completed prefix that can be reused. Prefix results must be inline and fit the server's limits; file-backed outputs and artifact files cannot be imported. Any prefix review must have been approved or resumed. The server selects the first unfinished step, and earlier steps do not execute again.
+
+The child preserves the source's semantic inputs, ordered file selections, label, and purpose. Creation returns `201` with `created: true`; replaying an accepted request with the same key returns the same child with `200` and `created: false`. Poll the returned `run.id`. The source run remains unchanged.
+
+To change input values or replace files, use `POST /flows/{flow_id}/runs/` with the current contract and a new create key. Upload any replacement files through the step-specific runtime-file endpoint and bind their IDs in `step_inputs`. Use new run creation also when no completed prefix can be reused or the source version is no longer published. A retry does not accept a caller-selected step or replacement inputs.
+
+## Error envelope
+
+```json
+{
+  "message": "Flow must be published before a run can be created.",
+  "code": "flow_not_published",
+  "eneo_error_code": 9007,
+  "context": { "flow_id": "00000000-0000-0000-0000-000000000001" },
+  "request_id": "request-id-for-support"
+}
+```
+
+`code` is the control-flow contract. `message` is for display, `context` can carry recovery hints, and `request_id` or optional `error_id` belongs in support logs. `context`, `request_id`, `error_id` and `details` are omitted when unset, never sent as `null`. Ignore numeric `eneo_error_code` for branching.
+
+Always keep an unknown-code branch that shows a generic failure, records the raw code and request ID, and refuses unsafe automatic retries.
+
+## High-value request recovery
+
+| HTTP / code                                | Recovery                                                                       |
+| ------------------------------------------ | ------------------------------------------------------------------------------ |
+| `401 authentication_error`                 | Send one supported credential, or a module session's token and key together.   |
+| `401 invalid_api_key`                      | Replace or reissue the key; do not retry it.                                   |
+| `403 insufficient_scope`                   | Fix key scope. Do not infer whether the resource exists.                       |
+| `403 insufficient_resource_permission`     | Reissue with the required permission reported in context.                      |
+| `403 flow_run_evidence_export_disabled`    | The flow has not allowed evidence export. Ask its editor; do not retry.        |
+| `404 not_found`                            | Refetch discovery; do not retry the stale ID blindly.                          |
+| `413 file_too_large`                       | Read the effective step limit from the run contract.                           |
+| `415 unsupported_media_type`               | Match both declared MIME type and bytes to `accepted_mimetypes`.               |
+| `422 request_validation_error`             | Fix the client request shape.                                                  |
+| `429 flow_run_concurrency_limit_reached`   | Honor `Retry-After`, poll active runs, then retry the same logical submission. |
+| `503` audit/content dependency unavailable | Retry the sensitive read with bounded backoff; do not bypass audit.            |
+
+## Flow-specific recovery
+
+| Code                                        | Recovery                                                                    |
+| ------------------------------------------- | --------------------------------------------------------------------------- |
+| `flow_not_published`                        | Ask for publication or select another published Flow.                       |
+| `flow_service_key_space_id_required`        | Send `space_id` for the space the key is scoped to.                         |
+| `flow_run_stale_version`                    | Refetch published projection and run contract, then rebuild the request.    |
+| `flow_run_idempotency_conflict`             | Reuse the original request or choose a new key for a genuinely new request. |
+| `flow_run_reserved_input_payload_key`       | Remove runtime-owned keys from `input_payload_json`.                        |
+| `flow_run_required_step_input_missing`      | Attach files to every required step in the contract.                        |
+| `flow_run_unknown_step_input`               | Remove stale step IDs after refetching the contract.                        |
+| `flow_run_top_level_file_ids_not_supported` | Move IDs into `step_inputs[step_id].file_ids`.                              |
+| `flow_run_speaker_labels_not_selectable`    | Send `speaker_labels` only when the run contract marks it selectable.       |
+| `flow_live_transcription_unavailable`       | Record without live text; upload the file and create the run as usual.      |
+| `flow_runtime_file_attached`                | Stop orphan cleanup; the run now owns the file lifecycle.                   |
+| `flow_review_stale_revision`                | Refetch the active checkpoint and show the competing change.                |
+| `flow_review_not_approved`                  | Approve first, then resume with the newest revision.                        |
+| `flow_review_idempotency_key_required`      | Reuse one stable key for retries of that logical resume.                    |
+| `flow_review_edit_not_allowed`              | Offer approve or reject instead of edit.                                    |
+| `flow_review_edit_file_backed_unsupported`  | Do not edit the preview; offer approve or reject.                           |
+| `flow_run_artifact_content_unavailable`     | Show retained metadata and mark bytes unavailable.                          |
+| `flow_evidence_export_too_large`            | Use inline evidence or paginate provider calls.                             |
+
+Run execution errors also appear in terminal run detail. Do not automatically retry timeouts or ambiguous provider failures: the external work may have started. Let an operator or user choose an eligible failed-run child retry or a new run; either can repeat provider work and add cost.

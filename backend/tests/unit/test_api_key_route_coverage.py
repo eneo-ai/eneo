@@ -18,6 +18,7 @@ from eneo.authentication.auth_dependencies import (
     ASSISTANTS_READ_OVERRIDES,
     CONVERSATIONS_READ_OVERRIDES,
     FILES_READ_OVERRIDES,
+    FLOW_METHOD_PERMISSION_OVERRIDES,
     INFO_BLOBS_READ_OVERRIDES,
     KNOWLEDGE_READ_OVERRIDES,
     MCP_APPS_READ_OVERRIDES,
@@ -124,6 +125,7 @@ INTENTIONALLY_UNGUARDED = {
     "/completion-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/embedding-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/transcription-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
+    "/transcription-services": "Speaker service names for space settings; mounted with admin scope + admin key guards like the model catalogs",
     "/image-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/rerank-models": "Model catalog endpoints are mounted with admin scope + admin key guards",
     "/ai-models": "Model listing aggregation",
@@ -137,7 +139,9 @@ INTENTIONALLY_UNGUARDED = {
     "/module-auth": "Module auth handoff: ticket issue is session-only; token exchange is registered service-key-bound in ModuleAuthBroker",
     "/roles": "Tenant admin scope + admin key guards (TENANT_ADMIN_API_KEY_GUARDS)",
     "/api-keys": "Self-management with ensure_manage_authorized() + scope guard",
+    "/api-key-capacity": "Read-only description of the calling key's own rate-limit budget. There is no resource to permission: the key can only ever see itself, and a session caller with no key is rejected with 403.",
     "/ws": "WebSocket endpoint — separate auth",
+    "/live-transcription": "Flows live transcription WebSocket: it accepts only a single-use ticket that the guarded POST /flows/{id}/steps/{step_id}/live-transcription-sessions/ issued",
     "/audit": "Admin audit endpoints with admin scope + admin key guards",
     "/mcp-servers": "MCP server management is tenant-admin infrastructure with admin scope + admin key guards",
     "/document-templates": "Document template library is tenant-admin infrastructure with admin scope + admin key guards; the signed runtime download and the read-only name listing are authenticated per route",
@@ -161,6 +165,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "/icons": "Static icon catalog",
     "/limits": "Tenant/user limits endpoint",
     "/ws": "WebSocket auth path",
+    "/live-transcription": "Flows live transcription WebSocket: scope was checked when the guarded POST issued its single-use ticket",
     "/templates": "Template listing/discovery endpoints",
     "/ai-models": "Model listing endpoint",
     "/integrations": "SharePoint webhook routes share /integrations prefix but lack scope guards (external callbacks); main integration_router has TENANT_ADMIN guards",
@@ -172,6 +177,7 @@ INTENTIONALLY_SCOPE_FREE = {
     "not the URL, so a path-level scope check would not gate anything. The HelperRunService "
     "enforces edit-permission on the body's target_id and actor identity on the run.",
     "/skills": "Skill catalogue and organisation lifecycle endpoints reject API keys with Authentication.SESSION; service-layer checks authorize the authenticated user",
+    "/api-key-capacity": "Deliberately outside the admin-scoped api_key_router so a space-scoped key can read its own budget. A scope check would gate a resource in the path; this route has no path parameter and returns only the caller's own key.",
 }
 
 
@@ -267,8 +273,6 @@ class TestNoDuplicatePermissionMaps:
         eneo_src = _get_eneo_src_path()
         matches = []
         for py_file in eneo_src.rglob("*.py"):
-            if "test" in str(py_file):
-                continue
             try:
                 tree = ast.parse(py_file.read_text())
             except SyntaxError:
@@ -291,7 +295,9 @@ class TestNoDuplicatePermissionMaps:
                         rel = py_file.relative_to(eneo_src)
                         matches.append(f"{rel}:{node.lineno}")
 
-        assert len(matches) == 1, (
+        assert [match.split(":")[0] for match in matches] == [
+            "authentication/auth_models.py"
+        ], (
             f"METHOD_PERMISSION_MAP must exist in exactly one place (auth_models.py). "
             f"Found in: {matches}"
         )
@@ -408,6 +414,99 @@ class TestReadOverrideWiring:
         assert "generate_signed_url" in overrides
 
 
+class TestMethodPermissionOverrideWiring:
+    """Method-permission overrides must stay explicit and narrowly scoped."""
+
+    def test_only_runtime_file_delete_has_flow_write_delete_override(self):
+        override_routes = [
+            info
+            for info in walk_routes()
+            if info.resource_perm_config is not None
+            and info.resource_perm_config.method_permission_overrides is not None
+        ]
+
+        assert override_routes, "No method permission override routes were found."
+        assert all(
+            info.resource_perm_config is not None
+            and info.resource_perm_config.method_permission_overrides
+            == FLOW_METHOD_PERMISSION_OVERRIDES
+            for info in override_routes
+        )
+        assert all(info.path.startswith("/flows") for info in override_routes)
+
+        overridden_names = set(FLOW_METHOD_PERMISSION_OVERRIDES)
+        matched_paths = {
+            (info.method, info.path, info.endpoint_name)
+            for info in override_routes
+            if info.endpoint_name in overridden_names
+        }
+
+        assert matched_paths == {
+            (
+                "DELETE",
+                "/flows/{id}/runtime-files/{file_id}/",
+                "delete_flow_runtime_file",
+            )
+        }
+
+
+_STASHED_API_KEY_GUARDS = frozenset(
+    {"_resource_permission_dep", "_scope_check_dep", "_api_key_permission_dep"}
+)
+
+
+def _resolved_calls(dependant) -> list:
+    """Dependency callables in the order FastAPI resolves them: each one's own
+    dependencies first."""
+    calls: list = []
+    for sub in dependant.dependencies:
+        calls.extend(_resolved_calls(sub))
+        calls.append(sub.call)
+    return calls
+
+
+def _resolution_order(dependant) -> list[str]:
+    return [getattr(call, "__name__", "") for call in _resolved_calls(dependant)]
+
+
+class TestFlowFeatureGateOrdering:
+    """The flows_core gate only stashes itself; the route's one authentication
+    runs it once the user is known. That pass authorizes the key against the
+    guards stashed on the request so far (ahead of them it falls back to the
+    basic method check, which refuses a write key the runtime-file delete
+    override allows), and a gate stashed after it, or a route with no such
+    authentication, would never be checked at all."""
+
+    def test_every_flow_gated_route_runs_the_gate_in_its_one_authentication(
+        self,
+    ):
+        gated_routes = 0
+        for route in runtime_router_routes():
+            calls = _resolved_calls(route.dependant)
+            names = [getattr(call, "__name__", "") for call in calls]
+            if "require_flow_feature" not in names:
+                continue
+            gated_routes += 1
+            authenticators = list(
+                dict.fromkeys(
+                    call for call in calls if hasattr(call, "__eneo_authentication__")
+                )
+            )
+            assert [getattr(call, "__name__", "") for call in authenticators] == [
+                "_get_container_with_user"
+            ], (route.methods, route.path, authenticators)
+            authenticated = calls.index(authenticators[0])
+            late = [
+                name
+                for call, name in zip(calls, names)
+                if name in _STASHED_API_KEY_GUARDS | {"require_flow_feature"}
+                and calls.index(call) > authenticated
+            ]
+            assert not late, (route.methods, route.path, late)
+
+        assert gated_routes, "No route carries the flows_core gate."
+
+
 # ---------------------------------------------------------------------------
 # Tenant-admin API key guard consistency
 # ---------------------------------------------------------------------------
@@ -440,6 +539,7 @@ class TestTenantAdminApiKeyGuards:
             "/completion-models",
             "/embedding-models",
             "/transcription-models",
+            "/transcription-services",
             "/image-models",
             "/rerank-models",
             "/audit",
@@ -977,6 +1077,7 @@ RESOURCE_PERM_VOCABULARY: frozenset[str] = frozenset(
         "knowledge",
         "conversations",
         "files",
+        "flows",
         "jobs",
         "prompts",
     }
@@ -994,6 +1095,7 @@ SCOPE_CHECK_VOCABULARY: frozenset[str] = frozenset(
         "conversation",
         "crawl_run",
         "file",
+        "flow",
         "group_chat",
         "info_blob",
         "prompt",

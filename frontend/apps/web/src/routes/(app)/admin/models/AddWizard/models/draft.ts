@@ -12,6 +12,10 @@ import type {
   ImageModel,
   RerankModel,
   SecurityClassification,
+  TenantCompletionModelCreate,
+  TenantCompletionModelUpdate,
+  TenantTranscriptionModelCreate,
+  TenantTranscriptionModelUpdate,
   TranscriptionModel
 } from "@eneo/eneo-js";
 import type { WizardModelDraft } from "../wizardState";
@@ -32,9 +36,21 @@ export interface ModelDraftState {
   displayName: string;
   maxInputTokensStr: string;
   maxOutputTokensStr: string;
+  maxInputTokensTouched: boolean;
+  maxOutputTokensTouched: boolean;
   vision: boolean;
   reasoning: boolean;
   supportsToolCalling: boolean;
+  /** The model identifier the strict tool-schema declaration was made for,
+   *  or null when undeclared. A declaration belongs to one provider route:
+   *  the moment the identifier differs, the declaration is ineffective until
+   *  the admin declares it again for the new route (the server withdraws it
+   *  the same way when a route moves). Effective only with tool calling. */
+  strictToolSchemaRoute: string | null;
+  /** Whether the admin changed the declaration during this edit. An update
+   *  carries the flag only then; an untouched declaration is not fresh intent
+   *  and must not resurrect what the server withdrew meanwhile. */
+  strictToolSchemaTouched: boolean;
   family: string;
   dimensionsStr: string;
   maxInputStr: string;
@@ -46,6 +62,9 @@ export interface ModelDraftState {
   outputCostPerTokenStr: string;
   /** USD per minute of audio (transcription only). */
   costPerMinuteStr: string;
+  /** Transcription only: the model is served over the realtime API that
+   *  live transcription uses. The server accepts it only for vLLM providers. */
+  supportsRealtime: boolean;
   /** USD per generated image (image only). */
   costPerImageStr: string;
   /** Request defaults the image tool uses when the assistant does not ask. */
@@ -80,9 +99,13 @@ export function createEmptyDraft(modelType: ModelType, providerType: string): Mo
     displayName: "",
     maxInputTokensStr: "",
     maxOutputTokensStr: "",
+    maxInputTokensTouched: false,
+    maxOutputTokensTouched: false,
     vision: false,
     reasoning: false,
     supportsToolCalling: false,
+    strictToolSchemaRoute: null,
+    strictToolSchemaTouched: false,
     family: modelType === "embedding" ? "openai" : providerType || "openai",
     dimensionsStr: "",
     maxInputStr: "",
@@ -91,6 +114,7 @@ export function createEmptyDraft(modelType: ModelType, providerType: string): Mo
     inputCostPerTokenStr: "",
     outputCostPerTokenStr: "",
     costPerMinuteStr: "",
+    supportsRealtime: false,
     costPerImageStr: "",
     defaultSize: "auto",
     defaultQuality: "auto",
@@ -165,7 +189,18 @@ export function hasValidCompletionTokenBudgets(draft: ModelDraftState): boolean 
     draft.maxInputTokensStr !== "" &&
     parseInt(draft.maxInputTokensStr, 10) > 0 &&
     draft.maxOutputTokensStr !== "" &&
-    parseInt(draft.maxOutputTokensStr, 10) > 0
+    parseInt(draft.maxOutputTokensStr, 10) > 0 &&
+    hasValidDeclaredCapacity(draft)
+  );
+}
+
+/** Every capacity field a draft states must be a positive whole number.
+ *  Saving a completion model also needs both fields filled in
+ *  (hasValidCompletionTokenBudgets). */
+export function hasValidDeclaredCapacity(draft: ModelDraftState): boolean {
+  const declared = [draft.maxInputTokensStr, draft.maxOutputTokensStr];
+  return declared.every(
+    (value) => !value || (Number.isInteger(Number(value)) && Number(value) > 0)
   );
 }
 
@@ -203,15 +238,131 @@ export function perMillionFromTokenCost(value: number | string | null | undefine
   return Number((n * TOKENS_PER_MILLION).toPrecision(10)).toString();
 }
 
+/** The model identifier as a request submits it. The route a declaration
+ *  is bound to, the identifier compared against it, and the name on the wire
+ *  are one value, so what the form shows is what the server stores. */
+export function submittedModelName(draft: ModelDraftState): string {
+  return draft.name.trim();
+}
+
+/** Changing the identifier keeps both token limits: a completion model needs
+ *  them to serve any request, so only an explicit new value replaces them. */
+export function setDraftModelName(draft: ModelDraftState, name: string): void {
+  draft.name = name;
+}
+
+/** Whether the strict tool-schema declaration applies to the draft's current
+ *  route. Changing the identifier (typing, or picking a catalog model) makes
+ *  a declaration ineffective; declaring again binds it to the new route. */
+export function isStrictToolSchemaDeclared(draft: ModelDraftState): boolean {
+  return (
+    draft.strictToolSchemaRoute !== null &&
+    draft.strictToolSchemaRoute === submittedModelName(draft)
+  );
+}
+
+export function declareStrictToolSchema(draft: ModelDraftState, declared: boolean): void {
+  draft.strictToolSchemaRoute = declared ? submittedModelName(draft) : null;
+  draft.strictToolSchemaTouched = true;
+}
+
+type CompletionCapabilityField =
+  "vision" | "reasoning" | "supports_tool_calling" | "supports_strict_tool_schema";
+
+/** The capability fields of a create request: a total projection, there is
+ *  no server state to preserve. */
+export function completionCreateCapabilities(
+  model: WizardModelDraft
+): Required<Pick<TenantCompletionModelCreate, CompletionCapabilityField>> {
+  return {
+    vision: model.vision ?? false,
+    reasoning: model.reasoning ?? false,
+    supports_tool_calling: model.supportsToolCalling ?? false,
+    supports_strict_tool_schema: model.supportsStrictToolSchema ?? false
+  };
+}
+
+/** The capability fields of an update request: a patch. The strict
+ *  declaration travels only when the admin changed it in this edit; left
+ *  untouched it is omitted, so the server's own withdrawal on a route move
+ *  stands and a stale form cannot declare a route nobody assessed. */
+export function completionUpdateCapabilities(
+  draft: ModelDraftState
+): Pick<TenantCompletionModelUpdate, CompletionCapabilityField> {
+  return {
+    vision: draft.vision,
+    reasoning: draft.reasoning,
+    supports_tool_calling: draft.supportsToolCalling,
+    ...(draft.strictToolSchemaTouched
+      ? { supports_strict_tool_schema: isStrictToolSchemaDeclared(draft) }
+      : {})
+  };
+}
+
+type TranscriptionCapabilityField = "supports_realtime";
+
+/** The capability fields of a transcription create request, total like the
+ *  completion projection. */
+export function transcriptionCreateCapabilities(
+  model: WizardModelDraft
+): Required<Pick<TenantTranscriptionModelCreate, TranscriptionCapabilityField>> {
+  return { supports_realtime: model.supportsRealtime ?? false };
+}
+
+/** The capability fields of a transcription update request. The flag always
+ *  travels, so turning it off reaches the server as well as turning it on. */
+export function transcriptionUpdateCapabilities(
+  draft: ModelDraftState
+): Pick<TenantTranscriptionModelUpdate, TranscriptionCapabilityField> {
+  return { supports_realtime: draft.supportsRealtime };
+}
+
+/** Apply a catalogue answer's ceilings to a draft.
+ *
+ *  A dimension the catalogue does not state is not a declaration: that field
+ *  keeps whatever the admin left there and stays untouched, so a later save
+ *  leaves the stored limit as it is.
+ */
+export function applyCatalogueCeilings(
+  draft: ModelDraftState,
+  answer: { max_input_tokens?: number | null; max_output_tokens?: number | null }
+): void {
+  if (answer.max_input_tokens != null) {
+    draft.maxInputTokensStr = String(answer.max_input_tokens);
+    draft.maxInputTokensTouched = true;
+  }
+  if (answer.max_output_tokens != null) {
+    draft.maxOutputTokensStr = String(answer.max_output_tokens);
+    draft.maxOutputTokensTouched = true;
+  }
+}
+
+/** The ceilings a save states. An untouched or blank field is omitted, so the
+ *  server keeps its stored value; the API refuses null, and the save guard
+ *  (hasValidCompletionTokenBudgets) refuses a blank field before this runs. */
+export function completionUpdateCeilings(
+  draft: ModelDraftState
+): Pick<TenantCompletionModelUpdate, "max_input_tokens" | "max_output_tokens"> {
+  return {
+    ...(draft.maxInputTokensTouched && draft.maxInputTokensStr
+      ? { max_input_tokens: Number(draft.maxInputTokensStr) }
+      : {}),
+    ...(draft.maxOutputTokensTouched && draft.maxOutputTokensStr
+      ? { max_output_tokens: Number(draft.maxOutputTokensStr) }
+      : {})
+  } satisfies Pick<TenantCompletionModelUpdate, "max_input_tokens" | "max_output_tokens">;
+}
+
 export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
   return {
-    name: draft.name,
+    name: submittedModelName(draft),
     displayName: draft.displayName,
     maxInputTokens: draft.maxInputTokensStr ? parseInt(draft.maxInputTokensStr, 10) : undefined,
     maxOutputTokens: draft.maxOutputTokensStr ? parseInt(draft.maxOutputTokensStr, 10) : undefined,
     vision: draft.vision,
     reasoning: draft.reasoning,
     supportsToolCalling: draft.supportsToolCalling,
+    supportsStrictToolSchema: isStrictToolSchemaDeclared(draft),
     family: draft.family,
     dimensions: draft.dimensionsStr ? parseInt(draft.dimensionsStr, 10) : undefined,
     maxInput: draft.maxInputStr ? parseInt(draft.maxInputStr, 10) : undefined,
@@ -220,6 +371,7 @@ export function draftToWizardModel(draft: ModelDraftState): WizardModelDraft {
     inputCostPerToken: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
     outputCostPerToken: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
     costPerMinute: rawCostToNumber(draft.costPerMinuteStr),
+    supportsRealtime: draft.supportsRealtime,
     costPerImage: rawCostToNumber(draft.costPerImageStr),
     defaultSize: draft.defaultSize,
     defaultQuality: draft.defaultQuality,
@@ -266,9 +418,13 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     displayName: ("nickname" in model && model.nickname) || model.name,
     maxInputTokensStr: "",
     maxOutputTokensStr: "",
+    maxInputTokensTouched: false,
+    maxOutputTokensTouched: false,
     vision: false,
     reasoning: false,
     supportsToolCalling: false,
+    strictToolSchemaRoute: null,
+    strictToolSchemaTouched: false,
     family: ("family" in model && model.family) || "openai",
     dimensionsStr: "",
     maxInputStr: "",
@@ -277,6 +433,7 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     inputCostPerTokenStr: "",
     outputCostPerTokenStr: "",
     costPerMinuteStr: "",
+    supportsRealtime: false,
     costPerImageStr: "",
     defaultSize: "auto",
     defaultQuality: "auto",
@@ -291,6 +448,10 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     base.vision = model.vision ?? false;
     base.reasoning = model.reasoning ?? false;
     base.supportsToolCalling = model.supports_tool_calling ?? false;
+    base.strictToolSchemaRoute =
+      "supports_strict_tool_schema" in model && model.supports_strict_tool_schema
+        ? model.name
+        : null;
     base.inputCostPerTokenStr = perMillionFromTokenCost(model.input_cost_per_token);
     base.outputCostPerTokenStr = perMillionFromTokenCost(model.output_cost_per_token);
   } else if (modelType === "embedding" && "dimensions" in model) {
@@ -300,6 +461,7 @@ export function modelToDraft(model: AnyCatalogModel, modelType: ModelType): Mode
     base.outputCostPerTokenStr = perMillionFromTokenCost(model.output_cost_per_token);
   } else if (modelType === "transcription" && "cost_per_minute" in model) {
     base.costPerMinuteStr = costToString(model.cost_per_minute);
+    base.supportsRealtime = model.supports_realtime ?? false;
   } else if (modelType === "image" && "cost_per_image" in model) {
     base.costPerImageStr = costToString(model.cost_per_image);
     base.defaultSize = isImageSize(model.default_size) ? model.default_size : "auto";
@@ -319,12 +481,14 @@ export function applyCatalogModelToDraft(
 ): ModelDraftState {
   const next: ModelDraftState = {
     ...draft,
-    name: info.name,
     displayName: info.display_name ?? info.name
   };
+  setDraftModelName(next, info.name);
   if (modelType === "completion") {
     next.maxInputTokensStr = info.max_input_tokens != null ? String(info.max_input_tokens) : "";
+    next.maxInputTokensTouched = true;
     next.maxOutputTokensStr = info.max_output_tokens != null ? String(info.max_output_tokens) : "";
+    next.maxOutputTokensTouched = true;
     next.vision = info.supports_vision ?? false;
     next.reasoning = info.supports_reasoning ?? false;
     next.supportsToolCalling = info.supports_function_calling ?? false;

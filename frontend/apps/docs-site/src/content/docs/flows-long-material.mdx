@@ -1,0 +1,136 @@
+import { Callout } from "nextra/components";
+
+# Process long material section by section
+
+A step that reads a long transcript or document can hit the model's limits in
+two ways: the material does not fit in the model's context window, or the answer
+becomes longer than the model may write in one reply. Reading the material
+section by section fixes both for one kind of step: a step that pulls things out
+of the text as it reads.
+
+This page explains when to choose it, how to set it up in the flow editor, and
+what to expect from the result. It is one part of
+[Building flows that are efficient and robust](/docs/flows-best-practices); for
+the exact runtime rules, see the
+[section processing reference](/docs/flows#process-long-material-section-by-section).
+
+## When to choose it
+
+Choose **Del för del** when the step extracts facts, tasks, decisions, quotes,
+or actions from long material and each item stands on its own. Typical cases:
+
+- A recording of several hours, transcribed, where every statement about a
+  person's needs, goals, or agreements must be registered.
+- A long document where every requirement, deadline, or deviation must be listed.
+- Meeting notes where every decision and action point must be captured.
+
+Keep **Allt på en gång** (the default) when the answer depends on the whole:
+
+- A summary, an overall assessment, a recommendation, or a ranking.
+- A step that compares the beginning of the material with the end.
+- A step that reads several materials at once.
+
+A good test: would a person reading the material one chapter at a time, noting what
+each chapter contains, end up with the answer you need? Then the step is a good
+candidate. If the answer depends on seeing the whole text at once, it is not.
+
+## Set it up in the flow editor
+
+1. Open the step under **Bearbetningssteg** and expand **Underlag**.
+2. Under **Så läser AI:n underlaget**, choose **Del för del**.
+3. Give the step a fixed answer format: **Svar i fast format** with exactly one
+   list in the schema, where each entry describes one section. Every section fills
+   in exactly one entry, and the step's result is that list with one entry per
+   section, in section order. Put what the step extracts inside the entry, for
+   example a list of facts:
+
+   ```json
+   {
+     "sektioner": [
+       { "uppgifter": [{ "id": "S1-F1", "text": "...", "citat": "..." }] }
+     ]
+   }
+   ```
+
+   A later step can read all extracted items across the sections at once, for
+   example `sektioner.*.uppgifter`.
+
+4. Write the instruction as if the AI reads one part of the material at a time:
+   "register every statement about ..." rather than "summarize the meeting".
+
+The choice is shown only where it can apply: an AI step that passes its answer
+on in a fixed format, without running per file or per record. Other steps leave
+the row out; a step that already has a choice keeps the row and greys out the
+other choices with the reason.
+
+The row also offers **Sammanfatta stegvis**, which summarizes each
+section and then merges the summaries. Use it only when the step must produce
+one record from material that does not fit, and the loss of detail is acceptable.
+
+<Callout type="info">
+  Short material is read in one request, as one section. The answer still has
+  the section shape: a list with a single entry. Later steps read the same shape
+  whether the material was short or long, so the setting is safe for a step that
+  sometimes receives short and sometimes very long material.
+</Callout>
+
+## Numbering items across sections
+
+Each section is read without knowledge of the others, so ids the AI invents
+would restart in every section: two sections could both produce `F1`. Eneo
+therefore tells the AI which section it is reading and asks it to start every
+new id with the section number, for example `S2-F1`. You do not need to write
+anything in the instruction for this.
+
+This is guidance to the AI, not a check: Eneo does not rewrite ids afterwards.
+Ids copied from the material stay as they are. If the instruction or the answer
+format sets another id format, the AI follows that instead.
+
+If you want the section number somewhere else, the instruction can use the
+variable `section_index`, the 1-based number of the current section:
+
+```text
+Start each summary with "Part {{ section_index }}:".
+```
+
+The variable exists only on a step that reads section by section. On other steps
+the prompt editor marks it as unavailable and explains why.
+
+## What the step gives up
+
+- **Knowledge and websites.** A step that reads section by section cannot use
+  knowledge. If knowledge or websites are attached, the run stops at that step,
+  and the editor warns about it. Remove them, or put the background in the
+  instruction or in an earlier step.
+- **Reasoning across sections.** A statement that begins in one section and is
+  corrected in a later one produces two items. Ask for corrections to be
+  registered as their own items, and let a later step reconcile them.
+- **Deduplication.** The sections are collected as they are. If the same fact
+  is stated in two sections, it appears twice. Add a later step that merges
+  duplicates if the flow needs a clean register.
+- **One material per step.** The step reads one previous-step text or one
+  uploaded file. Combine several materials in an earlier step first.
+
+Sections are cut at line breaks where practical, so a sentence is rarely split.
+A single very long line without breaks can still be split mid-sentence.
+
+## Check the result
+
+After a run, open it under **Körningar** and look at the step. Its result is
+the list of section entries, in the order of the material, so it shows how many
+sections the step read and which section should have produced a missing item.
+
+If a section's answer still exceeds what the model may write in one reply, the
+step fails instead of returning a partial answer. The usual causes are an
+instruction that asks for long free text per item, or an item schema with many
+optional fields. Shorten the per-item output before retrying.
+
+## A worked example
+
+A care plan flow receives a transcript of a four-hour conversation. Step 1 reads
+it **Del för del** and registers every statement as a fact with a source quote
+and an id; Eneo has each section start its ids with its own number. Step 2 reads the register **Allt på en
+gång**, the facts from every section together, groups them by area, and writes
+the plan. The long reading
+happens once, in the step built for it; every later step works on a compact
+register that fits in one request.

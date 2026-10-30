@@ -1,23 +1,29 @@
 import contextlib
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Any, Optional
 
 from eneo.files import audio
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_models import File
+from eneo.files.transcript import TranscriptSegment
 from eneo.main.config import SETTINGS, Settings
 from eneo.main.logging import get_logger
 from eneo.model_providers.infrastructure.litellm_provider import (
     load_active_litellm_provider,
 )
 from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    EmptyTranscriptionInterval,
     LiteLLMTranscriptionAdapter,
 )
 
 if TYPE_CHECKING:
     from eneo.database.database import AsyncSession
     from eneo.files.file_service import FileService
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+    )
     from eneo.settings.encryption_service import EncryptionService
     from eneo.tenants.tenant import TenantInDB
     from eneo.transcription_models.domain.transcription_model import (
@@ -26,6 +32,43 @@ if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class TranscribedAudio:
+    """A completed transcription and the length of the audio it read.
+
+    ``duration_seconds`` is the decoded length of the source this call
+    transcribed. It describes one successful logical transcription, not
+    provider-request accounting: the adapter may chunk and retry underneath.
+    It is ``None`` only when the text came from the File's stored transcription
+    and no audio was decoded.
+    """
+
+    text: str
+    duration_seconds: float | None
+    # The chunk windows the audio was decoded in, each spanning its measured
+    # duration; None when the text came from the File's stored transcription.
+    segments: tuple[TranscriptSegment, ...] | None = None
+    # The transcript's own lines as structured segments (one per rendered
+    # ``[HH:MM:SS - HH:MM:SS] SPEAKER_NN: text`` line, speaker-labelled), when
+    # the external service produced them. Distinct from ``segments``: these
+    # place text in time for a reader, chunk windows place it for alignment.
+    transcript_segments: tuple[TranscriptSegment, ...] | None = None
+    # How speaker labels were handled for this transcript: None when none were
+    # requested, "external" when an external service labelled it, or
+    # "skipped:<reason>" when they were requested but could not be produced.
+    diarization: str | None = None
+    # Wall time of the external speaker-labelling call, when one was made.
+    diarization_elapsed_ms: int | None = None
+    # The service's word-timestamp source, when reported.
+    alignment: str | None = None
+    speaker_review: dict[str, Any] | None = None
+    empty_intervals: tuple[EmptyTranscriptionInterval, ...] = ()
+    # What came of the external service timing the words of a transcript
+    # whose speakers were not labelled: None when it was not asked, "done",
+    # or the closed reason it failed (flows' ``WordTimingOutcome``).
+    word_timing: str | None = None
 
 
 class Transcriber:
@@ -47,14 +90,30 @@ class Transcriber:
         self.encryption_service = encryption_service
         self.session = session
 
-    async def transcribe(self, file: File, transcription_model: "TranscriptionModel"):
+    async def transcribe(
+        self,
+        file: File,
+        transcription_model: "TranscriptionModel",
+        *,
+        language: str | None = None,
+        diarize: bool = True,
+        persist_cache_to_file: bool = True,
+        observer: "ProviderCallObserver | None" = None,
+        max_speakers: int | None = None,
+    ) -> TranscribedAudio:
+        # ``diarize`` and ``max_speakers`` are part of the flow-step transcriber
+        # contract; speaker identification is only honoured by the external
+        # transcription service, so the model-registry path accepts and ignores them.
+        del diarize, max_speakers
         mimetype: str = file.mimetype or ""
         if file.blob is None or not AudioMimeTypes.has_value(mimetype):
             raise ValueError("File needs to be an audio file")
 
-        # If file already has a transcription, return it
-        if file.transcription:
-            return file.transcription
+        file_cache_enabled = persist_cache_to_file and language is None
+        # Cached transcription is only safe when language is auto-detected and
+        # the caller has chosen the File's shared transcription reference.
+        if file_cache_enabled and file.transcription:
+            return TranscribedAudio(text=file.transcription, duration_seconds=None)
 
         temp_file_path: Path | None = None
         try:
@@ -63,10 +122,20 @@ class Transcriber:
                 temp_file.write(file.blob)
 
             result = await self.transcribe_from_filepath(
-                filepath=temp_file_path, transcription_model=transcription_model
+                filepath=temp_file_path,
+                transcription_model=transcription_model,
+                language=language,
+                observer=observer,
             )
 
-            result = await self.file_service.save_transcription(file.id, result)
+            if file_cache_enabled:
+                stored_text = await self.file_service.save_transcription(
+                    file.id, result.text
+                )
+                result = TranscribedAudio(
+                    text=stored_text,
+                    duration_seconds=result.duration_seconds,
+                )
         finally:
             if temp_file_path is not None:
                 with contextlib.suppress(FileNotFoundError):
@@ -148,12 +217,21 @@ class Transcriber:
         )
 
     async def transcribe_from_filepath(
-        self, *, filepath: Path, transcription_model: "TranscriptionModel"
-    ):
+        self,
+        *,
+        filepath: Path,
+        transcription_model: "TranscriptionModel",
+        language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
+        limits: audio.AudioDecodeLimits | None = None,
+    ) -> TranscribedAudio:
         adapter = await self.prepare_transcription(transcription_model)
         return await self.transcribe_prepared_from_filepath(
             filepath=filepath,
             adapter=adapter,
+            language=language,
+            observer=observer,
+            limits=limits,
         )
 
     async def prepare_transcription(
@@ -167,6 +245,17 @@ class Transcriber:
         *,
         filepath: Path,
         adapter: LiteLLMTranscriptionAdapter,
-    ) -> str:
-        async with audio.to_wav(str(filepath)) as wav_file:
-            return await adapter.get_text_from_file(wav_file)
+        language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
+        limits: audio.AudioDecodeLimits | None = None,
+    ) -> TranscribedAudio:
+        async with audio.to_wav(str(filepath), limits=limits) as wav_file:
+            transcription = await adapter.get_text_from_file(
+                wav_file, language=language, observer=observer
+            )
+            return TranscribedAudio(
+                text=transcription.text,
+                duration_seconds=wav_file.duration,
+                segments=transcription.segments,
+                empty_intervals=transcription.empty_intervals,
+            )

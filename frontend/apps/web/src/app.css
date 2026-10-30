@@ -1,6 +1,8 @@
 @import "@eneo/ui/styles";
 @source "../../../packages/ui/src/";
 
+@custom-variant dark (&:is(.dark *));
+
 /* ------------------------------------------------------------------ */
 /* Tailwind v4 dark variant — aligned with eneo's data-theme state    */
 /* ------------------------------------------------------------------ */
@@ -35,7 +37,12 @@
   --color-muted: var(--background-tertiary);
   --color-muted-foreground: var(--text-secondary);
   --color-border: var(--border-default);
-  --color-ring: var(--border-stronger);
+  /* Focus indicator, not a border: `--border-stronger` is a 25% grey, which
+     paints every shadcn focus ring in the app at 1.3-1.7:1 against a 3:1
+     bar (WCAG 1.4.11). `--accent-default` fixes light but is only 2.84:1
+     in dark; `--accent-stronger` is 9.26:1 and 6.91:1, so it is the one
+     token that clears the bar in both themes. */
+  --color-ring: var(--accent-stronger);
 
   /* Popover (dropdown menu, command palette, popover, tooltip surfaces) */
   --color-popover: var(--background-primary);
@@ -181,6 +188,57 @@
   /* `text-tertiary` utility, which is mapped to it below.             */
   --text-color-muted: var(--text-secondary);
   --text-color-tertiary: var(--text-muted);
+
+  /* ---------------------------------------------------------------- */
+  /* 12px readability floor for `text-xs`                              */
+  /* ---------------------------------------------------------------- */
+  /* The app root is 15px (density choice, see the `html` rule below), */
+  /* which makes Tailwind's default `text-xs` (.75rem) compute to      */
+  /* 11.25px — under the 12px floor the WCAG/EN 301 549 work targets   */
+  /* for this audience. 0.8rem lands `text-xs` at exactly 12px without */
+  /* reflowing any other step of the type scale. The line-height       */
+  /* mirrors Tailwind's default ratio so the computed line box stays   */
+  /* 1rem.                                                             */
+  --text-xs: 0.8rem;
+  --text-xs--line-height: calc(1 / 0.8);
+}
+
+/* ------------------------------------------------------------------ */
+/* Motion tokens (transitions-dev shared scale)                        */
+/* ------------------------------------------------------------------ */
+/* One scale for durations, easings, distances and blur. Components    */
+/* reference these by name; the per-transition variables below map the */
+/* installed snippet (panel reveal) onto the scale.                     */
+:root {
+  --duration-stagger: 40ms;
+  --duration-micro: 80ms;
+  --duration-quick: 150ms;
+  --duration-fast: 250ms;
+  --duration-medium: 350ms;
+  --duration-slow: 400ms;
+  --duration-very-slow: 500ms;
+  --ease-smooth-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: ease-in-out;
+  --ease-out: ease-out;
+  --ease-linear: linear;
+  --distance-micro: 4px;
+  --distance-small: 6px;
+  --distance-base: 8px;
+  --distance-medium: 12px;
+  --distance-large: 30px;
+  --scale-large: 0.96;
+  --scale-medium: 0.97;
+  --scale-small: 0.98;
+  --scale-tiny: 0.99;
+  --blur-small: 2px;
+  --blur-medium: 3px;
+  --blur-large: 8px;
+
+  /* Panel reveal (07): the failure card container opening. */
+  --panel-open-dur: var(--duration-slow);
+  --panel-translate-y: var(--distance-medium);
+  --panel-blur: var(--blur-small);
+  --panel-ease: var(--ease-smooth-out);
 }
 
 @font-face {
@@ -232,6 +290,8 @@
 }
 
 html {
+  /* Deliberate density choice; `--text-xs` in the @theme block above is
+     raised to 0.8rem to keep the smallest utility at the 12px floor. */
   font-size: 15px;
   color: var(--text-color-primary);
   /* Prevent browser dark mode from interfering with app theme */
@@ -242,8 +302,37 @@ html.dark {
   color-scheme: dark;
 }
 
+/* ------------------------------------------------------------------ */
+/* Surfaces the browser draws for us                                  */
+/* ------------------------------------------------------------------ */
+/* Selection, the caret and scrollbars ship with the browser's own     */
+/* colours, which belong to no design system: a pure-black caret and   */
+/* a system-blue selection read as unfinished next to themed controls, */
+/* and on Windows the default scrollbar is a wide grey slab. Taking    */
+/* them from the accent and border tokens costs nothing and keeps the  */
+/* whole surface in one palette, in both themes.                       */
+::selection {
+  background: oklch(from var(--accent-default) l c h / 0.22);
+  color: var(--text-primary);
+}
+
+:where(input, textarea, [contenteditable]) {
+  caret-color: var(--accent-default);
+}
+
+@supports (scrollbar-color: auto) {
+  :where(html) {
+    scrollbar-color: var(--border-stronger) transparent;
+    scrollbar-width: thin;
+  }
+}
+
+/* Placeholder contrast: the raw `--text-muted` shade fails at ~2.7:1; the
+   dedicated `--text-placeholder` token (packages/ui themes) meets ~4.5:1 in
+   both themes while staying visibly lighter than entered text. Placeholders
+   must never carry required information regardless. */
 *::placeholder {
-  color: var(--text-color-muted) !important;
+  color: var(--text-placeholder) !important;
 }
 
 /* ------------------------------------------------------------------ */
@@ -287,6 +376,20 @@ body.print-mode > .printable-document {
   }
 }
 /* ------------------------------------------ */
+
+/* Honor OS-level reduced-motion across the app. Route components must not
+   redefine this; component-level transitions still gate themselves via
+   prefersReducedMotion() for zero-duration correctness. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
 
 /* ------------------------------------------ */
 /* What's new "Show me" spotlight (driver.js)  */

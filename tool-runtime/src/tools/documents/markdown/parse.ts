@@ -14,7 +14,7 @@ export type Inline = {
 };
 export type ListItem = { runs: Inline[]; children: Block[] };
 export type Block =
-  | { type: "heading"; level: 1 | 2 | 3; runs: Inline[] }
+  | { type: "heading"; level: 1 | 2 | 3 | 4 | 5 | 6; runs: Inline[] }
   | { type: "paragraph"; runs: Inline[] }
   | { type: "list"; ordered: boolean; start: number; items: ListItem[] }
   | {
@@ -97,7 +97,7 @@ function blocks(tokens: Token[], depth: number): Block[] {
         const heading = token as Tokens.Heading;
         out.push({
           type: "heading",
-          level: Math.min(3, Math.max(1, heading.depth)) as 1 | 2 | 3,
+          level: Math.min(6, Math.max(1, heading.depth)) as 1 | 2 | 3 | 4 | 5 | 6,
           runs: inline(heading.tokens),
         });
         break;
@@ -109,7 +109,8 @@ function blocks(tokens: Token[], depth: number): Block[] {
             ? (children[0] as Tokens.Image)
             : undefined;
         const placed =
-          image && /^(?:image:([A-Za-z][A-Za-z0-9_-]{0,63})|(eneo-file:[0-9a-f]{32}))$/.exec(image.href);
+          image &&
+          /^(?:image:([A-Za-z][A-Za-z0-9_-]{0,63})|(eneo-file:[0-9a-f]{32}))$/.exec(image.href);
         if (placed)
           out.push({
             type: "image",

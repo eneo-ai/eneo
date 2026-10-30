@@ -87,6 +87,51 @@ TAGS_METADATA = [
         },
     },
     {
+        "name": "flows",
+        "description": (
+            "Flow authoring and runtime operations. Use these endpoints to create draft "
+            "flows, manage flow-owned assistants, attach DOCX templates, inspect run "
+            "contracts, upload runtime input files, start runs, fetch run outputs, and "
+            "drive human-review checkpoints from webapps or service-owned API-key "
+            "integrations when the key has Flow write access and owns the run. "
+            "For service-key webapps, start with `GET /flows/?space_id=...` or "
+            "`GET /flows/{id}/published/`, then follow the returned runtime paths and "
+            "`GET /flows/{id}/run-contract/`; `steps_requiring_review` tells clients "
+            "whether the published version can pause for human review. Draft authoring "
+            "endpoints require a user principal."
+            "\n\n"
+            "Conventions that apply to every Flow endpoint:\n"
+            "- **Base URL.** Paths are relative to this deployment's own origin. Eneo has "
+            "no shared hosted origin.\n"
+            "- **Trailing slashes are load-bearing.** Every Flow path ends with `/` except "
+            "`GET /flows/{id}/runs/{run_id}/evidence/export`. Omitting a required slash "
+            "returns `307`, and clients that drop the body or credential on redirect will "
+            "fail.\n"
+            "- **Authentication.** Send exactly one of `Authorization: Bearer <user token>` "
+            "or `X-API-Key: <api key>`. Never put an API key in the bearer header.\n"
+            "- **Errors.** Every failure returns the `GeneralError` body. Branch on the "
+            "string `code`; `message` is not stable and the numeric `eneo_error_code` is a "
+            "legacy category that unrelated failures can share.\n"
+            "- **Completion is discovered by polling.** There is no client-registered "
+            "run-status subscription, server-sent event, or WebSocket surface; a flow "
+            "author can separately configure a terminal step to deliver its result over "
+            "outbound HTTP. Poll `GET /flows/{id}/runs/{run_id}/` and stop when the status "
+            "capability `should_poll` is false.\n"
+            "- **Scope is evaluated before resources resolve**, so a flow outside an API "
+            "key's scope returns `403 insufficient_scope` rather than `404`."
+        ),
+    },
+    {
+        "name": "flow-packages",
+        "description": (
+            "Flow package export, validation, and import-planning operations for "
+            "portable `.eneopkg` bundles. Export a draft Flow into a typed "
+            "package, validate a package before choosing a target space, then create "
+            "a space-scoped import plan to inspect required local resource mappings "
+            "before any imported draft flow is created."
+        ),
+    },
+    {
         "name": "jobs",
         "description": "Job operations. Use this to keep track of running and completed jobs.",
     },

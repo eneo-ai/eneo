@@ -123,6 +123,8 @@ def _verify_token(
     audience: str,
     resource_claim: str,
     maximum_lifetime_seconds: int,
+    expected_resource_id: UUID | None = None,
+    expected_tenant_id: UUID | None = None,
 ) -> dict[str, Any] | None:
     """Verify signature, contract version, claim types and lifetime.
 
@@ -188,6 +190,16 @@ def _verify_token(
     if expires_at < now:
         return None
     if issued_at > now + MAX_FUTURE_ISSUANCE_SECONDS:
+        return None
+    # A caller that already knows the resource or tenant it serves binds the
+    # token to them, so a valid link cannot be redeemed for another object.
+    if expected_resource_id is not None and claims.get(resource_claim) != str(
+        expected_resource_id
+    ):
+        return None
+    if expected_tenant_id is not None and claims.get("tenant_id") != str(
+        expected_tenant_id
+    ):
         return None
 
     return cast(dict[str, Any], claims)
@@ -259,7 +271,12 @@ def generate_info_blob_original_download_token(
     )
 
 
-def verify_signed_token(token: str) -> dict[str, Any] | None:
+def verify_signed_token(
+    token: str,
+    *,
+    expected_file_id: UUID | None = None,
+    expected_tenant_id: UUID | None = None,
+) -> dict[str, Any] | None:
     """Verify a processing-download token."""
     return _verify_token(
         token,
@@ -267,10 +284,17 @@ def verify_signed_token(token: str) -> dict[str, Any] | None:
         audience=FILE_PROCESSING_DOWNLOAD_AUDIENCE,
         resource_claim="file_id",
         maximum_lifetime_seconds=FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        expected_resource_id=expected_file_id,
+        expected_tenant_id=expected_tenant_id,
     )
 
 
-def verify_file_original_download_token(token: str) -> dict[str, Any] | None:
+def verify_file_original_download_token(
+    token: str,
+    *,
+    expected_file_id: UUID | None = None,
+    expected_tenant_id: UUID | None = None,
+) -> dict[str, Any] | None:
     """Verify an exact-original token using its purpose-separated key."""
     return _verify_token(
         token,
@@ -278,6 +302,8 @@ def verify_file_original_download_token(token: str) -> dict[str, Any] | None:
         audience=FILE_ORIGINAL_DOWNLOAD_AUDIENCE,
         resource_claim="file_id",
         maximum_lifetime_seconds=FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS,
+        expected_resource_id=expected_file_id,
+        expected_tenant_id=expected_tenant_id,
     )
 
 

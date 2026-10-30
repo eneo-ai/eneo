@@ -1,0 +1,289 @@
+from __future__ import annotations
+
+from typing import Any, cast
+from uuid import UUID
+
+from eneo.flows.domain.flow import FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptExecutionInput,
+    FlowStepAttemptInput,
+    FlowStepAttemptStart,
+)
+from eneo.flows.domain.rag_evidence import (
+    RagRetrievalRecord,
+    build_step_result_citation_state,
+)
+from eneo.flows.domain.runtime import RuntimeStep, StepExecutionOutput
+from eneo.flows.domain.step_output import (
+    RejectedCompletion,
+    RejectedOutput,
+    ResolvedStepMaterial,
+    build_rejected_output_payload,
+    build_step_material_aliases,
+    utf8_prefix,
+)
+from eneo.flows.flow_run_provenance import (
+    CitationsProvenance,
+    FlowAttemptProvenance,
+    LlmProvenance,
+    RagProvenance,
+    normalize_json_preview,
+    normalize_text_preview,
+)
+from eneo.json_types import JsonObject
+
+
+def build_activated_attempt_input(
+    *,
+    start: FlowStepAttemptStart | None,
+    resolved_input: JsonObject | None = None,
+    completion_configuration: FlowStepAttemptCompletionConfiguration | None = None,
+    execution_inputs: tuple[FlowStepAttemptExecutionInput, ...] = (),
+) -> FlowStepAttemptInput | None:
+    if (
+        start is None
+        and resolved_input is None
+        and completion_configuration is None
+        and not execution_inputs
+    ):
+        return None
+    return FlowStepAttemptInput(
+        start=start,
+        resolved_input=resolved_input,
+        completion_configuration=completion_configuration,
+        execution_inputs=execution_inputs or None,
+    )
+
+
+def build_terminal_attempt_input(
+    *,
+    start: FlowStepAttemptStart | None,
+    resolved_input: JsonObject | None = None,
+) -> FlowStepAttemptInput | None:
+    if start is None and resolved_input is None:
+        return None
+    return FlowStepAttemptInput(
+        start=start,
+        resolved_input=resolved_input,
+    )
+
+
+def build_incomplete_attempt_provenance(
+    *,
+    rag_metadata: object = None,
+) -> dict[str, Any] | None:
+    """Build evidence captured before an attempt produced a complete output."""
+    rag = (
+        RagProvenance.model_validate(rag_metadata)
+        if isinstance(rag_metadata, dict)
+        else None
+    )
+    if rag is None:
+        return None
+    return FlowAttemptProvenance(rag=rag).to_payload()
+
+
+def build_attempt_provenance(
+    *,
+    output: StepExecutionOutput,
+) -> dict[str, Any] | None:
+    """Build irreconstructible evidence from completed runtime output."""
+    tool_calls = (
+        normalize_json_preview(output.tool_calls_metadata)
+        if output.tool_calls_metadata is not None
+        else None
+    )
+    raw_completion_text = (
+        normalize_text_preview(output.raw_completion_text)
+        if isinstance(output.raw_completion_text, str) and output.raw_completion_text
+        else None
+    )
+    llm = (
+        LlmProvenance(
+            tool_calls=tool_calls,
+            raw_completion_text=raw_completion_text,
+        )
+        if tool_calls is not None or raw_completion_text is not None
+        else None
+    )
+    rag = (
+        RagProvenance.model_validate(output.rag_metadata)
+        if output.rag_metadata is not None
+        else None
+    )
+    citations = (
+        CitationsProvenance.model_validate(output.citation_sidecar)
+        if output.citation_sidecar is not None
+        else None
+    )
+    if llm is None and rag is None and citations is None:
+        return None
+    return FlowAttemptProvenance(
+        llm=llm,
+        rag=rag,
+        citations=citations,
+    ).to_payload()
+
+
+def build_default_failed_input_payload(*, input_source: str) -> dict[str, Any]:
+    return {
+        "text": "",
+        "source_text": "",
+        "input_source": input_source,
+        "used_question_binding": False,
+    }
+
+
+def build_failed_step_result(
+    *,
+    claimed: FlowStepResult,
+    error_code: str,
+    error_message: str,
+    input_payload_json: dict[str, Any] | None = None,
+    effective_prompt: str | None = None,
+    rejected_output: str | RejectedOutput | None = None,
+    rejected_completion: RejectedCompletion | None = None,
+    max_inline_text_bytes: int | None = None,
+) -> FlowStepResult:
+    if rejected_output is not None and max_inline_text_bytes is None:
+        raise ValueError("Retaining rejected output requires an inline byte cap.")
+    updates: dict[str, Any] = {
+        "status": FlowStepResultStatus.FAILED,
+        "output_payload_json": (
+            rejected_completion.output.to_payload()
+            if rejected_completion is not None
+            and rejected_completion.output is not None
+            else rejected_output.to_payload()
+            if isinstance(rejected_output, RejectedOutput)
+            else build_rejected_output_payload(
+                rejected_output, max_inline_bytes=max_inline_text_bytes
+            )
+            if rejected_output is not None and max_inline_text_bytes is not None
+            else None
+        ),
+        "error_code": error_code,
+        "error_message": error_message,
+    }
+    if input_payload_json is not None:
+        updates["input_payload_json"] = input_payload_json
+    if isinstance(effective_prompt, str):
+        updates["effective_prompt"] = effective_prompt
+    return claimed.model_copy(update=updates, deep=True)
+
+
+def build_step_input_payload(
+    *,
+    text: str,
+    source_text: str,
+    input_source: str,
+    used_question_binding: bool,
+    materials: tuple[ResolvedStepMaterial, ...],
+    max_inline_text_bytes: int,
+) -> dict[str, Any]:
+    return {
+        "text": utf8_prefix(text, max_bytes=max_inline_text_bytes)
+        if max_inline_text_bytes > 0
+        else text,
+        "text_truncated": max_inline_text_bytes > 0
+        and len(text.encode("utf-8")) > max_inline_text_bytes,
+        "source_text": utf8_prefix(source_text, max_bytes=max_inline_text_bytes)
+        if max_inline_text_bytes > 0
+        else source_text,
+        "source_text_truncated": max_inline_text_bytes > 0
+        and len(source_text.encode("utf-8")) > max_inline_text_bytes,
+        "material_aliases": [
+            alias.model_dump(mode="json")
+            for alias in build_step_material_aliases(
+                materials=materials, max_inline_bytes=max_inline_text_bytes
+            )
+        ],
+        "input_source": input_source,
+        "used_question_binding": used_question_binding,
+    }
+
+
+def build_completed_step_input_payload(output: StepExecutionOutput) -> JsonObject:
+    payload = build_step_input_payload(
+        text=output.input_text,
+        source_text=output.source_text,
+        input_source=output.input_source,
+        used_question_binding=output.used_question_binding,
+        materials=output.materials,
+        max_inline_text_bytes=output.max_inline_text_bytes,
+    )
+    payload["effective_prompt_truncated"] = (
+        output.max_inline_text_bytes > 0
+        and len(output.effective_prompt.encode("utf-8")) > output.max_inline_text_bytes
+    )
+    if output.transcription_metadata is not None:
+        payload["transcription"] = output.transcription_metadata
+    if output.runtime_input_metadata is not None:
+        payload["runtime_input"] = output.runtime_input_metadata
+    if output.long_material is not None:
+        payload["long_material"] = output.long_material
+    citation_state = build_step_result_citation_state(
+        output.rag_metadata,
+        inherited_sources=output.inherited_citation_sources or (),
+    )
+    if citation_state is not None:
+        # Verbatim passages live only in attempt provenance; the step result
+        # keeps the source identity a later step needs to inherit citations,
+        # including the inherited sources this step cited itself.
+        payload["rag"] = citation_state
+    if output.contract_validation is not None:
+        payload["contract_validation"] = output.contract_validation
+    if output.diagnostics:
+        payload["diagnostics"] = [
+            {
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+                "severity": diagnostic.severity,
+            }
+            for diagnostic in output.diagnostics
+        ]
+    return cast(JsonObject, payload)
+
+
+def build_completed_step_result(
+    *,
+    claimed: FlowStepResult,
+    run_id: UUID,
+    flow_id: UUID,
+    tenant_id: UUID,
+    step: RuntimeStep,
+    output: StepExecutionOutput,
+    output_payload_json: dict[str, Any],
+    execution_hash: str,
+) -> FlowStepResult:
+    return FlowStepResult(
+        id=claimed.id,
+        flow_run_id=run_id,
+        flow_id=flow_id,
+        tenant_id=tenant_id,
+        step_id=step.step_id,
+        step_order=step.step_order,
+        assistant_id=step.assistant_id,
+        input_payload_json=build_completed_step_input_payload(output),
+        effective_prompt=(
+            utf8_prefix(output.effective_prompt, max_bytes=output.max_inline_text_bytes)
+            if output.max_inline_text_bytes > 0
+            else output.effective_prompt
+        ),
+        output_payload_json=output_payload_json,
+        model_parameters_json=output.model_parameters_json,
+        num_tokens_input=output.num_tokens_input,
+        num_tokens_output=output.num_tokens_output,
+        status=FlowStepResultStatus.COMPLETED,
+        error_code=None,
+        error_message=None,
+        flow_step_execution_hash=execution_hash,
+        created_at=claimed.created_at,
+        updated_at=claimed.updated_at,
+    )
+
+
+def build_transcribe_only_rag_metadata(*, timeout_seconds: float) -> dict[str, Any]:
+    return RagRetrievalRecord(
+        status="skipped_transcribe_only", timeout_seconds=int(timeout_seconds)
+    ).to_payload()

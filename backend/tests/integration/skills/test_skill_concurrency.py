@@ -194,7 +194,10 @@ async def _wait_for_held_write(
 
 
 async def test_fresh_install_owner_has_every_tenant_permission(admin_user):
-    assert admin_user.permissions == set(Permission) - {Permission.EDITOR}
+    assert admin_user.permissions == set(Permission) - {
+        Permission.EDITOR,
+        Permission.FLOWS,
+    }
 
 
 async def test_binding_projection_keeps_pinned_and_current_revision_identity(

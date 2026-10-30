@@ -1,0 +1,1113 @@
+from __future__ import annotations
+
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Body,
+    Depends,
+    Header,
+    Path,
+    Query,
+    Request,
+    status,
+)
+from fastapi.responses import JSONResponse
+
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
+from eneo.flows.api import flow_access_context
+from eneo.flows.api.flow_api_common import (
+    FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE,
+    FLOW_RUN_FORBIDDEN_DESCRIPTION,
+    FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE,
+    RETIRED_FLOW_HISTORY_READ_CLAUSE,
+    RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE,
+    audit_actor_kwargs,
+    commit_flow_runtime_write_before_response,
+    error_response,
+)
+from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_models import (
+    PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE,
+    FlowRunCreateRequest,
+    FlowRunDetailPublic,
+    FlowRunListPublic,
+    FlowRunPublic,
+    FlowRunRedispatchRequest,
+    FlowRunRedispatchResponse,
+    FlowRunStartedByPublic,
+    FlowRunSummaryPublic,
+)
+from eneo.flows.api.flow_run_concurrency_response import (
+    FLOW_RUN_CONCURRENCY_MESSAGE,
+    FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
+    flow_run_concurrency_limit_response,
+)
+from eneo.flows.api.flow_run_contract_models import FlowRunCapacityPublic
+from eneo.flows.api.flow_run_started_by import (
+    started_by_for_run,
+    started_by_for_runs,
+)
+from eneo.flows.api.flow_run_status_capability_models import (
+    FlowRunStatusCapabilitiesPublic,
+    flow_run_status_capabilities_public,
+)
+from eneo.flows.api.flow_runtime_paths import (
+    FLOW_RUN_CANCEL_PATH,
+    FLOW_RUN_CAPACITY_PATH,
+    FLOW_RUN_PATH,
+    FLOW_RUN_REDISPATCH_PATH,
+    FLOW_RUN_STATUS_CAPABILITIES_PATH,
+    FLOW_RUN_STATUS_PATH,
+    FLOW_RUNS_PATH,
+)
+from eneo.flows.application.flow_dispatch import (
+    FlowRunDispatchAccepted,
+    FlowRunDispatchExhaustionGenerationConflictError,
+    FlowRunDispatchFailed,
+    dispatch_flow_run_recoverably_after_commit,
+    redrive_flow_run_recoverably_after_commit,
+)
+from eneo.flows.application.flow_run_evidence_snapshot import (
+    flow_run_evidence_snapshot_transaction,
+)
+from eneo.flows.application.flow_trace_audit import (
+    log_flow_trace_audit_or_raise,
+    raise_flow_trace_audit_unavailable,
+)
+from eneo.flows.domain.flow import FlowRun, FlowRunStatus
+from eneo.flows.domain.flow_run_exceptions import FlowRunConcurrencyLimitReachedError
+from eneo.flows.domain.flow_run_listing import (
+    FLOW_RUN_LIST_SEARCH_MAX_CHARS,
+    FlowRunListing,
+    FlowRunListOrder,
+    FlowRunListSort,
+)
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_step_inputs import FlowRunStepInputFiles
+from eneo.main.container.container import Container
+from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
+    ConflictException,
+    ErrorCodes,
+    InternalServerException,
+)
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
+from eneo.users.user import UserInDB
+
+router = APIRouter()
+_TENANT_RUN_CAPACITY_REASON = (
+    "Tenant members may read Flow run status capabilities and their own "
+    "tenant's run capacity."
+)
+
+_FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION = (
+    "Optional caller-supplied idempotency key of 1 to 255 characters after trimming; "
+    "a longer or blank key returns `400` with code `flow_run_invalid_idempotency_key`. "
+    "That bound is enforced as a typed error rather than as a schema `maxLength`, so a "
+    "validator generated from this document will not catch it. Reusing the same key "
+    "with the same request payload returns the existing run payload. Reusing the same "
+    "key with a different payload returns `400` with code "
+    "`flow_run_idempotency_conflict`. Replay is available while the matching run row is "
+    "retained; once retention removes the row the key no longer matches and the same "
+    "request creates a new run, so keep the returned run id as the durable polling "
+    "handle."
+)
+
+_FLOW_RUN_CAPACITY_DESCRIPTION = """
+Return how many more concurrent Flow runs may be started.
+
+Use this before submitting a batch, so a client discovers the limit
+up front instead of as a rejected `create_run` partway through. `active_runs`
+counts `queued` and `running` runs, including work started by
+other clients and stale queued work that has not been recovered. A run paused
+at `awaiting_review` holds no slot and is not counted.
+
+This is a snapshot, not a reservation: another caller can consume a slot
+between this response and `create_run`, which still enforces the limit.
+"""
+_FLOW_RUN_STATUS_CAPABILITIES_DESCRIPTION = """
+Return the canonical Flow run status capability table.
+
+Use this endpoint when building run-history, polling, cancellation, redispatch, and
+human-review UI logic. The response describes what each `FlowRun.status` value means
+operationally, so clients do not need to hard-code status groups.
+
+Important semantics:
+- `should_poll` is true for `queued`, `running`, and `awaiting_review`.
+- `is_terminal` is true for `completed`, `failed`, and `cancelled`.
+- `is_cancellable` tells clients when the cancel endpoint is a valid action.
+- `can_request_redispatch` is true for `queued`, but redispatch remains server-gated by
+  `dispatch_next_attempt_at`; a queued run that is not due returns
+  `redispatched_count: 0`.
+- `filter_order` is the recommended status filter order for run-history UIs.
+
+The table is flow-agnostic and stable across tenants. Fetch it once at application startup
+or generate equivalent constants from this OpenAPI schema.
+"""
+
+_FLOW_RUN_CREATE_DESCRIPTION = (
+    """
+    Create a new run for a published flow.
+
+    The returned run id is committed before this endpoint returns `201 Created`, so clients can
+    immediately poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` with the id from the response.
+
+    Generic consumer sequence:
+    1. Inspect `GET /api/v1/flows/{id}/run-contract/` to understand the published form fields,
+       required runtime step inputs, and version pinning requirements.
+    2. Upload required files via `.../steps/{step_id}/runtime-files/` using step ids
+       from the run contract before creating the run. A returned file id may be
+       reused under each compatible `step_inputs[step_id].file_ids` entry for
+       the same Flow.
+    3. Submit the returned uploaded files through `step_inputs[step_id].file_ids`,
+       together with any structured `input_payload_json` fields in this run request.
+       When the run contract's `transcription.speaker_labels.selectable` is true, the
+       request may also choose `speaker_labels`; when `transcription.max_speakers` is
+       present, it may bound the speaker count with `max_speakers`.
+    4. Poll `GET /api/v1/flows/{id}/runs/{run_id}/status/` until the run is terminal.
+       Then retrieve this run's audited detail or use `.../steps/` for evidence.
+
+    Request bodies reject unknown JSON fields. The removed top-level `file_ids` field returns
+    `400` with code `flow_run_top_level_file_ids_not_supported`; use
+    `step_inputs[step_id].file_ids` instead. A `speaker_labels` choice the run contract does
+    not offer returns `422` with code `flow_run_speaker_labels_not_selectable`, and a
+    `max_speakers` for a run that labels no speakers returns `422` with code
+    `flow_run_max_speakers_not_available`. A `run_label` that is not one line of 1 to
+    120 characters after trimming returns `422` with code `flow_run_invalid_label`.
+
+    `Idempotency-Key` is optional but recommended for retried writes. Reusing the same key with
+    the same request payload returns the existing run payload. Reusing the same key with a
+    different payload returns `400` with code `flow_run_idempotency_conflict`. Replay does not
+    enqueue another run; it returns the current retained run row. Replay lasts while the
+    matching run row is retained; clients should keep the returned run id as the durable
+    polling handle.
+
+    Service-key principals may create published-flow runs in v1. Draft ownership still
+    requires a user principal.
+
+    """
+    + FLOW_RUN_SERVICE_KEY_REVIEW_CLAUSE
+    + """
+    """
+)
+
+_FLOW_RUN_DETAIL_DESCRIPTION = """
+    Get the sensitive input and output detail for one run.
+
+    Use this endpoint for the accepted input and typed top-level `result` when building consumer apps.
+    `result` is null until the run completes successfully, then discriminates inline text,
+    authored structured JSON, current artifact metadata, or successful outbound delivery.
+    Structured values and contracts are interpreted with this run's pinned `flow_version`.
+
+    This response model is `FlowRunDetailPublic`: it is the run-create model plus an
+    always-present `webhook_deliveries` array, which stays empty unless the flow's final step
+    was authored with outbound HTTP delivery.
+
+    This content-bearing access is audit-logged and fails closed if the required audit record
+    cannot be committed. Do not use it for routine status polling. Poll the dedicated
+    `/status/` endpoint instead; there is no
+    client-registered run-status subscription, server-sent event, or WebSocket surface. A
+    flow author can separately configure a terminal step to deliver its result over outbound
+    HTTP, which is what `webhook_deliveries` reports; that does signal successful completion
+    to the receiver they configured, but it is designed into the flow rather than requested
+    by the caller and it reports neither failure nor review states. Poll the status endpoint about
+    every 2 seconds for the first 30 seconds, then every 5 seconds, then every 15 seconds,
+    and stop when the status capability `should_poll` is false. Keep polling while the status
+    is `awaiting_review`, because a reviewer can act at any time and the checkpoint can also
+    expire.
+    Current runtime visibility is policy-based: callers always see their own runs, tenant admins
+    can inspect runs across the tenant, same-space admins and owners can inspect run metadata for
+    flows in their space, and service-key principals can inspect only their own runs.
+    """
+
+_FLOW_RUN_STATUS_DESCRIPTION = """
+    Get the lifecycle status summary for one run.
+
+    This is the routine polling contract. It contains lifecycle, timing, and bounded,
+    secret-free dispatch diagnosis fields, but excludes accepted input, terminal errors,
+    terminal output, result-file metadata, provider usage, and webhook-delivery content.
+    Poll about every 2 seconds for the first 30 seconds, then every 5 seconds, then every
+    15 seconds, and stop when the status capability `should_poll` is false.
+
+    Status polling is authorized but not audit-logged as a distinct business event. Retrieve the
+    content-bearing run detail only when a user or client needs the run input or result.
+    """
+
+_FLOW_RUN_LIST_DESCRIPTION = """
+    List runs for a specific flow.
+
+    Use this endpoint to list runs under `/flows/{id}`.
+    The `count` field in the paginated response reports the number of items returned in the
+    current page, not the total number of matching runs across all pages. `has_more` reports
+    whether another page exists after this offset window.
+
+    Items use the same content-free lifecycle projection as the dedicated run-status endpoint.
+    Accepted input, terminal errors, terminal output, result-file metadata, provider usage, and
+    webhook deliveries are deliberately omitted so background history refresh does not expose
+    or repeatedly read sensitive content. Retrieve one run's audited detail when that content
+    is needed. The caller-supplied `run_label` is run metadata and is included.
+
+    Current runtime visibility is policy-based: callers always list their own runs, tenant admins
+    can list runs across the tenant, same-space admins and owners can list run metadata for flows
+    in their space, and service-key principals can list only their own runs.
+    """
+
+_FLOW_RUN_CANCEL_DESCRIPTION = (
+    """
+Cancel a flow run if it is not already terminal.
+
+Cancelling is idempotent and never fails on state. Calling it on a run that is already
+`completed`, `failed`, or `cancelled` returns `200` with that run unchanged, still in its
+existing terminal status. Do not assume the response status is `cancelled`; read
+`status` from the response body.
+
+The run status changes before the response returns, but the worker stops asynchronously.
+An in-flight completion-model call is aborted within a few seconds; an in-flight
+transcription or outbound HTTP call runs to completion and is honored only at the next
+step boundary. Provider work can therefore still be billed after this endpoint returns,
+and a step result can settle shortly after the run already reads `cancelled`.
+
+A cancelled run cannot be resumed or rerun. Create a new run instead.
+
+This is the canonical run control endpoint for flow consumers. Current runtime lifecycle control
+is policy-based: callers can cancel their own runs, tenant admins can cancel runs across the
+tenant, same-space admins and owners can cancel runs for flows in their space, and service-key
+principals can cancel only their own runs.
+
+"""
+    + FLOW_RUN_COMMIT_BEFORE_RESPONSE_CLAUSE
+    + """
+    """
+)
+
+
+@router.get(
+    FLOW_RUN_STATUS_CAPABILITIES_PATH,
+    response_model=FlowRunStatusCapabilitiesPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_flow_run_status_capabilities",
+    summary="Get flow run status capabilities",
+    description=_FLOW_RUN_STATUS_CAPABILITIES_DESCRIPTION,
+    responses={
+        401: error_response(
+            description="Authentication is required to inspect Flow run capabilities.",
+            message="Unauthenticated.",
+            eneo_error_code=ErrorCodes.AUTHENTICATION_ERROR,
+        ),
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_RUN_CAPACITY_REASON,
+)
+async def get_flow_run_status_capabilities(
+    _container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
+) -> FlowRunStatusCapabilitiesPublic:
+    return flow_run_status_capabilities_public()
+
+
+@router.get(
+    FLOW_RUN_CAPACITY_PATH,
+    response_model=FlowRunCapacityPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_flow_run_capacity",
+    summary="Get flow run capacity",
+    description=_FLOW_RUN_CAPACITY_DESCRIPTION,
+    responses={
+        401: error_response(
+            description="Authentication is required to inspect Flow run capacity.",
+            message="Unauthenticated.",
+            eneo_error_code=ErrorCodes.AUTHENTICATION_ERROR,
+        ),
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_TENANT_RUN_CAPACITY_REASON,
+)
+async def get_flow_run_capacity(
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
+) -> FlowRunCapacityPublic:
+    capacity = await container.flow_run_service().runtime_capacity()
+    return FlowRunCapacityPublic(
+        tenant_id=capacity.tenant_id,
+        active_runs=capacity.active_runs,
+        max_concurrent_runs=capacity.max_concurrent_runs,
+        available_slots=capacity.available_slots,
+    )
+
+
+@router.post(
+    FLOW_RUNS_PATH,
+    response_model=FlowRunPublic,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_flow_run",
+    summary="Create flow run",
+    description=_FLOW_RUN_CREATE_DESCRIPTION,
+    responses={
+        400: error_response(
+            description=(
+                "Flow cannot be run in its current state or the request payload is "
+                "invalid. Machine-readable codes include "
+                "`flow_not_published`, `flow_definition_checksum_mismatch`, "
+                "`flow_run_top_level_file_ids_not_supported`, "
+                "`flow_run_idempotency_conflict`, and "
+                "`flow_run_required_step_input_missing`. Runtime step-input errors "
+                "include context.step_ids so clients can highlight the missing "
+                "required upload controls."
+            ),
+            message="Flow must be published before creating runs.",
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
+        ),
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description=f"Flow not found in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
+            message="Flow not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        409: error_response(
+            description="The live transcript is already bound to another file.",
+            message="Live transcript is already bound to another file.",
+            eneo_error_code=ErrorCodes.CONFLICT,
+            code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_ALREADY_BOUND,
+        ),
+        429: {
+            **error_response(
+                description=(
+                    "The maximum number of active Flow runs is reached; "
+                    "`context.max_concurrent_runs` is the effective limit "
+                    "(the administrator's flow runtime policy, bounded by the "
+                    "server capacity). Wait for capacity, then submit the logical run again."
+                ),
+                message=FLOW_RUN_CONCURRENCY_MESSAGE,
+                eneo_error_code=ErrorCodes.BAD_REQUEST,
+                code=FlowApiErrorCode.RUN_CONCURRENCY_LIMIT_REACHED,
+                context={
+                    "max_concurrent_runs": 10,
+                    "retry_after_seconds": FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
+                },
+            ),
+            "headers": {
+                "Retry-After": {
+                    "description": (
+                        "Fixed polling hint in seconds, not a prediction: a run can "
+                        "take hours, so read `available_slots` from the run capacity "
+                        "endpoint to learn when a slot is free."
+                    ),
+                    "schema": {
+                        "type": "integer",
+                        "example": FLOW_RUN_CONCURRENCY_RETRY_AFTER_SECONDS,
+                    },
+                }
+            },
+        },
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
+)
+async def create_flow_run(
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the published flow that should be executed."),
+    ],
+    request: Request,
+    run_in: FlowRunCreateRequest,
+    background_tasks: BackgroundTasks,
+    idempotency_key: Annotated[
+        str | None,
+        Header(
+            alias="Idempotency-Key",
+            description=_FLOW_RUN_IDEMPOTENCY_HEADER_DESCRIPTION,
+        ),
+    ] = None,
+    container: Container = Depends(
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_module_user=True,
+            with_upload_admission=True,
+        )
+    ),
+) -> FlowRunPublic | JSONResponse:
+    assembler = FlowAssembler()
+    dispatch_run: FlowRun | None = None
+    completed_replay_view = None
+    started_by: FlowRunStartedByPublic | None = None
+    try:
+        async with commit_flow_runtime_write_before_response(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.RUN,
+                allow_service_key_principals=True,
+                require_published_for_service_key=True,
+            )
+            run_service = container.flow_run_service()
+            user = container.user()
+            create_result = await run_service.create_run(
+                flow_id=id,
+                input_payload_json=run_in.input_payload_json,
+                expected_flow_version=run_in.expected_flow_version,
+                step_inputs=(
+                    {
+                        step_id: FlowRunStepInputFiles(
+                            file_ids=tuple(step_input.file_ids),
+                            live_transcript_id=step_input.live_transcript_id,
+                            single_recording=step_input.single_recording,
+                        )
+                        for step_id, step_input in run_in.step_inputs.items()
+                    }
+                    if run_in.step_inputs is not None
+                    else None
+                ),
+                idempotency_key=idempotency_key,
+                **run_in.model_dump(
+                    include={"run_label", "speaker_labels", "max_speakers"},
+                    exclude_unset=True,
+                ),
+            )
+            run = create_result.run
+            started_by = await started_by_for_run(container, run)
+            if create_result.created:
+                await container.audit_service().log(
+                    tenant_id=user.tenant_id,
+                    user=user,
+                    action=ActionType.FLOW_RUN_CREATED,
+                    entity_type=EntityType.FLOW_RUN,
+                    entity_id=run.id,
+                    description=f"Created flow run for flow {id}",
+                    metadata=AuditMetadata.standard(
+                        actor=user,
+                        target=run,
+                        extra={
+                            "flow_id": str(id),
+                            "run_id": str(run.id),
+                            "revision": run.revision,
+                        },
+                    ),
+                    required=True,
+                )
+                dispatch_run = run
+            elif run.status is FlowRunStatus.COMPLETED:
+                completed_replay_view = (
+                    await run_service.enrich_run_with_result_files_and_usage(
+                        run=run,
+                    )
+                )
+    except FlowRunConcurrencyLimitReachedError as exc:
+        return flow_run_concurrency_limit_response(request, exc)
+
+    if dispatch_run is not None:
+        background_tasks.add_task(
+            dispatch_flow_run_recoverably_after_commit,
+            run_id=dispatch_run.id,
+            tenant_id=dispatch_run.tenant_id,
+            expected_revision=dispatch_run.revision,
+        )
+    if completed_replay_view is not None:
+        return assembler.to_run_public(
+            completed_replay_view.run,
+            result_files=completed_replay_view.result_files,
+            token_usage=completed_replay_view.token_usage,
+            transcription_usage=completed_replay_view.transcription_usage,
+            final_output=completed_replay_view.final_output,
+            started_by=started_by,
+        )
+    return assembler.to_run_public(run, started_by=started_by)
+
+
+@router.get(
+    FLOW_RUNS_PATH,
+    response_model=FlowRunListPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="list_flow_runs",
+    summary="List flow runs",
+    description=f"{_FLOW_RUN_LIST_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
+    responses={
+        200: {
+            "description": (
+                "Flow run page. `items` contains the returned page only; "
+                "`count` is the number of returned runs, `has_more` tells "
+                "clients whether to request the next offset window, and "
+                "`status_counts` counts every listed run by status, or is null "
+                "when `include_status_counts=false`."
+            ),
+            "content": {
+                "application/json": {
+                    "example": PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE,
+                }
+            },
+        },
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
+async def list_flow_runs(
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow whose runs should be listed.")
+    ],
+    request: Request,
+    limit: int = Query(
+        default=50, ge=1, le=200, description="Maximum number of runs to return."
+    ),
+    offset: int = Query(
+        default=0, ge=0, description="Number of runs to skip before returning results."
+    ),
+    statuses: Annotated[
+        list[FlowRunStatus] | None,
+        Query(
+            alias="status",
+            description=(
+                "Filter runs by one or more status values. Repeat `status=` "
+                "to request multiple statuses."
+            ),
+        ),
+    ] = None,
+    mine: Annotated[
+        bool,
+        Query(
+            description=(
+                "Only return runs the caller started, within the runs the caller "
+                "may see. A module session counts as its signed-in user."
+            ),
+        ),
+    ] = False,
+    search: Annotated[
+        str | None,
+        Query(
+            max_length=FLOW_RUN_LIST_SEARCH_MAX_CHARS,
+            description=(
+                "Only return runs whose `run_label`, or the name of whoever started "
+                "them (a user's username or email, a service key's name), contains "
+                "this text, ignoring case. It searches run metadata only, never "
+                "accepted input, output or evidence, so the list stays a "
+                "content-free read. Blank searches nothing."
+            ),
+            examples=["Case 123"],
+        ),
+    ] = None,
+    sort: Annotated[
+        FlowRunListSort,
+        Query(
+            description=(
+                "Order of the runs: `created_at` (when the run was created, the "
+                "default), `started_at` (when it started; its creation time while "
+                "it has not), `status` (the status capability table's "
+                "`filter_order`) or `duration` (from start to finish; runs that "
+                "have not finished come last in both orders). Ties list the "
+                "newest run first, so paging stays stable."
+            ),
+            examples=["started_at"],
+        ),
+    ] = "created_at",
+    order: Annotated[
+        FlowRunListOrder,
+        Query(description="`desc` (the default) or `asc`.", examples=["desc"]),
+    ] = "desc",
+    include_status_counts: Annotated[
+        bool,
+        Query(
+            description=(
+                "Whether to count the listed runs by status (the default). A client "
+                "that already has the counts, such as one reading a later page of "
+                "the same list, can pass `false` to skip the count over the whole "
+                "listed history; `status_counts` is then null."
+            ),
+        ),
+    ] = True,
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
+):
+    await flow_access_context.enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        required_access=FlowApiAction.VIEW,
+        allow_service_key_principals=True,
+        history=True,
+    )
+    listing = FlowRunListing.of(search=search, sort=sort, order=order)
+    run_service = container.flow_run_service()
+    runs = await run_service.list_run_statuses(
+        flow_id=id,
+        statuses=statuses,
+        mine=mine,
+        limit=limit + 1,
+        offset=offset,
+        history=True,
+        listing=listing,
+    )
+    status_counts = (
+        await run_service.count_run_statuses(
+            flow_id=id, mine=mine, history=True, search=listing.search
+        )
+        if include_status_counts
+        else None
+    )
+    page_runs = runs[:limit]
+    started_by = await started_by_for_runs(container, page_runs)
+    assembler = FlowAssembler()
+    return {
+        "count": len(page_runs),
+        "items": [
+            assembler.to_run_summary_public(run, started_by=started_by.get(run.id))
+            for run in page_runs
+        ],
+        "has_more": len(runs) > limit,
+        "status_counts": (
+            None
+            if status_counts is None
+            else {status.value: count for status, count in status_counts.items()}
+        ),
+    }
+
+
+@router.get(
+    FLOW_RUN_STATUS_PATH,
+    response_model=FlowRunSummaryPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_flow_run_status",
+    summary="Get flow run status",
+    description=f"{_FLOW_RUN_STATUS_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
+    responses={
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
+async def get_flow_run_status(
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow that owns the requested run.")
+    ],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to poll.")],
+    request: Request,
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
+):
+    await flow_access_context.enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        required_access=FlowApiAction.VIEW,
+        allow_service_key_principals=True,
+        history=True,
+    )
+    run = await container.flow_run_service().get_run_status(
+        run_id=run_id,
+        flow_id=id,
+        history=True,
+    )
+    return FlowAssembler.to_run_summary_public(
+        run, started_by=await started_by_for_run(container, run)
+    )
+
+
+@router.get(
+    FLOW_RUN_PATH,
+    response_model=FlowRunDetailPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_flow_run",
+    summary="Get flow run",
+    description=f"{_FLOW_RUN_DETAIL_DESCRIPTION.rstrip()}\n\n{RETIRED_FLOW_HISTORY_READ_CLAUSE}",
+    responses={
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Run not found for this flow and tenant.",
+            message="Flow run not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        503: error_response(
+            description=(
+                "Required access audit logging is unavailable, so no run input "
+                "or result was returned."
+            ),
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
+async def get_flow_run(
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow that owns the requested run.")
+    ],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to return.")],
+    request: Request,
+    container: Container = Depends(
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_module_user=True,
+        )
+    ),
+):
+    committed_audit_context: tuple[UserInDB, FlowRun] | None = None
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+                history=True,
+            )
+            run_service = container.flow_run_service()
+            run_view = await run_service.get_run_detail_with_result_files_and_usage(
+                run_id=run_id,
+                flow_id=id,
+                history=True,
+            )
+            response = FlowAssembler().to_run_detail_public(
+                run_view.run,
+                result_files=run_view.result_files,
+                token_usage=run_view.token_usage,
+                transcription_usage=run_view.transcription_usage,
+                final_output=run_view.final_output,
+                webhook_deliveries=run_view.webhook_deliveries,
+                started_by=await started_by_for_run(container, run_view.run),
+                evidence_access=await run_service.evidence_access(
+                    run_view.run, history=True
+                ),
+            )
+            user = container.user()
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run_view.run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                description=f"Viewed input and result for flow run {run_view.run.id}",
+                extra={"evidence_detail": "run_detail"},
+            )
+            committed_audit_context = (user, run_view.run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return response
+
+
+@router.post(
+    FLOW_RUN_CANCEL_PATH,
+    response_model=FlowRunPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="cancel_flow_run",
+    summary="Cancel flow run",
+    description=_FLOW_RUN_CANCEL_DESCRIPTION,
+    responses={
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description=f"Run not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
+            message="Flow run not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
+)
+async def cancel_flow_run(
+    id: Annotated[
+        UUID, Path(description="Identifier of the flow that owns the run to cancel.")
+    ],
+    run_id: Annotated[UUID, Path(description="Identifier of the run to cancel.")],
+    request: Request,
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
+    ),
+):
+    completed_run_view = None
+    async with commit_flow_runtime_write_before_response(container):
+        await flow_access_context.enforce_flow_scope(
+            request,
+            container,
+            flow_id=id,
+            required_access=FlowApiAction.RUN,
+            allow_service_key_principals=True,
+        )
+        run_service = container.flow_run_service()
+        run = await run_service.cancel_run(run_id=run_id, flow_id=id)
+        started_by = await started_by_for_run(container, run)
+        if run.status is FlowRunStatus.COMPLETED:
+            completed_run_view = (
+                await run_service.enrich_run_with_result_files_and_usage(
+                    run=run,
+                )
+            )
+    if completed_run_view is not None:
+        return FlowAssembler().to_run_public(
+            completed_run_view.run,
+            result_files=completed_run_view.result_files,
+            token_usage=completed_run_view.token_usage,
+            transcription_usage=completed_run_view.transcription_usage,
+            final_output=completed_run_view.final_output,
+            started_by=started_by,
+        )
+    return FlowAssembler().to_run_public(run, started_by=started_by)
+
+
+@router.post(
+    FLOW_RUN_REDISPATCH_PATH,
+    response_model=FlowRunRedispatchResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="redispatch_flow_run",
+    summary="Redispatch or redrive a queued run",
+    description="""
+    Request dispatch for a queued run whose durable next-at clock is due. If the
+    bounded budget ended after broker acceptance or without a durable rejection receipt,
+    the run remains queued.
+    Send its observed `dispatch_exhausted_at` as `expected_dispatch_exhausted_at` to
+    rearm exactly that exhausted epoch. A retried request cannot rearm a later epoch.
+    The audit record and any budget reset commit together before broker I/O; disabled or
+    failed auditing prevents the redrive.
+
+    Returns the refreshed run payload together with `redispatched_count`, which indicates
+    whether dispatch was accepted for this request. A zero count means either another
+    actor or worker already converged the run, or broker acceptance was outcome-unknown;
+    poll the returned run because bounded server recovery remains authoritative.
+
+    Service-key principals may redispatch only their own queued runs in v1.
+    """,
+    responses={
+        403: error_response(
+            description=FLOW_RUN_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description=f"Run not found for this flow and tenant. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
+            message="Flow run not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        409: error_response(
+            description=(
+                "The accepted dispatch-exhaustion generation changed or the request "
+                "omitted its generation timestamp. Refresh the run and retry with the "
+                "current `dispatch_exhausted_at`."
+            ),
+            examples={
+                FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value: {
+                    "summary": "Dispatch exhaustion generation changed",
+                    "value": {
+                        "message": (
+                            "Flow run dispatch exhaustion changed; refresh the run "
+                            "before retrying."
+                        ),
+                        "eneo_error_code": int(ErrorCodes.CONFLICT),
+                        "code": FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value,
+                        "context": {"run_id": "00000000-0000-4000-8000-000000000101"},
+                    },
+                }
+            },
+        ),
+        503: error_response(
+            description=(
+                "Required audit logging is unavailable, so redispatch was not armed."
+            ),
+            examples={
+                FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE.value: {
+                    "summary": "Required redispatch audit unavailable",
+                    "value": {
+                        "message": "Redispatch audit logging is unavailable.",
+                        "eneo_error_code": int(ErrorCodes.INTERNAL_SERVER_ERROR),
+                        "code": (
+                            FlowApiErrorCode.RUN_REDISPATCH_AUDIT_UNAVAILABLE.value
+                        ),
+                        "context": {"audit_required": True},
+                    },
+                }
+            },
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
+)
+async def redispatch_flow_run(
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the queued run."),
+    ],
+    run_id: Annotated[
+        UUID,
+        Path(
+            description=(
+                "Identifier of the queued run to dispatch when due or redrive after "
+                "accepted-or-outcome-unknown dispatch exhaustion."
+            )
+        ),
+    ],
+    request: Request,
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
+    ),
+    payload: FlowRunRedispatchRequest = Body(  # pyright: ignore[reportCallInDefaultInitializer]
+        default_factory=FlowRunRedispatchRequest
+    ),
+):
+    await flow_access_context.enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        required_access=FlowApiAction.RUN,
+        allow_service_key_principals=True,
+    )
+    user = container.user()
+    actor_kwargs = audit_actor_kwargs(user)
+    run_service = container.flow_run_service()
+    run = await run_service.get_run(run_id=run_id, flow_id=id)
+    try:
+        dispatch_result = await redrive_flow_run_recoverably_after_commit(
+            run_id=run.id,
+            tenant_id=run.tenant_id,
+            expected_revision=run.revision,
+            actor_id=actor_kwargs["actor_id"],
+            actor_type=actor_kwargs["actor_type"],
+            actor_api_key_id=actor_kwargs["actor_api_key_id"],
+            audit_metadata=AuditMetadata.standard(actor=user, target=run),
+            expected_dispatch_exhausted_at=payload.expected_dispatch_exhausted_at,
+        )
+    except FlowRunDispatchExhaustionGenerationConflictError as exc:
+        raise ConflictException(
+            "Flow run dispatch exhaustion changed; refresh the run before retrying.",
+            code=FlowApiErrorCode.RUN_REDISPATCH_CONFLICT.value,
+            context={"run_id": str(run.id)},
+        ) from exc
+    if isinstance(dispatch_result, FlowRunDispatchFailed):
+        raise InternalServerException from None
+
+    run = dispatch_result.run
+    redispatched_count = int(isinstance(dispatch_result, FlowRunDispatchAccepted))
+    completed_run_view = (
+        await run_service.enrich_run_with_result_files_and_usage(run=run)
+        if run.status is FlowRunStatus.COMPLETED
+        else None
+    )
+    started_by = await started_by_for_run(container, run)
+    assembler = FlowAssembler()
+    public_run = (
+        assembler.to_run_public(
+            completed_run_view.run,
+            result_files=completed_run_view.result_files,
+            token_usage=completed_run_view.token_usage,
+            transcription_usage=completed_run_view.transcription_usage,
+            final_output=completed_run_view.final_output,
+            started_by=started_by,
+        )
+        if completed_run_view is not None
+        else assembler.to_run_public(run, started_by=started_by)
+    )
+    return FlowRunRedispatchResponse(
+        run=public_run,
+        redispatched_count=redispatched_count,
+    )
+
+
+__all__ = ["router"]

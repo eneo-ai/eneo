@@ -11,6 +11,57 @@
 
 name: eneo-e2e
 
+x-e2e-backend-environment:
+  &e2e-backend-environment # Connections to the isolated services.
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: postgres
+  POSTGRES_HOST: e2e-db
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: eneo_test
+  REDIS_HOST: e2e-redis
+  TOOL_RUNTIME_URL: http://e2e-tool-runtime:3010
+  TOOL_RUNTIME_TOKEN: e2e-tool-runtime-token-not-a-secret
+  FILE_REFERENCE_BASE_URL: http://e2e-backend:8000
+  MCP_APPS_ENABLED: "true"
+  MCP_APP_CONTENT_BASE_URL: ${E2E_APP_CONTENT_ORIGIN:-http://127.0.0.1:8124}
+  PUBLIC_ORIGIN: http://localhost:4173
+  REDIS_PORT: "6379"
+  # Credentials are encrypted as in production, so providers can be added
+  # (the backend refuses to store a key without encryption). A fixed,
+  # public test key (CI's backend jobs use it too) that guards only the
+  # stack's dummy keys; e2e/seed.py encrypts the seeded provider's with it.
+  ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
+  TENANT_CREDENTIALS_ENABLED: "false"
+  FEDERATION_ENABLED: "false"
+  FEDERATION_PER_TENANT_ENABLED: "false"
+  OPENAI_API_KEY: test-openai-key
+  ANTHROPIC_API_KEY: test-anthropic-key
+  AZURE_API_KEY: test-azure-key
+  MISTRAL_API_KEY: test-mistral-key
+  # App settings (mirror the CI env). JWT_SECRET must match the frontend.
+  API_PREFIX: /api/v1
+  API_KEY_LENGTH: "64"
+  API_KEY_HEADER_NAME: X-API-Key
+  JWT_AUDIENCE: test
+  JWT_ISSUER: test
+  JWT_EXPIRY_TIME: "3600"
+  JWT_ALGORITHM: HS256
+  JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
+  JWT_TOKEN_PREFIX: Bearer
+  URL_SIGNING_KEY: unit-test-url-signing-key-with-at-least-32-bytes
+  MAX_IN_QUESTION: "1"
+  # Browser E2E exercises healthy PostgreSQL-inline mode without a remote
+  # byte plane. Real S3 persistence/integrity/recovery uses the dedicated
+  # pinned SeaweedFS + PostgreSQL 13 backend suite.
+  # Seeded login identity. init_db only seeds when ALL five are set.
+  DEFAULT_TENANT_NAME: E2ETenant
+  DEFAULT_TENANT_QUOTA_LIMIT: "10737418240"
+  DEFAULT_USER_NAME: E2EUser
+  DEFAULT_USER_EMAIL: e2e@example.com
+  DEFAULT_USER_PASSWORD: E2ePassword123!
+  # The suite signs in with the seed on every run; keep it usable.
+  DEFAULT_USER_PASSWORD_CHANGE_REQUIRED: "false"
+
 services:
   e2e-db:
     image: pgvector/pgvector:pg13
@@ -37,6 +88,8 @@ services:
 
   e2e-mock-model:
     image: python:3.11-slim
+    environment:
+      MOCK_TRANSCRIPTION_LATENCY_MS: "3000"
     command: ["python3", "/e2e/mock_model_server.py"]
     volumes:
       - ./e2e:/e2e:ro
@@ -51,6 +104,28 @@ services:
       timeout: 3s
       retries: 40
 
+  e2e-mock-realtime:
+    image: eneo-e2e-backend
+    command: ["python", "/e2e/mock_realtime.py"]
+    volumes:
+      - ./e2e:/e2e:ro
+    networks: [e2e]
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - |
+          import asyncio
+          from websockets.asyncio.client import connect
+          async def check():
+              async with connect("ws://127.0.0.1:8201/v1/realtime") as socket:
+                  await socket.recv()
+          asyncio.run(check())
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
   e2e-tool-runtime:
     image: eneo-e2e-tools:workflow
     build:
@@ -61,6 +136,7 @@ services:
     networks: [e2e]
 
   e2e-backend:
+    image: eneo-e2e-backend
     build:
       context: ./backend
       additional_contexts:
@@ -75,56 +151,7 @@ services:
         condition: service_healthy
       e2e-tool-runtime:
         condition: service_healthy
-    environment:
-      # Connections to the isolated services.
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-      POSTGRES_HOST: e2e-db
-      POSTGRES_PORT: "5432"
-      POSTGRES_DB: eneo_test
-      REDIS_HOST: e2e-redis
-      TOOL_RUNTIME_URL: http://e2e-tool-runtime:3010
-      TOOL_RUNTIME_TOKEN: e2e-tool-runtime-token-not-a-secret
-      FILE_REFERENCE_BASE_URL: http://e2e-backend:8000
-      MCP_APPS_ENABLED: "true"
-      MCP_APP_CONTENT_BASE_URL: ${E2E_APP_CONTENT_ORIGIN:-http://127.0.0.1:8124}
-      PUBLIC_ORIGIN: http://localhost:4173
-      REDIS_PORT: "6379"
-      # Credentials are encrypted as in production, so providers can be added
-      # (the backend refuses to store a key without encryption). A fixed,
-      # public test key (CI's backend jobs use it too) that guards only the
-      # stack's dummy keys; e2e/seed.py encrypts the seeded provider's with it.
-      ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
-      TENANT_CREDENTIALS_ENABLED: "false"
-      FEDERATION_ENABLED: "false"
-      FEDERATION_PER_TENANT_ENABLED: "false"
-      OPENAI_API_KEY: test-openai-key
-      ANTHROPIC_API_KEY: test-anthropic-key
-      AZURE_API_KEY: test-azure-key
-      MISTRAL_API_KEY: test-mistral-key
-      # App settings (mirror the CI env). JWT_SECRET must match the frontend.
-      API_PREFIX: /api/v1
-      API_KEY_LENGTH: "64"
-      API_KEY_HEADER_NAME: X-API-Key
-      JWT_AUDIENCE: test
-      JWT_ISSUER: test
-      JWT_EXPIRY_TIME: "3600"
-      JWT_ALGORITHM: HS256
-      JWT_SECRET: ci-test-jwt-secret-not-for-production-0123456789
-      JWT_TOKEN_PREFIX: Bearer
-      URL_SIGNING_KEY: unit-test-url-signing-key-with-at-least-32-bytes
-      MAX_IN_QUESTION: "1"
-      # Browser E2E exercises healthy PostgreSQL-inline mode without a remote
-      # byte plane. Real S3 persistence/integrity/recovery uses the dedicated
-      # pinned SeaweedFS + PostgreSQL 13 backend suite.
-      # Seeded login identity. init_db only seeds when ALL five are set.
-      DEFAULT_TENANT_NAME: E2ETenant
-      DEFAULT_TENANT_QUOTA_LIMIT: "10737418240"
-      DEFAULT_USER_NAME: E2EUser
-      DEFAULT_USER_EMAIL: e2e@example.com
-      DEFAULT_USER_PASSWORD: E2ePassword123!
-      # The suite signs in with the seed on every run; keep it usable.
-      DEFAULT_USER_PASSWORD_CHANGE_REQUIRED: "false"
+    environment: *e2e-backend-environment
     command:
       # Non-login shell + explicit venv on PATH: a login shell (-l) sources
       # /etc/profile, which resets PATH and drops /app/.venv/bin.
@@ -153,6 +180,56 @@ services:
       timeout: 3s
       retries: 50
       start_period: 60s
+
+  task-execution-worker:
+    image: eneo-e2e-backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    environment:
+      <<: *e2e-backend-environment
+    command: ["task-execution-worker"]
+    networks: [e2e]
+    healthcheck:
+      # The check imports the worker the same way, so it needs the same time.
+      test: ["CMD", "task-execution-worker", "--check"]
+      interval: 5s
+      timeout: 60s
+      retries: 30
+      start_period: 120s
+
+  task-maintenance-worker:
+    image: eneo-e2e-backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    environment:
+      <<: *e2e-backend-environment
+    command: ["task-maintenance-worker"]
+    networks: [e2e]
+
+  # Website crawls are delivered to their own ARQ queue (arq:crawler) and only
+  # this role consumes it. Same as the crawler-worker service in
+  # docs/deployment/docker-compose.yml: the image's run.sh reads WORKER_ROLE.
+  crawler-worker:
+    image: eneo-e2e-backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    environment:
+      <<: *e2e-backend-environment
+      RUN_AS_WORKER: "true"
+      WORKER_ROLE: crawler
+    networks: [e2e]
+    healthcheck:
+      # arq --check imports the whole worker module (about 10 s on a loaded
+      # host), so a 10 s timeout fails the check before the import ends.
+      test:
+        ["CMD", "arq", "--check", "src.eneo.worker.arq.CrawlerWorkerSettings"]
+      interval: 5s
+      timeout: 60s
+      retries: 30
+      start_period: 120s
 
 networks:
   e2e:

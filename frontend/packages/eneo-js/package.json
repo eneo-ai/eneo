@@ -6,9 +6,10 @@
   "main": "index.js",
   "types": "index.d.ts",
   "scripts": {
-    "test": "node --test src/auth/*.test.js src/endpoints/*.test.js src/integrations/*.test.js",
+    "check": "bun x --package typescript@5.9.3 tsc --noEmit -p tsconfig.type-smoke.json",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write .",
+    "test": "bun test update.test.js src/auth/*.test.js src/endpoints/*.test.js src/integrations/*.test.js",
     "update": "node update.js"
   },
   "devDependencies": {
@@ -24,7 +25,9 @@
     ".": "./index.js",
     "./auth/password-generator": "./src/auth/password-generator.js",
     "./integrations/sync-details": "./src/integrations/sync-details.js",
-    "./integrations/sync-announcements": "./src/integrations/sync-announcements.js"
+    "./integrations/sync-announcements": "./src/integrations/sync-announcements.js",
+    "./flows/run-status-capabilities": "./src/flows/flow-run-status-capabilities.js",
+    "./flows/runtime-upload-policy": "./src/flows/runtime-upload-policy.js"
   },
   "sideEffects": false
 }

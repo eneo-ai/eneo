@@ -1,0 +1,1229 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from typing import TypeVar
+from uuid import UUID
+
+import sqlalchemy as sa
+from pydantic import TypeAdapter, ValidationError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.sql.elements import ColumnElement
+
+from eneo.database.tables.flow_tables import (
+    FlowProviderCalls,
+    FlowStepAttemptResolvedInputs,
+    FlowStepAttempts,
+    FlowStepResults,
+)
+from eneo.flows.domain.flow import FlowRunTokenUsage, FlowRunTranscriptionUsage
+from eneo.flows.domain.provider_call import (
+    CompletionProviderCallRequest,
+    ProviderCall,
+    ProviderCallCompletion,
+    ProviderCallEvidence,
+    ProviderCallEvidencePage,
+    ProviderCallKind,
+    ProviderCallReason,
+    ProviderCallReceiptValue,
+    ProviderCallRejectionReason,
+    ProviderCallRequest,
+    ProviderCallResponseFormat,
+    ProviderCallStatus,
+    ProviderCallUnknownReason,
+    TranscriptionCallCompletion,
+    TranscriptionProviderCallRequest,
+)
+from eneo.flows.domain.text_processing import SummarizationProvenance
+from eneo.flows.enums import FlowStepAttemptStatus
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdgeIndexes,
+    append_summarization_provenance,
+    parse_resolved_input_edges,
+)
+
+_RESOLVED_INPUT_EDGE_INDEXES_ADAPTER: TypeAdapter[FlowResolvedInputEdgeIndexes] = (
+    TypeAdapter(FlowResolvedInputEdgeIndexes)
+)
+_TOKEN_USAGE_STREAM_BATCH_SIZE = 1000
+
+
+class FlowProviderCallAttemptNotOpenError(RuntimeError):
+    pass
+
+
+class FlowProviderCallNotFoundError(RuntimeError):
+    pass
+
+
+class FlowProviderCallStateConflictError(RuntimeError):
+    pass
+
+
+class FlowProviderCallResolvedInputLinkError(RuntimeError):
+    pass
+
+
+_T = TypeVar("_T")
+
+
+def _require(value: _T | None) -> _T:
+    assert value is not None
+    return value
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunUsage:
+    """What one run sent to providers, per metering surface."""
+
+    token_usage: FlowRunTokenUsage | None
+    transcription_usage: FlowRunTranscriptionUsage | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowProviderCallEvidenceMeasurement:
+    row_count: int
+    logical_json_bytes: int = 0
+
+    @classmethod
+    def empty(cls) -> "FlowProviderCallEvidenceMeasurement":
+        return cls(row_count=0, logical_json_bytes=0)
+
+
+def _provider_call_evidence_logical_bytes() -> ColumnElement[int]:
+    # Measure variable-size evidence before admitting rows to a bounded page.
+    return (
+        sa.func.coalesce(
+            sa.func.octet_length(
+                sa.cast(sa.func.to_jsonb(FlowProviderCalls.mapped_source_id), sa.Text)
+            ),
+            0,
+        )
+        + sa.func.coalesce(
+            sa.func.octet_length(
+                sa.cast(FlowProviderCalls.summarization_input, sa.Text)
+            ),
+            0,
+        )
+        + sa.func.coalesce(
+            sa.func.octet_length(sa.cast(FlowProviderCalls.digest_call, sa.Text)),
+            0,
+        )
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class FlowStepUsageReceipt:
+    """What one step's current attempt was billed, from provider receipts.
+
+    Token counts are summed over completed completion calls only; a rejected
+    call contributes nothing. ``provider_reported`` is true only when every
+    completed call reported both counts itself: an estimated, mixed or
+    unreported count is not a measurement. ``unresolved_call_count`` counts
+    started or outcome-unknown calls, whose spend is not yet known.
+    """
+
+    completion_call_count: int
+    completed_call_count: int
+    num_tokens_input: int
+    num_tokens_output: int
+    provider_reported: bool
+    unresolved_call_count: int
+
+    @property
+    def measured(self) -> bool:
+        """True when the receipt can stand in for the step's token spend."""
+        return (
+            self.completed_call_count > 0
+            and self.provider_reported
+            and self.unresolved_call_count == 0
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FlowAttemptCompletionReceipt:
+    response_model: str | None
+    provider_response_id: str | None
+    num_tokens_input: int | None
+    num_tokens_output: int | None
+
+
+class FlowProviderCallRepository:
+    """Owns ordered provider-call lifecycle rows under a Flow step attempt."""
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def get_attempt_completion_receipt(
+        self, *, attempt_id: UUID, provider_response_id: str | None
+    ) -> FlowAttemptCompletionReceipt:
+        """Read a rejected response's identity and the attempt's reported spend.
+
+        The caller has already locked and authorized the attempt. Counts cover
+        all its completion calls, including earlier tool rounds or mapped items;
+        missing or estimated usage never becomes an exact total here.
+        """
+        completed = FlowProviderCalls.status == ProviderCallStatus.COMPLETED.value
+        matching = (
+            sa.and_(
+                completed,
+                FlowProviderCalls.provider_response_id == provider_response_id,
+            )
+            if provider_response_id is not None
+            else completed
+        )
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().filter(completed).label("completed_count"),
+                    sa.func.count()
+                    .filter(
+                        FlowProviderCalls.status.in_(("started", "outcome_unknown"))
+                    )
+                    .label("unresolved_count"),
+                    sa.func.count().filter(matching).label("matching_count"),
+                    sa.func.max(FlowProviderCalls.response_model)
+                    .filter(matching)
+                    .label("response_model"),
+                    sa.func.max(FlowProviderCalls.provider_response_id)
+                    .filter(matching)
+                    .label("provider_response_id"),
+                    sa.func.count(FlowProviderCalls.num_tokens_input)
+                    .filter(
+                        sa.and_(completed, FlowProviderCalls.input_source == "provider")
+                    )
+                    .label("reported_inputs"),
+                    sa.func.count(FlowProviderCalls.num_tokens_output)
+                    .filter(
+                        sa.and_(
+                            completed, FlowProviderCalls.output_source == "provider"
+                        )
+                    )
+                    .label("reported_outputs"),
+                    sa.func.sum(FlowProviderCalls.num_tokens_input)
+                    .filter(completed)
+                    .label("input_tokens"),
+                    sa.func.sum(FlowProviderCalls.num_tokens_output)
+                    .filter(completed)
+                    .label("output_tokens"),
+                ).where(
+                    FlowProviderCalls.flow_step_attempt_id == attempt_id,
+                    FlowProviderCalls.call_kind == ProviderCallKind.COMPLETION.value,
+                )
+            )
+        ).one()
+        usage_complete = row.completed_count > 0 and row.unresolved_count == 0
+        sole_match = row.matching_count == 1
+        response_id = provider_response_id
+        if response_id is None and sole_match:
+            response_id = row.provider_response_id
+        return FlowAttemptCompletionReceipt(
+            response_model=row.response_model if sole_match else None,
+            provider_response_id=response_id,
+            num_tokens_input=(
+                int(row.input_tokens)
+                if usage_complete and row.reported_inputs == row.completed_count
+                else None
+            ),
+            num_tokens_output=(
+                int(row.output_tokens)
+                if usage_complete and row.reported_outputs == row.completed_count
+                else None
+            ),
+        )
+
+    async def list_step_usage_receipts(
+        self,
+        *,
+        run_ids: Sequence[UUID],
+        tenant_id: UUID,
+    ) -> dict[tuple[UUID, UUID], FlowStepUsageReceipt]:
+        """Completion receipts of every step result's CURRENT attempt, by run and step.
+
+        One statement over the live call rows, no payloads. A step whose current
+        attempt recorded no completion call has no entry: whether that is a
+        known zero (a deterministic step) or a missing receipt is the caller's
+        knowledge of the step, not this projection's.
+        """
+        if not run_ids:
+            return {}
+        is_completion = FlowProviderCalls.call_kind == ProviderCallKind.COMPLETION.value
+        contributing = sa.and_(is_completion, FlowProviderCalls.status != "rejected")
+        completed = sa.and_(is_completion, FlowProviderCalls.status == "completed")
+        unresolved = sa.and_(
+            is_completion, FlowProviderCalls.status.in_(("started", "outcome_unknown"))
+        )
+        not_provider_reported = sa.and_(
+            completed,
+            sa.or_(
+                FlowProviderCalls.input_source.is_(None),
+                FlowProviderCalls.output_source.is_(None),
+                FlowProviderCalls.input_source != "provider",
+                FlowProviderCalls.output_source != "provider",
+            ),
+        )
+        stmt = (
+            sa.select(
+                FlowStepAttempts.flow_run_id.label("run_id"),
+                FlowStepAttempts.step_id.label("step_id"),
+                sa.func.count(FlowProviderCalls.id)
+                .filter(contributing)
+                .label("completion_call_count"),
+                sa.func.count(FlowProviderCalls.id)
+                .filter(completed)
+                .label("completed_call_count"),
+                sa.func.coalesce(
+                    sa.func.sum(FlowProviderCalls.num_tokens_input).filter(completed), 0
+                ).label("num_tokens_input"),
+                sa.func.coalesce(
+                    sa.func.sum(FlowProviderCalls.num_tokens_output).filter(completed),
+                    0,
+                ).label("num_tokens_output"),
+                sa.func.coalesce(
+                    sa.func.bool_or(not_provider_reported).filter(completed), False
+                ).label("not_provider_reported"),
+                sa.func.count(FlowProviderCalls.id)
+                .filter(unresolved)
+                .label("unresolved_call_count"),
+            )
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .join(
+                FlowStepResults,
+                sa.and_(
+                    FlowStepResults.flow_run_id == FlowStepAttempts.flow_run_id,
+                    FlowStepResults.step_id == FlowStepAttempts.step_id,
+                    FlowStepResults.current_attempt_no == FlowStepAttempts.attempt_no,
+                ),
+            )
+            .where(FlowStepAttempts.flow_run_id.in_(tuple(run_ids)))
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .group_by(FlowStepAttempts.flow_run_id, FlowStepAttempts.step_id)
+            .having(sa.func.count(FlowProviderCalls.id).filter(contributing) > 0)
+        )
+        rows = (await self.session.execute(stmt)).all()
+        return {
+            (row.run_id, row.step_id): FlowStepUsageReceipt(
+                completion_call_count=int(row.completion_call_count),
+                completed_call_count=int(row.completed_call_count),
+                num_tokens_input=int(row.num_tokens_input),
+                num_tokens_output=int(row.num_tokens_output),
+                provider_reported=not bool(row.not_provider_reported),
+                unresolved_call_count=int(row.unresolved_call_count),
+            )
+            for row in rows
+        }
+
+    async def list_usage_for_runs(
+        self,
+        *,
+        run_ids: Sequence[UUID],
+        tenant_id: UUID,
+    ) -> dict[UUID, FlowRunUsage]:
+        if not run_ids:
+            return {}
+        # Keep live calls and retained summaries separate. This makes the source
+        # choice attempt-scoped without materializing live attempts' debug JSON.
+        # UNION ALL preserves that boundary in one database round trip.
+        #
+        # Tokens and audio seconds are counted from disjoint rows so one metric's
+        # unknown attempt cannot make the other look incomplete.
+        is_completion = FlowProviderCalls.call_kind == ProviderCallKind.COMPLETION.value
+        is_transcription = (
+            FlowProviderCalls.call_kind == ProviderCallKind.TRANSCRIPTION.value
+        )
+        unresolved = FlowProviderCalls.status.in_(("started", "outcome_unknown"))
+        contributing_completion = sa.and_(
+            is_completion, FlowProviderCalls.status != "rejected"
+        )
+        contributing_transcription = sa.and_(
+            is_transcription, FlowProviderCalls.status != "rejected"
+        )
+        live_stmt = (
+            sa.select(
+                FlowStepAttempts.flow_run_id.label("run_id"),
+                sa.literal("live").label("usage_source"),
+                sa.null().label("attempt_id"),
+                sa.null().label("provenance_json"),
+                sa.func.count(FlowProviderCalls.id)
+                .filter(contributing_completion)
+                .label("completion_call_count"),
+                sa.func.count(FlowProviderCalls.id)
+                .filter(contributing_transcription)
+                .label("transcription_call_count"),
+                sa.func.coalesce(
+                    sa.func.sum(FlowProviderCalls.num_tokens_input).filter(
+                        contributing_completion
+                    ),
+                    0,
+                ).label("num_tokens_input"),
+                sa.func.coalesce(
+                    sa.func.sum(FlowProviderCalls.num_tokens_output).filter(
+                        contributing_completion
+                    ),
+                    0,
+                ).label("num_tokens_output"),
+                sa.func.coalesce(
+                    sa.func.sum(FlowProviderCalls.audio_seconds).filter(
+                        sa.and_(
+                            is_transcription, FlowProviderCalls.status == "completed"
+                        )
+                    ),
+                    0,
+                ).label("audio_seconds"),
+                sa.func.coalesce(
+                    sa.func.bool_or(
+                        sa.or_(
+                            unresolved,
+                            FlowProviderCalls.input_source == "not_reported",
+                        )
+                    ).filter(contributing_completion),
+                    False,
+                ).label("input_incomplete"),
+                sa.func.coalesce(
+                    sa.func.bool_or(
+                        sa.or_(
+                            unresolved,
+                            FlowProviderCalls.output_source == "not_reported",
+                        )
+                    ).filter(contributing_completion),
+                    False,
+                ).label("output_incomplete"),
+                sa.func.coalesce(
+                    sa.func.bool_or(unresolved).filter(contributing_transcription),
+                    False,
+                ).label("audio_incomplete"),
+            )
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(FlowStepAttempts.flow_run_id.in_(tuple(run_ids)))
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .group_by(FlowStepAttempts.flow_run_id)
+            .having(
+                sa.or_(
+                    sa.func.count(FlowProviderCalls.id).filter(contributing_completion)
+                    > 0,
+                    sa.func.count(FlowProviderCalls.id).filter(
+                        contributing_transcription
+                    )
+                    > 0,
+                )
+            )
+        )
+        rows = await self.session.stream(
+            live_stmt.execution_options(yield_per=_TOKEN_USAGE_STREAM_BATCH_SIZE)
+        )
+
+        token_usage_by_run_id: dict[UUID, FlowRunTokenUsage] = {}
+        audio_usage_by_run_id: dict[UUID, FlowRunTranscriptionUsage] = {}
+        async for row in rows:
+            run_id: UUID = row.run_id
+            row_token_usage: FlowRunTokenUsage | None
+            row_audio_usage: FlowRunTranscriptionUsage | None
+            row_token_usage = (
+                FlowRunTokenUsage.from_counts(
+                    num_tokens_input=int(row.num_tokens_input),
+                    num_tokens_output=int(row.num_tokens_output),
+                    input_completeness=(
+                        "incomplete" if row.input_incomplete else "complete"
+                    ),
+                    output_completeness=(
+                        "incomplete" if row.output_incomplete else "complete"
+                    ),
+                )
+                if int(row.completion_call_count) > 0
+                else None
+            )
+            row_audio_usage = (
+                FlowRunTranscriptionUsage.from_counts(
+                    audio_seconds=float(row.audio_seconds),
+                    completeness=("incomplete" if row.audio_incomplete else "complete"),
+                )
+                if int(row.transcription_call_count) > 0
+                else None
+            )
+            if row_token_usage is not None:
+                previous_token_usage = token_usage_by_run_id.get(run_id)
+                token_usage_by_run_id[run_id] = (
+                    row_token_usage
+                    if previous_token_usage is None
+                    else _require(
+                        FlowRunTokenUsage.combine(
+                            (previous_token_usage, row_token_usage)
+                        )
+                    )
+                )
+            if row_audio_usage is not None:
+                previous_audio_usage = audio_usage_by_run_id.get(run_id)
+                audio_usage_by_run_id[run_id] = (
+                    row_audio_usage
+                    if previous_audio_usage is None
+                    else _require(
+                        FlowRunTranscriptionUsage.combine(
+                            (previous_audio_usage, row_audio_usage)
+                        )
+                    )
+                )
+
+        return {
+            run_id: FlowRunUsage(
+                token_usage=token_usage_by_run_id.get(run_id),
+                transcription_usage=audio_usage_by_run_id.get(run_id),
+            )
+            for run_id in token_usage_by_run_id.keys() | audio_usage_by_run_id.keys()
+        }
+
+    async def list_models_used_by_step(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int,
+    ) -> dict[UUID, tuple[str, ...]]:
+        """The models that answered in one run, per step, sorted by name.
+
+        At most ``limit`` (step, model) pairs are read, in step then name
+        order. A caller that must not truncate silently passes its ceiling
+        plus one and treats a larger answer as an overflow.
+
+        A model is listed when a completion or transcription call to it
+        completed, in any attempt. Its name is the one the answer gave, or the
+        route the call was sent to when the answer gave none. A call that was
+        rejected, or whose outcome is unknown, lists nothing; the receipts keep
+        that lifecycle.
+
+        Receipts are the only proof. An attempt's own model fields name the
+        model it was configured to ask and are never read here, so a run whose
+        receipts debug-evidence retention has deleted lists nothing.
+        """
+        model = sa.func.coalesce(
+            sa.func.nullif(sa.func.btrim(FlowProviderCalls.response_model), ""),
+            FlowProviderCalls.requested_model,
+        )
+        rows = await self.session.execute(
+            sa.select(FlowStepAttempts.step_id, model.label("model"))
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .where(FlowProviderCalls.status == ProviderCallStatus.COMPLETED.value)
+            .distinct()
+            .order_by(FlowStepAttempts.step_id, model)
+            .limit(limit)
+        )
+        models_by_step_id: dict[UUID, list[str]] = {}
+        for row in rows:
+            models_by_step_id.setdefault(row.step_id, []).append(row.model)
+        return {
+            step_id: tuple(sorted(models))
+            for step_id, models in models_by_step_id.items()
+        }
+
+    async def measure_evidence_row_count(
+        self, *, run_id: UUID, tenant_id: UUID, ceiling: int
+    ) -> int:
+        candidates = (
+            sa.select(FlowProviderCalls.id)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+            .limit(ceiling + 1)
+            .subquery()
+        )
+        return int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(candidates)
+            )
+            or 0
+        )
+
+    async def measure_evidence(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowProviderCallEvidenceMeasurement:
+        candidate_stmt = (
+            sa.select(FlowProviderCalls.id)
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(FlowStepAttempts.flow_run_id == run_id)
+            .where(FlowStepAttempts.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            candidate_stmt = candidate_stmt.limit(candidate_limit)
+        candidates = candidate_stmt.subquery()
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(_provider_call_evidence_logical_bytes()), 0
+                    ).label("logical_json_bytes"),
+                )
+                .select_from(FlowProviderCalls)
+                .where(FlowProviderCalls.id.in_(sa.select(candidates.c.id)))
+            )
+        ).one()
+        return FlowProviderCallEvidenceMeasurement(
+            row_count=int(row.row_count),
+            logical_json_bytes=int(row.logical_json_bytes),
+        )
+
+    async def list_evidence_page(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int,
+        after_event_id: UUID | None = None,
+        attempt_id: UUID | None = None,
+        total_count_limit: int | None = None,
+        logical_byte_budget: int | None = None,
+    ) -> ProviderCallEvidencePage:
+        if limit < 1:
+            raise ValueError("Provider-call evidence limit must be positive.")
+
+        predicates = [
+            FlowStepAttempts.flow_run_id == run_id,
+            FlowStepAttempts.tenant_id == tenant_id,
+        ]
+        if attempt_id is not None:
+            predicates.append(FlowStepAttempts.id == attempt_id)
+
+        count_stmt = (
+            sa.select(FlowProviderCalls.id)
+            .select_from(FlowProviderCalls)
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(*predicates)
+        )
+        if total_count_limit is not None:
+            count_stmt = count_stmt.limit(total_count_limit)
+        total_count = int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(count_stmt.subquery())
+            )
+            or 0
+        )
+        total_count_truncated = (
+            total_count_limit is not None and total_count == total_count_limit
+        )
+
+        page_predicates = list(predicates)
+        if after_event_id is not None:
+            cursor = (
+                await self.session.execute(
+                    sa.select(
+                        FlowStepAttempts.step_order,
+                        FlowStepAttempts.attempt_no,
+                        FlowProviderCalls.ordinal,
+                        FlowProviderCalls.id,
+                    )
+                    .select_from(FlowProviderCalls)
+                    .join(
+                        FlowStepAttempts,
+                        FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+                    )
+                    .where(*predicates)
+                    .where(FlowProviderCalls.id == after_event_id)
+                )
+            ).one_or_none()
+            if cursor is None:
+                raise FlowProviderCallNotFoundError(
+                    "The provider-call evidence cursor was not found."
+                )
+            page_predicates.append(
+                sa.tuple_(
+                    FlowStepAttempts.step_order,
+                    FlowStepAttempts.attempt_no,
+                    FlowProviderCalls.ordinal,
+                    FlowProviderCalls.id,
+                )
+                > sa.tuple_(*cursor)
+            )
+
+        admitted_ids = None
+        if logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowProviderCalls.id.label("row_id"),
+                    FlowStepAttempts.step_order.label("step_order"),
+                    FlowStepAttempts.attempt_no.label("attempt_no"),
+                    FlowProviderCalls.ordinal.label("ordinal"),
+                    _provider_call_evidence_logical_bytes().label("logical_bytes"),
+                )
+                .join(
+                    FlowStepAttempts,
+                    FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+                )
+                .where(*page_predicates)
+                .order_by(
+                    FlowStepAttempts.step_order.asc(),
+                    FlowStepAttempts.attempt_no.asc(),
+                    FlowProviderCalls.ordinal.asc(),
+                    FlowProviderCalls.id.asc(),
+                )
+                .limit(limit + 1)
+                .subquery()
+            )
+            order = (
+                candidates.c.step_order,
+                candidates.c.attempt_no,
+                candidates.c.ordinal,
+                candidates.c.row_id,
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number().over(order_by=order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=order)
+                .label("cumulative_logical"),
+            ).subquery()
+            admitted_ids = sa.select(ranked.c.row_id).where(
+                ranked.c.row_rank <= limit,
+                ranked.c.cumulative_logical <= logical_byte_budget,
+            )
+
+        row_stmt = (
+            sa.select(
+                FlowProviderCalls,
+                FlowStepAttempts.step_id,
+                FlowStepAttempts.step_order,
+                FlowStepAttempts.attempt_no,
+            )
+            .join(
+                FlowStepAttempts,
+                FlowStepAttempts.id == FlowProviderCalls.flow_step_attempt_id,
+            )
+            .where(*page_predicates)
+        )
+        if admitted_ids is not None:
+            row_stmt = row_stmt.where(FlowProviderCalls.id.in_(admitted_ids))
+        rows = (
+            await self.session.execute(
+                row_stmt.order_by(
+                    FlowStepAttempts.step_order.asc(),
+                    FlowStepAttempts.attempt_no.asc(),
+                    FlowProviderCalls.ordinal.asc(),
+                    FlowProviderCalls.id.asc(),
+                ).limit(limit + 1 if admitted_ids is None else limit)
+            )
+        ).all()
+        has_more = (
+            len(rows) > limit
+            if admitted_ids is None
+            else bool(rows) and total_count > len(rows)
+        )
+        visible_rows = rows[:limit]
+        items = tuple(
+            _to_evidence(
+                call=row[0],
+                step_id=row[1],
+                step_order=row[2],
+                attempt_no=row[3],
+            )
+            for row in visible_rows
+        )
+        return ProviderCallEvidencePage(
+            items=items,
+            count=len(items),
+            total_count=total_count,
+            total_count_truncated=total_count_truncated,
+            has_more=has_more,
+            next_after_event_id=items[-1].event_id if has_more else None,
+        )
+
+    async def mark_started_calls_outcome_unknown_for_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        reason: ProviderCallUnknownReason,
+    ) -> int:
+        attempt_ids = sa.select(FlowStepAttempts.id).where(
+            FlowStepAttempts.flow_run_id == run_id,
+            FlowStepAttempts.tenant_id == tenant_id,
+        )
+        now = datetime.now(timezone.utc)
+        result = await self.session.scalars(
+            sa.update(FlowProviderCalls)
+            .where(FlowProviderCalls.flow_step_attempt_id.in_(attempt_ids))
+            .where(FlowProviderCalls.status == ProviderCallStatus.STARTED.value)
+            .values(
+                status=ProviderCallStatus.OUTCOME_UNKNOWN.value,
+                outcome_reason=ProviderCallUnknownReason(reason).value,
+                finished_at=now,
+                updated_at=now,
+            )
+            .returning(FlowProviderCalls.id)
+        )
+        return len(result.all())
+
+    async def start_call_for_execution(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        request: ProviderCallRequest,
+        resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
+        summarization: SummarizationProvenance | None = None,
+    ) -> ProviderCall:
+        attempt_id, raw_resolved_input_edges = await self._lock_open_attempt(
+            FlowStepAttempts.flow_run_id == run_id,
+            FlowStepAttempts.step_id == step_id,
+            FlowStepAttempts.attempt_no == attempt_no,
+            FlowStepAttempts.tenant_id == tenant_id,
+        )
+        if (
+            isinstance(request, CompletionProviderCallRequest)
+            and request.summarization_input is not None
+        ):
+            if summarization is None:
+                raise ValueError("Summarization calls require their input provenance.")
+            await self._persist_summarization(
+                attempt_id=attempt_id,
+                summarization=summarization,
+                required_record_ids=request.summarization_input.record_ids,
+            )
+        if isinstance(request, TranscriptionProviderCallRequest):
+            # A transcription request produces the step input, so the resolved
+            # input aggregate it would point at does not exist yet.
+            return await self._insert_started_call(
+                attempt_id=attempt_id,
+                resolved_inputs_attempt_id=None,
+                request=request,
+                resolved_input_edge_indexes=(),
+            )
+        return await self._insert_started_call(
+            attempt_id=attempt_id,
+            resolved_inputs_attempt_id=attempt_id,
+            request=request,
+            resolved_input_edge_indexes=self._validate_resolved_input_edge_indexes(
+                indexes=resolved_input_edge_indexes,
+                resolved_input_edge_count=self._activated_edge_count(
+                    raw_resolved_input_edges
+                ),
+            ),
+        )
+
+    async def persist_summarization_for_execution(
+        self,
+        *,
+        run_id: UUID,
+        step_id: UUID,
+        attempt_no: int,
+        tenant_id: UUID,
+        summarization: SummarizationProvenance,
+    ) -> None:
+        try:
+            attempt_id, _ = await self._lock_open_attempt(
+                FlowStepAttempts.flow_run_id == run_id,
+                FlowStepAttempts.step_id == step_id,
+                FlowStepAttempts.attempt_no == attempt_no,
+                FlowStepAttempts.tenant_id == tenant_id,
+            )
+        except FlowProviderCallAttemptNotOpenError:
+            return
+        await self._persist_summarization(
+            attempt_id=attempt_id,
+            summarization=summarization,
+        )
+
+    async def _persist_summarization(
+        self,
+        *,
+        attempt_id: UUID,
+        summarization: SummarizationProvenance,
+        required_record_ids: tuple[str, ...] = (),
+    ) -> None:
+        existing = await self.session.scalar(
+            sa.select(FlowStepAttempts.provenance_json).where(
+                FlowStepAttempts.id == attempt_id
+            )
+        )
+        payload = append_summarization_provenance(
+            existing,
+            summarization,
+            required_record_ids=required_record_ids,
+        )
+        if payload != existing:
+            await self.session.execute(
+                sa.update(FlowStepAttempts)
+                .where(FlowStepAttempts.id == attempt_id)
+                .values(provenance_json=payload)
+            )
+
+    async def _lock_open_attempt(
+        self,
+        *identity_predicates: ColumnElement[bool],
+    ) -> tuple[UUID, object]:
+        row = (
+            await self.session.execute(
+                sa.select(
+                    FlowStepAttempts.id,
+                    FlowStepAttemptResolvedInputs.resolved_input_edges_jsonb,
+                )
+                .outerjoin(
+                    FlowStepAttemptResolvedInputs,
+                    FlowStepAttemptResolvedInputs.flow_step_attempt_id
+                    == FlowStepAttempts.id,
+                )
+                .where(*identity_predicates)
+                .where(FlowStepAttempts.status == FlowStepAttemptStatus.STARTED.value)
+                .with_for_update(of=FlowStepAttempts)
+            )
+        ).one_or_none()
+        if row is None:
+            raise FlowProviderCallAttemptNotOpenError(
+                "The Flow step attempt is not open for a provider call."
+            )
+        attempt_id, raw_resolved_input_edges = row
+        return attempt_id, raw_resolved_input_edges
+
+    @staticmethod
+    def _activated_edge_count(raw_resolved_input_edges: object) -> int:
+        if raw_resolved_input_edges is None:
+            raise FlowProviderCallResolvedInputLinkError(
+                "Provider I/O cannot start before resolved input evidence is activated."
+            )
+        parsed = parse_resolved_input_edges(raw_resolved_input_edges)
+        if parsed.status != "tracked" or parsed.aggregate is None:
+            raise FlowProviderCallResolvedInputLinkError(
+                "Provider I/O cannot start with corrupt resolved input evidence."
+            )
+        return len(parsed.aggregate.edges)
+
+    @staticmethod
+    def _validate_resolved_input_edge_indexes(
+        *,
+        indexes: FlowResolvedInputEdgeIndexes,
+        resolved_input_edge_count: int,
+    ) -> FlowResolvedInputEdgeIndexes:
+        try:
+            canonical_indexes = _RESOLVED_INPUT_EDGE_INDEXES_ADAPTER.validate_python(
+                indexes
+            )
+        except ValidationError as exc:
+            raise FlowProviderCallResolvedInputLinkError(
+                "Provider-call resolved input indexes are not canonical."
+            ) from exc
+        if canonical_indexes and canonical_indexes[-1] >= resolved_input_edge_count:
+            raise FlowProviderCallResolvedInputLinkError(
+                "Provider-call resolved input indexes exceed the activated aggregate."
+            )
+        return canonical_indexes
+
+    async def _insert_started_call(
+        self,
+        *,
+        attempt_id: UUID,
+        resolved_inputs_attempt_id: UUID | None,
+        request: ProviderCallRequest,
+        resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
+    ) -> ProviderCall:
+        current_ordinal = await self.session.scalar(
+            sa.select(sa.func.max(FlowProviderCalls.ordinal)).where(
+                FlowProviderCalls.flow_step_attempt_id == attempt_id
+            )
+        )
+        mapped_call = (
+            request.mapped_call
+            if isinstance(request, CompletionProviderCallRequest)
+            else None
+        )
+        row = await self.session.scalar(
+            sa.insert(FlowProviderCalls)
+            .values(
+                flow_step_attempt_id=attempt_id,
+                resolved_inputs_attempt_id=resolved_inputs_attempt_id,
+                ordinal=(current_ordinal or 0) + 1,
+                call_kind=request.call_kind.value,
+                status=ProviderCallStatus.STARTED.value,
+                request_schema_version=request.request_schema_version,
+                provider_request_hash=request.provider_request_hash,
+                requested_model=request.requested_model,
+                provider=request.provider,
+                response_format=(
+                    request.response_format.value
+                    if isinstance(request, CompletionProviderCallRequest)
+                    else ProviderCallResponseFormat.NONE.value
+                ),
+                requested_capabilities=(
+                    [capability.value for capability in request.requested_capabilities]
+                    if isinstance(request, CompletionProviderCallRequest)
+                    else []
+                ),
+                resolved_input_edge_indexes=list(resolved_input_edge_indexes),
+                summarization_input=(
+                    request.summarization_input.model_dump(mode="json")
+                    if isinstance(request, CompletionProviderCallRequest)
+                    and request.summarization_input is not None
+                    else None
+                ),
+                digest_call=(
+                    request.digest_call.model_dump(mode="json")
+                    if isinstance(request, CompletionProviderCallRequest)
+                    and request.digest_call is not None
+                    else None
+                ),
+                call_reason=(
+                    request.call_reason.value
+                    if isinstance(request, CompletionProviderCallRequest)
+                    else ProviderCallReason.INITIAL.value
+                ),
+                audio_seconds=(
+                    request.audio_seconds
+                    if isinstance(request, TranscriptionProviderCallRequest)
+                    else None
+                ),
+                mapped_execution_mode=(
+                    (
+                        "per_source"
+                        if mapped_call.execution_mode == "per_source_reader"
+                        else mapped_call.execution_mode
+                    )
+                    if mapped_call is not None
+                    else None
+                ),
+                mapped_item_index=(
+                    mapped_call.item_index if mapped_call is not None else None
+                ),
+                mapped_source_index=(
+                    mapped_call.source_index if mapped_call is not None else None
+                ),
+                mapped_source_id=(
+                    mapped_call.source_id if mapped_call is not None else None
+                ),
+                requested_at=datetime.now(timezone.utc),
+            )
+            .returning(FlowProviderCalls)
+        )
+        if row is None:
+            raise RuntimeError("Provider call insert returned no row.")
+        return ProviderCall.model_validate(row)
+
+    async def accept_call(self, *, call_id: UUID, provider_response_id: str) -> None:
+        if not provider_response_id or len(provider_response_id) > 512:
+            raise ValueError("Provider response id must contain 1 to 512 characters.")
+        row = await self.session.scalar(
+            sa.select(FlowProviderCalls)
+            .where(FlowProviderCalls.id == call_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        if row is None:
+            raise FlowProviderCallNotFoundError(
+                f"Flow provider call {call_id} was not found."
+            )
+        if row.call_kind != ProviderCallKind.TRANSCRIPTION.value:
+            raise FlowProviderCallStateConflictError(
+                "Only transcription calls have asynchronous job acceptance."
+            )
+        if row.provider_response_id == provider_response_id:
+            return
+        if (
+            row.provider_response_id is not None
+            or row.status != ProviderCallStatus.STARTED.value
+        ):
+            raise FlowProviderCallStateConflictError(
+                f"Flow provider call {call_id} cannot accept a different job."
+            )
+        row.provider_response_id = provider_response_id
+        await self.session.flush()
+
+    async def complete_call(
+        self,
+        *,
+        call_id: UUID,
+        receipt: ProviderCallReceiptValue,
+    ) -> ProviderCall:
+        row = await self.session.scalar(
+            sa.select(FlowProviderCalls)
+            .where(FlowProviderCalls.id == call_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        if row is None:
+            raise FlowProviderCallNotFoundError(
+                f"Flow provider call {call_id} was not found."
+            )
+        if row.status == ProviderCallStatus.COMPLETED.value:
+            if _completion_matches(row, receipt):
+                return ProviderCall.model_validate(row)
+            raise FlowProviderCallStateConflictError(
+                f"Flow provider call {call_id} already has different completion evidence."
+            )
+        if row.status != ProviderCallStatus.STARTED.value:
+            raise FlowProviderCallStateConflictError(
+                f"Flow provider call {call_id} is already terminal as {row.status}."
+            )
+
+        if (
+            row.provider_response_id is not None
+            and row.provider_response_id != receipt.provider_response_id
+        ):
+            raise FlowProviderCallStateConflictError(
+                f"Flow provider call {call_id} has a different accepted job identity."
+            )
+        row.status = ProviderCallStatus.COMPLETED.value
+        row.response_model = receipt.response_model
+        row.provider_response_id = receipt.provider_response_id
+        if isinstance(receipt, ProviderCallCompletion):
+            row.num_tokens_input = receipt.num_tokens_input
+            row.num_tokens_output = receipt.num_tokens_output
+            row.input_source = receipt.input_source
+            row.output_source = receipt.output_source
+        else:
+            # Transcription is not metered by tokens, and saying "not reported"
+            # would make this run's token total look incomplete.
+            row.input_source = "not_applicable"
+            row.output_source = "not_applicable"
+        row.finished_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        await self.session.refresh(row)
+        return ProviderCall.model_validate(row)
+
+    async def reject_call(
+        self,
+        *,
+        call_id: UUID,
+        reason: ProviderCallRejectionReason,
+    ) -> ProviderCall:
+        return await self._finish_without_receipt(
+            call_id=call_id,
+            status=ProviderCallStatus.REJECTED,
+            reason=ProviderCallRejectionReason(reason).value,
+        )
+
+    async def mark_outcome_unknown(
+        self,
+        *,
+        call_id: UUID,
+        reason: ProviderCallUnknownReason,
+    ) -> ProviderCall:
+        return await self._finish_without_receipt(
+            call_id=call_id,
+            status=ProviderCallStatus.OUTCOME_UNKNOWN,
+            reason=ProviderCallUnknownReason(reason).value,
+        )
+
+    async def _finish_without_receipt(
+        self,
+        *,
+        call_id: UUID,
+        status: ProviderCallStatus,
+        reason: str,
+    ) -> ProviderCall:
+        row = await self.session.scalar(
+            sa.select(FlowProviderCalls)
+            .where(FlowProviderCalls.id == call_id)
+            .execution_options(populate_existing=True)
+            .with_for_update()
+        )
+        if row is None:
+            raise FlowProviderCallNotFoundError(
+                f"Flow provider call {call_id} was not found."
+            )
+        if row.status == status.value and row.outcome_reason == reason:
+            return ProviderCall.model_validate(row)
+        if row.status != ProviderCallStatus.STARTED.value:
+            raise FlowProviderCallStateConflictError(
+                f"Flow provider call {call_id} is already terminal as {row.status}."
+            )
+
+        row.status = status.value
+        row.outcome_reason = reason
+        row.finished_at = datetime.now(timezone.utc)
+        await self.session.flush()
+        await self.session.refresh(row)
+        return ProviderCall.model_validate(row)
+
+
+def _completion_matches(
+    row: FlowProviderCalls,
+    receipt: ProviderCallReceiptValue,
+) -> bool:
+    if row.response_model != receipt.response_model:
+        return False
+    if row.provider_response_id != receipt.provider_response_id:
+        return False
+    if isinstance(receipt, TranscriptionCallCompletion):
+        return (
+            row.input_source == "not_applicable"
+            and row.output_source == "not_applicable"
+        )
+    return (
+        row.num_tokens_input == receipt.num_tokens_input
+        and row.num_tokens_output == receipt.num_tokens_output
+        and row.input_source == receipt.input_source
+        and row.output_source == receipt.output_source
+    )
+
+
+def _to_evidence(
+    *,
+    call: FlowProviderCalls,
+    step_id: UUID,
+    step_order: int,
+    attempt_no: int,
+) -> ProviderCallEvidence:
+    return ProviderCallEvidence.model_validate(
+        {
+            "event_id": call.id,
+            "summarization_input": call.summarization_input,
+            "digest_call": call.digest_call,
+            "attempt_id": call.flow_step_attempt_id,
+            "step_id": step_id,
+            "step_order": step_order,
+            "attempt_no": attempt_no,
+            "ordinal": call.ordinal,
+            "call_kind": call.call_kind,
+            "status": call.status,
+            "request_schema_version": call.request_schema_version,
+            "provider_request_hash": call.provider_request_hash,
+            "requested_model": call.requested_model,
+            "provider": call.provider,
+            "response_format": call.response_format,
+            "requested_capabilities": tuple(call.requested_capabilities),
+            "call_reason": call.call_reason,
+            "mapped_execution_mode": call.mapped_execution_mode,
+            "mapped_item_index": call.mapped_item_index,
+            "mapped_source_index": call.mapped_source_index,
+            "mapped_source_id": call.mapped_source_id,
+            "response_model": call.response_model,
+            "provider_response_id": call.provider_response_id,
+            "num_tokens_input": call.num_tokens_input,
+            "num_tokens_output": call.num_tokens_output,
+            "audio_seconds": (
+                float(call.audio_seconds) if call.audio_seconds is not None else None
+            ),
+            "input_source": call.input_source,
+            "output_source": call.output_source,
+            "outcome_reason": call.outcome_reason,
+            "requested_at": call.requested_at,
+            "finished_at": call.finished_at,
+        }
+    )

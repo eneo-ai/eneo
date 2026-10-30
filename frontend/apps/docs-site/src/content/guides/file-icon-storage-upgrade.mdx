@@ -139,7 +139,7 @@ running untouched. The command writes one JSON report to
 | Exit code | `outcome` | What to do |
 | --- | --- | --- |
 | `0` | `ready` | Continue with the disk check. |
-| `2` | `blocked` | Fix each item in `blockers`, for example an unsupported schema or encoding, or an item larger than `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`. |
+| `2` | `blocked` | Fix each item in `blockers`, for example an unsupported schema or encoding, or an item larger than PostgreSQL inline capacity. |
 | `3` | `incomplete` | The check did not finish. Check the database connection and permissions. For a very large database, add `--timeout-seconds 300`. |
 
 Summarize the report with `jq`:
@@ -765,12 +765,13 @@ LIMIT 100;"
 
 1. Fix the cause. If the storage target was changed, select **PostgreSQL** in
    **Admin > File storage** again. If an item is larger than
-   `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`, raise that limit for both backend and
-   worker after checking capacity.
+   PostgreSQL inline capacity, leave the campaign halted and resolve that item's
+   migration path before retrying. Direct legacy adoption into object storage is
+   not supported.
 2. Read `campaign_resume_revision` from `status`.
 3. Set `FILE_ICON_BACKFILL_RESUME_REVISION` in `env_backend.env` to a higher
    number. Never reuse or lower an earlier value.
-4. Recreate the worker (after an inline-limit change, recreate `backend worker`):
+4. Recreate the worker :
 
    ```bash
    docker compose up -d --force-recreate --no-deps worker
@@ -1073,7 +1074,7 @@ start the new worker. The other tuning settings are described in the
 No. PostgreSQL hashes and copies one item at a time inside the database. The
 worker coordinates the batches but never receives the file contents, so its
 memory stays around 140 MiB. PostgreSQL needs memory headroom for the largest
-item, which `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` limits.
+item, bounded by PostgreSQL inline capacity.
 
 ### Do we have to run cleanup?
 

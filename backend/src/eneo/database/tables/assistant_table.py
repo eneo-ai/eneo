@@ -2,7 +2,7 @@ from typing import Optional
 from uuid import UUID
 
 import sqlalchemy as sa
-from sqlalchemy import ForeignKey, Index
+from sqlalchemy import CheckConstraint, ForeignKey, Index
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -51,6 +51,14 @@ class Assistants(BasePublic):
     )
     data_retention_days: Mapped[Optional[int]] = mapped_column()
     metadata_json: Mapped[Optional[dict[str, object]]] = mapped_column(JSONB)
+    hidden: Mapped[bool] = mapped_column(default=False, nullable=False)
+    origin: Mapped[str] = mapped_column(
+        default="user", nullable=False, server_default="user"
+    )
+    managing_flow_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("flows.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     # TODO: refactor since this is a somewhat weird solution having a
     # type column. The reason is bc front-end wants a non-nullable
     # "type" field in a bunch of models. Thus a field with a default
@@ -115,6 +123,20 @@ class Assistants(BasePublic):
     )
 
     __table_args__ = (
+        CheckConstraint(
+            "origin IN ('user','flow_managed')",
+            name="ck_assistants_origin",
+        ),
+        CheckConstraint(
+            "(origin = 'user' AND managing_flow_id IS NULL) OR "
+            "(origin = 'flow_managed' AND managing_flow_id IS NOT NULL)",
+            name="ck_assistants_origin_flow_owner",
+        ),
+        CheckConstraint(
+            "origin <> 'flow_managed' OR hidden = true",
+            name="ck_assistants_flow_managed_hidden",
+        ),
+        Index("ix_assistants_origin_managing_flow", "origin", "managing_flow_id"),
         Index(
             "uq_assistants_space_id_id",
             "space_id",

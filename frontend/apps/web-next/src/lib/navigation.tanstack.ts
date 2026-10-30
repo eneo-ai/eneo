@@ -20,6 +20,7 @@ import { stringifySearch } from "./router/search";
 declare module "@tanstack/react-router" {
   interface HistoryState {
     settingsSectionFromIndex?: Seam.UrlState["settingsSectionFromIndex"];
+    flowStepDepth?: Seam.UrlState["flowStepDepth"];
   }
 }
 
@@ -130,6 +131,11 @@ function navigateUrl(href: string | URL, replace: boolean, options?: Seam.UrlOpt
 export const replaceUrl: typeof Seam.replaceUrl = (href, options) =>
   navigateUrl(href, true, options);
 export const pushUrl: typeof Seam.pushUrl = (href, options) => navigateUrl(href, false, options);
+
+export const goHistory: typeof Seam.goHistory = (delta) => {
+  if (!boundRouter) throw new Error("History needs the app’s router: createAppRouter binds it.");
+  boundRouter.history.go(delta);
+};
 
 export const readUrlState: typeof Seam.readUrlState = () => {
   if (!boundRouter) throw new Error("URL state needs the app's router: createAppRouter binds it.");

@@ -249,6 +249,7 @@ export function SkillActivationSection({
 
       {evidence.fallback_reason && (
         <Banner
+          role="status"
           status="info"
           title={t("chat_debug_fallback_title")}
           description={t(FALLBACK_KEY[evidence.fallback_reason])}
@@ -320,7 +321,12 @@ export function SkillActivationSection({
       </div>
 
       {unmatched.length > 0 && (
-        <Banner status="error" title={t("chat_debug_unmatched_rejections")} collapsible={false}>
+        <Banner
+          role="alert"
+          status="error"
+          title={t("chat_debug_unmatched_rejections")}
+          collapsible={false}
+        >
           <ul className="flex flex-col gap-2 text-sm">
             {unmatched.map((rejection, index) => (
               <li

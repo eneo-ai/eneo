@@ -13,7 +13,7 @@
   import Diff from "@lucide/svelte/icons/diff";
   import Download from "@lucide/svelte/icons/download";
   import FileText from "@lucide/svelte/icons/file-text";
-  import History from "@lucide/svelte/icons/history";
+  import History from "@lucide/svelte/icons/rotate-ccw-clock";
   import Maximize2 from "@lucide/svelte/icons/maximize-2";
   import Minimize2 from "@lucide/svelte/icons/minimize-2";
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";

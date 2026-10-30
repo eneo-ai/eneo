@@ -17,6 +17,7 @@ class AuditLogRawRow(TypedDict):
     tenant_id: str
     timestamp: str
     actor_id: str | None
+    actor_api_key_id: str | None
     actor_type: str
     action: str
     entity_type: str
@@ -36,6 +37,11 @@ class AuditLogRepository(ABC):
     @abstractmethod
     async def create(self, audit_log: AuditLog) -> AuditLog:
         """Create a new audit log entry."""
+        pass
+
+    @abstractmethod
+    async def create_if_absent(self, audit_log: AuditLog) -> AuditLog:
+        """Create an audit log entry or return the existing row with the same id."""
         pass
 
     @abstractmethod

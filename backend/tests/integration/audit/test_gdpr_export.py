@@ -3,12 +3,16 @@
 from uuid import uuid4
 
 import pytest
+import sqlalchemy as sa
 
 from eneo.audit.application.audit_export_service import AuditExportService
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.service_principals_table import ServicePrincipals
 
 pytestmark = pytest.mark.integration
 
@@ -139,3 +143,68 @@ async def test_csv_export_with_metadata(db_session, test_tenant, test_user):
         # Verify CSV is valid
         rows = csv_content.strip().split("\n")
         assert len(rows) >= 2
+
+
+@pytest.mark.asyncio
+async def test_stream_logs_raw_includes_actor_api_key_id(
+    db_session, test_tenant, test_user
+):
+    api_key_id = uuid4()
+    service_principal_id = uuid4()
+
+    async with db_session() as session:
+        await session.execute(
+            sa.insert(ServicePrincipals).values(
+                id=service_principal_id,
+                tenant_id=test_tenant.id,
+                display_name="Audit export service principal",
+                description=None,
+                scope_type="tenant",
+                scope_id=None,
+                state="active",
+                created_by_user_id=test_user,
+            )
+        )
+        await session.execute(
+            sa.insert(ApiKeysV2).values(
+                id=api_key_id,
+                tenant_id=test_tenant.id,
+                ownership="service",
+                owner_user_id=None,
+                service_principal_id=service_principal_id,
+                scope_type="tenant",
+                scope_id=None,
+                permission="read",
+                key_type="sk_",
+                key_hash=f"hash-{api_key_id.hex}",
+                hash_version="v1",
+                key_prefix="sk_test",
+                key_suffix="abcd1234",
+                name="audit-export-service-key",
+                state="active",
+                created_by_user_id=test_user,
+                delegation_depth=0,
+            )
+        )
+
+        repository = AuditLogRepositoryImpl(session)
+        service = AuditService(repository)
+
+        await service.log(
+            tenant_id=test_tenant.id,
+            actor_id=None,
+            actor_api_key_id=api_key_id,
+            actor_type=ActorType.API_KEY,
+            action=ActionType.FILE_UPLOADED,
+            entity_type=EntityType.FILE,
+            entity_id=uuid4(),
+            description="Service key uploaded file",
+            metadata={"actor": {"type": "api_key"}},
+        )
+
+        rows = [
+            row async for row in repository.stream_logs_raw(tenant_id=test_tenant.id)
+        ]
+
+    assert rows
+    assert any(row["actor_api_key_id"] == str(api_key_id) for row in rows)

@@ -125,6 +125,18 @@ class AppSparse(ResourcePermissionsMixin, InDB):
 # Spaces
 
 
+def _link_list_description(
+    links: str, hidden: str = "a deprecated model", level_scope: str = "model"
+) -> str:
+    return (
+        f"The {links} linked to the space. The list replaces the links the "
+        f"space lists; a link it does not list ({hidden}) is kept. A change to "
+        "a security classification of another level removes every linked "
+        f"{level_scope} whose classification is not at or above the new "
+        "level, listed or not."
+    )
+
+
 class CreateSpaceRequest(CreateRequest):
     pass
 
@@ -135,11 +147,44 @@ class UpdateSpaceRequest(BaseModel):
     name: str
     description: str
 
-    embedding_models: list[ModelId]
-    completion_models: list[ModelId]
-    transcription_models: list[ModelId]
-    mcp_servers: list[ModelId]
-    mcp_tools: list[MCPToolSetting]
+    embedding_models: list[ModelId] = Field(
+        description=_link_list_description("embedding models")
+    )
+    completion_models: list[ModelId] = Field(
+        description=_link_list_description("completion models")
+    )
+    transcription_models: list[ModelId] = Field(
+        description=_link_list_description("transcription models")
+    )
+    transcription_services: list[ModelId] = Field(
+        description=(
+            "The transcription services granted to the space. The space lists "
+            "every service granted to it, so the list replaces the grants: a "
+            "service it leaves out is no longer granted. A new grant must be "
+            "enabled and meet the space's classification. A change to a "
+            "security classification of another level removes every grant "
+            "whose classification is not at or above the new level."
+        )
+    )
+    mcp_servers: list[ModelId] = Field(
+        description=_link_list_description(
+            "MCP servers",
+            hidden="a disabled server, or a capability server such as web search, "
+            "which has its own setting",
+            level_scope="server other than a capability server",
+        )
+    )
+    mcp_tools: list[MCPToolSetting] = Field(
+        description=(
+            "The space's switches for its MCP servers' tools. The list sets the "
+            "switch of every tool it names and clears the switches of the tools "
+            "the space lists that it leaves out. The switch of a tool the space "
+            "does not list (one of a server it does not list, or one the "
+            "instance admin switched off for everyone) is kept unless the list "
+            "names it. Each tool must belong to a server linked to the space "
+            "after this request."
+        )
+    )
 
     security_classification: Union[ModelId, NotProvided, None] = Field(
         default=NOT_PROVIDED,
@@ -161,10 +206,36 @@ class UpdateSpaceRequest(BaseModel):
         description=(
             "Number of days to retain conversation history for this space. "
             "Applies to all assistants and apps in the space that don't have "
-            "their own retention policy. Set to null to disable space-level retention. "
+            "their own retention policy. It does not govern Flow run history; use "
+            "the dedicated Flow run-retention Space endpoint for that policy. "
+            "Set to null to disable the space-level conversation policy. "
             "Omit to keep the current retention policy unchanged. "
             "Valid range: 1-2555 days (1 day to 7 years)."
         ),
+    )
+
+
+class SpaceTranscriptionServiceLink(BaseModel):
+    """A transcription service granted to a space, with the state of the grant.
+
+    New work in the space may use the service only when it meets the
+    classification and is available."""
+
+    id: UUID
+    name: str
+    meets_security_classification: bool = Field(
+        description=(
+            "False when the service's security classification is below the space's."
+        )
+    )
+    available: bool = Field(description="False when the organisation disabled it.")
+    is_default: bool = Field(
+        description=(
+            "True for the organisation's default speaker identification "
+            "service, whether or not this space can use it now. A flow draft "
+            "that asks for speaker labels without a chosen service gets the "
+            "default stored as its choice only while the space can use it."
+        )
     )
 
 
@@ -179,6 +250,10 @@ class UpdateSpaceDryRunResponse(BaseModel):
     completion_models: list[CompletionModelPublic]
     embedding_models: list[EmbeddingModelPublic]
     transcription_models: list[TranscriptionModelPublic]
+    transcription_services: list[SpaceTranscriptionServiceLink] = Field(
+        default_factory=list[SpaceTranscriptionServiceLink],
+        description="Granted services the classification change would remove",
+    )
     mcp_servers: list[MCPServerPublicDict] = Field(
         default_factory=_empty_mcp_server_public_dict_list
     )
@@ -210,7 +285,14 @@ class SpaceSparse(InDB, ResourcePermissionsMixin):
     )
     applications: Optional[Applications] = None
     default_assistant: Optional[DefaultAssistant] = None
-    data_retention_days: Optional[int] = None
+    data_retention_days: Optional[int] = Field(
+        default=None,
+        description=(
+            "Configured Space retention days. This governs conversation history "
+            "for assistants and apps. It does not govern Flow run history, which "
+            "uses the dedicated Organization, Space, and Flow policy hierarchy."
+        ),
+    )
 
 
 class SpaceDashboard(SpaceSparse):
@@ -226,6 +308,38 @@ class SpaceRole(BaseModel):
         return self.value.value.capitalize()
 
 
+class SpaceModelLink(BaseModel):
+    """One model linked to a space, with the state of that link.
+
+    A link is usable only when both flags are true; the usable lists hold
+    exactly those. Keeping any other link grants no use."""
+
+    id: UUID
+    name: str
+    nickname: Optional[str] = None
+    meets_security_classification: bool = Field(
+        description=(
+            "False when the model's security classification is below the space's."
+        )
+    )
+    available: bool = Field(
+        description="False when the tenant has disabled or retired the model."
+    )
+
+
+class SpaceLinkedModels(BaseModel):
+    """Every model linked to a space that the space loads, usable or not.
+
+    A model list sent to update the space adds the models it names that are
+    not linked yet and removes the listed kind's links it leaves out, so a
+    client builds it from these IDs. A link to a retired (deprecated or
+    deleted) model is not listed and no edit changes it."""
+
+    completion_models: list[SpaceModelLink]
+    embedding_models: list[SpaceModelLink]
+    transcription_models: list[SpaceModelLink]
+
+
 class SpacePublic(SpaceDashboard):
     organization_space_id: UUID | None = Field(
         description="Organization space identity, independent of the caller's membership."
@@ -239,6 +353,26 @@ class SpacePublic(SpaceDashboard):
     embedding_models: list[EmbeddingModelPublic]
     completion_models: list[CompletionModelPublic]
     transcription_models: list[TranscriptionModelPublic]
+    linked_models: SpaceLinkedModels = Field(
+        description=(
+            "Every model linked to this space, each marked with whether it meets "
+            "the space's security classification and whether the tenant has it "
+            "available. Only links with both are in the usable model lists. A "
+            "model list sent to update the space adds the models it names and "
+            "removes the listed links it leaves out, so build it from these IDs. "
+            "Links to retired models are not listed. A model list keeps them; "
+            "a change of the space's security classification level removes "
+            "those below the new level."
+        ),
+    )
+    transcription_services: list[SpaceTranscriptionServiceLink] = Field(
+        default_factory=list[SpaceTranscriptionServiceLink],
+        description=(
+            "Every transcription service granted to this space, each marked with "
+            "whether it meets the space's classification and is enabled. Build "
+            "an update's service list from these IDs."
+        ),
+    )
     mcp_servers: list[MCPServerPublicDict] = Field(
         default_factory=_empty_mcp_server_public_dict_list
     )
@@ -285,6 +419,7 @@ class TemplateCreate(BaseModel):
 class CreateSpaceAssistantRequest(CreateRequest):
     enabled_capabilities: list[CapabilityPurpose] | None = None
     from_template: Optional[TemplateCreate] = None
+    hidden: bool = False
 
 
 class CreateSpaceAppRequest(CreateRequest):

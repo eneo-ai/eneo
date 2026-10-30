@@ -44,6 +44,30 @@ export function initFiles(client) {
 
   return {
     /**
+     * List files owned by the current user.
+     * @returns {Promise<{count: number, items: UploadedFile[]}>}
+     * @throws {EneoError}
+     */
+    list: async () => {
+      return client.fetch("/api/v1/files/", {
+        method: "get"
+      });
+    },
+
+    /**
+     * Get one file by id.
+     * @param {{fileId: string}} params
+     * @returns {Promise<UploadedFile>}
+     * @throws {EneoError}
+     */
+    get: async ({ fileId }) => {
+      return client.fetch(`/api/v1/files/{id}/`, {
+        method: "get",
+        params: { path: { id: fileId } }
+      });
+    },
+
+    /**
      * Upload a supported filetype and start converting it into an `InfoBlob`. Depending on the filetype and size the conversion can take some time,
      * so after a successful upload a `Job` is returned that can be independently tracked.
      * @param {Object} params
@@ -60,7 +84,6 @@ export function initFiles(client) {
         "/api/v1/files/",
         {
           method: "post",
-          //@ts-expect-error Typing for multipart/formdata upload does currently not work correctly
           requestBody: { "multipart/form-data": formData }
         },
         {

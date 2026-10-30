@@ -1,0 +1,435 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from typing import cast
+
+from pydantic import BaseModel, ConfigDict
+from pydantic.config import JsonDict
+
+from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStepResultAnnotation
+from eneo.flows.enums import (
+    FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE,
+    FlowInputSource,
+    FlowPrimaryOutputExecutionKind,
+)
+from eneo.flows.input_binding_contract_rules import effective_question_binding
+from eneo.flows.step_lineage import (
+    build_step_ref_mapping,
+    referenced_step_order,
+    resolve_reference_step_orders,
+    resolve_tool_argument_orders,
+)
+from eneo.flows.template_reference_analyzer import (
+    TemplateReferenceKind,
+    analyze_template,
+)
+from eneo.flows.transcription_config import (
+    FlowTranscriptionConfigError,
+    parse_transcription_config,
+)
+
+GRAPH_RESPONSE_EXAMPLE: JsonDict = {
+    "nodes": [
+        {"id": "step-1", "label": "Transcribe uploaded audio", "type": "step"},
+        {"id": "step-2", "label": "Create PDF summary", "type": "step"},
+    ],
+    "edges": [
+        {"source": "step-1", "target": "step-2"},
+    ],
+}
+
+
+class GraphNode(BaseModel):
+    id: str
+    label: str
+    type: str
+    step_order: int | None = None
+    input_source: str | None = None
+    input_type: str | None = None
+    output_type: str | None = None
+    output_mode: str | None = None
+    output_classification_override: int | None = None
+    run_status: str | None = None
+    num_tokens_input: int | None = None
+    num_tokens_output: int | None = None
+    error_message: str | None = None
+    # Audio steps only: whether this run labels speakers as part of transcription
+    # (speaker identification on, and an external service configured for it).
+    speaker_identification: bool | None = None
+
+
+class GraphEdge(BaseModel):
+    source: str
+    target: str
+    kind: str | None = None
+    source_step_order: int | None = None
+    target_step_order: int | None = None
+    style: str | None = None
+    label: str | None = None
+
+
+class GraphResponse(BaseModel):
+    model_config = ConfigDict(json_schema_extra={"example": GRAPH_RESPONSE_EXAMPLE})
+
+    nodes: list[GraphNode]
+    edges: list[GraphEdge]
+
+
+_ASSEMBLY_OUTPUT_MODES = frozenset(
+    mode.value
+    for mode, kind in FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE.items()
+    if kind is FlowPrimaryOutputExecutionKind.DETERMINISTIC
+)
+
+
+def build_graph_from_steps(
+    steps: Sequence[FlowPersistedJsonObject],
+) -> tuple[list[GraphNode], list[GraphEdge]]:
+    nodes: list[GraphNode] = [
+        GraphNode(id="input", label="Input", type="input"),
+    ]
+    edges: list[GraphEdge] = []
+
+    sorted_steps = sorted(steps, key=lambda item: int(item["step_order"]))
+    for step in sorted_steps:
+        step_id = str(step.get("step_id") or step.get("id"))
+        label = step.get("user_description") or f"Steg {step['step_order']}"
+        output_mode = step.get("output_mode")
+        node_type = "assembly" if output_mode in _ASSEMBLY_OUTPUT_MODES else "llm"
+        nodes.append(
+            GraphNode(
+                id=step_id,
+                label=label,
+                type=node_type,
+                step_order=int(step["step_order"]),
+                input_source=step.get("input_source"),
+                input_type=step.get("input_type"),
+                output_type=step.get("output_type"),
+                output_mode=output_mode,
+                output_classification_override=step.get(
+                    "output_classification_override"
+                ),
+            )
+        )
+
+    nodes.append(GraphNode(id="output", label="Output", type="output"))
+    step_ref_mapping = build_step_ref_mapping(sorted_steps)
+
+    for step in sorted_steps:
+        step_id = str(step.get("step_id") or step.get("id"))
+        step_order = int(step["step_order"])
+        input_source = step.get("input_source")
+        binding_upstream = _binding_upstream(
+            step=step,
+            step_ref_mapping=step_ref_mapping,
+        )
+        if binding_upstream is not None:
+            edges.extend(
+                _binding_edges(
+                    step_id=step_id,
+                    step_order=step_order,
+                    binding_upstream=binding_upstream,
+                    sorted_steps=sorted_steps,
+                )
+            )
+            continue
+
+        if input_source in {"flow_input", "http_get", "tool"}:
+            style = "dashed" if input_source != "flow_input" else None
+            edges.append(
+                GraphEdge(
+                    source="input",
+                    target=step_id,
+                    kind=input_source,
+                    source_step_order=0,
+                    target_step_order=step_order,
+                    style=style,
+                )
+            )
+        if input_source == "tool":
+            edges.extend(
+                _tool_argument_edges(
+                    step=step,
+                    step_id=step_id,
+                    step_order=step_order,
+                    sorted_steps=sorted_steps,
+                    step_ref_mapping=step_ref_mapping,
+                )
+            )
+
+        if input_source == "previous_step" and step_order > 1:
+            prev = next(
+                (
+                    item
+                    for item in sorted_steps
+                    if int(item["step_order"]) == step_order - 1
+                ),
+                None,
+            )
+            if prev is not None:
+                edges.append(
+                    GraphEdge(
+                        source=str(prev.get("step_id") or prev.get("id")),
+                        target=step_id,
+                        kind="previous_step",
+                        source_step_order=int(prev["step_order"]),
+                        target_step_order=step_order,
+                    )
+                )
+        elif input_source == "all_previous_steps":
+            for prev in sorted_steps:
+                if int(prev["step_order"]) < step_order:
+                    edges.append(
+                        GraphEdge(
+                            source=str(prev.get("step_id") or prev.get("id")),
+                            target=step_id,
+                            kind="all_previous_steps",
+                            source_step_order=int(prev["step_order"]),
+                            target_step_order=step_order,
+                            style="dashed",
+                            label="aggregated",
+                        )
+                    )
+            edges.append(
+                GraphEdge(
+                    source="input",
+                    target=step_id,
+                    kind="all_previous_steps",
+                    source_step_order=0,
+                    target_step_order=step_order,
+                    style="dashed",
+                )
+            )
+
+    if sorted_steps:
+        step_ids = {str(step.get("step_id") or step.get("id")) for step in sorted_steps}
+        source_step_ids = {
+            edge.source
+            for edge in edges
+            if edge.source in step_ids and edge.target in step_ids
+        }
+        terminal_steps = [
+            step
+            for step in sorted_steps
+            if str(step.get("step_id") or step.get("id")) not in source_step_ids
+        ]
+        for step in terminal_steps:
+            edges.append(
+                GraphEdge(
+                    source=str(step.get("step_id") or step.get("id")),
+                    target="output",
+                    kind="flow_output",
+                    source_step_order=int(step["step_order"]),
+                    target_step_order=None,
+                )
+            )
+    else:
+        edges.append(
+            GraphEdge(
+                source="input",
+                target="output",
+                kind="empty",
+                source_step_order=0,
+                target_step_order=None,
+                style="dashed",
+            )
+        )
+
+    return nodes, edges
+
+
+@dataclass(frozen=True)
+class _BindingUpstream:
+    step_orders: list[int]
+    reads_root_input: bool
+
+
+def _binding_upstream(
+    *,
+    step: FlowPersistedJsonObject,
+    step_ref_mapping: dict[str, int],
+) -> _BindingUpstream | None:
+    """What explicit underlag reads, or None when the step has none.
+
+    Step references (and ``föregående_steg``) become step edges; any other
+    reference (form field, runtime upload) reads the flow input. Fixed text
+    reads nothing.
+    """
+    bindings = step.get("input_bindings")
+    if not isinstance(bindings, dict):
+        return None
+    bindings_dict = cast(FlowPersistedJsonObject, bindings)
+    question = effective_question_binding(bindings_dict)
+    if question is None:
+        return None
+
+    step_order = int(step["step_order"])
+    references = analyze_template(
+        question,
+        step_refs=step_ref_mapping,
+        form_field_names=set(),
+    )
+    return _BindingUpstream(
+        step_orders=resolve_reference_step_orders(
+            references=references,
+            step_order=step_order,
+            max_prior_step_order=step_order - 1,
+        ),
+        reads_root_input=any(
+            reference.kind is not TemplateReferenceKind.STEP
+            and referenced_step_order(reference, step_order=step_order) is None
+            for reference in references
+        ),
+    )
+
+
+def _tool_argument_edges(
+    *,
+    step: FlowPersistedJsonObject,
+    step_id: str,
+    step_order: int,
+    sorted_steps: Sequence[FlowPersistedJsonObject],
+    step_ref_mapping: dict[str, int],
+) -> list[GraphEdge]:
+    """One edge from each earlier step a tool step's bound arguments read: what
+    that step produced is sent to the tool's server."""
+    steps_by_order = {int(item["step_order"]): item for item in sorted_steps}
+    raw_config = step.get("input_config")
+    return [
+        GraphEdge(
+            source=str(upstream.get("step_id") or upstream.get("id")),
+            target=step_id,
+            kind="tool_arguments",
+            source_step_order=upstream_order,
+            target_step_order=step_order,
+            style="dashed",
+            label="arguments",
+        )
+        for upstream_order in resolve_tool_argument_orders(
+            input_source=FlowInputSource.TOOL,
+            step_order=step_order,
+            input_config=cast(FlowPersistedJsonObject, raw_config)
+            if isinstance(raw_config, dict)
+            else None,
+            step_ref_mapping=step_ref_mapping,
+            max_prior_step_order=step_order - 1,
+        )
+        if (upstream := steps_by_order.get(upstream_order)) is not None
+    ]
+
+
+def _binding_edges(
+    *,
+    step_id: str,
+    step_order: int,
+    binding_upstream: _BindingUpstream,
+    sorted_steps: Sequence[FlowPersistedJsonObject],
+) -> list[GraphEdge]:
+    """Edges of a step whose explicit underlag is its whole input."""
+    result: list[GraphEdge] = []
+    if binding_upstream.reads_root_input:
+        result.append(
+            GraphEdge(
+                source="input",
+                target=step_id,
+                kind="flow_input",
+                source_step_order=0,
+                target_step_order=step_order,
+            )
+        )
+    steps_by_order = {int(item["step_order"]): item for item in sorted_steps}
+    for upstream_order in binding_upstream.step_orders:
+        upstream = steps_by_order.get(upstream_order)
+        if upstream is None:
+            continue
+        result.append(
+            GraphEdge(
+                source=str(upstream.get("step_id") or upstream.get("id")),
+                target=step_id,
+                kind="input_bindings.question",
+                source_step_order=upstream_order,
+                target_step_order=step_order,
+                style="dashed",
+                label="underlag",
+            )
+        )
+    return result
+
+
+def enrich_nodes_with_run_results(
+    nodes: Sequence[GraphNode],
+    step_results: Sequence[FlowStepResultAnnotation],
+) -> list[GraphNode]:
+    by_step_id = {str(item.step_id): item for item in step_results}
+
+    enriched: list[GraphNode] = []
+    for node in nodes:
+        if node.type not in {"llm", "assembly"}:
+            enriched.append(node)
+            continue
+        result = by_step_id.get(node.id)
+        if result is None:
+            enriched.append(node)
+            continue
+        enriched.append(
+            node.model_copy(
+                update={
+                    "run_status": result.status.value,
+                    "num_tokens_input": result.num_tokens_input,
+                    "num_tokens_output": result.num_tokens_output,
+                    "error_message": result.error_message,
+                }
+            )
+        )
+    return enriched
+
+
+def annotate_speaker_identification(
+    nodes: Sequence[GraphNode],
+    *,
+    wizard_metadata: FlowPersistedJsonObject | None,
+    speakers_identifiable: bool,
+    speaker_labels: bool | None = None,
+) -> list[GraphNode]:
+    """Mark audio steps whose transcription will also label speakers.
+
+    Only a connected speaker service labels speakers, so without one the flag
+    stays unset regardless of the flow's own setting. A run's own
+    ``speaker_labels`` choice replaces that setting. Malformed metadata is not
+    the graph's concern; it leaves the nodes untouched.
+    """
+    if not speakers_identifiable:
+        return list(nodes)
+    try:
+        config = parse_transcription_config({"wizard": wizard_metadata})
+    except FlowTranscriptionConfigError:
+        return list(nodes)
+    if not (config.enabled and config.diarize(speaker_labels)):
+        return list(nodes)
+    return [
+        node.model_copy(update={"speaker_identification": True})
+        if node.input_type == "audio"
+        else node
+        for node in nodes
+    ]
+
+
+def build_graph_response(
+    steps: Sequence[FlowPersistedJsonObject],
+    step_results: Sequence[FlowStepResultAnnotation] = (),
+    *,
+    wizard_metadata: FlowPersistedJsonObject | None = None,
+    speaker_identification_available: bool = False,
+    speaker_labels: bool | None = None,
+) -> GraphResponse:
+    nodes, edges = build_graph_from_steps(steps)
+    if step_results:
+        nodes = enrich_nodes_with_run_results(nodes, step_results)
+    nodes = annotate_speaker_identification(
+        nodes,
+        wizard_metadata=wizard_metadata,
+        speakers_identifiable=speaker_identification_available,
+        speaker_labels=speaker_labels,
+    )
+    return GraphResponse(nodes=nodes, edges=edges)

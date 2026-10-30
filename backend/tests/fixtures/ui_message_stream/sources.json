@@ -32,6 +32,7 @@
           "vision": false,
           "reasoning": false,
           "supports_tool_calling": false,
+          "supports_strict_tool_schema": false,
           "base_url": null,
           "litellm_model_name": null,
           "model_kwargs_capabilities": null,
@@ -53,12 +54,13 @@
           "token_limit": 10000,
           "supported_model_kwargs": {
             "temperature": {
-              "supported": true,
-              "control": "slider",
-              "minimum": 0.0,
-              "maximum": 2.0,
-              "step": 0.01,
-              "options": null
+              "supported": false,
+              "control": null,
+              "minimum": null,
+              "maximum": null,
+              "step": null,
+              "options": null,
+              "unknown": false
             },
             "top_p": {
               "supported": false,
@@ -66,7 +68,8 @@
               "minimum": null,
               "maximum": null,
               "step": null,
-              "options": null
+              "options": null,
+              "unknown": false
             },
             "reasoning_effort": {
               "supported": false,
@@ -74,7 +77,8 @@
               "minimum": null,
               "maximum": null,
               "step": null,
-              "options": null
+              "options": null,
+              "unknown": false
             },
             "verbosity": {
               "supported": false,
@@ -82,7 +86,8 @@
               "minimum": null,
               "maximum": null,
               "step": null,
-              "options": null
+              "options": null,
+              "unknown": false
             },
             "presence_penalty": {
               "supported": false,
@@ -90,7 +95,8 @@
               "minimum": null,
               "maximum": null,
               "step": null,
-              "options": null
+              "options": null,
+              "unknown": false
             },
             "frequency_penalty": {
               "supported": false,
@@ -98,7 +104,8 @@
               "minimum": null,
               "maximum": null,
               "step": null,
-              "options": null
+              "options": null,
+              "unknown": false
             },
             "top_k": {
               "supported": false,
@@ -106,7 +113,8 @@
               "minimum": null,
               "maximum": null,
               "step": null,
-              "options": null
+              "options": null,
+              "unknown": false
             }
           }
         },
@@ -188,7 +196,9 @@
       "data": {
         "prompt_tokens": 12,
         "completion_tokens": 3,
-        "turn_tokens": 15
+        "turn_tokens": 15,
+        "context_prompt_tokens": 12,
+        "context_completion_tokens": 3
       },
       "transient": true
     },
@@ -231,6 +241,7 @@
               "vision": false,
               "reasoning": false,
               "supports_tool_calling": false,
+              "supports_strict_tool_schema": false,
               "base_url": null,
               "litellm_model_name": null,
               "model_kwargs_capabilities": null,
@@ -252,12 +263,13 @@
               "token_limit": 10000,
               "supported_model_kwargs": {
                 "temperature": {
-                  "supported": true,
-                  "control": "slider",
-                  "minimum": 0.0,
-                  "maximum": 2.0,
-                  "step": 0.01,
-                  "options": null
+                  "supported": false,
+                  "control": null,
+                  "minimum": null,
+                  "maximum": null,
+                  "step": null,
+                  "options": null,
+                  "unknown": false
                 },
                 "top_p": {
                   "supported": false,
@@ -265,7 +277,8 @@
                   "minimum": null,
                   "maximum": null,
                   "step": null,
-                  "options": null
+                  "options": null,
+                  "unknown": false
                 },
                 "reasoning_effort": {
                   "supported": false,
@@ -273,7 +286,8 @@
                   "minimum": null,
                   "maximum": null,
                   "step": null,
-                  "options": null
+                  "options": null,
+                  "unknown": false
                 },
                 "verbosity": {
                   "supported": false,
@@ -281,7 +295,8 @@
                   "minimum": null,
                   "maximum": null,
                   "step": null,
-                  "options": null
+                  "options": null,
+                  "unknown": false
                 },
                 "presence_penalty": {
                   "supported": false,
@@ -289,7 +304,8 @@
                   "minimum": null,
                   "maximum": null,
                   "step": null,
-                  "options": null
+                  "options": null,
+                  "unknown": false
                 },
                 "frequency_penalty": {
                   "supported": false,
@@ -297,7 +313,8 @@
                   "minimum": null,
                   "maximum": null,
                   "step": null,
-                  "options": null
+                  "options": null,
+                  "unknown": false
                 },
                 "top_k": {
                   "supported": false,
@@ -305,7 +322,8 @@
                   "minimum": null,
                   "maximum": null,
                   "step": null,
-                  "options": null
+                  "options": null,
+                  "unknown": false
                 }
               }
             },

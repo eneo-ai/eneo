@@ -1,10 +1,16 @@
 """Unit tests for audit category mappings."""
 
+import json
+from pathlib import Path
+
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
     get_category_for_action,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[3]
+FRONTEND_MESSAGES_DIR = REPO_ROOT / "frontend" / "apps" / "web" / "messages"
 
 
 class TestCategoryMappings:
@@ -46,17 +52,6 @@ class TestCategoryMappings:
                 f"Invalid category '{category}' found in mappings"
             )
 
-    def test_admin_actions_count(self):
-        """Verify that admin_actions category has correct number of action types."""
-        admin_actions = [
-            action
-            for action, cat in CATEGORY_MAPPINGS.items()
-            if cat == "admin_actions"
-        ]
-        assert len(admin_actions) == 56, (
-            f"Expected 56 admin actions, got {len(admin_actions)}"
-        )
-
     def test_admin_actions_mapping(self):
         """Verify specific admin action types are correctly mapped."""
         admin_action_types = [
@@ -88,6 +83,10 @@ class TestCategoryMappings:
             ActionType.MODULE_ADDED_TO_TENANT,
             ActionType.MODULE_REMOVED_FROM_TENANT,
             ActionType.MODULE_CLIENT_CONFIG_UPDATED,
+            ActionType.FLOW_RUN_RETENTION_POLICY_CHANGED,
+            ActionType.FLOW_RETENTION_HOLD_PLACED,
+            ActionType.FLOW_RETENTION_HOLD_RELEASED,
+            ActionType.FLOW_RETENTION_HOLD_REVIEW_EXTENDED,
             ActionType.MODEL_PROVIDER_HEADERS_UPDATED,
             ActionType.MODEL_PROVIDER_DESTINATION_CHANGED,
             ActionType.MODEL_PROVIDER_HEADERS_PREVIEWED,
@@ -98,22 +97,41 @@ class TestCategoryMappings:
                 f"{action_type} should be mapped to 'admin_actions'"
             )
 
-    def test_user_actions_count(self):
-        """Verify that user_actions category has correct number of action types."""
-        user_actions = [
-            action for action, cat in CATEGORY_MAPPINGS.items() if cat == "user_actions"
+    def test_user_actions_mapping(self):
+        """Verify representative user actions are mapped correctly."""
+        user_action_types = [
+            ActionType.TOOL_APPROVAL_SUBMITTED,
+            ActionType.FLOW_CREATED,
+            ActionType.FLOW_RUN_CREATED,
+            ActionType.FLOW_PACKAGE_IMPORT_FAILED,
         ]
-        assert len(user_actions) == 52, (
-            f"Expected 52 user actions, got {len(user_actions)}"
-        )
-        assert ActionType.TOOL_APPROVAL_SUBMITTED.value in user_actions
 
-    def test_completion_model_migrated_maps_to_user_actions(self):
-        """Verify completion model migration is tracked as a user action."""
-        assert (
-            CATEGORY_MAPPINGS[ActionType.COMPLETION_MODEL_MIGRATED.value]
-            == "user_actions"
-        )
+        for action_type in user_action_types:
+            assert CATEGORY_MAPPINGS[action_type] == "user_actions", (
+                f"{action_type} should be mapped to 'user_actions'"
+            )
+
+    def test_ai_builder_actions_keep_their_category(self):
+        """The retired AI Builder's action types keep the category of the
+        entries it wrote."""
+        expected_actions = {
+            ActionType.AI_BUILDER_SESSION_CREATED,
+            ActionType.AI_BUILDER_PLAN_APPROVED,
+            ActionType.AI_BUILDER_PLAN_REVISED,
+            ActionType.AI_BUILDER_FLOW_APPLIED,
+            ActionType.AI_BUILDER_ATTACHMENT_DETACHED,
+            ActionType.AI_BUILDER_SESSION_CANCELLED,
+            ActionType.AI_BUILDER_CLIENT_ERROR_REPORTED,
+            ActionType.AI_BUILDER_CLIENT_ERROR_OUTCOME_RECORDED,
+        }
+
+        actual_actions = {
+            action for action in ActionType if action.value.startswith("ai_builder_")
+        }
+
+        assert actual_actions == expected_actions
+        for action in expected_actions:
+            assert CATEGORY_MAPPINGS[action.value] == "user_actions"
 
     def test_security_events_mapping(self):
         """Verify security event action types are correctly mapped."""
@@ -149,17 +167,6 @@ class TestCategoryMappings:
                 f"{action_type} should be mapped to 'file_operations'"
             )
 
-    def test_integration_events_count(self):
-        """Verify that integration_events category has correct number of action types."""
-        integration_actions = [
-            action
-            for action, cat in CATEGORY_MAPPINGS.items()
-            if cat == "integration_events"
-        ]
-        assert len(integration_actions) == 24, (
-            f"Expected 24 integration events, got {len(integration_actions)}"
-        )
-
     def test_mcp_events_mapping(self):
         """Verify MCP action types are correctly mapped to integration_events."""
         mcp_actions = [
@@ -183,6 +190,8 @@ class TestCategoryMappings:
             ActionType.RETENTION_POLICY_APPLIED,
             ActionType.ENCRYPTION_KEY_ROTATED,
             ActionType.SYSTEM_MAINTENANCE,
+            ActionType.FLOW_RUN_HISTORY_PURGED,
+            ActionType.FLOW_RUN_AUDIT_DELIVERY_REDRIVEN,
         ]
 
         for action_type in system_actions:
@@ -262,23 +271,27 @@ class TestCategoryDistribution:
             count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == category)
             assert count > 0, f"Category '{category}' has no action types mapped to it"
 
-    def test_category_counts_match_expected(self):
-        """Verify exact counts for each category."""
-        expected_counts = {
-            "admin_actions": 56,
-            "user_actions": 52,
-            "security_events": 12,
-            "file_operations": 8,
-            "integration_events": 24,
-            "system_actions": 3,
-            "audit_access": 3,  # Includes AUDIT_SESSION_CREATED
+
+class TestActionMessageCatalog:
+    """Verify that every backend audit action has frontend display messages."""
+
+    def test_all_action_types_have_en_and_sv_messages(self):
+        locales = {
+            locale: json.loads((FRONTEND_MESSAGES_DIR / f"{locale}.json").read_text())
+            for locale in ("en", "sv")
         }
 
-        for category, expected_count in expected_counts.items():
-            actual_count = sum(
-                1 for cat in CATEGORY_MAPPINGS.values() if cat == category
-            )
-            assert actual_count == expected_count, (
-                f"Category '{category}' should have {expected_count} actions, "
-                f"but has {actual_count}"
-            )
+        missing_or_empty = []
+        for action in ActionType:
+            for locale, messages in locales.items():
+                for key in (
+                    f"audit_action_{action.value}",
+                    f"audit_action_{action.value}_description",
+                ):
+                    if not messages.get(key):
+                        missing_or_empty.append(f"{locale}:{key}")
+
+        assert not missing_or_empty, (
+            "Missing or empty audit action messages: "
+            f"{', '.join(sorted(missing_or_empty))}"
+        )

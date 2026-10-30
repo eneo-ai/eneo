@@ -63,7 +63,7 @@ async def _seed_legacy_rows(
             """
             INSERT INTO files (
                 id, name, text, blob, checksum, size, mimetype, file_type,
-                transcription, user_id, tenant_id, parent_file_id
+                transcription, owner_user_id, tenant_id, parent_file_id
             ) VALUES (
                 :text_id, 'legacy.pdf', :extracted, :original, :text_checksum,
                 :text_size, 'application/pdf', 'text', :transcription,
@@ -182,7 +182,7 @@ async def test_file_and_icon_legacy_fallbacks_execute_against_postgres(
             download = await audio_service.get_download_no_auth(
                 audio_id,
                 range_header="bytes=2-7",
-                expected_tenant_id=tenant_id,
+                tenant_id=tenant_id,
             )
             try:
                 assert await _read_chunks(download.chunks) == audio[2:8]
@@ -194,7 +194,7 @@ async def test_file_and_icon_legacy_fallbacks_execute_against_postgres(
 
             original_download = await audio_service.get_original_download_no_auth(
                 audio_id,
-                expected_tenant_id=tenant_id,
+                tenant_id=tenant_id,
             )
             try:
                 assert await _read_chunks(original_download.chunks) == audio

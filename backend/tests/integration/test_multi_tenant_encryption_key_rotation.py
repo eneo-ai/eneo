@@ -31,21 +31,30 @@ from eneo.tenants.tenant_repo import TenantRepository
 
 @pytest.fixture(autouse=True)
 def enable_tenant_credentials(test_settings):
-    """Enable tenant credentials feature for all tests in this module.
+    """Enable tenant credentials feature for all tests in this module."""
+    from dependency_injector import providers
 
-    Uses set_settings() with a model_copy so the FastAPI Depends(get_settings)
-    resolution sees the override. Plain monkeypatch on the session-scoped
-    test_settings instance is not enough when another module has swapped the
-    singleton via set_settings(...) earlier in the same xdist worker.
-    """
-    from eneo.main.config import set_settings
+    from eneo.main.config import get_settings, set_settings
+    from eneo.main.container.container import Container
+    from eneo.settings.encryption_service import EncryptionService
 
+    original_settings = get_settings()
     enabled_settings = test_settings.model_copy(
         update={"tenant_credentials_enabled": True}
     )
     set_settings(enabled_settings)
-    yield
-    set_settings(test_settings)
+    Container.encryption_service.reset_last_overriding()
+    Container.encryption_service.override(
+        providers.Object(EncryptionService(enabled_settings.encryption_key))
+    )
+    try:
+        yield enabled_settings
+    finally:
+        set_settings(original_settings)
+        Container.encryption_service.reset_last_overriding()
+        Container.encryption_service.override(
+            providers.Object(EncryptionService(original_settings.encryption_key))
+        )
 
 
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:

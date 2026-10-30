@@ -16,7 +16,10 @@ from sqlalchemy.sql.selectable import Select
 
 from eneo.database.tables.base_class import Base
 from eneo.database.tables.files_table import FILE_USAGE_INFO_KEY, Files
-from eneo.files.file_models import FileUsageKind
+from eneo.database.tables.flow_tables import FlowVersionFileReferences
+from eneo.files.file_models import FileFlowVersionHolder, FileUsageKind
+
+FLOW_VERSION_HOLDER_LIMIT = 10
 
 
 class FileUsageUndeclaredError(RuntimeError):
@@ -36,7 +39,7 @@ def collect_file_usage_columns(
     found: list[tuple[FileUsageKind, sa.Column[UUID]]] = []
     for table in metadata.tables.values():
         for foreign_key in table.foreign_keys:
-            if foreign_key.column.table is not files_table:
+            if foreign_key.column is not files_table.c.id:
                 continue
             column = foreign_key.parent
             if FILE_USAGE_INFO_KEY not in column.info:
@@ -272,6 +275,25 @@ class FileUsageRepository:
                 count=row.usage_count,
             )
             for row in rows
+        ]
+
+    async def list_flow_version_holders(
+        self, file_ids: list[UUID]
+    ) -> list[FileFlowVersionHolder]:
+        rows = await self._session.execute(
+            sa.select(
+                FlowVersionFileReferences.flow_id, FlowVersionFileReferences.version
+            )
+            .where(FlowVersionFileReferences.file_id.in_(file_ids))
+            .distinct()
+            .order_by(
+                FlowVersionFileReferences.flow_id, FlowVersionFileReferences.version
+            )
+            .limit(FLOW_VERSION_HOLDER_LIMIT)
+        )
+        return [
+            FileFlowVersionHolder(flow_id=flow_id, version=version)
+            for flow_id, version in rows.all()
         ]
 
     @classmethod

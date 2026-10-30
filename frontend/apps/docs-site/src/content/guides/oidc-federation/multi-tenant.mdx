@@ -2,7 +2,7 @@
 
 Set up OIDC authentication where each tenant (organization, municipality, company) uses their own identity provider.
 
-import { Callout, Steps, Tabs } from 'nextra/components'
+import { Callout, Steps, Tabs } from "nextra/components";
 
 ---
 
@@ -33,7 +33,10 @@ Before starting, ensure you have:
 - [ ] For each tenant, the public origin its users will use (the same origin for all tenants, or a dedicated hostname per tenant - Eneo does not derive the tenant from the hostname)
 
 <Callout type="warning">
-  Multi-tenant federation **requires** `FEDERATION_ENABLED=true`. In this mode the `OIDC_*` environment variables are ignored - every tenant must be configured through the sysadmin API, and a tenant without a configuration cannot sign in.
+  Multi-tenant federation **requires** `FEDERATION_ENABLED=true`. In this mode
+  the `OIDC_*` environment variables are ignored - every tenant must be
+  configured through the sysadmin API, and a tenant without a configuration
+  cannot sign in.
 </Callout>
 
 ---
@@ -69,7 +72,9 @@ docker compose restart backend
 ```
 
 <Callout type="info">
-  `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias for `FEDERATION_ENABLED`. It still works but logs a warning at startup; when both are set, `FEDERATION_ENABLED` wins.
+  `FEDERATION_PER_TENANT_ENABLED` is a deprecated alias for
+  `FEDERATION_ENABLED`. It still works but logs a warning at startup; when both
+  are set, `FEDERATION_ENABLED` wins.
 </Callout>
 
 ### Prepare tenants
@@ -107,6 +112,7 @@ For each tenant, register Eneo as an application in their IdP. The redirect URI 
     ```
     https://login.microsoftonline.com/{directory-tenant-id}/v2.0/.well-known/openid-configuration
     ```
+
   </Tabs.Tab>
   <Tabs.Tab>
     1. Log in to the tenant's MobilityGuard admin console
@@ -122,6 +128,7 @@ For each tenant, register Eneo as an application in their IdP. The redirect URI 
     ```
     https://tenant-mobilityguard.com/.well-known/openid-configuration
     ```
+
   </Tabs.Tab>
 </Tabs>
 
@@ -188,12 +195,15 @@ curl -X POST "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/f
 ```
 
 This test:
+
 - Fetches the IdP's discovery document from the stored `discovery_endpoint`
 - Verifies the required OIDC fields are present (`issuer`, `authorization_endpoint`, `token_endpoint`, `jwks_uri`)
 - Returns `{"success": true, "message": "Federation config is valid and IdP is reachable", "issuer": "…"}`
 
 <Callout type="info">
-  The test does **not** fetch the JWKS, attempt actual authentication or validate client credentials - it only checks that the discovery endpoint is reachable and complete.
+  The test does **not** fetch the JWKS, attempt actual authentication or
+  validate client credentials - it only checks that the discovery endpoint is
+  reachable and complete.
 </Callout>
 
 ### Test login
@@ -214,11 +224,11 @@ You are redirected to the tenant's IdP. Authenticate with a user from that IdP; 
 
 When federation is enabled and more than one active tenant exists, the login page determines which tenant's IdP to use in this order:
 
-| Priority | Method | Description |
-|----------|--------|-------------|
-| 1 | **`tenant` query parameter** | `/login?tenant={slug}` starts the flow for that tenant immediately. Use this for direct links from intranets or portals |
-| 2 | **Remembered slug** | The last slug used in this browser session (stored in `sessionStorage`) stays the active tenant: the selector is skipped and the sign-in form is shown with a **Choose another organisation** link, and after a failed callback a **Try logging in again** button restarts the flow for that tenant. It does not start the IdP redirect by itself - use `?tenant={slug}` for that |
-| 3 | **Tenant selector** | The login page fetches `GET /api/v1/auth/tenants` and shows a selector. When exactly one tenant is returned it is selected automatically |
+| Priority | Method                       | Description                                                                                                                                                                                                                                                                                                                                                                       |
+| -------- | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1        | **`tenant` query parameter** | `/login?tenant={slug}` starts the flow for that tenant immediately. Use this for direct links from intranets or portals                                                                                                                                                                                                                                                           |
+| 2        | **Remembered slug**          | The last slug used in this browser session (stored in `sessionStorage`) stays the active tenant: the selector is skipped and the sign-in form is shown with a **Choose another organisation** link, and after a failed callback a **Try logging in again** button restarts the flow for that tenant. It does not start the IdP redirect by itself - use `?tenant={slug}` for that |
+| 3        | **Tenant selector**          | The login page fetches `GET /api/v1/auth/tenants` and shows a selector. When exactly one tenant is returned it is selected automatically                                                                                                                                                                                                                                          |
 
 Eneo does **not** resolve tenants from subdomains or hostnames. A dedicated hostname per tenant is optional (set it as that tenant's `canonical_public_origin`); the tenant is always carried explicitly via the slug and the signed state.
 
@@ -295,6 +305,7 @@ JIT never restores inactive or removed accounts. SCIM or an administrator must r
 The user's email domain isn't in the tenant's `allowed_domains` list (`403`).
 
 **Fix:** Add the domain with `PATCH`:
+
 ```bash
 curl -X PATCH "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/federation" \
   -H "X-API-Key: your-super-admin-api-key" \
@@ -307,6 +318,7 @@ curl -X PATCH "https://eneo.your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/
 The user authenticated successfully with the IdP but doesn't exist in Eneo and the tenant has JIT provisioning disabled (`403`).
 
 **Fix:** Either:
+
 - Create or invite the user in the tenant first
 - For deployments without SCIM, enable JIT (`provisioning: true`), configure a non-empty `allowed_domains`, require `email_verified: true` from the IdP (`"true"` and `"1"` are also accepted), and set a `default_role_id`. Otherwise auto-created users have no permissions. Do not enable JIT to bypass a SCIM provisioning failure.
 
@@ -321,6 +333,7 @@ Redis is reachable but the cached state for this login was not found: the callba
 Auth state caching is best-effort. When Redis is down the backend logs `Failed to persist OIDC state in Redis` / `Failed to retrieve cached OIDC state` warnings and continues on the signed state alone, without tamper detection.
 
 **Fix:** Verify Redis is running and accessible:
+
 ```bash
 redis-cli ping
 ```
@@ -343,6 +356,7 @@ docker compose logs backend | grep "correlation_id.*abc123"
 ```
 
 Remember to disable debug mode after:
+
 ```bash
 curl -X POST "https://eneo.your-domain.com/api/v1/sysadmin/observability/oidc-debug/" \
   -H "X-API-Key: your-super-admin-api-key" \
@@ -381,7 +395,9 @@ docker compose logs backend | grep "correlation_id.*a1b2c3d4e5f67890"
    - User resolution
 
 <Callout type="info">
-  When users report authentication issues, ask them for the correlation ID shown on the error screen. This allows you to quickly locate all related log entries.
+  When users report authentication issues, ask them for the correlation ID shown
+  on the error screen. This allows you to quickly locate all related log
+  entries.
 </Callout>
 
 ---
@@ -404,17 +420,18 @@ Where `{nonce}` is a 32-character hexadecimal string generated per authenticatio
 
 Each state entry contains:
 
-| Field | Description |
-|-------|-------------|
-| `tenant_id` | UUID of the tenant initiating authentication |
-| `tenant_slug` | Tenant slug for validation on callback |
-| `redirect_uri` | Server-computed redirect URI |
+| Field            | Description                                               |
+| ---------------- | --------------------------------------------------------- |
+| `tenant_id`      | UUID of the tenant initiating authentication              |
+| `tenant_slug`    | Tenant slug for validation on callback                    |
+| `redirect_uri`   | Server-computed redirect URI                              |
 | `config_version` | Tenant configuration version (for stale config detection) |
-| `iat` | Issued-at timestamp |
+| `iat`            | Issued-at timestamp                                       |
 
 ### TTL Configuration
 
 State tokens expire after 10 minutes by default (controlled by `oidc_state_ttl_seconds`). After expiration:
+
 - The Redis key is automatically deleted
 - Callback attempts with expired state will fail
 - Users must restart the authentication flow
@@ -437,7 +454,8 @@ redis-cli TTL "oidc:state:{nonce}"
 ```
 
 <Callout type="warning">
-  Never manually delete or modify state entries in production. This could cause active authentication flows to fail.
+  Never manually delete or modify state entries in production. This could cause
+  active authentication flows to fail.
 </Callout>
 
 ---
@@ -449,7 +467,8 @@ redis-cli TTL "oidc:state:{nonce}"
 Client secrets are encrypted using **Fernet** (AES-128-CBC + HMAC-SHA256) before being stored in the database.
 
 <Callout type="warning">
-  **Back up your `ENCRYPTION_KEY`** securely. If you lose it, you'll need to re-register all tenant IdPs and reconfigure their client secrets.
+  **Back up your `ENCRYPTION_KEY`** securely. If you lose it, you'll need to
+  re-register all tenant IdPs and reconfigure their client secrets.
 </Callout>
 
 ### Domain Restrictions
@@ -464,5 +483,4 @@ Authentication requests use signed state tokens (JWT with HS256) to prevent CSRF
 
 ## Next Steps
 
-- [Single-Tenant Setup](/guides/oidc-federation/single-tenant) - Simpler setup for single-organization deployments
 - [Authentication Architecture](/docs/authentication-architecture) - Technical details on the OIDC implementation

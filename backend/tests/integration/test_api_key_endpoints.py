@@ -1100,7 +1100,7 @@ async def test_admin_list_cursor_is_total_ordered_and_round_trips_full_pages(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_admin_module_binding_filter_uses_effective_key_eligibility(
+async def test_module_service_key_catalog_uses_effective_key_eligibility(
     client, db_container, default_user_token
 ):
     marker = f"module-eligible-{uuid4().hex[:8]}"
@@ -1154,11 +1154,10 @@ async def test_admin_module_binding_filter_uses_effective_key_eligibility(
         )
 
     response = await client.get(
-        "/api/v1/admin/api-keys",
+        "/api/v1/admin/modules/service-keys/",
         params={
             "search": marker,
             "limit": 20,
-            "eligible_for_module_binding": True,
         },
         headers={"Authorization": f"Bearer {default_user_token}"},
     )
@@ -1168,7 +1167,19 @@ async def test_admin_module_binding_filter_uses_effective_key_eligibility(
         eligible_write,
         eligible_admin,
     }
-    assert payload["total_count"] == 2
+    assert payload["total_count"] is None
+
+    eligible_lookup = await client.get(
+        f"/api/v1/admin/modules/service-keys/{eligible_write}/",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert eligible_lookup.status_code == 200, eligible_lookup.text
+
+    ineligible_lookup = await client.get(
+        f"/api/v1/admin/modules/service-keys/{expired}/",
+        headers={"Authorization": f"Bearer {default_user_token}"},
+    )
+    assert ineligible_lookup.status_code == 404, ineligible_lookup.text
 
 
 @pytest.mark.integration
@@ -2566,3 +2577,191 @@ async def test_owner_scoped_keys_cannot_access_diagnostics_regardless_of_permiss
             assert body["code"] == "insufficient_scope"
             assert body["request_id"] == request_id
             assert body["context"]["auth_layer"] == "api_key_scope"
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_created_api_key_is_committed_before_the_endpoint_returns(
+    setup_database,
+    default_user,
+    test_tenant,
+    object_content_runtime_ready,
+):
+    """A freshly issued key must be usable on the caller's very next request.
+
+    The default request container commits at dependency teardown, which runs
+    after the response has been sent — so a client that authenticates with the
+    secret it was just handed could race that commit and be told the key is
+    invalid. The endpoint therefore owns its transaction.
+
+    The endpoint is driven directly rather than over HTTP because an ASGI test
+    client only returns once teardown has already run, which would hide exactly
+    the ordering under test. A second, independent session stands in for the
+    caller's next request.
+    """
+    from dependency_injector import providers
+
+    from eneo.authentication.api_key_router import create_api_key
+    from eneo.authentication.auth_models import (
+        ApiKeyCreateRequest,
+        ApiKeyPermission,
+        ApiKeyScopeType,
+        ApiKeyType,
+    )
+    from eneo.database.database import sessionmanager
+    from eneo.main.container.container import Container
+
+    async with sessionmanager.session() as session:
+        # The explicit-transaction container hands the endpoint a session with no
+        # transaction open; the endpoint is responsible for the rest.
+        assert not session.in_transaction()
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(default_user),
+            tenant=providers.Object(test_tenant),
+        )
+        response = await create_api_key(
+            payload=ApiKeyCreateRequest(
+                name="Read-after-create key",
+                key_type=ApiKeyType.SK,
+                permission=ApiKeyPermission.READ,
+                scope_type=ApiKeyScopeType.TENANT,
+            ),
+            container=container,
+        )
+        created_id = UUID(str(response.api_key.id))
+
+        # Stand-in for the caller's next request: a different connection, while
+        # the endpoint's own session is still open.
+        async with (
+            sessionmanager.session() as next_request_session,
+            next_request_session.begin(),
+        ):
+            durable_id = await next_request_session.scalar(
+                sa.select(ApiKeysV2Table.id).where(ApiKeysV2Table.id == created_id)
+            )
+
+    assert durable_id == created_id, (
+        "the issued key was not committed before the endpoint returned, so the "
+        "caller's next request can be rejected as invalid_api_key"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_revoked_api_key_is_committed_before_the_endpoint_returns(
+    setup_database,
+    default_user,
+    test_tenant,
+    object_content_runtime_ready,
+):
+    """Revocation is the inverse of the read-after-create race, and worse.
+
+    A 200 on revoke tells an operator the key is dead. If that state is only
+    committed at dependency teardown, the key keeps authenticating after the
+    response is sent — the window is short, but it is a window in which a key
+    reported as revoked still works.
+    """
+    from dependency_injector import providers
+
+    from eneo.authentication.api_key_router import create_api_key, revoke_api_key
+    from eneo.authentication.auth_models import (
+        ApiKeyCreateRequest,
+        ApiKeyPermission,
+        ApiKeyScopeType,
+        ApiKeyState,
+        ApiKeyType,
+    )
+    from eneo.database.database import sessionmanager
+    from eneo.main.container.container import Container
+
+    def _container(session):
+        return Container(
+            session=providers.Object(session),
+            user=providers.Object(default_user),
+            tenant=providers.Object(test_tenant),
+        )
+
+    async with sessionmanager.session() as session:
+        created = await create_api_key(
+            payload=ApiKeyCreateRequest(
+                name="Revoke-before-return key",
+                key_type=ApiKeyType.SK,
+                permission=ApiKeyPermission.READ,
+                scope_type=ApiKeyScopeType.TENANT,
+            ),
+            container=_container(session),
+        )
+        key_id = UUID(str(created.api_key.id))
+
+        revoked = await revoke_api_key(id=key_id, container=_container(session))
+        assert revoked.state == ApiKeyState.REVOKED
+
+        # Stand-in for a request arriving right after the operator saw the 200.
+        async with (
+            sessionmanager.session() as next_request_session,
+            next_request_session.begin(),
+        ):
+            durable_state = await next_request_session.scalar(
+                sa.select(ApiKeysV2Table.state).where(ApiKeysV2Table.id == key_id)
+            )
+
+    assert durable_state == ApiKeyState.REVOKED.value, (
+        "revocation was reported to the operator before it was committed, so the "
+        "key still authenticates after the response"
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_notification_preferences_are_committed_before_the_endpoint_returns(
+    setup_database,
+    default_user,
+    test_tenant,
+    object_content_runtime_ready,
+):
+    """A saved preference is state the caller can read back immediately.
+
+    These three settings routes kept the default container, so their 200
+    described a write that only landed at dependency teardown; the caller's own
+    reload could still show the previous value.
+    """
+    from dependency_injector import providers
+
+    from eneo.authentication.api_key_router import update_notification_preferences
+    from eneo.authentication.auth_models import ApiKeyNotificationPreferencesUpdate
+    from eneo.database.database import sessionmanager
+    from eneo.database.tables.settings_table import Settings
+    from eneo.main.container.container import Container
+
+    async with sessionmanager.session() as session:
+        assert not session.in_transaction()
+        response = await update_notification_preferences(
+            request=ApiKeyNotificationPreferencesUpdate(days_before_expiry=[21, 3]),
+            container=Container(
+                session=providers.Object(session),
+                user=providers.Object(default_user),
+                tenant=providers.Object(test_tenant),
+            ),
+        )
+        assert response.days_before_expiry == [21, 3]
+
+        # Stand-in for the caller's next request, on a different connection.
+        async with (
+            sessionmanager.session() as next_request_session,
+            next_request_session.begin(),
+        ):
+            durable_widget = await next_request_session.scalar(
+                sa.select(Settings.chatbot_widget)
+                .where(Settings.user_id == default_user.id)
+                .order_by(Settings.updated_at.desc())
+                .limit(1)
+            )
+
+    assert isinstance(durable_widget, dict)
+    assert durable_widget["api_key_notifications"]["preferences"][
+        "days_before_expiry"
+    ] == [21, 3], (
+        "the preference was reported as saved before it was committed, so the "
+        "caller's next read can still return the previous value"
+    )

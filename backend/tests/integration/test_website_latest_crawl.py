@@ -189,6 +189,19 @@ async def test_older_crawls_report_that_failure_addresses_were_not_recorded(
     assert response.json()["total_count"] == 0
 
 
+async def _foreign_tenant_user(db_container, admin_user):
+    """The admin as a member of another tenant. A user-scoped Space repository
+    refuses a user whose tenant differs from its own, so the container gets the
+    matching tenant."""
+    async with db_container() as container:
+        tenant = container.tenant()
+    foreign_tenant_id = uuid4()
+    return (
+        admin_user.model_copy(update={"tenant_id": foreign_tenant_id}),
+        tenant.model_copy(update={"id": foreign_tenant_id}),
+    )
+
+
 async def test_failed_addresses_are_paginated_and_require_website_access(
     client, db_container, admin_user, website_id, headers, monkeypatch
 ) -> None:
@@ -281,8 +294,8 @@ async def test_failed_addresses_are_paginated_and_require_website_access(
             await client.get(failure_url, headers=headers, params={"kind": "unknown"})
         ).status_code == 422
 
-    foreign_user = admin_user.model_copy(update={"tenant_id": uuid4()})
-    async with db_container(user=foreign_user) as container:
+    foreign_user, foreign_tenant = await _foreign_tenant_user(db_container, admin_user)
+    async with db_container(user=foreign_user, tenant=foreign_tenant) as container:
         with pytest.raises(NotFoundException):
             await container.website_crud_service().get_crawl_failures(run_id)
     async with db_container(user=admin_user) as container:
@@ -413,8 +426,8 @@ async def test_latest_crawl_rejects_a_different_tenant_before_reading_runs(
 ) -> None:
     from eneo.main.exceptions import NotFoundException
 
-    foreign_user = admin_user.model_copy(update={"tenant_id": uuid4()})
-    async with db_container(user=foreign_user) as container:
+    foreign_user, foreign_tenant = await _foreign_tenant_user(db_container, admin_user)
+    async with db_container(user=foreign_user, tenant=foreign_tenant) as container:
         with pytest.raises(NotFoundException):
             await container.website_crud_service().get_latest_crawl_run(website_id)
 

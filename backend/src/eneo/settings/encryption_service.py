@@ -163,16 +163,51 @@ class EncryptionService:
         if not self._fernet:
             raise EncryptionNotConfiguredException(self.NOT_CONFIGURED_MESSAGE)
 
-        try:
-            decrypted_bytes = self._fernet.decrypt(token.encode())
-            return decrypted_bytes.decode()
-        except InvalidToken as e:
-            logger.error(f"Decryption failed: {e}")
+        plaintext = self._authenticated_plaintext(token)
+        if plaintext is None:
+            logger.error("Decryption failed: invalid token or wrong encryption key")
             raise ValueError("Decryption failed: invalid token or wrong encryption key")
+        return plaintext
 
     def is_encrypted(self, value: str) -> bool:
         """Check if value is encrypted with versioned format."""
         return value.startswith(self.VERSION_PREFIX) if value else False
+
+    def can_decrypt(self, value: str) -> bool:
+        """Whether the active key authenticates this value as its own ciphertext.
+
+        Verification without side effects: unlike `decrypt` this neither logs
+        nor raises, so a caller checking a whole estate of stored credentials
+        produces no diagnostic record per invalid value. `decrypt` keeps its
+        logging, because callers that mask a credential swallow its failure and
+        that log is their only visibility.
+        """
+        if not value or not self.is_encrypted(value):
+            return False
+        parts = value.split(":", 3)
+        if len(parts) != 4:
+            return False
+        _scheme, algorithm, version, token = parts
+        if algorithm != "fernet" or version != "v1":
+            return False
+        return self._authenticated_plaintext(token) is not None
+
+    def _authenticated_plaintext(self, token: str) -> str | None:
+        """Decrypt one Fernet token, or None when it does not authenticate.
+
+        A token can be cryptographically authentic and still not hold a
+        credential this service can return: anything written by another
+        producer may not decode as UTF-8. That is a failure to recover the
+        plaintext, not a different kind of event, so it is reported the same
+        way — `decrypt` raises its documented ValueError and `can_decrypt`
+        answers False.
+        """
+        if not self._fernet:
+            return None
+        try:
+            return self._fernet.decrypt(token.encode()).decode()
+        except (InvalidToken, UnicodeDecodeError):
+            return None
 
     @staticmethod
     def mask_secret(secret: str, visible_chars: int = 4) -> str:

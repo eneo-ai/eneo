@@ -133,6 +133,7 @@ class AuthService:
         user: UserInDB,
         *,
         assistant_id: UUID,
+        session_id: UUID | None = None,
         mcp_server_id: UUID | None = None,
         table_tools: bool = False,
         expires_in: int = 15,
@@ -157,6 +158,8 @@ class AuthService:
         can point spreadsheets at them instead of dumping their text.
         """
         claims: dict[str, object] = {"assistant_id": str(assistant_id)}
+        if session_id is not None:
+            claims["session_id"] = str(session_id)
         if mcp_server_id is not None:
             claims["mcp_server_id"] = str(mcp_server_id)
         if table_tools:

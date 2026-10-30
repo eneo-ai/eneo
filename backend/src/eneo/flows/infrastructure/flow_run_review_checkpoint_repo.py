@@ -1,0 +1,1814 @@
+"""Persistence owner for Flow run review checkpoints.
+
+Callers own the active database transaction. Mutating methods that touch both a
+parent Flow run row and its review checkpoint rows lock the run first, then
+re-check checkpoint state predicates before mutating.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
+from typing import Any, Literal, Sequence
+from uuid import UUID
+
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.tables.flow_tables import (
+    FlowRunReviewCheckpointEdits,
+    FlowRunReviewCheckpoints,
+    FlowRuns,
+    FlowStepResults,
+    FlowTranscriptCorrectionRevisions,
+)
+from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+from eneo.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    FlowRun,
+    FlowRunReviewCheckpoint,
+    FlowRunReviewCheckpointEdit,
+    FlowRunStatus,
+    FlowStepResultStatus,
+)
+from eneo.flows.domain.flow_run_exceptions import (
+    FlowRunNotFoundError,
+    FlowRunPersistenceInvariantError,
+)
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FlowRunAbandonmentWait,
+    require_flow_run_wait_before_deadline,
+    start_flow_dispatch_epoch,
+)
+from eneo.flows.domain.review_checkpoint_exceptions import (
+    FlowReviewCheckpointAlreadyResumedError,
+    FlowReviewCheckpointCancelledError,
+    FlowReviewCheckpointExpiredError,
+    FlowReviewCheckpointNotActiveError,
+    FlowReviewCheckpointNotApprovedError,
+    FlowReviewCheckpointNotFoundError,
+    FlowReviewCheckpointRejectedError,
+    FlowReviewCheckpointRunNotRunningError,
+    FlowReviewCheckpointStaleRevisionError,
+    FlowReviewCheckpointStepResultIncompleteError,
+    FlowReviewEditStepResultMissingError,
+    FlowReviewMultipleActiveCheckpointsError,
+    FlowReviewOpenBlockedByActiveCheckpointError,
+    FlowReviewRunNoLongerAwaitingReviewError,
+    FlowReviewRunNotAwaitingReviewError,
+)
+from eneo.flows.domain.review_edit_references import (
+    ResumedReviewPayload,
+    ReviewedResultKey,
+)
+from eneo.flows.domain.transcript_corrections import FlowTranscriptCorrectionSet
+from eneo.flows.enums import (
+    ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
+    RECONCILABLE_REVIEW_CHECKPOINT_STATES,
+    FlowOutputType,
+    FlowRunLifecycleSource,
+    FlowRunReviewCheckpointEditCause,
+    FlowRunReviewCheckpointState,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowConflictException
+from eneo.flows.flow_review_expiry_policy import (
+    FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
+    FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
+)
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_runtime_file_integrity import constraint_name_from_integrity_error
+from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
+    FlowRunAuditOutboxRepository,
+)
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.principal import FlowPrincipal
+
+# The partial unique index of review checkpoints (database/tables/flow_tables.py):
+# a resume key is unique per run.
+_RESUME_KEY_INDEX = "uq_flow_run_review_checkpoints_resume_key"
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunReviewCheckpointIdentity:
+    id: UUID
+    step_id: UUID
+    step_order: int
+    attempt_no: int
+    state: FlowRunReviewCheckpointState
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunReviewCheckpointHistoryBaseline:
+    revision: int
+    payload_json: FlowPersistedJsonObject | None
+    payload_sha256: str
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunReviewCheckpointOpenResult:
+    checkpoint: FlowRunReviewCheckpoint
+    run: FlowRun
+    created: bool
+    audit_outbox_id: UUID | None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunReviewCheckpointResumeResult:
+    checkpoint: FlowRunReviewCheckpoint
+    run: FlowRun
+    accepted: bool
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunReviewCheckpointEvidenceMeasurement:
+    row_count: int
+    stored_json_bytes: int
+    logical_json_bytes: int
+
+    @classmethod
+    def empty(cls) -> "FlowRunReviewCheckpointEvidenceMeasurement":
+        return cls(row_count=0, stored_json_bytes=0, logical_json_bytes=0)
+
+
+def _review_checkpoint_evidence_logical_bytes() -> Any:
+    json_bytes = sum(
+        (
+            sa.func.coalesce(sa.func.octet_length(sa.cast(column, sa.Text)), 0)
+            for column in (
+                FlowRunReviewCheckpoints.original_payload_json,
+                FlowRunReviewCheckpoints.current_payload_json,
+                FlowRunReviewCheckpoints.output_contract_json,
+                FlowRunReviewCheckpoints.next_step_ids_json,
+            )
+        ),
+        start=sa.literal(0),
+    )
+    return json_bytes + sa.func.coalesce(
+        sa.func.octet_length(
+            sa.cast(sa.func.to_jsonb(FlowRunReviewCheckpoints.step_label), sa.Text)
+        ),
+        0,
+    )
+
+
+_ACTIVE_REVIEW_CHECKPOINT_STATES = tuple(
+    state.value for state in ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES
+)
+_RECONCILABLE_REVIEW_CHECKPOINT_STATES = tuple(
+    state.value for state in RECONCILABLE_REVIEW_CHECKPOINT_STATES
+)
+_ReviewCheckpointTimestampColumn = Literal[
+    "edited_at",
+    "approved_at",
+    "rejected_at",
+    "resumed_at",
+    "cancelled_at",
+    "expired_at",
+]
+_REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE: dict[
+    FlowRunReviewCheckpointState,
+    _ReviewCheckpointTimestampColumn,
+] = {
+    FlowRunReviewCheckpointState.EDITED: "edited_at",
+    FlowRunReviewCheckpointState.APPROVED: "approved_at",
+    FlowRunReviewCheckpointState.REJECTED: "rejected_at",
+    FlowRunReviewCheckpointState.RESUMED: "resumed_at",
+    FlowRunReviewCheckpointState.CANCELLED: "cancelled_at",
+    FlowRunReviewCheckpointState.EXPIRED: "expired_at",
+}
+
+
+class FlowRunReviewCheckpointRepository:
+    def __init__(
+        self,
+        *,
+        session: AsyncSession,
+        audit_outbox_repo: FlowRunAuditOutboxRepository,
+    ):
+        self.session = session
+        self.audit_outbox_repo = audit_outbox_repo
+
+    @staticmethod
+    def _edit_select():
+        return sa.select(
+            FlowRunReviewCheckpointEdits,
+            FlowTranscriptCorrectionRevisions.correction_set_id,
+            FlowTranscriptCorrectionRevisions.revision,
+        ).outerjoin(
+            FlowTranscriptCorrectionRevisions,
+            FlowTranscriptCorrectionRevisions.id
+            == FlowRunReviewCheckpointEdits.corrections_revision_id,
+        )
+
+    async def _read_edits(
+        self, stmt: sa.Select[Any]
+    ) -> list[FlowRunReviewCheckpointEdit]:
+        rows = (await self.session.execute(stmt)).all()
+        return [
+            FlowRunReviewCheckpointEdit.model_validate(row).model_copy(
+                update={
+                    "correction_set_id": set_id,
+                    "corrections_revision": revision,
+                }
+            )
+            for row, set_id, revision in rows
+        ]
+
+    async def list_review_checkpoint_edits_for_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
+    ) -> list[FlowRunReviewCheckpointEdit]:
+        stmt = (
+            self._edit_select()
+            .join(
+                FlowRunReviewCheckpoints,
+                FlowRunReviewCheckpoints.id
+                == FlowRunReviewCheckpointEdits.checkpoint_id,
+            )
+            .where(FlowRunReviewCheckpointEdits.flow_run_id == run_id)
+            .where(FlowRunReviewCheckpointEdits.tenant_id == tenant_id)
+            .order_by(
+                FlowRunReviewCheckpoints.step_order,
+                FlowRunReviewCheckpoints.attempt_no,
+                FlowRunReviewCheckpointEdits.checkpoint_id,
+                FlowRunReviewCheckpointEdits.revision,
+            )
+        )
+        if logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowRunReviewCheckpointEdits.id,
+                    FlowRunReviewCheckpoints.step_order,
+                    FlowRunReviewCheckpoints.attempt_no,
+                    FlowRunReviewCheckpointEdits.checkpoint_id,
+                    FlowRunReviewCheckpointEdits.revision,
+                    sa.func.octet_length(
+                        sa.cast(FlowRunReviewCheckpointEdits.payload_json, sa.Text)
+                    ).label("logical"),
+                )
+                .join(
+                    FlowRunReviewCheckpoints,
+                    FlowRunReviewCheckpoints.id
+                    == FlowRunReviewCheckpointEdits.checkpoint_id,
+                )
+                .where(
+                    FlowRunReviewCheckpointEdits.flow_run_id == run_id,
+                    FlowRunReviewCheckpointEdits.tenant_id == tenant_id,
+                )
+                .order_by(
+                    FlowRunReviewCheckpoints.step_order,
+                    FlowRunReviewCheckpoints.attempt_no,
+                    FlowRunReviewCheckpointEdits.checkpoint_id,
+                    FlowRunReviewCheckpointEdits.revision,
+                )
+            )
+            if limit is not None:
+                candidates = candidates.limit(limit)
+            bounded = candidates.subquery()
+            ranked = sa.select(
+                bounded.c.id,
+                sa.func.sum(bounded.c.logical)
+                .over(
+                    order_by=(
+                        bounded.c.step_order,
+                        bounded.c.attempt_no,
+                        bounded.c.checkpoint_id,
+                        bounded.c.revision,
+                    )
+                )
+                .label("cumulative"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowRunReviewCheckpointEdits.id.in_(
+                    sa.select(ranked.c.id).where(
+                        ranked.c.cumulative <= logical_byte_budget
+                    )
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        return await self._read_edits(stmt)
+
+    async def get_review_checkpoint_history_baseline(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        revision: int,
+        logical_byte_budget: int,
+    ) -> tuple[FlowRunReviewCheckpointHistoryBaseline | None, tuple[int, int] | None]:
+        if revision == 1:
+            identifier = FlowRunReviewCheckpoints.id
+            payload = FlowRunReviewCheckpoints.original_payload_json
+            payload_stmt = sa.select(payload)
+            metadata_stmt = sa.select(
+                identifier,
+                sa.func.coalesce(sa.func.octet_length(sa.cast(payload, sa.Text)), 0),
+            )
+        else:
+            identifier = FlowRunReviewCheckpointEdits.id
+            payload = FlowRunReviewCheckpointEdits.payload_json
+            payload_stmt = sa.select(
+                payload, FlowRunReviewCheckpointEdits.payload_sha256_after
+            )
+            metadata_stmt = (
+                sa.select(identifier, sa.func.octet_length(sa.cast(payload, sa.Text)))
+                .join(
+                    FlowRunReviewCheckpoints,
+                    FlowRunReviewCheckpoints.id
+                    == FlowRunReviewCheckpointEdits.checkpoint_id,
+                )
+                .where(FlowRunReviewCheckpointEdits.revision == revision)
+            )
+        metadata = (
+            await self.session.execute(
+                metadata_stmt.where(
+                    FlowRunReviewCheckpoints.id == checkpoint_id,
+                    FlowRunReviewCheckpoints.tenant_id == tenant_id,
+                    FlowRunReviewCheckpoints.flow_id == flow_id,
+                    FlowRunReviewCheckpoints.flow_run_id == flow_run_id,
+                )
+            )
+        ).one_or_none()
+        if metadata is None:
+            return None, None
+        if metadata[1] > logical_byte_budget:
+            return None, (revision, int(metadata[1]))
+        row = (
+            await self.session.execute(payload_stmt.where(identifier == metadata[0]))
+        ).one_or_none()
+        if row is None:
+            return None, None
+        return FlowRunReviewCheckpointHistoryBaseline(
+            revision=revision,
+            payload_json=row[0],
+            payload_sha256=canonical_json_hash(row[0]) if revision == 1 else row[1],
+        ), None
+
+    async def list_review_checkpoint_edits(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        after_revision: int | None,
+        limit: int,
+        logical_byte_budget: int,
+    ) -> tuple[list[FlowRunReviewCheckpointEdit], bool, tuple[int, int] | None]:
+        candidates = (
+            sa.select(
+                FlowRunReviewCheckpointEdits.id,
+                FlowRunReviewCheckpointEdits.revision,
+                sa.func.octet_length(
+                    sa.cast(FlowRunReviewCheckpointEdits.payload_json, sa.Text)
+                ).label("logical"),
+            )
+            .where(
+                FlowRunReviewCheckpointEdits.checkpoint_id == checkpoint_id,
+                FlowRunReviewCheckpointEdits.tenant_id == tenant_id,
+                FlowRunReviewCheckpointEdits.revision > (after_revision or 1),
+            )
+            .order_by(FlowRunReviewCheckpointEdits.revision)
+            .limit(limit + 1)
+            .subquery()
+        )
+        ranked = sa.select(
+            candidates.c.id,
+            candidates.c.revision,
+            candidates.c.logical,
+            sa.func.sum(candidates.c.logical)
+            .over(order_by=candidates.c.revision)
+            .label("cumulative"),
+            sa.func.row_number().over(order_by=candidates.c.revision).label("position"),
+        ).subquery()
+        metadata = (
+            await self.session.execute(
+                sa.select(ranked)
+                .where(
+                    sa.or_(
+                        ranked.c.position == 1,
+                        ranked.c.cumulative - ranked.c.logical <= logical_byte_budget,
+                    )
+                )
+                .order_by(ranked.c.position)
+            )
+        ).all()
+        admitted = [
+            row.id for row in metadata[:limit] if row.cumulative <= logical_byte_budget
+        ]
+        obstructing = None
+        if len(metadata) > len(admitted):
+            next_row = metadata[len(admitted)]
+            if next_row.cumulative > logical_byte_budget:
+                obstructing = (int(next_row.revision), int(next_row.logical))
+        edits = (
+            await self._read_edits(
+                self._edit_select()
+                .where(FlowRunReviewCheckpointEdits.id.in_(admitted))
+                .order_by(FlowRunReviewCheckpointEdits.revision)
+            )
+            if admitted
+            else []
+        )
+        return edits, len(metadata) > len(admitted), obstructing
+
+    async def _insert_edit(
+        self,
+        *,
+        checkpoint: FlowRunReviewCheckpoint,
+        principal: FlowPrincipal,
+        cause: FlowRunReviewCheckpointEditCause,
+        payload_sha256_before: str,
+        payload_sha256_after: str,
+        corrections_revision_id: UUID | None = None,
+    ) -> None:
+        await self.session.execute(
+            sa.insert(FlowRunReviewCheckpointEdits).values(
+                tenant_id=checkpoint.tenant_id,
+                flow_id=checkpoint.flow_id,
+                flow_run_id=checkpoint.flow_run_id,
+                checkpoint_id=checkpoint.id,
+                revision=checkpoint.revision,
+                cause=cause.value,
+                corrections_revision_id=corrections_revision_id,
+                payload_json=checkpoint.current_payload_json,
+                payload_sha256_before=payload_sha256_before,
+                payload_sha256_after=payload_sha256_after,
+                edited_by_user_id=principal.principal_user_id,
+                edited_by_service_id=principal.principal_service_id,
+                edited_by_principal_type=principal.principal_type.value,
+            )
+        )
+
+    async def measure_edit_evidence_row_count(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        ceiling: int,
+    ) -> int:
+        candidates = (
+            sa.select(FlowRunReviewCheckpointEdits.id)
+            .where(
+                FlowRunReviewCheckpointEdits.flow_run_id == run_id,
+                FlowRunReviewCheckpointEdits.tenant_id == tenant_id,
+            )
+            .limit(ceiling + 1)
+            .subquery()
+        )
+        return int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(candidates)
+            )
+            or 0
+        )
+
+    async def measure_edit_evidence(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowRunReviewCheckpointEvidenceMeasurement:
+        stmt = sa.select(
+            (
+                sa.func.octet_length(
+                    sa.cast(FlowRunReviewCheckpointEdits.payload_json, sa.Text)
+                )
+            ).label("logical"),
+            (sa.func.pg_column_size(FlowRunReviewCheckpointEdits.payload_json)).label(
+                "stored"
+            ),
+        ).where(
+            FlowRunReviewCheckpointEdits.flow_run_id == run_id,
+            FlowRunReviewCheckpointEdits.tenant_id == tenant_id,
+        )
+        if candidate_limit is not None:
+            stmt = stmt.limit(candidate_limit)
+        candidates = stmt.subquery()
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count(),
+                    sa.func.coalesce(sa.func.sum(candidates.c.stored), 0),
+                    sa.func.coalesce(sa.func.sum(candidates.c.logical), 0),
+                )
+            )
+        ).one()
+        return FlowRunReviewCheckpointEvidenceMeasurement(
+            row_count=int(row[0]),
+            stored_json_bytes=int(row[1]),
+            logical_json_bytes=int(row[2]),
+        )
+
+    async def measure_evidence_row_count(
+        self, *, run_id: UUID, tenant_id: UUID, ceiling: int
+    ) -> int:
+        candidates = (
+            sa.select(FlowRunReviewCheckpoints.id)
+            .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .limit(ceiling + 1)
+            .subquery()
+        )
+        return int(
+            await self.session.scalar(
+                sa.select(sa.func.count()).select_from(candidates)
+            )
+            or 0
+        )
+
+    async def measure_evidence(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        candidate_limit: int | None = None,
+    ) -> FlowRunReviewCheckpointEvidenceMeasurement:
+        stored = sum(
+            (
+                sa.func.coalesce(sa.func.pg_column_size(column), 0)
+                for column in (
+                    FlowRunReviewCheckpoints.original_payload_json,
+                    FlowRunReviewCheckpoints.current_payload_json,
+                    FlowRunReviewCheckpoints.output_contract_json,
+                    FlowRunReviewCheckpoints.next_step_ids_json,
+                )
+            ),
+            start=sa.literal(0),
+        )
+        logical = _review_checkpoint_evidence_logical_bytes()
+        candidate_stmt = (
+            sa.select(FlowRunReviewCheckpoints.id)
+            .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+        )
+        if candidate_limit is not None:
+            candidate_stmt = candidate_stmt.limit(candidate_limit)
+        candidates = candidate_stmt.subquery()
+        row = (
+            # Paired with `_dump_review_checkpoint_record`, including the two
+            # JSON columns it emits under contract-facing names.
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(sa.func.sum(stored), 0).label("stored_json_bytes"),
+                    sa.func.coalesce(sa.func.sum(logical), 0).label(
+                        "logical_json_bytes"
+                    ),
+                )
+                .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+                .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                .where(FlowRunReviewCheckpoints.id.in_(sa.select(candidates.c.id)))
+            )
+        ).one()
+        return FlowRunReviewCheckpointEvidenceMeasurement(
+            row_count=int(row.row_count),
+            stored_json_bytes=int(row.stored_json_bytes),
+            logical_json_bytes=int(row.logical_json_bytes),
+        )
+
+    async def create_or_get_review_checkpoint_for_attempt(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        step_id: UUID,
+        step_order: int,
+        attempt_no: int,
+        original_payload_json: FlowPersistedJsonObject | None,
+        current_payload_json: FlowPersistedJsonObject | None,
+        requester_principal_type: PrincipalType,
+        requester_user_id: UUID | None,
+        requester_service_id: UUID | None,
+        review_mode: FlowStepReviewMode,
+        output_type: FlowOutputType,
+        step_label: str | None = None,
+        output_contract_json: FlowPersistedJsonObject | None = None,
+        next_step_ids: Sequence[UUID] | None = None,
+        review_expires_after_seconds: int | None = None,
+    ) -> FlowRunReviewCheckpoint:
+        effective_expires_after_seconds = (
+            review_expires_after_seconds
+            if review_expires_after_seconds is not None
+            else FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
+        )
+        expires_at = datetime.now(timezone.utc) + timedelta(
+            seconds=effective_expires_after_seconds
+        )
+        next_step_ids_json = (
+            [str(next_step_id) for next_step_id in next_step_ids]
+            if next_step_ids is not None
+            else None
+        )
+        checkpoint_row = await self.session.scalar(
+            pg_insert(FlowRunReviewCheckpoints)
+            .values(
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+                flow_run_id=flow_run_id,
+                step_id=step_id,
+                step_order=step_order,
+                attempt_no=attempt_no,
+                state=FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+                revision=1,
+                schema_version=1,
+                original_payload_json=original_payload_json,
+                current_payload_json=current_payload_json,
+                step_label=step_label,
+                review_mode=review_mode.value,
+                output_type=output_type.value,
+                output_contract_json=output_contract_json,
+                requester_principal_type=requester_principal_type.value,
+                requester_user_id=requester_user_id,
+                requester_service_id=requester_service_id,
+                next_step_ids_json=next_step_ids_json,
+                expires_at=expires_at,
+            )
+            .on_conflict_do_nothing(
+                constraint="uq_flow_run_review_checkpoints_run_step_attempt",
+            )
+            .returning(FlowRunReviewCheckpoints)
+        )
+        if checkpoint_row is None:
+            checkpoint_row = await self.session.scalar(
+                sa.select(FlowRunReviewCheckpoints)
+                .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
+                .where(FlowRunReviewCheckpoints.step_id == step_id)
+                .where(FlowRunReviewCheckpoints.attempt_no == attempt_no)
+                .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            )
+        if checkpoint_row is None:
+            raise FlowRunPersistenceInvariantError(
+                operation="create_review_checkpoint",
+                run_id=flow_run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+        return FlowRunReviewCheckpoint.model_validate(checkpoint_row)
+
+    async def open_review_checkpoint_for_completed_step(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        step_id: UUID,
+        step_order: int,
+        attempt_no: int,
+        requester_principal: FlowPrincipal,
+        next_step_ids: Sequence[UUID],
+        review_mode: FlowStepReviewMode,
+        output_type: FlowOutputType,
+        step_label: str | None = None,
+        output_contract_json: FlowPersistedJsonObject | None = None,
+        review_expires_after_seconds: int | None = None,
+    ) -> FlowRunReviewCheckpointOpenResult:
+        """Open a checkpoint for a step the caller resolved from the published run graph.
+
+        The repository persists downstream step IDs for resume decisions, but it
+        does not infer graph topology while holding run locks.
+        """
+        await FlowRunRepository(session=self.session).lock_execution_ownership(
+            run_id=flow_run_id, tenant_id=tenant_id
+        )
+        run_row = await self.session.scalar(
+            sa.select(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if run_row is None:
+            raise FlowRunNotFoundError(
+                run_id=flow_run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+
+        existing_checkpoint_row = await self.session.scalar(
+            sa.select(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
+            .where(FlowRunReviewCheckpoints.step_id == step_id)
+            .where(FlowRunReviewCheckpoints.attempt_no == attempt_no)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+        )
+        if existing_checkpoint_row is not None:
+            return FlowRunReviewCheckpointOpenResult(
+                checkpoint=FlowRunReviewCheckpoint.model_validate(
+                    existing_checkpoint_row
+                ),
+                run=FlowRun.model_validate(run_row),
+                created=False,
+                audit_outbox_id=None,
+            )
+
+        if run_row.status != FlowRunStatus.RUNNING.value:
+            raise FlowReviewCheckpointRunNotRunningError(status=run_row.status)
+
+        active_checkpoint = await self.get_active_review_checkpoint(
+            run_id=flow_run_id,
+            tenant_id=tenant_id,
+        )
+        if active_checkpoint is not None:
+            raise FlowReviewOpenBlockedByActiveCheckpointError(
+                active_checkpoint_id=active_checkpoint.id
+            )
+
+        step_result_row = await self.session.scalar(
+            sa.select(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == flow_run_id)
+            .where(FlowStepResults.step_id == step_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if (
+            step_result_row is None
+            or step_result_row.status != FlowStepResultStatus.COMPLETED.value
+            or step_result_row.current_attempt_no != attempt_no
+        ):
+            raise FlowReviewCheckpointStepResultIncompleteError(
+                step_id=step_id,
+                attempt_no=attempt_no,
+            )
+
+        checkpoint = await self.create_or_get_review_checkpoint_for_attempt(
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+            step_id=step_id,
+            step_order=step_order,
+            attempt_no=attempt_no,
+            original_payload_json=step_result_row.output_payload_json,
+            current_payload_json=step_result_row.output_payload_json,
+            step_label=step_label,
+            review_mode=review_mode,
+            output_type=output_type,
+            output_contract_json=output_contract_json,
+            requester_principal_type=requester_principal.principal_type,
+            requester_user_id=requester_principal.principal_user_id,
+            requester_service_id=requester_principal.principal_service_id,
+            next_step_ids=next_step_ids,
+            review_expires_after_seconds=review_expires_after_seconds,
+        )
+        updated_run_row = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.RUNNING.value)
+            .values(
+                status=FlowRunStatus.AWAITING_REVIEW.value,
+                revision=FlowRuns.revision + 1,
+            )
+            .returning(FlowRuns)
+        )
+        if updated_run_row is None:
+            raise FlowReviewCheckpointRunNotRunningError()
+
+        outbox_id = await self.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
+            checkpoint=checkpoint,
+            run_revision=updated_run_row.revision,
+            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_OPENED,
+            principal=requester_principal,
+            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_OPENED,
+            target_state=FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        )
+        return FlowRunReviewCheckpointOpenResult(
+            checkpoint=checkpoint,
+            run=FlowRun.model_validate(updated_run_row),
+            created=True,
+            audit_outbox_id=outbox_id,
+        )
+
+    async def get_active_review_checkpoint(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+    ) -> FlowRunReviewCheckpoint | None:
+        checkpoint_rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunReviewCheckpoints)
+                    .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                    .where(
+                        FlowRunReviewCheckpoints.state.in_(
+                            _ACTIVE_REVIEW_CHECKPOINT_STATES
+                        )
+                    )
+                    .order_by(FlowRunReviewCheckpoints.created_at.desc())
+                    .limit(2)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if not checkpoint_rows:
+            return None
+        if len(checkpoint_rows) > 1:
+            raise FlowReviewMultipleActiveCheckpointsError()
+        return FlowRunReviewCheckpoint.model_validate(checkpoint_rows[0])
+
+    async def get_review_checkpoint_for_edit(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        expected_revision: int,
+    ) -> FlowRunReviewCheckpoint:
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        self._require_review_checkpoint_not_expired(checkpoint_row)
+        self._require_review_run_waiting(run_row)
+        self._require_review_checkpoint_revision(
+            checkpoint_row=checkpoint_row,
+            expected_revision=expected_revision,
+        )
+        self._require_review_checkpoint_state(
+            checkpoint_row=checkpoint_row,
+            allowed_states=(
+                FlowRunReviewCheckpointState.AWAITING_REVIEW,
+                FlowRunReviewCheckpointState.EDITED,
+            ),
+        )
+        return FlowRunReviewCheckpoint.model_validate(checkpoint_row)
+
+    async def edit_review_checkpoint_payload(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        expected_revision: int,
+        current_payload_json: FlowPersistedJsonObject,
+        principal: FlowPrincipal,
+    ) -> FlowRunReviewCheckpoint:
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        self._require_review_checkpoint_not_expired(checkpoint_row)
+        self._require_review_run_waiting(run_row)
+        self._require_review_checkpoint_revision(
+            checkpoint_row=checkpoint_row,
+            expected_revision=expected_revision,
+        )
+        self._require_review_checkpoint_state(
+            checkpoint_row=checkpoint_row,
+            allowed_states=(
+                FlowRunReviewCheckpointState.AWAITING_REVIEW,
+                FlowRunReviewCheckpointState.EDITED,
+            ),
+        )
+        before = canonical_json_hash(checkpoint_row.current_payload_json)
+        updated_checkpoint = await self._update_review_checkpoint_state(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            target_state=FlowRunReviewCheckpointState.EDITED,
+            principal=principal,
+            values={"current_payload_json": current_payload_json},
+        )
+        after = canonical_json_hash(updated_checkpoint.current_payload_json)
+        step_result_id = await self.session.scalar(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == flow_run_id)
+            .where(FlowStepResults.flow_id == flow_id)
+            .where(FlowStepResults.tenant_id == tenant_id)
+            .where(FlowStepResults.step_id == checkpoint_row.step_id)
+            .where(FlowStepResults.current_attempt_no == checkpoint_row.attempt_no)
+            .values(output_payload_json=current_payload_json)
+            .returning(FlowStepResults.id)
+        )
+        if step_result_id is None:
+            raise FlowReviewEditStepResultMissingError()
+        await self._insert_edit(
+            checkpoint=updated_checkpoint,
+            principal=principal,
+            cause=FlowRunReviewCheckpointEditCause.REVIEWER_EDIT,
+            payload_sha256_before=before,
+            payload_sha256_after=after,
+        )
+        await self._insert_review_checkpoint_transition_outbox(
+            checkpoint=updated_checkpoint,
+            run_revision=run_row.revision,
+            principal=principal,
+            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EDITED,
+            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_EDITED,
+            target_state=FlowRunReviewCheckpointState.EDITED,
+            payload_sha256_before=before,
+            payload_sha256_after=after,
+        )
+        return updated_checkpoint
+
+    async def approve_review_checkpoint(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        expected_revision: int,
+        principal: FlowPrincipal,
+        current_payload_json: FlowPersistedJsonObject | None = None,
+        correction_set: FlowTranscriptCorrectionSet | None = None,
+    ) -> FlowRunReviewCheckpoint:
+        """Approve the checkpoint, optionally replacing its payload in the
+        same revision bump (transcript-corrections fold-in). A provided
+        payload is mirrored to the step result exactly like a review edit.
+        """
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        self._require_review_checkpoint_approvable(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            expected_revision=expected_revision,
+        )
+        return await self._approve_locked_review_checkpoint(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            principal=principal,
+            current_payload_json=current_payload_json,
+            correction_set=correction_set,
+        )
+
+    async def approve_and_resume_review_checkpoint(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        expected_revision: int,
+        resume_idempotency_key: str,
+        principal: FlowPrincipal,
+        current_payload_json: FlowPersistedJsonObject | None = None,
+        correction_set: FlowTranscriptCorrectionSet | None = None,
+    ) -> FlowRunReviewCheckpointResumeResult:
+        """Approve the checkpoint and resume its run under one lock scope.
+
+        The two transitions keep their own checkpoint revisions and audit
+        outbox rows, so the trail reads exactly like approve followed by
+        resume; the caller's transaction makes them land together or not at
+        all. ``expected_revision`` guards the approval hop only: the client
+        never observes the approved revision, so the resume hop needs no CAS.
+        A replay of ``resume_idempotency_key`` on an already resumed
+        checkpoint returns the current rows before any approval guard runs,
+        so a retry after a lost response cannot fail on state it caused.
+        """
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        replay = self._review_resume_replay(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            resume_idempotency_key=resume_idempotency_key,
+        )
+        if replay is not None:
+            return replay
+        self._require_review_checkpoint_approvable(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            expected_revision=expected_revision,
+        )
+        await self._approve_locked_review_checkpoint(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            principal=principal,
+            current_payload_json=current_payload_json,
+            correction_set=correction_set,
+        )
+        return await self._resume_locked_review_checkpoint(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+            resume_idempotency_key=resume_idempotency_key,
+            principal=principal,
+        )
+
+    async def find_review_resume_replay(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        resume_idempotency_key: str,
+    ) -> FlowRunReviewCheckpointResumeResult | None:
+        """The rows an earlier resume with this key produced, or None when the
+        key is new. Takes the transition locks so a caller can settle replay
+        before approval work that a resumed checkpoint would refuse.
+        """
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        return self._review_resume_replay(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            resume_idempotency_key=resume_idempotency_key,
+        )
+
+    def _require_review_checkpoint_approvable(
+        self,
+        *,
+        checkpoint_row: FlowRunReviewCheckpoints,
+        run_row: FlowRuns,
+        expected_revision: int,
+    ) -> None:
+        self._require_review_checkpoint_not_expired(checkpoint_row)
+        self._require_review_run_waiting(run_row)
+        self._require_review_checkpoint_revision(
+            checkpoint_row=checkpoint_row,
+            expected_revision=expected_revision,
+        )
+        self._require_review_checkpoint_state(
+            checkpoint_row=checkpoint_row,
+            allowed_states=(
+                FlowRunReviewCheckpointState.AWAITING_REVIEW,
+                FlowRunReviewCheckpointState.EDITED,
+            ),
+        )
+
+    async def _approve_locked_review_checkpoint(
+        self,
+        *,
+        checkpoint_row: FlowRunReviewCheckpoints,
+        run_row: FlowRuns,
+        principal: FlowPrincipal,
+        current_payload_json: FlowPersistedJsonObject | None,
+        correction_set: FlowTranscriptCorrectionSet | None,
+    ) -> FlowRunReviewCheckpoint:
+        """The APPROVED write on rows the caller locked and guarded."""
+        checkpoint_id = checkpoint_row.id
+        tenant_id = checkpoint_row.tenant_id
+        flow_id = checkpoint_row.flow_id
+        flow_run_id = checkpoint_row.flow_run_id
+        before = (
+            canonical_json_hash(checkpoint_row.current_payload_json)
+            if current_payload_json is not None
+            else None
+        )
+        after = None
+        corrections_revision_id = None
+        if current_payload_json is not None:
+            if correction_set is None:
+                raise ValueError("A folded payload requires its correction set.")
+            corrections_revision_id = await self.session.scalar(
+                sa.select(FlowTranscriptCorrectionRevisions.id)
+                .where(
+                    FlowTranscriptCorrectionRevisions.correction_set_id
+                    == correction_set.id
+                )
+                .where(
+                    FlowTranscriptCorrectionRevisions.revision
+                    == correction_set.revision
+                )
+                .where(FlowTranscriptCorrectionRevisions.tenant_id == tenant_id)
+                .where(FlowTranscriptCorrectionRevisions.flow_run_id == flow_run_id)
+            )
+            if corrections_revision_id is None:
+                raise FlowRunPersistenceInvariantError(
+                    operation="resolve_fold_correction_revision",
+                    run_id=flow_run_id,
+                    tenant_id=tenant_id,
+                    flow_id=flow_id,
+                )
+        updated_checkpoint = await self._update_review_checkpoint_state(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            target_state=FlowRunReviewCheckpointState.APPROVED,
+            principal=principal,
+            values=(
+                {"current_payload_json": current_payload_json}
+                if current_payload_json is not None
+                else None
+            ),
+        )
+        if current_payload_json is not None:
+            after = canonical_json_hash(updated_checkpoint.current_payload_json)
+            step_result_id = await self.session.scalar(
+                sa.update(FlowStepResults)
+                .where(FlowStepResults.flow_run_id == flow_run_id)
+                .where(FlowStepResults.flow_id == flow_id)
+                .where(FlowStepResults.tenant_id == tenant_id)
+                .where(FlowStepResults.step_id == checkpoint_row.step_id)
+                .where(FlowStepResults.current_attempt_no == checkpoint_row.attempt_no)
+                .values(output_payload_json=current_payload_json)
+                .returning(FlowStepResults.id)
+            )
+            if step_result_id is None:
+                raise FlowReviewEditStepResultMissingError()
+            assert before is not None and after is not None
+            await self._insert_edit(
+                checkpoint=updated_checkpoint,
+                principal=principal,
+                cause=FlowRunReviewCheckpointEditCause.CORRECTIONS_FOLDED,
+                payload_sha256_before=before,
+                payload_sha256_after=after,
+                corrections_revision_id=corrections_revision_id,
+            )
+        await self._insert_review_checkpoint_transition_outbox(
+            checkpoint=updated_checkpoint,
+            run_revision=run_row.revision,
+            principal=principal,
+            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_APPROVED,
+            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_APPROVED,
+            target_state=FlowRunReviewCheckpointState.APPROVED,
+            payload_sha256_before=before,
+            payload_sha256_after=after,
+        )
+        return updated_checkpoint
+
+    async def reject_review_checkpoint(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        expected_revision: int,
+        reason: str,
+        principal: FlowPrincipal,
+    ) -> FlowRunReviewCheckpoint:
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        self._require_review_checkpoint_not_expired(checkpoint_row)
+        self._require_review_run_waiting(run_row)
+        self._require_review_checkpoint_revision(
+            checkpoint_row=checkpoint_row,
+            expected_revision=expected_revision,
+        )
+        self._require_review_checkpoint_state(
+            checkpoint_row=checkpoint_row,
+            allowed_states=(
+                FlowRunReviewCheckpointState.AWAITING_REVIEW,
+                FlowRunReviewCheckpointState.EDITED,
+            ),
+        )
+        updated_checkpoint = await self._update_review_checkpoint_state(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            target_state=FlowRunReviewCheckpointState.REJECTED,
+            principal=principal,
+        )
+        await self._insert_review_checkpoint_transition_outbox(
+            checkpoint=updated_checkpoint,
+            run_revision=run_row.revision,
+            principal=principal,
+            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_REJECTED,
+            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_REJECTED,
+            target_state=FlowRunReviewCheckpointState.REJECTED,
+            error_code=FlowApiErrorCode.REVIEW_REJECTED.value,
+            error_message=reason,
+        )
+        return updated_checkpoint
+
+    async def resume_review_checkpoint(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        expected_revision: int,
+        resume_idempotency_key: str,
+        principal: FlowPrincipal,
+    ) -> FlowRunReviewCheckpointResumeResult:
+        (
+            checkpoint_row,
+            run_row,
+        ) = await self._load_review_checkpoint_and_run_rows_for_update(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+        )
+        self._require_review_checkpoint_not_expired(checkpoint_row)
+        replay = self._review_resume_replay(
+            checkpoint_row=checkpoint_row,
+            run_row=run_row,
+            resume_idempotency_key=resume_idempotency_key,
+        )
+        if replay is not None:
+            return replay
+        self._require_review_resume_source_state(checkpoint_row)
+        self._require_review_run_waiting(run_row)
+        self._require_review_checkpoint_revision(
+            checkpoint_row=checkpoint_row,
+            expected_revision=expected_revision,
+        )
+        return await self._resume_locked_review_checkpoint(
+            checkpoint_id=checkpoint_id,
+            tenant_id=tenant_id,
+            flow_id=flow_id,
+            flow_run_id=flow_run_id,
+            resume_idempotency_key=resume_idempotency_key,
+            principal=principal,
+        )
+
+    @staticmethod
+    def _review_resume_replay(
+        *,
+        checkpoint_row: FlowRunReviewCheckpoints,
+        run_row: FlowRuns,
+        resume_idempotency_key: str,
+    ) -> FlowRunReviewCheckpointResumeResult | None:
+        """Idempotent replay: a resumed checkpoint holding the same key returns
+        its current rows; one holding another key is a conflict."""
+        if checkpoint_row.state != FlowRunReviewCheckpointState.RESUMED.value:
+            return None
+        if checkpoint_row.resume_idempotency_key == resume_idempotency_key:
+            return FlowRunReviewCheckpointResumeResult(
+                checkpoint=FlowRunReviewCheckpoint.model_validate(checkpoint_row),
+                run=FlowRun.model_validate(run_row),
+                accepted=False,
+            )
+        raise FlowReviewCheckpointAlreadyResumedError()
+
+    async def _resume_locked_review_checkpoint(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+        resume_idempotency_key: str,
+        principal: FlowPrincipal,
+    ) -> FlowRunReviewCheckpointResumeResult:
+        """The RESUMED write plus the run's requeue on rows the caller locked
+        and guarded."""
+        try:
+            updated_checkpoint = await self._update_review_checkpoint_state(
+                checkpoint_id=checkpoint_id,
+                tenant_id=tenant_id,
+                target_state=FlowRunReviewCheckpointState.RESUMED,
+                principal=principal,
+                values={"resume_idempotency_key": resume_idempotency_key},
+            )
+        except IntegrityError as exc:
+            # The key is unique per run: another checkpoint of the run was
+            # resumed with it.
+            if constraint_name_from_integrity_error(exc) != _RESUME_KEY_INDEX:
+                raise
+            raise FlowConflictException(
+                "The Idempotency-Key already resumed another review checkpoint "
+                "of this run.",
+                code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
+            ) from exc
+        now_utc = datetime.now(timezone.utc)
+        updated_run_row = await self.session.scalar(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
+            .values(
+                status=FlowRunStatus.QUEUED.value,
+                revision=FlowRuns.revision + 1,
+                **start_flow_dispatch_epoch(now_utc),
+            )
+            .returning(FlowRuns)
+        )
+        if updated_run_row is None:
+            raise FlowReviewRunNoLongerAwaitingReviewError()
+        run = FlowRun.model_validate(updated_run_row)
+        await self._insert_review_checkpoint_transition_outbox(
+            checkpoint=updated_checkpoint,
+            run_revision=run.revision,
+            principal=principal,
+            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_RESUMED,
+            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_RESUMED,
+            target_state=FlowRunReviewCheckpointState.RESUMED,
+        )
+        return FlowRunReviewCheckpointResumeResult(
+            checkpoint=updated_checkpoint,
+            run=run,
+            accepted=True,
+        )
+
+    async def cancel_active_review_checkpoint_for_terminal_run(
+        self,
+        *,
+        tenant_id: UUID,
+        flow_run_id: UUID,
+        run_revision: int,
+        principal: FlowPrincipal | None,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> FlowRunReviewCheckpoint | None:
+        """Cancel after the caller has locked and terminalized the parent run."""
+        now_utc = datetime.now(timezone.utc)
+        values: dict[str, Any] = {
+            "state": FlowRunReviewCheckpointState.CANCELLED.value,
+            "revision": FlowRunReviewCheckpoints.revision + 1,
+            "cancelled_at": now_utc,
+        }
+        if principal is not None:
+            values["decided_by_principal_type"] = principal.principal_type.value
+            values["decided_by_user_id"] = principal.principal_user_id
+            values["decided_by_service_id"] = principal.principal_service_id
+        checkpoint_row = await self.session.scalar(
+            sa.update(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .where(FlowRunReviewCheckpoints.state.in_(_ACTIVE_REVIEW_CHECKPOINT_STATES))
+            .values(**values)
+            .returning(FlowRunReviewCheckpoints)
+        )
+        if checkpoint_row is None:
+            return None
+        checkpoint = FlowRunReviewCheckpoint.model_validate(checkpoint_row)
+        await self._insert_review_checkpoint_transition_outbox(
+            checkpoint=checkpoint,
+            run_revision=run_revision,
+            principal=principal,
+            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_CANCELLED,
+            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_CANCELLED,
+            target_state=FlowRunReviewCheckpointState.CANCELLED,
+            error_code=error_code,
+            error_message=error_message,
+        )
+        return checkpoint
+
+    async def list_expired_review_checkpoints(
+        self,
+        *,
+        tenant_id: UUID,
+        expires_before: datetime,
+        limit: int = 100,
+    ) -> list[FlowRunReviewCheckpoint]:
+        # Discovery is intentionally read-only. The mutator below owns run-first
+        # locking and CAS predicates so review decisions cannot deadlock with expiry.
+        rows = (
+            (
+                await self.session.execute(
+                    sa.select(FlowRunReviewCheckpoints)
+                    .join(
+                        FlowRuns,
+                        sa.and_(
+                            FlowRuns.id == FlowRunReviewCheckpoints.flow_run_id,
+                            FlowRuns.tenant_id == FlowRunReviewCheckpoints.tenant_id,
+                        ),
+                    )
+                    .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                    .where(FlowRunReviewCheckpoints.expires_at.is_not(None))
+                    .where(FlowRunReviewCheckpoints.expires_at <= expires_before)
+                    .where(
+                        FlowRunReviewCheckpoints.state.in_(
+                            _RECONCILABLE_REVIEW_CHECKPOINT_STATES
+                        )
+                    )
+                    .where(FlowRuns.status == FlowRunStatus.AWAITING_REVIEW.value)
+                    .order_by(
+                        FlowRunReviewCheckpoints.expires_at.asc(),
+                        FlowRunReviewCheckpoints.id.asc(),
+                    )
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return [FlowRunReviewCheckpoint.model_validate(row) for row in rows]
+
+    async def expire_review_checkpoint_for_reconciliation(
+        self,
+        *,
+        checkpoint_id: UUID,
+        flow_run_id: UUID,
+        tenant_id: UUID,
+        expires_before: datetime,
+    ) -> FlowRunReviewCheckpoint | None:
+        run_row = await self.session.scalar(
+            sa.select(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if run_row is None:
+            raise FlowRunNotFoundError(
+                run_id=flow_run_id,
+                tenant_id=tenant_id,
+            )
+        if run_row.status != FlowRunStatus.AWAITING_REVIEW.value:
+            return None
+
+        now_utc = datetime.now(timezone.utc)
+        checkpoint_row = await self.session.scalar(
+            sa.update(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.id == checkpoint_id)
+            .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .where(FlowRunReviewCheckpoints.expires_at.is_not(None))
+            .where(FlowRunReviewCheckpoints.expires_at <= expires_before)
+            .where(
+                FlowRunReviewCheckpoints.state.in_(
+                    _RECONCILABLE_REVIEW_CHECKPOINT_STATES
+                )
+            )
+            .values(
+                state=FlowRunReviewCheckpointState.EXPIRED.value,
+                revision=FlowRunReviewCheckpoints.revision + 1,
+                expired_at=now_utc,
+            )
+            .returning(FlowRunReviewCheckpoints)
+        )
+        if checkpoint_row is None:
+            return None
+        checkpoint = FlowRunReviewCheckpoint.model_validate(checkpoint_row)
+        await self._insert_review_checkpoint_transition_outbox(
+            checkpoint=checkpoint,
+            run_revision=run_row.revision,
+            principal=None,
+            action=ActionType.FLOW_RUN_REVIEW_CHECKPOINT_EXPIRED,
+            source=FlowRunLifecycleSource.REVIEW_CHECKPOINT_EXPIRED,
+            target_state=FlowRunReviewCheckpointState.EXPIRED,
+            error_code=FlowApiErrorCode.REVIEW_EXPIRED.value,
+            error_message=FLOW_REVIEW_EXPIRED_TERMINAL_MESSAGE,
+        )
+        return checkpoint
+
+    async def _load_review_checkpoint_and_run_rows_for_update(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        flow_id: UUID,
+        flow_run_id: UUID,
+    ) -> tuple[FlowRunReviewCheckpoints, FlowRuns]:
+        run_row = await self.session.scalar(
+            sa.select(FlowRuns)
+            .where(FlowRuns.id == flow_run_id)
+            .where(FlowRuns.flow_id == flow_id)
+            .where(FlowRuns.tenant_id == tenant_id)
+            .with_for_update()
+        )
+        if run_row is None:
+            raise FlowRunNotFoundError(
+                run_id=flow_run_id,
+                tenant_id=tenant_id,
+                flow_id=flow_id,
+            )
+        checkpoint_row = await self.session.scalar(
+            sa.select(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.id == checkpoint_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .where(FlowRunReviewCheckpoints.flow_id == flow_id)
+            .where(FlowRunReviewCheckpoints.flow_run_id == flow_run_id)
+            .with_for_update()
+        )
+        if checkpoint_row is None:
+            raise FlowReviewCheckpointNotFoundError()
+        return checkpoint_row, run_row
+
+    @staticmethod
+    def _require_review_run_waiting(run_row: FlowRuns) -> None:
+        if run_row.status == FlowRunStatus.AWAITING_REVIEW.value:
+            return
+        raise FlowReviewRunNotAwaitingReviewError(status=run_row.status)
+
+    @staticmethod
+    def _require_review_checkpoint_not_expired(
+        checkpoint_row: FlowRunReviewCheckpoints,
+    ) -> None:
+        if checkpoint_row.state == FlowRunReviewCheckpointState.EXPIRED.value:
+            raise FlowReviewCheckpointExpiredError(
+                checkpoint_id=checkpoint_row.id,
+                state=checkpoint_row.state,
+                expires_at=checkpoint_row.expires_at,
+                expired_at=checkpoint_row.expired_at,
+            )
+        if checkpoint_row.state not in _RECONCILABLE_REVIEW_CHECKPOINT_STATES:
+            return
+        if checkpoint_row.expires_at is None:
+            return
+        expires_at = checkpoint_row.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at > datetime.now(timezone.utc):
+            return
+        raise FlowReviewCheckpointExpiredError(
+            checkpoint_id=checkpoint_row.id,
+            state=checkpoint_row.state,
+            expires_at=expires_at,
+            expired_at=checkpoint_row.expired_at,
+        )
+
+    @staticmethod
+    def _require_review_checkpoint_revision(
+        *,
+        checkpoint_row: FlowRunReviewCheckpoints,
+        expected_revision: int,
+    ) -> None:
+        if checkpoint_row.revision == expected_revision:
+            return
+        raise FlowReviewCheckpointStaleRevisionError(
+            expected_checkpoint_revision=expected_revision,
+            current_checkpoint_revision=checkpoint_row.revision,
+        )
+
+    @staticmethod
+    def _require_review_checkpoint_state(
+        *,
+        checkpoint_row: FlowRunReviewCheckpoints,
+        allowed_states: Sequence[FlowRunReviewCheckpointState],
+    ) -> None:
+        allowed_values = tuple(state.value for state in allowed_states)
+        if checkpoint_row.state in allowed_values:
+            return
+        raise FlowReviewCheckpointNotActiveError(state=checkpoint_row.state)
+
+    @staticmethod
+    def _require_review_resume_source_state(
+        checkpoint_row: FlowRunReviewCheckpoints,
+    ) -> None:
+        state = checkpoint_row.state
+        if state == FlowRunReviewCheckpointState.APPROVED.value:
+            if checkpoint_row.approved_at is not None:
+                require_flow_run_wait_before_deadline(
+                    wait=FlowRunAbandonmentWait.APPROVED_REVIEW,
+                    anchor_at=checkpoint_row.approved_at,
+                    now=datetime.now(timezone.utc),
+                    checkpoint_id=checkpoint_row.id,
+                )
+            return
+        if state == FlowRunReviewCheckpointState.REJECTED.value:
+            raise FlowReviewCheckpointRejectedError()
+        if state == FlowRunReviewCheckpointState.CANCELLED.value:
+            raise FlowReviewCheckpointCancelledError()
+        if state == FlowRunReviewCheckpointState.EXPIRED.value:
+            raise FlowReviewCheckpointExpiredError(
+                checkpoint_id=checkpoint_row.id,
+                state=checkpoint_row.state,
+                expires_at=checkpoint_row.expires_at,
+                expired_at=checkpoint_row.expired_at,
+            )
+        if state == FlowRunReviewCheckpointState.RESUMED.value:
+            raise FlowReviewCheckpointAlreadyResumedError()
+        raise FlowReviewCheckpointNotApprovedError(state=state)
+
+    async def _update_review_checkpoint_state(
+        self,
+        *,
+        checkpoint_id: UUID,
+        tenant_id: UUID,
+        target_state: FlowRunReviewCheckpointState,
+        principal: FlowPrincipal,
+        values: dict[str, Any] | None = None,
+    ) -> FlowRunReviewCheckpoint:
+        update_values: dict[str, Any] = {
+            "state": target_state.value,
+            "revision": FlowRunReviewCheckpoints.revision + 1,
+            "decided_by_principal_type": principal.principal_type.value,
+            "decided_by_user_id": principal.principal_user_id,
+            "decided_by_service_id": principal.principal_service_id,
+        }
+        timestamp_field = _REVIEW_CHECKPOINT_TIMESTAMP_BY_STATE.get(target_state)
+        if timestamp_field is not None:
+            update_values[timestamp_field] = datetime.now(timezone.utc)
+        if values is not None:
+            update_values.update(values)
+        checkpoint_row = await self.session.scalar(
+            sa.update(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.id == checkpoint_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .values(**update_values)
+            .returning(FlowRunReviewCheckpoints)
+            .execution_options(populate_existing=True)
+        )
+        if checkpoint_row is None:
+            raise FlowReviewCheckpointNotFoundError()
+        return FlowRunReviewCheckpoint.model_validate(checkpoint_row)
+
+    async def _insert_review_checkpoint_transition_outbox(
+        self,
+        *,
+        checkpoint: FlowRunReviewCheckpoint,
+        run_revision: int,
+        principal: FlowPrincipal | None,
+        action: ActionType,
+        source: FlowRunLifecycleSource,
+        target_state: FlowRunReviewCheckpointState,
+        error_code: str | None = None,
+        error_message: str | None = None,
+        payload_sha256_before: str | None = None,
+        payload_sha256_after: str | None = None,
+    ) -> UUID:
+        return await self.audit_outbox_repo.insert_review_checkpoint_audit_outbox(
+            checkpoint=checkpoint,
+            run_revision=run_revision,
+            action=action,
+            principal=principal,
+            source=source,
+            target_state=target_state,
+            error_code=error_code,
+            error_message=error_message,
+            payload_sha256_before=payload_sha256_before,
+            payload_sha256_after=payload_sha256_after,
+        )
+
+    async def list_review_checkpoint_identities(
+        self, *, run_id: UUID, tenant_id: UUID, step_orders: Sequence[int]
+    ) -> list[FlowRunReviewCheckpointIdentity]:
+        rows = (
+            await self.session.execute(
+                sa.select(
+                    FlowRunReviewCheckpoints.id,
+                    FlowRunReviewCheckpoints.step_id,
+                    FlowRunReviewCheckpoints.step_order,
+                    FlowRunReviewCheckpoints.attempt_no,
+                    FlowRunReviewCheckpoints.state,
+                ).where(
+                    FlowRunReviewCheckpoints.flow_run_id == run_id,
+                    FlowRunReviewCheckpoints.tenant_id == tenant_id,
+                    FlowRunReviewCheckpoints.step_order.in_(tuple(step_orders)),
+                )
+            )
+        ).all()
+        return [
+            FlowRunReviewCheckpointIdentity(
+                id=row.id,
+                step_id=row.step_id,
+                step_order=row.step_order,
+                attempt_no=row.attempt_no,
+                state=FlowRunReviewCheckpointState(row.state),
+            )
+            for row in rows
+        ]
+
+    async def list_resumed_json_review_payloads(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        attempts: frozenset[ReviewedResultKey],
+        max_rows: int,
+        max_logical_bytes: int,
+    ) -> tuple[ResumedReviewPayload, ...] | None:
+        """The payloads of the run's RESUMED JSON checkpoints with a changed
+        structured value for exactly these (step_id, attempt_no) pairs, or None
+        when they exceed `max_rows` or
+        `max_logical_bytes`: a partial read never stands in for the whole.
+        Sizes are counted before any payload is loaded."""
+
+        if not attempts:
+            return ()
+        eligible = (
+            FlowRunReviewCheckpoints.flow_run_id == run_id,
+            FlowRunReviewCheckpoints.tenant_id == tenant_id,
+            FlowRunReviewCheckpoints.state
+            == FlowRunReviewCheckpointState.RESUMED.value,
+            FlowRunReviewCheckpoints.output_type == FlowOutputType.JSON.value,
+            # An approval without a change names nothing: never counted or read.
+            FlowRunReviewCheckpoints.original_payload_json[
+                "structured"
+            ].is_distinct_from(
+                FlowRunReviewCheckpoints.current_payload_json["structured"]
+            ),
+            sa.tuple_(
+                FlowRunReviewCheckpoints.step_id, FlowRunReviewCheckpoints.attempt_no
+            ).in_(sorted(attempts)),
+        )
+        sizes = (
+            await self.session.execute(
+                sa.select(
+                    FlowRunReviewCheckpoints.id,
+                    _review_checkpoint_evidence_logical_bytes(),
+                )
+                .where(*eligible)
+                .limit(max_rows + 1)
+            )
+        ).all()
+        if len(sizes) > max_rows or sum(int(size) for _, size in sizes) > (
+            max_logical_bytes
+        ):
+            return None
+        if not sizes:
+            return ()
+        rows = await self.session.execute(
+            sa.select(
+                FlowRunReviewCheckpoints.step_id,
+                FlowRunReviewCheckpoints.attempt_no,
+                FlowRunReviewCheckpoints.original_payload_json,
+                FlowRunReviewCheckpoints.current_payload_json,
+            ).where(FlowRunReviewCheckpoints.id.in_([row_id for row_id, _ in sizes]))
+        )
+        return tuple(
+            (step_id, attempt_no, original, current)
+            for step_id, attempt_no, original, current in rows
+        )
+
+    async def list_review_checkpoints_for_run(
+        self,
+        *,
+        run_id: UUID,
+        tenant_id: UUID,
+        limit: int | None = None,
+        logical_byte_budget: int | None = None,
+    ) -> list[FlowRunReviewCheckpoint]:
+        stmt = (
+            sa.select(FlowRunReviewCheckpoints)
+            .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+            .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+            .order_by(
+                FlowRunReviewCheckpoints.step_order.asc(),
+                FlowRunReviewCheckpoints.attempt_no.asc(),
+                FlowRunReviewCheckpoints.id.asc(),
+            )
+        )
+        if limit is not None and logical_byte_budget is not None:
+            candidates = (
+                sa.select(
+                    FlowRunReviewCheckpoints.id.label("row_id"),
+                    FlowRunReviewCheckpoints.step_order.label("step_order"),
+                    FlowRunReviewCheckpoints.attempt_no.label("attempt_no"),
+                    _review_checkpoint_evidence_logical_bytes().label("logical_bytes"),
+                )
+                .where(FlowRunReviewCheckpoints.flow_run_id == run_id)
+                .where(FlowRunReviewCheckpoints.tenant_id == tenant_id)
+                .order_by(
+                    FlowRunReviewCheckpoints.step_order.asc(),
+                    FlowRunReviewCheckpoints.attempt_no.asc(),
+                    FlowRunReviewCheckpoints.id.asc(),
+                )
+                .limit(limit + 1)
+                .subquery()
+            )
+            order = (
+                candidates.c.step_order,
+                candidates.c.attempt_no,
+                candidates.c.row_id,
+            )
+            ranked = sa.select(
+                candidates.c.row_id,
+                sa.func.row_number().over(order_by=order).label("row_rank"),
+                sa.func.sum(candidates.c.logical_bytes)
+                .over(order_by=order)
+                .label("cumulative_logical"),
+            ).subquery()
+            stmt = stmt.where(
+                FlowRunReviewCheckpoints.id.in_(
+                    sa.select(ranked.c.row_id).where(
+                        ranked.c.row_rank <= limit,
+                        ranked.c.cumulative_logical <= logical_byte_budget,
+                    )
+                )
+            )
+        if limit is not None:
+            stmt = stmt.limit(limit)
+        rows = (await self.session.execute(stmt)).scalars().all()
+        return [FlowRunReviewCheckpoint.model_validate(row) for row in rows]

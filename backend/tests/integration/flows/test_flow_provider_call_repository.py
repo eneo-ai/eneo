@@ -1,0 +1,2450 @@
+from __future__ import annotations
+
+import json
+import wave
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta, timezone
+from hashlib import sha256
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
+
+import pytest
+import sqlalchemy as sa
+
+from eneo.database.database import sessionmanager
+from eneo.database.tables.flow_tables import (
+    FlowProviderCalls,
+    FlowStepAttemptResolvedInputs,
+    FlowStepAttempts,
+    FlowStepResults,
+)
+from eneo.database.tables.token_usage_table import ProviderTokenUsages
+from eneo.flows.domain.flow import (
+    Flow,
+    FlowProviderCallTokenUsage,
+    FlowRunTokenUsage,
+    FlowStep,
+)
+from eneo.flows.domain.provider_call import (
+    CompletionProviderCallRequest,
+    ProviderCall,
+    ProviderCallCompletion,
+    ProviderCallKind,
+    ProviderCallRejectionReason,
+    ProviderCallRequest,
+    ProviderCallResponseFormat,
+    ProviderCallUnknownReason,
+    SummarizationCallInput,
+    TranscriptionCallCompletion,
+    TranscriptionProviderCallRequest,
+)
+from eneo.flows.domain.step_output import RejectedCompletion
+from eneo.flows.domain.text_processing import (
+    SummarizationProvenance,
+    TextProcessingRecord,
+    summarization_json_bytes,
+)
+from eneo.flows.enums import FlowStepAttemptStatus
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdgeIndexes,
+    FlowResolvedInputEdges,
+    FlowResolvedInputFlowInputSource,
+    FlowResolvedInputJsonPath,
+    MappedProviderCallProvenance,
+    build_resolved_input_edge,
+    parse_attempt_provenance,
+)
+from eneo.flows.infrastructure.flow_provider_call_recorder import (
+    FlowProviderCallRecorder,
+)
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallAttemptNotOpenError,
+    FlowProviderCallNotFoundError,
+    FlowProviderCallRepository,
+    FlowProviderCallResolvedInputLinkError,
+    FlowProviderCallStateConflictError,
+)
+from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.runtime.run_cancellation import FlowStepCancelledError
+from eneo.model_providers.domain.provider_call_observer import (
+    CompletionCallRequestFacts,
+    CompletionCallResultFacts,
+)
+from eneo.token_usage.infrastructure.token_usage_analyzer import TokenUsageAnalyzer
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    LiteLLMTranscriptionAdapter,
+)
+from tests.flow_snapshot_fixtures import assistant_snapshot
+
+
+class _TranscriptionCredentialResolverStub:
+    provider_id = "provider-id"
+    provider_type = "openai"
+
+    def get_api_key(self, *, required: bool = False) -> str:
+        return "test-key"
+
+    def get_credential_field(self, *, field: str, required: bool = False) -> str | None:
+        return None
+
+
+def _write_silent_wav(path: Path, *, seconds: float, samplerate: int = 8000) -> None:
+    with wave.open(str(path), "w") as handle:
+        handle.setnchannels(1)
+        handle.setsampwidth(2)
+        handle.setframerate(samplerate)
+        handle.writeframes(b"\x00\x00" * int(seconds * samplerate))
+
+
+@dataclass(frozen=True, slots=True)
+class _StartedAttempt:
+    attempt_id: UUID
+    run_id: UUID
+    flow_id: UUID
+    step_id: UUID
+    attempt_no: int
+    tenant_id: UUID
+    principal_user_id: UUID
+    completion_model_id: UUID
+
+
+async def _activate_resolved_inputs(
+    *,
+    repo: FlowRunRepository,
+    context: _StartedAttempt,
+    aggregate: FlowResolvedInputEdges,
+) -> None:
+    activated = await repo.activate_step_attempt(
+        run_id=context.run_id,
+        step_id=context.step_id,
+        attempt_no=context.attempt_no,
+        tenant_id=context.tenant_id,
+        resolved_input_edges=aggregate,
+        attempt_input=None,
+    )
+    assert activated is not None
+
+
+async def _read_call(session, call_id: UUID) -> ProviderCall:
+    row = await session.scalar(
+        sa.select(FlowProviderCalls).where(FlowProviderCalls.id == call_id)
+    )
+    assert row is not None
+    return ProviderCall.model_validate(row)
+
+
+async def _start_provider_call(
+    *,
+    repo: FlowProviderCallRepository,
+    context: _StartedAttempt,
+    request: ProviderCallRequest,
+    resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes = (),
+) -> ProviderCall:
+    return await repo.start_call_for_execution(
+        run_id=context.run_id,
+        step_id=context.step_id,
+        attempt_no=context.attempt_no,
+        tenant_id=context.tenant_id,
+        request=request,
+        resolved_input_edge_indexes=resolved_input_edge_indexes,
+    )
+
+
+def _build_flow(
+    *,
+    tenant_id: UUID,
+    space_id: UUID,
+    user_id: UUID,
+    assistant_id: UUID,
+    step_order: int = 1,
+) -> Flow:
+    return Flow(
+        id=None,
+        tenant_id=tenant_id,
+        space_id=space_id,
+        name="Provider call lifecycle flow",
+        description="Flow used to prove provider call persistence.",
+        created_by_user_id=user_id,
+        owner_user_id=user_id,
+        published_version=None,
+        metadata_json=None,
+        data_retention_days=30,
+        created_at=None,
+        updated_at=None,
+        steps=[
+            FlowStep(
+                id=None,
+                flow_id=uuid4(),
+                tenant_id=tenant_id,
+                assistant_id=assistant_id,
+                step_order=step_order,
+                user_description="Summarize the input",
+                input_source="flow_input",
+                input_type="text",
+                input_contract=None,
+                output_mode="pass_through",
+                output_type="text",
+                output_contract=None,
+                input_bindings={"question": "{{flow.input.question}}"},
+                output_classification_override=None,
+                input_config=None,
+                output_config=None,
+            )
+        ],
+    )
+
+
+async def _create_started_attempt(
+    *,
+    session,
+    admin_user,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    activate_resolved_inputs: bool = True,
+    step_order: int = 1,
+    space_user_id: UUID | None = None,
+) -> _StartedAttempt:
+    model = await completion_model_factory(
+        session, f"provider-call-model-{uuid4().hex}"
+    )
+    space = await space_factory(
+        session, "Provider call lifecycle space", [model.id], user_id=space_user_id
+    )
+    assistant = await assistant_factory(
+        session,
+        "Provider call lifecycle assistant",
+        model.id,
+        space_id=space.id,
+    )
+    flow = await FlowRepository(session=session).create(
+        flow=_build_flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+            step_order=step_order,
+        ),
+        tenant_id=admin_user.tenant_id,
+    )
+    step = flow.steps[0]
+    assert flow.id is not None
+    assert step.id is not None
+    await FlowVersionRepository(session=session).create(
+        flow_id=flow.id,
+        version=1,
+        definition_json={
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
+                    "step_order": step.step_order,
+                }
+            ]
+        },
+        tenant_id=admin_user.tenant_id,
+    )
+    run_repo = FlowRunRepository(session=session)
+    run = await run_repo.create(
+        flow_id=flow.id,
+        flow_version=1,
+        principal_user_id=admin_user.id,
+        tenant_id=admin_user.tenant_id,
+        input_payload_json={"question": "What happened?"},
+        preseed_steps=[
+            {
+                "step_id": step.id,
+                "assistant_id": step.assistant_id,
+                "step_order": step.step_order,
+            }
+        ],
+    )
+    # A started attempt belongs to a run a worker has claimed. The in-flight
+    # cancel watch reads the run row and treats any status other than RUNNING
+    # as a cancellation, so a run left QUEUED is "cancelled" as soon as a
+    # provider call outlives one poll interval.
+    assert await run_repo.mark_running_if_claimable(
+        run_id=run.id,
+        tenant_id=admin_user.tenant_id,
+        expected_revision=run.revision,
+    )
+    attempt = await run_repo.create_or_get_attempt_started(
+        run_id=run.id,
+        flow_id=flow.id,
+        tenant_id=admin_user.tenant_id,
+        step_id=step.id,
+        step_order=step.step_order,
+        attempt_no=1,
+        dispatch_task_id="provider-call-lifecycle-test",
+    )
+    context = _StartedAttempt(
+        attempt_id=attempt.id,
+        run_id=run.id,
+        flow_id=flow.id,
+        step_id=step.id,
+        attempt_no=attempt.attempt_no,
+        tenant_id=admin_user.tenant_id,
+        principal_user_id=admin_user.id,
+        completion_model_id=model.id,
+    )
+    if activate_resolved_inputs:
+        await _activate_resolved_inputs(
+            repo=run_repo,
+            context=context,
+            aggregate=FlowResolvedInputEdges(schema_version=1, edges=()),
+        )
+    return context
+
+
+async def _summarization_runtime(context, admin_user, *, numeric=False):
+    from tests.unittests.flows.test_summarize import _fold_case
+
+    executor, _, assistant, run, state, step, _, _ = _fold_case(admin_user)
+    executor._persist_summarization = type(executor)._persist_summarization.__get__(
+        executor
+    )
+    executor.max_inline_text_bytes = 8192
+    assistant.completion_model.id = context.completion_model_id
+    run = run.model_copy(update={"id": context.run_id, "flow_id": context.flow_id})
+    step = replace(step, step_id=context.step_id)
+    if numeric:
+        contract = json.loads(json.dumps(step.output_contract))
+        contract["properties"]["records"]["items"]["properties"]["numbers"] = {
+            "type": "array",
+            "items": {"type": "number"},
+        }
+        step = replace(step, output_contract=contract)
+
+    async def activate(**kwargs):
+        async with sessionmanager.session() as session, session.begin():
+            return await FlowRunRepository(session).activate_step_attempt(**kwargs)
+
+    executor.flow_run_repo.activate_step_attempt.side_effect = activate
+    return executor, assistant, run, state, step
+
+
+async def _read_summarization_evidence(context):
+    async with sessionmanager.session() as session, session.begin():
+        attempt = await session.get(FlowStepAttempts, context.attempt_id)
+        receipts = list(
+            await session.scalars(
+                sa.select(FlowProviderCalls)
+                .where(
+                    FlowProviderCalls.flow_step_attempt_id == context.attempt_id,
+                    FlowProviderCalls.summarization_input.is_not(None),
+                )
+                .order_by(FlowProviderCalls.ordinal)
+            )
+        )
+        parsed = parse_attempt_provenance(attempt.provenance_json)
+        assert parsed.provenance is not None
+        provenance = parsed.provenance.summarization
+        assert provenance is not None
+        by_id = {record.id: record for record in provenance.records}
+        assert len(by_id) == len(provenance.records)
+        assert receipts
+        for receipt in receipts:
+            assert set(receipt.summarization_input["record_ids"]) <= by_id.keys()
+        assert all(set(record.parents) <= by_id.keys() for record in provenance.records)
+        status = attempt.status
+        session.expunge_all()
+        return provenance, receipts, status
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("cancel_via_api", [False, True])
+async def test_summarization_receipts_resolve_before_worker_finalization(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    client,
+    flow_process_auth_headers,
+    cancel_via_api,
+):
+    async with sessionmanager.session() as session, session.begin():
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=False,
+            step_order=2,
+            space_user_id=admin_user.id,
+        )
+    executor, assistant, run, state, step = await _summarization_runtime(
+        context, admin_user
+    )
+    respond = assistant.get_response.side_effect
+    dispatched = []
+    checkpoint = None
+
+    async def dispatch(**kwargs):
+        nonlocal checkpoint
+        observer = kwargs["provider_call_observer"]
+        call_id = await observer.started(
+            CompletionCallRequestFacts(
+                request_schema_version=2,
+                provider_request_hash=sha256(kwargs["question"].encode()).hexdigest(),
+                requested_model="test-model",
+                provider="test",
+                response_format="none",
+                requested_capabilities=(),
+                reason="initial",
+            )
+        )
+        dispatched.append(call_id)
+        if observer.summarization_input is not None:
+            checkpoint, _, _ = await _read_summarization_evidence(context)
+        if (
+            observer.summarization_input is not None
+            and observer.summarization_input.round == 2
+        ):
+            if cancel_via_api:
+                response = await client.post(
+                    f"/api/v1/flows/{context.flow_id}/runs/{context.run_id}/cancel/",
+                    headers=flow_process_auth_headers,
+                )
+                assert response.status_code == 200, response.text
+                assert response.json()["status"] == "cancelled"
+            raise RuntimeError("Injected failure mid-fold")
+        response = await respond(**kwargs)
+        await observer.completed(
+            call_id,
+            CompletionCallResultFacts(
+                response_model="test-model",
+                provider_response_id=None,
+                num_tokens_input=None,
+                num_tokens_output=None,
+            ),
+        )
+        return response
+
+    assistant.get_response.side_effect = dispatch
+    # With the API cancel, the step ends with whichever the executor observes
+    # first: the injected failure or the cancel watch seeing the run cancelled.
+    expected_failures = (
+        (RuntimeError, FlowStepCancelledError) if cancel_via_api else RuntimeError
+    )
+    with pytest.raises(expected_failures) as raised:
+        await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    if not isinstance(raised.value, FlowStepCancelledError):
+        assert "Injected failure mid-fold" in str(raised.value)
+    assert len(dispatched) > 3
+    before, receipts, status = await _read_summarization_evidence(context)
+    assert before == checkpoint
+    assert any(record.round == 1 for record in before.records)
+    assert any(receipt.summarization_input["round"] == 2 for receipt in receipts)
+    if cancel_via_api:
+        assert status == FlowStepAttemptStatus.CANCELLED.value
+    async with sessionmanager.session() as session, session.begin():
+        finished = await FlowRunRepository(session).finish_attempt(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            status=FlowStepAttemptStatus.FAILED,
+            provenance_json={"schema_version": "flow-attempt-provenance.v3"},
+        )
+        assert (finished is None) == cancel_via_api
+    after, _, _ = await _read_summarization_evidence(context)
+    assert after == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_summarization_input_hash_survives_postgresql_numeric_normalization(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=False,
+            step_order=2,
+            space_user_id=admin_user.id,
+        )
+    executor, assistant, run, state, step = await _summarization_runtime(
+        context, admin_user, numeric=True
+    )
+    respond = assistant.get_response.side_effect
+    dispatched = {}
+
+    async def dispatch(**kwargs):
+        observer = kwargs["provider_call_observer"]
+        call_id = await observer.started(
+            CompletionCallRequestFacts(
+                request_schema_version=2,
+                provider_request_hash=sha256(kwargs["question"].encode()).hexdigest(),
+                requested_model="test-model",
+                provider="test",
+                response_format="none",
+                requested_capabilities=(),
+                reason="initial",
+            )
+        )
+        dispatched[call_id] = kwargs["question"].encode("utf-8")
+        response = await respond(**kwargs)
+        value = json.loads(response.completion)
+        value["records"][0]["value"] = "short"
+        value["records"][0]["numbers"] = [
+            1e20,
+            1.2345678901234568e20,
+            10**30 + 1,
+            1e-7,
+            1.0,
+            -0.0,
+        ]
+        response.completion = json.dumps(value)
+        await observer.completed(
+            call_id,
+            CompletionCallResultFacts(
+                response_model="test-model",
+                provider_response_id=None,
+                num_tokens_input=None,
+                num_tokens_output=None,
+            ),
+        )
+        return response
+
+    assistant.get_response.side_effect = dispatch
+    result = await executor._execute_step(step=step, run=run, state=state, attempt_no=1)
+    reached, _, _ = await _read_summarization_evidence(context)
+    terminal_record_id = reached.records[-1].id
+    assert reached.records[-1].round == reached.rounds
+    assert summarization_json_bytes(
+        reached.records[-1].value
+    ) == summarization_json_bytes(result.output.structured_output["records"][0])
+    async with sessionmanager.session() as session, session.begin():
+        await FlowRunRepository(session).finish_attempt(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            status=FlowStepAttemptStatus.COMPLETED,
+            provenance_json={"schema_version": "flow-attempt-provenance.v3"},
+        )
+    provenance, receipts, _ = await _read_summarization_evidence(context)
+    by_id = {record.id: record for record in provenance.records}
+    assert provenance.records[-1].id == terminal_record_id
+    assert isinstance(provenance.records[0].value["numbers"][0], int)
+    assert provenance.records[0].value["numbers"][2] == 10**30 + 1
+    for receipt in receipts:
+        descriptor = receipt.summarization_input
+        reconstructed = summarization_json_bytes(
+            {
+                "records": [
+                    by_id[record_id].value for record_id in descriptor["record_ids"]
+                ]
+            }
+        )
+        assert descriptor["input_sha256"] == sha256(reconstructed).hexdigest()
+        assert descriptor["input_bytes"] == len(reconstructed)
+        assert dispatched[receipt.id] == reconstructed
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_summarization_provenance_and_receipt_commit_atomically(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as session, session.begin():
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+    provenance = SummarizationProvenance(
+        rounds=1,
+        sources=(),
+        records=(
+            TextProcessingRecord(
+                id="section:0", round=0, section_indexes=(0,), value={"value": "parent"}
+            ),
+            TextProcessingRecord(
+                id="round:1:0",
+                round=1,
+                parents=("section:0",),
+                section_indexes=(0,),
+                value={"value": "child"},
+            ),
+        ),
+    )
+    encoded = summarization_json_bytes({"records": [provenance.records[-1].value]})
+    request = CompletionProviderCallRequest(
+        request_schema_version=2,
+        provider_request_hash="a" * 64,
+        requested_model="test-model",
+        provider="test",
+        requested_capabilities=(),
+        summarization_input=SummarizationCallInput(
+            round=2,
+            group_index=0,
+            record_ids=("round:1:0",),
+            input_bytes=len(encoded),
+            input_sha256=sha256(encoded).hexdigest(),
+            reserved_calls=1,
+            reserved_input_tokens=10,
+            max_provider_calls=10,
+            max_input_tokens=1000,
+        ),
+    )
+
+    async def start(session):
+        return await FlowProviderCallRepository(session).start_call_for_execution(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            request=request,
+            resolved_input_edge_indexes=(),
+            summarization=provenance,
+        )
+
+    with pytest.raises(RuntimeError, match="Abort receipt transaction"):
+        async with sessionmanager.session() as session, session.begin():
+            await start(session)
+            async with sessionmanager.session() as reader, reader.begin():
+                attempt = await reader.get(FlowStepAttempts, context.attempt_id)
+                assert attempt.provenance_json is None
+                assert (
+                    await reader.scalar(
+                        sa.select(sa.func.count())
+                        .select_from(FlowProviderCalls)
+                        .where(
+                            FlowProviderCalls.flow_step_attempt_id
+                            == context.attempt_id,
+                        )
+                    )
+                    == 0
+                )
+            raise RuntimeError("Abort receipt transaction")
+    async with sessionmanager.session() as reader, reader.begin():
+        attempt = await reader.get(FlowStepAttempts, context.attempt_id)
+        assert attempt.provenance_json is None
+        assert (
+            await reader.scalar(
+                sa.select(sa.func.count())
+                .select_from(FlowProviderCalls)
+                .where(
+                    FlowProviderCalls.flow_step_attempt_id == context.attempt_id,
+                )
+            )
+            == 0
+        )
+    async with sessionmanager.session() as session, session.begin():
+        await start(session)
+        await start(session)
+    persisted, receipts, _ = await _read_summarization_evidence(context)
+    assert persisted == provenance
+    assert len(receipts) == 2
+    async with sessionmanager.session() as session, session.begin():
+        await FlowRunRepository(session).finish_attempt(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            attempt_no=1,
+            status=FlowStepAttemptStatus.CANCELLED,
+        )
+    with pytest.raises(FlowProviderCallAttemptNotOpenError):
+        async with sessionmanager.session() as session, session.begin():
+            await start(session)
+    after, receipts, status = await _read_summarization_evidence(context)
+    assert after == persisted
+    assert len(receipts) == 2
+    assert status == FlowStepAttemptStatus.CANCELLED.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_table_check_constraints_are_valid_postgresql(
+    db_container,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        constraints = [
+            constraint
+            for constraint in FlowProviderCalls.__table__.constraints
+            if isinstance(constraint, sa.CheckConstraint)
+        ]
+
+        assert constraints
+        for constraint in constraints:
+            statement = (
+                sa.select(constraint.sqltext).select_from(FlowProviderCalls).limit(0)
+            )
+            await session.execute(statement)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_links_only_the_resolved_inputs_consumed_by_that_call(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=False,
+        )
+        question_edge = build_resolved_input_edge(
+            binding_ref="question",
+            source=FlowResolvedInputFlowInputSource(
+                kind="flow_input",
+                selector=FlowResolvedInputJsonPath(
+                    kind="json_path",
+                    path=("question",),
+                ),
+            ),
+            selected_value="What happened?",
+        )
+        instruction_edge = build_resolved_input_edge(
+            binding_ref="assistant_prompt",
+            source=FlowResolvedInputFlowInputSource(
+                kind="flow_input",
+                selector=FlowResolvedInputJsonPath(
+                    kind="json_path",
+                    path=("instruction",),
+                ),
+            ),
+            selected_value="Be concise.",
+        )
+        await _activate_resolved_inputs(
+            repo=FlowRunRepository(session),
+            context=context,
+            aggregate=FlowResolvedInputEdges(
+                schema_version=1,
+                edges=(question_edge, instruction_edge),
+            ),
+        )
+
+        started = await FlowProviderCallRepository(session).start_call_for_execution(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=context.attempt_no,
+            tenant_id=context.tenant_id,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="e" * 64,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                response_format="none",
+                requested_capabilities=(),
+            ),
+            resolved_input_edge_indexes=(1,),
+        )
+
+        assert started.resolved_input_edge_indexes == (1,)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("activate_resolved_inputs", "indexes", "message"),
+    [
+        (False, (), "before resolved input evidence is activated"),
+        (True, (0,), "exceed the activated aggregate"),
+    ],
+)
+async def test_provider_call_refuses_unverifiable_resolved_input_links(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    activate_resolved_inputs: bool,
+    indexes: tuple[int, ...],
+    message: str,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=activate_resolved_inputs,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        with pytest.raises(FlowProviderCallResolvedInputLinkError, match=message):
+            await repo.start_call_for_execution(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=context.attempt_no,
+                tenant_id=context.tenant_id,
+                request=CompletionProviderCallRequest(
+                    provider_request_hash="f" * 64,
+                    requested_model="openai/gpt-4o-mini",
+                    provider="openai",
+                    response_format="none",
+                    requested_capabilities=(),
+                ),
+                resolved_input_edge_indexes=indexes,
+            )
+
+        assert await session.scalar(sa.select(sa.func.count(FlowProviderCalls.id))) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_refuses_corrupt_resolved_input_evidence(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=False,
+        )
+        await session.execute(
+            sa.insert(FlowStepAttemptResolvedInputs).values(
+                flow_step_attempt_id=context.attempt_id,
+                resolved_input_edges_jsonb={"schema_version": 1, "edges": [{}]},
+            )
+        )
+
+        with pytest.raises(
+            FlowProviderCallResolvedInputLinkError,
+            match="corrupt resolved input evidence",
+        ):
+            await _start_provider_call(
+                repo=FlowProviderCallRepository(session),
+                context=context,
+                request=CompletionProviderCallRequest(
+                    provider_request_hash="f" * 64,
+                    requested_model="openai/gpt-4o-mini",
+                    provider="openai",
+                    response_format="none",
+                    requested_capabilities=(),
+                ),
+            )
+
+        assert await session.scalar(sa.select(sa.func.count(FlowProviderCalls.id))) == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_ordinals_resume_from_persisted_attempt_rows(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        request = CompletionProviderCallRequest(
+            provider_request_hash="a" * 64,
+            requested_model="openai/gpt-4o-mini",
+            provider="openai",
+            response_format="json_object",
+            requested_capabilities=("reasoning", "structured_output"),
+        )
+
+        repo = FlowProviderCallRepository(session)
+        first = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=request,
+        )
+        await session.flush()
+        second = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=request.model_copy(
+                update={
+                    "provider_request_hash": "b" * 64,
+                    "response_format": ProviderCallResponseFormat.NONE,
+                    "requested_capabilities": (),
+                }
+            ),
+        )
+
+        assert first.ordinal == 1
+        assert second.ordinal == 2
+        assert first.status == "started"
+        assert second.status == "started"
+        assert first.flow_step_attempt_id == context.attempt_id
+        assert second.flow_step_attempt_id == context.attempt_id
+        assert first.requested_capabilities == (
+            "reasoning",
+            "structured_output",
+        )
+        assert second.requested_capabilities == ()
+
+        page = await FlowProviderCallRepository(session).list_evidence_page(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            limit=2,
+        )
+        assert page.items[0].requested_capabilities == (
+            "reasoning",
+            "structured_output",
+        )
+        assert page.items[1].requested_capabilities == ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_evidence_rejects_noncanonical_persisted_capabilities(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        started = await _start_provider_call(
+            repo=FlowProviderCallRepository(session),
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="c" * 64,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                response_format="json_schema",
+                requested_capabilities=("reasoning", "structured_output"),
+            ),
+        )
+        await session.flush()
+
+        await session.execute(
+            sa.update(FlowProviderCalls)
+            .where(FlowProviderCalls.id == started.id)
+            .values(
+                requested_capabilities=[
+                    "structured_output",
+                    "reasoning",
+                    "reasoning",
+                ]
+            )
+            .execution_options(synchronize_session=False)
+        )
+        await session.flush()
+        session.expire_all()
+
+        with pytest.raises(
+            ValueError,
+            match="Requested provider capabilities must be sorted and unique",
+        ):
+            await FlowProviderCallRepository(session).list_evidence_page(
+                run_id=context.run_id,
+                tenant_id=context.tenant_id,
+                limit=1,
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    (
+        "prior_call",
+        "input_tokens",
+        "input_source",
+        "expected_input",
+        "response_id",
+        "duplicate_id",
+        "expected_model",
+    ),
+    [
+        (False, 0, "provider", 0, "returned-response", False, "observed-model"),
+        (True, 13, "provider", 34, "returned-response", False, "observed-model"),
+        (
+            False,
+            None,
+            "not_reported",
+            None,
+            "returned-response",
+            False,
+            "observed-model",
+        ),
+        (False, 5, "estimated", None, "returned-response", False, "observed-model"),
+        (False, 13, "provider", 13, None, False, "observed-model"),
+        (True, 13, "provider", 34, "returned-response", True, None),
+    ],
+)
+async def test_rejected_completion_persists_receipts_without_recounting_usage(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    prior_call,
+    input_tokens,
+    input_source,
+    expected_input,
+    response_id,
+    duplicate_id,
+    expected_model,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        calls = FlowProviderCallRepository(session)
+        request = CompletionProviderCallRequest(
+            provider_request_hash="f" * 64,
+            requested_model="configured-model",
+            provider="hosted_vllm",
+            requested_capabilities=(),
+        )
+        if prior_call:
+            earlier = await _start_provider_call(
+                repo=calls, context=context, request=request
+            )
+            await calls.complete_call(
+                call_id=earlier.id,
+                receipt=ProviderCallCompletion(
+                    response_model="earlier-model",
+                    provider_response_id=(
+                        "returned-response" if duplicate_id else "earlier-response"
+                    ),
+                    num_tokens_input=21,
+                    num_tokens_output=8,
+                    input_source="provider",
+                    output_source="provider",
+                ),
+            )
+        rejected = await _start_provider_call(
+            repo=calls, context=context, request=request
+        )
+        await calls.reject_call(
+            call_id=rejected.id,
+            reason=ProviderCallRejectionReason.RESPONSE_FORMAT_REJECTED,
+        )
+        returned = await _start_provider_call(
+            repo=calls, context=context, request=request
+        )
+        await calls.complete_call(
+            call_id=returned.id,
+            receipt=ProviderCallCompletion(
+                response_model="observed-model",
+                provider_response_id="returned-response",
+                num_tokens_input=input_tokens,
+                num_tokens_output=16384,
+                input_source=input_source,
+                output_source="provider",
+            ),
+        )
+        before = await calls.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+        run_repo = FlowRunRepository(session)
+        finish = dict(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=context.attempt_no,
+            tenant_id=context.tenant_id,
+            status=FlowStepAttemptStatus.FAILED,
+            error_code="flow_llm_output_truncated",
+            rejected_completion=RejectedCompletion(
+                finish_reason="length",
+                provider_response_id=response_id,
+            ),
+        )
+        with pytest.raises(ValueError, match="diagnostics come from call receipts"):
+            await run_repo.finish_attempt(**finish, num_tokens_output=0)
+        invalid_status = {**finish, "status": FlowStepAttemptStatus.COMPLETED}
+        with pytest.raises(ValueError, match="only finish a failed attempt"):
+            await run_repo.finish_attempt(**invalid_status)
+        attempt = await run_repo.finish_attempt(**finish)
+
+        assert attempt is not None
+        assert attempt.status == FlowStepAttemptStatus.FAILED
+        assert attempt.finish_reason == "length"
+        assert attempt.response_model == expected_model
+        assert attempt.provider_response_id == "returned-response"
+        assert attempt.num_tokens_input == expected_input
+        assert attempt.num_tokens_output == 16384 + (8 if prior_call else 0)
+        assert (
+            await calls.list_usage_for_runs(
+                run_ids=[context.run_id],
+                tenant_id=context.tenant_id,
+            )
+            == before
+        )
+        assert (
+            await FlowRunRepository(session).finish_attempt(
+                run_id=context.run_id,
+                step_id=context.step_id,
+                attempt_no=context.attempt_no,
+                tenant_id=context.tenant_id,
+                status=FlowStepAttemptStatus.FAILED,
+                rejected_completion=RejectedCompletion("stop", "late-response"),
+            )
+            is None
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_budget_exhausted_rejection_persists_on_the_migrated_schema(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """A receipt written while the step's budget ran out is settled as a known
+    refusal; the migrated lifecycle constraint (202609201000) must admit it."""
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        calls = FlowProviderCallRepository(session)
+        started = await _start_provider_call(
+            repo=calls,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="b" * 64,
+                requested_model="configured-model",
+                provider="hosted_vllm",
+                requested_capabilities=(),
+            ),
+        )
+        settled = await calls.reject_call(
+            call_id=started.id,
+            reason=ProviderCallRejectionReason.BUDGET_EXHAUSTED,
+        )
+        await session.flush()
+        row = await session.scalar(
+            sa.select(FlowProviderCalls).where(FlowProviderCalls.id == started.id)
+        )
+        persisted = (row.status, row.outcome_reason, row.finished_at is not None)
+
+    assert settled.id == started.id
+    assert persisted == ("rejected", "budget_exhausted", True)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_downgrade_is_refused_while_budget_exhausted_receipts_exist(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """Rolling back 202609201000 must not rewrite an unsent refusal into a
+    provider rejection: the migration's guard refuses on a populated table and
+    the receipt keeps its reason."""
+    import importlib.util
+    from pathlib import Path as _Path
+
+    spec = importlib.util.spec_from_file_location(
+        "budget_exhausted_migration",
+        _Path(__file__).parents[3]
+        / "alembic"
+        / "versions"
+        / "202609201000_provider_call_budget_exhausted_rejection.py",
+    )
+    assert spec is not None and spec.loader is not None
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
+
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        calls = FlowProviderCallRepository(session)
+        started = await _start_provider_call(
+            repo=calls,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="c" * 64,
+                requested_model="configured-model",
+                provider="hosted_vllm",
+                requested_capabilities=(),
+            ),
+        )
+        await calls.reject_call(
+            call_id=started.id, reason=ProviderCallRejectionReason.BUDGET_EXHAUSTED
+        )
+        await session.flush()
+
+        def _refuse(sync_session):
+            migration.refuse_downgrade_if_budget_exhausted_receipts(
+                sync_session.connection()
+            )
+
+        with pytest.raises(RuntimeError, match="Refusing to downgrade 202609201000"):
+            await session.run_sync(_refuse)
+        reason = await session.scalar(
+            sa.select(FlowProviderCalls.outcome_reason).where(
+                FlowProviderCalls.id == started.id
+            )
+        )
+
+    assert reason == "budget_exhausted"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("unresolved", [False, True])
+async def test_rejected_completion_does_not_invent_missing_receipts(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    unresolved,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        calls = FlowProviderCallRepository(session)
+        if unresolved:
+            request = CompletionProviderCallRequest(
+                provider_request_hash="e" * 64,
+                requested_model="configured-model",
+                requested_capabilities=(),
+            )
+            for _ in range(2):
+                returned = await _start_provider_call(
+                    repo=calls, context=context, request=request
+                )
+                await calls.complete_call(
+                    call_id=returned.id,
+                    receipt=ProviderCallCompletion(
+                        response_model="observed-model",
+                        provider_response_id=None,
+                        num_tokens_input=2,
+                        num_tokens_output=3,
+                        input_source="provider",
+                        output_source="provider",
+                    ),
+                )
+            await _start_provider_call(repo=calls, context=context, request=request)
+
+        run_repo = FlowRunRepository(session)
+        finish = dict(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=context.attempt_no,
+            status=FlowStepAttemptStatus.FAILED,
+            rejected_completion=RejectedCompletion(
+                finish_reason="length", provider_response_id=None
+            ),
+        )
+        assert await run_repo.finish_attempt(tenant_id=uuid4(), **finish) is None
+        attempt = await run_repo.finish_attempt(tenant_id=context.tenant_id, **finish)
+        assert attempt is not None
+        assert attempt.finish_reason == "length"
+        assert attempt.response_model is None
+        assert attempt.provider_response_id is None
+        assert attempt.num_tokens_input is None
+        assert attempt.num_tokens_output is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_completion_is_idempotent_and_rejects_conflicts(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+        started = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="c" * 64,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                requested_capabilities=(),
+            ),
+        )
+        receipt = ProviderCallCompletion(
+            response_model="gpt-4o-mini-2026-07-01",
+            provider_response_id="provider-response-1",
+            num_tokens_input=21,
+            num_tokens_output=8,
+            input_source="provider",
+            output_source="provider",
+        )
+
+        completed = await repo.complete_call(call_id=started.id, receipt=receipt)
+        replayed = await repo.complete_call(call_id=started.id, receipt=receipt)
+
+        assert completed == replayed
+        assert completed.status == "completed"
+        assert completed.finished_at is not None
+        assert completed.provider_response_id == "provider-response-1"
+        assert completed.num_tokens_input == 21
+        assert completed.num_tokens_output == 8
+
+        with pytest.raises(FlowProviderCallStateConflictError):
+            await repo.complete_call(
+                call_id=started.id,
+                receipt=receipt.model_copy(
+                    update={"provider_response_id": "conflicting-response"}
+                ),
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_token_usage_marks_mixed_reported_and_unreported_calls_incomplete(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+        reported = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="1" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=reported.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="provider-response-reported",
+                num_tokens_input=21,
+                num_tokens_output=8,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        unreported = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="2" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=unreported.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="provider-response-unreported",
+                num_tokens_input=None,
+                num_tokens_output=None,
+                input_source="not_reported",
+                output_source="not_reported",
+            ),
+        )
+
+        usage_by_run_id = await repo.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+    usage = usage_by_run_id[context.run_id].token_usage
+    assert usage is not None
+    assert usage.num_tokens_input == 21
+    assert usage.num_tokens_output == 8
+    assert usage.num_tokens_total == 29
+    assert usage.input_completeness == "incomplete"
+    assert usage.output_completeness == "incomplete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_token_usage_distinguishes_unknown_only_from_no_provider_calls(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        assert (
+            await repo.list_usage_for_runs(
+                run_ids=[context.run_id],
+                tenant_id=context.tenant_id,
+            )
+            == {}
+        )
+
+        started = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="3" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.mark_outcome_unknown(
+            call_id=started.id,
+            reason="request_timeout",
+        )
+
+        usage_by_run_id = await repo.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+    usage = usage_by_run_id[context.run_id].token_usage
+    assert usage is not None
+    assert usage.num_tokens_total == 0
+    assert usage.input_completeness == "incomplete"
+    assert usage.output_completeness == "incomplete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_live_token_aggregation_matches_the_provider_call_contract(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+        completed_start = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="c" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        completed = await repo.complete_call(
+            call_id=completed_start.id,
+            receipt=ProviderCallCompletion(
+                num_tokens_input=7,
+                num_tokens_output=None,
+                input_source="provider",
+                output_source="not_reported",
+            ),
+        )
+        completed_only_usage = await repo.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+        expected_completed_only = FlowRunTokenUsage.from_provider_calls(
+            (
+                FlowProviderCallTokenUsage(
+                    status=completed.status.value,
+                    num_tokens_input=completed.num_tokens_input,
+                    num_tokens_output=completed.num_tokens_output,
+                    input_source=completed.input_source,
+                    output_source=completed.output_source,
+                ),
+            )
+        )
+        assert expected_completed_only is not None
+        assert (
+            completed_only_usage[context.run_id].token_usage == expected_completed_only
+        )
+        assert expected_completed_only.input_completeness == "complete"
+        assert expected_completed_only.output_completeness == "incomplete"
+
+        rejected_start = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="d" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        unknown_start = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="e" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+
+        rejected = await repo.reject_call(
+            call_id=rejected_start.id,
+            reason="response_format_rejected",
+        )
+        started_usage = await repo.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+        expected_started = FlowRunTokenUsage.from_provider_calls(
+            FlowProviderCallTokenUsage(
+                status=call.status.value,
+                num_tokens_input=call.num_tokens_input,
+                num_tokens_output=call.num_tokens_output,
+                input_source=call.input_source,
+                output_source=call.output_source,
+            )
+            for call in (completed, rejected, unknown_start)
+        )
+        assert expected_started is not None
+        assert started_usage[context.run_id].token_usage == expected_started
+
+        unknown = await repo.mark_outcome_unknown(
+            call_id=unknown_start.id,
+            reason="request_timeout",
+        )
+        usage_by_run_id = await repo.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+        assert rejected.status == "rejected"
+        assert rejected.outcome_reason == "response_format_rejected"
+        assert rejected.finished_at is not None
+        assert unknown.status == "outcome_unknown"
+        assert unknown.outcome_reason == "request_timeout"
+        assert unknown.finished_at is not None
+
+    expected = FlowRunTokenUsage.from_provider_calls(
+        FlowProviderCallTokenUsage(
+            status=call.status.value,
+            num_tokens_input=call.num_tokens_input,
+            num_tokens_output=call.num_tokens_output,
+            input_source=call.input_source,
+            output_source=call.output_source,
+        )
+        for call in (completed, rejected, unknown)
+    )
+    assert expected is not None
+    assert usage_by_run_id[context.run_id].token_usage == expected
+    assert usage_by_run_id[context.run_id].transcription_usage is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_recorder_commits_outside_executor_session(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with sessionmanager.session() as setup_session, setup_session.begin():
+        context = await _create_started_attempt(
+            session=setup_session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+
+    recorder = FlowProviderCallRecorder(
+        run_id=context.run_id,
+        step_id=context.step_id,
+        attempt_no=context.attempt_no,
+        tenant_id=context.tenant_id,
+        principal_user_id=context.principal_user_id,
+        principal_service_id=None,
+        completion_model_id=context.completion_model_id,
+        mapped_call=None,
+        resolved_input_edge_indexes=(),
+    )
+    call_id = await recorder.started(
+        CompletionCallRequestFacts(
+            request_schema_version=2,
+            provider_request_hash="1" * 64,
+            requested_model="openai/gpt-4o-mini",
+            provider="openai",
+            response_format="none",
+            requested_capabilities=(),
+            reason="initial",
+        )
+    )
+    await recorder.completed(
+        call_id,
+        CompletionCallResultFacts(
+            response_model="gpt-4o-mini-2026-07-01",
+            provider_response_id="isolated-session-response",
+            num_tokens_input=13,
+            num_tokens_output=5,
+        ),
+    )
+
+    async with (
+        sessionmanager.session() as verification_session,
+        verification_session.begin(),
+    ):
+        persisted = await _read_call(verification_session, call_id)
+        platform_usage = await verification_session.scalar(
+            sa.select(ProviderTokenUsages).where(
+                ProviderTokenUsages.source_type == "flow_provider_call",
+                ProviderTokenUsages.source_id == call_id,
+                ProviderTokenUsages.tenant_id == context.tenant_id,
+            )
+        )
+        usage_summary = await TokenUsageAnalyzer(
+            verification_session
+        ).get_model_token_usage(
+            context.tenant_id,
+            datetime.now(timezone.utc) - timedelta(days=1),
+            datetime.now(timezone.utc) + timedelta(days=1),
+        )
+        assert platform_usage is not None
+        platform_usage_values = (
+            platform_usage.completion_model_id,
+            platform_usage.principal_user_id,
+            platform_usage.input_tokens,
+            platform_usage.output_tokens,
+        )
+
+    assert persisted.status == "completed"
+    assert persisted.ordinal == 1
+    assert persisted.provider_response_id == "isolated-session-response"
+    assert platform_usage_values == (
+        context.completion_model_id,
+        context.principal_user_id,
+        13,
+        5,
+    )
+    model_usage = next(
+        usage
+        for usage in usage_summary.models
+        if usage.model_id == context.completion_model_id
+    )
+    assert model_usage.input_token_usage == 13
+    assert model_usage.output_token_usage == 5
+    assert model_usage.request_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_evidence_page_is_stable_bounded_and_cursor_checked(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+        calls = [
+            await _start_provider_call(
+                repo=repo,
+                context=context,
+                request=CompletionProviderCallRequest(
+                    provider_request_hash=f"{index:x}" * 64,
+                    requested_model="openai/gpt-4o-mini",
+                    requested_capabilities=(),
+                    mapped_call=(
+                        MappedProviderCallProvenance(
+                            execution_mode="per_source_reader",
+                            source_index=1,
+                            source_id="source-file-1",
+                        )
+                        if index == 1
+                        else None
+                    ),
+                ),
+            )
+            for index in (1, 2, 3)
+        ]
+
+        first_page = await repo.list_evidence_page(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            limit=2,
+        )
+        second_page = await repo.list_evidence_page(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            limit=2,
+            after_event_id=first_page.next_after_event_id,
+        )
+
+        assert [item.event_id for item in first_page.items] == [
+            calls[0].id,
+            calls[1].id,
+        ]
+        assert first_page.count == 2
+        assert first_page.total_count == 3
+        assert first_page.has_more is True
+        assert first_page.next_after_event_id == calls[1].id
+        assert first_page.items[0].mapped_execution_mode == "per_source"
+        assert first_page.items[0].mapped_source_index == 1
+        assert first_page.items[0].mapped_source_id == "source-file-1"
+        assert [item.event_id for item in second_page.items] == [calls[2].id]
+        assert second_page.count == 1
+        assert second_page.total_count == 3
+        assert second_page.has_more is False
+        assert second_page.next_after_event_id is None
+
+        with pytest.raises(FlowProviderCallNotFoundError):
+            await repo.list_evidence_page(
+                run_id=context.run_id,
+                tenant_id=context.tenant_id,
+                limit=2,
+                after_event_id=uuid4(),
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_stale_run_recovery_marks_only_started_provider_calls_unknown(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+        completed_start = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="a" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        started = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="b" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=completed_start.id,
+            receipt=ProviderCallCompletion(
+                num_tokens_input=2,
+                num_tokens_output=1,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+
+        changed = await repo.mark_started_calls_outcome_unknown_for_run(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            reason="stale_started",
+        )
+
+        assert changed == 1
+        assert (await _read_call(session, completed_start.id)).status == "completed"
+        recovered = await _read_call(session, started.id)
+        assert recovered.status == "outcome_unknown"
+        assert recovered.outcome_reason == "stale_started"
+        assert recovered.finished_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_transcription_call_starts_before_resolved_inputs_are_activated(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    """A transcription request produces the step input it would have to point at."""
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            activate_resolved_inputs=False,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        call = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=TranscriptionProviderCallRequest(
+                provider_request_hash="a" * 64,
+                requested_model="openai/whisper-1",
+                provider="openai",
+                audio_seconds=51.25,
+            ),
+        )
+
+        assert call.call_kind == ProviderCallKind.TRANSCRIPTION
+        assert call.audio_seconds == 51.25
+        assert call.resolved_input_edge_indexes == ()
+
+        # A completion call still may not start before that evidence exists.
+        with pytest.raises(FlowProviderCallResolvedInputLinkError):
+            await _start_provider_call(
+                repo=repo,
+                context=context,
+                request=CompletionProviderCallRequest(
+                    provider_request_hash="b" * 64,
+                    requested_model="openai/gpt-4o-mini",
+                    requested_capabilities=(),
+                ),
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_run_usage_keeps_token_and_audio_completeness_independent(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        first_chunk = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=TranscriptionProviderCallRequest(
+                provider_request_hash="1" * 64,
+                requested_model="openai/whisper-1",
+                provider="openai",
+                audio_seconds=300.0,
+            ),
+        )
+        await repo.complete_call(
+            call_id=first_chunk.id,
+            receipt=TranscriptionCallCompletion(
+                response_model="whisper-1",
+                provider_response_id="transcription-1",
+            ),
+        )
+        abandoned_chunk = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=TranscriptionProviderCallRequest(
+                provider_request_hash="2" * 64,
+                requested_model="openai/whisper-1",
+                provider="openai",
+                audio_seconds=45.5,
+            ),
+        )
+        await repo.mark_outcome_unknown(
+            call_id=abandoned_chunk.id, reason="provider_error"
+        )
+        retried_chunk = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=TranscriptionProviderCallRequest(
+                provider_request_hash="2" * 64,
+                requested_model="openai/whisper-1",
+                provider="openai",
+                audio_seconds=45.5,
+            ),
+        )
+        await repo.complete_call(
+            call_id=retried_chunk.id,
+            receipt=TranscriptionCallCompletion(
+                response_model="whisper-1",
+                provider_response_id="transcription-2",
+            ),
+        )
+        completion = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="3" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=completion.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="completion-1",
+                num_tokens_input=21,
+                num_tokens_output=8,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+
+        usage_by_run_id = await repo.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+    usage = usage_by_run_id[context.run_id]
+    token_usage = usage.token_usage
+    transcription_usage = usage.transcription_usage
+    assert token_usage is not None
+    assert transcription_usage is not None
+    # The transcription that never resolved does not corrupt the token total,
+    # and the transcription total counts the successful retry once.
+    assert token_usage.num_tokens_total == 29
+    assert token_usage.input_completeness == "complete"
+    assert token_usage.output_completeness == "complete"
+    assert transcription_usage.audio_seconds == 345.5
+    assert transcription_usage.completeness == "incomplete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_models_used_are_the_models_that_answered_completed_calls(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        transcription = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=TranscriptionProviderCallRequest(
+                provider_request_hash="1" * 64,
+                requested_model="openai/whisper-1",
+                provider="openai",
+                audio_seconds=300.0,
+            ),
+        )
+        await repo.complete_call(
+            call_id=transcription.id,
+            receipt=TranscriptionCallCompletion(
+                response_model="whisper-1",
+                provider_response_id="transcription-1",
+            ),
+        )
+        answered = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="2" * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=answered.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="completion-1",
+                num_tokens_input=21,
+                num_tokens_output=8,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        answered_without_naming_itself = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="3" * 64,
+                requested_model="azure/gpt-4.1",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.complete_call(
+            call_id=answered_without_naming_itself.id,
+            receipt=ProviderCallCompletion(
+                num_tokens_input=5,
+                num_tokens_output=2,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        refused = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="4" * 64,
+                requested_model="openai/refused-before-an-answer",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.reject_call(call_id=refused.id, reason="response_format_rejected")
+        lost = await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="5" * 64,
+                requested_model="openai/outcome-never-learned",
+                requested_capabilities=(),
+            ),
+        )
+        await repo.mark_outcome_unknown(call_id=lost.id, reason="provider_error")
+        await _start_provider_call(
+            repo=repo,
+            context=context,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="6" * 64,
+                requested_model="openai/still-waiting",
+                requested_capabilities=(),
+            ),
+        )
+
+        models_by_step_id = await repo.list_models_used_by_step(
+            run_id=context.run_id, tenant_id=context.tenant_id, limit=100
+        )
+        bounded = await repo.list_models_used_by_step(
+            run_id=context.run_id, tenant_id=context.tenant_id, limit=2
+        )
+        another_tenants_view = await repo.list_models_used_by_step(
+            run_id=context.run_id, tenant_id=uuid4(), limit=100
+        )
+
+    # The answer names the model when it can; the route it was sent to stands
+    # in when the answer does not.
+    assert models_by_step_id == {
+        context.step_id: ("azure/gpt-4.1", "gpt-4o-mini-2026-07-01", "whisper-1")
+    }
+    # The read stops at the limit, in name order, rather than returning all.
+    assert bounded == {context.step_id: ("azure/gpt-4.1", "gpt-4o-mini-2026-07-01")}
+    assert another_tenants_view == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_an_attempt_s_own_model_fields_are_not_models_used(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        # An attempt records the model it was configured to ask, in both
+        # fields. Without a receipt neither says that a provider answered.
+        await FlowRunRepository(session=session).finish_attempt(
+            run_id=context.run_id,
+            step_id=context.step_id,
+            attempt_no=context.attempt_no,
+            tenant_id=context.tenant_id,
+            status=FlowStepAttemptStatus.COMPLETED,
+            requested_model="openai/gpt-4o-mini",
+            response_model="gpt-4o-mini",
+            provider="openai",
+        )
+
+        models_by_step_id = await FlowProviderCallRepository(
+            session
+        ).list_models_used_by_step(
+            run_id=context.run_id, tenant_id=context.tenant_id, limit=100
+        )
+
+    assert models_by_step_id == {}
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_a_retried_transcription_is_durable_from_the_adapter_to_the_run_total(
+    setup_database,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+    tmp_path,
+):
+    """Drive the real adapter into the real recorder and read the run's total.
+
+    Every other proof stops at an in-memory observer or writes the rows by hand,
+    so a wiring regression could leave them all green while a run recorded
+    nothing. Only the provider itself is faked here.
+    """
+    attempts = {"count": 0}
+
+    async def flaky_atranscription(**kwargs):
+        attempts["count"] += 1
+        if attempts["count"] == 1:
+            raise RuntimeError("provider timed out")
+        return SimpleNamespace(text="transkription", model="whisper-1", id="resp-2")
+
+    monkeypatch.setattr(
+        "eneo.transcription_models.infrastructure.adapters.litellm_transcription"
+        ".litellm_transport.atranscription",
+        AsyncMock(side_effect=flaky_atranscription),
+    )
+    async with sessionmanager.session() as setup_session, setup_session.begin():
+        context = await _create_started_attempt(
+            session=setup_session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+    chunk_path = tmp_path / "chunk.wav"
+    _write_silent_wav(chunk_path, seconds=12.5)
+    adapter = LiteLLMTranscriptionAdapter(
+        model=SimpleNamespace(name="Whisper", model_name="whisper-1"),
+        credential_resolver=_TranscriptionCredentialResolverStub(),
+        provider_type="openai",
+    )
+    recorder = FlowProviderCallRecorder(
+        run_id=context.run_id,
+        step_id=context.step_id,
+        attempt_no=context.attempt_no,
+        tenant_id=context.tenant_id,
+        principal_user_id=context.principal_user_id,
+        principal_service_id=None,
+        completion_model_id=None,
+        mapped_call=None,
+        resolved_input_edge_indexes=(),
+    )
+
+    text = await adapter._transcribe_chunk(
+        chunk_path,
+        language="sv",
+        observer=recorder,
+        audio_seconds=12.5,
+    )
+
+    async with sessionmanager.session() as session, session.begin():
+        repo = FlowProviderCallRepository(session)
+        page = await repo.list_evidence_page(
+            run_id=context.run_id,
+            tenant_id=context.tenant_id,
+            limit=10,
+        )
+        usage_by_run_id = await repo.list_usage_for_runs(
+            run_ids=[context.run_id],
+            tenant_id=context.tenant_id,
+        )
+
+    assert text == "transkription"
+    assert attempts["count"] == 2
+    calls = page.items
+    assert [call.status.value for call in calls] == ["outcome_unknown", "completed"]
+    assert {call.call_kind for call in calls} == {ProviderCallKind.TRANSCRIPTION}
+    # The retry is the same request, so it carries the same identity and length.
+    assert len({call.provider_request_hash for call in calls}) == 1
+    assert [call.audio_seconds for call in calls] == [12.5, 12.5]
+
+    usage = usage_by_run_id[context.run_id]
+    assert usage.token_usage is None
+    assert usage.transcription_usage is not None
+    # Only the attempt that completed is counted, and the attempt whose outcome
+    # was never learned makes the total a lower bound.
+    assert usage.transcription_usage.audio_seconds == 12.5
+    assert usage.transcription_usage.completeness == "incomplete"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_step_usage_receipts_measure_only_provider_reported_completed_calls(
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    """The review's per-step receipt: completed provider-reported calls count,
+    a rejected call contributes nothing, an estimated count is not a
+    measurement, only the current attempt's calls are read once the step is
+    retried, an unresolved call withholds on its own, and another tenant sees
+    nothing."""
+    async with db_container() as container:
+        session = container.session()
+        context = await _create_started_attempt(
+            session=session,
+            admin_user=admin_user,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+        )
+        repo = FlowProviderCallRepository(session)
+
+        def request(digit: str) -> CompletionProviderCallRequest:
+            return CompletionProviderCallRequest(
+                provider_request_hash=digit * 64,
+                requested_model="openai/gpt-4o-mini",
+                requested_capabilities=(),
+            )
+
+        reported = await _start_provider_call(
+            repo=repo, context=context, request=request("1")
+        )
+        await repo.complete_call(
+            call_id=reported.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="reported",
+                num_tokens_input=21,
+                num_tokens_output=8,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        rejected = await _start_provider_call(
+            repo=repo, context=context, request=request("2")
+        )
+        await repo.reject_call(
+            call_id=rejected.id,
+            reason=ProviderCallRejectionReason.RESPONSE_FORMAT_REJECTED,
+        )
+        measured = await repo.list_step_usage_receipts(
+            run_ids=[context.run_id], tenant_id=context.tenant_id
+        )
+        assert set(measured) == {(context.run_id, context.step_id)}
+        receipt = measured[(context.run_id, context.step_id)]
+        assert (receipt.num_tokens_input, receipt.num_tokens_output) == (21, 8)
+        assert receipt.completion_call_count == 1
+        assert receipt.completed_call_count == 1
+        assert receipt.measured is True
+
+        estimated = await _start_provider_call(
+            repo=repo, context=context, request=request("3")
+        )
+        await repo.complete_call(
+            call_id=estimated.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="estimated",
+                num_tokens_input=5,
+                num_tokens_output=5,
+                input_source="estimated",
+                output_source="provider",
+            ),
+        )
+        with_estimate = (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=context.tenant_id
+            )
+        )[(context.run_id, context.step_id)]
+        assert with_estimate.completed_call_count == 2
+        assert with_estimate.provider_reported is False
+        assert with_estimate.measured is False
+
+        # A retry: the second attempt records one clean call, but the step's
+        # result still points at the first attempt, so nothing changes...
+        run_repo = FlowRunRepository(session)
+        second = await run_repo.create_or_get_attempt_started(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            step_id=context.step_id,
+            step_order=1,
+            attempt_no=2,
+            dispatch_task_id="provider-call-lifecycle-test-retry",
+        )
+        retry = replace(context, attempt_id=second.id, attempt_no=2)
+        await _activate_resolved_inputs(
+            repo=run_repo,
+            context=retry,
+            aggregate=FlowResolvedInputEdges(schema_version=1, edges=()),
+        )
+        retried = await _start_provider_call(
+            repo=repo, context=retry, request=request("4")
+        )
+        await repo.complete_call(
+            call_id=retried.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="retried",
+                num_tokens_input=50,
+                num_tokens_output=40,
+                input_source="provider",
+                output_source="provider",
+            ),
+        )
+        still_first = (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=context.tenant_id
+            )
+        )[(context.run_id, context.step_id)]
+        assert still_first == with_estimate
+        # ...until the result's current attempt moves: then the first
+        # attempt's calls, tokens and estimate are history and count nothing.
+        await session.execute(
+            sa.update(FlowStepResults)
+            .where(FlowStepResults.flow_run_id == context.run_id)
+            .where(FlowStepResults.step_id == context.step_id)
+            .values(current_attempt_no=2)
+        )
+        current = (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=context.tenant_id
+            )
+        )[(context.run_id, context.step_id)]
+        assert (current.num_tokens_input, current.num_tokens_output) == (50, 40)
+        assert current.completion_call_count == 1
+        assert current.completed_call_count == 1
+        assert current.provider_reported is True
+        assert current.measured is True
+
+        # An unresolved call withholds on its own, with every completed call
+        # provider-reported.
+        unresolved = await _start_provider_call(
+            repo=repo, context=retry, request=request("5")
+        )
+        await repo.mark_outcome_unknown(
+            call_id=unresolved.id, reason=ProviderCallUnknownReason.REQUEST_TIMEOUT
+        )
+        with_unresolved = (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=context.tenant_id
+            )
+        )[(context.run_id, context.step_id)]
+        assert with_unresolved.unresolved_call_count == 1
+        assert with_unresolved.provider_reported is True
+        assert with_unresolved.measured is False
+
+        assert (
+            await repo.list_step_usage_receipts(
+                run_ids=[context.run_id], tenant_id=uuid4()
+            )
+            == {}
+        )
+        assert (
+            await repo.list_step_usage_receipts(run_ids=[], tenant_id=context.tenant_id)
+            == {}
+        )

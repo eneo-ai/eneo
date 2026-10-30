@@ -1,5 +1,6 @@
 from collections import defaultdict
 from collections.abc import AsyncIterator, Mapping, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
@@ -10,7 +11,7 @@ from sqlalchemy import Select
 from sqlalchemy.engine import ScalarResult
 from sqlalchemy.orm import selectinload
 
-from eneo.assistants.assistant import Assistant
+from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.assistants.assistant_update import AssistantUpdate
 from eneo.database.association_writes import (
@@ -31,6 +32,7 @@ from eneo.database.tables.assistant_template_table import AssistantTemplates
 from eneo.database.tables.capabilities_table import AssistantCapabilities
 from eneo.database.tables.collections_table import CollectionsTable
 from eneo.database.tables.document_templates_table import AssistantDocumentTemplates
+from eneo.database.tables.flow_tables import FlowSteps
 from eneo.database.tables.group_chats_table import (
     GroupChatsAssistantsMapping,
     GroupChatsTable,
@@ -67,7 +69,6 @@ if TYPE_CHECKING:
         CompletionModelRepository,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
-    from eneo.users.user import UserInDB
 
 
 @dataclass(frozen=True)
@@ -181,12 +182,12 @@ def _exclude_helper_assistants(
 class AssistantRepository:
     def __init__(
         self,
+        *,
         session: AsyncSession,
         factory: AssistantFactory,
         file_repo: FileRepository,
         file_content_loader: FileContentLoader,
         completion_model_repo: "CompletionModelRepository",
-        user: "UserInDB",
     ):
         super().__init__()
         self.session = session
@@ -194,7 +195,6 @@ class AssistantRepository:
         self.file_repo = file_repo
         self.file_content_loader = file_content_loader
         self.completion_model_repo = completion_model_repo
-        self.user = user
 
     @staticmethod
     async def get_personal_defaults_snapshot(
@@ -462,6 +462,28 @@ class AssistantRepository:
 
         return await self.session.scalar(stmt)
 
+    async def _prune_mcp_tool_overrides(
+        self, assistant_id: UUID, mcp_server_ids: list[UUID]
+    ) -> None:
+        """Keep the assistant's tool overrides inside its selected servers, so
+        a server attached again later does not bring back old switches."""
+        from eneo.database.tables.mcp_server_table import (
+            MCPServerTools as MCPServerToolsTable,
+        )
+
+        stmt = sa.delete(AssistantMCPServerTools).where(
+            AssistantMCPServerTools.assistant_id == assistant_id
+        )
+        if mcp_server_ids:
+            stmt = stmt.where(
+                AssistantMCPServerTools.mcp_server_tool_id.not_in(
+                    sa.select(MCPServerToolsTable.id).where(
+                        MCPServerToolsTable.mcp_server_id.in_(mcp_server_ids)
+                    )
+                )
+            )
+        await self.session.execute(stmt)
+
     async def _set_mcp_tools(
         self,
         assistant_id: UUID,
@@ -556,6 +578,27 @@ class AssistantRepository:
 
         return await self.session.scalars(query)
 
+    async def delete_removable_flow_managed(
+        self,
+        *,
+        flow_id: UUID,
+        assistant_ids: AbstractSet[UUID],
+    ) -> dict[UUID, UUID | None]:
+        """Delete the given assistants ``flow_id`` manages that no step uses.
+
+        Returns the deleted assistants' icon ids, keyed by assistant id, as the
+        statement saw them; anything else it skipped.
+        """
+        rows = await self.session.execute(
+            sa.delete(Assistants)
+            .where(Assistants.id.in_(assistant_ids))
+            .where(Assistants.origin == AssistantOrigin.FLOW_MANAGED.value)
+            .where(Assistants.managing_flow_id == flow_id)
+            .where(~sa.exists().where(FlowSteps.assistant_id == Assistants.id))
+            .returning(Assistants.id, Assistants.icon_id)
+        )
+        return {row.id: row.icon_id for row in rows}
+
     async def add(self, assistant: Assistant):
         completion_model_id = (
             assistant.completion_model.id
@@ -576,6 +619,9 @@ class AssistantRepository:
                 completion_model_id=completion_model_id,
                 completion_model_kwargs=assistant.completion_model_kwargs.model_dump(),
                 logging_enabled=assistant.logging_enabled,
+                hidden=assistant.hidden,
+                origin=assistant.origin.value,
+                managing_flow_id=assistant.managing_flow_id,
                 guardrail_active=False,
                 space_id=assistant.space_id,
                 is_default=assistant.is_default,
@@ -917,6 +963,16 @@ class AssistantRepository:
                 AssistantMCPServers.mcp_server_id == server_id,
             )
         )
+        await self._prune_mcp_tool_overrides(
+            assistant_id,
+            list(
+                await self.session.scalars(
+                    sa.select(AssistantMCPServers.mcp_server_id).where(
+                        AssistantMCPServers.assistant_id == assistant_id
+                    )
+                )
+            ),
+        )
         await self.session.execute(
             sa.update(Assistants)
             .where(
@@ -1011,6 +1067,7 @@ class AssistantRepository:
                 AssistantMCPServers.mcp_server_id,
                 change.mcp_server_ids,
             )
+            await self._prune_mcp_tool_overrides(assistant_id, change.mcp_server_ids)
         if change.mcp_tools is not None:
             await self._set_mcp_tools(assistant_id, change.mcp_tools)
         if change.prompt is not None:
@@ -1053,14 +1110,21 @@ class AssistantRepository:
 
     async def delete(self, assistant_id: UUID, space_id: UUID) -> UUID | None:
         """Delete the assistant; returns the icon the deleted row showed."""
-        return await self.session.scalar(
-            sa.delete(Assistants)
-            .where(
-                Assistants.id == assistant_id,
-                Assistants.space_id == space_id,
+        row = (
+            await self.session.execute(
+                sa.delete(Assistants)
+                .where(
+                    Assistants.id == assistant_id,
+                    Assistants.space_id == space_id,
+                    Assistants.is_default.is_(False),
+                    Assistants.origin != AssistantOrigin.FLOW_MANAGED.value,
+                )
+                .returning(Assistants.id, Assistants.icon_id)
             )
-            .returning(Assistants.icon_id)
-        )
+        ).one_or_none()
+        if row is None:
+            raise NotFoundException("Assistant not found")
+        return row.icon_id
 
     async def move(
         self, assistant_id: UUID, source_space_id: UUID, target_space_id: UUID

@@ -1,0 +1,268 @@
+import { Callout } from "nextra/components";
+
+# Designing Flows
+
+This page is for teams shaping a published Eneo Flow before integration work begins, and it helps you choose supported steps, inputs, review points, and artifact outputs.
+
+You are in the design step of the consumer journey, where the flow shape is settled before the runtime endpoints are wired.
+
+The reference guide keeps the full field catalog: [Flow Runtime API Reference](/guides/flows-api-guide).
+
+## Building blocks
+
+A Flow is a published graph of steps. Each step declares `input_source`, `input_type`, `output_type`, and `output_mode`.
+
+Flow input can use HTTP GET, or the answer of one MCP tool that the step calls (`input_source` `tool`; see [Flows](/docs/flows#core-step-fields)). Flow does not support HTTP POST input, and a step's model cannot use MCP tools. Terminal HTTP POST output remains available through the durable webhook outbox.
+
+HTTP steps send to `http` or `https` URLs without credentials in the address, and only to public addresses. An administrator can allow private networks; loopback, link-local and cloud-metadata addresses are never allowed. Redirects are not followed. An HTTP input step that points at a blocked destination fails with `typed_io_http_ssrf_blocked`. A webhook delivery to one is not retried: it is dead-lettered on the first attempt and the run fails with `flow_webhook_delivery_failed`.
+
+These examples use the API's `input_type`, `output_type`, and `output_mode` values. They are step configurations, not a complete list of supported combinations. The published run contract determines which runtime inputs the Flow requires.
+
+| `input_type` | `output_type` | `output_mode`     | Use it when                                                   |
+| ------------ | ------------- | ----------------- | ------------------------------------------------------------- |
+| `text`       | `text`        | `pass_through`    | Process form fields or pasted text into a text answer.         |
+| `text`       | `json`        | `pass_through`    | Produce structured fields for later steps or your app.        |
+| `document`   | `text`        | `pass_through`    | Read documents into human-readable text.                       |
+| `document`   | `json`        | `pass_through`    | Extract structured fields before comparison or review.        |
+| `audio`      | `text`        | `transcribe_only` | Transcribe audio before later text, JSON, or artifact steps.   |
+
+### Artifact steps
+
+For generated PDF and DOCX outputs, prepare the text in earlier steps and add a separate `render_verbatim` step. For a fixed DOCX template, add a `template_fill` step that reads prepared text. These step shapes use the same API enum values:
+
+| `input_type` | `output_type` | `output_mode`    | Use it when                                      |
+| ------------ | ------------- | ---------------- | ------------------------------------------------ |
+| `text`       | `pdf`         | `render_verbatim` | Render prepared text as a generated PDF.        |
+| `text`       | `docx`        | `render_verbatim` | Render prepared text as a generated DOCX.       |
+| `text`       | `docx`        | `template_fill`   | Fill a fixed DOCX template from prepared text.  |
+
+<Callout type="warning">
+
+**Not supported: Image input.**
+
+Image input is not supported by the Flow runtime today.
+
+Closest supported alternative: Convert the image into a supported document or text input before starting the run.
+
+</Callout>
+
+## Inputs done right
+
+Use runtime uploads for files, form fields for caller choices, and pasted text for small text inputs.
+
+Reserved `input_payload_json` keys stay owned by the backend; do not create form fields with reserved names.
+
+```json
+{
+  "input_payload_json": {
+    "case_type": "intake",
+    "priority": "normal"
+  },
+  "step_inputs": {
+    "STEP_ID": {
+      "file_ids": ["RUNTIME_FILE_ID"]
+    }
+  }
+}
+```
+
+### Design from the published contract
+
+Before building a UI, inspect the runtime paths and run contract for the published flow version.
+
+1. Call `GET /api/v1/flows/{id}/published/` to get runtime-safe paths for service-key or user clients.
+2. Call `GET runtime_paths.run_contract` to get required form fields, file inputs, review steps, and final output.
+3. Call `GET runtime_paths.graph` to get the published topology your app can show before a run.
+4. Use `published_flow_version` as the version pin when your app creates a run.
+
+Endpoint facts:
+
+| Endpoint                           | Method | Success  | Operation                    |
+| ---------------------------------- | ------ | -------- | ---------------------------- |
+| `/api/v1/flows/{id}/run-contract/` | `GET`  | `200 OK` | `get_flow_run_contract`      |
+| `/api/v1/flows/{id}/graph/`        | `GET`  | `200 OK` | `get_flow_graph`             |
+| `/api/v1/flows/{id}/published/`    | `GET`  | `200 OK` | `get_published_flow_runtime` |
+
+Contract coverage: These endpoints are contract-tested.
+
+Common errors in this sequence: `flow_not_published`, `flow_deleted`, `flow_run_stale_version`.
+
+Use the [Flow error reference](/guides/flows/reference/errors) for the Flow-specific code catalog and recovery actions.
+
+## Chaining steps
+
+Prefer targeted references such as `{{step_1.output.structured.fields}}` over broad all-previous-step prose. Step references use `step_N`, where `N` is the referenced step's saved order.
+
+Use JSON steps when another step or your app needs stable fields. Use text steps for human-facing prose.
+
+## Knowledge, models, and artifacts
+
+Attach knowledge only to the step that needs it. Different steps may use different model choices when the published Flow exposes that design.
+
+Use DOCX template fill for fixed placeholders, DOCX create for generated documents, and PDF when the result is a final read-only artifact.
+
+### Fill an existing Word template
+
+Choose **Fill Word template**, then upload a `.docx` file and map each named
+template field to text from an earlier step or a form field. Template selection
+and field mapping are available in both editor modes. **Leave empty** deliberately
+omits a field; **Select source** means the mapping still needs to be completed.
+Test the flow and open the resulting Word document to check placement and styles
+before publishing it.
+
+Eneo fills Word content controls. To mark a place in your existing template:
+
+1. Open the template in Word for Windows. Enable **Developer** under **File >
+   Options > Customize Ribbon**.
+2. Insert a **Rich Text Content Control** for a section, or a **Plain Text Content
+   Control** for a short field. For a section, select the whole paragraph,
+   including its paragraph mark, before inserting the control.
+3. In the control's **Properties**, set a clear **Title** and a unique **Tag**,
+   such as `background`. The title identifies the field in Eneo; the tag stores
+   its mapping. Each place needs its own control.
+4. Keep controls in the document body, outside table cells, headers and footers.
+   Nested, XML-mapped and other control types are not supported.
+5. Save as `.docx`, upload it and choose the text for each field.
+
+Rich sections support paragraphs, headings, lists and tables using the template's
+styles. Inline text fields insert text within a paragraph. Ordinary text
+placeholders such as `{{name}}` need to be replaced with content controls; changing
+the file extension does not convert them.
+
+**How to prepare your template** beside the upload button explains these steps.
+**Download example template** provides a working template with one rich section
+named **Dokument** and tagged `dokument`. It includes headings, setup instructions
+and links to Microsoft. The instructions sit inside the section, so filling it
+replaces them with the flow's text.
+
+**Example with several fields** provides a short name field and separate
+sections for **Bakgrund**, **Bedömning** and **Nästa steg**. Its fixed headings
+remain when the field text is replaced. You can use it on Windows and Mac.
+Keep headings outside a control when they should remain in the result. Click
+inside a control in Word to see its title and editing boundaries.
+
+For templates with several fields, **Show places in the template** lists them
+in document order, with their nearest preceding heading when available. Only
+Word's built-in Heading styles count as headings, and a long heading is
+shortened. Select a field to move focus to its mapping. This helps you find the
+insertion point; the final pagination and layout are checked in the downloaded
+Word result.
+
+When replacing a template, mappings with the same Word tag are kept, including
+intentional **Leave empty** choices. Fields that no longer exist are listed
+separately. Use **Remove obsolete mappings**, then map any new fields.
+
+Automatic matching requires one clear source for the template tag. If several
+names match, choose the source explicitly.
+
+A whole JSON object is marked **Invalid** rather than ready to run. Choose text
+from a previous step, or use a single text field from structured data in an
+advanced expression. The renderer checks the resolved value when the flow runs.
+
+Dots separate structured field-path segments, such as `details.title`. Each
+segment must be non-empty: leading, trailing, or repeated dots prevent
+publication. A property with an empty name cannot be selected by a dotted
+expression, even if the output contract declares it. Whitespace surrounding
+a segment is ignored, as it is at runtime. You can still save an unfinished
+mapping as a draft.
+
+Word for Mac can use prepared content controls, but its Developer tab does not
+offer the same tools to create them or change their tags. Keep the example's
+prepared control, or prepare new fields in Word for Windows. Mac's legacy form
+fields do not replace the content controls Eneo needs. To show the tab on Mac,
+choose **Word > Preferences > Ribbon & Toolbar > Main Tabs > Developer > Save**.
+
+Microsoft explains how to [show the Developer tab on Windows and Mac](https://support.microsoft.com/en-gb/word/show-the-developer-tab-in-word)
+and [create a form in Word](https://support.microsoft.com/en-us/word/create-a-form-in-word-that-users-can-complete-or-print).
+
+If checking the template fails, its existing field mappings remain available.
+For a connection failure, use **Try again**. For an invalid template, correct the
+file in Word and upload it again. Switching steps during upload keeps the result
+attached to the step where the upload started, including when the step gets its
+first save meanwhile. If the upload or check fails while you are on another step,
+the error and **Try again** wait on the original step for when you return.
+
+## Long material
+
+A step reads its whole input at once. When a transcript or a document is larger than the model can read, the step fails with a typed error that says so, and nothing is silently cut.
+
+For material that can be long, set the step's text processing mode:
+
+- **Bearbeta varje avsnitt** splits the material into sections that fit the model, runs the step on every section, and returns an ordered list with one result per section. Use it for extraction, where every detail must be kept.
+- **Sammanfatta underlaget** does the same first pass, then folds the section results into one answer under fixed limits on calls and tokens. Use it when the next step needs one text, such as minutes or a summary.
+
+Sections do not overlap, so a fact is processed once. A fold that stops shrinking is refused with a typed error rather than looping. Every call records which sections or earlier results it consumed, so an answer can be traced back to the material.
+
+The shape follows the map and reduce pattern used by long-document tooling such as LangChain: process parts, then reduce. Knowledge attached to a step still uses retrieval with overlapping chunks; the two are separate.
+
+## Review design
+
+Mark the step that needs human judgment for review. The run pauses at that step; arbitrary mid-run pause is not the supported model.
+
+## Anti-patterns
+
+<Callout type="warning">
+
+**Anti-pattern: One giant step.**
+
+One broad instruction hides which part failed and makes review harder.
+
+Better design: split extraction, reasoning, review, and artifact rendering into separate steps.
+
+</Callout>
+
+Avoid chaining only through prose when a JSON contract would give your app stable fields.
+
+Avoid baking runtime data into instructions. Put caller data in form fields or runtime file bindings.
+
+## Worked scenarios
+
+### Speech to structured report
+
+Goal: Turn an audio upload into structured sections and a filled DOCX template.
+
+| Step             | Input                | Output                          | Bindings                                | Knowledge      |
+| ---------------- | -------------------- | ------------------------------- | --------------------------------------- | -------------- |
+| Transcribe audio | Runtime audio upload | Text transcript                 | `step_inputs[transcribe].file_ids`      | None           |
+| Extract sections | Transcript text      | JSON section headers            | `{{step_1.output.text}}`                | None           |
+| Compose report   | Section JSON         | Report text                     | `{{step_2.output.structured.sections}}` | Step knowledge |
+| Fill template    | Report text          | DOCX artifact (`template_fill`) | `{{step_3.output.text}}`                | Template asset |
+
+The flow keeps speech, structure, prose, and template rendering in separate steps so a failure can be traced to the stage that produced it.
+
+### Document intake with human gate
+
+Goal: Extract uploaded documents, pause for review, and produce a final artifact.
+
+| Step            | Input                   | Output        | Bindings                        | Knowledge      |
+| --------------- | ----------------------- | ------------- | ------------------------------- | -------------- |
+| Extract upload  | Runtime document upload | JSON fields   | `step_inputs[extract].file_ids` | None           |
+| Create artifact | Approved JSON           | DOCX artifact | `{{step_1.output.structured}}`  | Template asset |
+
+Configure an `edit` review policy on the extract step. The checkpoint pauses after step 1; approval makes its reviewed or edited output available as `{{step_1.output.structured}}` before step 2 creates the artifact.
+
+### Compare and decide
+
+Goal: Compare two uploads against caller-supplied criteria and return a recommendation.
+
+| Step               | Input                           | Output              | Bindings                            | Knowledge |
+| ------------------ | ------------------------------- | ------------------- | ----------------------------------- | --------- |
+| Read first upload  | Runtime document upload         | JSON metrics        | `step_inputs[first].file_ids`       | None      |
+| Read second upload | Runtime document upload         | JSON metrics        | `step_inputs[second].file_ids`      | None      |
+| Recommend          | Both JSON outputs plus criteria | Text recommendation | `ALL_PREVIOUS_STEPS` and form field | None      |
+
+The comparison step receives both structured extractions and a clear weighting field instead of prose-only chaining.
+
+### Form intake to artifact
+
+Goal: Use form fields to compose sections and generate a DOCX artifact.
+
+| Step                  | Input               | Output        | Bindings                 | Knowledge               |
+| --------------------- | ------------------- | ------------- | ------------------------ | ----------------------- |
+| Collect sections      | Runtime form fields | Draft text    | `input_payload_json`     | None                    |
+| Compose artifact body | Draft text          | Final text    | `{{step_1.output.text}}` | Optional step knowledge |
+| Fill template         | Final text          | DOCX artifact | `{{step_2.output.text}}` | Template asset          |
+
+The form-only path avoids fake uploads and makes every caller-provided value explicit in the run payload.
+
+Next: [Flows FAQ](/guides/flows/flows-faq).

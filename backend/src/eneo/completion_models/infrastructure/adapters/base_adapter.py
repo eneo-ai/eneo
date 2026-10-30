@@ -2,6 +2,11 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, AsyncIterator, Optional
 
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionRequestPackage,
+)
+
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
         Completion,
@@ -39,7 +44,11 @@ class CompletionModelAdapter(ABC):
         return self.model.get_model_route()
 
     def get_logging_details(
-        self, context: "Context", model_kwargs: "ModelKwargs | dict[str, Any] | None"
+        self,
+        context: "Context",
+        model_kwargs: "ModelKwargs | dict[str, Any] | None",
+        *,
+        prepared_request: CompletionRequestPackage | None = None,
     ) -> "LoggingDetails":
         raise NotImplementedError()
 
@@ -53,6 +62,15 @@ class CompletionModelAdapter(ABC):
     ) -> ProviderInput:
         """Serialize the exact provider-visible messages and tool catalogue."""
         pass
+
+    def package_request(
+        self,
+        provider_input: ProviderInput,
+        *,
+        model_kwargs: "ModelKwargs | dict[str, Any] | None" = None,
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    ) -> CompletionRequestPackage:
+        raise NotImplementedError()
 
     async def get_response(
         self,

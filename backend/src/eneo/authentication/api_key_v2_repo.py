@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional, cast
 from uuid import UUID
@@ -8,19 +9,29 @@ import sqlalchemy as sa
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql import Select
 
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.authentication.auth_models import (
     PERMISSION_LEVEL_ORDER,
     ApiKeyListCursor,
-    ApiKeyOwnership,
-    ApiKeyPermission,
     ApiKeyScopeType,
     ApiKeyState,
     ApiKeyType,
     ApiKeyV2InDB,
+    ServicePrincipalInDB,
+    ServicePrincipalState,
 )
 from eneo.database.tables.api_keys_v2_table import ApiKeysV2
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.service_principals_table import ServicePrincipals
 from eneo.database.tables.tenant_table import Tenants
 from eneo.database.tables.users_table import Users
+
+
+def _flow_managed_assistant_ids() -> Select[tuple[UUID]]:
+    """A flow-managed assistant is internal step configuration, never a key scope."""
+    return sa.select(Assistants.id).where(
+        Assistants.origin == AssistantOrigin.FLOW_MANAGED.value
+    )
 
 
 class ApiKeysV2Repository:
@@ -34,6 +45,94 @@ class ApiKeysV2Repository:
         record = await self.session.scalar(query)
 
         return ApiKeyV2InDB.model_validate(record)
+
+    async def create_service_principal(
+        self,
+        *,
+        tenant_id: UUID,
+        display_name: str,
+        description: str | None,
+        scope_type: str,
+        scope_id: UUID | None,
+        created_by_user_id: UUID | None,
+    ) -> ServicePrincipalInDB:
+        query = (
+            sa.insert(ServicePrincipals)
+            .values(
+                tenant_id=tenant_id,
+                display_name=display_name,
+                description=description,
+                scope_type=scope_type,
+                scope_id=scope_id,
+                state=ServicePrincipalState.ACTIVE.value,
+                created_by_user_id=created_by_user_id,
+            )
+            .returning(ServicePrincipals)
+        )
+        record = await self.session.scalar(query)
+
+        return ServicePrincipalInDB.model_validate(record)
+
+    async def update_service_principal_display(
+        self,
+        *,
+        service_principal_id: UUID,
+        tenant_id: UUID,
+        display_name: str,
+        description: str | None,
+    ) -> ServicePrincipalInDB | None:
+        query = (
+            sa.update(ServicePrincipals)
+            .where(ServicePrincipals.id == service_principal_id)
+            .where(ServicePrincipals.tenant_id == tenant_id)
+            .values(display_name=display_name, description=description)
+            .returning(ServicePrincipals)
+        )
+        record = await self.session.scalar(query)
+        if record is None:
+            return None
+
+        return ServicePrincipalInDB.model_validate(record)
+
+    async def get_service_principal(
+        self,
+        *,
+        service_principal_id: UUID,
+        tenant_id: UUID,
+    ) -> ServicePrincipalInDB | None:
+        query = (
+            sa.select(ServicePrincipals)
+            .where(ServicePrincipals.id == service_principal_id)
+            .where(ServicePrincipals.tenant_id == tenant_id)
+        )
+        record = await self.session.scalar(query)
+        if record is None:
+            return None
+
+        return ServicePrincipalInDB.model_validate(record)
+
+    async def list_service_principals_by_ids(
+        self,
+        *,
+        service_principal_ids: Iterable[UUID],
+        tenant_id: UUID,
+    ) -> dict[UUID, ServicePrincipalInDB]:
+        principal_ids = tuple(dict.fromkeys(service_principal_ids))
+        if not principal_ids:
+            return {}
+        query = (
+            sa.select(ServicePrincipals)
+            .where(ServicePrincipals.tenant_id == tenant_id)
+            .where(ServicePrincipals.id.in_(principal_ids))
+        )
+        records = await self.session.scalars(query)
+
+        return {
+            service_principal.id: service_principal
+            for service_principal in (
+                ServicePrincipalInDB.model_validate(record) for record in records
+            )
+        }
 
     async def get(
         self, *, key_id: UUID, tenant_id: UUID, for_update: bool = False
@@ -151,13 +250,13 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
+        ownership: str | None = None,
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
-        ownership: str | None = None,
         min_permission: str | None = None,
-        eligible_for_module_binding: bool = False,
+        effectively_active: bool = False,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -169,13 +268,13 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            ownership=ownership,
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
-            ownership=ownership,
             min_permission=min_permission,
-            eligible_for_module_binding=eligible_for_module_binding,
+            effectively_active=effectively_active,
         )
         if cursor is not None:
             if cursor.key_id is None:
@@ -214,11 +313,11 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
+        ownership: str | None = None,
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
-        ownership: str | None = None,
     ) -> list[ApiKeyV2InDB]:
         query = cast(
             Select[Any],
@@ -230,11 +329,11 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            ownership=ownership,
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
-            ownership=ownership,
         )
         query = query.order_by(self.table.created_at.desc())
         records = await self.session.scalars(query)
@@ -248,13 +347,13 @@ class ApiKeysV2Repository:
         scope_id: UUID | None = None,
         state: ApiKeyState | None = None,
         key_type: str | None = None,
+        ownership: str | None = None,
         owner_user_id: UUID | None = None,
         created_by_user_id: UUID | None = None,
         search: str | None = None,
         expires_within_days: int | None = None,
-        ownership: str | None = None,
         min_permission: str | None = None,
-        eligible_for_module_binding: bool = False,
+        effectively_active: bool = False,
     ) -> int:
         query = cast(
             Select[Any],
@@ -268,13 +367,13 @@ class ApiKeysV2Repository:
             scope_id=scope_id,
             state=state,
             key_type=key_type,
+            ownership=ownership,
             owner_user_id=owner_user_id,
             created_by_user_id=created_by_user_id,
             search=search,
             expires_within_days=expires_within_days,
-            ownership=ownership,
             min_permission=min_permission,
-            eligible_for_module_binding=eligible_for_module_binding,
+            effectively_active=effectively_active,
         )
         result = await self.session.scalar(query)
         return int(result or 0)
@@ -287,15 +386,15 @@ class ApiKeysV2Repository:
         scope_id: UUID | None,
         state: ApiKeyState | None,
         key_type: str | None,
+        ownership: str | None,
         owner_user_id: UUID | None,
         created_by_user_id: UUID | None,
         search: str | None,
         expires_within_days: int | None,
-        ownership: str | None = None,
         min_permission: str | None = None,
-        eligible_for_module_binding: bool = False,
+        effectively_active: bool = False,
     ) -> Select[Any]:
-        effectively_active = sa.and_(
+        effectively_active_predicate = sa.and_(
             self.table.revoked_at.is_(None),
             self.table.suspended_at.is_(None),
             sa.or_(
@@ -307,19 +406,8 @@ class ApiKeysV2Repository:
                 self.table.rotation_grace_until > sa.func.now(),
             ),
         )
-        if eligible_for_module_binding:
-            required = PERMISSION_LEVEL_ORDER[ApiKeyPermission.WRITE.value]
-            allowed = [
-                permission
-                for permission, level in PERMISSION_LEVEL_ORDER.items()
-                if level >= required
-            ]
-            query = query.where(
-                self.table.ownership == ApiKeyOwnership.SERVICE.value,
-                self.table.key_type == ApiKeyType.SK.value,
-                self.table.permission.in_(allowed),
-                effectively_active,
-            )
+        if effectively_active:
+            query = query.where(effectively_active_predicate)
         if ownership is not None:
             query = query.where(self.table.ownership == ownership)
         if min_permission is not None:
@@ -444,6 +532,21 @@ class ApiKeysV2Repository:
 
         return ApiKeyV2InDB.model_validate(record)
 
+    async def revoke_unrevoked(
+        self, *, key_id: UUID, tenant_id: UUID, **values: object
+    ) -> Optional[ApiKeyV2InDB]:
+        """Revoke the key unless it already is: None when no row changed, so a
+        concurrent revocation keeps its own reason, time and audit row."""
+        record = await self.session.scalar(
+            sa.update(self.table)
+            .where(self.table.id == key_id)
+            .where(self.table.tenant_id == tenant_id)
+            .where(self.table.revoked_at.is_(None))
+            .values(state=ApiKeyState.REVOKED.value, **values)
+            .returning(self.table)
+        )
+        return None if record is None else ApiKeyV2InDB.model_validate(record)
+
     async def delete(self, *, key_id: UUID, tenant_id: UUID) -> bool:
         query = (
             sa.delete(self.table)
@@ -453,6 +556,18 @@ class ApiKeysV2Repository:
         )
         deleted_id = await self.session.scalar(query)
         return deleted_id is not None
+
+    @staticmethod
+    def last_used_is_due(
+        stored: datetime | None, *, at: datetime, min_interval_seconds: int
+    ) -> bool:
+        """Whether ``update_last_used_at`` would write, judged from a loaded row.
+
+        The same predicate as the update's own guard. Only that update moves the
+        stored time, and only forward, so a loaded time that is not due means the
+        update would match no row.
+        """
+        return stored is None or stored < at - timedelta(seconds=min_interval_seconds)
 
     async def update_last_used_at(
         self,
@@ -464,8 +579,12 @@ class ApiKeysV2Repository:
     ) -> Optional[ApiKeyV2InDB]:
         cutoff = last_used_at - timedelta(seconds=min_interval_seconds)
 
-        query = (
-            sa.update(self.table)
+        # The bump is best effort and the request's transaction can stay open
+        # while a response streams, so a key another transaction holds keeps
+        # its time instead of making this request wait. The lock is the one the
+        # update takes anyway, so rows that only reference the key never wait.
+        due_key = (
+            sa.select(self.table.id)
             .where(self.table.id == key_id)
             .where(self.table.tenant_id == tenant_id)
             .where(
@@ -474,6 +593,13 @@ class ApiKeysV2Repository:
                     self.table.last_used_at < cutoff,
                 )
             )
+            .with_for_update(key_share=True, skip_locked=True)
+            .correlate(None)
+            .scalar_subquery()
+        )
+        query = (
+            sa.update(self.table)
+            .where(self.table.id == due_key)
             .values(last_used_at=last_used_at)
             .returning(self.table)
         )
@@ -594,6 +720,32 @@ class ApiKeysV2Repository:
             .where(self.table.expires_at <= now)
             .where(self.table.revoked_at.is_(None))
             .where(self.table.state != ApiKeyState.EXPIRED.value)
+        )
+        records = await self.session.scalars(query)
+        return [ApiKeyV2InDB.model_validate(record) for record in records]
+
+    async def scope_is_flow_managed_assistant(self, assistant_id: UUID) -> bool:
+        return bool(
+            await self.session.scalar(
+                sa.select(
+                    _flow_managed_assistant_ids()
+                    .where(Assistants.id == assistant_id)
+                    .exists()
+                )
+            )
+        )
+
+    async def list_unrevoked_flow_managed_assistant_keys(
+        self, *, limit: int
+    ) -> list[ApiKeyV2InDB]:
+        query = (
+            sa.select(self.table)
+            .where(self.table.scope_type == ApiKeyScopeType.ASSISTANT.value)
+            .where(self.table.scope_id.in_(_flow_managed_assistant_ids()))
+            .where(self.table.revoked_at.is_(None))
+            .where(self.table.state != ApiKeyState.REVOKED.value)
+            .order_by(self.table.created_at, self.table.id)
+            .limit(limit)
         )
         records = await self.session.scalars(query)
         return [ApiKeyV2InDB.model_validate(record) for record in records]

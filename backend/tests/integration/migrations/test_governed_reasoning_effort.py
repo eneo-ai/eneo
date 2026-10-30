@@ -15,7 +15,7 @@ from alembic import command
 from alembic.config import Config
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.completion_models.domain.model_kwargs_capabilities import (
-    SupportedModelKwargs,
+    resolve_supported_model_kwargs,
 )
 from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
     TenantModelAdapter,
@@ -24,6 +24,7 @@ from eneo.governance_policy.domain.policy_resolver import (
     EffectiveConfig,
     select_effective_reasoning_effort,
 )
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -59,16 +60,18 @@ def reasoning_db(test_settings):
         password=test_settings.postgres_password,
     )
     connection.autocommit = True
-    command.upgrade(config, PRE_REVISION)
-    try:
-        yield connection, config
-    finally:
-        connection.close()
+    with at_revision(config, PRE_REVISION):
+        try:
+            yield connection, config
+        finally:
+            connection.close()
 
 
 def _legacy_capabilities() -> dict[str, object]:
+    unsupported = {"supported": False}
     return {
-        "temperature": {"supported": False},
+        "temperature": unsupported,
+        "top_p": unsupported,
         "reasoning_effort": {
             "supported": True,
             "control": "select",
@@ -79,10 +82,13 @@ def _legacy_capabilities() -> dict[str, object]:
             "control": "select",
             "options": ["low", "medium", "high"],
         },
+        "presence_penalty": unsupported,
+        "frequency_penalty": unsupported,
+        "top_k": unsupported,
     }
 
 
-def _insert_legacy_model(connection) -> str:
+def _insert_model(connection, capabilities: dict[str, object]) -> str:
     model_id = str(uuid4())
     with connection.cursor() as cursor:
         cursor.execute(
@@ -93,11 +99,16 @@ def _insert_legacy_model(connection) -> str:
                 model_kwargs_capabilities, created_at, updated_at
             )
             VALUES (
-                %s, 'legacy-reasoning-model', 'Legacy reasoning model', 4096, 1024,
+                %s, %s, %s, 4096, 1024,
                 'openai', 'stable', 'usa', true, %s::jsonb, now(), now()
             )
             """,
-            (model_id, json.dumps(_legacy_capabilities())),
+            (
+                model_id,
+                f"legacy-reasoning-model-{model_id}",
+                f"Legacy reasoning model {model_id}",
+                json.dumps(capabilities),
+            ),
         )
     return model_id
 
@@ -108,6 +119,12 @@ def _capabilities(connection, model_id: str) -> dict[str, object]:
             "SELECT model_kwargs_capabilities FROM completion_models WHERE id = %s",
             (model_id,),
         )
+        return cursor.fetchone()[0]
+
+
+def _current_revision(connection) -> str:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT version_num FROM alembic_version")
         return cursor.fetchone()[0]
 
 
@@ -125,8 +142,8 @@ def _prepare_kwargs(reasoning_effort: str) -> dict[str, object]:
             return_value={},
         ),
         patch(
-            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter."
-            "_get_supported_openai_params",
+            "eneo.completion_models.infrastructure.tenant_model_capabilities."
+            "get_supported_openai_params",
             return_value=["reasoning_effort"],
         ),
     ):
@@ -135,23 +152,38 @@ def _prepare_kwargs(reasoning_effort: str) -> dict[str, object]:
         )
 
 
-def test_upgrade_removes_unverified_none_before_policy_and_dispatch(
+def test_upgrade_removes_unverified_none_and_keeps_legacy_settings_usable(
     reasoning_db,
 ) -> None:
     connection, config = reasoning_db
-    model_id = _insert_legacy_model(connection)
+    legacy_model_id = _insert_model(connection, _legacy_capabilities())
+    explicit_capabilities = {
+        **_legacy_capabilities(),
+        "_evidence": "admin_explicit",
+    }
+    explicit_model_id = _insert_model(connection, explicit_capabilities)
 
+    assert _current_revision(connection) == PRE_REVISION
     command.upgrade(config, REASONING_REVISION)
 
-    capabilities = _capabilities(connection, model_id)
+    capabilities = _capabilities(connection, legacy_model_id)
     assert capabilities["reasoning_effort"]["options"] == [
         "low",
         "medium",
         "high",
     ]
     assert capabilities["verbosity"]["options"] == ["low", "medium", "high"]
+    # The migration only strips the unverified "none"; the snapshot stays
+    # untagged and is read as a legacy discovery record, not dropped.
+    assert "_evidence" not in capabilities
+    explicit_after = _capabilities(connection, explicit_model_id)
+    assert explicit_after["_evidence"] == "admin_explicit"
+    assert explicit_after["reasoning_effort"]["options"] == ["low", "medium", "high"]
 
-    supported_kwargs = SupportedModelKwargs.model_validate(capabilities)
+    supported_kwargs = resolve_supported_model_kwargs(
+        model_kwargs_capabilities=capabilities,
+        reasoning=True,
+    )
     selected_model = SimpleNamespace(
         get_supported_model_kwargs=lambda: supported_kwargs
     )

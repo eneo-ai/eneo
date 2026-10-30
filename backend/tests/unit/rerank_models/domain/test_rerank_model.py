@@ -38,10 +38,8 @@ def _db_row(**overrides):
     return row
 
 
-def _user():
-    user = MagicMock()
-    user.tenant = MagicMock(security_enabled=False)
-    return user
+def _tenant():
+    return MagicMock(security_enabled=False)
 
 
 class TestCreateFromDb:
@@ -49,7 +47,7 @@ class TestCreateFromDb:
         row = _db_row()
 
         model = RerankModel.create_from_db(
-            row, _user(), provider_name="Cohere", provider_type="cohere"
+            row, _tenant(), provider_name="Cohere", provider_type="cohere"
         )
 
         assert model.name == "rerank-multilingual-v3.0"
@@ -64,7 +62,7 @@ class TestCreateFromDb:
 
     def test_public_dto_carries_the_catalog_fields(self):
         model = RerankModel.create_from_db(
-            _db_row(is_default=True), _user(), provider_type="cohere"
+            _db_row(is_default=True), _tenant(), provider_type="cohere"
         )
 
         public = RerankModelPublic.from_domain(model)
@@ -79,7 +77,7 @@ class TestCreateFromDb:
 
     def test_carries_candidate_factor_and_cap_to_the_public_dto(self):
         model = RerankModel.create_from_db(
-            _db_row(candidate_factor=3, max_candidates=250), _user()
+            _db_row(candidate_factor=3, max_candidates=250), _tenant()
         )
 
         assert (model.candidate_factor, model.max_candidates) == (3, 250)
@@ -87,6 +85,6 @@ class TestCreateFromDb:
         assert (public.candidate_factor, public.max_candidates) == (3, 250)
 
     def test_disabled_model_cannot_be_accessed(self):
-        model = RerankModel.create_from_db(_db_row(is_enabled=False), _user())
+        model = RerankModel.create_from_db(_db_row(is_enabled=False), _tenant())
 
         assert RerankModelPublic.from_domain(model).can_access is False

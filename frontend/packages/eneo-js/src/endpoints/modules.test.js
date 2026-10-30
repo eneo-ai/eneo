@@ -8,6 +8,8 @@ test("createEneo exposes tenant-implicit module administration", () => {
   const eneo = createEneo({ baseUrl: "https://example.test" });
 
   assert.equal(typeof eneo.modules.list, "function");
+  assert.equal(typeof eneo.modules.listServiceKeys, "function");
+  assert.equal(typeof eneo.modules.getServiceKey, "function");
   assert.equal(typeof eneo.modules.install, "function");
   assert.equal(typeof eneo.modules.uninstall, "function");
 });
@@ -26,6 +28,8 @@ test("modules use one complete install command and no tenant parameter", async (
   };
 
   await modules.list();
+  await modules.listServiceKeys({ limit: 50, search: "reports" });
+  await modules.getServiceKey({ serviceKeyId: config.service_key_id });
   await modules.install({ moduleKey: "reports", config });
   await modules.uninstall({ moduleKey: "reports" });
 
@@ -33,6 +37,20 @@ test("modules use one complete install command and no tenant parameter", async (
     {
       endpoint: "/api/v1/admin/modules/",
       request: { method: "get" }
+    },
+    {
+      endpoint: "/api/v1/admin/modules/service-keys/",
+      request: {
+        method: "get",
+        params: { query: { limit: 50, search: "reports" } }
+      }
+    },
+    {
+      endpoint: "/api/v1/admin/modules/service-keys/{service_key_id}/",
+      request: {
+        method: "get",
+        params: { path: { service_key_id: config.service_key_id } }
+      }
     },
     {
       endpoint: "/api/v1/admin/modules/{module_key}/",

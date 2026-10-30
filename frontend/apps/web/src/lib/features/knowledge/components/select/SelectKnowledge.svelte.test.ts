@@ -56,6 +56,7 @@ function space(organizationSpaceId: string | null = "org"): Space {
     embedding_models: [model],
     completion_models: [],
     transcription_models: [],
+    linked_models: { completion_models: [], embedding_models: [], transcription_models: [] },
     knowledge: {
       groups: { items: collections, count: collections.length },
       websites: { items: websites, count: websites.length },

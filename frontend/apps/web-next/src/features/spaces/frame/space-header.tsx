@@ -3,16 +3,25 @@
 import { BreadcrumbItem, Breadcrumbs } from "@astryxdesign/core/Breadcrumbs";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
+import { useQuery } from "@tanstack/react-query";
 import { Building2, SquarePen, User } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
 import { iconUrl } from "@/components/composites/icon-field";
+import { useAppContext } from "@/components/providers/app-context";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
+import { browserApi } from "@/lib/api/browser";
 import { cn } from "@/lib/utils";
+import { flowsListQueryOptions } from "@/features/flows/flows-api";
 import { AddMemberDialog } from "../members/space-members";
 import { MemberStack } from "../members/member-stack";
 import { useSpace } from "../use-space";
-import { spaceLandingHref, spaceSections, type SpaceRoute } from "./space-sections";
+import {
+  spaceLandingHref,
+  spaceSections,
+  type SpaceRoute,
+  type SpaceSection
+} from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
 
 /** The space's display name: personal and organization spaces use their alias. */
@@ -22,6 +31,25 @@ export function useSpaceDisplayName(): string {
   if (space.personal) return t("personal");
   if (space.organization) return t("organization");
   return space.name;
+}
+
+/**
+ * The space's tabs for this user, flows included when the tenant has them. The
+ * other counts come with the space; the flows are listed separately (the same
+ * list the flows tab shows), so their count arrives once that list is read.
+ */
+export function useSpaceSections(): SpaceSection[] {
+  const { space, routeId, can } = useSpace();
+  const { featureFlags } = useAppContext();
+  const showsFlows = featureFlags.flows && !space.organization && can("read", "app");
+  const flows = useQuery({
+    ...flowsListQueryOptions(browserApi, space.id),
+    enabled: showsFlows
+  });
+  return spaceSections(space, can, routeId, {
+    flows: featureFlags.flows,
+    flowCount: flows.data?.length
+  });
 }
 
 /**
@@ -41,7 +69,7 @@ export function SpaceHeader({
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const name = useSpaceDisplayName();
-  const sections = spaceSections(space, can, routeId);
+  const sections = useSpaceSections();
   const isHeading = route.isSectionRoot;
   const isShared = !space.personal && !space.organization;
   const description = space.personal

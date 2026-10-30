@@ -77,7 +77,9 @@ class TestTenantImageModelService:
             assert created.is_org_default is True
             assert (created.provider_name or "").lower() == "openai"
 
-            listed = await ImageModelRepository(session, admin_user).all()
+            listed = await ImageModelRepository(
+                session=session, tenant=container.tenant()
+            ).all()
             assert {m.id for m in listed} >= {seed.id, created.id}
 
     async def test_display_name_is_unique_per_provider(
@@ -176,7 +178,7 @@ class TestImageModelSoftDelete:
             ).scalar_one()
             assert row.deleted_at is not None
 
-            repo = ImageModelRepository(session, admin_user)
+            repo = ImageModelRepository(session=session, tenant=container.tenant())
             assert all(m.id != model_id for m in await repo.all())
             assert await repo.one_or_none(model_id) is None
 
@@ -202,7 +204,7 @@ class TestImageModelSoftDelete:
 
             # The listing names the provider so the admin sees the block
             # before trying to delete.
-            repo = ImageModelRepository(session, admin_user)
+            repo = ImageModelRepository(session=session, tenant=container.tenant())
             usage = {m.id: m.used_by_mcp_servers for m in await repo.all()}
             assert [(u.id, u.name, u.purpose) for u in usage[model.id]] == [
                 (provider.id, provider.name, "image_generation")

@@ -6,6 +6,7 @@ import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, renderToHtml, testAppContext } from "@/test/render";
 import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
+import { composerValue } from "@/test/composer";
 import { ChatView, type ActivityState } from "./chat-view";
 
 const spies = vi.hoisted(() => ({ announce: vi.fn(), toastError: vi.fn() }));
@@ -129,7 +130,7 @@ describe("ChatView start state", () => {
 
     const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
     fireEvent.click(screen.getByRole("button", { name: /Gör en plan/ }));
-    expect((textarea as HTMLTextAreaElement).value).toBe("Gör en konkret plan för: ");
+    expect(composerValue(textarea)).toBe("Gör en konkret plan för: ");
     expect(document.activeElement).toBe(textarea);
 
     const quickLinks = await screen.findByRole("region", { name: "Dina assistenter" });

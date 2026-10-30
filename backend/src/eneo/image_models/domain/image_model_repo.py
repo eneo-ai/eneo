@@ -16,14 +16,14 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.database.database import AsyncSession
-    from eneo.users.user import UserInDB
+    from eneo.tenants.tenant import TenantInDB
 
 
 class ImageModelRepository:
-    def __init__(self, session: "AsyncSession", user: "UserInDB") -> None:
+    def __init__(self, *, session: "AsyncSession", tenant: "TenantInDB") -> None:
         super().__init__()
         self.session = session
-        self.user = user
+        self.tenant = tenant
 
     def _base_query(self):
         return (
@@ -39,7 +39,7 @@ class ImageModelRepository:
                 # presentation layer.
                 sa.or_(
                     ImageModels.tenant_id.is_(None),
-                    ImageModels.tenant_id == self.user.tenant_id,
+                    ImageModels.tenant_id == self.tenant.id,
                 ),
                 # Soft-deleted models are tombstones; never surface them.
                 ImageModels.deleted_at.is_(None),
@@ -57,7 +57,7 @@ class ImageModelRepository:
         models = [
             ImageModel.create_from_db(
                 image_model_db=image_model,
-                user=self.user,
+                tenant=self.tenant,
                 provider_name=provider_name,
                 provider_type=provider_type,
             )
@@ -76,7 +76,7 @@ class ImageModelRepository:
         image_model, provider_name, provider_type = row
         model = ImageModel.create_from_db(
             image_model_db=image_model,
-            user=self.user,
+            tenant=self.tenant,
             provider_name=provider_name,
             provider_type=provider_type,
         )
@@ -96,7 +96,7 @@ class ImageModelRepository:
                 MCPServers.purpose,
             )
             .where(
-                MCPServers.tenant_id == self.user.tenant_id,
+                MCPServers.tenant_id == self.tenant.id,
                 MCPServers.image_model_id.in_(by_id.keys()),
             )
             .order_by(MCPServers.created_at, MCPServers.id)
@@ -127,7 +127,7 @@ class ImageModelRepository:
             )
             .where(
                 ImageModels.id == image_model.id,
-                ImageModels.tenant_id == self.user.tenant_id,
+                ImageModels.tenant_id == self.tenant.id,
             )
         )
         await self.session.execute(stmt)
@@ -138,7 +138,7 @@ class ImageModelRepository:
                 .values(is_default=False)
                 .where(
                     ImageModels.id != image_model.id,
-                    ImageModels.tenant_id == self.user.tenant_id,
+                    ImageModels.tenant_id == self.tenant.id,
                 )
             )
             await self.session.execute(stmt)

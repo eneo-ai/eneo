@@ -5,10 +5,11 @@ from collections.abc import AsyncGenerator, AsyncIterable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from fastapi import UploadFile
 
+from eneo.files import audio
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.extraction_limits import get_file_extraction_limits
 from eneo.files.file_models import FileContentVariant, FileType
@@ -20,7 +21,7 @@ from eneo.files.image_processing import (
     extract_images_from_office,
     extract_images_from_pdf,
 )
-from eneo.files.text import TextExtractor, TextMimeTypes
+from eneo.files.text import PdfExtractionLimits, TextExtractor, TextMimeTypes
 from eneo.main.config import get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.object_content.deployment_policy import (
@@ -63,6 +64,8 @@ class PreparedFileUpload:
     display_media_type: str
     contents: tuple[PendingFileContent, ...]
     derivatives: tuple["PreparedFileUpload", ...] = ()
+    # Audio measured at upload: its decoded length, or None.
+    audio_seconds: float | None = None
 
 
 async def _path_chunks(filepath: Path) -> AsyncGenerator[bytes]:
@@ -75,6 +78,55 @@ async def _bytes_chunks(payload: bytes) -> AsyncGenerator[bytes]:
     view = memoryview(payload)
     for start in range(0, len(view), _FILE_STREAM_CHUNK_BYTES):
         yield bytes(view[start : start + _FILE_STREAM_CHUNK_BYTES])
+
+
+async def _measure_audio_length(
+    filepath: Path, limits: audio.AudioDecodeLimits
+) -> float:
+    """The audio's decoded length, as the run's transcription decodes it. The
+    decode stops at the limits and refuses what passes them before the file is
+    kept; a file the decoder cannot read is refused too."""
+    try:
+        return await audio.bounded_measurement(
+            lambda: audio.measure_duration(str(filepath), limits=limits)
+        )
+    except ValueError as exc:
+        raise audio.AudioUnreadableError(str(exc)) from exc
+
+
+class UploadLimit(NamedTuple):
+    maximum_bytes: int
+    # The limit a refusal reports: the caller's own name, else the admission
+    # use case when the snapshot's limit applies.
+    name: str | None
+
+
+def upload_limit(
+    file_type: FileType,
+    *,
+    snapshot: UploadAdmissionSnapshot | None,
+    max_size: int | None,
+    limit_name: str | None = None,
+) -> UploadLimit:
+    """The tighter of the caller's limit and the admission snapshot's limit for
+    this type of session upload. A caller that brings its own limit, such as a
+    tool-generated document, needs no snapshot."""
+    if snapshot is None:
+        if max_size is None:
+            raise RuntimeError("Upload admission snapshot is required")
+        return UploadLimit(max_size, limit_name)
+    if file_type is FileType.IMAGE:
+        admitted = snapshot.session_image_maximum_bytes
+        use_case = UploadLimitUseCase.SESSION_IMAGE
+    elif file_type is FileType.AUDIO:
+        admitted = snapshot.session_audio_maximum_bytes
+        use_case = UploadLimitUseCase.SESSION_AUDIO
+    else:
+        admitted = snapshot.session_file_maximum_bytes
+        use_case = UploadLimitUseCase.SESSION_FILE
+    if max_size is not None and max_size <= admitted:
+        return UploadLimit(max_size, limit_name)
+    return UploadLimit(admitted, limit_name or use_case.value)
 
 
 class FileProtocol:
@@ -90,6 +142,57 @@ class FileProtocol:
         self.image_extractor = image_extractor
 
     @asynccontextmanager
+    async def prepare_document_upload(
+        self,
+        upload_file: UploadFile,
+        *,
+        upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
+        max_size: int | None = None,
+        limit_name: str | None = None,
+    ) -> AsyncGenerator[PreparedFileUpload]:
+        """Preserve an uploaded document exactly for domain-specific inspection."""
+
+        limit = upload_limit(
+            FileType.DOCUMENT,
+            snapshot=upload_admission_snapshot,
+            max_size=max_size,
+            limit_name=limit_name,
+        )
+        file_size = self.file_size_service.get_file_size(upload_file.file)
+        if file_size > limit.maximum_bytes:
+            raise FileTooLargeException(
+                file_size=file_size,
+                max_size=limit.maximum_bytes,
+                limit_name=limit.name,
+            )
+
+        # Prior inspection must not truncate the original document we persist.
+        await upload_file.seek(0)
+        filepath = Path(
+            await self.file_size_service.save_file_to_disk(upload_file.file)
+        )
+        media_type = (upload_file.content_type or "").split(";", 1)[
+            0
+        ].strip() or "application/octet-stream"
+        try:
+            yield PreparedFileUpload(
+                name=sanitize_filename(upload_file.filename),
+                file_type=FileType.DOCUMENT,
+                display_media_type=media_type,
+                contents=(
+                    PendingFileContent(
+                        variant=FileContentVariant.ORIGINAL,
+                        chunks=_path_chunks(filepath),
+                        declared_media_type=media_type,
+                        verified_media_type=media_type,
+                    ),
+                ),
+            )
+        finally:
+            with contextlib.suppress(FileNotFoundError):
+                os.remove(filepath)
+
+    @asynccontextmanager
     async def prepare_upload(
         self,
         upload_file: UploadFile,
@@ -97,6 +200,8 @@ class FileProtocol:
         upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
         max_size: int | None = None,
         limit_name: str | None = None,
+        pdf_limits: PdfExtractionLimits | None = None,
+        audio_limits: audio.AudioDecodeLimits | None = None,
     ) -> AsyncGenerator[PreparedFileUpload]:
         """Classify one upload into exact and derived content variants.
 
@@ -107,32 +212,23 @@ class FileProtocol:
         content_type = (upload_file.content_type or "").split(";")[0].strip()
         if ImageMimeTypes.has_value(content_type):
             file_type = FileType.IMAGE
-            if max_size is None:
-                if upload_admission_snapshot is None:
-                    raise RuntimeError("Upload admission snapshot is required")
-                max_size = upload_admission_snapshot.session_image_maximum_bytes
-                limit_name = limit_name or UploadLimitUseCase.SESSION_IMAGE.value
         elif AudioMimeTypes.has_value(content_type):
             file_type = FileType.AUDIO
-            if max_size is None:
-                if upload_admission_snapshot is None:
-                    raise RuntimeError("Upload admission snapshot is required")
-                max_size = upload_admission_snapshot.session_audio_maximum_bytes
-                limit_name = limit_name or UploadLimitUseCase.SESSION_AUDIO.value
         else:
             file_type = FileType.TEXT
-            if max_size is None:
-                if upload_admission_snapshot is None:
-                    raise RuntimeError("Upload admission snapshot is required")
-                max_size = upload_admission_snapshot.session_file_maximum_bytes
-                limit_name = limit_name or UploadLimitUseCase.SESSION_FILE.value
+        limit = upload_limit(
+            file_type,
+            snapshot=upload_admission_snapshot,
+            max_size=max_size,
+            limit_name=limit_name,
+        )
 
         file_size = self.file_size_service.get_file_size(upload_file.file)
-        if file_size > max_size:
+        if file_size > limit.maximum_bytes:
             raise FileTooLargeException(
                 file_size=file_size,
-                max_size=max_size,
-                limit_name=limit_name,
+                max_size=limit.maximum_bytes,
+                limit_name=limit.name,
             )
 
         filepath = Path(
@@ -150,12 +246,18 @@ class FileProtocol:
             )
 
             if file_type is FileType.IMAGE:
-                image = self.image_extractor.extract(
-                    filepath,
-                    media_type,
-                    upload_file.filename,
+                # Decoding and resampling a photo takes about 0.1 s of CPU, which
+                # would stall every request and stream on this event loop.
+                processed = await asyncio.to_thread(
+                    lambda: downscale_image(
+                        self.image_extractor.extract(
+                            filepath,
+                            media_type,
+                            upload_file.filename,
+                        ),
+                        media_type,
+                    )
                 )
-                processed = downscale_image(image, media_type)
                 model_input = PendingFileContent(
                     variant=FileContentVariant.MODEL_INPUT,
                     chunks=_bytes_chunks(processed.blob),
@@ -176,18 +278,34 @@ class FileProtocol:
                     file_type=file_type,
                     display_media_type=media_type,
                     contents=(original,),
+                    audio_seconds=(
+                        await _measure_audio_length(filepath, audio_limits)
+                        if audio_limits is not None
+                        else None
+                    ),
                 )
                 return
 
-            # Parsing runs in a resource-limited child: a large or hostile
-            # document must not stall the event loop or exhaust this process.
-            extracted_text = (
-                await self.text_extractor.extract_bounded(
-                    filepath,
-                    media_type,
-                    upload_file.filename,
+            if media_type == TextMimeTypes.PDF.value and pdf_limits is not None:
+                extracted_text = (
+                    (
+                        await self.text_extractor.extract_from_pdf_async(
+                            filepath, upload_file.filename, limits=pdf_limits
+                        )
+                    )
+                    .strip()
+                    .encode("utf-8")
                 )
-            ).encode("utf-8")
+            else:
+                # Parsing runs in a resource-limited child: a large or hostile
+                # document must not stall the event loop or exhaust this process.
+                extracted_text = (
+                    await self.text_extractor.extract_bounded(
+                        filepath,
+                        media_type,
+                        upload_file.filename,
+                    )
+                ).encode("utf-8")
             extracted = PendingFileContent(
                 variant=FileContentVariant.EXTRACTED_TEXT,
                 chunks=_bytes_chunks(extracted_text),

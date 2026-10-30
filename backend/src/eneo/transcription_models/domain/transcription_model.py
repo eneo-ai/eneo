@@ -13,13 +13,14 @@ if TYPE_CHECKING:
     from eneo.database.tables.ai_models_table import (
         TranscriptionModels as TranscriptionModelsDB,
     )
-    from eneo.users.user import UserInDB
+    from eneo.tenants.tenant import TenantInDB
 
 
 class TranscriptionModel(AIModel):
     def __init__(
         self,
-        user: "UserInDB",
+        *,
+        tenant: "TenantInDB",
         id: "UUID",
         created_at: "datetime",
         updated_at: "datetime",
@@ -43,9 +44,10 @@ class TranscriptionModel(AIModel):
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
         migrated_to_model_id: Optional["UUID"] = None,
+        supports_realtime: bool = False,
     ):
         super().__init__(
-            user=user,
+            tenant=tenant,
             id=id,
             created_at=created_at,
             updated_at=updated_at,
@@ -71,6 +73,7 @@ class TranscriptionModel(AIModel):
         self.provider_name = provider_name
         self.provider_type = provider_type
         self.migrated_to_model_id = migrated_to_model_id
+        self.supports_realtime = supports_realtime
 
     @property
     def model_name(self) -> str:
@@ -85,13 +88,13 @@ class TranscriptionModel(AIModel):
     def create_from_db(
         cls,
         transcription_model_db: "TranscriptionModelsDB",
-        user: "UserInDB",
+        tenant: "TenantInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
     ):
         # Settings are now directly on the model table
         return cls(
-            user=user,
+            tenant=tenant,
             id=transcription_model_db.id,
             created_at=transcription_model_db.created_at,
             updated_at=transcription_model_db.updated_at,
@@ -121,4 +124,5 @@ class TranscriptionModel(AIModel):
             provider_name=provider_name,
             provider_type=provider_type,
             migrated_to_model_id=transcription_model_db.migrated_to_model_id,
+            supports_realtime=transcription_model_db.supports_realtime,
         )

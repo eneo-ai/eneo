@@ -1,0 +1,284 @@
+from __future__ import annotations
+
+import inspect
+import json
+from collections.abc import Awaitable, Sequence
+from dataclasses import dataclass
+from typing import Protocol
+
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.runtime import StepDiagnostic
+from eneo.flows.output_processing import (
+    MAX_REPORTED_KEY_PATHS,
+    StructuredOutputValue,
+    conform_keys_to_schema,
+)
+from eneo.flows.runtime.document_rendering.guidance import (
+    document_markdown_guidance,
+)
+from eneo.flows.runtime.structured_output_budget import structured_output_json
+
+_MAX_REPORTED_PATH_LENGTH = 200
+_MAX_REPORTED_PATHS_MESSAGE_LENGTH = 1600
+
+
+class ParseJsonOutputFn(Protocol):
+    def __call__(self, raw_text: str, /) -> StructuredOutputValue: ...
+
+
+class CheckContractFn(Protocol):
+    async def __call__(
+        self,
+        data: StructuredOutputValue,
+        schema: FlowPersistedJsonObject,
+        /,
+        *,
+        label: str,
+    ) -> None: ...
+
+
+class RenderDocumentFn(Protocol):
+    def __call__(
+        self,
+        text: str,
+        output_type: str,
+        *,
+        step_order: int,
+        title: str,
+    ) -> tuple[bytes, str] | Awaitable[tuple[bytes, str]]: ...
+
+
+class RenderStructuredDocumentFn(Protocol):
+    def __call__(
+        self,
+        data: StructuredOutputValue,
+        output_type: str,
+        *,
+        step_order: int,
+        title: str,
+        schema: FlowPersistedJsonObject | None = None,
+    ) -> tuple[bytes, str] | Awaitable[tuple[bytes, str]]: ...
+
+
+class EnsureSourceWithinLimitsFn(Protocol):
+    def __call__(self, text: str) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class RenderedOutputArtifact:
+    blob: bytes
+    mimetype: str
+
+
+@dataclass(frozen=True, slots=True)
+class OutputFormatProcessingResult:
+    structured_output: StructuredOutputValue | None = None
+    artifact: RenderedOutputArtifact | None = None
+    diagnostics: tuple[StepDiagnostic, ...] = ()
+    # The text the step persists instead of the model's own, set only when a key
+    # was renamed: every reader of the step's text then sees the structured value.
+    conformed_text: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OutputFormatProcessingContext:
+    parse_json_output: ParseJsonOutputFn
+    check_contract: CheckContractFn
+    render_document: RenderDocumentFn
+    render_structured_document: RenderStructuredDocumentFn
+    ensure_source_within_limits: EnsureSourceWithinLimitsFn
+    # The title a rendered document carries: its file name without the extension.
+    document_title: str
+    # JSON preserves the existing compiled-validator gate; document contracts validate directly.
+    json_contract_validation_enabled: bool
+
+
+class OutputFormatSpec(Protocol):
+    def prompt_instructions(
+        self, output_contract: FlowPersistedJsonObject | None
+    ) -> tuple[str, ...]: ...
+
+    def requests_structured_output(
+        self, output_contract: FlowPersistedJsonObject | None
+    ) -> bool: ...
+
+    async def process_model_output(
+        self,
+        full_text: str,
+        *,
+        step_order: int,
+        output_contract: FlowPersistedJsonObject | None,
+        context: OutputFormatProcessingContext,
+    ) -> OutputFormatProcessingResult:
+        """Parse and conform the model's text, await the contract check,
+        then render."""
+        ...
+
+
+def append_output_format_instructions(prompt: str, instructions: Sequence[str]) -> str:
+    if not instructions:
+        return prompt
+    suffix = "\n".join(instructions)
+    return f"{prompt}\n\n{suffix}" if prompt.strip() else suffix
+
+
+def json_schema_instructions(
+    output_contract: FlowPersistedJsonObject | None,
+) -> tuple[str, ...]:
+    instructions = (
+        "Return ONLY valid JSON.",
+        "Do not include markdown code fences, commentary, or any surrounding text.",
+        "The top-level JSON value must be an object or array.",
+    )
+    if output_contract is None:
+        return instructions
+    return (
+        *instructions,
+        *output_contract_instructions(output_contract),
+    )
+
+
+def output_contract_instructions(
+    output_contract: FlowPersistedJsonObject,
+) -> tuple[str, str]:
+    return (
+        "Follow this JSON Schema exactly:",
+        json.dumps(output_contract, ensure_ascii=False, sort_keys=True),
+    )
+
+
+def document_prompt_instructions(
+    *, artifact_name: str, output_contract: FlowPersistedJsonObject | None
+) -> tuple[str, ...]:
+    if output_contract is None:
+        return (
+            *document_markdown_guidance(artifact_name=artifact_name),
+            "For PDF output specifically, do not start the response with %PDF-.",
+        )
+    return (
+        f"The system will validate your JSON and render it into a {artifact_name} file after you respond.",
+        "Return ONLY valid JSON.",
+        "Do not include markdown code fences, commentary, or any surrounding text.",
+        "The top-level JSON value must be an object or array.",
+        "Use plain text for JSON string values; do not include Markdown formatting markers inside strings.",
+        *output_contract_instructions(output_contract),
+    )
+
+
+def document_requests_structured_output(
+    output_contract: FlowPersistedJsonObject | None,
+) -> bool:
+    return output_contract is not None
+
+
+@dataclass(frozen=True, slots=True)
+class ConformedModelOutput:
+    diagnostics: tuple[StepDiagnostic, ...]
+    conformed_text: str | None
+
+
+def conform_model_output_keys(
+    structured_output: StructuredOutputValue,
+    output_contract: FlowPersistedJsonObject,
+) -> ConformedModelOutput:
+    result = conform_keys_to_schema(structured_output, output_contract)
+    diagnostics: list[StepDiagnostic] = []
+    if result.renamed_count:
+        count = result.renamed_count
+        diagnostics.append(
+            StepDiagnostic(
+                code="typed_output_keys_renamed",
+                message=_format_reported_paths(
+                    f"Renamed {count} field{'' if count == 1 else 's'} to the "
+                    "contract spelling",
+                    tuple(f"{old} -> {new}" for old, new in result.renamed_sample),
+                    total=count,
+                ),
+                severity="warning",
+            )
+        )
+    if result.dropped_paths:
+        count = len(result.dropped_paths)
+        diagnostics.append(
+            StepDiagnostic(
+                code="typed_output_extra_properties_dropped",
+                message=_format_reported_paths(
+                    f"Dropped {count} undeclared field{'' if count == 1 else 's'}",
+                    result.dropped_paths,
+                    total=count,
+                ),
+                severity="warning",
+            )
+        )
+    return ConformedModelOutput(
+        diagnostics=tuple(diagnostics),
+        conformed_text=(
+            structured_output_json(structured_output) if result.renamed_count else None
+        ),
+    )
+
+
+async def process_structured_document_output(
+    full_text: str,
+    *,
+    output_type: str,
+    step_order: int,
+    output_contract: FlowPersistedJsonObject,
+    context: OutputFormatProcessingContext,
+) -> OutputFormatProcessingResult:
+    structured_output = context.parse_json_output(full_text)
+    conformed = conform_model_output_keys(structured_output, output_contract)
+    await context.check_contract(
+        structured_output,
+        output_contract,
+        label=f"Step {step_order} output",
+    )
+    rendered = context.render_structured_document(
+        structured_output,
+        output_type,
+        step_order=step_order,
+        title=context.document_title,
+        schema=output_contract,
+    )
+    blob, mimetype = await rendered if inspect.isawaitable(rendered) else rendered
+    return OutputFormatProcessingResult(
+        structured_output=structured_output,
+        artifact=RenderedOutputArtifact(blob=blob, mimetype=mimetype),
+        diagnostics=conformed.diagnostics,
+        conformed_text=conformed.conformed_text,
+    )
+
+
+async def render_document_output(
+    full_text: str,
+    *,
+    output_type: str,
+    step_order: int,
+    context: OutputFormatProcessingContext,
+) -> OutputFormatProcessingResult:
+    rendered = context.render_document(
+        full_text,
+        output_type,
+        step_order=step_order,
+        title=context.document_title,
+    )
+    blob, mimetype = await rendered if inspect.isawaitable(rendered) else rendered
+    return OutputFormatProcessingResult(
+        artifact=RenderedOutputArtifact(blob=blob, mimetype=mimetype)
+    )
+
+
+def _format_reported_paths(summary: str, paths: tuple[str, ...], *, total: int) -> str:
+    shown_paths = tuple(_truncate_path(path) for path in paths[:MAX_REPORTED_KEY_PATHS])
+    suffix = ""
+    hidden_count = total - len(shown_paths)
+    if hidden_count > 0:
+        suffix = f"; {hidden_count} more omitted"
+    message = f"{summary}: {', '.join(shown_paths)}{suffix}"
+    return message[:_MAX_REPORTED_PATHS_MESSAGE_LENGTH]
+
+
+def _truncate_path(path: str) -> str:
+    if len(path) <= _MAX_REPORTED_PATH_LENGTH:
+        return path
+    return f"{path[: _MAX_REPORTED_PATH_LENGTH - 3]}..."

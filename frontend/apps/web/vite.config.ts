@@ -17,8 +17,10 @@ const pkg = JSON.parse(json);
 const browserTarget = "es2022";
 
 export default defineConfig({
+  cacheDir: process.env.VITEST ? "node_modules/.vitest" : "node_modules/.vite-web",
   build: {
-    target: browserTarget
+    target: browserTarget,
+    reportCompressedSize: false
   },
   optimizeDeps: {
     esbuildOptions: {
@@ -40,16 +42,25 @@ export default defineConfig({
         });
       }
     },
-    paraglideVitePlugin({
-      project: "./project.inlang",
-      outdir: "./src/lib/paraglide",
-      strategy: ["url", "cookie", "baseLocale"],
-      // One module per message (paraglide's default) means ~15k modules for
-      // our catalog and pushed the production build past an 8 GB heap. Rollup
-      // merges them into one chunk that every page loads anyway, so per-locale
-      // modules cost no extra bytes.
-      outputStructure: "locale-modules"
-    }) as PluginOption,
+    // Paraglide's change detection is in-memory only, so every fresh process
+    // rewrites the whole catalog under src/lib/paraglide. Vitest loads this
+    // shared config once per project; compiling from each project can expose a
+    // half-written catalog to another project. The test lifecycle compiles the
+    // catalog once before Vitest starts. Other secondary tooling can set
+    // PARAGLIDE_SKIP_COMPILE=1 to leave a running dev server undisturbed.
+    ...(process.env.PARAGLIDE_SKIP_COMPILE || process.env.VITEST
+      ? []
+      : [
+          paraglideVitePlugin({
+            project: "./project.inlang",
+            outdir: "./src/lib/paraglide",
+            strategy: ["url", "cookie", "baseLocale"],
+            // This catalogue contains thousands of messages. Paraglide's
+            // large-project structure keeps one generated module per locale
+            // instead of making Vite retain one module per message.
+            outputStructure: "locale-modules"
+          }) as PluginOption
+        ]),
     tailwindcss() as PluginOption,
     eneoIcons() as PluginOption,
     svelteCssCache(),
@@ -72,8 +83,9 @@ export default defineConfig({
         "src/lib/paraglide/**" // generated i18n catalogs
       ]
     },
-    // Two Vitest projects share the Vite/SvelteKit setup above via `extends`:
+    // Three Vitest projects share the Vite/SvelteKit setup above via `extends`:
     //   - client: component tests (*.svelte.test.ts) in a real Chromium via Playwright
+    //   - dom: deterministic high-volume component wiring tests (*.dom.test.ts) in jsdom
     //   - server: pure unit tests (*.test.ts) in Node
     // Component tests need a real DOM because Svelte 5 runes/$effect/transitions
     // misbehave under jsdom; the server project keeps unit tests fast.
@@ -100,11 +112,23 @@ export default defineConfig({
       },
       {
         extends: "./vite.config.ts",
+        resolve: {
+          conditions: ["browser"]
+        },
+        test: {
+          name: "dom",
+          environment: "jsdom",
+          setupFiles: ["./src/lib/test/domSetup.ts"],
+          include: ["src/**/*.dom.{test,spec}.{js,ts}"]
+        }
+      },
+      {
+        extends: "./vite.config.ts",
         test: {
           name: "server",
           environment: "node",
           include: ["src/**/*.{test,spec}.{js,ts}"],
-          exclude: ["src/**/*.svelte.{test,spec}.{js,ts}"]
+          exclude: ["src/**/*.svelte.{test,spec}.{js,ts}", "src/**/*.dom.{test,spec}.{js,ts}"]
         }
       }
     ]
@@ -121,7 +145,10 @@ export default defineConfig({
     },
     watch: {
       usePolling: true,
-      interval: 1000
+      interval: 1000,
+      // E2E tooling writes thousands of files into these while a dev server
+      // runs; none of them belong to the dev module graph.
+      ignored: ["**/.svelte-kit-e2e/**", "**/test-results/**", "**/playwright-report/**"]
     }
   },
   define: {

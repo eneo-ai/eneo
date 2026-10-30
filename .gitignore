@@ -19,8 +19,6 @@
 docs/deployment/env_*.env
 
 # docker
-# devcontainer Feature lockfile (auto-generated locally; not tracked by the team)
-.devcontainer/devcontainer-lock.json
 
 # venv
 .venv/
@@ -52,6 +50,7 @@ CLAUDE.md
 .claude/
 .specify/
 .devcontainer/claude-config/
+.devcontainer/devcontainer-lock.json
 .code/
 .mcp.json
 install-claude.sh
@@ -60,6 +59,7 @@ specs/
 .serena/
 .speckit/
 .playwright-mcp/
+.remember/
 
 # OpenAI Codex configuration
 .codex
@@ -79,7 +79,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.code-workspace
-.codex/
 .env.*
 !.env.example
 !.env.template
@@ -103,4 +102,41 @@ coverage.json
 htmlcov/
 .cache/
 tmp/
+.omx/
+.codex/*
+!.codex/agents/
+!.codex/agents/**
+!.codex/skills/
+!.codex/skills/**
+.codex/skills/.system/**
+!.codex/prompts/
+!.codex/prompts/**
+
+# Local gate-work helpers (AI Builder hardening toil reduction — never committed)
+scripts/gate-local/
+
+# Internal scratch directory — working documents and review artifacts
+# kept in-repo for stability across /tmp wipes but never committed.
+plan/
+
+# Local runtime and prompt scratch
 backend/celerybeat-schedule
+/prompt.md
+
+# Local review artifacts stay out of the branch.
+fablereview/
+review-artifacts/
+
+# Local hook/cache output.
+**/.impeccable/
+
+# Raw refactor execution artifacts stay local; curated plans, journals,
+# retrospectives, and reconciliations under docs/refactor are durable.
+docs/refactor/execution/batch-*/claude-attack-*.md
+docs/refactor/execution/batch-*/claude-packet-*.md
+docs/refactor/execution/batch-*/*transcript*.md
+docs/refactor/execution/batch-*/raw-*
+docs/refactor/execution/batch-*/manual-eval-results/raw-*
+docs/refactor/execution/batch-*/manual-eval-results/*.local.json
+# br doctor per-run artifacts
+.doctor/

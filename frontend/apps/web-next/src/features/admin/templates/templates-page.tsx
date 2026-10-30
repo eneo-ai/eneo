@@ -23,7 +23,7 @@ import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tansta
 import { MoreHorizontal, Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Table } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";
 import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -380,7 +380,7 @@ function DeletedActions({ row }: { row: TemplateRow }) {
         pending={purge.isPending}
         onConfirm={() => purge.mutateAsync()}
       >
-        <QuietBanner
+        <Banner
           status="error"
           title={template.name}
           description={t("permanent_delete_cannot_undo")}

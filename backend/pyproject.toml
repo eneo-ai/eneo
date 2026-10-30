@@ -18,6 +18,7 @@ dependencies = [
     "asyncpg>=0.27.0,<0.28",
     "psycopg2-binary>=2.9.5,<3",
     "pyjwt>=2.14.0,<3",
+    "pycryptodome~=3.17",
     "sse-starlette>=1.6.1,<2",
     "gunicorn>=23.0.0,<24",
     "pdfplumber>=0.11,<1",
@@ -25,7 +26,8 @@ dependencies = [
     "pillow-heif>=0.18,<2",  # HEIC/HEIF decode (iPhone photos) -> converted to JPEG
     "langchain-core>=1.4.8,<2",  # output parsers; pulls patched langsmith
     "langchain-text-splitters>=1.1.2,<2",  # RecursiveCharacterTextSplitter; >=1.1.2 clears GHSA-fv5p
-    "pydantic-settings>=2.14.2,<3",
+    # 2.15 warns on FastMCP's unresolved generic lifespan field during import.
+    "pydantic-settings>=2.14.2,<2.15",
     "wrapt>=1.16.0,<2",
     "python-multipart>=0.0.27,<1",
     "arq>=0.26,<1",  # v0.26+ required for allow_abort_jobs, lifecycle hooks
@@ -40,6 +42,7 @@ dependencies = [
     "sqlalchemy-mixins>=2.0.5,<3",
     "python-magic>=0.4.27,<0.5",
     "redis>=5.0.8,<6",
+    "websockets>=14,<18",  # asyncio client of the live transcription relay
     "sentry-sdk[fastapi]==2.8.0",
     "greenlet>=3.2.2,<4",
     "litellm==1.104.7",
@@ -57,6 +60,8 @@ dependencies = [
     "aiofiles>=23.0,<24",
     "python-calamine>=0.3.1,<1",  # Fast Excel reader engine for pandas
     "typing-extensions>=4.12.0,<5",
+    "uuid-utils>=0.9,<1",  # UUIDv7 for stable ConversationMessage ids
+    "markdown-it-py>=4,<5",
     "opentelemetry-sdk>=1.20.0,<2",
     "opentelemetry-instrumentation-fastapi>=0.41b0",
     "opentelemetry-instrumentation-sqlalchemy>=0.41b0",
@@ -69,6 +74,8 @@ dependencies = [
 [project.scripts]
 start = "eneo.server.main:start"
 worker = "eneo.worker.cli:start"
+task-execution-worker = "eneo.worker.platform_tasks_cli:execution_worker"
+task-maintenance-worker = "eneo.worker.platform_tasks_cli:maintenance_worker"
 run-cron = "eneo.worker.run_cron:main"
 
 [dependency-groups]
@@ -90,11 +97,15 @@ dev = [
     "pytest-dotenv>=0.5.2,<0.6",
     "openpyxl>=3.1.5,<4",
     "pytest-xdist>=3.8.0",
+    "import-linter>=2.11,<3",
     "python-docx>=1.2.0,<2",  # test-only: builds .docx fixtures in test_text_extractor
     "deptry>=0.25.1",
     "vulture>=2.16",
     "mypy-boto3-s3>=1.43,<2",
     "botocore-stubs>=1.43,<2",
+    "mutmut>=3.7,<4",
+    "types-lxml>=2026.2.16",
+    "hypothesis>=6,<7",
 ]
 
 [build-system]
@@ -163,14 +174,42 @@ omit = [
 show_missing = true
 skip_covered = false
 
+[tool.mutmut]
+source_paths = ["src/eneo"]
+only_mutate = [
+    "src/eneo/flow_packages/application/flow_package_import_planner.py",
+    "src/eneo/flow_packages/domain/flow_package_envelope.py",
+    "src/eneo/flow_packages/infrastructure/flow_package_zip_reader.py",
+    "src/eneo/flows/flow_run_redaction.py",
+    "src/eneo/flows/application/flow_run_access_policy.py",
+    "src/eneo/authentication/principal.py",
+    "src/eneo/audit/application/guaranteed_delivery.py",
+    "src/eneo/resource_packages/checksum.py",
+    "src/eneo/resource_packages/archive.py",
+    "src/eneo/assistants/assistant_package_adapter.py",
+    "src/eneo/token_usage/infrastructure/provider_token_usage_repo.py",
+    "src/eneo/flows/infrastructure/flow_provider_call_recorder.py",
+]
+pytest_add_cli_args_test_selection = [
+    "tests/unittests/flow_packages/test_flow_package_api.py",
+    "tests/unittests/flow_packages/test_flow_package_export_service.py",
+    "tests/unittests/flow_packages/test_flow_package_import_planner.py",
+    "tests/unittests/flow_packages/test_flow_package_models.py",
+    "tests/unittests/flow_packages/test_flow_package_zip_reader.py",
+    "tests/unittests/flows/test_flow_run_access_policy.py",
+    "tests/unittests/flows/test_flow_run_redaction.py",
+    "tests/unittests/flows/test_flow_provider_call_recorder.py",
+    "tests/unit/authentication/test_principal.py",
+    "tests/unit/audit/test_guaranteed_delivery.py",
+    "tests/unit/assistants/test_assistant_package_adapter.py",
+    "tests/unit/resource_packages/test_archive.py",
+    "tests/unit/token_usage/test_provider_token_usage_repo.py",
+    "tests/unittests/tenants/test_tenant_flow_settings.py",
+]
+
 # Dead-code / dependency analysis. Both are advisory (not wired into pre-commit)
 # and run via `task deadcode` or directly. They surface candidates for a human
 # to triage — neither auto-removes anything.
-
-[tool.deptry]
-# example_mcp_server.py is a standalone copy-paste sample (imports fastmcp, which
-# is intentionally not a project dependency), so it is excluded from the scan.
-extend_exclude = ["src/eneo/server/example_mcp_server.py"]
 
 # DEP003 (transitive): imported directly but only resolve via transitive deps.
 # Promoting them to direct dependencies is a separate cleanup; ignored here so
@@ -182,7 +221,7 @@ extend_exclude = ["src/eneo/server/example_mcp_server.py"]
 # sentry-sdk is declared for the planned Sentry integration but not yet wired up
 # (no sentry_sdk.init call) — kept available rather than dropping observability.
 [tool.deptry.per_rule_ignores]
-DEP003 = ["sqlalchemy", "starlette", "aiohttp", "multidict", "pdfminer", "pypdfium2", "pydantic_core", "yaml"]
+DEP003 = ["sqlalchemy", "starlette", "aiohttp", "multidict", "pdfminer", "pypdfium2", "pydantic_core", "yaml", "certifi"]
 DEP002 = [
     "alembic",
     "asyncpg",

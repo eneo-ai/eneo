@@ -27,6 +27,9 @@ declare module "@eneo/icons/assistant" {
 declare module "@eneo/icons/assistants" {
   export { Icon as IconAssistants } from "@eneo/icons/*";
 }
+declare module "@eneo/icons/attachment" {
+  export { Icon as IconAttachment } from "@eneo/icons/*";
+}
 declare module "@eneo/icons/calendar" {
   export { Icon as IconCalendar } from "@eneo/icons/*";
 }
@@ -90,6 +93,9 @@ declare module "@eneo/icons/file" {
 declare module "@eneo/icons/folder" {
   export { Icon as IconFolder } from "@eneo/icons/*";
 }
+declare module "@eneo/icons/group" {
+  export { Icon as IconGroup } from "@eneo/icons/*";
+}
 declare module "@eneo/icons/history" {
   export { Icon as IconHistory } from "@eneo/icons/*";
 }
@@ -137,6 +143,9 @@ declare module "@eneo/icons/notification" {
 }
 declare module "@eneo/icons/overview" {
   export { Icon as IconOverview } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/pause" {
+  export { Icon as IconPause } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/people" {
   export { Icon as IconPeople } from "@eneo/icons/*";
@@ -204,11 +213,17 @@ declare module "@eneo/icons/stop" {
 declare module "@eneo/icons/trash" {
   export { Icon as IconTrash } from "@eneo/icons/*";
 }
+declare module "@eneo/icons/upload-cloud" {
+  export { Icon as IconUploadCloud } from "@eneo/icons/*";
+}
 declare module "@eneo/icons/upload" {
   export { Icon as IconUpload } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/web" {
   export { Icon as IconWeb } from "@eneo/icons/*";
+}
+declare module "@eneo/icons/workflow" {
+  export { Icon as IconWorkflow } from "@eneo/icons/*";
 }
 declare module "@eneo/icons/x-mark" {
   export { Icon as IconXMark } from "@eneo/icons/*";

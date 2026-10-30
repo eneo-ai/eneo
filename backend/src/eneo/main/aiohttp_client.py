@@ -2,14 +2,16 @@ import aiohttp
 
 
 class AioHttpClient:
-    session: aiohttp.ClientSession = None  # type: ignore[assignment]
+    session: aiohttp.ClientSession | None = None
 
-    def start(self):
+    def start(self) -> None:
         self.session = aiohttp.ClientSession()
 
-    async def stop(self):
-        await self.session.close()
-        self.session = None  # type: ignore[assignment]
+    async def stop(self) -> None:
+        session = self.session
+        self.session = None
+        if session is not None:
+            await session.close()
 
     def __call__(self) -> aiohttp.ClientSession:
         assert self.session is not None

@@ -1,6 +1,7 @@
+from collections.abc import Iterable, Sequence
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union
+from typing import TYPE_CHECKING, Any, Optional, Protocol, TypeVar, Union
 from uuid import UUID
 
 from eneo.main.datetime_utils import datetime_or_utc_min
@@ -38,11 +39,41 @@ if TYPE_CHECKING:
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.services.service import Service
+    from eneo.transcription_services.models import TranscriptionServiceConnection
     from eneo.websites.domain.website import Website
+
+
+class ClassifiedLink(Protocol):
+    """A resource a space links to and grants use of under its classification:
+    a model, or a transcription-service connection."""
+
+    @property
+    def id(self) -> UUID: ...
+
+    @property
+    def can_access(self) -> bool: ...
+
+    @property
+    def security_classification(self) -> Optional[SecurityClassification]: ...
+
+
+_M = TypeVar("_M", bound=ClassifiedLink)
+
+
+def _security_level(
+    classification: Optional[SecurityClassification],
+) -> int | None:
+    """The level model eligibility depends on; None when unclassified."""
+    return classification.security_level if classification is not None else None
+
 
 UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to access."
 SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE = (
     "Security classification is not compatible with the space."
+)
+NO_COMPLETION_MODEL_EXCEPTION_MESSAGE = (
+    "Cannot perform operation: Space '{space_name}' has no completion models configured. "
+    "Please configure at least one completion model in the space settings."
 )
 
 
@@ -82,6 +113,8 @@ class Space:
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         group_members: dict[UUID, SpaceGroupMember] | None = None,
         default_assistant_load_failed: bool = False,
+        unloaded_hidden_assistant_ids: frozenset[UUID] = frozenset(),
+        transcription_services: Optional[list["TranscriptionServiceConnection"]] = None,
     ):
         super().__init__()
         self.id = id
@@ -93,6 +126,7 @@ class Space:
         self._embedding_models = embedding_models
         self._completion_models = completion_models
         self._transcription_models = transcription_models
+        self._transcription_services = list(transcription_services or [])
         self._mcp_servers = mcp_servers
         self.default_assistant = default_assistant
         # True when a default-assistant row existed in the DB but failed to
@@ -101,6 +135,9 @@ class Space:
         # so they don't auto-create a duplicate default. See SpaceInitService.
         self.default_assistant_load_failed = default_assistant_load_failed
         self.assistants = assistants or []
+        # Hidden assistants of the space this load did not build. API-key
+        # access facts still count them, as a load of every hidden one did.
+        self.unloaded_hidden_assistant_ids = unloaded_hidden_assistant_ids
         self.group_chats = group_chats or []
         self.apps = apps or []
         self.services = services or []
@@ -111,6 +148,20 @@ class Space:
         self.created_at = created_at
         self.updated_at = updated_at
         self.security_classification = security_classification
+        # A stored model list can outlive a reclassification of the space or of
+        # a model. The space's classification is the one owner of which models
+        # it may use, so a hydrated list is held to it here, once, instead of
+        # every chooser asking again. A linked model below the classification
+        # is not usable here, but it stays linked: an unrelated save must not
+        # remove it, and an admin decides whether to raise the model's
+        # classification, change the space's, or remove it.
+        self._completion_models_below_classification: list["CompletionModel"] = []
+        self._embedding_models_below_classification: list["EmbeddingModel"] = []
+        self._transcription_models_below_classification: list[TranscriptionModel] = []
+        self._transcription_services_below_classification: list[
+            "TranscriptionServiceConnection"
+        ] = []
+        self._split_models_by_classification()
         self.data_retention_days = data_retention_days
         self.enabled_capabilities: list[CapabilityPurpose] = list(
             enabled_capabilities or []
@@ -146,6 +197,44 @@ class Space:
         return transcription_model_id in [
             model.id for model in self.transcription_models
         ]
+
+    @property
+    def usable_transcription_services(self) -> list["TranscriptionServiceConnection"]:
+        """The connections new work in this space may use: granted, allowed by
+        the classification, and enabled by the organisation."""
+        return [
+            connection
+            for connection in self._transcription_services
+            if connection.can_access
+        ]
+
+    def usable_transcription_service(
+        self, connection_id: UUID
+    ) -> "TranscriptionServiceConnection | None":
+        return next(
+            (
+                connection
+                for connection in self.usable_transcription_services
+                if connection.id == connection_id
+            ),
+            None,
+        )
+
+    @property
+    def default_transcription_service(
+        self,
+    ) -> "TranscriptionServiceConnection | None":
+        """The organisation's default speaker identification service, while
+        this space may use it. An administrator marked it; no other service
+        stands in when none is marked or the marked one is not usable here."""
+        return next(
+            (
+                connection
+                for connection in self.usable_transcription_services
+                if connection.is_default
+            ),
+            None,
+        )
 
     def is_mcp_server_in_space(self, mcp_server_id: UUID | None) -> bool:
         return mcp_server_id in [server.id for server in self.mcp_servers]
@@ -220,8 +309,7 @@ class Space:
 
         if not sorted_completion_models:
             raise BadRequestException(
-                f"Cannot perform operation: Space '{self.name}' has no completion models configured. "
-                "Please configure at least one completion model in the space settings."
+                NO_COMPLETION_MODEL_EXCEPTION_MESSAGE.format(space_name=self.name)
             )
 
         return sorted_completion_models[0]  # type: ignore
@@ -245,17 +333,39 @@ class Space:
 
         return sorted_transcription_models[0]  # type: ignore
 
+    def select_default_completion_model(
+        self, candidates: Iterable["CompletionModel"]
+    ) -> Optional["CompletionModel"]:
+        """This space's default among an already-vetted candidate set.
+
+        The policy — the organisation default, else the newest — lives here so
+        that callers narrowing the candidates for their own reasons (a planner
+        that also needs an active provider, say) pick the same way this space
+        would, instead of restating it and drifting.
+        """
+        eligible = list(candidates)
+        organisation_default = next(
+            (model for model in eligible if model.is_org_default), None
+        )
+        if organisation_default is not None:
+            return organisation_default
+        return max(
+            eligible,
+            key=lambda model: datetime_or_utc_min(model.created_at),
+            default=None,
+        )
+
     def get_default_completion_model(self) -> Optional["CompletionModel"]:
         if not self.completion_models:
             return None
 
-        model = filter(
-            lambda m: m.is_org_default and m.can_access, self.completion_models
+        default_model = self.select_default_completion_model(
+            model for model in self.completion_models if model.can_access
         )
-        default_model = next(model, None)
-
         if default_model is None:
-            default_model = self.get_latest_completion_model()
+            raise BadRequestException(
+                NO_COMPLETION_MODEL_EXCEPTION_MESSAGE.format(space_name=self.name)
+            )
 
         return default_model
 
@@ -280,43 +390,168 @@ class Space:
         # Get the most recently added model as a fallback
         return self.get_latest_transcription_model()
 
+    def get_marked_default_transcription_model(self) -> Optional[TranscriptionModel]:
+        """The transcription model an administrator marked as the
+        organisation's default, while this space can use it. No other model
+        stands in when none is marked or the marked one is not usable here."""
+        return next(
+            (
+                model
+                for model in self.transcription_models
+                if model.is_org_default and model.can_access
+            ),
+            None,
+        )
+
     @property
     def embedding_models(self):
+        """The embedding models usable in this space."""
         return self._embedding_models
 
     @embedding_models.setter
     def embedding_models(self, embedding_models: list["EmbeddingModel"]):
-        for model in embedding_models:
-            if not model.can_access:
-                raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
-            self.validate_model_security_compatibility(model)
-
-        self._embedding_models = embedding_models
+        self._embedding_models, self._embedding_models_below_classification = (
+            self._assign_models(embedding_models, self.linked_embedding_models)
+        )
 
     @property
     def completion_models(self) -> list["CompletionModel"]:
+        """The completion models usable in this space."""
         return self._completion_models
 
     @completion_models.setter
     def completion_models(self, completion_models: list["CompletionModel"]):
-        for model in completion_models:
-            if not model.can_access:
-                raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
-            self.validate_model_security_compatibility(model)
-        self._completion_models = completion_models
+        self._completion_models, self._completion_models_below_classification = (
+            self._assign_models(completion_models, self.linked_completion_models)
+        )
 
     @property
     def transcription_models(self) -> list[TranscriptionModel]:
+        """The transcription models usable in this space."""
         return self._transcription_models
 
     @transcription_models.setter
     def transcription_models(self, transcription_models: list[TranscriptionModel]):
-        for model in transcription_models:
-            if not model.can_access:
-                raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
-            self.validate_model_security_compatibility(model)
+        (
+            self._transcription_models,
+            self._transcription_models_below_classification,
+        ) = self._assign_models(transcription_models, self.linked_transcription_models)
 
-        self._transcription_models = transcription_models
+    @property
+    def transcription_services(self) -> list["TranscriptionServiceConnection"]:
+        """The transcription services granted to this space and usable here."""
+        return self._transcription_services
+
+    @transcription_services.setter
+    def transcription_services(
+        self, transcription_services: list["TranscriptionServiceConnection"]
+    ):
+        (
+            self._transcription_services,
+            self._transcription_services_below_classification,
+        ) = self._assign_models(
+            transcription_services, self.linked_transcription_services
+        )
+
+    @property
+    def transcription_services_below_classification(
+        self,
+    ) -> list["TranscriptionServiceConnection"]:
+        return list(self._transcription_services_below_classification)
+
+    @property
+    def linked_transcription_services(
+        self,
+    ) -> list["TranscriptionServiceConnection"]:
+        return [
+            *self._transcription_services,
+            *self._transcription_services_below_classification,
+        ]
+
+    @property
+    def completion_models_below_classification(self) -> list["CompletionModel"]:
+        """Linked completion models below this space's classification.
+
+        They stay linked but are not usable here; see __init__."""
+        return list(self._completion_models_below_classification)
+
+    @property
+    def embedding_models_below_classification(self) -> list["EmbeddingModel"]:
+        return list(self._embedding_models_below_classification)
+
+    @property
+    def transcription_models_below_classification(self) -> list[TranscriptionModel]:
+        return list(self._transcription_models_below_classification)
+
+    @property
+    def linked_completion_models(self) -> list["CompletionModel"]:
+        """Every completion model linked to this space, usable or not.
+
+        A write of the space's links persists this list, so a model below the
+        classification is removed only when a request leaves it out."""
+        return [
+            *self._completion_models,
+            *self._completion_models_below_classification,
+        ]
+
+    @property
+    def linked_embedding_models(self) -> list["EmbeddingModel"]:
+        return [*self._embedding_models, *self._embedding_models_below_classification]
+
+    @property
+    def linked_transcription_models(self) -> list[TranscriptionModel]:
+        return [
+            *self._transcription_models,
+            *self._transcription_models_below_classification,
+        ]
+
+    def _split_models_by_classification(self) -> None:
+        """Sort every linked model and service into usable and below-classification."""
+        self._completion_models, self._completion_models_below_classification = (
+            self._split_by_classification(self.linked_completion_models)
+        )
+        self._embedding_models, self._embedding_models_below_classification = (
+            self._split_by_classification(self.linked_embedding_models)
+        )
+        (
+            self._transcription_models,
+            self._transcription_models_below_classification,
+        ) = self._split_by_classification(self.linked_transcription_models)
+        (
+            self._transcription_services,
+            self._transcription_services_below_classification,
+        ) = self._split_by_classification(self.linked_transcription_services)
+
+    def _split_by_classification(
+        self, models: Sequence[_M]
+    ) -> tuple[list[_M], list[_M]]:
+        usable = [m for m in models if self.allows_security_classification(m)]
+        below = [m for m in models if not self.allows_security_classification(m)]
+        return usable, below
+
+    def _assign_models(
+        self, models: Sequence[_M], linked: Sequence[_M]
+    ) -> tuple[list[_M], list[_M]]:
+        """Validate an explicit model list and split it into usable and below.
+
+        The list replaces the space's links, so a model it leaves out is
+        unlinked. A model that is already linked may stay whatever its state:
+        keeping a link grants no use, so neither the tenant disabling it nor
+        its classification falling below the space's removes it here. A new
+        link must be accessible and meet the classification, as before.
+        """
+        linked_ids = {model.id for model in linked}
+        usable: list[_M] = []
+        below: list[_M] = []
+        for model in models:
+            allowed = self.allows_security_classification(model)
+            if model.id not in linked_ids:
+                if not model.can_access:
+                    raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
+                if not allowed:
+                    raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
+            (usable if allowed else below).append(model)
+        return usable, below
 
     @property
     def mcp_servers(self) -> list["MCPServer"]:
@@ -335,6 +570,7 @@ class Space:
         embedding_models: list["EmbeddingModel"] | None = None,
         completion_models: list["CompletionModel"] | None = None,
         transcription_models: list[TranscriptionModel] | None = None,
+        transcription_services: list["TranscriptionServiceConnection"] | None = None,
         mcp_servers: list["MCPServer"] | None = None,
         security_classification: Union[
             SecurityClassification, NotProvided, None
@@ -361,29 +597,20 @@ class Space:
                 raise BadRequestException(
                     "Can not change security classification of personal space"
                 )
+            changes_classification = self.changes_security_level(
+                security_classification
+            )
             self.security_classification = security_classification
-            if self.security_classification is not None:
-                self.completion_models = [
-                    model
-                    for model in self.completion_models
-                    if not self.security_classification.is_greater_than(
-                        model.security_classification
-                    )
-                ]
-                self.embedding_models = [
-                    model
-                    for model in self.embedding_models
-                    if not self.security_classification.is_greater_than(
-                        model.security_classification
-                    )
-                ]
-                self.transcription_models = [
-                    model
-                    for model in self.transcription_models
-                    if not self.security_classification.is_greater_than(
-                        model.security_classification
-                    )
-                ]
+            # A linked model the new classification allows is usable again.
+            self._split_models_by_classification()
+            if changes_classification and self.security_classification is not None:
+                # Changing the space's classification is the admin's explicit,
+                # previewed decision; as on develop, it removes the models the
+                # new classification does not allow.
+                self._completion_models_below_classification = []
+                self._embedding_models_below_classification = []
+                self._transcription_models_below_classification = []
+                self._transcription_services_below_classification = []
                 # Capability markers stay: the provider resolved at ask time
                 # is what gets checked, not the marker's own classification.
                 self._mcp_servers = [
@@ -418,6 +645,14 @@ class Space:
                 )
 
             self.transcription_models = transcription_models
+
+        if transcription_services is not None:
+            if self.is_personal():
+                raise BadRequestException(
+                    "Can not add transcription services to personal space"
+                )
+
+            self.transcription_services = transcription_services
 
         if mcp_servers is not None:
             if self.is_personal():
@@ -639,10 +874,32 @@ class Space:
     def get_website(self, website_id: UUID) -> "Website":
         return self._get_entity(website_id, self.websites)
 
-    def validate_model_security_compatibility(self, model: "AIModel") -> None:
+    def changes_security_level(
+        self, classification: Optional[SecurityClassification]
+    ) -> bool:
+        """Whether moving to ``classification`` may remove links. Eligibility
+        depends on the level alone, so a PATCH that resends the classification,
+        or names another one at the same level, leaves every link as it is."""
+        return _security_level(self.security_classification) != _security_level(
+            classification
+        )
+
+    def allows_security_classification(self, link: ClassifiedLink) -> bool:
+        """Whether this space's classification permits the model or service.
+
+        The predicate form exists for callers that must *choose* a model rather
+        than accept one: the stored model list is only validated when it is
+        assigned, so a caller picking from it on the user's behalf has to ask
+        again rather than assume.
+        """
         if not self.security_classification:
-            return
-        if self.security_classification.is_greater_than(model.security_classification):
+            return True
+        return not self.security_classification.is_greater_than(
+            link.security_classification
+        )
+
+    def validate_model_security_compatibility(self, model: "AIModel") -> None:
+        if not self.allows_security_classification(model):
             raise BadRequestException(SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE)
 
     def validate_mcp_server_security_compatibility(
@@ -666,6 +923,8 @@ class Space:
 
         if hasattr(model, "can_access") and not model.can_access:
             raise BadRequestException("Completion model is not accessible")
+
+        self.validate_model_security_compatibility(model)
 
         if any(m.id == model.id for m in self.completion_models):
             return

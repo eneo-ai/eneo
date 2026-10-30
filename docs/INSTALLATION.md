@@ -72,7 +72,7 @@ uv run python init_db.py
 
 ### Step 5: Start Services
 
-Open **3 separate terminals** in VS Code:
+Open separate terminals in VS Code:
 
 **Terminal 1 - Backend API:**
 ```bash
@@ -86,11 +86,32 @@ cd frontend
 bun run dev
 ```
 
-**Terminal 3 - Worker (Optional, for document processing and for the crawler & apps to work):**
+**Terminal 3 - ARQ worker (document processing, apps, crawl scheduling, and existing background jobs):**
 ```bash
 cd backend
 uv run worker
 ```
+
+**Terminal 4 - Platform execution worker:**
+```bash
+cd backend
+uv run task-execution-worker
+```
+
+**Terminal 5 - Platform maintenance worker and scheduler:**
+```bash
+cd backend
+uv run task-maintenance-worker
+```
+
+**Terminal 6 - Crawler worker (website crawls):**
+```bash
+cd backend
+uv run arq src.eneo.worker.arq.CrawlerWorkerSettings
+```
+
+The platform workers use separate execution and maintenance capacity queues so
+long Flow runs cannot starve recovery, expiry, audit, or webhook work.
 
 ## Verify Installation
 
@@ -150,9 +171,8 @@ required.
 
 Administrators with the Storage permission set upload limits and choose storage
 for eligible new File and Icon writes in **Admin > File storage**. Changes take effect
-without restarting the backend or worker. Operators keep
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` as a PostgreSQL, WAL, backup, and process
-safety ceiling; it is not the upload policy.
+without restarting the backend or worker. The limits apply to every Flow. Storage capacity is shown on the same page;
+choose object storage for files larger than PostgreSQL inline capacity.
 
 ## Common Issues & Solutions
 
@@ -174,8 +194,7 @@ Then restart the backend.
 
 Ask an administrator with the Storage permission to review the configured and
 effective limits in **Admin > File storage**. For PostgreSQL-inline session uploads,
-the effective limit is the smaller of the admin policy and the operator's
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` ceiling. For object-store session uploads,
+the effective limit cannot exceed PostgreSQL inline capacity. For object-store session uploads,
 the effective limit is the smaller of the admin policy and the configured
 portable multipart envelope. The page identifies which value constrains the
 upload. FastAPI/Starlette multipart parsing happens before route admission and

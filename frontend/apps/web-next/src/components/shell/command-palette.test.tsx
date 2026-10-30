@@ -93,12 +93,19 @@ function seededClient() {
   return queryClient;
 }
 
-function renderPalette(permissions: Permission[] = []) {
+function renderPalette(permissions: Permission[] = [], { flowsEnabled = false } = {}) {
   const onCreateSpace = vi.fn();
   const onOpenChange = vi.fn();
   renderInApp(
     <ShellCommandPalette isOpen onOpenChange={onOpenChange} onCreateSpace={onCreateSpace} />,
-    { queryClient: seededClient(), appContext: testAppContext({ permissions }) }
+    {
+      queryClient: seededClient(),
+      appContext: testAppContext({
+        permissions,
+        settings: { flows_enabled: flowsEnabled },
+        featureFlags: { flows: false }
+      })
+    }
   );
   return { onCreateSpace, onOpenChange };
 }
@@ -130,11 +137,11 @@ describe("ShellCommandPalette", () => {
     const combobox = within(dialog).getByRole("combobox", {
       name: "Sök bland assistenter, ytor, konversationer, kunskap och åtgärder"
     });
+    // The results are a listbox once there are results to pick from.
+    await within(dialog).findByRole("option", { name: /Upphandlingsassistenten/ });
     expect(combobox.getAttribute("aria-controls")).toBe(
       within(dialog).getByRole("listbox").getAttribute("id")
     );
-
-    await within(dialog).findByRole("option", { name: /Upphandlingsassistenten/ });
     for (const group of ["Assistenter", "Ytor", "Konversationer", "Åtgärder"]) {
       expect(within(dialog).getByRole("group", { name: group })).toBeTruthy();
     }
@@ -298,6 +305,20 @@ describe("ShellCommandPalette", () => {
     expect(screen.queryByRole("option", { name: /Gammalt namn|Raderad konversation/ })).toBeNull();
     // The fresh spaces list came from the cache.
     expect(get).not.toHaveBeenCalledWith("/api/v1/spaces/", expect.anything());
+  });
+
+  it("offers the flow settings to an admin when the tenant has flows", async () => {
+    renderPalette(["admin"], { flowsEnabled: true });
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("flöden");
+    expect(await screen.findByRole("option", { name: /^Administration › Fl ?öden$/ })).toBeTruthy();
+  });
+
+  it("offers no flow settings when the tenant has no flows", async () => {
+    renderPalette(["admin"]);
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("flöden");
+    await screen.findByText("Inga resultat hittades");
   });
 
   it("hides Skapa yta and admin pages from others", async () => {

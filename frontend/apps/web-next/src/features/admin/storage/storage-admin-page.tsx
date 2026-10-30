@@ -485,14 +485,14 @@ function StoragePolicyEditor({
                       <td className="p-3">{bytesLabel(limit.effective_bytes)}</td>
                       <td className="p-3">{targetLabel(limit.storage_target)}</td>
                       <td className="p-3">
-                        {limit.operator_ceiling_bytes === null
+                        {limit.storage_capacity_bytes === null
                           ? t("storage_effective_limits_no_ceiling")
-                          : bytesLabel(limit.operator_ceiling_bytes)}
+                          : bytesLabel(limit.storage_capacity_bytes)}
                       </td>
                       <td className="p-3">
                         {t(
-                          limit.constraining_source === "operator_ceiling"
-                            ? "storage_constraint_operator_ceiling"
+                          limit.constraining_source === "storage_capacity"
+                            ? "storage_constraint_storage_capacity"
                             : "storage_constraint_admin_policy"
                         )}
                       </td>

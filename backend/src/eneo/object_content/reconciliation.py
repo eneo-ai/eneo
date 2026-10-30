@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from secrets import token_hex
 from time import monotonic
 from uuid import UUID
@@ -25,6 +25,7 @@ from eneo.object_content.object_store_provider import (
     ObjectStoreProvider,
 )
 from eneo.object_content.reconciliation_repository import (
+    InlineConversionResult,
     MultipartAbortLease,
     ObjectContentHealthFacts,
     ObjectContentReconciliationRepository,
@@ -51,6 +52,7 @@ class ReconciliationResult:
     object_cycle_completed: bool
     multipart_aborted: int
     orphan_objects_deleted: int
+    inline_conversion: InlineConversionResult = InlineConversionResult()
 
     @classmethod
     def empty(cls) -> "ReconciliationResult":
@@ -93,6 +95,7 @@ class ObjectContentReconciler:
                 limit=self._core_settings.reconciliation_batch_size,
             )
 
+        inline_conversion = await self._convert_inline_payloads()
         provider = self._object_store_provider
         if provider is not None:
             await provider.refresh()
@@ -117,14 +120,38 @@ class ObjectContentReconciler:
                 object_cycle_completed=False,
                 multipart_aborted=0,
                 orphan_objects_deleted=0,
+                inline_conversion=inline_conversion,
             )
 
         async with provider.acquire(refresh=False) as store_lease:
-            return await self._run_remote_once(
+            result = await self._run_remote_once(
                 lifecycle_advanced=lifecycle_advanced,
                 inline_deleted=inline_deleted,
                 store_lease=store_lease,
             )
+            return replace(result, inline_conversion=inline_conversion)
+
+    async def _convert_inline_payloads(self) -> InlineConversionResult:
+        scanned = converted = rejected = skipped = 0
+        step = InlineConversionResult()
+        for _ in range(self._core_settings.reconciliation_batch_size):
+            async with self._database.session() as session, session.begin():
+                step = await ObjectContentReconciliationRepository(
+                    session
+                ).convert_next_inline_payload()
+            scanned += step.scanned
+            converted += step.converted
+            rejected += step.rejected
+            skipped += step.skipped
+            if not step.has_more:
+                break
+        return replace(
+            step,
+            scanned=scanned,
+            converted=converted,
+            rejected=rejected,
+            skipped=skipped,
+        )
 
     async def _run_remote_once(
         self,

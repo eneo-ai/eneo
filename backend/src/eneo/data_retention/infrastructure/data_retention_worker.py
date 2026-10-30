@@ -1,7 +1,8 @@
 import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import asdict
 from datetime import datetime, timezone
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 from dependency_injector import providers
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -14,6 +15,7 @@ from eneo.worker.worker import Worker
 
 logger = logging.getLogger(__name__)
 worker = Worker()
+T = TypeVar("T")
 
 
 class DeletedCounts(TypedDict):
@@ -32,10 +34,33 @@ class CleanupResults(TypedDict):
     success: bool
 
 
-@worker.cron_job(hour=3, minute=0)  # Run daily at 3 AM
+async def _run_cleanup_step(
+    *,
+    session: AsyncSession,
+    results: CleanupResults,
+    error_prefix: str,
+    action: Callable[[], Awaitable[T]],
+    commit_each_batch: bool = False,
+) -> T | None:
+    try:
+        if commit_each_batch:
+            return await action()
+        async with session.begin():
+            return await action()
+    except Exception as e:
+        error_msg = f"{error_prefix}: {type(e).__name__}"
+        logger.error(error_msg)
+        results["errors"].append(error_msg)
+        results["success"] = False
+        return None
+
+
+@worker.cron_job(hour=3, minute=0)
 async def cleanup_old_data(container: Container) -> CleanupResults:
-    """
-    Daily cleanup of old data based on retention policies.
+    """Run the daily cleanup for non-Flow retention policies.
+
+    Flow-owned data is deliberately excluded. Flow retention settings determine
+    purge eligibility, but deletion requires a separate administrator action.
 
     Uses explicit sessionmanager.session() to avoid nested transaction issues
     when cron wrapper already has a transaction open.
@@ -70,58 +95,57 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
     async with sessionmanager.session() as session:
         container.session.override(providers.Object(session))  # pyright: ignore[reportUnknownMemberType]  # dependency_injector provider stubs have partially unknown override()
         try:
-            data_retention_service = container.data_retention_service()
+            retention_service = container.data_retention_service()
 
-            # Delete old questions
-            try:
-                questions_count = await data_retention_service.delete_old_questions(
+            questions_count = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to delete old questions",
+                action=lambda: retention_service.delete_old_questions(
                     commit_each_batch=True
-                )
+                ),
+                commit_each_batch=True,
+            )
+            if questions_count is not None:
                 results["deleted"]["questions"] = questions_count
                 if questions_count > 0:
                     logger.info(
                         f"Deleted {questions_count} old questions based on retention policies"
                     )
-            except Exception as e:
-                error_msg = f"Failed to delete old questions: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                results["errors"].append(error_msg)
-                results["success"] = False
 
-            # Delete old app runs
-            try:
-                app_runs_count = await data_retention_service.delete_old_app_runs(
+            app_runs_count = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to delete old app runs",
+                action=lambda: retention_service.delete_old_app_runs(
                     commit_each_batch=True
-                )
+                ),
+                commit_each_batch=True,
+            )
+            if app_runs_count is not None:
                 results["deleted"]["app_runs"] = app_runs_count
                 if app_runs_count > 0:
                     logger.info(
                         f"Deleted {app_runs_count} old app runs based on retention policies"
                     )
-            except Exception as e:
-                error_msg = f"Failed to delete old app runs: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                results["errors"].append(error_msg)
-                results["success"] = False
 
-            # Delete old orphaned sessions
-            try:
-                sessions_count = await data_retention_service.delete_old_sessions(
+            sessions_count = await _run_cleanup_step(
+                session=session,
+                results=results,
+                error_prefix="Failed to delete old sessions",
+                action=lambda: retention_service.delete_old_sessions(
                     commit_each_batch=True
-                )
+                ),
+                commit_each_batch=True,
+            )
+            if sessions_count is not None:
                 results["deleted"]["sessions"] = sessions_count
                 if sessions_count > 0:
                     logger.info(f"Deleted {sessions_count} orphaned sessions")
-            except Exception as e:
-                error_msg = f"Failed to delete old sessions: {str(e)}"
-                logger.error(error_msg, exc_info=True)
-                results["errors"].append(error_msg)
-                results["success"] = False
         finally:
-            # Always reset override, even on exception
+            # Later worker calls must not inherit this job's scoped session.
             container.session.reset_override()
 
-    # Calculate total and duration
     end_time = datetime.now(timezone.utc)
     duration = (end_time - start_time).total_seconds()
 
@@ -133,7 +157,6 @@ async def cleanup_old_data(container: Container) -> CleanupResults:
         + results["deleted"]["sessions"]
     )
 
-    # Log summary
     if results["success"]:
         logger.info(
             f"Data retention cleanup completed successfully: "

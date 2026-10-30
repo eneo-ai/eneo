@@ -47,7 +47,8 @@ async def test_file_usage_groups_every_current_product_relation(
         mimetype="text/plain",
         file_type=FileType.TEXT.value,
         tenant_id=test_tenant.id,
-        user_id=admin_user.id,
+        owner_type="user",
+        owner_user_id=admin_user.id,
     )
     async_session.add_all([app_run, chat_session, file])
     await async_session.flush()

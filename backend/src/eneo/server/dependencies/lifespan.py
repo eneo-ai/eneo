@@ -1,4 +1,6 @@
-from contextlib import asynccontextmanager
+from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack, asynccontextmanager
+from functools import partial
 
 from fastapi import FastAPI
 
@@ -20,6 +22,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreConnectionError,
 )
 from eneo.object_content.runtime import object_content_runtime
+from eneo.redis.clients import redis_clients
 from eneo.server.dependencies.predefined_roles import init_predefined_roles
 from eneo.server.websockets.websocket_manager import websocket_manager
 from eneo.sessions.session_service import drain_background_saves
@@ -29,20 +32,88 @@ from eneo.settings.encryption_service import EncryptionService
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await startup()
-    # The loopback internal-MCP servers are mounted sub-apps; Starlette does
-    # not run a mounted app's lifespan, so the parent must drive their session
-    # managers. Skip in OpenAPI-only mode (no startup deps, no requests served).
-    if get_settings().openapi_only_mode:
-        yield
-    else:
-        async with internal_mcp_lifespan():
+    try:
+        # The loopback internal-MCP servers are mounted sub-apps; Starlette does
+        # not run a mounted app's lifespan, so the parent must drive their session
+        # managers. Skip in OpenAPI-only mode (no startup deps, no requests served).
+        if get_settings().openapi_only_mode:
             yield
-            # Streamed turns cut off by the shutdown finish their cleanup
-            # while everything they use is still up: a connection host
-            # attached to a loopback server ends gracefully only while that
-            # server still answers, and the pools close in shutdown().
-            await drain_streamed_turns()
-    await shutdown()
+        else:
+            async with internal_mcp_lifespan():
+                try:
+                    yield
+                finally:
+                    # Finish streamed turns while their MCP servers and pools are up.
+                    await drain_streamed_turns()
+    finally:
+        await shutdown()
+
+
+async def start_persistence() -> Callable[[], Awaitable[None]]:
+    """Bring up what any process that reads or writes application data needs.
+
+    The database session manager and the durable object-content runtime are
+    process singletons, and the container hands out services that need both.
+    The API's lifespan and every other process that builds a container (the
+    workers) start them here.
+
+    A second start while persistence is running is refused before anything is
+    touched: the running owner keeps its engine and runtime. A failed start
+    leaves nothing started that this call started: the caller never reaches its
+    own stop, so whatever escapes (cancellation included) unwinds here first.
+
+    Returns the stop that undoes exactly this start, for a caller that must
+    unwind it before its own shutdown would run.
+    """
+    if object_content_runtime.enabled:
+        raise RuntimeError("Persistence is already running in this process")
+    settings = get_settings()
+    # `init` keeps an engine another owner opened; only an engine this call
+    # opens is this call's to close.
+    opened_database = not sessionmanager.initialized
+    sessionmanager.init(settings.database_url)
+    try:
+        # PostgreSQL owns the optional administrator-managed connection, so it
+        # must be available before object-content imports or loads that
+        # configuration. The root encryption key remains deployment bootstrap
+        # material.
+        encryption_key = None if settings.testing else settings.encryption_key
+        object_content_runtime.start(
+            encryption=EncryptionService(encryption_key),
+        )
+        try:
+            await object_content_runtime.validate_configuration()
+        except ObjectStoreConnectionDatabaseUnavailable:
+            # Connection metadata lives in PostgreSQL. Treat an outage there
+            # like any other transient storage dependency failure and retry
+            # through readiness and reconciliation after startup.
+            pass
+        except (ObjectContentConfigurationError, ObjectStoreConnectionError):
+            # Before the next clause: a configuration error is also an
+            # ObjectContentUnavailableError, and it is not transient.
+            raise
+        except ObjectContentUnavailableError:
+            # A transient database/store outage is a readiness failure. The
+            # process remains live and retries the binding check on readiness
+            # and every reconciliation attempt.
+            pass
+    except BaseException:
+        await _stop(close_database=opened_database)
+        raise
+    return partial(_stop, close_database=opened_database)
+
+
+async def stop_persistence() -> None:
+    await _stop(close_database=True)
+
+
+async def _stop(*, close_database: bool) -> None:
+    try:
+        await object_content_runtime.stop()
+    finally:
+        # A store that fails to close must not keep the database open.
+        if close_database:
+            await sessionmanager.close()
 
 
 async def startup():
@@ -51,36 +122,21 @@ async def startup():
     if settings.openapi_only_mode:
         return
 
-    sessionmanager.init(settings.database_url)
-    # PostgreSQL owns the optional administrator-managed connection, so it must
-    # be available before object-content imports or loads that configuration.
-    # The root encryption key remains deployment bootstrap material.
-    encryption_key = None if settings.testing else settings.encryption_key
-    object_content_runtime.start(
-        encryption=EncryptionService(encryption_key),
-    )
-    aiohttp_client.start()
-    try:
-        await object_content_runtime.validate_configuration()
-    except ObjectStoreConnectionDatabaseUnavailable:
-        # Connection metadata lives in PostgreSQL. Treat an outage there like
-        # any other transient storage dependency failure and retry through
-        # readiness and reconciliation after startup.
-        pass
-    except (ObjectContentConfigurationError, ObjectStoreConnectionError):
-        await object_content_runtime.stop()
-        await sessionmanager.close()
-        await aiohttp_client.stop()
-        raise
-    except ObjectContentUnavailableError:
-        # A transient database/store outage is a readiness failure. The process
-        # remains live and retries the binding check on readiness and every
-        # reconciliation attempt.
-        pass
-    await job_manager.init()
+    # The caller of a failed startup never reaches shutdown, so whatever
+    # escapes (cancellation included) stops what this call started, last
+    # started first. Once everything is up, stopping it is shutdown's.
+    async with AsyncExitStack() as started:
+        started.push_async_callback(await start_persistence())
+        redis_clients.start()
+        started.push_async_callback(redis_clients.stop)
+        aiohttp_client.start()
+        started.push_async_callback(aiohttp_client.stop)
+        await job_manager.init()
+        started.push_async_callback(job_manager.close)
 
-    # init predefined roles
-    await init_predefined_roles()
+        # init predefined roles
+        await init_predefined_roles()
+        started.pop_all()
 
 
 async def drain_streamed_turns():
@@ -100,8 +156,12 @@ async def shutdown():
     if settings.openapi_only_mode:
         return
 
-    await object_content_runtime.stop()
-    await sessionmanager.close()
-    await aiohttp_client.stop()
-    await job_manager.close()
-    await websocket_manager.shutdown()
+    # Every step runs even when an earlier one fails. Callbacks run last pushed
+    # first: the websocket listeners leave their subscriptions before the Redis
+    # clients behind them close.
+    async with AsyncExitStack() as steps:
+        steps.push_async_callback(redis_clients.stop)
+        steps.push_async_callback(websocket_manager.shutdown)
+        steps.push_async_callback(job_manager.close)
+        steps.push_async_callback(aiohttp_client.stop)
+        steps.push_async_callback(stop_persistence)

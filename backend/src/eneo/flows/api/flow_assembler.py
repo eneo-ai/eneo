@@ -1,0 +1,490 @@
+from __future__ import annotations
+
+import logging
+from collections.abc import Mapping, Sequence
+from typing import TYPE_CHECKING, Any, cast
+from uuid import UUID
+
+from pydantic import ValidationError
+
+from eneo.authentication.auth_models import FlowServicePrincipalActorPublic
+from eneo.flows.api.flow_models import (
+    FlowPublic,
+    FlowRunDetailPublic,
+    FlowRunErrorPublic,
+    FlowRunEvidenceAccessPublic,
+    FlowRunPublic,
+    FlowRunReviewCheckpointPublic,
+    FlowRunStartedByPublic,
+    FlowRunStepInputFilePublic,
+    FlowRunStepPublic,
+    FlowRunSummaryPublic,
+    FlowRunTokenUsagePublic,
+    FlowRunTranscriptionUsagePublic,
+    FlowRunWebhookDeliveryPublic,
+    FlowSparsePublic,
+    FlowStepCreateRequest,
+    FlowStepDiagnosticPublic,
+    FlowStepUpdateRequest,
+)
+from eneo.flows.api.flow_run_contract_models import (
+    FlowFinalOutputContractPublic,
+    FlowRunArtifactResultPublic,
+    FlowRunFileBackedTextResultPublic,
+    FlowRunInlineTextResultPublic,
+    FlowRunOutboundHttpResultPublic,
+    FlowRunResultPublic,
+    FlowRunStructuredResultPublic,
+)
+from eneo.flows.api.flow_runtime_paths import (
+    FlowRuntimePublic,
+    build_flow_runtime_paths,
+)
+from eneo.flows.application.flow_run_access_policy import FlowRunEvidenceAccess
+from eneo.flows.domain.flow import (
+    Flow,
+    FlowRun,
+    FlowRunReviewCheckpoint,
+    FlowRunStatusSnapshot,
+    FlowRunTokenUsage,
+    FlowRunTranscriptionUsage,
+    FlowSparse,
+    FlowStep,
+    FlowStepResult,
+)
+from eneo.flows.domain.step_output import (
+    FileBackedStepText,
+    StepOutputMetadataError,
+    interpret_step_text,
+)
+from eneo.flows.domain.transcript_source import TranscriptSourceReference
+from eneo.flows.enums import FlowOutputDelivery, FlowOutputType, FlowRunStatus
+from eneo.flows.flow_run_input_envelope import (
+    read_max_speakers,
+    read_semantic_flow_input_payload,
+    read_speaker_labels_choice,
+)
+from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileRef
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.http_transport import redact_persisted_config
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRead,
+)
+
+if TYPE_CHECKING:
+    from eneo.flows.api.flow_definition_access import FlowPermissions
+
+logger = logging.getLogger(__name__)
+# Keep drift logs searchable without dumping arbitrary persisted payload keys.
+_MAX_LOGGED_DIAGNOSTIC_ERROR_TYPES = 3
+_MAX_LOGGED_DIAGNOSTIC_EXTRA_KEYS = 3
+_PUBLIC_STEP_DIAGNOSTIC_FIELDS = frozenset(FlowStepDiagnosticPublic.model_fields)
+
+
+class FlowAssembler:
+    def to_domain_step(self, step: FlowStepCreateRequest) -> FlowStep:
+        return self._to_domain_step_from_authoring_request(step, step_id=None)
+
+    def to_domain_step_for_update(self, step: FlowStepUpdateRequest) -> FlowStep:
+        return self._to_domain_step_from_authoring_request(step, step_id=step.id)
+
+    def _to_domain_step_from_authoring_request(
+        self, step: FlowStepCreateRequest, *, step_id: UUID | None
+    ) -> FlowStep:
+        return FlowStep(
+            id=step_id,
+            assistant_id=step.assistant_id,
+            step_order=step.step_order,
+            timeout_seconds=step.timeout_seconds,
+            user_description=step.user_description,
+            input_source=step.input_source,
+            input_type=step.input_type,
+            input_contract=step.input_contract,
+            output_mode=step.output_mode,
+            output_type=step.output_type,
+            output_contract=step.output_contract,
+            input_bindings=step.input_bindings,
+            output_classification_override=step.output_classification_override,
+            input_config=step.input_config,
+            output_config=step.output_config,
+            review_policy=step.review_policy,
+        )
+
+    def to_public(self, flow: Flow, *, permissions: FlowPermissions) -> FlowPublic:
+        """``flow`` for the caller whose ``permissions`` on it are given."""
+        redacted = self._redact_step_configs(flow)
+        return FlowPublic.model_validate({**dict(redacted), "permissions": permissions})
+
+    def to_sparse_public(
+        self, flow: FlowSparse, *, permissions: FlowPermissions
+    ) -> FlowSparsePublic:
+        return FlowSparsePublic.model_validate(
+            {**dict(flow), "permissions": permissions}
+        )
+
+    def to_runtime_public(
+        self, flow: Flow, *, published_version: int, api_prefix: str
+    ) -> FlowRuntimePublic:
+        flow_id = flow.require_persisted_id()
+
+        runtime_paths = build_flow_runtime_paths(flow_id, api_prefix=api_prefix)
+        return FlowRuntimePublic(
+            id=flow_id,
+            space_id=flow.space_id,
+            name=flow.name,
+            description=flow.description,
+            published_version=published_version,
+            created_at=flow.created_at,
+            updated_at=flow.updated_at,
+            runtime_paths=runtime_paths,
+        )
+
+    @staticmethod
+    def to_run_result_public(
+        *,
+        run: FlowRun,
+        final_output: FlowFinalOutputContractPublic | None,
+        result_files: Sequence[FlowRunStepResultFile] = (),
+    ) -> FlowRunResultPublic | None:
+        return _project_run_result(
+            run=run,
+            final_output=final_output,
+            result_files=result_files,
+        )
+
+    def to_run_public(
+        self,
+        run: FlowRun,
+        *,
+        result_files: Sequence[FlowRunStepResultFile] = (),
+        token_usage: FlowRunTokenUsage | None = None,
+        transcription_usage: FlowRunTranscriptionUsage | None = None,
+        final_output: FlowFinalOutputContractPublic | None = None,
+        started_by: FlowRunStartedByPublic | None = None,
+    ) -> FlowRunPublic:
+        public_token_usage = (
+            FlowRunTokenUsagePublic.model_validate(token_usage)
+            if token_usage is not None
+            else None
+        )
+        public_transcription_usage = (
+            FlowRunTranscriptionUsagePublic.model_validate(transcription_usage)
+            if transcription_usage is not None
+            else None
+        )
+        return FlowRunPublic.model_validate(run).model_copy(
+            update={
+                "input_payload_json": read_semantic_flow_input_payload(
+                    run.input_payload_json
+                ),
+                "speaker_labels": read_speaker_labels_choice(run.input_payload_json),
+                "max_speakers": read_max_speakers(run.input_payload_json),
+                "result": self.to_run_result_public(
+                    run=run,
+                    final_output=final_output,
+                    result_files=result_files,
+                ),
+                "result_files": list(result_files),
+                "token_usage": public_token_usage,
+                "transcription_usage": public_transcription_usage,
+                "started_by": started_by,
+            }
+        )
+
+    @staticmethod
+    def to_run_summary_public(
+        run: FlowRunStatusSnapshot,
+        *,
+        started_by: FlowRunStartedByPublic | None = None,
+    ) -> FlowRunSummaryPublic:
+        return FlowRunSummaryPublic.model_validate(run).model_copy(
+            update={"started_by": started_by}
+        )
+
+    def to_run_detail_public(
+        self,
+        run: FlowRun,
+        *,
+        result_files: Sequence[FlowRunStepResultFile] = (),
+        token_usage: FlowRunTokenUsage | None = None,
+        transcription_usage: FlowRunTranscriptionUsage | None = None,
+        final_output: FlowFinalOutputContractPublic | None = None,
+        webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = (),
+        started_by: FlowRunStartedByPublic | None = None,
+        evidence_access: FlowRunEvidenceAccess,
+    ) -> FlowRunDetailPublic:
+        run_payload = self.to_run_public(
+            run,
+            result_files=result_files,
+            token_usage=token_usage,
+            transcription_usage=transcription_usage,
+            final_output=final_output,
+            started_by=started_by,
+        ).model_dump()
+        return FlowRunDetailPublic.model_validate(
+            {
+                **run_payload,
+                "webhook_deliveries": [
+                    FlowRunWebhookDeliveryPublic.model_validate(delivery)
+                    for delivery in webhook_deliveries
+                ],
+                "error": (
+                    FlowRunErrorPublic.with_guidance(run.error)
+                    if run.error is not None
+                    else None
+                ),
+                "evidence_access": FlowRunEvidenceAccessPublic(
+                    can_read_evidence=evidence_access.view_refusal is None,
+                    can_export_redacted=evidence_access.redacted_export_refusal is None,
+                    can_export_raw=evidence_access.raw_export_refusal is None,
+                    read_refusal_code=evidence_access.view_refusal,
+                    redacted_export_refusal_code=(
+                        evidence_access.redacted_export_refusal
+                    ),
+                    raw_export_refusal_code=evidence_access.raw_export_refusal,
+                ),
+            }
+        )
+
+    def to_step_public(
+        self,
+        result: FlowStepResult,
+        *,
+        runtime_input_file_ids: Sequence[UUID] = (),
+        runtime_input_files: Sequence[FlowRunStepInputFileRef] | None = None,
+        runtime_input_single_recording: bool = False,
+        result_files: Sequence[FlowRunStepResultFile] = (),
+        transcript_source: "TranscriptSourceReference | None" = None,
+    ) -> FlowRunStepPublic:
+        input_payload = result.input_payload_json
+        if transcript_source is not None:
+            input_payload = input_payload or {}
+            input_payload = {
+                **input_payload,
+                "transcription": {
+                    **input_payload.get("transcription", {}),
+                    "segments_hash": transcript_source.source_hash,
+                },
+            }
+        return FlowRunStepPublic.model_validate(result).model_copy(
+            update={
+                "input_payload_json": input_payload,
+                "diagnostics": _project_step_diagnostics(result),
+                "runtime_input_file_ids": list(runtime_input_file_ids),
+                "runtime_input_files": (
+                    [
+                        FlowRunStepInputFilePublic(
+                            file_id=file.file_id,
+                            name=file.name,
+                            mimetype=file.mimetype,
+                        )
+                        for file in runtime_input_files
+                        if file.name is not None
+                    ]
+                    if runtime_input_files is not None
+                    else None
+                ),
+                "runtime_input_single_recording": runtime_input_single_recording,
+                "result_files": list(result_files),
+            }
+        )
+
+    def to_review_checkpoint_public(
+        self,
+        checkpoint: FlowRunReviewCheckpoint,
+        *,
+        requester_service_principal: FlowServicePrincipalActorPublic | None = None,
+        decided_by_service_principal: FlowServicePrincipalActorPublic | None = None,
+    ) -> FlowRunReviewCheckpointPublic:
+        # Public API names omit persistence-only `_json` suffixes because every
+        # response is already JSON-serialized; keep the suffix on domain fields
+        # where it records the backing column convention.
+        return FlowRunReviewCheckpointPublic.model_validate(
+            {
+                **checkpoint.model_dump(),
+                "next_step_ids": checkpoint.next_step_ids_json,
+                "output_contract": checkpoint.output_contract_json,
+                "requester_service_principal": requester_service_principal,
+                "decided_by_service_principal": decided_by_service_principal,
+            }
+        )
+
+    @staticmethod
+    def _redact_step_configs(flow: Flow) -> Flow:
+        """Replace encrypted secrets with sentinel values in authored HTTP configs."""
+        redacted_steps = [
+            step.model_copy(
+                update={
+                    "input_config": redact_persisted_config(step.input_config),
+                    "output_config": redact_persisted_config(step.output_config),
+                },
+                deep=True,
+            )
+            for step in flow.steps
+        ]
+        return flow.model_copy(update={"steps": redacted_steps}, deep=True)
+
+
+class FlowRunResultProjectionError(RuntimeError):
+    """Persisted completed-run data does not satisfy its published result contract."""
+
+
+def _project_run_result(
+    *,
+    run: FlowRun,
+    final_output: FlowFinalOutputContractPublic | None,
+    result_files: Sequence[FlowRunStepResultFile],
+) -> FlowRunResultPublic | None:
+    if run.status is not FlowRunStatus.COMPLETED:
+        return None
+    if final_output is None:
+        raise FlowRunResultProjectionError(
+            "Completed run has no pinned final-output contract."
+        )
+
+    if final_output.delivery is FlowOutputDelivery.OUTBOUND_HTTP:
+        return FlowRunOutboundHttpResultPublic(
+            kind="outbound_http",
+            delivery_status="delivered",
+        )
+
+    if final_output.delivery is FlowOutputDelivery.ARTIFACT:
+        final_files = [
+            result_file
+            for result_file in result_files
+            if result_file.step_id == final_output.step_id
+        ]
+        if not final_files:
+            raise FlowRunResultProjectionError(
+                "Completed artifact run has no current final-step artifact metadata."
+            )
+        return FlowRunArtifactResultPublic(kind="artifact", files=final_files)
+
+    payload = run.output_payload_json
+    if payload is None:
+        raise FlowRunResultProjectionError(
+            "Completed payload run has no terminal output payload."
+        )
+    if final_output.output_type is FlowOutputType.JSON:
+        if "structured" not in payload:
+            raise FlowRunResultProjectionError(
+                "Completed structured run has no structured terminal value."
+            )
+        return FlowRunStructuredResultPublic(
+            kind="structured",
+            value=payload["structured"],
+            output_contract=final_output.output_contract,
+        )
+    if final_output.output_type is FlowOutputType.TEXT:
+        try:
+            text = interpret_step_text(payload)
+        except StepOutputMetadataError as exc:
+            raise FlowRunResultProjectionError(
+                "Completed text run has malformed persisted text metadata."
+            ) from exc
+        if isinstance(text, FileBackedStepText):
+            matching_files = [
+                result_file
+                for result_file in result_files
+                if result_file.flow_run_id == run.id
+                and result_file.flow_id == run.flow_id
+                and result_file.tenant_id == run.tenant_id
+                and result_file.step_id == final_output.step_id
+                and result_file.file_id == text.file_id
+                and result_file.source == "generated_output"
+            ]
+            if len(matching_files) != 1:
+                raise FlowRunResultProjectionError(
+                    "Completed file-backed text run must have exactly one current "
+                    "final-step generated output file."
+                )
+            return FlowRunFileBackedTextResultPublic(
+                kind="file_backed_text",
+                preview=text.preview,
+                file=matching_files[0],
+            )
+        return FlowRunInlineTextResultPublic(kind="inline_text", text=text.text)
+    raise FlowRunResultProjectionError(
+        "Completed payload run has an unsupported published output type."
+    )
+
+
+def _project_step_diagnostics(
+    result: FlowStepResult,
+) -> list[FlowStepDiagnosticPublic]:
+    input_payload = result.input_payload_json
+    if not isinstance(input_payload, Mapping):
+        return []
+
+    raw_diagnostics_value = input_payload.get("diagnostics")
+    if not isinstance(raw_diagnostics_value, list):
+        return []
+    raw_diagnostics = cast(list[object], raw_diagnostics_value)
+
+    diagnostics: list[FlowStepDiagnosticPublic] = []
+    dropped_count = 0
+    trimmed_count = 0
+    error_types: list[str] = []
+    trimmed_keys: list[str] = []
+
+    for raw_item in raw_diagnostics:
+        if not isinstance(raw_item, Mapping):
+            dropped_count += 1
+            if len(error_types) < _MAX_LOGGED_DIAGNOSTIC_ERROR_TYPES:
+                error_types.append("not_mapping")
+            continue
+        raw_mapping = cast(Mapping[Any, Any], raw_item)
+        public_payload, extra_keys = _split_public_step_diagnostic_payload(raw_mapping)
+        if extra_keys:
+            trimmed_count += 1
+            for key in extra_keys:
+                if len(trimmed_keys) >= _MAX_LOGGED_DIAGNOSTIC_EXTRA_KEYS:
+                    break
+                trimmed_keys.append(key)
+        try:
+            diagnostics.append(FlowStepDiagnosticPublic.model_validate(public_payload))
+        except ValidationError as exc:
+            dropped_count += 1
+            if len(error_types) < _MAX_LOGGED_DIAGNOSTIC_ERROR_TYPES:
+                error_type = "validation_error"
+                errors = exc.errors()
+                if errors:
+                    error_type = errors[0].get("type", "validation_error")
+                error_types.append(error_type)
+
+    if trimmed_count:
+        logger.warning(
+            "flow_step_diagnostics_projection_trimmed",
+            extra={
+                "run_id": str(result.flow_run_id),
+                "step_id": str(result.step_id),
+                "trimmed_count": trimmed_count,
+                "trimmed_keys": trimmed_keys,
+            },
+        )
+
+    if dropped_count:
+        logger.warning(
+            "flow_step_diagnostics_projection_dropped",
+            extra={
+                "run_id": str(result.flow_run_id),
+                "step_id": str(result.step_id),
+                "dropped_count": dropped_count,
+                "error_types": error_types,
+            },
+        )
+
+    return diagnostics
+
+
+def _split_public_step_diagnostic_payload(
+    raw_item: Mapping[Any, Any],
+) -> tuple[dict[str, Any], list[str]]:
+    public_payload: dict[str, Any] = {}
+    extra_keys: list[str] = []
+    for key, value in raw_item.items():
+        if isinstance(key, str) and key in _PUBLIC_STEP_DIAGNOSTIC_FIELDS:
+            public_payload[key] = value
+        else:
+            extra_keys.append(str(key))
+    return public_payload, extra_keys

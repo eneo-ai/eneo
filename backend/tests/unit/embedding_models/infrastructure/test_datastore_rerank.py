@@ -55,7 +55,7 @@ def _datastore(results: list[InfoBlobChunkInDBWithScore]) -> Datastore:
     embeddings = AsyncMock()
     embeddings.get_embedding_for_query = AsyncMock(return_value=[0.1, 0.2])
     return Datastore(
-        user=MagicMock(),
+        tenant_id=TEST_UUID,
         info_blob_chunk_repo=repo,
         create_embeddings_service=embeddings,
     )

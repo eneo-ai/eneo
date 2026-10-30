@@ -32,6 +32,15 @@ class Permission(str, Enum):
     INTEGRATIONS = "integrations"
     SHARED_SPACES = "shared_spaces"
     API_KEYS = "api_keys"
+    FLOWS = "flows"
+    FLOWS_VIEW = "flows_view"
+    FLOWS_RUN = "flows_run"
+    FLOWS_MANAGE = "flows_manage"
+    FLOWS_TRACE = "flows_trace"
+    # Gallring (retention deletion). Explicit per-role grants, never implied by
+    # admin or another grant; one person may hold both (separation of duties).
+    RETENTION_MANAGE = "retention_manage"
+    RETENTION_HOLDS = "retention_holds"
     STORAGE = "storage"
     MODULES = "modules"
     ASSISTANT_DEBUG = "assistant_debug"
@@ -46,6 +55,41 @@ class Permission(str, Enum):
     COMPUTE = "compute"
 
 
+_FLOW_PERMISSION_ALIASES: dict[Permission, tuple[Permission, ...]] = {
+    # Existing tenants may still carry the pre-granular `flows` grant in role
+    # rows. Keep the compatibility rule centralized here so routers and
+    # services can require the explicit permission they actually need.
+    Permission.FLOWS_VIEW: (
+        Permission.FLOWS_VIEW,
+        Permission.FLOWS_RUN,
+        Permission.FLOWS_MANAGE,
+        Permission.FLOWS,
+    ),
+    Permission.FLOWS_RUN: (
+        Permission.FLOWS_RUN,
+        Permission.FLOWS_MANAGE,
+        Permission.FLOWS,
+    ),
+    Permission.FLOWS_MANAGE: (
+        Permission.FLOWS_MANAGE,
+        Permission.FLOWS,
+    ),
+    Permission.FLOWS_TRACE: (
+        Permission.FLOWS_TRACE,
+        Permission.FLOWS,
+    ),
+}
+
+
+def has_permission(
+    permissions: list[Permission] | tuple[Permission, ...] | set[Permission],
+    permission: Permission,
+) -> bool:
+    effective_permissions = _FLOW_PERMISSION_ALIASES.get(permission, (permission,))
+    permission_set = set(permissions)
+    return any(candidate in permission_set for candidate in effective_permissions)
+
+
 def validate_permissions(permission: Permission) -> Callable[[_F], _F]:
     """This decorator can only be used on class methods
     where a user exists in the `self`.
@@ -53,7 +97,7 @@ def validate_permissions(permission: Permission) -> Callable[[_F], _F]:
 
     def _validate(func: _F) -> _F:
         async def _inner(self: Any, *args: Any, **kwargs: Any) -> Any:
-            if permission not in self.user.permissions:
+            if not has_permission(self.user.permissions, permission):
                 raise UnauthorizedException(
                     f"Need permission {permission.value} in order to access"
                 )
@@ -66,7 +110,7 @@ def validate_permissions(permission: Permission) -> Callable[[_F], _F]:
 
 
 def validate_permission(user: UserInDB, permission: Permission):
-    if permission not in user.permissions:
+    if not has_permission(user.permissions, permission):
         raise UnauthorizedException(
             f"Need permission {permission.value} in order to access"
         )

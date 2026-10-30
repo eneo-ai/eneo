@@ -71,9 +71,13 @@ export type SessionData = {
 };
 
 export type TokenUsageData = {
+  /** Summed over every provider request in the turn (billing). */
   prompt_tokens: number;
   completion_tokens: number;
   turn_tokens: number;
+  /** The final provider request only: what the context window holds. */
+  context_prompt_tokens?: number;
+  context_completion_tokens?: number;
 };
 
 export type ToolCallInfo = {
@@ -124,6 +128,8 @@ export type EneoToolMetadata = {
   result_status?: string | null;
   /** History only: the files the call produced (live: the `file` parts' `tool_call_id`). */
   generated_file_ids?: string[] | null;
+  /** What a call on one of Eneo's own servers returned as data (a flow run's id); null for others. */
+  structured_content?: Record<string, unknown> | null;
 };
 
 /**
@@ -165,7 +171,18 @@ export type EneoMessageMetadata = {
   generatedFiles?: Schema<"FilePublic">[];
   webSearchReferences?: { id: string; title: string; url: string }[];
   mcpToolReferences?: Schema<"McpToolReferencePublic">[];
-  tokens?: { prompt?: number | null; completion?: number | null };
+  /**
+   * `prompt`/`completion` sum every provider request in the turn (billing);
+   * `contextPrompt`/`contextCompletion` are the final request alone, which is
+   * what the context-usage meter shows. Null on rows saved before they were
+   * recorded.
+   */
+  tokens?: {
+    prompt?: number | null;
+    completion?: number | null;
+    contextPrompt?: number | null;
+    contextCompletion?: number | null;
+  };
   completionModel?: CompletionModelInfo | null;
   /** Group chats: which member assistant answered this message. */
   answeringAssistant?: { id: string; handle: string } | null;

@@ -53,7 +53,7 @@ describe("toAppError", () => {
       toAppError(backendError(422, undefined, hostileHeaders), { status: 500, message: "boom" })
     ).toEqual({
       status: 422,
-      message: "A validation error occured.",
+      message: "A validation error occurred.",
       code: 9046,
       traceId: undefined
     });

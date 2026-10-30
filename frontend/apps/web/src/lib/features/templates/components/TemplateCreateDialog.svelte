@@ -8,6 +8,10 @@
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import {
+    hasAccessibleCompletionModel,
+    hasAccessibleTranscriptionModel
+  } from "$lib/features/spaces/spaceModelAvailability";
   import { getTemplateController } from "$lib/features/templates/TemplateController";
   import TemplateSelector from "./TemplateSelector.svelte";
   import TemplateWizard from "./wizard/TemplateWizard.svelte";
@@ -61,10 +65,11 @@
   const missingModelWarnings = $derived.by(() => {
     if (kind !== "app") return [];
     const warnings: string[] = [];
-    if ($currentSpace.completion_models.length < 1) {
+    // A model the user cannot access does not make the space ready.
+    if (!hasAccessibleCompletionModel($currentSpace.completion_models)) {
       warnings.push(m.completion_models_warning_app());
     }
-    if ($currentSpace.transcription_models.length < 1) {
+    if (!hasAccessibleTranscriptionModel($currentSpace.transcription_models)) {
       warnings.push(m.transcription_models_warning_app());
     }
     return warnings;

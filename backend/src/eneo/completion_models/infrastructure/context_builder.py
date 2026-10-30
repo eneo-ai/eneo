@@ -11,6 +11,8 @@ from typing_extensions import override
 from eneo.ai_models.completion_models.completion_model import (
     Context,
     FunctionDefinition,
+    KnowledgeTrace,
+    KnowledgeTraceGroup,
     Message,
     MessageToolCall,
     function_definition_to_tool,
@@ -382,6 +384,22 @@ class ChunkGrouping:
     )
 
 
+# Not frozen: contextlib assigns __traceback__ when an exception leaves a
+# generator context manager, which a frozen dataclass refuses. eq=False keeps
+# Exception's identity equality and hashing.
+@dataclass(eq=False)
+class ContextWindowExceededError(Exception):
+    estimated_tokens: int
+    max_tokens: int
+
+    def __str__(self) -> str:
+        return (
+            "Estimated context exceeds configured model limit: "
+            f"{self.estimated_tokens} estimated tokens vs "
+            f"{self.max_tokens} configured tokens."
+        )
+
+
 class _Prompt:
     def __init__(
         self,
@@ -396,6 +414,7 @@ class _Prompt:
         self.knowledge_catalog: str | None = None
         self.attachments: str | None = None
         self._knowledge_tokens: int = 0
+        self._knowledge_trace: KnowledgeTrace | None = None
         self.version: int = version
         self.model_name: str = model_name
         self.has_tools: bool = has_tools
@@ -439,6 +458,14 @@ class _Prompt:
             components.append(self.attachments)
 
         return "\n\n".join(components)
+
+    @staticmethod
+    def _safe_title(value: object) -> str:
+        return value if isinstance(value, str) else ""
+
+    @staticmethod
+    def _safe_chunk_no(value: object) -> int:
+        return value if isinstance(value, int) and not isinstance(value, bool) else 0
 
     @staticmethod
     def _common_overlap(text1: str, text2: str) -> int:
@@ -556,12 +583,17 @@ class _Prompt:
             used_tokens = count_tokens(rendered, self.model_name)
             if used_tokens <= max_tokens:
                 self._knowledge_tokens = used_tokens
-                return rendered
+                return self._render_reconstructed_chunks(selected, raw_chunks=chunks)
             selected.pop()
         self._knowledge_tokens = 0
-        return ""
+        return self._render_reconstructed_chunks([], raw_chunks=chunks)
 
-    def _render_reconstructed_chunks(self, chunks: list[_InfoBlobChunkLike]) -> str:
+    def _render_reconstructed_chunks(
+        self,
+        chunks: list[_InfoBlobChunkLike],
+        *,
+        raw_chunks: list[_InfoBlobChunkLike] | None = None,
+    ) -> str:
         # Create a dictionary to store chunk indices
         chunk_indices = {id(chunk): i for i, chunk in enumerate(chunks)}
 
@@ -599,9 +631,9 @@ class _Prompt:
 
                 chunk_grouping = ChunkGrouping(
                     id=doc_id,
-                    title=group[0].info_blob_title or "",
-                    start_chunk=group[0].chunk_no,
-                    end_chunk=group[-1].chunk_no,
+                    title=self._safe_title(group[0].info_blob_title),
+                    start_chunk=self._safe_chunk_no(group[0].chunk_no),
+                    end_chunk=self._safe_chunk_no(group[-1].chunk_no),
                     content=full_text,
                     chunk_count=len(group),
                     source_metadata=list(group[0].info_blob_source_metadata),
@@ -618,6 +650,47 @@ class _Prompt:
             grouping.relevance_score = grouping_scores[id(grouping)]
 
         chunk_groupings.sort(key=lambda x: x.relevance_score, reverse=True)
+
+        if raw_chunks is not None:
+            raw_source_ids = list(
+                dict.fromkeys(str(chunk.info_blob_id) for chunk in raw_chunks)
+            )
+            included_source_ids = list(
+                dict.fromkeys(str(grouping.id) for grouping in chunk_groupings)
+            )
+            not_included_source_ids = [
+                source_id
+                for source_id in raw_source_ids
+                if source_id not in included_source_ids
+            ]
+            self._knowledge_trace = KnowledgeTrace(
+                version=self.version,
+                selection_basis="semantic_search_ranked_chunks_grouped_by_source",
+                raw_source_count=len(raw_source_ids),
+                raw_chunk_count=len(raw_chunks),
+                included_source_count=len(included_source_ids),
+                not_included_source_count=len(not_included_source_ids),
+                included_chunk_count=sum(
+                    grouping.chunk_count for grouping in chunk_groupings
+                ),
+                knowledge_tokens=self._knowledge_tokens,
+                truncated_by_token_budget=len(chunks) < len(raw_chunks)
+                or bool(not_included_source_ids),
+                included_source_ids=included_source_ids,
+                not_included_source_ids=not_included_source_ids,
+                included_groups=[
+                    KnowledgeTraceGroup(
+                        source_id=str(grouping.id),
+                        source_id_short=str(grouping.id)[:8],
+                        source_title=grouping.title,
+                        start_chunk=grouping.start_chunk,
+                        end_chunk=grouping.end_chunk,
+                        chunk_count=grouping.chunk_count,
+                        relevance_score=grouping.relevance_score,
+                    )
+                    for grouping in chunk_groupings
+                ],
+            )
 
         if self.version == 1:
             return "\n".join(
@@ -685,6 +758,9 @@ class _Prompt:
 
     def get_tokens_of_knowledge(self) -> int:
         return self._knowledge_tokens
+
+    def get_knowledge_trace(self) -> KnowledgeTrace | None:
+        return self._knowledge_trace
 
 
 class ContextBuilder:
@@ -841,11 +917,27 @@ class ContextBuilder:
         mcp_tools: list[FunctionDefinition] | None = None,
         extra_tool_dicts: list[dict[str, Any]] | None = None,
         vision: bool = True,
+        reject_over_limit: bool = False,
         file_reference_urls: dict[UUID, str] | None = None,
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
         url_only_prompt_file_ids: Collection[UUID] = (),
+        account_tokens: bool = True,
     ) -> Context:
+        """Build the request context and, by default, its token estimate.
+
+        The estimate sizes the history and knowledge budgets and the
+        over-limit check. A caller that sends neither and measures the final
+        request itself may pass account_tokens=False: the context is built the
+        same, its token_count is left at 0, and no over-limit warning is logged.
+        """
+        if not account_tokens and (
+            session is not None or info_blob_chunks or reject_over_limit
+        ):
+            raise ValueError(
+                "History, knowledge and over-limit rejection need the token "
+                "estimate; only a request without them can skip it."
+            )
         if files is None:
             files = []
         if prompt_files is None:
@@ -858,9 +950,7 @@ class ContextBuilder:
             mcp_tools = []
         tokens_used = 0
 
-        # Create the input, count the tokens. The current question is sent as
-        # a user message carrying both the text and any attached images, so it
-        # is counted in exactly that shape.
+        # Create the input; its tokens are counted with the prompt below.
         _input_string = self._build_input(
             input_str=input_str,
             files=files,
@@ -893,14 +983,10 @@ class ContextBuilder:
                 if file.id not in seen_image_ids
                 and file.parent_file_id not in url_only_prompt_file_ids
             ]
-        tokens_used_input = count_message_tokens(
-            [{"role": "user", "content": _input_string}], model_name
-        ) + _image_files_tokens(current_images, model_name)
-        tokens_used += tokens_used_input
 
-        # Tool definitions occupy context space too — count them up front so
-        # the history and knowledge budgets shrink accordingly. extra_tool_dicts
-        # carries definitions merged later by the adapter (MCP proxy tools).
+        # Tool definitions occupy context space too, so they are counted with
+        # the input and prompt below. extra_tool_dicts carries definitions
+        # merged later by the adapter (MCP proxy tools).
         functions: list[FunctionDefinition] = list(mcp_tools)
 
         tool_dicts: list[dict[str, Any]] = [
@@ -908,10 +994,8 @@ class ContextBuilder:
         ]
         if extra_tool_dicts:
             tool_dicts.extend(extra_tool_dicts)
-        tokens_used += count_tool_tokens(tool_dicts, model_name)
 
         # Create the necessary parts of the prompt.
-        # Add the tokens used.
         _prompt = _Prompt(
             version=version,
             model_name=model_name,
@@ -932,7 +1016,20 @@ class ContextBuilder:
         # Tool-mode knowledge: a token-cheap catalog of searchable sources; the
         # content itself stays behind the knowledge-MCP search tool.
         _prompt.add_knowledge_catalog(knowledge_catalog)
-        tokens_used += _prompt.num_tokens
+
+        # The required parts are counted up front so the history and knowledge
+        # budgets shrink accordingly. The current question is sent as a user
+        # message carrying both the text and any attached images, so it is
+        # counted in exactly that shape.
+        if account_tokens:
+            tokens_used += (
+                count_message_tokens(
+                    [{"role": "user", "content": _input_string}], model_name
+                )
+                + _image_files_tokens(current_images, model_name)
+                + count_tool_tokens(tool_dicts, model_name)
+                + _prompt.num_tokens
+            )
 
         # Create the messages. When knowledge chunks are present, reserve 80%
         # for knowledge and cap history to 20%. When there are no chunks the
@@ -959,6 +1056,18 @@ class ContextBuilder:
         # and may accept it. Knowledge below receives no remaining budget, while
         # the required prompt/input is still sent so the provider can decide.
         if tokens_used > max_tokens:
+            if reject_over_limit:
+                logger.warning(
+                    "Estimated context exceeds configured model limit: "
+                    "%d estimated tokens vs %d configured tokens; rejecting "
+                    "before provider call",
+                    tokens_used,
+                    max_tokens,
+                )
+                raise ContextWindowExceededError(
+                    estimated_tokens=tokens_used,
+                    max_tokens=max_tokens,
+                )
             logger.warning(
                 "Estimated context exceeds configured model limit: "
                 "%d estimated tokens vs %d configured tokens; sending request "
@@ -980,4 +1089,5 @@ class ContextBuilder:
             images=current_images,
             token_count=tokens_used,
             function_definitions=functions,
+            knowledge_trace=_prompt.get_knowledge_trace(),
         )

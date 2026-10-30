@@ -1,0 +1,560 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass
+from enum import Enum
+from typing import Literal, cast
+from uuid import UUID
+
+import litellm
+
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+    reasoning_effort_options_from_model_info,
+)
+from eneo.main.exceptions import (
+    BadRequestException,
+    ProviderRejectedRequestException,
+)
+from eneo.main.logging import get_logger
+from eneo.tenants.provider_field_config import get_canonical_provider_type
+
+logger = get_logger(__name__)
+
+
+class StructuredOutputMode(str, Enum):
+    STRICT_JSON_SCHEMA = "strict_json_schema"
+    JSON_OBJECT = "json_object"
+    PROMPT_WITH_PYDANTIC_VALIDATION = "prompt_with_pydantic_validation"
+
+
+class StructuredOutputDecisionSource(str, Enum):
+    LITELLM_RESPONSE_SCHEMA = "litellm_response_schema"
+    LITELLM_RESPONSE_FORMAT = "litellm_response_format"
+    NO_PROVIDER_SUPPORT = "no_provider_support"
+
+
+@dataclass(frozen=True, slots=True)
+class StructuredOutputCapabilityDecision:
+    mode: StructuredOutputMode
+    source: StructuredOutputDecisionSource
+    supports_response_schema: bool | None
+    supports_response_format: bool | None
+
+    def __post_init__(self) -> None:
+        if self.source is StructuredOutputDecisionSource.LITELLM_RESPONSE_SCHEMA:
+            if (
+                self.mode is not StructuredOutputMode.STRICT_JSON_SCHEMA
+                or self.supports_response_schema is not True
+            ):
+                raise ValueError("response-schema decisions must use strict JSON mode")
+        elif self.source is StructuredOutputDecisionSource.LITELLM_RESPONSE_FORMAT:
+            if (
+                self.mode is not StructuredOutputMode.JSON_OBJECT
+                or self.supports_response_schema is True
+                or self.supports_response_format is not True
+            ):
+                raise ValueError("response-format decisions must use JSON object mode")
+        elif self.source is StructuredOutputDecisionSource.NO_PROVIDER_SUPPORT:
+            if (
+                self.mode is not StructuredOutputMode.PROMPT_WITH_PYDANTIC_VALIDATION
+                or self.supports_response_schema is True
+                or self.supports_response_format is True
+            ):
+                raise ValueError("unsupported decisions must use prompt validation")
+
+
+def resolve_structured_output_capability(
+    *,
+    litellm_model: str,
+    provider_type: str,
+) -> StructuredOutputCapabilityDecision:
+    supports_schema = _safe_supports_response_schema(
+        litellm_model=litellm_model,
+        provider_type=provider_type,
+    )
+    supports_format = _safe_supports_response_format(
+        litellm_model=litellm_model,
+        provider_type=provider_type,
+    )
+
+    if supports_schema is True:
+        return StructuredOutputCapabilityDecision(
+            mode=StructuredOutputMode.STRICT_JSON_SCHEMA,
+            source=StructuredOutputDecisionSource.LITELLM_RESPONSE_SCHEMA,
+            supports_response_schema=supports_schema,
+            supports_response_format=supports_format,
+        )
+    if supports_format is True:
+        return StructuredOutputCapabilityDecision(
+            mode=StructuredOutputMode.JSON_OBJECT,
+            source=StructuredOutputDecisionSource.LITELLM_RESPONSE_FORMAT,
+            supports_response_schema=supports_schema,
+            supports_response_format=supports_format,
+        )
+    return unsupported_structured_output_decision(
+        supports_response_schema=supports_schema,
+        supports_response_format=supports_format,
+    )
+
+
+def unsupported_structured_output_decision(
+    *,
+    supports_response_schema: bool | None = None,
+    supports_response_format: bool | None = None,
+) -> StructuredOutputCapabilityDecision:
+    return StructuredOutputCapabilityDecision(
+        mode=StructuredOutputMode.PROMPT_WITH_PYDANTIC_VALIDATION,
+        source=StructuredOutputDecisionSource.NO_PROVIDER_SUPPORT,
+        supports_response_schema=supports_response_schema,
+        supports_response_format=supports_response_format,
+    )
+
+
+def schema_response_format(
+    *,
+    litellm_model: str,
+    provider_type: str,
+    schema: Mapping[str, object],
+    name: str,
+) -> dict[str, object] | None:
+    """Build a native schema request without rewriting the validation contract.
+
+    Unsupported grammar features must not turn previously usable JSON requests
+    into 400s. vLLM also constrains models absent from LiteLLM's catalog.
+    """
+    provider_type = get_canonical_provider_type(provider_type)
+    if not _common_schema_subset(schema):
+        return None
+    if provider_type != "hosted_vllm":
+        if schema.get("type") != "object":
+            return None
+        if (
+            _safe_supports_response_schema(
+                litellm_model=litellm_model, provider_type=provider_type
+            )
+            is not True
+        ):
+            return None
+    return {
+        "type": "json_schema",
+        "json_schema": {
+            "name": name,
+            # Authored schemas need not satisfy OpenAI's stricter schema subset.
+            # The caller must still validate against the complete contract.
+            "strict": False,
+            "schema": deepcopy(dict(schema)),
+        },
+    }
+
+
+_COMMON_SCHEMA_KEYWORDS = frozenset(
+    {
+        "type",
+        "properties",
+        "required",
+        "additionalProperties",
+        "items",
+        "enum",
+        "const",
+        "minLength",
+        "maxLength",
+        "minimum",
+        "maximum",
+        "exclusiveMinimum",
+        "exclusiveMaximum",
+        "minItems",
+        "maxItems",
+        "title",
+        "description",
+        "$schema",
+        "$id",
+    }
+)
+
+
+def _common_schema_subset(schema: Mapping[str, object]) -> bool:
+    if schema.keys() - _COMMON_SCHEMA_KEYWORDS:
+        return False
+    properties = schema.get("properties", {})
+    if not isinstance(properties, Mapping):
+        return False
+    children = list(cast(Mapping[str, object], properties).values())
+    for keyword in ("items", "additionalProperties"):
+        child = schema.get(keyword)
+        if child is not None and not isinstance(child, bool):
+            children.append(child)
+    return all(
+        isinstance(child, Mapping)
+        and _common_schema_subset(cast(Mapping[str, object], child))
+        for child in children
+    )
+
+
+def get_supported_openai_params(
+    *,
+    model: str,
+    custom_llm_provider: str | None = None,
+) -> tuple[str, ...] | None:
+    params = cast(
+        list[str] | None,
+        getattr(litellm, "get_supported_openai_params")(
+            model=model,
+            custom_llm_provider=custom_llm_provider,
+        ),
+    )
+    return tuple(params) if params is not None else None
+
+
+def resolve_reasoning_effort_options(
+    *,
+    litellm_model: str,
+    provider_type: str,
+) -> tuple[str, ...]:
+    """Return the reasoning levels LiteLLM confirms for one model route."""
+    try:
+        supported_params = get_supported_openai_params(
+            model=litellm_model,
+            custom_llm_provider=provider_type,
+        )
+    except Exception:
+        logger.warning(
+            "LiteLLM reasoning parameter metadata unavailable",
+            exc_info=True,
+            extra={
+                "litellm_model": litellm_model,
+                "provider_type": provider_type,
+            },
+        )
+        return ()
+
+    if supported_params is None or "reasoning_effort" not in supported_params:
+        return ()
+
+    try:
+        model_info = cast(
+            Mapping[str, object],
+            getattr(litellm, "get_model_info")(
+                model=litellm_model,
+                custom_llm_provider=provider_type,
+            ),
+        )
+    except Exception:
+        logger.warning(
+            "LiteLLM reasoning level metadata unavailable",
+            exc_info=True,
+            extra={
+                "litellm_model": litellm_model,
+                "provider_type": provider_type,
+            },
+        )
+        return ()
+
+    return tuple(reasoning_effort_options_from_model_info(model_info))
+
+
+def enrich_reasoning_effort_capability(
+    *,
+    supported_model_kwargs: SupportedModelKwargs,
+    has_capability_snapshot: bool,
+    reasoning: bool,
+    litellm_model: str,
+    provider_type: str | None,
+) -> SupportedModelKwargs:
+    """Fill a missing reasoning snapshot from credential-free LiteLLM metadata."""
+    if has_capability_snapshot or not reasoning or not provider_type:
+        return supported_model_kwargs
+
+    reasoning_options = resolve_reasoning_effort_options(
+        litellm_model=litellm_model,
+        provider_type=provider_type,
+    )
+    if not reasoning_options:
+        return supported_model_kwargs
+
+    return supported_model_kwargs.model_copy(
+        update={
+            "reasoning_effort": ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=list(reasoning_options),
+            )
+        }
+    )
+
+
+def selectable_reasoning_effort_options(
+    capability: ModelKwargCapability,
+    *,
+    max_length: int,
+) -> tuple[str, ...]:
+    """Return the exact, request-safe values exposed by a select capability."""
+    if not capability.supported or capability.control != "select":
+        return ()
+
+    return tuple(
+        option
+        for option in dict.fromkeys(capability.options or ())
+        if option and option == option.strip() and len(option) <= max_length
+    )
+
+
+def filter_request_model_kwargs(
+    model_kwargs: ModelKwargs, supported: SupportedModelKwargs
+) -> ModelKwargs:
+    """A request's own settings for a route.
+
+    An explicit reasoning effort is kept for route validation. A value for a
+    sampling control the model offers, but outside its advertised range or
+    options, is refused. A sampling control the model does not offer at all
+    is left out, as before. Stored settings go through
+    `stored_request_model_kwargs` first, so only values a request supplies
+    itself can be refused here.
+    """
+    kept: dict[str, object] = {}
+    for name, value in model_kwargs.model_dump(exclude_none=True).items():
+        if name == "reasoning_effort" or name not in SupportedModelKwargs.model_fields:
+            kept[name] = value
+            continue
+        capability: ModelKwargCapability = getattr(supported, name)
+        if capability.accepts(value):
+            kept[name] = value
+        elif capability.supported:
+            raise ProviderRejectedRequestException(
+                f"The selected model does not accept this {name} value.",
+                code="provider_rejected_request",
+                details={
+                    "reason": "model_setting_not_offered",
+                    "parameter": name,
+                    "retryable": False,
+                },
+            )
+    return ModelKwargs.model_validate(kept)
+
+
+def stored_request_model_kwargs(
+    stored: ModelKwargs,
+    supported: SupportedModelKwargs,
+    *,
+    completion_model_id: UUID | None,
+) -> ModelKwargs:
+    """What an assistant's, app's or flow step's stored settings send.
+
+    Stored settings are kept as saved; a request sends only what the model
+    accepts now, because the model's capability can change after a setting
+    was saved. A stored value it no longer accepts is left out instead of
+    failing the run, and logged once per request when it is a reasoning
+    effort (an option removed, the reasoning flag turned off, no capability
+    recorded) or a value outside a control the model does offer (a number
+    outside the advertised range). Values a request supplies itself use
+    `filter_request_model_kwargs`, which keeps an explicit effort for request
+    validation.
+    """
+    sendable = stored.filter_unsupported(supported)
+    omitted = {
+        name: value
+        for name, value in stored.model_dump(exclude_none=True).items()
+        if name in SupportedModelKwargs.model_fields
+        and value != ""
+        and getattr(sendable, name) is None
+        and (name == "reasoning_effort" or getattr(supported, name).supported)
+    }
+    if omitted:
+        logger.warning(
+            "Stored model settings are not offered by the model; omitting them",
+            extra={
+                "completion_model_id": str(completion_model_id)
+                if completion_model_id
+                else None,
+                "omitted_settings": omitted,
+                "offered_reasoning_efforts": list(
+                    supported.reasoning_effort.options or ()
+                ),
+            },
+        )
+    return sendable
+
+
+def validate_model_kwargs_update(
+    submitted: ModelKwargs,
+    supported: SupportedModelKwargs,
+    *,
+    stored: ModelKwargs | None,
+) -> None:
+    """Refuse an edit's model settings that the model does not offer.
+
+    `stored` is what is saved against the same model, or None when the edit
+    moves to another model. A value left as stored is the stored setting,
+    kept as saved and filtered when sent, so an editor can save other
+    settings next to one the model no longer offers; every value the edit
+    changes, and every value on another model, must be offered.
+    """
+    checked = submitted
+    if stored is not None:
+        checked = ModelKwargs.model_validate(
+            {
+                name: value
+                for name, value in submitted.model_dump().items()
+                if value != getattr(stored, name)
+            }
+        )
+    if checked.filter_unsupported(supported) != checked:
+        raise BadRequestException(
+            "Model settings contain a value unsupported by the selected model"
+        )
+
+
+def route_takes_reasoning_effort(*, litellm_model: str, provider_type: str) -> bool:
+    """Whether LiteLLM knows this route takes a reasoning effort at all."""
+    supported_params = get_supported_openai_params(
+        model=litellm_model.removeprefix(f"{provider_type}/"),
+        custom_llm_provider=provider_type,
+    )
+    return supported_params is not None and "reasoning_effort" in supported_params
+
+
+def route_sends_reasoning_effort(
+    *,
+    litellm_model: str,
+    provider_type: str,
+    effort: str,
+) -> bool:
+    """Whether `normalize_reasoning_effort` sends `effort` on this route.
+
+    A level a route offers can still be refused here: LiteLLM does not know
+    the route takes a reasoning effort, or `none` is not a level it confirms.
+    """
+    if not route_takes_reasoning_effort(
+        litellm_model=litellm_model, provider_type=provider_type
+    ):
+        return False
+    return effort != "none" or effort in resolve_reasoning_effort_options(
+        litellm_model=litellm_model,
+        provider_type=provider_type,
+    )
+
+
+def normalize_reasoning_effort(
+    *,
+    litellm_model: str,
+    provider_type: str,
+    model_kwargs: Mapping[str, object],
+    openai_absent_effort: Literal["low"] | None,
+) -> dict[str, object]:
+    """Return explicit provider-safe reasoning controls for one request.
+
+    OpenAI reasoning models apply their own default effort when none is sent.
+    A caller with its own policy for that case passes it as
+    `openai_absent_effort`; None leaves the effort out, so the provider's
+    default applies. This transport policy is intentionally independent of the
+    persisted user-facing reasoning controls. Other providers use absence as
+    the off signal. Parameter-capability errors propagate before provider I/O.
+    """
+
+    normalized = dict(model_kwargs)
+    requested_effort = normalized.get("reasoning_effort")
+    if requested_effort not in (None, ""):
+        if not route_sends_reasoning_effort(
+            litellm_model=litellm_model,
+            provider_type=provider_type,
+            effort=str(requested_effort),
+        ):
+            raise ProviderRejectedRequestException(
+                "The selected model route cannot honour the requested reasoning effort.",
+                code="provider_rejected_request",
+                details={"reason": "reasoning_effort_unsupported", "retryable": False},
+            )
+        return normalized
+
+    normalized.pop("reasoning_effort", None)
+    if openai_absent_effort is not None and (
+        route_takes_reasoning_effort(
+            litellm_model=litellm_model, provider_type=provider_type
+        )
+        and provider_type == "openai"
+    ):
+        normalized["reasoning_effort"] = openai_absent_effort
+    return normalized
+
+
+def supports_response_schema(
+    *,
+    model: str,
+    custom_llm_provider: str | None = None,
+) -> bool:
+    return bool(
+        getattr(litellm, "supports_response_schema")(
+            model=model,
+            custom_llm_provider=custom_llm_provider,
+        )
+    )
+
+
+def _safe_supports_response_schema(
+    *,
+    litellm_model: str,
+    provider_type: str,
+) -> bool | None:
+    try:
+        return supports_response_schema(
+            model=litellm_model,
+            custom_llm_provider=provider_type,
+        )
+    except Exception:
+        logger.warning(
+            "LiteLLM response schema capability check failed",
+            exc_info=True,
+            extra={
+                "litellm_model": litellm_model,
+                "provider_type": provider_type,
+            },
+        )
+        return None
+
+
+def _safe_supports_response_format(
+    *,
+    litellm_model: str,
+    provider_type: str,
+) -> bool | None:
+    try:
+        supported_params = get_supported_openai_params(
+            model=litellm_model,
+            custom_llm_provider=provider_type,
+        )
+    except Exception:
+        logger.warning(
+            "LiteLLM response format capability check failed",
+            exc_info=True,
+            extra={
+                "litellm_model": litellm_model,
+                "provider_type": provider_type,
+            },
+        )
+        return None
+    if supported_params is None:
+        return None
+    return "response_format" in supported_params
+
+
+__all__ = [
+    "StructuredOutputCapabilityDecision",
+    "StructuredOutputDecisionSource",
+    "StructuredOutputMode",
+    "enrich_reasoning_effort_capability",
+    "get_supported_openai_params",
+    "normalize_reasoning_effort",
+    "resolve_reasoning_effort_options",
+    "resolve_structured_output_capability",
+    "route_sends_reasoning_effort",
+    "route_takes_reasoning_effort",
+    "schema_response_format",
+    "selectable_reasoning_effort_options",
+    "stored_request_model_kwargs",
+    "supports_response_schema",
+    "unsupported_structured_output_decision",
+    "validate_model_kwargs_update",
+]

@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, AsyncGenerator, Optional
+from collections.abc import Collection, Mapping, Sequence
+from dataclasses import dataclass, field, replace
+from typing import TYPE_CHECKING, Any, AsyncGenerator, Literal, Optional, TypeAlias
 from uuid import UUID
 
 import redis.asyncio as aioredis
@@ -11,16 +11,39 @@ from eneo.ai_models.completion_models.completion_model import (
     Completion,
     CompletionModel,
     CompletionModelResponse,
+    Context,
     ModelKwargs,
     ResponseType,
+    sends_strict_tool_schemas,
 )
 from eneo.audit.application.audit_metadata import AuditMetadata
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
-from eneo.authentication.signed_urls import build_signed_original_download_url
+from eneo.authentication.signed_urls import (
+    build_signed_original_download_url,
+    parse_file_reference_url,
+    verify_file_original_download_token,
+)
+from eneo.completion_models.domain.model_capacity import ModelCapacity
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
+)
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionRequestPackage,
+    CompletionRequestPreflight,
+)
 from eneo.completion_models.domain.skill_activation import SkillActivationRuntime
 from eneo.completion_models.infrastructure.adapters.base_adapter import ProviderInput
 from eneo.completion_models.infrastructure.context_builder import ContextBuilder
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputCapabilityDecision,
+    enrich_reasoning_effort_capability,
+    filter_request_model_kwargs,
+    normalize_reasoning_effort,
+    route_takes_reasoning_effort,
+)
 from eneo.files.file_models import File
 from eneo.files.file_reference import (
     file_reference_base_url,
@@ -46,6 +69,10 @@ from eneo.mcp_servers.infrastructure.proxy import (
     MCPProxySessionFactory,
 )
 from eneo.mcp_servers.infrastructure.tool_approval import get_approval_manager
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallReason,
+)
 from eneo.sessions.session import SessionInDB
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tokens.token_utils import log_token_count_drift
@@ -54,6 +81,10 @@ if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.infrastructure.adapters.base_adapter import (
         CompletionModelAdapter,
+    )
+    from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
+        TenantCompletionModel,
+        TenantModelAdapter,
     )
     from eneo.database.database import AsyncSession
     from eneo.document_templates.domain import DocumentTemplateReference
@@ -70,6 +101,239 @@ if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 logger = get_logger(__name__)
+
+
+CompletionEvidenceJsonType: TypeAlias = Literal[
+    "null",
+    "boolean",
+    "integer",
+    "number",
+    "string",
+    "array",
+    "object",
+    "unknown",
+]
+CompletionEvidenceFieldDomain: TypeAlias = Literal[
+    "credential",
+    "endpoint",
+    "provider_configuration",
+    "route",
+    "conversation",
+    "tool_contract",
+    "tool_selection",
+    "transport_control",
+    "output_limit",
+    "model_control",
+]
+CompletionCapabilityConstraint: TypeAlias = Literal["none", "range", "options"]
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionEvidenceField:
+    """Allowlisted request-shape fact that never carries the field value."""
+
+    name: str
+    json_type: CompletionEvidenceJsonType
+    domain: CompletionEvidenceFieldDomain
+
+    def to_log_value(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "json_type": self.json_type,
+            "domain": self.domain,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionModelKwargCapabilityEvidence:
+    name: str
+    supported: bool
+    json_type: CompletionEvidenceJsonType
+    constraint: CompletionCapabilityConstraint
+
+    def to_log_value(self) -> dict[str, object]:
+        return {
+            "name": self.name,
+            "supported": self.supported,
+            "json_type": self.json_type,
+            "constraint": self.constraint,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class CompletionRouteEvidence:
+    """Content-free projection of the effective selected completion route."""
+
+    configuration_fields: tuple[CompletionEvidenceField, ...]
+    unclassified_configuration_field_count: int
+    model_kwargs_capabilities: tuple[CompletionModelKwargCapabilityEvidence, ...]
+    supports_strict_tool_schema: bool = False
+
+    def to_log_value(self) -> dict[str, object]:
+        return {
+            "source": "resolved_completion_model_route",
+            "capability_posture": "trusted_effective",
+            "configuration_fields": [
+                field.to_log_value() for field in self.configuration_fields
+            ],
+            "unclassified_configuration_field_count": (
+                self.unclassified_configuration_field_count
+            ),
+            "model_kwargs_capabilities": [
+                capability.to_log_value()
+                for capability in self.model_kwargs_capabilities
+            ],
+            # Names the capability that shaped the outgoing tool contract, so a
+            # provider rejection can be read without the model row.
+            "supports_strict_tool_schema": self.supports_strict_tool_schema,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedCompletionModelRoute:
+    litellm_model: str
+    provider_type: str
+    litellm_kwargs: dict[str, object]
+    supported_model_kwargs: SupportedModelKwargs
+    requested_model_kwargs: ModelKwargs = field(default_factory=ModelKwargs)
+    resolved_model_id: UUID | None = None
+    # Effective strict-tool-schema capability of this route. Callers that build
+    # tool schemas read it here instead of inspecting the model or provider.
+    supports_strict_tool_schema: bool = False
+    # The model row's own reasoning flag; it holds without effort metadata
+    # (a deployment name LiteLLM does not know).
+    declares_reasoning: bool = False
+
+    def prepare_provider_kwargs(self) -> dict[str, object]:
+        provider_kwargs = {
+            key: value
+            for key, value in self.litellm_kwargs.items()
+            if key not in SupportedModelKwargs.model_fields
+        }
+        provider_kwargs.update(
+            filter_request_model_kwargs(
+                self.requested_model_kwargs, self.supported_model_kwargs
+            ).model_dump(exclude_none=True)
+        )
+        provider_kwargs = normalize_reasoning_effort(
+            litellm_model=self.litellm_model,
+            provider_type=self.provider_type,
+            model_kwargs=provider_kwargs,
+            # The Builder's "Standard" reasoning is the model's own default.
+            openai_absent_effort=None,
+        )
+        return provider_kwargs
+
+    def may_reason_by_default(self) -> bool:
+        """Whether the provider may think when the request sends no effort.
+
+        The row's reasoning flag, its effort capability and LiteLLM's route
+        metadata can each be missing while the model reasons at its own
+        default: a row flagged reasoning on a deployment name LiteLLM does not
+        know, or a row without the flag on a route LiteLLM sends an effort to
+        (OpenAI gpt-5-mini). Any source makes the route one that may think; a
+        failed metadata lookup is raised, not read as "no".
+        """
+        if self.declares_reasoning:
+            return True
+        return self.supported_model_kwargs.reasoning_effort.supported or (
+            route_takes_reasoning_effort(
+                litellm_model=self.litellm_model, provider_type=self.provider_type
+            )
+        )
+
+    def incident_evidence(self) -> CompletionRouteEvidence:
+        configuration_fields: list[CompletionEvidenceField] = []
+        unclassified_configuration_field_count = 0
+        for name in sorted(self.litellm_kwargs):
+            if name in SupportedModelKwargs.model_fields:
+                continue
+            domain = completion_evidence_field_domain(name)
+            if domain is None:
+                unclassified_configuration_field_count += 1
+                continue
+            configuration_fields.append(
+                CompletionEvidenceField(
+                    name=name,
+                    json_type=completion_evidence_json_type(self.litellm_kwargs[name]),
+                    domain=domain,
+                )
+            )
+
+        capabilities = self.supported_model_kwargs
+        capability_specs: tuple[
+            tuple[
+                str,
+                ModelKwargCapability,
+                CompletionEvidenceJsonType,
+            ],
+            ...,
+        ] = (
+            ("temperature", capabilities.temperature, "number"),
+            ("top_p", capabilities.top_p, "number"),
+            ("reasoning_effort", capabilities.reasoning_effort, "string"),
+            ("verbosity", capabilities.verbosity, "string"),
+            ("presence_penalty", capabilities.presence_penalty, "number"),
+            ("frequency_penalty", capabilities.frequency_penalty, "number"),
+            ("top_k", capabilities.top_k, "integer"),
+        )
+        model_kwargs_capabilities = tuple(
+            CompletionModelKwargCapabilityEvidence(
+                name=name,
+                supported=capability.supported,
+                json_type=json_type,
+                constraint=(
+                    "options"
+                    if capability.options is not None
+                    else "range"
+                    if capability.minimum is not None or capability.maximum is not None
+                    else "none"
+                ),
+            )
+            for name, capability, json_type in capability_specs
+        )
+        return CompletionRouteEvidence(
+            configuration_fields=tuple(configuration_fields),
+            unclassified_configuration_field_count=(
+                unclassified_configuration_field_count
+            ),
+            model_kwargs_capabilities=model_kwargs_capabilities,
+            supports_strict_tool_schema=self.supports_strict_tool_schema,
+        )
+
+
+def completion_evidence_json_type(value: object) -> CompletionEvidenceJsonType:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, int):
+        return "integer"
+    if isinstance(value, float):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, Mapping):
+        return "object"
+    if isinstance(value, Sequence) and not isinstance(value, bytes):
+        return "array"
+    return "unknown"
+
+
+def completion_evidence_field_domain(
+    name: str,
+) -> CompletionEvidenceFieldDomain | None:
+    if name in SupportedModelKwargs.model_fields:
+        return "model_control"
+    if name == "api_key":
+        return "credential"
+    if name == "api_base":
+        return "endpoint"
+    if name in {"api_version", "api_type", "organization", "response_format"}:
+        return "provider_configuration"
+    if name in {"drop_params", "num_retries", "max_retries"}:
+        return "transport_control"
+    return None
 
 
 async def _name_app_views(completion: Completion, mcp_proxy: Any | None) -> None:
@@ -137,7 +401,10 @@ class CompletionService:
         )
         super().__init__()
 
-    async def _get_adapter(self, model: CompletionModel) -> "CompletionModelAdapter":
+    async def _get_adapter(
+        self,
+        model: "TenantCompletionModel",
+    ) -> "TenantModelAdapter":
         """
         Get the adapter for the given model.
 
@@ -186,9 +453,9 @@ class CompletionService:
     def _create_tenant_model_adapter(
         self,
         *,
-        model: CompletionModel,
+        model: "TenantCompletionModel",
         provider: "ResolvedLiteLLMProvider",
-    ) -> "CompletionModelAdapter":
+    ) -> "TenantModelAdapter":
         from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import (
             TenantModelAdapter,
         )
@@ -216,6 +483,36 @@ class CompletionService:
                 self.encryption_service, self.user
             ),
         )
+
+    async def resolve_model_route(
+        self,
+        model: "TenantCompletionModel",
+    ) -> ResolvedCompletionModelRoute:
+        adapter = await self._get_adapter(model)
+        litellm_model, litellm_kwargs = adapter.resolve_litellm_params()
+        supported_model_kwargs = enrich_reasoning_effort_capability(
+            supported_model_kwargs=model.supported_model_kwargs,
+            has_capability_snapshot=model.model_kwargs_capabilities is not None,
+            reasoning=model.reasoning,
+            litellm_model=litellm_model,
+            provider_type=adapter.provider_type,
+        )
+        return ResolvedCompletionModelRoute(
+            litellm_model=litellm_model,
+            litellm_kwargs=litellm_kwargs,
+            supported_model_kwargs=supported_model_kwargs,
+            provider_type=adapter.provider_type,
+            resolved_model_id=model.id,
+            supports_strict_tool_schema=sends_strict_tool_schemas(model),
+            declares_reasoning=model.reasoning,
+        )
+
+    async def resolve_structured_output_capability(
+        self,
+        model: CompletionModel,
+    ) -> StructuredOutputCapabilityDecision:
+        adapter = await self._get_adapter(model)
+        return adapter.resolve_structured_output_capability()
 
     async def prepare_skill_activation_preflight(
         self,
@@ -296,6 +593,24 @@ class CompletionService:
                     tenant_id=self.tenant.id,
                 )
         return urls
+
+    @staticmethod
+    def _file_reference_urls_expiry(urls: dict[UUID, str]) -> int | None:
+        expiries: list[int] = []
+        for file_id, url in urls.items():
+            reference = parse_file_reference_url(url)
+            claims = (
+                verify_file_original_download_token(
+                    reference[1], expected_file_id=file_id
+                )
+                if reference is not None
+                else None
+            )
+            expiry = claims.get("expires_at") if claims is not None else None
+            if type(expiry) is not int:
+                return 0
+            expiries.append(expiry)
+        return min(expiries, default=None)
 
     async def _mint_generated_file_url(
         self, file: File, session: SessionInDB | None
@@ -426,6 +741,123 @@ class CompletionService:
                         continue
                 yield chunk
 
+    async def preflight_request(
+        self,
+        *,
+        model: CompletionModel,
+        text_input: str,
+        model_kwargs: ModelKwargs | None = None,
+        files: list[File] | None = None,
+        prompt: str = "",
+        prompt_files: list[File] | None = None,
+        transcription_inputs: list[str] | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        session: SessionInDB | None = None,
+        version: int = 1,
+        mcp_proxy: MCPProxySession | None = None,
+        skill_runtime: SkillActivationRuntime | None = None,
+        inline_file_text: bool = True,
+        knowledge_catalog: str = "",
+        capability_fallback_prompt: str | None = None,
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    ) -> CompletionRequestPreflight:
+        """Measure both dispatch forms using caller-supplied retrieval and tools.
+
+        The caller owns capability fallback instructions and any frozen MCP
+        catalogue. This method neither retrieves knowledge nor discovers tools.
+        """
+        adapter = await self._get_adapter(model)
+        model_route = adapter.get_model_route()
+        capacity = ModelCapacity(model.max_input_tokens, model.max_output_tokens)
+        max_tokens = capacity.require_input_tokens()
+        if model_kwargs is not None:
+            model_kwargs = filter_request_model_kwargs(
+                model_kwargs, model.supported_model_kwargs
+            )
+        history_files = [
+            file
+            for question in (session.questions if session else [])
+            for file in [*question.files, *question.generated_files]
+        ]
+        file_reference_urls = self._build_file_reference_urls(
+            (files or []) + history_files
+        )
+        # The context estimate only sizes the history and knowledge budgets.
+        # Without either, each package's measured input reserve is its count.
+        account_tokens = session is not None or bool(info_blob_chunks)
+
+        def package(
+            package_prompt: str, kwargs: ModelKwargs | None
+        ) -> CompletionRequestPackage:
+            context = self.context_builder.build_context(
+                input_str=text_input,
+                max_tokens=max_tokens,
+                model_name=model_route,
+                files=files or [],
+                prompt=package_prompt,
+                session=session,
+                info_blob_chunks=info_blob_chunks or [],
+                prompt_files=prompt_files or [],
+                transcription_inputs=transcription_inputs or [],
+                version=version,
+                mcp_tools=(
+                    [skill_runtime.tool_definition]
+                    if skill_runtime is not None
+                    and skill_runtime.tool_definition is not None
+                    else None
+                ),
+                knowledge_catalog=knowledge_catalog,
+                vision=model.vision,
+                extra_tool_dicts=(
+                    mcp_proxy.get_tools_for_llm()
+                    if mcp_proxy is not None and model.supports_tool_calling
+                    else None
+                ),
+                file_reference_urls=file_reference_urls,
+                inline_file_text=inline_file_text,
+                account_tokens=account_tokens,
+            )
+            provider_input = adapter.prepare_provider_input(
+                context, mcp_proxy=mcp_proxy, skill_runtime=skill_runtime
+            )
+            request = adapter.package_request(
+                provider_input,
+                model_kwargs=kwargs,
+                useful_output_reserve_tokens=useful_output_reserve_tokens,
+            )
+            if not account_tokens:
+                context.token_count = request.input_reserve.tokens
+            return replace(request, context=context)
+
+        preferred = package(prompt, model_kwargs)
+        fallback = None
+        if capability_fallback_prompt is not None:
+            fallback = package(
+                capability_fallback_prompt,
+                model_kwargs.model_copy(update={"response_format": None})
+                if model_kwargs is not None
+                else None,
+            )
+        refusal = None
+        if not preferred.fits and (fallback is None or not fallback.fits):
+            refusal = (
+                "current_request_output_capacity_insufficient"
+                if not capacity.output_reserve_fits(useful_output_reserve_tokens)
+                else "current_request_input_does_not_fit"
+            )
+        return CompletionRequestPreflight(
+            model_route=model_route,
+            capacity=capacity,
+            retrieval_included=info_blob_chunks is not None,
+            preferred=preferred,
+            fallback=fallback,
+            file_reference_urls=file_reference_urls,
+            file_reference_urls_expires_at=self._file_reference_urls_expiry(
+                file_reference_urls
+            ),
+            refusal=refusal,
+        )
+
     async def get_response(
         self,
         model: CompletionModel,
@@ -442,9 +874,15 @@ class CompletionService:
         version: int = 1,
         mcp_servers: list["MCPServer"] | None = None,
         require_tool_approval: bool = False,
+        reject_context_over_limit: bool = False,
+        provider_call_observer: ProviderCallObserver | None = None,
+        provider_call_reason: ProviderCallReason = "initial",
         skill_runtime: SkillActivationRuntime | None = None,
         inline_file_text: bool = True,
         knowledge_catalog: str = "",
+        useful_output_reserve_tokens: int | None = None,
+        prepared_request: CompletionRequestPackage | None = None,
+        file_reference_urls: dict[UUID, str] | None = None,
         url_only_prompt_file_ids: Collection[UUID] = (),
         document_template: "DocumentTemplateReference | None" = None,
     ) -> CompletionModelResponse:
@@ -458,6 +896,10 @@ class CompletionService:
             info_blob_chunks = []
         if mcp_servers is None:
             mcp_servers = []
+        if stream and provider_call_observer is not None:
+            raise ValueError(
+                "Provider call observation is only supported for non-streaming requests."
+            )
         # Org-level disable must be honored at runtime. Disabling a server only
         # flips MCPServers.is_enabled (mcp_server_settings_service); the existing
         # assistant->server associations are never pruned, so a disabled server
@@ -469,6 +911,10 @@ class CompletionService:
         # (effective_config_service), so re-filtering here is idempotent.
         mcp_servers = [server for server in mcp_servers if server.is_enabled]
         model_adapter = await self._get_adapter(model)
+        if model_kwargs is not None:
+            model_kwargs = filter_request_model_kwargs(
+                model_kwargs, model.supported_model_kwargs
+            )
         initial_skill_tokens = (
             skill_runtime.snapshot().measurement.tokens
             if skill_runtime is not None
@@ -502,9 +948,10 @@ class CompletionService:
             if tools_advertised and url_only_prompt_file_ids
             else []
         )
-        file_reference_urls = self._build_file_reference_urls(
-            files + history_files + referenced_prompt_files
-        )
+        if file_reference_urls is None:
+            file_reference_urls = self._build_file_reference_urls(
+                files + history_files + referenced_prompt_files
+            )
         # The previous turn's generated files are minted for the first time on
         # this turn, so they are "new" exactly once, here. Persistent
         # attachments are re-minted every turn of a session but represent one
@@ -561,38 +1008,49 @@ class CompletionService:
                     else (),
                     rendered_prompt=prompt,
                 )
-            context = self.context_builder.build_context(
-                input_str=text_input,
-                max_tokens=max_tokens,
-                model_name=model_adapter.get_model_route(),
-                files=files,
-                prompt=prompt,
-                session=session,
-                info_blob_chunks=info_blob_chunks,
-                prompt_files=prompt_files,
-                transcription_inputs=transcription_inputs,
-                version=version,
-                mcp_tools=(
-                    [skill_runtime.tool_definition]
-                    if skill_runtime is not None
-                    and skill_runtime.tool_definition is not None
-                    else None
-                ),
-                knowledge_catalog=knowledge_catalog,
-                vision=model.vision,
-                extra_tool_dicts=(
-                    mcp_proxy.get_tools_for_llm()
-                    if mcp_proxy and model.supports_tool_calling
-                    else None
-                ),
-                file_reference_urls=file_reference_urls,
-                inline_file_text=inline_file_text,
-                url_only_prompt_file_ids={file.id for file in referenced_prompt_files},
-            )
+            if prepared_request is not None:
+                context = prepared_request.context or Context(
+                    input="", token_count=prepared_request.input_reserve.tokens
+                )
+            else:
+                context = self.context_builder.build_context(
+                    input_str=text_input,
+                    max_tokens=max_tokens,
+                    model_name=model_adapter.get_model_route(),
+                    files=files,
+                    prompt=prompt,
+                    session=session,
+                    info_blob_chunks=info_blob_chunks,
+                    prompt_files=prompt_files,
+                    transcription_inputs=transcription_inputs,
+                    version=version,
+                    mcp_tools=(
+                        [skill_runtime.tool_definition]
+                        if skill_runtime is not None
+                        and skill_runtime.tool_definition is not None
+                        else None
+                    ),
+                    knowledge_catalog=knowledge_catalog,
+                    vision=model.vision,
+                    extra_tool_dicts=(
+                        mcp_proxy.get_tools_for_llm()
+                        if mcp_proxy and model.supports_tool_calling
+                        else None
+                    ),
+                    reject_over_limit=reject_context_over_limit,
+                    file_reference_urls=file_reference_urls,
+                    inline_file_text=inline_file_text,
+                    url_only_prompt_file_ids={
+                        file.id for file in referenced_prompt_files
+                    },
+                )
 
             if extended_logging:
+                logging_options: dict[str, Any] = {}
+                if prepared_request is not None:
+                    logging_options["prepared_request"] = prepared_request
                 logging_details = model_adapter.get_logging_details(
-                    context=context, model_kwargs=model_kwargs
+                    context=context, model_kwargs=model_kwargs, **logging_options
                 )
             else:
                 logging_details = None
@@ -604,13 +1062,23 @@ class CompletionService:
                 await mcp_proxy.close()
             raise
 
+        dispatch_options: dict[str, Any] = {}
+        if prepared_request is not None:
+            dispatch_options["prepared_request"] = prepared_request
+        if useful_output_reserve_tokens is not None:
+            dispatch_options["useful_output_reserve_tokens"] = (
+                useful_output_reserve_tokens
+            )
         if not stream:
             try:
                 completion = await model_adapter.get_response(
                     context=context,
                     model_kwargs=model_kwargs,
                     mcp_proxy=mcp_proxy,
+                    provider_call_observer=provider_call_observer,
+                    provider_call_reason=provider_call_reason,
                     skill_runtime=skill_runtime,
+                    **dispatch_options,
                 )
                 await _name_app_views(completion, mcp_proxy)
                 adapter_input_estimate = completion.input_token_estimate
@@ -629,6 +1097,7 @@ class CompletionService:
                     model_kwargs=model_kwargs,
                     mcp_proxy=mcp_proxy,
                     skill_runtime=skill_runtime,
+                    **dispatch_options,
                 )
             except BaseException:
                 # Stream preparation failed, so streaming_wrapper never runs
@@ -764,7 +1233,11 @@ class CompletionService:
         total_token_count = (
             adapter_input_estimate
             if adapter_input_estimate is not None
-            else context.token_count
+            else (
+                prepared_request.input_reserve.tokens
+                if prepared_request is not None
+                else context.token_count
+            )
             + max(
                 final_skill_tokens - initial_skill_tokens,
                 0,
@@ -779,7 +1252,7 @@ class CompletionService:
 
         return CompletionModelResponse(
             completion=completion,
-            model=model_adapter.model,
+            model=model,
             extended_logging=logging_details,
             total_token_count=total_token_count,
             usage=usage,

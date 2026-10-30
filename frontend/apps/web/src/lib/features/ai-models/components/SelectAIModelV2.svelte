@@ -5,8 +5,25 @@
   model details preview — behind a bordered trigger that fits the settings
   forms. Works for both completion and transcription models.
 -->
-<script lang="ts" generics="T extends TranscriptionModel | CompletionModel">
-  import type { CompletionModel, TranscriptionModel } from "@eneo/eneo-js";
+<script module lang="ts">
+  export type SelectableAIModel = {
+    id: string;
+    name: string;
+    nickname?: string | null;
+    description?: string | null;
+    // Both ceilings are declarations: null means the model route has none.
+    token_limit?: number | null;
+    max_input_tokens?: number | null;
+    org?: string | null;
+    provider_id?: string | null;
+    provider_name?: string | null;
+    provider_type?: string | null;
+  };
+</script>
+
+<script lang="ts" generics="T extends SelectableAIModel">
+  import { createEventDispatcher } from "svelte";
+  import type { CompletionModel } from "@eneo/eneo-js";
   import Ban from "@lucide/svelte/icons/ban";
   import ChevronsUpDown from "@lucide/svelte/icons/chevrons-up-down";
   import * as Popover from "$lib/components/ui/popover/index.js";
@@ -17,53 +34,76 @@
   import ChatModelDetails from "$lib/features/chat/components/switcher/ChatModelDetails.svelte";
 
   type Props = {
-    /** Models the user can choose from. Sorted by vendor for display. */
     availableModels: T[];
-    /** Bindable id-bearing model that is currently selected. */
-    selectedModel: T | undefined | null;
-    /** Forwarded to the trigger; surfaces (e.g. Settings.Row) pass labelling ids. */
-    aria?: Record<string, string>;
+    selectedModel?: T | undefined | null;
+    aria?: AriaProps;
+    dropdownLabel?: string;
+    showCost?: boolean;
   };
 
-  let { availableModels, selectedModel = $bindable(), aria = {} }: Props = $props();
+  let {
+    availableModels,
+    selectedModel = $bindable(null),
+    aria = { "aria-label": m.select_ai_model() },
+    dropdownLabel = m.select_completion_model(),
+    showCost = true
+  }: Props = $props();
 
-  // Sort a copy so we never mutate the caller's array.
-  const sortedModels = $derived(sortModels([...availableModels]));
-  const modelGroups = $derived(groupModelsByVendor(sortedModels, m.model_group_other()));
+  const dispatch = createEventDispatcher<{
+    change: { selectedModel: T | undefined | null };
+  }>();
 
+  let open = $state(false);
+  let previewedModelId = $state<string | null>(null);
+  const valueId = $props.id();
+
+  const sortedAvailableModels = $derived.by(() => {
+    const models = [...availableModels];
+    sortModels(models);
+    return models;
+  });
+
+  const modelGroups = $derived.by(() =>
+    groupModelsByVendor(sortedAvailableModels, m.model_group_other())
+  );
   const selectedId = $derived(selectedModel?.id ?? "");
   const unsupportedModelSelected = $derived(
     selectedModel != null && !availableModels.some((model) => model.id === selectedModel?.id)
   );
-
-  let open = $state(false);
-  const valueId = $props.id();
-  // Compose the accessible name so screen readers announce the *selected* model,
-  // not only the field label a surface supplies via aria-labelledby.
   const labelledBy = $derived([aria["aria-labelledby"], valueId].filter(Boolean).join(" "));
-
-  // Drive the details preview from the highlighted row, falling back to the
-  // selected model so the panel is populated the moment the dropdown opens.
-  let previewedModelId = $state<string | null>(null);
+  const triggerLabel = $derived(aria["aria-label"] ?? (labelledBy ? undefined : dropdownLabel));
   const previewedModel = $derived(
-    sortedModels.find((model) => model.id === previewedModelId) ??
-      sortedModels.find((model) => model.id === selectedId) ??
-      sortedModels[0] ??
-      null
+    sortedAvailableModels.find((model) => model.id === previewedModelId) ?? null
   );
-  // The details card renders completion-model metadata; transcription models have none.
-  const detailModel = $derived(
-    previewedModel && "max_input_tokens" in previewedModel
-      ? (previewedModel as CompletionModel)
-      : null
-  );
+  const detailModel = $derived.by(() => {
+    if (!showCost || !previewedModel || !hasCompletionDetails(previewedModel)) {
+      return null;
+    }
+    return previewedModel;
+  });
 
   $effect(() => {
     if (!open) previewedModelId = null;
   });
 
   function pick(model: T) {
-    selectedModel = model;
+    if (model.id !== selectedModel?.id) {
+      selectedModel = model;
+      dispatch("change", { selectedModel });
+    }
+    open = false;
+  }
+
+  function providerFor(model: SelectableAIModel) {
+    return model.org ?? model.provider_type ?? model.provider_name;
+  }
+
+  function hasCompletionDetails(
+    model: SelectableAIModel
+  ): model is SelectableAIModel & CompletionModel {
+    // Field presence, not its value: a completion model with an undeclared
+    // input ceiling still has pricing and a description to show.
+    return "max_input_tokens" in model;
   }
 </script>
 
@@ -73,9 +113,10 @@
       <button
         {...props}
         {...aria}
+        aria-label={triggerLabel}
         aria-labelledby={labelledBy || undefined}
         type="button"
-        class="border-default text-primary hover:border-stronger hover:bg-hover-dimmer focus-visible:ring-stronger flex h-12 items-center justify-between gap-2 rounded-xl border px-3 text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none"
+        class="border-input bg-background hover:bg-accent focus-visible:ring-ring inline-flex h-10 w-full items-center justify-between rounded-md border px-3 py-2 text-sm shadow-xs transition-colors focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
       >
         {#if unsupportedModelSelected}
           <span id={valueId} class="text-negative-default flex min-w-0 items-center gap-2 truncate">
@@ -84,13 +125,13 @@
           </span>
         {:else if selectedModel}
           <span id={valueId} class="flex min-w-0 items-center gap-2 truncate">
-            <ModelSelector.Logo provider={selectedModel.org ?? selectedModel.provider_type} />
+            <ModelSelector.Logo provider={providerFor(selectedModel)} class="size-4 shrink-0" />
             <span class="truncate font-medium">{selectedModel.nickname ?? selectedModel.name}</span>
           </span>
         {:else}
           <span id={valueId} class="text-secondary truncate">{m.select_a_model()}</span>
         {/if}
-        <ChevronsUpDown class="text-muted size-4 shrink-0" aria-hidden="true" />
+        <ChevronsUpDown class="text-muted-foreground ml-2 size-4 shrink-0 opacity-60" />
       </button>
     {/snippet}
   </Popover.Trigger>
@@ -115,7 +156,7 @@
                   onHighlight={() => (previewedModelId = model.id)}
                   class="min-h-10"
                 >
-                  <ModelSelector.Logo provider={model.org ?? model.provider_type} />
+                  <ModelSelector.Logo provider={providerFor(model)} />
                   <ModelSelector.Name>{model.nickname ?? model.name}</ModelSelector.Name>
                 </ModelSelector.Item>
               {/each}
@@ -123,6 +164,7 @@
           {/each}
         </ModelSelector.List>
       </div>
+
       {#if detailModel}
         <ChatModelDetails model={detailModel} class="border-border border-l" />
       {/if}

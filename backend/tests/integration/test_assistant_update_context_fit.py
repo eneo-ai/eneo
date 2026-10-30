@@ -8,6 +8,7 @@ import sqlalchemy as sa
 from fastapi import UploadFile
 from starlette.datastructures import Headers
 
+from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.files.attachment_budget import assert_prompt_and_files_fit_context
 from eneo.main.exceptions import BadRequestException
@@ -75,9 +76,12 @@ async def test_concurrent_model_and_attachment_saves_revalidate_after_lock(
 
     async def update(container, *, change_model):
         return await container.assistant_service().update_assistant(
-            assistant_id,
-            completion_model_id=small_id if change_model else None,
-            attachments=None if change_model else [(attachment.id, True)],
+            assistant_id=assistant_id,
+            update=(
+                AssistantUpdateCommand(completion_model_id=small_id)
+                if change_model
+                else AssistantUpdateCommand(attachments=[(attachment.id, True)])
+            ),
         )
 
     async with db_container() as first:

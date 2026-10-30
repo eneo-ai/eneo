@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Text } from "@astryxdesign/core/Text";
 import { revealProblems } from "@/components/composites/field-problem";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
@@ -78,7 +78,7 @@ function PolicyForm({ policy }: { policy: PasswordLifecyclePolicy }) {
         onChange={setMaxAgeDays}
         placeholder={t("admin_password_policy_never")}
         autoComplete="off"
-        className="max-w-48"
+        containerClassName="max-w-48"
         status={
           maxAgeError
             ? { type: "error", message: t("admin_password_policy_max_age_invalid") }

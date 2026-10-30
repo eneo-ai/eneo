@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.database.database import AsyncSession
-    from eneo.users.user import UserInDB
+    from eneo.tenants.tenant import TenantInDB
 
 
 _EMBEDDING_SEMANTIC_FIELDS = frozenset(
@@ -94,10 +94,10 @@ async def guard_embedding_provider_update(
 
 
 class EmbeddingModelRepository:
-    def __init__(self, session: "AsyncSession", user: "UserInDB") -> None:
+    def __init__(self, *, session: "AsyncSession", tenant: "TenantInDB") -> None:
         super().__init__()
         self.session = session
-        self.user = user
+        self.tenant = tenant
 
     async def all(self, with_deprecated: bool = False):
         stmt = (
@@ -117,7 +117,7 @@ class EmbeddingModelRepository:
                 # UI filtering happens at the presentation layer
                 sa.or_(
                     EmbeddingModels.tenant_id.is_(None),
-                    EmbeddingModels.tenant_id == self.user.tenant_id,
+                    EmbeddingModels.tenant_id == self.tenant.id,
                 ),
                 # Soft-deleted models are tombstones kept only so existing
                 # collections/websites still resolve; never surface them.
@@ -139,7 +139,7 @@ class EmbeddingModelRepository:
         return [
             EmbeddingModel.to_domain(
                 db_model=embedding_model,
-                user=self.user,
+                tenant=self.tenant,
                 provider_name=provider_name,
                 provider_type=provider_type,
             )
@@ -161,10 +161,10 @@ class EmbeddingModelRepository:
             )
             .where(
                 EmbeddingModels.id == model_id,
-                # Allow both global models (tenant_id IS NULL) and tenant models (tenant_id = user.tenant_id)
+                # Allow both global models and models owned by the requesting tenant.
                 sa.or_(
                     EmbeddingModels.tenant_id.is_(None),
-                    EmbeddingModels.tenant_id == self.user.tenant_id,
+                    EmbeddingModels.tenant_id == self.tenant.id,
                 ),
                 # Soft-deleted models stay invisible to all callers.
                 EmbeddingModels.deleted_at.is_(None),
@@ -180,7 +180,7 @@ class EmbeddingModelRepository:
         embedding_model, provider_name, provider_type = row
         return EmbeddingModel.to_domain(
             db_model=embedding_model,
-            user=self.user,
+            tenant=self.tenant,
             provider_name=provider_name,
             provider_type=provider_type,
         )
@@ -209,7 +209,7 @@ class EmbeddingModelRepository:
             )
             .where(
                 EmbeddingModels.id == embedding_model.id,
-                EmbeddingModels.tenant_id == self.user.tenant_id,
+                EmbeddingModels.tenant_id == self.tenant.id,
             )
         )
         await self.session.execute(stmt)

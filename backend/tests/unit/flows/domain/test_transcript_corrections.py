@@ -1,0 +1,971 @@
+from __future__ import annotations
+
+import pytest
+
+from eneo.flows.domain.transcript_corrections import (
+    MAX_CORRECTION_OCCURRENCES,
+    MAX_SPEAKER_EDITS,
+    TranscriptCorrectionInvalidOccurrenceError,
+    TranscriptCorrectionOccurrence,
+    TranscriptSpeakerEdit,
+    TranscriptSpeakerEditInvalidError,
+    apply_corrections,
+    apply_corrections_and_speaker_edits,
+    apply_to_rendered_transcript,
+    segments_content_hash,
+    sort_occurrences,
+    sort_speaker_edits,
+    speaker_run_windows,
+    validate_occurrences,
+    validate_speaker_edits,
+)
+from eneo.flows.domain.transcript_words import LocatedWord, locate_words
+
+
+def test_incremental_segment_hash_preserves_canonical_hash():
+    from eneo.flows.domain import transcript_corrections
+
+    segments = [
+        {"text": "Å\n", "speaker": None, "start": 0.0},
+        {"text": '雪"', "speaker": "SPEAKER_01", "start": 1.5},
+    ]
+    digest = transcript_corrections.SegmentsContentHash()
+    assert (
+        digest.hexdigest()
+        == segments_content_hash([])
+        == "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+    )
+    expected = [
+        "21dda26aace79546f5991ce12ce1c6a8d6ae5eb6b186bec5a219e81c0800dbae",
+        "ea22a749c3090faa17902c70c39329e50de80ff6185ff75049a61a09b16601c8",
+    ]
+    for index, segment in enumerate(segments, start=1):
+        digest.append(segment)
+        assert (
+            digest.hexdigest()
+            == segments_content_hash(segments[:index])
+            == expected[index - 1]
+        )
+
+
+def _segment(text: str, *, speaker: str | None = "SPEAKER_00") -> dict:
+    return {
+        "file_index": 1,
+        "start": 0.0,
+        "end": 4.0,
+        "speaker": speaker,
+        "text": text,
+    }
+
+
+def _occurrence(
+    *,
+    segment_index: int = 0,
+    char_start: int,
+    char_end: int,
+    original: str,
+    corrected: str,
+) -> TranscriptCorrectionOccurrence:
+    return TranscriptCorrectionOccurrence(
+        segment_index=segment_index,
+        char_start=char_start,
+        char_end=char_end,
+        original=original,
+        corrected=corrected,
+    )
+
+
+def _speaker_edit(
+    *,
+    segment_index: int = 0,
+    char_start: int | None = None,
+    char_end: int | None = None,
+    original: str | None = None,
+    original_speaker: str = "SPEAKER_00",
+    speaker: str = "SPEAKER_01",
+) -> TranscriptSpeakerEdit:
+    return TranscriptSpeakerEdit(
+        segment_index=segment_index,
+        char_start=char_start,
+        char_end=char_end,
+        original=original,
+        original_speaker=original_speaker,
+        speaker=speaker,
+    )
+
+
+class TestSegmentsContentHash:
+    def test_hash_ignores_key_order_but_not_values(self) -> None:
+        segments = [{"text": "Hej", "start": 0.0, "end": 1.0}]
+        reordered = [{"end": 1.0, "start": 0.0, "text": "Hej"}]
+        changed = [{"text": "Hej!", "start": 0.0, "end": 1.0}]
+
+        assert segments_content_hash(segments) == segments_content_hash(reordered)
+        assert segments_content_hash(segments) != segments_content_hash(changed)
+
+    def test_hash_is_stable_for_non_ascii_text(self) -> None:
+        segments = [_segment("Çagri höll i mötet.")]
+
+        assert segments_content_hash(segments) == segments_content_hash(
+            [dict(segments[0])]
+        )
+
+
+class TestValidateOccurrences:
+    def test_accepts_matching_occurrences(self) -> None:
+        segments = [_segment("Vi frågade sugary om planen.")]
+        occurrence = _occurrence(
+            char_start=11, char_end=17, original="sugary", corrected="Çagri"
+        )
+
+        validate_occurrences(segments, [occurrence])
+
+    def test_rejects_segment_index_out_of_range(self) -> None:
+        segments = [_segment("Hej.")]
+        occurrence = _occurrence(
+            segment_index=1, char_start=0, char_end=3, original="Hej", corrected="Nej"
+        )
+
+        with pytest.raises(TranscriptCorrectionInvalidOccurrenceError) as excinfo:
+            validate_occurrences(segments, [occurrence])
+        assert excinfo.value.reason == "segment_index_out_of_range"
+
+    def test_rejects_char_range_past_text_end(self) -> None:
+        segments = [_segment("Hej.")]
+        occurrence = _occurrence(
+            char_start=2, char_end=10, original="j.", corrected="x"
+        )
+
+        with pytest.raises(TranscriptCorrectionInvalidOccurrenceError) as excinfo:
+            validate_occurrences(segments, [occurrence])
+        assert excinfo.value.reason == "char_range_invalid"
+
+    def test_rejects_original_mismatch(self) -> None:
+        segments = [_segment("Vi frågade sugary om planen.")]
+        occurrence = _occurrence(
+            char_start=11, char_end=17, original="sockry", corrected="Çagri"
+        )
+
+        with pytest.raises(TranscriptCorrectionInvalidOccurrenceError) as excinfo:
+            validate_occurrences(segments, [occurrence])
+        assert excinfo.value.reason == "original_mismatch"
+
+    def test_rejects_overlapping_ranges_within_a_segment(self) -> None:
+        segments = [_segment("abcdef")]
+        occurrences = [
+            _occurrence(char_start=0, char_end=3, original="abc", corrected="x"),
+            _occurrence(char_start=2, char_end=5, original="cde", corrected="y"),
+        ]
+
+        with pytest.raises(TranscriptCorrectionInvalidOccurrenceError) as excinfo:
+            validate_occurrences(segments, occurrences)
+        assert excinfo.value.reason == "overlapping_ranges"
+
+    def test_adjacent_ranges_do_not_overlap(self) -> None:
+        segments = [_segment("abcdef")]
+        occurrences = [
+            _occurrence(char_start=0, char_end=3, original="abc", corrected="x"),
+            _occurrence(char_start=3, char_end=6, original="def", corrected="y"),
+        ]
+
+        validate_occurrences(segments, occurrences)
+
+    def test_rejects_oversized_occurrence_lists(self) -> None:
+        segments = [_segment("a" * 3)]
+        occurrence = _occurrence(char_start=0, char_end=1, original="a", corrected="b")
+
+        with pytest.raises(TranscriptCorrectionInvalidOccurrenceError) as excinfo:
+            validate_occurrences(
+                segments, [occurrence] * (MAX_CORRECTION_OCCURRENCES + 1)
+            )
+        assert excinfo.value.reason == "too_many_occurrences"
+
+    def test_offsets_are_character_based_for_non_ascii_text(self) -> None:
+        segments = [_segment("Çagri sa hej.")]
+        occurrence = _occurrence(
+            char_start=0, char_end=5, original="Çagri", corrected="Cagri"
+        )
+
+        validate_occurrences(segments, [occurrence])
+
+
+class TestApplyCorrections:
+    def test_applies_multiple_occurrences_right_to_left_within_a_line(self) -> None:
+        segments = [_segment("sugary pratade med sugary igår.")]
+        occurrences = [
+            _occurrence(char_start=0, char_end=6, original="sugary", corrected="Çagri"),
+            _occurrence(
+                char_start=19, char_end=25, original="sugary", corrected="Çagri"
+            ),
+        ]
+
+        corrected, skipped = apply_corrections(segments, occurrences)
+
+        assert corrected[0]["text"] == "Çagri pratade med Çagri igår."
+        assert skipped == []
+
+    def test_replacement_length_change_does_not_shift_earlier_offsets(self) -> None:
+        segments = [_segment("aa bb cc")]
+        occurrences = [
+            _occurrence(char_start=0, char_end=2, original="aa", corrected="lång text"),
+            _occurrence(char_start=6, char_end=8, original="cc", corrected="x"),
+        ]
+
+        corrected, skipped = apply_corrections(segments, occurrences)
+
+        assert corrected[0]["text"] == "lång text bb x"
+        assert skipped == []
+
+    def test_empty_corrected_deletes_the_span(self) -> None:
+        segments = [_segment("Hej alltså världen.")]
+        occurrences = [
+            _occurrence(char_start=3, char_end=10, original=" alltså", corrected="")
+        ]
+
+        corrected, skipped = apply_corrections(segments, occurrences)
+
+        assert corrected[0]["text"] == "Hej världen."
+        assert skipped == []
+
+    def test_skips_mismatched_and_out_of_range_occurrences(self) -> None:
+        segments = [_segment("Hej världen.")]
+        mismatched = _occurrence(
+            char_start=0, char_end=3, original="Nej", corrected="Tja"
+        )
+        out_of_range = _occurrence(
+            segment_index=5, char_start=0, char_end=3, original="Hej", corrected="Tja"
+        )
+
+        corrected, skipped = apply_corrections(segments, [mismatched, out_of_range])
+
+        assert corrected[0]["text"] == "Hej världen."
+        assert set(skipped) == {mismatched, out_of_range}
+
+    def test_does_not_mutate_the_input_segments(self) -> None:
+        segments = [_segment("Hej världen.")]
+        occurrences = [
+            _occurrence(char_start=0, char_end=3, original="Hej", corrected="Tja")
+        ]
+
+        corrected, _ = apply_corrections(segments, occurrences)
+
+        assert segments[0]["text"] == "Hej världen."
+        assert corrected[0]["text"] == "Tja världen."
+        assert corrected[0]["speaker"] == segments[0]["speaker"]
+
+    def test_corrections_only_touch_the_text_field(self) -> None:
+        segments = [_segment("Hej.", speaker="SPEAKER_03")]
+        occurrences = [
+            _occurrence(char_start=0, char_end=3, original="Hej", corrected="Nej")
+        ]
+
+        corrected, _ = apply_corrections(segments, occurrences)
+
+        assert corrected[0]["speaker"] == "SPEAKER_03"
+        assert corrected[0]["start"] == segments[0]["start"]
+        assert corrected[0]["end"] == segments[0]["end"]
+
+
+class TestSortOccurrences:
+    def test_sorts_by_segment_then_char_start(self) -> None:
+        second_line = _occurrence(
+            segment_index=1, char_start=0, char_end=1, original="a", corrected="b"
+        )
+        first_line_late = _occurrence(
+            segment_index=0, char_start=9, char_end=10, original="c", corrected="d"
+        )
+        first_line_early = _occurrence(
+            segment_index=0, char_start=2, char_end=3, original="e", corrected="f"
+        )
+
+        ordered = sort_occurrences([second_line, first_line_late, first_line_early])
+
+        assert ordered == [first_line_early, first_line_late, second_line]
+
+
+class TestValidateSpeakerEdits:
+    def test_accepts_whole_segment_and_span_edits(self) -> None:
+        segments = [
+            _segment("Vi frågade sugary om planen."),
+            _segment("sugary svarade direkt.", speaker="SPEAKER_01"),
+        ]
+        edits = [
+            _speaker_edit(),
+            _speaker_edit(
+                segment_index=1,
+                char_start=0,
+                char_end=6,
+                original="sugary",
+                original_speaker="SPEAKER_01",
+                speaker="SPEAKER_02",
+            ),
+        ]
+
+        validate_speaker_edits(segments, edits)
+
+    def test_rejects_segment_index_out_of_range(self) -> None:
+        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+            validate_speaker_edits([_segment("Hej.")], [_speaker_edit(segment_index=1)])
+        assert excinfo.value.reason == "segment_index_out_of_range"
+
+    def test_rejects_original_speaker_mismatch(self) -> None:
+        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+            validate_speaker_edits(
+                [_segment("Hej.")],
+                [_speaker_edit(original_speaker="SPEAKER_01", speaker="SPEAKER_02")],
+            )
+        assert excinfo.value.reason == "original_speaker_mismatch"
+
+    def test_rejects_segment_without_speaker(self) -> None:
+        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+            validate_speaker_edits([_segment("Hej.", speaker=None)], [_speaker_edit()])
+        assert excinfo.value.reason == "original_speaker_mismatch"
+
+    def test_accepts_same_label_confirmation(self) -> None:
+        validate_speaker_edits(
+            [_segment("Hej.")], [_speaker_edit(speaker="SPEAKER_00")]
+        )
+
+    def test_rejects_span_text_mismatch(self) -> None:
+        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+            validate_speaker_edits(
+                [_segment("Hej världen.")],
+                [_speaker_edit(char_start=0, char_end=3, original="Nej")],
+            )
+        assert excinfo.value.reason == "original_mismatch"
+
+    def test_rejects_span_past_text_end(self) -> None:
+        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+            validate_speaker_edits(
+                [_segment("Hej.")],
+                [_speaker_edit(char_start=2, char_end=10, original="j.")],
+            )
+        assert excinfo.value.reason == "char_range_invalid"
+
+    def test_rejects_partially_null_span(self) -> None:
+        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+            validate_speaker_edits(
+                [_segment("Hej.")], [_speaker_edit(char_start=0, char_end=3)]
+            )
+        assert excinfo.value.reason == "char_range_invalid"
+
+    def test_rejects_overlapping_spans(self) -> None:
+        segments = [_segment("abcdef")]
+        edits = [
+            _speaker_edit(char_start=0, char_end=3, original="abc"),
+            _speaker_edit(
+                char_start=2, char_end=5, original="cde", speaker="SPEAKER_02"
+            ),
+        ]
+
+        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+            validate_speaker_edits(segments, edits)
+        assert excinfo.value.reason == "overlapping_speaker_spans"
+
+    def test_adjacent_spans_do_not_overlap(self) -> None:
+        segments = [_segment("abcdef")]
+        edits = [
+            _speaker_edit(char_start=0, char_end=3, original="abc"),
+            _speaker_edit(
+                char_start=3, char_end=6, original="def", speaker="SPEAKER_02"
+            ),
+        ]
+
+        validate_speaker_edits(segments, edits)
+
+    def test_rejects_whole_segment_combined_with_span(self) -> None:
+        segments = [_segment("abcdef")]
+        edits = [
+            _speaker_edit(),
+            _speaker_edit(
+                char_start=0, char_end=3, original="abc", speaker="SPEAKER_02"
+            ),
+        ]
+
+        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+            validate_speaker_edits(segments, edits)
+        assert excinfo.value.reason == "whole_segment_conflicts_with_span"
+
+    def test_allows_labels_not_present_in_the_transcript(self) -> None:
+        validate_speaker_edits(
+            [_segment("Hej.")], [_speaker_edit(speaker="SPEAKER_07")]
+        )
+
+    def test_rejects_oversized_edit_lists(self) -> None:
+        edits = [_speaker_edit()] * (MAX_SPEAKER_EDITS + 1)
+
+        with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+            validate_speaker_edits([_segment("Hej.")], edits)
+        assert excinfo.value.reason == "too_many_speaker_edits"
+
+
+class TestApplySpeakerEdits:
+    def test_whole_segment_edit_replaces_speaker_and_keeps_text(self) -> None:
+        segments = [_segment("Hej världen.")]
+
+        corrected, skipped_occurrences, skipped_edits = (
+            apply_corrections_and_speaker_edits(segments, [], [_speaker_edit()])
+        )
+
+        assert corrected[0]["speaker"] == "SPEAKER_01"
+        assert corrected[0]["text"] == "Hej världen."
+        assert "speaker_runs" not in corrected[0]
+        assert skipped_occurrences == []
+        assert skipped_edits == []
+
+    def test_span_edit_produces_runs_in_corrected_space(self) -> None:
+        segments = [_segment("Vi frågade sugary om planen.")]
+        occurrences = [
+            _occurrence(
+                char_start=11, char_end=17, original="sugary", corrected="Çagri"
+            )
+        ]
+        edits = [_speaker_edit(char_start=18, char_end=28, original="om planen.")]
+
+        corrected, _, skipped_edits = apply_corrections_and_speaker_edits(
+            segments, occurrences, edits
+        )
+
+        assert corrected[0]["text"] == "Vi frågade Çagri om planen."
+        assert corrected[0]["speaker"] == "SPEAKER_00"
+        assert corrected[0]["speaker_runs"] == [
+            {
+                "char_start": 0,
+                "char_end": 17,
+                "speaker": "SPEAKER_00",
+                "decision": None,
+            },
+            {
+                "char_start": 17,
+                "char_end": 27,
+                "speaker": "SPEAKER_01",
+                "decision": "confirmed",
+            },
+        ]
+        assert skipped_edits == []
+
+    def test_span_boundary_inside_replacement_clamps(self) -> None:
+        segments = [_segment("Vi frågade sugary om planen.")]
+        occurrences = [
+            _occurrence(char_start=11, char_end=17, original="sugary", corrected="X")
+        ]
+        edits = [_speaker_edit(char_start=14, char_end=28, original="ary om planen.")]
+
+        corrected, _, _ = apply_corrections_and_speaker_edits(
+            segments, occurrences, edits
+        )
+
+        assert corrected[0]["text"] == "Vi frågade X om planen."
+        assert corrected[0]["speaker_runs"] == [
+            {
+                "char_start": 0,
+                "char_end": 12,
+                "speaker": "SPEAKER_00",
+                "decision": None,
+            },
+            {
+                "char_start": 12,
+                "char_end": 23,
+                "speaker": "SPEAKER_01",
+                "decision": "confirmed",
+            },
+        ]
+
+    def test_full_coverage_spans_collapse_to_speaker_replacement(self) -> None:
+        segments = [_segment("Hej världen.")]
+        edits = [_speaker_edit(char_start=0, char_end=12, original="Hej världen.")]
+
+        corrected, _, _ = apply_corrections_and_speaker_edits(segments, [], edits)
+
+        assert corrected[0]["speaker"] == "SPEAKER_01"
+        assert "speaker_runs" not in corrected[0]
+
+    def test_adjacent_equal_speaker_runs_merge(self) -> None:
+        segments = [_segment("abcdef")]
+        edits = [
+            _speaker_edit(char_start=0, char_end=3, original="abc"),
+            _speaker_edit(char_start=3, char_end=6, original="def"),
+        ]
+
+        corrected, _, _ = apply_corrections_and_speaker_edits(segments, [], edits)
+
+        assert corrected[0]["speaker"] == "SPEAKER_01"
+        assert "speaker_runs" not in corrected[0]
+
+    def test_mismatched_speaker_edits_are_skipped(self) -> None:
+        segments = [_segment("Hej världen.")]
+        wrong_speaker = _speaker_edit(original_speaker="SPEAKER_05")
+        wrong_text = _speaker_edit(char_start=0, char_end=3, original="Nej")
+        out_of_range = _speaker_edit(segment_index=7)
+
+        corrected, _, skipped = apply_corrections_and_speaker_edits(
+            segments, [], [wrong_speaker, wrong_text, out_of_range]
+        )
+
+        assert corrected[0]["speaker"] == "SPEAKER_00"
+        assert "speaker_runs" not in corrected[0]
+        assert set(skipped) == {wrong_speaker, wrong_text, out_of_range}
+
+    def test_speaker_edits_do_not_mutate_input_segments(self) -> None:
+        segments = [_segment("Hej världen.")]
+
+        corrected, _, _ = apply_corrections_and_speaker_edits(
+            segments, [], [_speaker_edit()]
+        )
+
+        assert segments[0]["speaker"] == "SPEAKER_00"
+        assert corrected[0]["speaker"] == "SPEAKER_01"
+
+
+_PREFIX_1 = "[00:00:00 - 00:00:04] "
+_PREFIX_2 = "[00:00:04 - 00:00:08] "
+
+
+class TestApplyToRenderedTranscript:
+    def _segments(self) -> list[dict]:
+        return [
+            _segment("Vi frågade sugary om planen."),
+            _segment("sugary svarade direkt.", speaker="SPEAKER_01"),
+        ]
+
+    def _rendered(self) -> str:
+        return "\n".join(
+            [
+                "## Del 1",
+                f"{_PREFIX_1}SPEAKER_00: Vi frågade sugary om planen.",
+                "",
+                f"{_PREFIX_2}SPEAKER_01: sugary svarade direkt.",
+            ]
+        )
+
+    def test_patches_single_run_lines_in_place(self) -> None:
+        occurrences = [
+            _occurrence(
+                char_start=11, char_end=17, original="sugary", corrected="Çagri"
+            )
+        ]
+        edits = [
+            _speaker_edit(
+                segment_index=1,
+                original_speaker="SPEAKER_01",
+                speaker="SPEAKER_03",
+            )
+        ]
+
+        patched = apply_to_rendered_transcript(
+            self._rendered(), self._segments(), occurrences, edits
+        )
+
+        assert patched == "\n".join(
+            [
+                "## Del 1",
+                f"{_PREFIX_1}SPEAKER_00: Vi frågade Çagri om planen.",
+                "",
+                f"{_PREFIX_2}SPEAKER_03: sugary svarade direkt.",
+            ]
+        )
+
+    def test_splits_a_line_per_run_with_the_same_prefix(self) -> None:
+        edits = [_speaker_edit(char_start=18, char_end=28, original="om planen.")]
+
+        patched = apply_to_rendered_transcript(
+            self._rendered(), self._segments(), [], edits
+        )
+
+        assert patched == "\n".join(
+            [
+                "## Del 1",
+                f"{_PREFIX_1}SPEAKER_00: Vi frågade sugary",
+                f"{_PREFIX_1}SPEAKER_01: om planen.",
+                "",
+                f"{_PREFIX_2}SPEAKER_01: sugary svarade direkt.",
+            ]
+        )
+
+    def test_returns_none_when_a_line_was_hand_edited(self) -> None:
+        rendered = self._rendered().replace("svarade", "sa")
+
+        assert (
+            apply_to_rendered_transcript(
+                rendered, self._segments(), [], [_speaker_edit()]
+            )
+            is None
+        )
+
+    def test_returns_none_when_line_count_does_not_match(self) -> None:
+        rendered = f"{_PREFIX_1}SPEAKER_00: Vi frågade sugary om planen."
+
+        assert (
+            apply_to_rendered_transcript(
+                rendered, self._segments(), [], [_speaker_edit()]
+            )
+            is None
+        )
+
+
+class TestSortSpeakerEdits:
+    def test_whole_segment_sorts_before_spans(self) -> None:
+        span = _speaker_edit(char_start=0, char_end=3, original="abc")
+        whole = _speaker_edit()
+        later_segment = _speaker_edit(segment_index=1, original_speaker="SPEAKER_01")
+
+        assert sort_speaker_edits([later_segment, span, whole]) == [
+            whole,
+            span,
+            later_segment,
+        ]
+
+
+def _timed_segment(text: str, *, start: float, end: float, speaker: str) -> dict:
+    return {
+        "file_index": 0,
+        "start": start,
+        "end": end,
+        "speaker": speaker,
+        "text": text,
+    }
+
+
+def _words(text: str, timings: list[tuple[str, float, float]]) -> list[LocatedWord]:
+    return locate_words(
+        text, [{"word": w, "start": s, "end": e} for w, s, e in timings]
+    )
+
+
+class TestSpeakerRunWindows:
+    TEXT = "Vi frågade sugary om planen."
+    TIMINGS = [
+        ("Vi", 0.2, 0.4),
+        ("frågade", 0.5, 1.0),
+        ("sugary", 1.1, 1.6),
+        ("om", 2.4, 2.5),
+        ("planen.", 2.6, 3.3),
+    ]
+
+    def test_each_run_takes_the_window_of_the_words_it_covers(self) -> None:
+        runs = [
+            {
+                "char_start": 0,
+                "char_end": 17,
+                "speaker": "SPEAKER_00",
+                "decision": None,
+            },
+            {"char_start": 18, "char_end": 28, "speaker": "SPEAKER_01"},
+        ]
+
+        windows = speaker_run_windows(
+            self.TEXT, _words(self.TEXT, self.TIMINGS), [], runs, (0.0, 4.0)
+        )
+
+        assert windows == [(0.2, 1.6), (2.4, 3.3)]
+
+    def test_runs_are_matched_through_text_corrections(self) -> None:
+        # "sugary" -> "Çagri" shortens the corrected text; the runs are in
+        # corrected space while the words sit in the raw text.
+        occurrences = [
+            _occurrence(
+                char_start=11, char_end=17, original="sugary", corrected="Çagri"
+            )
+        ]
+        runs = [
+            {"char_start": 0, "char_end": 16, "speaker": "SPEAKER_00"},
+            {
+                "char_start": 17,
+                "char_end": 27,
+                "speaker": "SPEAKER_01",
+                "decision": "confirmed",
+            },
+        ]
+
+        windows = speaker_run_windows(
+            self.TEXT, _words(self.TEXT, self.TIMINGS), occurrences, runs, (0.0, 4.0)
+        )
+
+        assert windows == [(0.2, 1.6), (2.4, 3.3)]
+
+    def test_a_run_without_words_keeps_the_segment_window(self) -> None:
+        runs = [
+            {
+                "char_start": 0,
+                "char_end": 17,
+                "speaker": "SPEAKER_00",
+                "decision": None,
+            },
+            {"char_start": 18, "char_end": 28, "speaker": "SPEAKER_01"},
+        ]
+        only_first_words = _words(self.TEXT, self.TIMINGS[:3])
+
+        windows = speaker_run_windows(self.TEXT, only_first_words, [], runs, (0.0, 4.0))
+
+        assert windows == [(0.2, 1.6), (0.0, 4.0)]
+
+
+class TestApplyToRenderedTranscriptWithWords:
+    def test_a_split_line_gets_one_window_per_run(self) -> None:
+        text = "Vi frågade sugary om planen."
+        segments = [_timed_segment(text, start=0.0, end=4.0, speaker="SPEAKER_00")]
+        rendered = f"{_PREFIX_1}SPEAKER_00: {text}"
+        edits = [_speaker_edit(char_start=18, char_end=28, original="om planen.")]
+        words = {0: _words(text, TestSpeakerRunWindows.TIMINGS)}
+
+        patched = apply_to_rendered_transcript(rendered, segments, [], edits, words)
+
+        assert patched == "\n".join(
+            [
+                "[00:00:00 - 00:00:01] SPEAKER_00: Vi frågade sugary",
+                "[00:00:02 - 00:00:03] SPEAKER_01: om planen.",
+            ]
+        )
+
+    def test_without_words_the_segment_prefix_is_reused(self) -> None:
+        text = "Vi frågade sugary om planen."
+        segments = [_timed_segment(text, start=0.0, end=4.0, speaker="SPEAKER_00")]
+        rendered = f"{_PREFIX_1}SPEAKER_00: {text}"
+        edits = [_speaker_edit(char_start=18, char_end=28, original="om planen.")]
+
+        patched = apply_to_rendered_transcript(rendered, segments, [], edits, {})
+
+        assert patched == "\n".join(
+            [
+                f"{_PREFIX_1}SPEAKER_00: Vi frågade sugary",
+                f"{_PREFIX_1}SPEAKER_01: om planen.",
+            ]
+        )
+
+
+class TestLocateWords:
+    def test_places_tokens_sequentially_and_retries_bare_of_punctuation(self) -> None:
+        located = locate_words(
+            "Vi ses imorgon.",
+            [
+                {"word": "Vi", "start": 0, "end": 0.2},
+                {"word": "ses,", "start": 0.3, "end": 0.5, "probability": 0.0},
+                {"word": "aldrig", "start": 0.6, "end": 0.8},
+                {"word": "imorgon", "start": 0.9, "end": 1.4, "probability": True},
+            ],
+        )
+
+        assert [(w.char_start, w.char_end) for w in located] == [
+            (0, 2),
+            (3, 6),
+            (-1, -1),
+            (7, 14),
+        ]
+        assert located[1].probability == 0.0
+        assert located[3].probability is None
+        assert located[2].located is False
+
+
+@pytest.mark.parametrize(
+    "original,speaker,decision",
+    [
+        ("SPEAKER_00", "SPEAKER_00", "confirmed"),
+        (None, "SPEAKER_01", "confirmed"),
+        (None, None, "unresolved"),
+        ("SPEAKER_00", None, "unresolved"),
+    ],
+)
+def test_v3_review_decision_round_trip(original, speaker, decision):
+    segment = {
+        **_segment("Läsbara ord.", speaker=original),
+        "speaker_attribution": "provisional",
+        "overlap_ids": ["file:overlap_0000"],
+    }
+    edit = TranscriptSpeakerEdit(0, None, None, None, original, speaker, decision)
+    validate_speaker_edits([segment], [edit])
+    raw = "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: Läsbara ord."
+    rendered = apply_to_rendered_transcript(raw, [segment], [], [edit])
+    expected = (
+        f"{speaker}: " if decision == "confirmed" else "[Talare går inte att avgöra]: "
+    )
+    assert rendered == "[00:00:00 - 00:00:04] " + expected + "Läsbara ord."
+    assert segment["speaker"] == original
+    assert segment["overlap_ids"] == ["file:overlap_0000"]
+    assert apply_to_rendered_transcript(raw, [segment], [], []) == raw
+
+
+@pytest.mark.parametrize(
+    "speaker,decision", [(None, "confirmed"), ("SPEAKER_00", "unresolved")]
+)
+def test_v3_decision_requires_consistent_speaker(speaker, decision):
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        validate_speaker_edits(
+            [_segment("Hej.")],
+            [
+                TranscriptSpeakerEdit(
+                    0, None, None, None, "SPEAKER_00", speaker, decision
+                )
+            ],
+        )
+    assert excinfo.value.reason == "invalid_decision"
+
+
+def test_partial_same_label_confirmation_preserves_review_boundaries():
+    segment = {**_segment("Hej där alla"), "speaker_attribution": "provisional"}
+    edit = TranscriptSpeakerEdit(0, 4, 7, "där", "SPEAKER_00", "SPEAKER_00")
+    validate_speaker_edits([segment], [edit])
+    raw = "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: Hej där alla"
+    assert apply_to_rendered_transcript(raw, [segment], [], [edit]).splitlines() == [
+        "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: Hej",
+        "[00:00:00 - 00:00:04] SPEAKER_00: där",
+        "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: alla",
+    ]
+
+
+def test_null_speaker_partial_unresolved_does_not_fall_back_to_suggestion():
+    segment = {
+        **_segment("Hej där", speaker=None),
+        "speaker_attribution": "provisional",
+    }
+    edit = TranscriptSpeakerEdit(0, 4, 7, "där", None, None, "unresolved")
+    raw = "[00:00:00 - 00:00:04] [Överlappande tal – osäker talare]: Hej där"
+    rendered = apply_to_rendered_transcript(raw, [segment], [], [edit])
+    assert "[Talare går inte att avgöra]: där" in rendered
+    assert "[Överlappande tal – osäker talare]: Hej" in rendered
+
+
+def test_v3_text_replacement_cannot_cross_a_speaker_decision_boundary():
+    from eneo.flows.domain.transcript_corrections import validate_correction_partitions
+
+    edit = TranscriptSpeakerEdit(0, 2, 5, "two", None, None, "unresolved")
+    with pytest.raises(TranscriptCorrectionInvalidOccurrenceError) as excinfo:
+        validate_correction_partitions(
+            [TranscriptCorrectionOccurrence(0, 1, 3, " t", "x")], [edit]
+        )
+    assert excinfo.value.reason == "crosses_speaker_boundary"
+    # Replacements, including punctuation insertions, contained in one partition are valid.
+    validate_correction_partitions(
+        [TranscriptCorrectionOccurrence(0, 4, 5, "o", "o.")], [edit]
+    )
+
+
+def _named_segments() -> list[dict]:
+    return [
+        _segment("Hej.", speaker="SPEAKER_00"),
+        _segment("Hallå.", speaker="SPEAKER_01"),
+    ]
+
+
+def test_speaker_names_are_trimmed_and_an_emptied_name_is_explicitly_none():
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    names = normalize_speaker_names(
+        {"SPEAKER_00": "  Anna Berg \n", "SPEAKER_01": "   "},
+        segments=_named_segments(),
+        speaker_edits=[],
+    )
+
+    # None is "no name", which clears what a speaker-naming step gave.
+    assert names == {"SPEAKER_00": "Anna Berg", "SPEAKER_01": None}
+    assert normalize_speaker_names(
+        {"SPEAKER_01": None}, segments=_named_segments(), speaker_edits=[]
+    ) == {"SPEAKER_01": None}
+
+
+@pytest.mark.parametrize(
+    "label", ["SPEAKER_02", "speaker_00", "SPEAKER_0", "Anna", "SPEAKER_00 ", ""]
+)
+def test_a_name_for_a_label_the_transcript_does_not_have_is_refused(label):
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        normalize_speaker_names(
+            {label: "Anna"}, segments=_named_segments(), speaker_edits=[]
+        )
+
+    assert excinfo.value.reason == "unknown_speaker_label"
+    assert excinfo.value.context == {"label": label}
+
+
+def test_a_label_the_saved_speaker_edits_split_off_may_be_named():
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    split = _speaker_edit(
+        segment_index=1, original_speaker="SPEAKER_01", speaker="SPEAKER_02"
+    )
+
+    assert normalize_speaker_names(
+        {"SPEAKER_02": "Cecilia"}, segments=_named_segments(), speaker_edits=[split]
+    ) == {"SPEAKER_02": "Cecilia"}
+
+
+@pytest.mark.parametrize(
+    "name", ["Anna\nBerg", "Anna\rBerg", "Anna Berg", "Anna\tBerg", "An\x00na"]
+)
+def test_a_name_that_breaks_the_line_is_refused(name):
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        normalize_speaker_names(
+            {"SPEAKER_00": name}, segments=_named_segments(), speaker_edits=[]
+        )
+
+    assert excinfo.value.reason == "invalid_speaker_name"
+    # The name itself is never echoed back.
+    assert excinfo.value.context == {"label": "SPEAKER_00", "max_chars": 120}
+
+
+def test_a_name_is_at_most_120_characters():
+    from eneo.flows.domain.transcript_corrections import normalize_speaker_names
+
+    longest = "Å" * 120
+    assert normalize_speaker_names(
+        {"SPEAKER_00": f" {longest} "}, segments=_named_segments(), speaker_edits=[]
+    ) == {"SPEAKER_00": longest}
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        normalize_speaker_names(
+            {"SPEAKER_00": longest + "x"},
+            segments=_named_segments(),
+            speaker_edits=[],
+        )
+    assert excinfo.value.reason == "invalid_speaker_name"
+
+
+def test_at_most_100_speakers_are_named():
+    from eneo.flows.domain.transcript_corrections import (
+        MAX_SPEAKER_NAMES,
+        normalize_speaker_names,
+    )
+
+    segments = [
+        _segment("Hej.", speaker=f"SPEAKER_{index:03d}") for index in range(101)
+    ]
+    names = {f"SPEAKER_{index:03d}": "Anna" for index in range(101)}
+
+    assert MAX_SPEAKER_NAMES == 100
+    assert (
+        len(
+            normalize_speaker_names(
+                dict(list(names.items())[:100]), segments=segments, speaker_edits=[]
+            )
+        )
+        == 100
+    )
+    with pytest.raises(TranscriptSpeakerEditInvalidError) as excinfo:
+        normalize_speaker_names(names, segments=segments, speaker_edits=[])
+    assert excinfo.value.reason == "too_many_speaker_names"
+    assert excinfo.value.context == {
+        "speaker_name_count": 101,
+        "max_speaker_names": 100,
+    }
+
+
+def test_pruning_drops_only_split_labels_whose_last_edit_is_gone():
+    from eneo.flows.domain.transcript_corrections import prune_speaker_names
+
+    # SPEAKER_01's only passage moved to SPEAKER_02; SPEAKER_03's split was undone.
+    edits = [
+        _speaker_edit(
+            segment_index=1, original_speaker="SPEAKER_01", speaker="SPEAKER_02"
+        )
+    ]
+    stored = {
+        "SPEAKER_00": None,
+        "SPEAKER_01": "Bo",
+        "SPEAKER_02": "Cecilia",
+        "SPEAKER_03": "David",
+    }
+
+    assert prune_speaker_names(
+        stored, segments=_named_segments(), speaker_edits=edits
+    ) == {"SPEAKER_00": None, "SPEAKER_01": "Bo", "SPEAKER_02": "Cecilia"}

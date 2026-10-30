@@ -10,13 +10,14 @@ const OWN_SKILLS_ONLY_USER = { roles: [{ permissions: ["personal_chat", "persona
 
 describe("App edit loader", () => {
   test("loads Skill bindings for an App reader", async () => {
+    const appId = "00000000-0000-4000-8000-000000000001";
     const bindings = [{ skill_id: "skill-1" }];
     const listAppBindings = vi.fn().mockResolvedValue(bindings);
     const list = vi.fn().mockResolvedValue(emptySkillCatalogPage());
     const listCatalogue = vi.fn().mockResolvedValue({ items: [], next_cursor: null });
     const event = {
       depends: vi.fn(),
-      params: { appId: "app-1" },
+      params: { appId },
       parent: vi.fn().mockResolvedValue({
         user: USE_SKILLS_USER,
         currentSpace: {
@@ -25,7 +26,7 @@ describe("App edit loader", () => {
           skill_permissions: [READ_SKILL_PERMISSION]
         },
         eneo: {
-          apps: { get: vi.fn().mockResolvedValue({ id: "app-1" }) },
+          apps: { get: vi.fn().mockResolvedValue({ id: appId }) },
           skills: {
             list,
             catalogue: { list: listCatalogue },
@@ -39,7 +40,7 @@ describe("App edit loader", () => {
 
     expect(listAppBindings).toHaveBeenCalledWith({
       spaceId: "space-1",
-      appId: "app-1"
+      appId
     });
     expect(result.skillBindings).toEqual(bindings);
     expect(list).toHaveBeenCalledWith({
@@ -51,12 +52,13 @@ describe("App edit loader", () => {
   });
 
   test("returns an empty catalog without making Skill calls when access is missing", async () => {
+    const appId = "00000000-0000-4000-8000-000000000001";
     const list = vi.fn();
     const listCatalogue = vi.fn();
     const listAppBindings = vi.fn();
     const event = {
       depends: vi.fn(),
-      params: { appId: "app-1" },
+      params: { appId },
       parent: vi.fn().mockResolvedValue({
         user: USE_SKILLS_USER,
         currentSpace: {
@@ -65,7 +67,7 @@ describe("App edit loader", () => {
           skill_permissions: []
         },
         eneo: {
-          apps: { get: vi.fn().mockResolvedValue({ id: "app-1" }) },
+          apps: { get: vi.fn().mockResolvedValue({ id: appId }) },
           skills: {
             list,
             catalogue: { list: listCatalogue },

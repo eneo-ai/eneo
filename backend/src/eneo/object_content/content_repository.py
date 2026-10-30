@@ -1,14 +1,16 @@
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from hashlib import sha256
 from uuid import UUID
 
-from sqlalchemy import Select, func, literal, select, tuple_
+from sqlalchemy import Select, func, literal, select, text, tuple_
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.affected_rows import affected_row_count
+from eneo.database.database import DatabaseSessionManager
 from eneo.database.tables.file_icon_backfill_table import (
     FileIconBackfillAdmissionState,
     FileIconBackfillCampaign,
@@ -31,8 +33,10 @@ from eneo.object_content.content import (
     ObjectContentBusyError,
     ObjectContentIdempotencyConflictError,
     ObjectContentStateError,
+    ObjectContentUnavailableError,
     StorageKind,
 )
+from eneo.object_content.verified_spool import settle_read_operation
 
 _SHA256_BYTES = 32
 
@@ -233,7 +237,8 @@ class ObjectContentRepository:
                     select(
                         literal(row.id),
                         literal(StorageKind.POSTGRES_INLINE.value),
-                        matching_source.c.payload,
+                        # EXTERNAL alone preserves a copied compressed datum.
+                        matching_source.c.payload.op("||")(literal(b"")),
                     ),
                 )
             )
@@ -689,47 +694,131 @@ class ObjectContentRepository:
             verification_digest_bytes,
         ) in rows:
             content = self._readable(row)
-            if (
-                content.storage_kind is StorageKind.POSTGRES_INLINE
-                and inline_payload is None
-            ):
-                raise ObjectContentStateError("Inline content payload is missing")
-            if content.storage_kind is StorageKind.OBJECT_STORE and (
-                object_key is None
-                or verification_chunk_size_bytes is None
-                or verification_digest_bytes is None
-                or verification_chunk_size_bytes < 1
-                or verification_digest_bytes < _SHA256_BYTES
-                or verification_digest_bytes % _SHA256_BYTES != 0
-            ):
-                raise ObjectContentStateError(
-                    "Object-store verification descriptor is missing or invalid"
-                )
-            sources[content.content_id] = ReadableContentSource(
-                content=content,
-                inline_payload=inline_payload,
-                object_store_descriptor=(
-                    ObjectStoreDescriptor(
-                        content_id=content.content_id,
-                        object_key=object_key,
-                        verification_chunk_size_bytes=verification_chunk_size_bytes,
-                        verification_chunk_count=(
-                            verification_digest_bytes // _SHA256_BYTES
-                        ),
-                    )
-                    if (
-                        object_key is not None
-                        and verification_chunk_size_bytes is not None
-                        and verification_digest_bytes is not None
-                    )
-                    else None
-                ),
+            sources[content.content_id] = self._readable_source(
+                content,
+                inline_payload,
+                object_key,
+                verification_chunk_size_bytes,
+                verification_digest_bytes,
             )
 
         requested_ids = {grant.content_id for grant in grants}
         if sources.keys() != requested_ids:
             raise ObjectContentStateError("Object content is not available")
         return sources
+
+    @staticmethod
+    def _readable_source(
+        content: ReadableContent,
+        inline_payload: bytes | None,
+        object_key: str | None,
+        verification_chunk_size_bytes: int | None,
+        verification_digest_bytes: int | None,
+        *,
+        require_inline_payload: bool = True,
+    ) -> ReadableContentSource:
+        if (
+            content.storage_kind is StorageKind.POSTGRES_INLINE
+            and inline_payload is None
+            and require_inline_payload
+        ):
+            raise ObjectContentStateError("Inline content payload is missing")
+        if content.storage_kind is StorageKind.OBJECT_STORE and (
+            object_key is None
+            or verification_chunk_size_bytes is None
+            or verification_digest_bytes is None
+            or verification_chunk_size_bytes < 1
+            or verification_digest_bytes < _SHA256_BYTES
+            or verification_digest_bytes % _SHA256_BYTES != 0
+        ):
+            raise ObjectContentStateError(
+                "Object-store verification descriptor is missing or invalid"
+            )
+        return ReadableContentSource(
+            content=content,
+            inline_payload=inline_payload,
+            object_store_descriptor=(
+                ObjectStoreDescriptor(
+                    content_id=content.content_id,
+                    object_key=object_key,
+                    verification_chunk_size_bytes=verification_chunk_size_bytes,
+                    verification_chunk_count=(
+                        verification_digest_bytes // _SHA256_BYTES
+                    ),
+                )
+                if (
+                    object_key is not None
+                    and verification_chunk_size_bytes is not None
+                    and verification_digest_bytes is not None
+                )
+                else None
+            ),
+        )
+
+    async def get_read_metadata(
+        self, grant: ContentReadGrant
+    ) -> tuple[ReadableContentSource, int | None, bool]:
+        row = (
+            await self._session.execute(
+                select(
+                    ObjectContents,
+                    func.octet_length(InlineContentPayloads.payload),
+                    func.pg_column_size(InlineContentPayloads.payload),
+                    ObjectStoreObjects.object_key,
+                    ObjectStoreObjects.verification_chunk_size_bytes,
+                    func.octet_length(ObjectStoreObjects.verification_chunk_sha256),
+                )
+                .outerjoin(
+                    InlineContentPayloads,
+                    InlineContentPayloads.content_id == ObjectContents.id,
+                )
+                .outerjoin(
+                    ObjectStoreObjects,
+                    ObjectStoreObjects.content_id == ObjectContents.id,
+                )
+                .where(
+                    ObjectContents.id == grant.content_id,
+                    ObjectContents.tenant_id == grant.tenant_id,
+                    ObjectContents.access_class == grant.access_class.value,
+                    ObjectContents.state == ContentState.AVAILABLE.value,
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            raise ObjectContentStateError("Object content is not available")
+        control, physical_size, stored_size, key, chunk_size, digest_bytes = row
+        content = self._readable(control)
+        if (
+            content.storage_kind is StorageKind.POSTGRES_INLINE
+            and physical_size is None
+        ):
+            raise ObjectContentStateError("Inline content payload is missing")
+        return (
+            self._readable_source(
+                content,
+                None,
+                key,
+                chunk_size,
+                digest_bytes,
+                require_inline_payload=False,
+            ),
+            physical_size,
+            physical_size is not None and stored_size >= physical_size,
+        )
+
+    async def read_inline_slice(
+        self, *, content_id: UUID, offset: int, length: int
+    ) -> bytes:
+        if offset < 0 or length < 1:
+            raise ValueError("Invalid inline slice bounds")
+        payload = await self._session.scalar(
+            select(
+                func.substr(InlineContentPayloads.payload, offset + 1, length)
+            ).where(InlineContentPayloads.content_id == content_id)
+        )
+        if not isinstance(payload, bytes) or len(payload) != length:
+            raise ObjectContentUnavailableError("Inline snapshot slice is incomplete")
+        return payload
 
     async def get_object_store_verification_chunks(
         self,
@@ -787,12 +876,18 @@ class ObjectContentRepository:
         missing_before: datetime | None = None,
         observed_at: datetime | None = None,
         observed_size_bytes: int | None = None,
+        observed_inline_sha256: bytes | None = None,
     ) -> bool:
         if failure_code not in {
             ContentFailureCode.BACKEND_MISSING,
             ContentFailureCode.BACKEND_CORRUPT,
         }:
             raise ValueError("mark_backend_failure requires a backend failure code")
+        if observed_inline_sha256 is not None and (
+            observed_storage_kind is not StorageKind.POSTGRES_INLINE
+            or failure_code is not ContentFailureCode.BACKEND_CORRUPT
+        ):
+            raise ValueError("An inline checksum requires an inline corrupt failure")
         if (observed_storage_kind is StorageKind.OBJECT_STORE) != (
             observed_object_key is not None
         ):
@@ -831,6 +926,7 @@ class ObjectContentRepository:
                         missing_before=missing_before,
                         observed_at=observed_at,
                         observed_size_bytes=observed_size_bytes,
+                        observed_inline_sha256=observed_inline_sha256,
                     )
                     if changed:
                         await self._session.flush()
@@ -867,6 +963,7 @@ class ObjectContentRepository:
             missing_before=missing_before,
             observed_at=observed_at,
             observed_size_bytes=observed_size_bytes,
+            observed_inline_sha256=observed_inline_sha256,
         )
         if changed:
             if completed_items and row.state == ContentState.FAILED.value:
@@ -889,9 +986,18 @@ class ObjectContentRepository:
         missing_before: datetime | None,
         observed_at: datetime | None,
         observed_size_bytes: int | None,
+        observed_inline_sha256: bytes | None,
     ) -> bool:
         if row.storage_kind != observed_storage_kind.value:
             return False
+        if observed_inline_sha256 is not None:
+            current_sha256 = await self._session.scalar(
+                select(func.sha256(InlineContentPayloads.payload)).where(
+                    InlineContentPayloads.content_id == row.id
+                )
+            )
+            if current_sha256 != observed_inline_sha256:
+                return False
         if observed_storage_kind is StorageKind.OBJECT_STORE:
             descriptor = await self._session.scalar(
                 select(ObjectStoreObjects)
@@ -1072,6 +1178,7 @@ class ObjectContentRepository:
                 select(ObjectContents)
                 .where(ObjectContents.id == content_id)
                 .with_for_update()
+                .execution_options(populate_existing=True)
             )
         ).one_or_none()
         if row is None:
@@ -1159,3 +1266,25 @@ class ObjectContentRepository:
             media_type=row.verified_media_type,
             access_class=ContentAccessClass(row.access_class),
         )
+
+
+class ContentReadSnapshot:
+    """Keep representation, access facts and bytes in one read-only snapshot."""
+
+    def __init__(self, repository: ObjectContentRepository) -> None:
+        self.repository = repository
+
+    @classmethod
+    @asynccontextmanager
+    async def open(
+        cls, database: DatabaseSessionManager
+    ) -> AsyncGenerator["ContentReadSnapshot"]:
+        session = database.create_session()
+        try:
+            await session.begin()
+            await session.execute(
+                text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY")
+            )
+            yield cls(ObjectContentRepository(session))
+        finally:
+            await settle_read_operation(session.close())

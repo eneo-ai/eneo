@@ -66,7 +66,7 @@ def assess_personal_skill_layer(
     policy: SkillRuntimePolicy,
     holds_permission: bool,
     model_route: str,
-    max_input_tokens: int,
+    max_input_tokens: int | None,
     supports_tool_calling: bool,
     prompt_files: Sequence[File],
 ) -> PersonalSkillLayerDecision:
@@ -189,7 +189,7 @@ def plan_personal_chat_turn(
     policy: SkillRuntimePolicy,
     holds_permission: bool,
     model_route: str,
-    max_input_tokens: int,
+    max_input_tokens: int | None,
     supports_tool_calling: bool,
     prompt_files: Sequence[File],
 ) -> SkillTurnPlan:

@@ -3,6 +3,7 @@
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.category_mappings import CATEGORY_MAPPINGS
 from eneo.audit.domain.category_types import CategoryType
 
 # Valid category names - derived from CategoryType enum
@@ -10,6 +11,11 @@ VALID_CATEGORIES = frozenset(category.value for category in CategoryType)
 
 # Valid action names - derived from ActionType enum
 VALID_ACTIONS = frozenset(action.value for action in ActionType)
+ACTION_COUNT = len(ActionType)
+
+
+def _action_count_for(category: CategoryType) -> int:
+    return sum(1 for mapped in CATEGORY_MAPPINGS.values() if mapped == category.value)
 
 
 class CategoryConfig(BaseModel):
@@ -36,7 +42,7 @@ class CategoryConfig(BaseModel):
             "example": {
                 "category": "admin_actions",
                 "enabled": True,
-                "action_count": 13,
+                "action_count": _action_count_for(CategoryType.ADMIN_ACTIONS),
                 "example_actions": [
                     "user_created",
                     "role_deleted",
@@ -86,7 +92,7 @@ class AuditConfigResponse(BaseModel):
                     {
                         "category": "admin_actions",
                         "enabled": True,
-                        "action_count": 13,
+                        "action_count": _action_count_for(CategoryType.ADMIN_ACTIONS),
                         "example_actions": [
                             "user_created",
                             "role_deleted",
@@ -96,7 +102,7 @@ class AuditConfigResponse(BaseModel):
                     {
                         "category": "user_actions",
                         "enabled": True,
-                        "action_count": 28,
+                        "action_count": _action_count_for(CategoryType.USER_ACTIONS),
                         "example_actions": [
                             "assistant_created",
                             "space_deleted",
@@ -162,11 +168,12 @@ class ActionConfig(BaseModel):
 class ActionConfigResponse(BaseModel):
     """
     Response model for GET /api/v1/audit/config/actions.
-    Contains all 65 actions with their configuration and metadata.
+    Contains every ActionType with its configuration.
     """
 
     actions: list[ActionConfig] = Field(
-        ..., description="List of all actions with configuration and Swedish metadata"
+        ...,
+        description="List of all actions with configuration; display text is translated by the frontend",
     )
 
     model_config = ConfigDict(
@@ -223,7 +230,7 @@ class ActionConfigUpdateRequest(BaseModel):
         ...,
         description="List of action configuration updates",
         min_length=1,
-        max_length=65,
+        max_length=ACTION_COUNT,
     )
 
     model_config = ConfigDict(

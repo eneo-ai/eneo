@@ -10,7 +10,11 @@
 
   type Props = {
     fileReferencesEnabled: boolean;
-    selectedModel?: { id: string; max_input_tokens: number; supports_tool_calling?: boolean };
+    selectedModel?: {
+      id: string;
+      max_input_tokens: number | null;
+      supports_tool_calling?: boolean;
+    };
     /** Set by the attachment list; bind it and call it after saving or discarding. */
     cancelUploadsAndClearQueue?: () => void;
   };

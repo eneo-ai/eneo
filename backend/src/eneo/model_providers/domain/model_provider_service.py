@@ -2,7 +2,6 @@ from collections.abc import Sequence
 from datetime import date, datetime, timezone
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal, Optional
-from urllib.parse import urlsplit
 from uuid import UUID, uuid4
 
 from eneo.embedding_models.domain.embedding_model_repo import (
@@ -17,6 +16,10 @@ from eneo.main.exceptions import (
 from eneo.model_providers.domain.connection_check import (
     ConnectionCheck,
     ConnectionCheckError,
+)
+from eneo.model_providers.domain.endpoints import (
+    normalize_destination,
+    require_key_for_destination,
 )
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
@@ -47,6 +50,7 @@ from eneo.model_providers.domain.provider_api import (
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     embedding_provider_configuration,
+    resolve_provider_request_identity,
 )
 from eneo.model_providers.infrastructure.model_provider_repository import (
     ModelProviderRepository,
@@ -63,6 +67,7 @@ from eneo.model_providers.infrastructure.provider_type_support import (
 )
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
+    lookup_provider_field,
 )
 from eneo.settings.encryption_service import EncryptionService
 from eneo.tenants.masking import looks_masked
@@ -112,45 +117,24 @@ class ConnectionCheckNotSupportedException(BadRequestException):
     """No cheap authenticated call is known for this provider."""
 
 
-def effective_endpoint(provider_type: str, config: dict[str, Any]) -> str | None:
+def effective_endpoint(
+    provider_type: str,
+    config: dict[str, Any],
+    credentials: dict[str, Any] | None = None,
+) -> str | None:
     """The destination a provider's credentials are sent to.
 
-    A configured ``endpoint`` wins; otherwise the provider type's default,
-    when it has one. ``None`` means the transport picks the destination
-    itself (LiteLLM's built-in base for that provider).
+    The ``endpoint`` a request resolves wins (``lookup_provider_field``: a
+    credential value, even an empty one, shadows config); otherwise the
+    provider type's default, when it has one. ``None`` means the transport
+    picks the destination itself (LiteLLM's built-in base for that provider).
     """
-    raw = config.get("endpoint")
+    raw = lookup_provider_field(
+        credentials=credentials or {}, config=config, field="endpoint"
+    )
     if isinstance(raw, str) and raw.strip():
         return raw.strip()
     return DEFAULT_ENDPOINTS.get(provider_type)
-
-
-def normalize_destination(endpoint: str | None) -> str | None:
-    """Canonical ``scheme://host[:port]/path`` for comparing destinations.
-
-    Scheme and host are case-insensitive, a default port is the same as no
-    port, and trailing slashes do not change where a request goes. A
-    different scheme, host, port, base path or query does.
-    """
-    if endpoint is None:
-        return None
-    value = endpoint.strip()
-    if not value:
-        return None
-    parts = urlsplit(value if "://" in value else f"//{value}")
-    scheme = parts.scheme.lower()
-    host = (parts.hostname or "").lower()
-    try:
-        port: int | None = parts.port
-    except ValueError:
-        port = None
-        host = parts.netloc.lower()
-    if (scheme, port) in (("http", 80), ("https", 443)):
-        port = None
-    netloc = f"{host}:{port}" if port is not None else host
-    path = parts.path.rstrip("/")
-    query = f"?{parts.query}" if parts.query else ""
-    return f"{scheme}://{netloc}{path}{query}"
 
 
 def _has_stored_api_key(credentials: dict[str, Any]) -> bool:
@@ -608,6 +592,7 @@ class ModelProviderService:
         """
         # Get existing provider
         provider = await self.repository.get_by_id(provider_id, for_update=True)
+        request_identity_before = self._resolved_request_identity(provider)
         connection_settings_changed = False
         # Captured before the edit: kept secrets were entered for this destination.
         kept_secrets = retained_secret_headers(
@@ -677,6 +662,9 @@ class ModelProviderService:
             provider, kept_secrets, previous_destination
         )
 
+        if self._resolved_request_identity(provider) != request_identity_before:
+            await self.repository.clear_route_declarations(provider_id)
+
         return await self.repository.update(
             provider, clear_connection_check=connection_settings_changed
         )
@@ -709,6 +697,16 @@ class ModelProviderService:
             return outcomes, problem, True, exc.reason
         return outcomes, problem, problem is not None, None
 
+    def _resolved_request_identity(
+        self, provider: ModelProvider
+    ) -> tuple[tuple[str, str | None], ...]:
+        """Return the provider settings that decide where a request executes."""
+        return resolve_provider_request_identity(
+            provider_type=provider.provider_type,
+            credentials=provider.credentials,
+            config=provider.config,
+        )
+
     @staticmethod
     def _require_replacement_key_for_new_destination(
         provider: ModelProvider,
@@ -740,11 +738,18 @@ class ModelProviderService:
             return
 
         replacement = credentials.get("api_key") if credentials is not None else None
-        if not isinstance(replacement, str) or not replacement.strip():
-            raise BadRequestException(
-                "Changing the provider endpoint requires entering a new API key; "
-                "the stored key is not reused for a different destination."
-            )
+        require_key_for_destination(
+            stored_destination=effective_endpoint(
+                provider.provider_type, provider.config, provider.credentials
+            ),
+            proposed_destination=effective_endpoint(
+                provider.provider_type,
+                merged_config,
+                credentials if credentials is not None else provider.credentials,
+            ),
+            key_stored=_has_stored_api_key(provider.credentials),
+            replacement_key=replacement if isinstance(replacement, str) else None,
+        )
 
     def _require_reentered_secrets_for_new_destination(
         self,

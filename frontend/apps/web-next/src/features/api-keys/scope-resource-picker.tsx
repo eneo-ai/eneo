@@ -160,7 +160,7 @@ export function ScopeResourcePicker({
       hasEntriesOnFocus
       hasClear
       debounceMs={0}
-      emptySearchResultsText={t("no_results")}
+      emptySearchText={t("no_results")}
       isDisabled={isDisabled || (source.isPending && !failed)}
       status={
         problem

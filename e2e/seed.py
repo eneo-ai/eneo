@@ -17,8 +17,12 @@ compose file) the key stays plaintext, which the backend then reads as-is.
 """
 
 import asyncio
+import os
+from uuid import UUID
 
+from pydantic import TypeAdapter, ValidationError
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from eneo.database.database import sessionmanager
 from eneo.database.tables.ai_models_table import (
@@ -27,18 +31,81 @@ from eneo.database.tables.ai_models_table import (
     TranscriptionModels,
 )
 from eneo.database.tables.model_providers_table import ModelProviders
+from eneo.database.tables.roles_table import Roles
 from eneo.database.tables.tenant_table import Tenants
 from eneo.main.config import get_settings
+from eneo.server.dependencies.predefined_roles import (
+    load_predefined_roles_from_config,
+)
 from eneo.settings.encryption_service import EncryptionService
 
 MOCK_ENDPOINT = "http://e2e-mock-model:8200/v1"
-TENANT_NAME = "E2ETenant"
+TENANT_NAME = os.environ.get("E2E_TENANT_NAME", "E2ETenant")
+# A default transcription model also permits app creation in the E2E space.
+TRANSCRIPTION_MODEL_NAME = os.environ.get("E2E_TRANSCRIPTION_MODEL", "e2e-mock-transcription")
 PROVIDER_NAME = "E2E Mock Provider"
 # A dummy: the mock accepts any key.
 API_KEY = "test-key"
 MODEL_NAME = "e2e-mock"
 EMBEDDING_MODEL_NAME = "e2e-mock-embedding"
-TRANSCRIPTION_MODEL_NAME = "e2e-mock-transcription"
+OWNER_ROLE_SOURCE = "Owner"
+PERMISSIONS_ADAPTER = TypeAdapter(list[str])
+
+
+def _predefined_owner_permissions() -> list[str]:
+    for template in load_predefined_roles_from_config():
+        name: object = template.get("name")
+        if name != OWNER_ROLE_SOURCE:
+            continue
+        raw_permissions: object = template.get("permissions")
+        try:
+            return PERMISSIONS_ADAPTER.validate_python(raw_permissions, strict=True)
+        except ValidationError as exc:
+            raise RuntimeError(
+                "Predefined Owner role permissions must be strings."
+            ) from exc
+
+    raise RuntimeError("Predefined Owner role template not found.")
+
+
+async def _ensure_owner_permissions(session: AsyncSession, tenant_id: UUID) -> None:
+    role = (
+        await session.execute(
+            select(Roles).where(
+                Roles.tenant_id == tenant_id,
+                Roles.predefined_source == OWNER_ROLE_SOURCE,
+            )
+        )
+    ).scalar_one_or_none()
+    if role is None:
+        role = (
+            await session.execute(
+                select(Roles).where(
+                    Roles.tenant_id == tenant_id,
+                    Roles.name == OWNER_ROLE_SOURCE,
+                )
+            )
+        ).scalar_one_or_none()
+    if role is None:
+        raise RuntimeError("E2E Owner role not found.")
+
+    template_permissions = _predefined_owner_permissions()
+    existing_permissions = list(role.permissions)
+    missing_permissions = [
+        permission
+        for permission in template_permissions
+        if permission not in existing_permissions
+    ]
+    if not missing_permissions:
+        return
+
+    # init_db creates Owner before granular Flow permissions; boot seeding skips
+    # sourced roles, so E2E merges from the predefined-role source of truth.
+    role.permissions = [*existing_permissions, *missing_permissions]
+    print(
+        "[seed] merged E2E Owner permissions from predefined role template",
+        flush=True,
+    )
 
 
 async def main() -> None:
@@ -54,6 +121,8 @@ async def main() -> None:
         tenant_id = (
             await session.execute(select(Tenants.id).where(Tenants.name == TENANT_NAME))
         ).scalar_one()
+
+        await _ensure_owner_permissions(session, tenant_id)
 
         provider = (
             await session.execute(
@@ -147,26 +216,25 @@ async def main() -> None:
             ),
             "default embedding model",
         )
-        # The backend refuses to create an app in a space without one. Runs in
-        # the e2e stack stay queued (no worker), so the mock never transcribes.
-        await add_if_missing(
-            TranscriptionModels(
-                name=TRANSCRIPTION_MODEL_NAME,
-                model_name=TRANSCRIPTION_MODEL_NAME,
-                nickname="E2E Mock Transcription",
-                open_source=False,
-                family="openai",
-                stability="stable",
-                hosting="usa",
-                org="OpenAI",
-                base_url=MOCK_ENDPOINT,
-                tenant_id=tenant_id,
-                provider_id=provider_id,
-                is_enabled=True,
-                is_default=True,
-            ),
-            "default transcription model",
-        )
+        if TRANSCRIPTION_MODEL_NAME:
+            await add_if_missing(
+                TranscriptionModels(
+                    name=TRANSCRIPTION_MODEL_NAME,
+                    model_name=TRANSCRIPTION_MODEL_NAME,
+                    nickname="E2E Mock Transcription",
+                    open_source=False,
+                    family="openai",
+                    stability="stable",
+                    hosting="usa",
+                    org="OpenAI",
+                    base_url=MOCK_ENDPOINT,
+                    tenant_id=tenant_id,
+                    provider_id=provider_id,
+                    is_enabled=True,
+                    is_default=True,
+                ),
+                "default transcription model",
+            )
 
     for item in done:
         print(f"[seed] {item}", flush=True)

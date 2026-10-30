@@ -27,7 +27,7 @@ instructions to be trusted:
 | ---------------------------------------------------- | ------------------------------- | -------------------------------------------------------------------------------------- |
 | JavaScript for `run_javascript`                      | The model                       | A program with a fixed budget of memory, time and output, and no I/O                   |
 | SQL for `query_table` and `assert_table`             | The model                       | One read-only statement over the loaded sheets, in an engine with nothing else enabled |
-| CSV, XLSX and DOCX files                             | Users, or tools acting for them | Bounded packages parsed in a separate process, with saved values only                  |
+| CSV, XLSX, JSON and DOCX files                       | Users, or tools acting for them | Bounded packages parsed in a separate process, with saved values only                  |
 | Document content, templates and chart specifications | The model and users             | Validated specifications rendered by engines that are kept out of the backend          |
 
 The separation it maintains:
@@ -196,12 +196,21 @@ are disabled, memory (256 MB), spill space (256 MB) and threads (1) are set,
 and the configuration is locked so the query cannot change any of it. DuckDB's
 own parser must see exactly one statement of type `SELECT`; anything else is
 refused. The query is wrapped in a row limit (500, or the export limit of
-200,000) and interrupted at its deadline (10 s). The engine's diagnosis of the
+200,000) and interrupted at its deadline (10 s). The rows returned to the
+model are bounded as well: a cell is cut at 4,000 characters and the rows stop
+at 256 KB, reported as truncation; an export file keeps every cell whole. The
+engine's diagnosis of the
 model's SQL (an unknown column, a syntax error, a failed cast) is returned so
 the model can correct it; other engine errors are reported generically.
 
-**File parsing** happens in the same confined children. CSV must be UTF-8
-without NUL bytes. XLSX and DOCX packages pass a zip guard that reads only the
+**File parsing** happens in the same confined children. CSV and JSON must be
+UTF-8 without NUL bytes. JSON is read as text by DuckDB's JSON reader, with no
+type inference, in an instance of its own whose memory limit is the query
+limit or 32 times the file size, whichever is larger (640 MB at the 20 MB
+upload cap). A JSON Lines file becomes one sheet CSV of its records (200
+columns, within the same 64 MiB); a JSON document is never turned into sheets,
+and `query_json` binds the model's path as a string literal and returns at
+most 16,000 characters of structure or value. XLSX and DOCX packages pass a zip guard that reads only the
 central directory: at most 10,000 entries, no ZIP64, and a declared expansion
 bounded at 64 MiB or 100 times the packed size. A workbook is converted to at
 most 20 sheets and 64 MiB of CSV; formulas are read as their saved values and

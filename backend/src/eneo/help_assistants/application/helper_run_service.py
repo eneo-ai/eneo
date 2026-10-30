@@ -9,7 +9,8 @@ Key invariants pinned here:
 
 * **Tool / knowledge isolation (PRD §6.5).** The completion request is
   built from the *helper* assistant's prompt, model, collections, websites,
-  integration_knowledge_list, and MCP servers. Nothing leaks from the
+  integration_knowledge_list, and the MCP servers its space has switched on
+  (``AssistantService.get_help_assistant_for_turn``). Nothing leaks from the
   ``target_assistant`` — silent inheritance is the failure mode this
   design rules out.
 * **No extended logging (PRD §6 + Critical test #3).** ``extended_logging``
@@ -76,8 +77,7 @@ if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
         CompletionModel as AICompletionModel,
     )
-    from eneo.assistants.assistant import Assistant
-    from eneo.assistants.assistant_service import AssistantService
+    from eneo.assistants.assistant_service import AssistantService, HelpAssistantTurn
     from eneo.audit.application.audit_service import AuditService
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
@@ -190,7 +190,8 @@ class HelperRunService:
                 code="helper_not_available",
             )
 
-        helper_assistant = await self._load_helper_assistant(role.assistant_id)
+        helper_turn = await self._load_helper_assistant(role.assistant_id)
+        helper_assistant = helper_turn.assistant
         self._check_helper_completion_model(helper_assistant)
 
         session = await self._create_helper_session(
@@ -238,8 +239,10 @@ class HelperRunService:
             # logging or insights aggregation, regardless of the helper
             # assistant's stored ``logging_enabled`` / ``insight_enabled``.
             extended_logging=False,
-            model_kwargs=helper_assistant.completion_model_kwargs,
-            mcp_servers=list(helper_assistant.mcp_servers),
+            model_kwargs=helper_assistant.request_model_kwargs(
+                helper_assistant.completion_model
+            ),
+            mcp_servers=helper_turn.mcp_servers,
         )
 
         if stream:
@@ -301,7 +304,8 @@ class HelperRunService:
             raise NotFoundException(
                 "Helper assistant for this run is no longer available."
             )
-        helper_assistant = await self._load_helper_assistant(run.assistant_id)
+        helper_turn = await self._load_helper_assistant(run.assistant_id)
+        helper_assistant = helper_turn.assistant
         self._check_helper_completion_model(helper_assistant)
 
         session = await self.session_repo.get_for_helper_run(
@@ -336,8 +340,10 @@ class HelperRunService:
             stream=stream,
             # PRD §6 + Critical test #3: same hard-coded gate as run().
             extended_logging=False,
-            model_kwargs=helper_assistant.completion_model_kwargs,
-            mcp_servers=list(helper_assistant.mcp_servers),
+            model_kwargs=helper_assistant.request_model_kwargs(
+                helper_assistant.completion_model
+            ),
+            mcp_servers=helper_turn.mcp_servers,
         )
 
         if stream:
@@ -444,7 +450,7 @@ class HelperRunService:
             )
         return target_assistant
 
-    async def _load_helper_assistant(self, assistant_id: UUID) -> Assistant:
+    async def _load_helper_assistant(self, assistant_id: UUID) -> "HelpAssistantTurn":
         # PRIVILEGED helper read (PRD §5/§6/§10). The helper assistant lives in
         # the org-space, whose only members are tenant admins, so the normal
         # permission-enforcing assistant_service.get_assistant would 403 for
@@ -452,9 +458,9 @@ class HelperRunService:
         # the EDIT check on the *target* assistant
         # (_load_target_with_edit_permission) plus the role's is_enabled /
         # is_visible_to_users flags — both enforced above — NOT org-space
-        # membership. get_help_assistant keeps the read scoped to the assistant
+        # membership. get_help_assistant_for_turn keeps the read scoped to the assistant
         # designated by the (active or former) help-assistant role.
-        return await self.assistant_service.get_help_assistant(assistant_id)
+        return await self.assistant_service.get_help_assistant_for_turn(assistant_id)
 
     def _check_helper_completion_model(self, helper: Assistant) -> None:
         if helper.completion_model is None:

@@ -41,7 +41,11 @@ class DatabaseSessionManager:
         self._engine: AsyncEngine | None = None
         self._sessionmaker: async_sessionmaker[AsyncSession] | None = None
 
-    def init(self, host: str):
+    @property
+    def initialized(self) -> bool:
+        return self._engine is not None
+
+    def init(self, host: str) -> None:
         # If already initialized, don't reinitialize (important for tests)
         if self._engine is not None:
             logger.debug("Database already initialized, skipping reinitialization")
@@ -55,12 +59,20 @@ class DatabaseSessionManager:
             pool_timeout=settings.db_pool_timeout,
             pool_pre_ping=settings.db_pool_pre_ping,
             pool_recycle=settings.db_pool_recycle,
+            echo_pool=settings.db_pool_debug,
         )
         self._sessionmaker = async_sessionmaker(
             autocommit=False,
             bind=self._engine,
             autobegin=False,
             class_=SafeAsyncSession,
+        )
+        logger.info(
+            "Database connection budget: %s pool_size + %s max_overflow = %s "
+            "connections for this process",
+            settings.db_pool_size,
+            settings.db_pool_max_overflow,
+            settings.db_pool_size + settings.db_pool_max_overflow,
         )
         logger.debug(f"Database connected to {host}")
 
@@ -89,7 +101,7 @@ class DatabaseSessionManager:
         return self._sessionmaker()
 
     @contextlib.asynccontextmanager
-    async def connect(self) -> AsyncGenerator[AsyncConnection]:
+    async def connect(self) -> AsyncGenerator[AsyncConnection, None]:
         if self._engine is None:
             raise Exception("DatabaseSessionManager is not initialized")
 
@@ -101,7 +113,7 @@ class DatabaseSessionManager:
                 raise
 
     @contextlib.asynccontextmanager
-    async def session(self) -> AsyncGenerator[AsyncSession]:
+    async def session(self) -> AsyncGenerator[AsyncSession, None]:
         if self._sessionmaker is None:
             raise Exception("DatabaseSessionManager is not initialized")
 

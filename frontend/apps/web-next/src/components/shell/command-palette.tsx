@@ -251,6 +251,8 @@ export default function ShellCommandPalette({
   const isAdmin = can("admin");
   const canManageModules = can("modules");
   const usingTemplates = Boolean(settings.using_templates);
+  // The tenant's switch: the admin pages need no flow permission of the admin.
+  const flowsEnabled = settings.flows_enabled === true;
 
   // Loads (from the query cache) when the palette opens and on every query.
   const searchSource = useMemo<SearchSource<PaletteItem>>(() => {
@@ -264,7 +266,7 @@ export default function ShellCommandPalette({
     const permissions: PalettePermissions = {
       canCreateSpace,
       isAdmin,
-      adminGroups: adminNavGroups({ usingTemplates, canManageModules })
+      adminGroups: adminNavGroups({ usingTemplates, canManageModules, flowsEnabled })
     };
     const toItems = (entries: PaletteEntry[]): PaletteItem[] => {
       for (const entry of entries) entriesById.current.set(entry.id, entry);
@@ -287,7 +289,8 @@ export default function ShellCommandPalette({
     canCreateSpace,
     isAdmin,
     canManageModules,
-    usingTemplates
+    usingTemplates,
+    flowsEnabled
   ]);
 
   function run(id: string) {
@@ -296,11 +299,11 @@ export default function ShellCommandPalette({
     // Both wait until the palette has closed and returned focus: the dialog
     // then returns focus to the same place, and the drawer (when the palette
     // was opened from it) hands focus back to its menu button.
-    if (entry.action.type === "create-space") {
+    if (entry.command.type === "create-space") {
       window.setTimeout(onCreateSpace, 0);
       return;
     }
-    router.push(entry.action.href);
+    router.push(entry.command.href);
     if (onNavigate) window.setTimeout(onNavigate, 0);
   }
 

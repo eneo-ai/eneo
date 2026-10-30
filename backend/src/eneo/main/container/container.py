@@ -2,7 +2,6 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from contextvars import ContextVar
 
-import redis.asyncio as aioredis
 from dependency_injector import containers, providers
 
 from eneo.actors import ActorFactory, ActorManager
@@ -100,6 +99,91 @@ from eneo.files.file_size_service import FileSizeService
 from eneo.files.image import ImageExtractor
 from eneo.files.text import TextExtractor
 from eneo.files.transcriber import Transcriber
+from eneo.flows import (
+    FlowRepository,
+    FlowRunRepository,
+    FlowRunService,
+    FlowService,
+    FlowVersionRepository,
+)
+from eneo.flows.application.flow_retention_hold_service import (
+    FlowRetentionHoldService,
+)
+from eneo.flows.application.flow_review_expiry_reconciliation import (
+    FlowReviewExpiryReconciler,
+)
+from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from eneo.flows.application.flow_run_audit_outbox_delivery import (
+    FlowRunAuditOutboxDeliveryService,
+)
+from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
+from eneo.flows.application.flow_run_retention_policy_service import (
+    FlowRunRetentionPolicyService,
+)
+from eneo.flows.application.flow_run_review_checkpoint_service import (
+    FlowRunReviewCheckpointService,
+)
+from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.application.flow_transcript_corrections_service import (
+    FlowTranscriptCorrectionsService,
+)
+from eneo.flows.application.flow_transcript_regeneration_service import (
+    FlowTranscriptRegenerationService,
+)
+from eneo.flows.application.flow_transcript_source_service import (
+    FlowTranscriptSourceService,
+)
+from eneo.flows.application.flow_transcript_words_service import (
+    FlowTranscriptWordsService,
+)
+from eneo.flows.flow_run_contract_service import FlowRunContractService
+from eneo.flows.flow_runtime_file_service import FlowRuntimeFileService
+from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
+from eneo.flows.flow_template_asset_repo import FlowTemplateAssetRepository
+from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
+)
+from eneo.flows.infrastructure.flow_retention_hold_repo import (
+    FlowRetentionHoldRepository,
+)
+from eneo.flows.infrastructure.flow_run_audit_outbox_repo import (
+    FlowRunAuditOutboxRepository,
+)
+from eneo.flows.infrastructure.flow_run_retention_policy_repo import (
+    FlowRunRetentionPolicyRepository,
+)
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
+)
+from eneo.flows.infrastructure.flow_run_starter_repo import FlowRunStarterRepository
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRepository,
+)
+from eneo.flows.infrastructure.flow_suggestion_dismissal_repo import (
+    FlowSuggestionDismissalRepository,
+)
+from eneo.flows.infrastructure.flow_suggestion_evidence_repo import (
+    FlowSuggestionEvidenceRepository,
+)
+from eneo.flows.infrastructure.flow_transcript_corrections_repo import (
+    FlowTranscriptCorrectionsRepository,
+)
+from eneo.flows.infrastructure.flow_transcript_source_repo import (
+    FlowTranscriptSourceRepository,
+)
+from eneo.flows.infrastructure.flow_transcript_words_repo import (
+    FlowTranscriptWordsRepository,
+)
+from eneo.flows.infrastructure.published_tool_usage import PublishedToolUsageReader
+from eneo.flows.runtime.flow_webhook_delivery import FlowRunWebhookDeliveryService
+from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from eneo.flows.runtime.live_transcription.service import (
+    LiveTranscriptionSessionService,
+)
+from eneo.flows.runtime.live_transcription.tickets import LiveTranscriptionTicketStore
+from eneo.flows.runtime.platform_execution_backend import PlatformFlowExecutionBackend
+from eneo.flows.variable_resolver import FlowVariableResolver
 from eneo.governance_policy.application.effective_config_service import (
     EffectiveConfigService,
 )
@@ -263,6 +347,7 @@ from eneo.integration.presentation.assemblers.tenant_integration_assembler impor
 from eneo.integration.presentation.assemblers.user_integration_assembler import (
     UserIntegrationAssembler,
 )
+from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_repo import JobRepository
 from eneo.jobs.job_service import JobService
 from eneo.jobs.task_service import TaskService
@@ -289,6 +374,9 @@ from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
 )
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_tool_repo_impl import (
     MCPServerToolRepoImpl,
+)
+from eneo.mcp_servers.infrastructure.repo_impl.unattended_tool_facts_reader import (
+    UnattendedToolFactsReader,
 )
 from eneo.mcp_servers.presentation.assemblers.mcp_server_assembler import (
     MCPServerAssembler,
@@ -319,7 +407,7 @@ from eneo.prompts.prompt_factory import PromptFactory
 from eneo.prompts.prompt_repo import PromptRepository
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.questions_repo import QuestionRepository
-from eneo.redis.connection import build_redis_pool_kwargs
+from eneo.redis.clients import redis_clients
 from eneo.rerank_models.application import RerankModelCRUDService
 from eneo.rerank_models.application.rerank_service import RerankService
 from eneo.rerank_models.domain import RerankModelRepository
@@ -357,6 +445,8 @@ from eneo.storage.application.storage_services import StorageInfoService
 from eneo.storage.domain.storage_factory import StorageInfoFactory
 from eneo.storage.domain.storage_repo import StorageInfoRepository
 from eneo.storage.presentation.storage_assembler import StorageInfoAssembler
+from eneo.tasks.arq_adapter import ArqTaskEnqueuer
+from eneo.tasks.routing import task_queue_routing
 from eneo.templates.api.templates_assembler import TemplateAssembler
 from eneo.templates.app_template.api.app_template_assembler import (
     AppTemplateAssembler,
@@ -425,16 +515,6 @@ from eneo.workflows.step_repo import StepRepository
 _logger = get_logger(__name__)
 
 
-def _create_redis_client() -> aioredis.Redis:
-    settings = get_settings()
-    url = f"redis://{settings.redis_host}:{settings.redis_port}"
-    kwargs = build_redis_pool_kwargs(settings, decode_responses=False)
-
-    # redis-py stubs declare Redis.from_url(**kwargs: Unknown), so pyright marks the
-    # call as partially unknown even though the return type is concrete.
-    return aioredis.Redis.from_url(url, **kwargs)  # pyright: ignore[reportUnknownMemberType]
-
-
 def _build_crawl_engine() -> PythonCrawlEngine:
     settings = get_settings()
     return PythonCrawlEngine(
@@ -452,7 +532,7 @@ def _build_encryption_service() -> EncryptionService:
     key = settings.encryption_key
     if settings.testing:
         key = None
-    _logger.info(
+    _logger.debug(
         "Container: Initializing EncryptionService",
         extra={
             "encryption_key_present": bool(key),
@@ -460,6 +540,18 @@ def _build_encryption_service() -> EncryptionService:
         },
     )
     return EncryptionService(key)
+
+
+def _flow_http_request_timeout_seconds() -> float:
+    return float(get_settings().flow_http_request_timeout_seconds)
+
+
+def _flow_http_max_timeout_seconds() -> float:
+    return float(get_settings().flow_http_max_timeout_seconds)
+
+
+def _flow_http_allow_private_networks() -> bool:
+    return bool(get_settings().flow_http_allow_private_networks)
 
 
 def _object_content_service() -> ObjectContentService:
@@ -558,7 +650,9 @@ class Container(containers.DeclarativeContainer):
         _build_encryption_service
     )
 
-    redis_client = providers.Singleton(_create_redis_client)
+    # The process's command client (eneo.redis.clients): every container shares
+    # its pool, and resolving it outside the process's lifetime is refused.
+    redis_client = providers.Callable(redis_clients.commands)
     # Factories
     prompt_factory = providers.Factory(PromptFactory)
     assistant_template_factory = providers.Factory(AssistantTemplateFactory)
@@ -587,6 +681,7 @@ class Container(containers.DeclarativeContainer):
 
     storage_info_factory = providers.Factory(StorageInfoFactory)
     app_run_factory = providers.Factory(AppRunFactory)
+
     actor_factory = providers.Factory(ActorFactory)
 
     # Managers
@@ -710,16 +805,16 @@ class Container(containers.DeclarativeContainer):
     )
     # TODO: rename when the first repo is not used anymore
     completion_model_repo2 = providers.Factory(
-        CompletionModelRepository, session=session, user=user
+        CompletionModelRepository, session=session, tenant=tenant
     )
     embedding_model_repo2 = providers.Factory(
-        EmbeddingModelRepository, session=session, user=user
+        EmbeddingModelRepository, session=session, tenant=tenant
     )
     transcription_model_repo = providers.Factory(
-        TranscriptionModelRepository, session=session, user=user
+        TranscriptionModelRepository, session=session, tenant=tenant
     )
     image_model_repo = providers.Factory(
-        ImageModelRepository, session=session, user=user
+        ImageModelRepository, session=session, tenant=tenant
     )
     rerank_model_repo = providers.Factory(
         RerankModelRepository, session=session, user=user
@@ -787,7 +882,6 @@ class Container(containers.DeclarativeContainer):
         file_repo=file_repo,
         file_content_loader=file_content_loader,
         completion_model_repo=completion_model_repo2,
-        user=user,
     )
 
     info_blob_chunk_repo = providers.Factory(InfoBlobChunkRepo, session=session)
@@ -810,6 +904,100 @@ class Container(containers.DeclarativeContainer):
         file_content_loader=file_content_loader,
     )
     crawl_run_repo = providers.Factory(CrawlRunRepository, session=session)
+    flow_repo = providers.Factory(
+        FlowRepository,
+        session=session,
+    )
+    flow_run_retention_policy_repo = providers.Factory(
+        FlowRunRetentionPolicyRepository,
+        session=session,
+    )
+    flow_retention_hold_repo = providers.Factory(
+        FlowRetentionHoldRepository,
+        session=session,
+    )
+    flow_version_repo = providers.Factory(
+        FlowVersionRepository,
+        session=session,
+    )
+    published_tool_usage_reader = providers.Factory(
+        PublishedToolUsageReader,
+        session=session,
+    )
+    flow_template_asset_repo = providers.Factory(
+        FlowTemplateAssetRepository,
+        session=session,
+    )
+    flow_run_audit_outbox_repo = providers.Factory(
+        FlowRunAuditOutboxRepository,
+        session=session,
+    )
+    flow_run_webhook_delivery_repo = providers.Factory(
+        FlowRunWebhookDeliveryRepository,
+        session=session,
+    )
+    flow_runtime_upload_repo = providers.Factory(
+        FlowRuntimeUploadRepository,
+        session=session,
+    )
+    flow_run_repo = providers.Factory(
+        FlowRunRepository,
+        session=session,
+        audit_outbox_repo=flow_run_audit_outbox_repo,
+    )
+    flow_provider_call_repo = providers.Factory(
+        FlowProviderCallRepository,
+        session=session,
+    )
+    flow_suggestion_evidence_repo = providers.Factory(
+        FlowSuggestionEvidenceRepository,
+        session=session,
+    )
+    flow_suggestion_dismissal_repo = providers.Factory(
+        FlowSuggestionDismissalRepository,
+        session=session,
+    )
+    flow_run_starter_repo = providers.Factory(
+        FlowRunStarterRepository,
+        session=session,
+    )
+    flow_run_review_checkpoint_repo = providers.Factory(
+        FlowRunReviewCheckpointRepository,
+        session=session,
+        audit_outbox_repo=flow_run_audit_outbox_repo,
+    )
+    flow_transcript_corrections_repo = providers.Factory(
+        FlowTranscriptCorrectionsRepository,
+        session=session,
+    )
+    flow_transcript_words_repo = providers.Factory(
+        FlowTranscriptWordsRepository,
+        session=session,
+    )
+    flow_transcript_source_repo = providers.Factory(
+        FlowTranscriptSourceRepository,
+        session=session,
+    )
+    flow_run_terminalizer = providers.Factory(
+        FlowRunTerminalizer,
+        flow_run_repo=flow_run_repo,
+        audit_outbox_repo=flow_run_audit_outbox_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
+    )
+    flow_review_expiry_reconciler = providers.Factory(
+        FlowReviewExpiryReconciler,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
+        flow_run_terminalizer=flow_run_terminalizer,
+    )
+    platform_task_enqueuer = providers.Singleton(
+        ArqTaskEnqueuer,
+        job_manager=providers.Object(job_manager),
+        routing=providers.Callable(task_queue_routing),
+    )
+    flow_execution_backend = providers.Factory(
+        PlatformFlowExecutionBackend,
+        task_enqueuer=platform_task_enqueuer,
+    )
 
     storage_repo = providers.Factory(
         StorageInfoRepository, user=user, session=session, factory=storage_info_factory
@@ -836,7 +1024,19 @@ class Container(containers.DeclarativeContainer):
     )
     space_repo = providers.Factory(
         SpaceRepository,
+        tenant=tenant,
         user=user,
+        factory=space_factory,
+        file_content_loader=file_content_loader,
+        session=session,
+        completion_model_repo=completion_model_repo2,
+        transcription_model_repo=transcription_model_repo,
+        embedding_model_repo=embedding_model_repo2,
+        http_auth_encryption=http_auth_encryption_service,
+    )
+    tenant_scoped_space_repo = providers.Factory(
+        SpaceRepository,
+        tenant=tenant,
         factory=space_factory,
         file_content_loader=file_content_loader,
         session=session,
@@ -902,6 +1102,17 @@ class Container(containers.DeclarativeContainer):
         TenantFederationService,
         tenant_repo=tenant_repo,
         encryption_service=encryption_service,
+    )
+    flow_run_retention_policy_service = providers.Factory(
+        FlowRunRetentionPolicyService,
+        user=user,
+        repository=flow_run_retention_policy_repo,
+        audit_service=audit_service,
+    )
+    flow_retention_hold_service = providers.Factory(
+        FlowRetentionHoldService,
+        user=user,
+        repository=flow_retention_hold_repo,
         audit_service=audit_service,
     )
 
@@ -931,7 +1142,7 @@ class Container(containers.DeclarativeContainer):
     )
     datastore = providers.Factory(
         Datastore,
-        user=user,
+        tenant_id=tenant.provided.id,
         create_embeddings_service=create_embeddings_service,
         info_blob_chunk_repo=info_blob_chunk_repo,
     )
@@ -1021,6 +1232,36 @@ class Container(containers.DeclarativeContainer):
         transcription_model_repo=transcription_model_repo,
     )
     auth_service = providers.Factory(AuthService)
+    data_retention_service = providers.Factory(
+        DataRetentionService,
+        session=session,
+    )
+    flow_run_audit_outbox_delivery_service = providers.Factory(
+        FlowRunAuditOutboxDeliveryService,
+        audit_outbox_repo=flow_run_audit_outbox_repo,
+        audit_log_repo=audit_log_repo,
+    )
+    flow_http_runtime = providers.Factory(
+        FlowHttpRuntimeHelper,
+        variable_resolver=providers.Factory(FlowVariableResolver),
+        request_timeout_seconds=providers.Callable(_flow_http_request_timeout_seconds),
+        max_timeout_seconds=providers.Callable(_flow_http_max_timeout_seconds),
+        allow_private_networks=providers.Callable(_flow_http_allow_private_networks),
+    )
+    flow_run_webhook_delivery_service = providers.Factory(
+        FlowRunWebhookDeliveryService,
+        webhook_delivery_repo=flow_run_webhook_delivery_repo,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        flow_version_repo=flow_version_repo,
+        flow_run_terminalizer=flow_run_terminalizer,
+        encryption_service=encryption_service,
+        audit_service=audit_service,
+        user_repo=user_repo,
+        api_key_repo=api_key_v2_repo,
+        tenant_repo=tenant_repo,
+        http_runtime=flow_http_runtime,
+    )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,
         session=session,
@@ -1096,6 +1337,7 @@ class Container(containers.DeclarativeContainer):
     )
     api_key_policy_service = providers.Factory(
         ApiKeyPolicyService,
+        api_key_repo=api_key_v2_repo,
         space_service=space_service,
         user=user,
     )
@@ -1183,7 +1425,9 @@ class Container(containers.DeclarativeContainer):
         feature_flag_service=feature_flag_service,
         tenant_repo=tenant_repo,
         audit_service=audit_service,
+        data_retention_service=data_retention_service,
         skill_repo=skill_repo,
+        upload_admission=upload_admission,
     )
     crawl_service = providers.Factory(
         CrawlService,
@@ -1242,6 +1486,7 @@ class Container(containers.DeclarativeContainer):
     file_service = providers.Factory(
         FileService,
         user=user,
+        owner=providers.Object(None),
         repo=file_repo,
         protocol=file_protocol,
         object_content=object_content_service,
@@ -1360,6 +1605,146 @@ class Container(containers.DeclarativeContainer):
         audit_service=audit_service,
         space_repo=space_repo,
         rerank_service=rerank_service,
+    )
+    flow_template_asset_service = providers.Factory(
+        FlowTemplateAssetService,
+        user=user,
+        flow_repo=flow_repo,
+        file_repo=file_repo,
+        file_content_loader=file_content_loader,
+        file_service=file_service,
+        template_asset_repo=flow_template_asset_repo,
+        flow_version_repo=flow_version_repo,
+    )
+    # Built on the session `flow_repo` writes through: a publish decides on
+    # these facts in the transaction that stores its version.
+    unattended_tool_facts_reader = providers.Factory(
+        UnattendedToolFactsReader, session=session
+    )
+    flow_service = providers.Factory(
+        FlowService,
+        user=user,
+        flow_repo=flow_repo,
+        flow_version_repo=flow_version_repo,
+        assistant_service=assistant_service,
+        template_asset_service=flow_template_asset_service,
+        encryption_service=encryption_service,
+        space_service=space_service,
+        tool_facts_reader=unattended_tool_facts_reader,
+    )
+    # One per Container, so the flow gate and every run service of a request
+    # share its memo. A Container is built per request and given its user by
+    # `override_user`: never resolve this before authentication.
+    flow_run_access_policy = providers.Singleton(
+        FlowRunAccessPolicy,
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        space_service=space_service,
+        actor_manager=actor_manager,
+    )
+    flow_run_service = providers.Factory(
+        FlowRunService,
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=flow_provider_call_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
+        flow_run_terminalizer=flow_run_terminalizer,
+        flow_version_repo=flow_version_repo,
+        file_repo=file_repo,
+        runtime_upload_repo=flow_runtime_upload_repo,
+        settings_service=settings_service,
+        access_policy=flow_run_access_policy,
+        webhook_delivery_repo=flow_run_webhook_delivery_repo,
+    )
+    flow_transcript_source_service = providers.Factory(
+        FlowTranscriptSourceService,
+        user=user,
+        access_policy=flow_run_access_policy,
+        flow_run_repo=flow_run_repo,
+        transcript_source_repo=flow_transcript_source_repo,
+    )
+    flow_run_evidence_service = providers.Factory(
+        FlowRunEvidenceService,
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=flow_provider_call_repo,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=file_repo,
+        access_policy=flow_run_access_policy,
+        webhook_delivery_repo=flow_run_webhook_delivery_repo,
+        transcript_source_service=flow_transcript_source_service,
+    )
+    flow_run_review_checkpoint_service = providers.Factory(
+        FlowRunReviewCheckpointService,
+        user=user,
+        flow_run_review_checkpoint_repo=flow_run_review_checkpoint_repo,
+        access_policy=flow_run_access_policy,
+        flow_run_terminalizer=flow_run_terminalizer,
+        flow_run_repo=flow_run_repo,
+        transcript_corrections_repo=flow_transcript_corrections_repo,
+        transcript_words_repo=flow_transcript_words_repo,
+        transcript_source_service=flow_transcript_source_service,
+    )
+    flow_transcript_corrections_service = providers.Factory(
+        FlowTranscriptCorrectionsService,
+        user=user,
+        transcript_corrections_repo=flow_transcript_corrections_repo,
+        audit_service=audit_service,
+        access_policy=flow_run_access_policy,
+        flow_run_repo=flow_run_repo,
+        transcript_source_service=flow_transcript_source_service,
+    )
+    flow_transcript_regeneration_service = providers.Factory(
+        FlowTranscriptRegenerationService,
+        user=user,
+        run_service=flow_run_service,
+        access_policy=flow_run_access_policy,
+        run_repo=flow_run_repo,
+        corrections_repo=flow_transcript_corrections_repo,
+        words_repo=flow_transcript_words_repo,
+        audit_service=audit_service,
+        transcript_source_service=flow_transcript_source_service,
+    )
+    flow_transcript_words_service = providers.Factory(
+        FlowTranscriptWordsService,
+        user=user,
+        transcript_words_repo=flow_transcript_words_repo,
+        flow_run_repo=flow_run_repo,
+        transcript_source_service=flow_transcript_source_service,
+    )
+    flow_runtime_file_service = providers.Factory(
+        FlowRuntimeFileService,
+        user=user,
+        session=session,
+        flow_service=flow_service,
+        file_service=file_service,
+        runtime_upload_repo=flow_runtime_upload_repo,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        audit_service=audit_service,
+    )
+    flow_live_transcription_session_service = providers.Factory(
+        LiveTranscriptionSessionService,
+        user=user,
+        flow_service=flow_service,
+        flow_version_repo=flow_version_repo,
+        settings_service=settings_service,
+        ticket_store=providers.Factory(
+            LiveTranscriptionTicketStore, redis_client=redis_client
+        ),
+        settings=providers.Callable(get_settings),
+    )
+    flow_run_contract_service = providers.Factory(
+        FlowRunContractService,
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=flow_template_asset_repo,
+        settings=providers.Callable(get_settings),
     )
     group_chat_service = providers.Factory(
         GroupChatService,
@@ -1743,11 +2128,6 @@ class Container(containers.DeclarativeContainer):
         job_service=job_service,
     )
 
-    data_retention_service = providers.Factory(
-        DataRetentionService,
-        session=session,
-    )
-
     # ═══════════════════════════════════════════════════════════════════════════
     # SESSION SCOPE: Unit-of-Work pattern for long-running tasks
     # ═══════════════════════════════════════════════════════════════════════════
@@ -1764,7 +2144,7 @@ class Container(containers.DeclarativeContainer):
 
     @staticmethod
     @asynccontextmanager
-    async def session_scope() -> AsyncGenerator[AsyncSession]:
+    async def session_scope() -> AsyncGenerator[AsyncSession, None]:
         """Provide a short-lived session for explicit DB operations.
 
         Use this for Unit-of-Work pattern in long-running tasks (crawlers,

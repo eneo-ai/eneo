@@ -9,7 +9,7 @@ import { Search, X } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { conversationContext } from "@/components/shell/conversation-context";
 import { conversationHref } from "@/components/shell/routes";
@@ -395,7 +395,13 @@ export function HistoryAside({
 
   if (!inline) {
     return (
-      <BottomSheet isOpen onOpenChange={(open) => !open && onClose()} label={label} height="tall">
+      <BottomSheet
+        isOpen
+        onOpenChange={(open) => !open && onClose()}
+        label={label}
+        height="tall"
+        padding={0}
+      >
         <HistoryPanel {...props} onClose={onClose} />
       </BottomSheet>
     );

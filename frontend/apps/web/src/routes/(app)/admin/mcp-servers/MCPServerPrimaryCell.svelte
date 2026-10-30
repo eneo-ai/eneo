@@ -39,7 +39,7 @@
     switch (type) {
       case "none":
         return {
-          label: "Public",
+          label: m.mcp_auth_public(),
           icon: Globe,
           classes: "label-moss bg-label-dimmer text-label-stronger"
         };

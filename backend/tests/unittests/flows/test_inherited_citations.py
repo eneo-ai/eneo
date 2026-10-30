@@ -1,0 +1,334 @@
+from __future__ import annotations
+
+from uuid import uuid4
+
+from eneo.flows.citation_sidecar import build_citation_sidecar
+from eneo.flows.domain.flow import FlowStepResult
+from eneo.flows.domain.rag_evidence import build_step_result_citation_state
+from eneo.flows.domain.runtime import RunExecutionState, RuntimeStep
+from eneo.flows.runtime.inherited_citations import (
+    collect_inherited_citation_context,
+    inherited_cited_sources,
+)
+from tests.unittests.flows.executor_test_support import (
+    completed_grounded_result as _completed_grounded_result,
+)
+
+
+def _runtime_step(*, input_bindings: dict[str, object]) -> RuntimeStep:
+    return RuntimeStep(
+        step_id=uuid4(),
+        step_order=2,
+        assistant_id=uuid4(),
+        user_description="Final report",
+        input_source="previous_step",
+        input_bindings=input_bindings,
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+
+
+def _run_state(prior_result: FlowStepResult) -> RunExecutionState:
+    return RunExecutionState(
+        completed_by_order={1: prior_result},
+        prior_results=[prior_result],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_1": 1},
+        step_names_by_order={1: "Grounded summary"},
+    )
+
+
+def test_inherited_citation_context_reads_only_underlag_steps() -> None:
+    first = _completed_grounded_result(
+        step_order=1, source_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    )
+    second = _completed_grounded_result(
+        step_order=2, source_id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    )
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=3,
+        assistant_id=uuid4(),
+        user_description="Final report",
+        input_source="all_previous_steps",
+        input_bindings={"question": "Samtal: {{ step_2.output.text }}"},
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+    state = RunExecutionState(
+        completed_by_order={1: first, 2: second},
+        prior_results=[first, second],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_1": 1, "step_2": 2},
+        step_names_by_order={1: "Grounded summary", 2: "Second summary"},
+    )
+
+    context = collect_inherited_citation_context(
+        step=step, state=state, prompt_template=None
+    )
+
+    assert context["upstream_step_orders"] == [2]
+    assert context["upstream_step_labels"] == ["Second summary"]
+    assert context["available_source_ids"] == ["bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
+
+
+def test_prompt_references_join_the_inherited_sources() -> None:
+    first = _completed_grounded_result(
+        step_order=1, source_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    )
+    second = _completed_grounded_result(
+        step_order=2, source_id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    )
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=3,
+        assistant_id=uuid4(),
+        user_description="Final report",
+        input_source="previous_step",
+        input_bindings={"question": "Samtal: {{ step_2.output.text }}"},
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+    state = RunExecutionState(
+        completed_by_order={1: first, 2: second},
+        prior_results=[first, second],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_1": 1, "step_2": 2},
+        step_names_by_order={1: "Grounded summary", 2: "Second summary"},
+    )
+
+    context = collect_inherited_citation_context(
+        step=step,
+        state=state,
+        prompt_template="Bakgrund: {{ step_1.output.text }}",
+    )
+
+    assert context["upstream_step_orders"] == [1, 2]
+    assert context["available_source_ids"] == [
+        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+        "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    ]
+
+
+def test_cited_inherited_sources_reach_the_next_consumer() -> None:
+    # Step 1 retrieves A. Step 2 reads step 1, retrieves nothing of its own and
+    # cites A; its result carries A as an inherited citation. Step 3 binds only
+    # step 2 and must still be able to cite A, while an unrelated source B on a
+    # step it does not read stays out.
+    first = _completed_grounded_result(
+        step_order=1, source_id="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    )
+    unrelated = _completed_grounded_result(
+        step_order=2, source_id="bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    )
+    first_state = RunExecutionState(
+        completed_by_order={1: first},
+        prior_results=[first],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_1": 1},
+        step_names_by_order={1: "Grounded summary"},
+    )
+    consumer = RuntimeStep(
+        step_id=uuid4(),
+        step_order=3,
+        assistant_id=uuid4(),
+        user_description="Middle",
+        input_source="previous_step",
+        input_bindings={"question": "Underlag: {{ step_1.output.text }}"},
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+    inherited = collect_inherited_citation_context(
+        step=consumer, state=first_state, prompt_template=None
+    )
+    cited = inherited_cited_sources(
+        citation_sidecar={"cited_source_ids": ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]},
+        inherited_context=inherited,
+    )
+    middle_state = build_step_result_citation_state(None, inherited_sources=cited)
+    assert middle_state is not None
+    middle = _completed_grounded_result(step_order=3, rag=middle_state)
+
+    final_step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=4,
+        assistant_id=uuid4(),
+        user_description="Final report",
+        input_source="all_previous_steps",
+        input_bindings={"question": "Samtal: {{ step_3.output.text }}"},
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+    state = RunExecutionState(
+        completed_by_order={1: first, 2: unrelated, 3: middle},
+        prior_results=[first, unrelated, middle],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_1": 1, "step_2": 2, "step_3": 3},
+        step_names_by_order={1: "Grounded summary", 2: "Unrelated", 3: "Middle"},
+    )
+
+    context = collect_inherited_citation_context(
+        step=final_step, state=state, prompt_template=None
+    )
+
+    assert context["upstream_step_orders"] == [3]
+    assert context["available_source_ids"] == ["aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
+
+
+def test_inherited_citation_context_reads_typed_source_refs() -> None:
+    prior_result = _completed_grounded_result(step_order=1)
+    context = collect_inherited_citation_context(
+        prompt_template=None,
+        step=_runtime_step(
+            input_bindings={
+                "source_refs": [
+                    {"step_ref": "step_1", "output": "text", "label": "Grounding"}
+                ]
+            }
+        ),
+        state=_run_state(prior_result),
+    )
+
+    assert context["upstream_step_orders"] == [1]
+    assert context["upstream_step_labels"] == ["Grounded summary"]
+    assert context["available_source_ids"] == ["11111111-1111-1111-1111-111111111111"]
+
+
+def test_repeated_retrieval_left_out_of_the_prompt_keeps_inherited_membership() -> None:
+    # Step 1 retrieves A. Step 2 inherits A, retrieves A again but its own
+    # prompt context excludes it, and cites A: the sidecar resolves the
+    # citation as direct. The next consumer must still inherit A, listed once.
+    source_a = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    first = _completed_grounded_result(step_order=1, source_id=source_a)
+    first_state = RunExecutionState(
+        completed_by_order={1: first},
+        prior_results=[first],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_1": 1},
+        step_names_by_order={1: "Grounded summary"},
+    )
+    middle_step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=2,
+        assistant_id=uuid4(),
+        user_description="Middle",
+        input_source="previous_step",
+        input_bindings={"question": "Underlag: {{ step_1.output.text }}"},
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+    inherited = collect_inherited_citation_context(
+        step=middle_step, state=first_state, prompt_template=None
+    )
+    retrieved_again = {
+        "id": source_a,
+        "id_short": source_a[:8],
+        "title": "Procurement memo",
+        "source_title": "Procurement memo",
+        "matched_chunk_count": 1,
+        "recorded_passage_count": 0,
+        "best_score": 0.9,
+    }
+    sidecar = build_citation_sidecar(
+        "",
+        references=[retrieved_again],
+        included_source_ids=[],
+        inherited_references=inherited["available_sources"],
+        inherited_source_ids=inherited["available_source_ids"],
+        citation_mode_requested=True,
+        raw_completion_text=f'Slutsats <inref id="{source_a[:8]}"/>',
+    )
+    assert sidecar["direct_cited_source_ids"] == [source_a]
+    assert sidecar["inherited_cited_source_ids"] == []
+
+    cited = inherited_cited_sources(
+        citation_sidecar=sidecar, inherited_context=inherited
+    )
+    middle_state = build_step_result_citation_state(
+        {
+            "status": "success",
+            "references": [retrieved_again],
+            "prompt_context": {"tracked": True, "included_source_ids": []},
+        },
+        inherited_sources=cited,
+    )
+    assert middle_state is not None
+    assert [source["id"] for source in middle_state["citation_sources"]] == [source_a]
+    assert middle_state["prompt_context"]["included_source_ids"] == [source_a]
+    middle = _completed_grounded_result(step_order=2, rag=middle_state)
+
+    final_step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=3,
+        assistant_id=uuid4(),
+        user_description="Final",
+        input_source="all_previous_steps",
+        input_bindings={"question": "Samtal: {{ step_2.output.text }}"},
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+    )
+    state = RunExecutionState(
+        completed_by_order={1: first, 2: middle},
+        prior_results=[first, middle],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_ref_mapping={"step_1": 1, "step_2": 2},
+        step_names_by_order={1: "Grounded summary", 2: "Middle"},
+    )
+
+    context = collect_inherited_citation_context(
+        step=final_step, state=state, prompt_template=None
+    )
+
+    assert context["upstream_step_orders"] == [2]
+    assert context["available_source_ids"] == [source_a]
+
+
+def test_inherited_citation_context_ignores_what_only_the_delivery_config_reads() -> (
+    None
+):
+    # A webhook template is filled after the model has answered: the model never
+    # sees step 1's text, so it must not be offered step 1's sources to cite.
+    step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=2,
+        assistant_id=uuid4(),
+        user_description="Deliver",
+        input_source="previous_step",
+        input_bindings={"question": "Sammanfatta."},
+        input_config=None,
+        output_mode="http_post",
+        output_config={
+            "url": "https://example.org/{{ step_1.output.text }}",
+            "auth": {"mode": "none"},
+        },
+    )
+
+    context = collect_inherited_citation_context(
+        step=step,
+        state=_run_state(_completed_grounded_result(step_order=1)),
+        prompt_template=None,
+    )
+
+    assert context["upstream_step_orders"] == []
+    assert context["available_source_ids"] == []

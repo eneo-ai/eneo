@@ -1,5 +1,9 @@
 import type { TabularColumn } from "./engine/types";
+import type { JsonReadOutcome } from "./engine/json";
 import type { TabularConfig } from "./config";
+
+/** How the downloaded bytes are read: by their filename's extension. */
+export type SourceFormat = "csv" | "xlsx" | "jsonl";
 
 /** Formula values come from Excel's saved results; this runtime never recalculates. */
 export type CalculationDiagnostics = {
@@ -24,16 +28,29 @@ export type SheetMetadata = {
   skipRows?: number;
 };
 
+/** What one ingest produced and the cache keeps. */
+export type IngestResult = { sheets: SheetMetadata[] };
+
 /** Child job: validate and convert one downloaded file, writing sheet CSVs to `outputDir`. */
 export type IngestJob = {
   kind: "tabular_ingest";
   selection?: import("./selection").SourceSelection;
   inputPath: string;
-  isXlsx: boolean;
+  format: SourceFormat;
   contentType: string;
   outputDir: string;
   config: TabularConfig;
 };
+
+/** Child job: a downloaded JSON document's structure, or the value at a JSONPath in it. */
+export type JsonExtractJob = {
+  kind: "json_extract";
+  inputPath: string;
+  path?: string;
+  maxChars: number;
+  config: TabularConfig;
+};
+export type { JsonReadOutcome };
 
 /** Child job: one read-only query (or a list of checks) over already-parsed sheet CSVs. */
 export type QueryJob = {
@@ -64,6 +81,8 @@ export type QueryOutcome = {
   /** Rows written to the export file, and whether the export hit its row limit. */
   exportedRows?: number;
   exportTruncated?: boolean;
+  /** Cells cut to MAX_CELL_CHARS in the returned rows. */
+  clippedCells?: number;
 };
 
 /** Per statement: a result, or the safe reason it was rejected. */

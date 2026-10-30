@@ -40,9 +40,11 @@ from eneo.authentication.auth_models import (
 )
 from eneo.authentication.auth_service import INTERNAL_MCP_AUDIENCE, AuthService
 from eneo.authentication.endpoint_access import authorize_user
+from eneo.authentication.service_key_user import build_service_key_user
 from eneo.database.tables.app_table import AppRuns, Apps
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.collections_table import CollectionsTable
+from eneo.database.tables.flow_tables import Flows
 from eneo.database.tables.group_chats_table import GroupChatsTable
 from eneo.database.tables.info_blobs_table import InfoBlobs
 from eneo.database.tables.integration_table import IntegrationKnowledge
@@ -162,11 +164,7 @@ def _check_basic_method_permission(
     request: Request,
     key: ApiKeyV2InDB,
 ) -> None:
-    """Enforce the key's basic permission level against the HTTP method.
-
-    Catch-all for routes without a specific resource guard.
-    No read-overrides — only the raw method->permission mapping applies.
-    """
+    """Enforce the key's basic permission level against the HTTP method."""
     required = METHOD_PERMISSION_MAP.get(request.method, "admin")
     required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
     granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
@@ -191,10 +189,7 @@ def _check_management_permission(
     key: ApiKeyV2InDB,
     required: str,
 ) -> None:
-    """Enforce a minimum API key permission for management endpoints.
-
-    NOT gated by the feature flag — management guards always enforce.
-    """
+    """Enforce a minimum API key permission for management endpoints."""
     granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
     required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
 
@@ -220,31 +215,32 @@ def _check_method_resource_permission(
     key: ApiKeyV2InDB,
     config: dict[str, object],
 ) -> None:
-    """Check method→permission and fine-grained resource permission.
-
-    The method→permission check (with read-overrides) is ALWAYS enforced,
-    even when ``api_key_enforce_resource_permissions`` is disabled.
-    The fine-grained resource-type check is delegated to
-    ``check_resource_permission`` which self-gates via the flag.
-
-    Called after authentication has set ``request.state.api_key``.
-    *config* is written by the router-level
-    ``require_resource_permission_for_method`` dependency.
-    """
+    """Check method→permission and fine-grained resource permission."""
     resource_type = cast(str, config["resource_type"])
     read_override_endpoints = cast(
         "frozenset[str] | None", config.get("read_override_endpoints")
     )
+    method_permission_overrides = cast(
+        "dict[str, str] | None", config.get("method_permission_overrides")
+    )
 
     required = METHOD_PERMISSION_MAP.get(request.method, "admin")
+    route = request.scope.get("route")
+    endpoint = getattr(route, "endpoint", None)
+    endpoint_name = getattr(endpoint, "__name__", None)
+    if isinstance(endpoint_name, str):
+        if (
+            method_permission_overrides is not None
+            and endpoint_name in method_permission_overrides
+        ):
+            required = method_permission_overrides[endpoint_name]
+        elif (
+            required != "read"
+            and read_override_endpoints is not None
+            and endpoint_name in read_override_endpoints
+        ):
+            required = "read"
 
-    if required != "read" and read_override_endpoints:
-        route = request.scope.get("route")
-        if route and hasattr(route, "endpoint"):
-            if route.endpoint.__name__ in read_override_endpoints:
-                required = "read"
-
-    # Method→permission: always enforced (respects read-overrides above)
     required_level = PERMISSION_LEVEL_ORDER.get(required, 3)
     granted_level = PERMISSION_LEVEL_ORDER.get(key.permission, 0)
     if granted_level < required_level:
@@ -263,7 +259,6 @@ def _check_method_resource_permission(
             },
         )
 
-    # Fine-grained resource permission (self-gated by flag)
     check_resource_permission(key, resource_type, required)
 
 
@@ -1004,42 +999,15 @@ class UserService:
         still enforced by SpaceActor and the route-level scope/permission
         guards — this only unblocks the role-based permission gates.
         """
-        from eneo.roles.role import RoleInDB
-        from eneo.users.user import UserInDB as UserInDBModel
-
         tenant = await self.tenant_repo.get(key.tenant_id)
         if tenant is None:
             raise BadRequestException(
                 f"Tenant {key.tenant_id} does not exist for service key {key.id}"
             )
-
-        # Use the key id directly as the synthetic user id. No row in `users`
-        # carries this id, so it remains "obviously not a real user" — but it
-        # now correlates with the actual key in logs, audit metadata, and
-        # caches without an extra uuid5 derivation step.
-        synthetic_role = RoleInDB(
-            id=key.id,
-            tenant_id=key.tenant_id,
-            name=f"Service Key Role ({key.name})",
-            permissions=sorted(
-                _synthesize_service_key_permissions(key),
-                key=lambda p: p.value,
-            ),
-        )
-
-        key_suffix = key.key_suffix or key.id.hex[:8]
-        return UserInDBModel(
-            id=key.id,
-            email=f"sk-{key_suffix}@service.key",
-            username=f"Service Key ({key.name})",
-            state=UserState.ACTIVE,
-            tenant_id=key.tenant_id,
+        return build_service_key_user(
+            key=key,
             tenant=tenant,
-            active_api_key=key,
-            roles=[synthetic_role],
-            used_tokens=0,
-            email_verified=True,
-            is_active=True,
+            permissions=_synthesize_service_key_permissions(key),
         )
 
     async def _resolve_api_key(
@@ -1146,6 +1114,7 @@ class UserService:
         )
 
         policy_service = ApiKeyPolicyService(
+            api_key_repo=self.api_key_v2_repo,
             space_service=self.space_service,
             user=None,
         )
@@ -1176,13 +1145,17 @@ class UserService:
             raise
 
         if not is_repeated_request_authentication:
-            settings = get_settings()
-            await self.api_key_v2_repo.update_last_used_at(
-                key_id=resolved.key.id,
-                tenant_id=resolved.key.tenant_id,
-                last_used_at=datetime.now(timezone.utc),
-                min_interval_seconds=settings.api_key_last_used_min_interval_seconds,
-            )
+            min_interval = get_settings().api_key_last_used_min_interval_seconds
+            now = datetime.now(timezone.utc)
+            if ApiKeysV2Repository.last_used_is_due(
+                resolved.key.last_used_at, at=now, min_interval_seconds=min_interval
+            ):
+                await self.api_key_v2_repo.update_last_used_at(
+                    key_id=resolved.key.id,
+                    tenant_id=resolved.key.tenant_id,
+                    last_used_at=now,
+                    min_interval_seconds=min_interval,
+                )
 
         if request is None:
             raise ApiKeyValidationError(
@@ -1517,6 +1490,9 @@ class UserService:
             return await session.scalar(stmt)
         elif resource_type == "website":
             stmt = sa.select(Websites.space_id).where(Websites.id == resource_id)
+            return await session.scalar(stmt)
+        elif resource_type == "flow":
+            stmt = sa.select(Flows.space_id).where(Flows.id == resource_id)
             return await session.scalar(stmt)
         elif resource_type == "app_run":
             return await self._resolve_app_run_space_id(resource_id)
@@ -2280,8 +2256,6 @@ class UserService:
 
         # If roles are being changed, check admin safety
         if user_update_public.roles is not None:
-            from eneo.roles.permissions import Permission
-
             current_user = await self.repo.get_user_by_id(user_id)
             if current_user is not None:
                 had_admin = Permission.ADMIN in current_user.permissions
@@ -2329,8 +2303,6 @@ class UserService:
 
         # If state is being changed to inactive/deleted, check admin safety
         if user_update_public.state in (UserState.INACTIVE, UserState.DELETED):
-            from eneo.roles.permissions import Permission
-
             target_user = await self.repo.get_user_by_id(user_id)
             if target_user is not None and Permission.ADMIN in target_user.permissions:
                 admin_count = await self.repo.count_users_with_admin_permission(
@@ -2368,8 +2340,6 @@ class UserService:
         return user_in_db
 
     async def delete_user(self, user_id: UUID):
-        from eneo.roles.permissions import Permission
-
         # Check if deleting this user would leave tenant without admin
         user = await self.repo.get_user_by_id(user_id)
         if user is not None and Permission.ADMIN in user.permissions:

@@ -1,0 +1,639 @@
+from __future__ import annotations
+
+import io
+from collections.abc import AsyncIterator
+from uuid import UUID, uuid4
+
+import pytest
+import sqlalchemy as sa
+from docx import Document
+from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.orm.session import SessionTransaction
+
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.audit_log import AuditLog
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.database.database import sessionmanager
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
+    Flows,
+    FlowTemplateAssets,
+    FlowVersions,
+)
+from eneo.database.tables.spaces_table import Spaces
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
+from eneo.flows.domain.flow import FlowStep
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_resource_bindings import (
+    FlowResourceBindingSource,
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
+from eneo.flows.flow_template_asset_service import (
+    AttachedTemplateFileUnavailableError,
+)
+from eneo.flows.runtime.docx_template_runtime import (
+    extract_docx_text,
+    render_docx_template,
+)
+from eneo.main.exceptions import BadRequestException
+from tests.docx_controls import (
+    append_rich_control,
+    append_text_control,
+)
+
+DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+
+
+def _template_bytes(placeholder: str) -> bytes:
+    document = Document()
+    append_text_control(
+        document.add_paragraph("Ärende: "),
+        tag=placeholder,
+        label=placeholder,
+        hint=placeholder,
+    )
+    payload = io.BytesIO()
+    document.save(payload)
+    return payload.getvalue()
+
+
+async def _bytes(payload: bytes) -> AsyncIterator[bytes]:
+    yield payload
+
+
+async def _save_template_file(container, *, name: str, content: bytes):
+    return await container.file_service().save_prepared_file(
+        PreparedFileUpload(
+            name=name,
+            file_type=FileType.DOCUMENT,
+            display_media_type=DOCX_MIME,
+            contents=(
+                PendingFileContent(
+                    variant=FileContentVariant.ORIGINAL,
+                    chunks=_bytes(content),
+                    declared_media_type=DOCX_MIME,
+                    verified_media_type=DOCX_MIME,
+                ),
+            ),
+        )
+    )
+
+
+async def _create_flow_and_file(
+    container, *, placeholder: str, content: bytes | None = None
+):
+    user = container.user()
+    space = Spaces(
+        tenant_id=user.tenant_id,
+        user_id=user.id,
+        name=f"template-binding-{uuid4().hex}",
+    )
+    container.session().add(space)
+    await container.session().flush()
+    flow = await container.flow_service().create_flow(
+        space_id=space.id,
+        name=f"Template flow {uuid4().hex}",
+        description="",
+    )
+    content = content if content is not None else _template_bytes(placeholder)
+    file = await _save_template_file(
+        container,
+        name="template.docx",
+        content=content,
+    )
+    return user, space, flow, file
+
+
+async def _create_template_download_fixture(db_container):
+    async with db_container() as setup_container:
+        user, _space, flow, file = await _create_flow_and_file(
+            setup_container,
+            placeholder="case_id",
+        )
+        token = setup_container.auth_service().create_access_token_for_user(user)
+
+    async with db_container(user=user) as asset_container:
+        asset = await asset_container.flow_template_asset_service().create_from_existing_attached_file(
+            flow_id=flow.id,
+            file_id=file.id,
+        )
+    return token, flow.id, asset.id, file.id, user.id, user.tenant_id
+
+
+async def _delete_file(
+    *,
+    file_id,
+    lock_timeout: bool,
+) -> None:
+    async with sessionmanager.session() as session, session.begin():
+        if lock_timeout:
+            await session.execute(sa.text("SET LOCAL lock_timeout = '100ms'"))
+        await session.execute(sa.delete(Files).where(Files.id == file_id))
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_upload_route_persists_the_uploaded_bytes(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+) -> None:
+    # The route inspects the upload for placeholders and then persists it;
+    # both must read the same bytes, or the stored asset is empty and every
+    # later read (inspect, publish, run) fails as an invalid archive.
+    _ = patch_auth_service_jwt
+    async with db_container() as setup_container:
+        user, _space, flow, _file = await _create_flow_and_file(
+            setup_container,
+            placeholder="case_id",
+        )
+        token = setup_container.auth_service().create_access_token_for_user(user)
+    content = _template_bytes("case_id")
+    headers = {"Authorization": f"Bearer {token}"}
+
+    upload = await client.post(
+        f"/api/v1/flows/{flow.id}/template-files/",
+        files={"upload_file": ("mall.docx", content, DOCX_MIME)},
+        headers=headers,
+    )
+    assert upload.status_code == 201, upload.text
+    asset_id = upload.json()["id"]
+    assert upload.json()["placeholders"] == ["case_id"]
+
+    inspect = await client.get(
+        f"/api/v1/flows/{flow.id}/template-inspect/",
+        params={"file_id": asset_id},
+        headers=headers,
+    )
+    assert inspect.status_code == 200, inspect.text
+
+    async with db_container(user=user) as container:
+        (
+            _asset,
+            stored,
+        ) = await container.flow_template_asset_service().get_asset_with_file(
+            flow_id=flow.id,
+            asset_id=UUID(asset_id),
+        )
+    assert stored.blob == content
+
+    # A flow bound to the stored asset publishes: publication re-reads the
+    # asset bytes to check every placeholder has a binding.
+    assistant = await client.post(
+        f"/api/v1/flows/{flow.id}/assistants/",
+        json={"name": "Prepare"},
+        headers=headers,
+    )
+    assert assistant.status_code == 201, assistant.text
+    bound = await client.patch(
+        f"/api/v1/flows/{flow.id}/",
+        json={
+            "name": flow.name,
+            "description": "",
+            "steps": [
+                {
+                    "assistant_id": assistant.json()["id"],
+                    "step_order": 1,
+                    "user_description": "Prepare content",
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                },
+                {
+                    "assistant_id": assistant.json()["id"],
+                    "step_order": 2,
+                    "user_description": "Fill template",
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": {
+                        "template_asset_id": asset_id,
+                        "bindings": {"case_id": "{{ föregående_steg }}"},
+                    },
+                },
+            ],
+        },
+        headers=headers,
+    )
+    assert bound.status_code == 200, bound.text
+    published = await client.post(f"/api/v1/flows/{flow.id}/publish/", headers=headers)
+    assert published.status_code == 200, published.text
+    assert published.json()["published_version"] == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_download_url_commits_bounded_audit_before_response(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+) -> None:
+    _ = patch_auth_service_jwt
+    (
+        token,
+        flow_id,
+        asset_id,
+        file_id,
+        user_id,
+        tenant_id,
+    ) = await _create_template_download_fixture(db_container)
+
+    response = await client.post(
+        f"/api/v1/flows/{flow_id}/template-files/{asset_id}/signed-url/",
+        json={"expires_in": 120},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    async with db_container() as container:
+        audit_log = await container.session().scalar(
+            sa.select(AuditLogTable).where(
+                AuditLogTable.action == ActionType.FILE_SIGNED_URL_MINTED.value,
+                AuditLogTable.entity_type == EntityType.FILE.value,
+                AuditLogTable.entity_id == file_id,
+            )
+        )
+        assert audit_log is not None
+        assert audit_log.tenant_id == tenant_id
+        assert audit_log.actor_id == user_id
+        assert audit_log.actor_api_key_id is None
+        assert audit_log.actor_type == "user"
+        assert audit_log.outcome == "success"
+        assert audit_log.log_metadata["extra"] == {
+            "flow_id": str(flow_id),
+            "template_asset_id": str(asset_id),
+            "file_id": str(file_id),
+            "download_purpose": "flow_template",
+        }
+        assert response.json()["url"] not in repr(audit_log.log_metadata)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_download_audit_commit_failure_returns_typed_503(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    monkeypatch,
+) -> None:
+    _ = patch_auth_service_jwt
+    (
+        token,
+        flow_id,
+        asset_id,
+        file_id,
+        _user_id,
+        _tenant_id,
+    ) = await _create_template_download_fixture(db_container)
+    events: list[str] = []
+    original_create_audit = AuditLogRepositoryImpl.create
+    original_commit = SessionTransaction.commit
+
+    async def mark_template_download_audit_transaction(
+        repository: AuditLogRepositoryImpl,
+        audit_log: AuditLog,
+    ) -> AuditLog:
+        result = await original_create_audit(repository, audit_log)
+        if audit_log.action == ActionType.FILE_SIGNED_URL_MINTED:
+            repository.session.sync_session.info["fail_template_audit_commit"] = True
+        return result
+
+    def fail_template_download_audit_commit(
+        transaction: SessionTransaction,
+        *,
+        _to_root: bool = False,
+    ) -> None:
+        if transaction.session.info.pop("fail_template_audit_commit", False):
+            events.append("commit_failed")
+            raise RuntimeError("template download audit commit unavailable")
+        original_commit(transaction, _to_root=_to_root)
+
+    monkeypatch.setattr(
+        AuditLogRepositoryImpl,
+        "create",
+        mark_template_download_audit_transaction,
+    )
+    monkeypatch.setattr(
+        SessionTransaction, "commit", fail_template_download_audit_commit
+    )
+
+    response = await client.post(
+        f"/api/v1/flows/{flow_id}/template-files/{asset_id}/signed-url/",
+        json={"expires_in": 120},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 503
+    assert events == ["commit_failed"]
+    payload = response.json()
+    assert payload["code"] == FlowApiErrorCode.TEMPLATE_DOWNLOAD_AUDIT_UNAVAILABLE
+    assert payload["context"] == {"audit_required": True}
+    assert "url" not in payload
+    async with db_container() as container:
+        audit_count = await container.session().scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.action == ActionType.FILE_SIGNED_URL_MINTED.value,
+                AuditLogTable.entity_id == file_id,
+            )
+        )
+    assert audit_count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_download_hides_cross_tenant_asset_without_audit(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    tenant_factory,
+    user_factory,
+) -> None:
+    _ = patch_auth_service_jwt
+    async with db_container() as setup_container:
+        current_user = setup_container.user()
+        token = setup_container.auth_service().create_access_token_for_user(
+            current_user
+        )
+        other_tenant = await tenant_factory(
+            setup_container.session(),
+            name=f"Flow audit isolation {uuid4().hex}",
+        )
+        other_user = await user_factory(
+            setup_container.session(),
+            tenant_id=other_tenant.id,
+        )
+        other_space = Spaces(
+            tenant_id=other_tenant.id,
+            user_id=other_user.id,
+            name=f"Other tenant Flow space {uuid4().hex}",
+        )
+        setup_container.session().add(other_space)
+        await setup_container.session().flush()
+        other_flow = Flows(
+            tenant_id=other_tenant.id,
+            space_id=other_space.id,
+            name=f"Other tenant Flow {uuid4().hex}",
+            description="Tenant-isolation audit fixture.",
+            created_by_user_id=other_user.id,
+            owner_user_id=other_user.id,
+        )
+        other_file = Files(
+            tenant_id=other_tenant.id,
+            owner_type="user",
+            owner_user_id=other_user.id,
+            name="other-tenant-template.docx",
+            mimetype=DOCX_MIME,
+            file_type=FileType.DOCUMENT.value,
+        )
+        setup_container.session().add_all([other_flow, other_file])
+        await setup_container.session().flush()
+        other_asset = FlowTemplateAssets(
+            tenant_id=other_tenant.id,
+            space_id=other_space.id,
+            flow_id=other_flow.id,
+            file_id=other_file.id,
+            name=other_file.name,
+            checksum="cross-tenant-template-fixture",
+            mimetype=DOCX_MIME,
+            placeholders=[],
+            created_by_user_id=other_user.id,
+            updated_by_user_id=other_user.id,
+        )
+        setup_container.session().add(other_asset)
+        await setup_container.session().flush()
+        other_flow_id = other_flow.id
+        other_asset_id = other_asset.id
+        other_file_id = other_file.id
+
+    response = await client.post(
+        (f"/api/v1/flows/{other_flow_id}/template-files/{other_asset_id}/signed-url/"),
+        json={"expires_in": 120},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert response.status_code == 404
+    assert "url" not in response.json()
+    async with db_container() as container:
+        audit_count = await container.session().scalar(
+            sa.select(sa.func.count(AuditLogTable.id)).where(
+                AuditLogTable.action == ActionType.FILE_SIGNED_URL_MINTED.value,
+                AuditLogTable.entity_id == other_file_id,
+            )
+        )
+    assert audit_count == 0
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_promoted_template_fences_its_file(
+    db_container,
+) -> None:
+    async with db_container() as setup_container:
+        user, _space, flow, file = await _create_flow_and_file(
+            setup_container,
+            placeholder="case_id",
+        )
+
+    async with db_container(user=user) as container:
+        asset = await container.flow_template_asset_service().create_from_existing_attached_file(
+            flow_id=flow.id,
+            file_id=file.id,
+        )
+        await container.session().flush()
+
+        persisted_asset_file_id = await container.session().scalar(
+            sa.select(FlowTemplateAssets.file_id).where(
+                FlowTemplateAssets.id == asset.id
+            )
+        )
+        persisted_file_id = await container.session().scalar(
+            sa.select(Files.id).where(Files.id == file.id)
+        )
+        assert persisted_asset_file_id == file.id
+        assert persisted_file_id == file.id
+
+        with pytest.raises(IntegrityError):
+            async with container.session().begin_nested():
+                await container.session().execute(
+                    sa.delete(Files).where(Files.id == file.id)
+                )
+                await container.session().flush()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_template_promotion_lock_serializes_both_file_delete_race_orders(
+    db_container,
+) -> None:
+    async with db_container() as setup_container:
+        user, _space, flow, file = await _create_flow_and_file(
+            setup_container,
+            placeholder="case_id",
+        )
+
+    async with db_container(user=user) as promotion_container:
+        asset = await promotion_container.flow_template_asset_service().create_from_existing_attached_file(
+            flow_id=flow.id,
+            file_id=file.id,
+        )
+        with pytest.raises(DBAPIError) as lock_error:
+            await _delete_file(file_id=file.id, lock_timeout=True)
+        assert getattr(lock_error.value.orig, "sqlstate", None) == "55P03"
+        assert asset.file_id == file.id
+
+    with pytest.raises(IntegrityError):
+        await _delete_file(file_id=file.id, lock_timeout=False)
+
+    async with db_container(user=user) as setup_container:
+        second_content = _template_bytes("reference_number")
+        second_file = await _save_template_file(
+            setup_container,
+            name="second-template.docx",
+            content=second_content,
+        )
+    await _delete_file(file_id=second_file.id, lock_timeout=False)
+
+    async with db_container(user=user) as promotion_container:
+        with pytest.raises(AttachedTemplateFileUnavailableError):
+            await promotion_container.flow_template_asset_service().create_from_existing_attached_file(
+                flow_id=flow.id,
+                file_id=second_file.id,
+            )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize("mapping_case", ["valid", "missing", "structured"])
+async def test_a_template_fill_publish_validates_controls_and_pins_identity(
+    db_container,
+    mapping_case: str,
+) -> None:
+    document = Document(io.BytesIO(_template_bytes("case_id")))
+    append_rich_control(document, tag="body", label="Bakgrund", hint="Skriv bakgrunden")
+    payload = io.BytesIO()
+    document.save(payload)
+    async with db_container() as setup_container:
+        user, _space, flow, file = await _create_flow_and_file(
+            setup_container,
+            placeholder="case_id",
+            content=payload.getvalue(),
+        )
+
+    async with db_container(user=user) as container:
+        asset = await container.flow_template_asset_service().create_from_existing_attached_file(
+            flow_id=flow.id, file_id=file.id
+        )
+        assistant, _ = await container.flow_service().create_flow_assistant(
+            flow_id=flow.id,
+            name="template-fill",
+        )
+        bindings = {
+            "case_id": "{{ flow_input.case_id }}",
+            "body": "{{ flow_input.body }}",
+        }
+        if mapping_case == "missing":
+            del bindings["body"]
+        elif mapping_case == "structured":
+            bindings["body"] = "{{flow_input}}"
+        updated = await container.flow_service().update_flow(
+            flow_id=flow.id,
+            metadata_json={
+                "form_schema": {
+                    "fields": [
+                        {"name": "case_id", "type": "text"},
+                        {"name": "body", "type": "text"},
+                    ]
+                }
+            },
+            steps=[
+                FlowStep(
+                    assistant_id=assistant.id,
+                    step_order=1,
+                    user_description="Fill template",
+                    input_source="flow_input",
+                    input_type="text",
+                    output_mode="template_fill",
+                    output_type="docx",
+                    output_config={
+                        "bindings": bindings,
+                        "template_asset_id": str(asset.id),
+                    },
+                )
+            ],
+        )
+        await container.flow_service().replace_resource_bindings(
+            flow_id=flow.id,
+            bindings=(
+                LocalResourceBinding(
+                    slot_ref=ResourceSlotRef(
+                        kind=ResourceSlotKind.TEMPLATE_ASSET,
+                        slot="document-template",
+                        label=asset.name,
+                    ),
+                    local_kind=LocalResourceKind.TEMPLATE_ASSET,
+                    local_id=asset.id,
+                ),
+            ),
+            source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        )
+
+        if mapping_case != "valid":
+            with pytest.raises(
+                BadRequestException,
+                match="missing bindings" if mapping_case == "missing" else "scalar",
+            ):
+                await container.flow_service().publish_flow(flow_id=updated.id)
+            version_count = await container.session().scalar(
+                sa.select(sa.func.count(FlowVersions.version)).where(
+                    FlowVersions.flow_id == flow.id
+                )
+            )
+            assert version_count == 0
+            return
+
+        published = await container.flow_service().publish_flow(flow_id=updated.id)
+
+        assert published.published_version == 1
+        definition = await container.session().scalar(
+            sa.select(FlowVersions.definition_json).where(
+                FlowVersions.flow_id == flow.id,
+                FlowVersions.tenant_id == user.tenant_id,
+                FlowVersions.version == 1,
+            )
+        )
+        assert isinstance(definition, dict)
+        output_config = definition["steps"][0]["output_config"]
+        assert output_config["template_asset_id"] == str(asset.id)
+        assert output_config["template_checksum"] == file.checksum
+        assert output_config["placeholders"] == ["case_id", "body"]
+        assert output_config["bindings"] == {
+            "case_id": "{{ flow_input.case_id }}",
+            "body": "{{ flow_input.body }}",
+        }
+        (
+            _asset,
+            pinned_file,
+        ) = await container.flow_template_asset_service().get_asset_with_file(
+            flow_id=flow.id,
+            asset_id=asset.id,
+        )
+        assert pinned_file.blob is not None
+        rendered, _mime, _text = await render_docx_template(
+            template_bytes=pinned_file.blob,
+            template_name=pinned_file.name,
+            context={"case_id": "KS-2026-42", "body": "**Verifierad** bakgrund."},
+            step_order=1,
+        )
+        text = extract_docx_text(rendered)
+        assert "KS-2026-42" in text
+        assert "Verifierad" in text
+        assert "bakgrund." in text
+        assert "Skriv bakgrunden" not in text

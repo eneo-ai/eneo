@@ -1,0 +1,92 @@
+[importlinter]
+root_package = eneo
+include_external_packages = False
+
+[importlinter:contract:flow-packages-domain-no-infrastructure]
+# Package schemas, checksums, and envelope invariants are the portable contract.
+# Zip parsing/writing remains infrastructure and must not leak back into domain.
+name = Flow package domain must not import infrastructure
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.flow_packages.domain
+forbidden_modules =
+    eneo.flow_packages.infrastructure
+
+[importlinter:contract:flows-no-crawler]
+# Flows and the crawler are separate owners of outbound network access: neither
+# imports the other. The address classification they can share lives in
+# eneo.main.destination_policy.
+name = Flows must not import the crawler
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.flows
+forbidden_modules =
+    eneo.crawler
+
+[importlinter:contract:crawler-no-flows]
+# The other direction of the same boundary.
+name = Crawler must not import flows
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.crawler
+forbidden_modules =
+    eneo.flows
+
+[importlinter:contract:transcription-services-no-flows]
+# Flow orchestration depends on transcription services, never the reverse.
+# Direct imports only: the admin adapters use platform modules (users, the
+# table registry) that themselves reach small Flow modules.
+name = Transcription services must not import flows
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.transcription_services
+forbidden_modules =
+    eneo.flows
+
+[importlinter:contract:transcription-service-client-no-flows]
+# Admin connection checks and Flow execution share the native service client
+# and its vocabulary; neither may reach Flow code, even indirectly.
+name = Transcription service client must not reach flows
+type = forbidden
+source_modules =
+    eneo.transcription_services.client
+    eneo.transcription_services.models
+forbidden_modules =
+    eneo.flows
+
+[importlinter:contract:flow-vocabulary-readers-no-orm]
+# Vocabulary belongs to the flows enum owner; these readers do not need
+# table declarations to decide which values are valid.
+name = Flow vocabulary readers must not import ORM tables
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.flows.flow_validators
+    eneo.flows.runtime.step_definition_parser
+forbidden_modules =
+    eneo.database.tables.flow_tables
+
+[importlinter:contract:flows-infrastructure-no-runtime]
+# Persistence consumes domain delivery intents; runtime result envelopes
+# belong to execution callers.
+name = Flows infrastructure must not import runtime
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.flows.infrastructure
+forbidden_modules =
+    eneo.flows.runtime
+
+[importlinter:contract:flow-publication-no-docx-runtime]
+# Template assets own byte inspection; publication consumes their typed names.
+name = Flow publication must not inspect DOCX bytes directly
+type = forbidden
+allow_indirect_imports = true
+source_modules =
+    eneo.flows.application.flow_service
+forbidden_modules =
+    eneo.flows.runtime.docx_template_runtime

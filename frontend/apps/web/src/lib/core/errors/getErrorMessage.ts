@@ -35,10 +35,10 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9005: () => m.eneo_error_9005(), // AUTHENTICATION_ERROR
   9019: () => m.eneo_error_9019(), // USER_INACTIVE
   9025: () => m.eneo_error_9025(), // TENANT_SUSPENDED
-  9061: () => m.eneo_error_9061(), // CURRENT_PASSWORD_INCORRECT
-  9058: () => m.eneo_error_9058(), // PASSWORD_REUSE
-  9059: () => m.eneo_error_9059(), // PASSWORD_POLICY_VIOLATION
-  9060: () => m.eneo_error_9060(), // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
+  9064: () => m.eneo_error_9064(), // CURRENT_PASSWORD_INCORRECT
+  9061: () => m.eneo_error_9061(), // PASSWORD_REUSE
+  9062: () => m.eneo_error_9062(), // PASSWORD_POLICY_VIOLATION
+  9063: () => m.eneo_error_9063(), // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
   9070: () => m.eneo_error_9070(), // PASSWORD_CHANGE_REQUIRED
 
   // --- Model & provider issues ---
@@ -64,12 +64,13 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9038: () => m.eneo_error_9038(), // RESOURCE_NOT_READY
 
   // --- File uploads ---
-  9056: () => m.eneo_error_9056(), // INVALID_FILENAME
-  9057: () => m.eneo_error_9057(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
+  9058: () => m.eneo_error_9058(), // INVALID_FILENAME
+  9059: () => m.eneo_error_9059(), // INFO_BLOB_ORIGINAL_UNAVAILABLE
+  9060: () => m.eneo_error_9060(), // UNKNOWN_MODEL_CAPACITY
 
   // --- Website crawl lifecycle ---
-  9063: () => m.eneo_error_9063(), // WEBSITE_CRAWL_ACTIVE
-  9064: () => m.eneo_error_9064(), // WEBSITE_CRAWL_CLEANUP_PENDING
+  9066: () => m.eneo_error_9066(), // WEBSITE_CRAWL_ACTIVE
+  9067: () => m.eneo_error_9067(), // WEBSITE_CRAWL_CLEANUP_PENDING
 
   // --- Model lifecycle ---
   9039: () => m.eneo_error_9039(), // MODEL_IN_USE
@@ -94,7 +95,7 @@ const ERROR_CODE_MESSAGES: Partial<Record<EneoErrorCode, () => string>> = {
   9051: () => m.eneo_error_9051(), // SKILL_STILL_ATTACHED
   9053: () => m.eneo_error_9053(), // SKILL_NOT_PUBLISHED_FOR_BINDING
   9054: () => m.eneo_error_9054(), // SKILL_BLOCKED_FOR_BINDING
-  9062: () => m.eneo_error_9062() // SKILL_REMOVAL_BUSY
+  9065: () => m.eneo_error_9065() // SKILL_REMOVAL_BUSY
 };
 
 /**

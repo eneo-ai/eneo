@@ -10,7 +10,8 @@
   import { browser } from "$app/environment";
   import { getAttachmentManager } from "$lib/features/attachments/AttachmentManager";
   import FileSizeValidationPanel from "$lib/features/attachments/components/FileSizeValidationPanel.svelte";
-  import AudioRecorder from "./AudioRecorder.svelte";
+  import AudioRecorder from "$lib/features/audio/AudioRecorder.svelte";
+  import { buildRecordedAudioFile } from "$lib/features/audio/recordedAudioFile";
   import AttachmentItem from "$lib/features/attachments/components/AttachmentItem.svelte";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -152,9 +153,15 @@
       isRecording = active;
     }}
     onRecordingDone={({ blob, mimeType, reason }) => {
-      const extension = mimeType.replaceAll("audio/", "").split(";")[0] ?? "";
-      const fileName = `${m.recording_filename_template({ datetime: formatDateTime(new Date(), { seconds: true }) })}.${extension}`;
-      audioFile = new File([blob], fileName, { type: mimeType });
+      // Nothing was captured; the recorder shows its own error.
+      if (!blob) return;
+      audioFile = buildRecordedAudioFile({
+        blob,
+        mimeType,
+        fileNameBase: m.recording_filename_template({
+          datetime: formatDateTime(new Date(), { seconds: true })
+        })
+      });
       audioURL = URL.createObjectURL(blob);
       if (reason === "limit") {
         recordingWarning = m.recording_limit_reached();
@@ -172,30 +179,19 @@
 <style lang="postcss">
   @reference "@eneo/ui/styles";
 
-  /* Warning alert with icon and left border accent */
   .alert-warning {
     @apply flex items-start gap-3 rounded-lg p-4;
-    @apply border-l-4 border-yellow-500 bg-yellow-50;
-    @apply text-sm text-yellow-800;
+    @apply border-warning-default/30 bg-warning-dimmer text-warning-stronger border;
+    @apply text-sm;
     max-width: 60ch;
   }
 
-  :global(.dark) .alert-warning {
-    @apply border-yellow-500/70 bg-yellow-900/20 text-yellow-200;
-  }
-
-  /* Success flash for queued recording */
   .success-flash {
     @apply flex items-center gap-2 rounded-lg p-3;
-    @apply bg-green-50 text-green-700;
+    @apply bg-positive-dimmer text-positive-stronger;
     max-width: 60ch;
   }
 
-  :global(.dark) .success-flash {
-    @apply bg-green-900/20 text-green-300;
-  }
-
-  /* Action button row with clear hierarchy */
   .action-row {
     @apply flex flex-wrap items-center gap-3;
   }

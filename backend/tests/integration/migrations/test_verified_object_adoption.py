@@ -8,7 +8,7 @@ from uuid import uuid4
 import psycopg2
 import pytest
 from sqlalchemy.exc import DBAPIError
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config

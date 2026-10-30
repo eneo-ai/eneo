@@ -19,7 +19,7 @@ import {
 import type { ReferenceSelection } from "@eneo/skill-instructions/editor";
 import { useEffect, useId, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { getErrorMessage } from "@/lib/api/errors";
 
 type Category = "skills" | "functions" | "mcp";

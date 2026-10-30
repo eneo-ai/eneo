@@ -83,6 +83,36 @@ export function getPermissionCopy(name: string, fallbackDescription: string): En
         label: m.permission_api_keys(),
         description: m.permission_api_keys_description()
       };
+    case "flows_view":
+      return {
+        label: m.permission_flows_view(),
+        description: m.permission_flows_view_description()
+      };
+    case "flows_run":
+      return {
+        label: m.permission_flows_run(),
+        description: m.permission_flows_run_description()
+      };
+    case "flows_manage":
+      return {
+        label: m.permission_flows_manage(),
+        description: m.permission_flows_manage_description()
+      };
+    case "flows_trace":
+      return {
+        label: m.permission_flows_trace(),
+        description: m.permission_flows_trace_description()
+      };
+    case "retention_manage":
+      return {
+        label: m.permission_retention_manage(),
+        description: m.permission_retention_manage_description()
+      };
+    case "retention_holds":
+      return {
+        label: m.permission_retention_holds(),
+        description: m.permission_retention_holds_description()
+      };
     case "modules":
       return {
         label: m.permission_modules(),

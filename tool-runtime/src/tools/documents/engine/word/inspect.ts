@@ -46,6 +46,11 @@ const OTHER_CONTROL_TYPES = new Set([
 
 export type PlaceholderKind = "rich" | "text";
 export type PlaceholderLocation = "body" | "header" | "footer";
+/** Why a control is not filled, for callers that explain it in their own words. */
+export type PlaceholderReasonCode =
+  "untagged" | "nested" | "unsupported_kind" | "data_bound" | "placement";
+/** What directly holds a control: the part itself, a paragraph, or another element. */
+export type PlaceholderContainer = "part" | "paragraph" | "other";
 export type Placeholder = {
   /** The control's tag, or the trimmed name between the braces. */
   name: string;
@@ -63,8 +68,16 @@ export type Placeholder = {
   block?: boolean;
   supported: boolean;
   reason?: string;
+  reasonCode?: PlaceholderReasonCode;
+  /** A control's direct holder; a caller with a stricter profile places by it. */
+  container?: PlaceholderContainer;
+  /** Whether a control sits in a table cell. */
+  inTable?: boolean;
+  /** A plain text control that takes line breaks (`w:text w:multiLine`). */
+  multiline?: boolean;
   /** The level of the nearest heading above a body control (0 when there is none). */
   headingLevel: number;
+  sectionHeading?: string;
 };
 
 /** Style ids by role, resolved from style names; undefined when the template lacks the style. */
@@ -247,24 +260,56 @@ export function controlsOf(
 ): { placeholder: Placeholder; sdt: Element }[] {
   const found: { placeholder: Placeholder; sdt: Element }[] = [];
   let lastHeading = 0;
-  const scan = (node: Element, inSdt: boolean, inParagraph: boolean) => {
+  let lastHeadingText: string | undefined;
+  const scan = (node: Element, inSdt: boolean, inParagraph: boolean, inTable: boolean) => {
     for (const child of children(node)) {
       if (child.type !== "element") continue;
       if (child.name === "w:p") {
         const style = attr(at(child, "w:pPr", "w:pStyle"), "w:val");
         const level = style === undefined ? undefined : headingLevelOf.get(style);
-        if (level !== undefined && !inSdt) lastHeading = level;
-        scan(child, inSdt, true);
+        if (level !== undefined && !inSdt) {
+          lastHeading = level;
+          lastHeadingText =
+            level > 0
+              ? textOf(child).replace(/\s+/g, " ").trim().slice(0, 200) || undefined
+              : undefined;
+        }
+        scan(child, inSdt, true, inTable);
         continue;
       }
       if (child.name !== "w:sdt") {
-        scan(child, inSdt, inParagraph);
+        scan(child, inSdt, inParagraph, inTable || child.name === "w:tc");
         continue;
       }
+      const container: PlaceholderContainer =
+        node.name === "w:p"
+          ? "paragraph"
+          : node.name === "w:body" || node.name === "w:hdr" || node.name === "w:ftr"
+            ? "part"
+            : "other";
       const properties = find(child, "w:sdtPr");
       const tag = attr(find(properties, "w:tag"), "w:val")?.trim();
+      if (!tag) {
+        found.push({
+          sdt: child,
+          placeholder: {
+            name: "",
+            syntax: "control",
+            kind: "text",
+            location,
+            supported: false,
+            reason: "a content control has no tag",
+            reasonCode: "untagged",
+            label: attr(find(properties, "w:alias"), "w:val"),
+            container,
+            inTable,
+            headingLevel: lastHeading,
+          },
+        });
+      }
       if (tag) {
-        const isText = !!find(properties, "w:text");
+        const text = find(properties, "w:text");
+        const isText = !!text;
         const other = children(properties).find((p) => OTHER_CONTROL_TYPES.has(p.name ?? ""));
         const content = find(child, "w:sdtContent");
         const placeholder: Placeholder = {
@@ -272,34 +317,46 @@ export function controlsOf(
           syntax: "control",
           kind: isText || inParagraph ? "text" : "rich",
           label: attr(find(properties, "w:alias"), "w:val"),
-          hint: find(properties, "w:showingPlcHdr")
-            ? textOf(content).replace(/\s+/g, " ").trim() || undefined
-            : undefined,
+          hint: find(properties, "w:showingPlcHdr") ? controlText(content) || undefined : undefined,
           location,
           block: !inParagraph,
+          container,
+          inTable,
+          multiline: ["1", "true", "on"].includes(attr(text, "w:multiLine") ?? ""),
           supported: true,
           headingLevel: lastHeading,
+          sectionHeading: lastHeadingText,
         };
-        if (inSdt) {
+        const refuse = (reasonCode: PlaceholderReasonCode, reason: string) => {
           placeholder.supported = false;
-          placeholder.reason = "nested inside another control";
-        } else if (other) {
-          placeholder.supported = false;
-          placeholder.reason = `${other.name!.replace(/^w1?[45]?:/, "")} controls are not filled`;
-        } else if (find(properties, "w:dataBinding")) {
-          placeholder.supported = false;
-          placeholder.reason = "bound to document data";
-        } else if (placeholder.kind === "rich" && location !== "body") {
-          placeholder.supported = false;
-          placeholder.reason = `a rich control in the ${location} is not filled`;
-        }
+          placeholder.reasonCode = reasonCode;
+          placeholder.reason = reason;
+        };
+        if (inSdt) refuse("nested", "nested inside another control");
+        else if (other)
+          refuse(
+            "unsupported_kind",
+            `${other.name!.replace(/^w1?[45]?:/, "")} controls are not filled`,
+          );
+        else if (find(properties, "w:dataBinding")) refuse("data_bound", "bound to document data");
+        else if (placeholder.kind === "rich" && location !== "body")
+          refuse("placement", `a rich control in the ${location} is not filled`);
         found.push({ placeholder, sdt: child });
       }
-      scan(find(child, "w:sdtContent") ?? child, true, inParagraph);
+      scan(find(child, "w:sdtContent") ?? child, true, inParagraph, inTable);
     }
   };
-  scan(rootElement(root), false, false);
+  scan(rootElement(root), false, false, false);
   return found;
+}
+
+/** A control's text as its author laid it out: paragraphs apart, line breaks and tabs kept. */
+function controlText(content: Element | undefined): string {
+  const paragraphs = findAll(content, "w:p");
+  const text = paragraphs.length
+    ? paragraphs.map((paragraph) => textOf(paragraph).trim()).join("\n\n")
+    : textOf(content);
+  return text.trim();
 }
 
 /** The `{{name}}` placeholders of one part by location, as written. */
@@ -415,15 +472,36 @@ export function toReport(inspection: TemplateInspection): TemplateReport {
   return {
     syntax: inspection.syntax,
     placeholders: inspection.placeholders.map(
-      ({ name, syntax, kind, label, hint, location, supported, reason }) => ({
+      ({
+        name,
+        syntax,
+        kind,
+        label,
+        hint,
+        location,
+        supported,
+        reason,
+        reasonCode,
+        container,
+        inTable,
+        multiline,
+        headingLevel,
+        sectionHeading,
+      }) => ({
         name,
         syntax,
         kind,
         ...(label !== undefined ? { label } : {}),
         ...(hint !== undefined ? { hint } : {}),
         location,
+        ...(sectionHeading !== undefined ? { section_heading: sectionHeading } : {}),
+        ...(syntax === "control" ? { heading_level: headingLevel } : {}),
+        ...(container !== undefined ? { container } : {}),
+        ...(inTable !== undefined ? { in_table: inTable } : {}),
+        ...(multiline !== undefined ? { multiline } : {}),
         supported,
         ...(reason !== undefined ? { reason } : {}),
+        ...(reasonCode !== undefined ? { reason_code: reasonCode } : {}),
       }),
     ),
     checks: inspection.checks,

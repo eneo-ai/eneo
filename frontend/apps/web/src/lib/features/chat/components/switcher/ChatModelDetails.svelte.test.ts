@@ -65,7 +65,7 @@ describe("ChatModelDetails", () => {
 
     await expect.element(page.getByRole("heading", { name: "GPT Test" })).toBeVisible();
     await expect.element(page.getByText("Best for careful analysis.")).toBeVisible();
-    const formattedTokens = new Intl.NumberFormat(intlLocale()).format(model.max_input_tokens);
+    const formattedTokens = new Intl.NumberFormat(intlLocale()).format(model.max_input_tokens ?? 0);
     await expect
       .element(page.getByText(m.model_selector_context_value({ tokens: formattedTokens })))
       .toBeVisible();

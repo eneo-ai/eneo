@@ -32,6 +32,34 @@ from eneo.logging.logging import LoggingDetails
 from eneo.logging.logging_repo import LoggingRepository
 
 
+@pytest.fixture
+def enable_tenant_credentials_mode(test_settings):
+    """Override runtime settings so tenant credential routes are actually enabled."""
+    from dependency_injector import providers
+
+    from eneo.main.config import get_settings, set_settings
+    from eneo.main.container.container import Container
+    from eneo.settings.encryption_service import EncryptionService
+
+    original_settings = get_settings()
+    enabled_settings = test_settings.model_copy(
+        update={"tenant_credentials_enabled": True}
+    )
+    set_settings(enabled_settings)
+    Container.encryption_service.reset_last_overriding()
+    Container.encryption_service.override(
+        providers.Object(EncryptionService(enabled_settings.encryption_key))
+    )
+    try:
+        yield enabled_settings
+    finally:
+        set_settings(original_settings)
+        Container.encryption_service.reset_last_overriding()
+        Container.encryption_service.override(
+            providers.Object(EncryptionService(original_settings.encryption_key))
+        )
+
+
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
     """Helper to create a test tenant via API."""
     payload = {
@@ -412,7 +440,8 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     encryption_service,
     test_settings,
     mock_transcription_models,
-    _tenant_credentials_enabled,
+    monkeypatch,
+    enable_tenant_credentials_mode,
 ):
     """Verify GET /tenants/{id}/credentials is strictly tenant-scoped.
 
@@ -427,6 +456,7 @@ async def test_credentials_endpoint_never_leaks_other_tenant_keys(
     - Credential enumeration attacks
     - Response filtering bugs
     """
+    _ = enable_tenant_credentials_mode
     # Create two tenants with credentials
     tenant_a = await _create_tenant(
         client, super_admin_token, f"tenant-cred-a-{uuid4().hex[:6]}"

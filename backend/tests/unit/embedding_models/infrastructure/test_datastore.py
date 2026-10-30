@@ -17,7 +17,7 @@ from eneo.main.exceptions import OpenAIException
 
 def _datastore():
     return Datastore(
-        user=MagicMock(),
+        tenant_id=uuid4(),
         info_blob_chunk_repo=MagicMock(),
         create_embeddings_service=MagicMock(),
     )
@@ -75,7 +75,7 @@ async def test_add_surfaces_the_original_provider_error(monkeypatch):
     chunk_repo = MagicMock()
     chunk_repo.add = AsyncMock()
     datastore = Datastore(
-        user=MagicMock(),
+        tenant_id=uuid4(),
         info_blob_chunk_repo=chunk_repo,
         create_embeddings_service=embeddings,
     )
@@ -97,7 +97,7 @@ def test_chunk_text_clamps_to_the_embedding_models_limit(monkeypatch):
     monkeypatch.setattr(chunking.settings, "chunk_size", 200)
     monkeypatch.setattr(chunking.settings, "chunk_overlap", 40)
     datastore = Datastore(
-        user=MagicMock(tenant_id=uuid4()),
+        tenant_id=uuid4(),
         info_blob_chunk_repo=MagicMock(),
         create_embeddings_service=MagicMock(),
     )

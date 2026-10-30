@@ -28,6 +28,7 @@ from eneo.sessions.session import (
     SessionAdd,
     SessionFeedback,
     SessionInDB,
+    SessionMetadataPublic,
     SessionUpdate,
 )
 from eneo.sessions.sessions_repo import OwnedChatPartner, SessionRepository
@@ -219,7 +220,7 @@ class SessionService:
         return SessionRepository(session, loader)
 
     @asynccontextmanager
-    async def _write_transaction(self) -> AsyncGenerator[None]:
+    async def _write_transaction(self) -> AsyncGenerator[None, None]:
         """Open a short write transaction only when one is not already active."""
         session = self.session_repo.session
         if session.in_transaction():
@@ -321,9 +322,9 @@ class SessionService:
         cursor: datetime | None = None,
         previous: bool = False,
         name_filter: str | None = None,
-    ) -> tuple[list[SessionInDB], int]:
+    ) -> tuple[list[SessionMetadataPublic], int]:
         user_id, api_key_id = self._principal_columns()
-        return await self.session_repo.get_by_assistant(
+        return await self.session_repo.get_metadata_by_assistant(
             assistant_id=assistant_id,
             user_id=user_id,
             api_key_id=api_key_id,
@@ -630,9 +631,9 @@ class SessionService:
         cursor: datetime | None = None,
         previous: bool = False,
         name_filter: str | None = None,
-    ) -> tuple[list[SessionInDB], int]:
+    ) -> tuple[list[SessionMetadataPublic], int]:
         user_id, api_key_id = self._principal_columns()
-        return await self.session_repo.get_by_group_chat(
+        return await self.session_repo.get_metadata_by_group_chat(
             group_chat_id=group_chat_id,
             user_id=user_id,
             api_key_id=api_key_id,

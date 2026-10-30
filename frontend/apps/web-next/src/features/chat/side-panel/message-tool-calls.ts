@@ -26,6 +26,8 @@ export type ToolCallRecord = {
   resultStatus: string | null;
   /** The files the call produced: recorded on the call in history, read from the file parts live. */
   generatedFileIds: string[];
+  /** Data a call on one of Eneo's own servers returned (a flow run's id); null for others. */
+  structuredContent: Record<string, unknown> | null;
   part: ToolPart;
 };
 
@@ -96,6 +98,10 @@ export function messageToolCalls(message: EneoUIMessage): ToolCallRecord[] {
             ? (part.errorText ?? "failed")
             : null),
       generatedFileIds: [...new Set([...recorded, ...(filesByCall.get(part.toolCallId) ?? [])])],
+      structuredContent:
+        eneo.structured_content && typeof eneo.structured_content === "object"
+          ? eneo.structured_content
+          : null,
       part
     });
   }

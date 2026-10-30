@@ -449,12 +449,15 @@ async def cleanup_old_exports(container: Container) -> ExportCleanupResult:
 
 @worker.cron_job(hour=1, minute=0)  # Daily at 01:00 UTC
 async def api_key_maintenance(container: Container) -> dict[str, object]:
-    """Daily maintenance for API keys (expiration and rotation cleanup)."""
+    """Daily API key maintenance: revoke keys scoped to flow-managed
+    assistants. The expiration, unused-key and rotation-cleanup phases of
+    ``run_daily_maintenance`` stay disabled pending eneo-946w (they never ran
+    before this job could start)."""
     from eneo.main.logging import get_logger
 
     logger = get_logger(__name__)
     service = container.api_key_maintenance_service()
-    results = await service.run_daily_maintenance()
+    results = await service.revoke_flow_managed_assistant_keys()
 
     if results.get("errors"):
         logger.warning("API key maintenance completed with errors", extra=results)

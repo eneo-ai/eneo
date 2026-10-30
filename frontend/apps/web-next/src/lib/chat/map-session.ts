@@ -64,7 +64,9 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
             approved: tool.approved ?? null,
             result_status: tool.result_status ?? null,
             // The files the call produced (live streams carry the call id on the file part).
-            generated_file_ids: tool.generated_file_ids ?? null
+            generated_file_ids: tool.generated_file_ids ?? null,
+            // Data an own server's call returned (a flow run's id), kept in the history.
+            structured_content: tool.structured_content ?? null
           } satisfies EneoToolMetadata
         },
         state:
@@ -89,7 +91,9 @@ export function mapSessionMessages(messages: PersistedMessage[]): EneoUIMessage[
         mcpToolReferences: message.mcp_tool_references ?? [],
         tokens: {
           prompt: message.num_tokens_question,
-          completion: message.num_tokens_answer
+          completion: message.num_tokens_answer,
+          contextPrompt: message.context_prompt_tokens ?? null,
+          contextCompletion: message.context_completion_tokens ?? null
         },
         completionModel: message.completion_model
           ? {

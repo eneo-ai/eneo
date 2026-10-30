@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { browserApi } from "@/lib/api/browser";
-import { recentConversationsQueryOptions } from "@/lib/api/conversations";
+import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
@@ -97,6 +97,15 @@ const partner: ChatPartner = {
 };
 /** One panel for the conversations, scoped to this partner or to all (decision 29). */
 const HEADING = "Konversationer";
+
+const recentRow = (id: string, name: string): RecentConversation => ({
+  id,
+  name,
+  created_at: "2026-10-26T09:00:00Z",
+  last_activity_at: "2026-10-26T10:00:00Z",
+  partner: { id: "assistant-1", name: "Upphandlingsassistenten", type: "assistant" },
+  space: { id: "space-1", name: "Upphandling", organization: false, personal: false }
+});
 
 /** Opens a row's menu and returns the menu item with the given name. */
 async function rowMenuItem(row: string, item: string) {
@@ -205,6 +214,58 @@ describe("HistoryAside", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
     await waitFor(() => expect(onDeleted).toHaveBeenCalledWith("s2"));
     expect(queryClient.getQueryState(recent)?.isInvalidated).toBe(true);
+  });
+
+  it("shows a rename and a delete in the history and the recent list before their refetch answers", async () => {
+    const queryClient = testQueryClient();
+    const recent = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(recent, [
+      recentRow("s1", "Upphandlingsanalys"),
+      recentRow("s2", "Protokoll KS")
+    ]);
+    renderHistory({ queryClient });
+    await screen.findByRole("button", { name: "Protokoll KS" });
+    // The lists' refetches do not answer during this test.
+    const serve = api.GET.getMockImplementation()!;
+    api.GET.mockImplementation(() => new Promise(() => {}));
+    onTestFinished(() => void api.GET.mockImplementation(serve));
+
+    fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Byt namn"));
+    const input = await screen.findByLabelText(/^Namn/);
+    fireEvent.change(input, { target: { value: "Direktupphandling" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    expect(await screen.findByRole("button", { name: "Direktupphandling" })).toBeTruthy();
+    expect(queryClient.getQueryData(recent)).toEqual([
+      recentRow("s1", "Direktupphandling"),
+      recentRow("s2", "Protokoll KS")
+    ]);
+
+    fireEvent.click(await rowMenuItem("Protokoll KS", "Ta bort"));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort konversationen" });
+    fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+    await waitFor(() =>
+      expect(queryClient.getQueryData(recent)).toEqual([recentRow("s1", "Direktupphandling")])
+    );
+  });
+
+  it("changes nothing in the lists when a rename fails", async () => {
+    const queryClient = testQueryClient();
+    const recent = recentConversationsQueryOptions(browserApi).queryKey;
+    queryClient.setQueryData(recent, [recentRow("s1", "Upphandlingsanalys")]);
+    api.PATCH.mockResolvedValueOnce({
+      error: { message: "Server error" },
+      response: new Response("{}", { status: 500 })
+    } as never);
+    renderHistory({ queryClient });
+
+    fireEvent.click(await rowMenuItem("Upphandlingsanalys", "Byt namn"));
+    const input = await screen.findByLabelText(/^Namn/);
+    fireEvent.change(input, { target: { value: "Direktupphandling" } });
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalled());
+    await waitFor(() => expect(queryClient.isMutating()).toBe(0));
+    expect(queryClient.getQueryData(recent)).toEqual([recentRow("s1", "Upphandlingsanalys")]);
+    expect(screen.queryByRole("button", { name: "Direktupphandling" })).toBeNull();
   });
 
   it("renames and deletes from a row's menu; answers are rated in the conversation", async () => {
@@ -371,7 +432,7 @@ describe("HistoryAside scope (decision 29)", () => {
 describe("RenameSessionDialog", () => {
   it("renames with a visible label and saves on Enter", () => {
     const onSave = vi.fn();
-    const session = { id: "s1", name: "Gammalt namn" };
+    const session = recentRow("s1", "Gammalt namn");
     const { rerender } = renderInApp(
       <RenameSessionDialog session={session} pending={false} onCancel={vi.fn()} onSave={onSave} />
     );
@@ -388,7 +449,7 @@ describe("RenameSessionDialog", () => {
     const onSave = vi.fn();
     renderInApp(
       <RenameSessionDialog
-        session={{ id: "s1", name: "Gammalt namn" }}
+        session={recentRow("s1", "Gammalt namn")}
         pending={false}
         onCancel={vi.fn()}
         onSave={onSave}
@@ -413,7 +474,7 @@ describe("RenameSessionDialog", () => {
   });
 
   it("discards an unsaved name and validation when the same dialog reopens", () => {
-    const session = { id: "s1", name: "Gammalt namn" };
+    const session = recentRow("s1", "Gammalt namn");
     const onCancel = vi.fn();
     const onSave = vi.fn();
     const dialog = (current: typeof session | null) => (

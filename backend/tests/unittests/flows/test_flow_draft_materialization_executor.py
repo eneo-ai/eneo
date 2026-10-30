@@ -1,0 +1,402 @@
+"""Creating the draft flow a compiled changeset describes: the flow, one
+configured assistant per step, the steps and the resource bindings."""
+
+from __future__ import annotations
+
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
+
+import pytest
+
+from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.flows.application.flow_authoring_refusal import FlowAuthoringRefusalCode
+from eneo.flows.application.flow_draft_materialization import (
+    FlowDraftAssistantToCreate,
+    FlowDraftChangeSet,
+    FlowDraftCompiledStep,
+)
+from eneo.flows.application.flow_draft_materialization_executor import (
+    FlowDraftMaterializer,
+)
+from eneo.flows.domain.flow import Flow
+from eneo.flows.flow_authoring_spec import AssistantSpec
+from eneo.flows.flow_resource_bindings import (
+    FlowResourceBindingSource,
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
+from eneo.main.exceptions import BadRequestException
+
+
+def _flow(
+    *,
+    flow_id: UUID | None = None,
+    space_id: UUID | None = None,
+    name: str = "Flow",
+) -> Flow:
+    return Flow(
+        id=flow_id or uuid4(),
+        tenant_id=uuid4(),
+        space_id=space_id or uuid4(),
+        name=name,
+        description=None,
+        steps=[],
+    )
+
+
+def _compiled_step(
+    *,
+    plan_step_ref: str = "step_a",
+    step_order: int = 1,
+    output_mode: str = "pass_through",
+    output_type: str = "text",
+    output_config: dict[str, object] | None = None,
+) -> FlowDraftCompiledStep:
+    return FlowDraftCompiledStep(
+        plan_step_ref=plan_step_ref,
+        step_order=step_order,
+        user_description="Test step",
+        input_source="flow_input",
+        input_type="text",
+        output_mode=output_mode,
+        output_type=output_type,
+        output_config=output_config,
+    )
+
+
+def _resource_binding(
+    *,
+    slot: str = "default-model",
+    slot_kind: ResourceSlotKind = ResourceSlotKind.MODEL,
+    local_kind: LocalResourceKind = LocalResourceKind.COMPLETION_MODEL,
+    local_id: UUID | None = None,
+) -> LocalResourceBinding:
+    return LocalResourceBinding(
+        slot_ref=ResourceSlotRef(kind=slot_kind, slot=slot, label=slot),
+        local_kind=local_kind,
+        local_id=local_id or uuid4(),
+    )
+
+
+def _flow_service() -> AsyncMock:
+    service = AsyncMock()
+    service.list_flows.return_value = []
+    service.get_flow_assistant_prompts.return_value = {}
+    return service
+
+
+async def test_create_mode_materializes_flow_and_resource_bindings() -> None:
+    flow_id = uuid4()
+    space_id = uuid4()
+    assistant_id = uuid4()
+    binding = _resource_binding()
+    service = _flow_service()
+    service.create_flow.return_value = _flow(flow_id=flow_id, space_id=space_id)
+    assistant = MagicMock()
+    assistant.id = assistant_id
+    service.create_flow_assistant.return_value = (assistant, [])
+
+    result = await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Created flow",
+            flow_description="Description",
+            assistants_to_create=[
+                FlowDraftAssistantToCreate(
+                    plan_step_ref="step_a",
+                    assistant_spec=AssistantSpec(instructions="Do it."),
+                )
+            ],
+            compiled_steps=[_compiled_step()],
+        ),
+        flow_service=service,
+        space_id=space_id,
+        resource_bindings=(binding,),
+        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+    )
+
+    service.create_flow.assert_awaited_once_with(
+        space_id=space_id,
+        name="Created flow",
+        description="Description",
+        metadata_json=None,
+    )
+    service.update_flow.assert_awaited_once()
+    update_kwargs = service.update_flow.await_args.kwargs
+    assert update_kwargs["flow_id"] == flow_id
+    assert update_kwargs["steps"][0].assistant_id == assistant_id
+    service.replace_resource_bindings.assert_awaited_once_with(
+        flow_id=flow_id,
+        bindings=(binding,),
+        source=FlowResourceBindingSource.PACKAGE_IMPORT,
+    )
+    assert result.flow_id == flow_id
+    assert result.flow_name == "Created flow"
+    assert result.steps_created == 1
+
+
+async def test_create_mode_propagates_update_failure_without_cleanup() -> None:
+    flow_id = uuid4()
+    service = _flow_service()
+    service.create_flow.return_value = _flow(flow_id=flow_id)
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    service.create_flow_assistant.return_value = (assistant, [])
+    service.update_flow.side_effect = RuntimeError("update failed")
+
+    with pytest.raises(RuntimeError, match="update failed"):
+        await FlowDraftMaterializer().execute(
+            changeset=FlowDraftChangeSet(
+                flow_name="Created flow",
+                flow_description="Description",
+                assistants_to_create=[
+                    FlowDraftAssistantToCreate(
+                        plan_step_ref="step_a",
+                        assistant_spec=AssistantSpec(instructions="Do it."),
+                    )
+                ],
+                compiled_steps=[_compiled_step()],
+            ),
+            flow_service=service,
+            space_id=uuid4(),
+            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        )
+
+    service.delete_flow.assert_not_awaited()
+
+
+async def test_knowledge_bindings_are_materialized_by_local_kind() -> None:
+    flow_id = uuid4()
+    collection_id = uuid4()
+    website_id = uuid4()
+    integration_knowledge_id = uuid4()
+    service = _flow_service()
+    service.create_flow.return_value = _flow(flow_id=flow_id)
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    service.create_flow_assistant.return_value = (assistant, [])
+
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Knowledge flow",
+            flow_description="",
+            assistants_to_create=[
+                FlowDraftAssistantToCreate(
+                    plan_step_ref="knowledge",
+                    assistant_spec=AssistantSpec(
+                        instructions="Use local knowledge.",
+                        knowledge_refs=[
+                            "knowledge.policy",
+                            "knowledge.website",
+                            "knowledge.integration",
+                        ],
+                    ),
+                )
+            ],
+            compiled_steps=[_compiled_step(plan_step_ref="knowledge", step_order=1)],
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        resource_bindings=(
+            _resource_binding(
+                slot="policy",
+                slot_kind=ResourceSlotKind.KNOWLEDGE,
+                local_kind=LocalResourceKind.COLLECTION,
+                local_id=collection_id,
+            ),
+            _resource_binding(
+                slot="website",
+                slot_kind=ResourceSlotKind.KNOWLEDGE,
+                local_kind=LocalResourceKind.WEBSITE,
+                local_id=website_id,
+            ),
+            _resource_binding(
+                slot="integration",
+                slot_kind=ResourceSlotKind.KNOWLEDGE,
+                local_kind=LocalResourceKind.INTEGRATION_KNOWLEDGE,
+                local_id=integration_knowledge_id,
+            ),
+        ),
+        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+    )
+
+    command = service.update_reserved_flow_assistant.await_args.kwargs["update"]
+    assert isinstance(command, AssistantUpdateCommand)
+    assert command.groups == [collection_id]
+    assert command.websites == [website_id]
+    assert command.integration_knowledge_ids == [integration_knowledge_id]
+
+
+async def test_step_without_knowledge_clears_resource_lists() -> None:
+    flow_id = uuid4()
+    service = _flow_service()
+    service.create_flow.return_value = _flow(flow_id=flow_id)
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    service.create_flow_assistant.return_value = (assistant, [])
+
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Plain flow",
+            flow_description="",
+            assistants_to_create=[
+                FlowDraftAssistantToCreate(
+                    plan_step_ref="plain",
+                    assistant_spec=AssistantSpec(instructions=""),
+                ),
+            ],
+            compiled_steps=[_compiled_step(plan_step_ref="plain", step_order=1)],
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+    )
+
+    command = service.update_reserved_flow_assistant.await_args.kwargs["update"]
+    assert isinstance(command, AssistantUpdateCommand)
+    assert command.groups == []
+    assert command.websites == []
+    assert command.integration_knowledge_ids == []
+    assert not command.is_set("mcp_server_ids")
+    assert not command.is_set("mcp_tools")
+    assert command.prompt is not None
+    assert command.prompt.text == ""
+
+
+@pytest.mark.parametrize(
+    ("output_mode", "output_type"),
+    [("transcribe_only", "text"), ("template_fill", "docx")],
+)
+async def test_materializer_clears_completion_model_for_non_completion_create_changeset(
+    output_mode: str,
+    output_type: str,
+) -> None:
+    flow_id = uuid4()
+    service = _flow_service()
+    service.create_flow.return_value = _flow(flow_id=flow_id)
+    assistant = MagicMock()
+    assistant.id = uuid4()
+    service.create_flow_assistant.return_value = (assistant, [])
+
+    await FlowDraftMaterializer().execute(
+        changeset=FlowDraftChangeSet(
+            flow_name="Non-completion flow",
+            flow_description="",
+            assistants_to_create=[
+                FlowDraftAssistantToCreate(
+                    plan_step_ref="non_completion_step",
+                    assistant_spec=AssistantSpec(
+                        instructions="Run the step.",
+                        model_ref="model.default",
+                    ),
+                )
+            ],
+            compiled_steps=[
+                _compiled_step(
+                    plan_step_ref="non_completion_step",
+                    output_mode=output_mode,
+                    output_type=output_type,
+                )
+            ],
+        ),
+        flow_service=service,
+        space_id=uuid4(),
+        binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+    )
+
+    command = service.update_reserved_flow_assistant.await_args.kwargs["update"]
+    assert isinstance(command, AssistantUpdateCommand)
+    assert command.completion_model_id is None
+    assert "completion_model_id" in command.model_fields_set
+
+
+async def test_duplicate_slot_bindings_fail_before_mutation() -> None:
+    first = _resource_binding(slot="default-model")
+    second = _resource_binding(slot="default-model")
+    service = _flow_service()
+
+    with pytest.raises(BadRequestException) as error:
+        await FlowDraftMaterializer().execute(
+            changeset=FlowDraftChangeSet(flow_name="Flow", flow_description=""),
+            flow_service=service,
+            space_id=uuid4(),
+            resource_bindings=(first, second),
+            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        )
+
+    assert error.value.code == "duplicate_slot_binding"
+    service.create_flow.assert_not_called()
+
+
+async def test_unresolved_slot_binding_fails_before_mutation() -> None:
+    service = _flow_service()
+
+    with pytest.raises(BadRequestException) as error:
+        await FlowDraftMaterializer().execute(
+            changeset=FlowDraftChangeSet(
+                flow_name="Flow",
+                flow_description="",
+                assistants_to_create=[
+                    FlowDraftAssistantToCreate(
+                        plan_step_ref="step_a",
+                        assistant_spec=AssistantSpec(
+                            instructions="Use model.",
+                            model_ref="model.default",
+                        ),
+                    )
+                ],
+                compiled_steps=[_compiled_step()],
+            ),
+            flow_service=service,
+            space_id=uuid4(),
+            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        )
+
+    assert error.value.code == "unresolved_slot_binding"
+    assert error.value.context["slot_ref"] == "model.default"
+    service.create_flow.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("assistant_spec", "code"),
+    [
+        (
+            AssistantSpec(
+                instructions="Use invalid refs.", model_ref="not-a-valid-ref"
+            ),
+            FlowAuthoringRefusalCode.INVALID_MODEL_REF,
+        ),
+        (
+            AssistantSpec(
+                instructions="Use invalid refs.", knowledge_refs=["not-a-valid-ref"]
+            ),
+            FlowAuthoringRefusalCode.INVALID_KB_REF,
+        ),
+    ],
+)
+async def test_invalid_slot_ref_fails_before_mutation(
+    assistant_spec: AssistantSpec, code: FlowAuthoringRefusalCode
+) -> None:
+    service = _flow_service()
+
+    with pytest.raises(BadRequestException) as error:
+        await FlowDraftMaterializer().execute(
+            changeset=FlowDraftChangeSet(
+                flow_name="Flow",
+                flow_description="",
+                assistants_to_create=[
+                    FlowDraftAssistantToCreate(
+                        plan_step_ref="step_a",
+                        assistant_spec=assistant_spec,
+                    )
+                ],
+                compiled_steps=[_compiled_step()],
+            ),
+            flow_service=service,
+            space_id=uuid4(),
+            binding_source=FlowResourceBindingSource.PACKAGE_IMPORT,
+        )
+
+    assert error.value.code is code
+    service.create_flow.assert_not_called()

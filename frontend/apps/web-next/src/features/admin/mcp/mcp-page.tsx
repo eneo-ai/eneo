@@ -31,7 +31,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
-import { Switch as AxSwitch } from "@/components/astryx/switch";
+import { Switch as AxSwitch } from "@astryxdesign/core/Switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";

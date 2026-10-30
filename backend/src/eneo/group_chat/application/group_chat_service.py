@@ -118,7 +118,9 @@ class GroupChatService:
         icon_id = await self.group_chat_repo.delete(group_chat_id, group_chat.space_id)
 
         if icon_id:
-            await self.icon_repo.delete_if_unreferenced(icon_id)
+            await self.icon_repo.delete_if_unreferenced(
+                icon_id, tenant_id=self.user.tenant_id
+            )
 
     async def update_group_chat(
         self,

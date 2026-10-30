@@ -22,7 +22,11 @@
   import { cubicOut } from "svelte/easing";
   import { invalidate } from "$app/navigation";
   import type { Writable } from "svelte/store";
-  import type { ModelProviderPublic } from "@eneo/eneo-js";
+  import type {
+    ModelProviderPublic,
+    TenantCompletionModelCreate,
+    TenantTranscriptionModelCreate
+  } from "@eneo/eneo-js";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";
   import { toast } from "$lib/components/toast";
@@ -46,7 +50,13 @@
     type WizardStepId,
     type WizardModelDraft
   } from "./wizardState";
-  import { isCostValueOverflow, MAX_COST_INPUT, type ModelType } from "./models/draft";
+  import {
+    MAX_COST_INPUT,
+    completionCreateCapabilities,
+    isCostValueOverflow,
+    transcriptionCreateCapabilities,
+    type ModelType
+  } from "./models/draft";
 
   let {
     openController,
@@ -383,6 +393,11 @@
     providerId: string
   ): Promise<{ id: string } | undefined> {
     if (modelType === "completion") {
+      if (model.maxInputTokens === undefined || model.maxOutputTokens === undefined) {
+        // isDraftComplete admits a completion draft only with both budgets;
+        // the shared draft shape cannot say so, the request contract can.
+        throw new Error(`Model ${model.name} has no token budgets`);
+      }
       return eneo.tenantModels.createCompletion({
         provider_id: providerId,
         name: model.name,
@@ -390,9 +405,7 @@
         family: model.family ?? "openai",
         max_input_tokens: model.maxInputTokens,
         max_output_tokens: model.maxOutputTokens,
-        vision: model.vision ?? false,
-        reasoning: model.reasoning ?? false,
-        supports_tool_calling: model.supportsToolCalling ?? false,
+        ...completionCreateCapabilities(model),
         hosting: model.hosting ?? "swe",
         is_active: true,
         description: model.description ?? null,
@@ -401,7 +414,7 @@
         security_classification: model.securityClassification
           ? { id: model.securityClassification.id }
           : null
-      });
+      } satisfies TenantCompletionModelCreate);
     }
     if (modelType === "embedding") {
       return eneo.tenantModels.createEmbedding({
@@ -431,10 +444,11 @@
         is_active: true,
         description: model.description ?? null,
         cost_per_minute: model.costPerMinute ?? null,
+        ...transcriptionCreateCapabilities(model),
         security_classification: model.securityClassification
           ? { id: model.securityClassification.id }
           : null
-      });
+      } satisfies TenantTranscriptionModelCreate);
     }
     if (modelType === "rerank") {
       return eneo.tenantModels.createRerank({

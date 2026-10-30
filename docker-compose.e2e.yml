@@ -7,7 +7,8 @@
 # Prod-safety by construction:
 #   - its own throwaway postgres/redis, isolated network
 #   - every outbound LLM key is a dummy, so it can't reach a real provider
-#   - reuses the devcontainer image + venv (read-only), ships nothing to prod
+#   - reuses the rebuilt devcontainer image + venv (read-only); native packages
+#     are baked into the image
 #
 # Bring up:   docker compose -f docker-compose.e2e.yml up -d --wait
 # Tear down:  docker compose -f docker-compose.e2e.yml down        (data is gone)
@@ -16,6 +17,44 @@
 # before the run and tears it down after (see frontend/apps/web/e2e/*).
 
 name: eneo-e2e
+
+x-e2e-backend-environment: &e2e-backend-environment
+  POSTGRES_HOST: e2e-db
+  POSTGRES_DB: eneo_test
+  REDIS_HOST: e2e-redis
+  TOOL_RUNTIME_URL: http://e2e-tool-runtime:3010
+  TOOL_RUNTIME_TOKEN: e2e-tool-runtime-token-not-a-secret
+  FILE_REFERENCE_BASE_URL: http://e2e-backend:8000
+  MCP_APPS_ENABLED: "true"
+  MCP_APP_CONTENT_BASE_URL: ${E2E_APP_CONTENT_ORIGIN:-http://127.0.0.1:8124}
+  PUBLIC_ORIGIN: http://localhost:4173
+  PYTHONDONTWRITEBYTECODE: "1"
+  # Credentials are encrypted as in production, so providers can be added
+  # (the backend refuses to store a key without encryption). A fixed,
+  # public test key (CI's backend jobs use it too) that guards only the
+  # stack's dummy keys; e2e/seed.py encrypts the seeded provider's with it.
+  ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
+  TENANT_CREDENTIALS_ENABLED: "false"
+  FEDERATION_ENABLED: "false"
+  FEDERATION_PER_TENANT_ENABLED: "false"
+  # Hard guarantee: no real outbound model calls from the test stack.
+  OPENAI_API_KEY: test-openai-key
+  ANTHROPIC_API_KEY: test-anthropic-key
+  AZURE_API_KEY: test-azure-key
+  MISTRAL_API_KEY: test-mistral-key
+  # Deterministic identity for the seeded login user.
+  DEFAULT_TENANT_NAME: E2ETenant
+  DEFAULT_USER_EMAIL: e2e@example.com
+  DEFAULT_USER_PASSWORD: E2ePassword123!
+  # The suite signs in with the seed on every run; keep it usable.
+  DEFAULT_USER_PASSWORD_CHANGE_REQUIRED: "false"
+
+x-e2e-backend-volumes: &e2e-backend-volumes
+  # When Compose is invoked from inside the devcontainer, `.` resolves to the
+  # container-only `/workspace` path, which the host Docker daemon cannot bind.
+  # Point E2E_WORKSPACE_SOURCE at the host checkout in that case.
+  - ${E2E_WORKSPACE_SOURCE:-.}:/workspace
+  - backend_venv:/workspace/backend/.venv:ro
 
 services:
   e2e-db:
@@ -48,7 +87,7 @@ services:
     image: eneo_devcontainer-eneo
     command: ["python3", "/workspace/e2e/mock_model_server.py"]
     volumes:
-      - .:/workspace:ro
+      - ${E2E_WORKSPACE_SOURCE:-.}:/workspace:ro
     networks: [e2e]
     healthcheck:
       test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/8200"]
@@ -67,9 +106,6 @@ services:
 
   e2e-backend:
     image: eneo_devcontainer-eneo
-    # Root so we can install the few system libs the devcontainer adds
-    # post-create (not baked into the image). The venv is mounted read-only.
-    user: root
     working_dir: /workspace/backend
     depends_on:
       e2e-db:
@@ -82,43 +118,13 @@ services:
         condition: service_healthy
     env_file:
       - ./backend/.env
-    environment:
-      POSTGRES_HOST: e2e-db
-      POSTGRES_DB: eneo_test
-      REDIS_HOST: e2e-redis
-      TOOL_RUNTIME_URL: http://e2e-tool-runtime:3010
-      TOOL_RUNTIME_TOKEN: e2e-tool-runtime-token-not-a-secret
-      FILE_REFERENCE_BASE_URL: http://e2e-backend:8000
-      MCP_APPS_ENABLED: "true"
-      MCP_APP_CONTENT_BASE_URL: ${E2E_APP_CONTENT_ORIGIN:-http://127.0.0.1:8124}
-      PUBLIC_ORIGIN: http://localhost:4173
-      PYTHONDONTWRITEBYTECODE: "1"
-      # Credentials are encrypted as in production, so providers can be added
-      # (the backend refuses to store a key without encryption). A fixed,
-      # public test key (CI's backend jobs use it too) that guards only the
-      # stack's dummy keys; e2e/seed.py encrypts the seeded provider's with it.
-      ENCRYPTION_KEY: yPIAaWTENh5knUuz75NYHblR3672X-7lH-W6AD4F1hs=
-      TENANT_CREDENTIALS_ENABLED: "false"
-      FEDERATION_ENABLED: "false"
-      FEDERATION_PER_TENANT_ENABLED: "false"
-      # Hard guarantee: no real outbound model calls from the test stack.
-      OPENAI_API_KEY: test-openai-key
-      ANTHROPIC_API_KEY: test-anthropic-key
-      AZURE_API_KEY: test-azure-key
-      MISTRAL_API_KEY: test-mistral-key
-      # Deterministic identity for the seeded login user.
-      DEFAULT_TENANT_NAME: E2ETenant
-      DEFAULT_USER_EMAIL: e2e@example.com
-      DEFAULT_USER_PASSWORD: E2ePassword123!
-      # The suite signs in with the seed on every run; keep it usable.
-      DEFAULT_USER_PASSWORD_CHANGE_REQUIRED: "false"
+    environment: *e2e-backend-environment
     command:
       - bash
       - -lc
       - |
         set -e
         export PATH="/workspace/backend/.venv/bin:$$PATH"
-        apt-get update -qq && apt-get install -y -qq libsndfile1 ffmpeg >/dev/null
         python init_db.py            # migrate (alembic upgrade head) + seed tenant/user
         python /workspace/e2e/seed.py  # seed mock completion + embedding models
         exec gunicorn src.eneo.server.main:app \
@@ -126,9 +132,7 @@ services:
           --keep-alive 75 --bind 0.0.0.0:8000
     ports:
       - "8124:8000"
-    volumes:
-      - .:/workspace
-      - backend_venv:/workspace/backend/.venv:ro
+    volumes: *e2e-backend-volumes
     networks: [e2e]
     healthcheck:
       test: ["CMD", "bash", "-lc", "echo > /dev/tcp/127.0.0.1/8000"]
@@ -137,13 +141,96 @@ services:
       retries: 40
       start_period: 60s
 
+  task-execution-worker:
+    image: eneo_devcontainer-eneo
+    working_dir: /workspace/backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      <<: *e2e-backend-environment
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        export PATH="/workspace/backend/.venv/bin:$$PATH"
+        exec task-execution-worker
+    volumes: *e2e-backend-volumes
+    networks: [e2e]
+    healthcheck:
+      # The check imports the worker the same way, so it needs the same time.
+      # A healthcheck does not inherit the command's PATH export, and this
+      # image installs the entrypoint only in the mounted venv.
+      test: ["CMD", "/workspace/backend/.venv/bin/task-execution-worker", "--check"]
+      interval: 5s
+      timeout: 60s
+      retries: 30
+      start_period: 120s
+
+  task-maintenance-worker:
+    image: eneo_devcontainer-eneo
+    working_dir: /workspace/backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      <<: *e2e-backend-environment
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        export PATH="/workspace/backend/.venv/bin:$$PATH"
+        exec task-maintenance-worker
+    volumes: *e2e-backend-volumes
+    networks: [e2e]
+
+  # Website crawls are delivered to their own ARQ queue (arq:crawler) and only
+  # this role consumes it. Same role selection as the crawler-worker service in
+  # docs/deployment/docker-compose.yml (run.sh reads WORKER_ROLE).
+  crawler-worker:
+    image: eneo_devcontainer-eneo
+    working_dir: /workspace/backend
+    depends_on:
+      e2e-backend:
+        condition: service_healthy
+    env_file:
+      - ./backend/.env
+    environment:
+      <<: *e2e-backend-environment
+      RUN_AS_WORKER: "true"
+      WORKER_ROLE: crawler
+    command:
+      - bash
+      - -lc
+      - |
+        set -e
+        exec ./run.sh
+    volumes: *e2e-backend-volumes
+    networks: [e2e]
+    healthcheck:
+      # arq --check imports the whole worker module (about 10 s on a loaded
+      # host), so a 10 s timeout fails the check before the import ends.
+      test: ["CMD", "bash", "-lc", "export PATH=/workspace/backend/.venv/bin:$$PATH && arq --check src.eneo.worker.arq.CrawlerWorkerSettings"]
+      interval: 5s
+      timeout: 60s
+      retries: 30
+      start_period: 120s
+
 networks:
   e2e:
     name: eneo-e2e
 
 volumes:
   # The devcontainer's prebuilt backend venv, reused read-only so we skip a pip
-  # install. Requires the devcontainer to have been built at least once.
+  # install. Requires the devcontainer to have been built at least once. The
+  # volume is named after the checkout directory, so secondary checkouts must
+  # override E2E_BACKEND_VENV_VOLUME (see `docker volume ls`).
   backend_venv:
     external: true
-    name: eneo_devcontainer_backend_venv
+    name: ${E2E_BACKEND_VENV_VOLUME:-eneo_devcontainer_backend_venv}

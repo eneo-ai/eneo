@@ -13,6 +13,7 @@ from eneo.assistants.assistant_service import (
     NonStreamingAnswer,
     _attach_generated_file_ids,
 )
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
 from eneo.questions.question import ToolCallInfo
 
@@ -89,7 +90,8 @@ async def test_non_streaming_answer_hands_back_the_files_its_tools_made():
         blob=b"\x89PNG",
         mimetype="image/png",
         file_type=FileType.IMAGE,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
     )
     service = AssistantService.__new__(AssistantService)

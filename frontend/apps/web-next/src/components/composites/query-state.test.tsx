@@ -45,7 +45,7 @@ describe("QueryStateBoundary", () => {
     );
     const region = screen.getByRole("status");
     expect(region.getAttribute("aria-busy")).toBe("true");
-    expect(within(region).getByText("Laddar...")).toBeTruthy();
+    expect(within(region).getByText("Laddar…")).toBeTruthy();
     expect(screen.queryByRole("list")).toBeNull();
   });
 

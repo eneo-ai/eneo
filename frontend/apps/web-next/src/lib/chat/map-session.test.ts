@@ -175,13 +175,33 @@ describe("mapSessionMessages", () => {
         files: [file as PersistedMessage["files"][number]],
         generated_files: [file as PersistedMessage["files"][number]],
         num_tokens_question: 12,
-        num_tokens_answer: 34
+        num_tokens_answer: 34,
+        context_prompt_tokens: 8,
+        context_completion_tokens: 3
       }
     ]);
 
     expect(messages[0]!.metadata?.files?.[0]?.name).toBe("a.pdf");
     expect(messages[1]!.metadata?.generatedFiles?.[0]?.name).toBe("a.pdf");
-    expect(messages[1]!.metadata?.tokens).toEqual({ prompt: 12, completion: 34 });
+    expect(messages[1]!.metadata?.tokens).toEqual({
+      prompt: 12,
+      completion: 34,
+      contextPrompt: 8,
+      contextCompletion: 3
+    });
+  });
+
+  it("leaves the context counts null on rows saved before they were recorded", () => {
+    const messages = mapSessionMessages([
+      { ...baseMessage, num_tokens_question: 12, num_tokens_answer: 34 }
+    ]);
+
+    expect(messages[1]!.metadata?.tokens).toEqual({
+      prompt: 12,
+      completion: 34,
+      contextPrompt: null,
+      contextCompletion: null
+    });
   });
 
   it("carries persisted MCP resource references in assistant metadata", () => {

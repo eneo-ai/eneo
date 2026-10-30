@@ -8,6 +8,7 @@ from alembic import context
 
 # Add your model's MetaData object here
 # for 'autogenerate' support
+from eneo.database.renumbered_revisions import check_renumbered_revision_stamp
 from eneo.database.tables.base_class import Base  # noqa
 from eneo.main.config import get_settings
 
@@ -53,6 +54,11 @@ def run_migrations_online() -> None:
         context.configure(
             connection=connection, target_metadata=target_metadata, compare_type=True
         )
+        # Moving a database refuses a stamp whose id develop reused; `alembic
+        # stamp`, the repair, still runs.
+        migrations_fn = context.get_context().opts.get("fn")
+        if getattr(migrations_fn, "__name__", None) in {"upgrade", "downgrade"}:
+            check_renumbered_revision_stamp(connection)
 
         with context.begin_transaction():
             context.run_migrations()

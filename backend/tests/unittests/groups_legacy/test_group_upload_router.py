@@ -104,7 +104,7 @@ def test_upload_rejects_invalid_filename_before_staging_or_job_creation(
     )
 
     assert response.status_code == 400
-    assert response.json()["eneo_error_code"] == ErrorCodes.INVALID_FILENAME
+    assert response.json()["eneo_error_code"] == 9058
     assert (
         "400" in app.openapi()["paths"]["/{id}/info-blobs/upload/"]["post"]["responses"]
     )

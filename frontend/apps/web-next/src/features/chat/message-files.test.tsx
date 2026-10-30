@@ -124,7 +124,7 @@ describe("PendingMessageFiles", () => {
     );
     expect(screen.getByText("4 bifogade filer")).toBeTruthy();
     expect(screen.getByText("2 av 4 klara")).toBeTruthy();
-    const bar = screen.getByRole("progressbar", { name: "Laddar upp..." });
+    const bar = screen.getByRole("progressbar", { name: "Laddar upp…" });
     expect(bar.getAttribute("aria-valuenow")).toBe("2");
     expect(bar.getAttribute("aria-valuemax")).toBe("4");
     await expectNoAxeViolations(container);

@@ -1,0 +1,241 @@
+# Flows operations runbook
+
+## Execution deadlines and long flows
+
+`TASK_EXECUTION_TIMEOUT_SECONDS` bounds one worker invocation, including all
+steps executed before completion or a review pause. Its default is 14400 seconds.
+Completing a step does not restart that clock. Resuming an approved review
+checkpoint dispatches a new invocation with a new execution budget; time spent
+awaiting review does not consume worker execution time. Review expiry is governed
+separately by the checkpoint policy.
+
+The task cancels execution at this deadline and persists `flow_task_timeout`.
+The execution worker's outer ARQ deadline uses
+`flow_task_hard_timeout_seconds`: the task budget plus 60 seconds, giving the
+task's bounded failure handler time to commit. Do not configure both deadlines
+to the same value: ARQ can otherwise cancel the task before its timeout handler
+runs, leaving recovery to report `flow_worker_stalled` later.
+
+The default step budget and deployment hard ceiling both equal the invocation
+timeout minus the 60-second finalization reserve. Each step receives at most the
+invocation's remaining time minus that reserve. Tenant policy and an explicit
+step `timeout_seconds` can only lower this available budget. One attempt budget
+covers input preparation, knowledge retrieval, transcription, provider calls,
+retries and JSON capability fallbacks, mapped items, document rendering, and
+finalization. Persistence also consumes the invocation budget. LiteLLM's process
+default request timeout follows the same deployment step budget; requests within
+a flow attempt use its remaining time. Configuration requires at least 65 seconds
+per invocation to fund the reserve and five seconds of step work.
+
+For a long flow, inspect each uninterrupted group of steps between review pauses.
+Earlier steps leave less time for later steps. Size the existing deployment task
+budget for the supported workload, including non-model work;
+increasing only a step limit does not extend the task. Keep execution and
+maintenance workers on the same effective configuration. When upgrading, update
+the environment file and restart the workers. Review checkpoints should serve an
+actual review need, not act as artificial timeout resets.
+
+`flow_worker_stalled` means the stale-run reconciler terminalized a running row
+after its recovery threshold. It does not identify whether the process exited,
+the event loop stopped responding, or timeout terminalization failed. Correlate
+the run and task IDs with execution-worker timeout/exception logs, container
+restart or exit events, and the attempt's `resolved_timeout_seconds` and provider
+call receipt. A failed attempt's recorded duration can include time waiting for
+reconciliation after worker death; it does not prove that a model ran that long.
+Preserve completed step results and treat an unfinished provider call as outcome
+unknown. Do not automatically replay it: remote work and spend may already have
+occurred.
+
+## Worker shutdown
+
+ARQ workers drain for up to 60 seconds on SIGTERM, and the compose file gives
+each worker `init: true` and `stop_grace_period: 70s`. A flow run longer than
+the drain is cancelled and recovered by the heartbeat reaper.
+
+## Runtime health
+
+`GET /api/healthz/flows` is an operator diagnostic endpoint. It requires the
+configured Eneo super API key; ordinary user, tenant API, service, and
+super-duper credentials are rejected. Keep the key in the deployment secret
+manager and never print it in logs or tickets.
+
+```bash
+curl --fail-with-body --silent --show-error \
+  --header "X-API-Key: ${ENEO_SUPER_API_KEY}" \
+  "${ENEO_BASE_URL}/api/healthz/flows" | jq .
+```
+
+The response combines bounded database diagnostics with platform worker
+readiness for execution and maintenance. `UNKNOWN` means a diagnostic query
+failed or timed out. Missing or expired ARQ health keys and Redis probe failures
+fail closed.
+
+Health and recovery use the same staleness predicate for running runs. A stale
+run with a pending or claimed webhook delivery is excluded from both surfaces
+because the webhook worker may still own an external effect. Let the bounded
+claim/retry lifecycle converge before repeating the health check.
+
+Production has two Flow-related platform processes:
+
+- `task-execution-worker` executes queued runs;
+- `task-maintenance-worker` reconciles stale work, expires review checkpoints,
+  redispatches queued work, and delivers audit/webhook outboxes.
+
+There is no Flow-private worker, beat process, or scheduler.
+
+A run that ends in a webhook requests the webhook outbox job
+(`flows.drain_webhook_outbox`) right after it commits the delivery,
+best-effort: a request that is refused, has an unknown outcome, fails or
+outlasts `REDIS_CONN_TIMEOUT` is logged as
+`flow_executor.webhook_delivery_request_*` and the run stays as committed. The
+webhook outbox cron requests the same job every 30 seconds as recovery. The
+30 s is the cadence, not a delivery bound: a backlog, the job's row cap, slow
+waves and worker or Redis outages delay delivery.
+
+One outbox job runs at a time: every request uses one fixed ARQ job id, so ARQ
+takes no second job while one is queued or running, and the job keeps no result
+once it ends, so the next request starts a new one. Each cron tick has its own
+ARQ job id. A job killed mid-run (for example by a SIGKILL at deploy) keeps its
+job id, so requests join it until ARQ picks it up again when its in-progress
+marker expires: the maintenance worker's longest job timeout plus 10 s after it
+started (205 s by default). The job allows one try, so that pickup records it
+as failed and the next request starts a new job. Restart maintenance workers
+together when deploying: an old worker delivers inside the cron and does not
+know the new job, so while old and new workers overlap two deliveries can run
+at once (claims stay correct).
+
+The job's time budget is derived from `FLOW_HTTP_MAX_TIMEOUT_SECONDS`
+(default 120). One delivery is budgeted 15 s of preparation, the maximum
+request timeout and 15 s to audit the call and record the outcome (150 s by
+default). A job claims deliveries in waves of 10, only while its remaining
+time covers one such delivery, so it claims during its first 30 s and has a
+180 s deadline. Every send ends by the deadline minus those 15 s; a send cut
+short is a normal retryable failure. A claimed delivery whose request was not
+sent before then is released and is not charged an attempt. The outbound
+audit after a send waits at most until the deadline; an audit given up there
+is logged as a warning and the HTTP result is still recorded. Everything the
+job does, claims included, is cut at its hard stop 10 s after the deadline
+(190 s). A delivery still unfinished there keeps its claim, so its outcome is
+unknown until the claim expires; the job logs an error for each such delivery
+and one error with its counts, and returns with the `hard_stopped` status.
+ARQ cancels the job only after a further 5 s (195 s), and a claim lasts as
+long as that timeout. Retry delays count from the failure.
+
+## Health flags and recovery
+
+Timing values are returned in `thresholds`; code-owned defaults are shown below.
+Any positive count triggers a flag unless an age condition is stated.
+
+| Flag | Effective threshold | Recovery action |
+| --- | --- | --- |
+| `EXECUTION_WORKER_UNAVAILABLE` | The platform execution worker health key is missing or the one-second Redis readiness probe failed. | Restore Redis and `task-execution-worker`, then repeat the health check. |
+| `MAINTENANCE_WORKER_UNAVAILABLE` | The platform maintenance worker health key is missing or the one-second Redis readiness probe failed. | Restore Redis and `task-maintenance-worker`, then repeat the health check. |
+| `STALE_QUEUED_RUNS` | A queued run remains dispatch-pending for at least `stale_queued_after_seconds` (30 seconds). | Verify broker and execution health; allow bounded redispatch to converge. |
+| `ACCEPTED_DISPATCH_EXHAUSTED` | At least one queued run has exhausted dispatch after broker acceptance or an outcome-unknown send. | Check for a delayed claim before using the authorized generation-fenced redispatch endpoint. Never clear fields with SQL. |
+| `STALE_RUNNING_RUNS` | A recovery-eligible run is at least `stale_running_after_seconds` old (task timeout plus 60 seconds) but has not crossed the unhealthy threshold. | Restore worker capacity and allow the stale-running reconciler to terminalize through normal ownership. |
+| `STALE_RUNNING_RECONCILER_LAG` | The oldest recovery-eligible run exceeds `stale_running_unhealthy_after_seconds` (task timeout plus 180 seconds). | Restore maintenance capacity and inspect sanitized reconciler errors. |
+| `EXPIRED_REVIEW_CHECKPOINTS` | A reconcilable checkpoint is expired but no more than `review_expiry_unhealthy_after_seconds` (120 seconds) past expiry. | Allow review-expiry reconciliation to terminalize the checkpoint. |
+| `REVIEW_EXPIRY_RECONCILER_LAG` | The oldest reconcilable checkpoint is more than 120 seconds past expiry. | Restore maintenance capacity and inspect expiry-task failures. |
+| `TERMINAL_RUNS_WITH_OPEN_ATTEMPTS` | Any terminal run updated within the 24-hour integrity lookback still has an open attempt. | Stop mutation, preserve evidence, and investigate terminalization ownership. |
+| `TERMINAL_RUNS_WITH_ACTIVE_STEP_RESULTS` | Any terminal run updated within the 24-hour integrity lookback still has an active step result. | Stop mutation, preserve evidence, and investigate terminalization ownership. |
+| `AUDIT_OUTBOX_DELIVERY_BACKLOG` | A pending audit row remains eligible after the 300-second backlog grace. | Restore audit storage and maintenance capacity; let bounded delivery retry. |
+| `AUDIT_OUTBOX_DEAD_LETTERS` | Any lifecycle-audit delivery exhausted its bounded attempts. | Preserve the row, restore dependencies, and follow the fail-closed dead-letter guidance below. |
+| `WEBHOOK_OUTBOX_DELIVERY_BACKLOG` | An unclaimed or sufficiently expired pending webhook delivery remains eligible beyond the 300-second grace. | Restore destination connectivity and maintenance capacity; inspect sanitized diagnosis. |
+| `WEBHOOK_OUTBOX_EXPIRED_CLAIMS` | Any pending webhook claim has reached `claim_expires_at`. | Verify the former worker no longer owns the effect, then allow bounded reclaim. |
+| `WEBHOOK_OUTBOX_DEAD_LETTERS` | Any webhook delivery exhausted its five-attempt budget. | Preserve the row and inspect its sanitized failure and destination contract. |
+| `GALLRING_HOLD_REVIEW_OVERDUE` | An active legal hold on Flow run history has passed its review date (DEGRADED; the hold still stops deletion). | Have a holder of `retention_holds` review it in Admin > Flow settings > Retention: extend the review date with a reason, or release the hold with a reason. |
+
+A stale running run with a pending or claimed webhook delivery may still have an
+external effect in progress. Do not terminalize it manually. Let the bounded
+claim/retry lifecycle converge first.
+
+## Accepted dispatch exhaustion
+
+A queued run whose `dispatch_exhausted_at` is set can still have a delayed
+broker-accepted delivery. First verify broker and worker health and wait for a
+possible claim. If delivery was lost, an authorized run owner may call the run
+redispatch endpoint with the observed `dispatch_exhausted_at` generation token.
+The audited compare-and-swap re-arms only that generation; concurrent requests
+cannot re-arm a later epoch. Poll the returned run after either a successful or
+no-op response. Automatic maintenance never resets an exhausted budget.
+
+## Lifecycle audit outbox dead letters
+
+Terminal and review transitions write durable lifecycle-audit outbox rows.
+Both `pending` and `dead_lettered` rows are required audit state and block
+run-history purge.
+
+The supported recovery path is the narrow deployment-shell command below. It
+requires deployment or Kubernetes access through the authenticated operations
+wrapper for that environment. Deployments must provide an access-controlled,
+deployment-owned launcher that invokes only this module and injects
+`ENEO_OPERATOR_IDENTITY` from its authenticated operator context. The CLI
+cannot authenticate a human inside the application container; it fails closed
+when the launcher does not provide an identity. Do not set or forward that
+variable from an untrusted shell or command argument; do not expose this path
+as a generic privileged shell. There is no public or tenant-facing redrive
+endpoint and no bulk redrive command.
+
+```bash
+# The deployment-owned launcher must pass the subcommand and arguments exactly.
+/usr/local/sbin/eneo-flow-audit-outbox -- list --limit 50
+```
+
+Use the `dead_lettered_at` value from the bounded list as the generation token.
+Inspect one row without changing it, then redrive only that row after the audit
+store, database, and platform maintenance worker are healthy:
+
+```bash
+export FLOW_AUDIT_OUTBOX_ID="<outbox-id-from-list>"
+export FLOW_AUDIT_DEAD_LETTERED_AT="<dead-lettered-at-from-list>"
+/usr/local/sbin/eneo-flow-audit-outbox -- dry-run "${FLOW_AUDIT_OUTBOX_ID}" \
+  --expected-dead-lettered-at "${FLOW_AUDIT_DEAD_LETTERED_AT}"
+/usr/local/sbin/eneo-flow-audit-outbox -- redrive "${FLOW_AUDIT_OUTBOX_ID}" \
+  --expected-dead-lettered-at "${FLOW_AUDIT_DEAD_LETTERED_AT}" \
+  --reason "Audit storage recovered; normal delivery can resume."
+```
+
+The command uses the existing generation-fenced delivery service and records
+the operator identity, bounded reason, previous attempt count, and prior
+generation in the tenant-scoped audit row. A stale generation or concurrent
+delivery returns a nonzero conflict exit; list the row again before retrying.
+Do not delete, resolve, reset attempts, or alter lifecycle fields with SQL. A
+pending or dead-lettered row remains a retention blocker until the canonical
+delivery owner records success.
+
+Exit status `10` means the row was not found, `11` means it is no longer
+dead-lettered, `12` means the generation is stale, `20` means configuration or
+database bootstrap failed, and `21` means the audit operation or sink failed.
+
+## Evidence export
+
+Each flow decides whether its run evidence may be exported:
+`metadata_json.evidence_policy.allow_export` is false until someone who may
+edit the flow turns it on (**Nedladdning av bevisunderlag** under the flow's
+basic settings). While it is off, everyone who could otherwise export is
+refused with `flow_run_evidence_export_disabled`, tenant administrators and
+service keys included; a caller who may not export gets the ordinary refusal.
+The flow's current value applies to all of its runs, and a deleted flow
+keeps the value it was deleted with, so it cannot be turned on afterwards. The
+flow's audit entry records each change with the old and the new value.
+
+Raw evidence export is exceptional. It requires the explicit non-default reason
+gate and an audit-before-response transaction. If audit or commit fails,
+protected bytes are not returned. Active encryption enforcement belongs to
+M2.9; until that enforcement is active and verified in the deployment, do not
+enable or perform raw evidence export. Redacted export remains the default.
+Never put encryption keys, API keys, or exported evidence in tickets or command
+history.
+
+## Stored HTTP credentials
+
+Authored HTTP credentials are encrypted before storage, and save/publish refuses
+values that cannot be protected. Legacy rows must be reviewed through an
+approved tenant-scoped support procedure. Do not automatically rewrite,
+re-encrypt, or delete them. Re-enter affected draft credentials, publish a new
+immutable version, retire the affected old version, and rotate the destination
+credential.
+
+An `UNPROTECTED` finding identifies fields, never values. `UNREADABLE` means the
+stored configuration no longer proves its expected shape. Confirm the active
+encryption key before interpreting either result.

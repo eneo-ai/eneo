@@ -803,8 +803,19 @@ class TestCompletionModelMigration:
 
             migration_service = container.completion_model_migration_service()
 
+            # The blocker is the typed code, not the wording of the message.
+            validation = await migration_service.validate_migration(
+                from_model_id=source_model.id,
+                to_model_id=target_model.id,
+                tenant_id=admin_user.tenant_id,
+            )
+            assert any(
+                code.startswith("security_classification_insufficient:")
+                for code in validation.warning_codes
+            )
+
             # confirm_migration alone must NOT bypass the blocker.
-            with pytest.raises(ValidationException) as exc_info:
+            with pytest.raises(ValidationException):
                 await migration_service.migrate_model_usage(
                     from_model_id=source_model.id,
                     to_model_id=target_model.id,
@@ -812,8 +823,6 @@ class TestCompletionModelMigration:
                     confirm_migration=True,
                     force_override=False,
                 )
-
-            assert "security classification" in str(exc_info.value).lower()
 
     async def test_force_override_bypasses_security_classification_blocker(
         self,

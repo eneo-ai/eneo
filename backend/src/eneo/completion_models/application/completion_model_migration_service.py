@@ -17,6 +17,9 @@ from sqlalchemy import and_
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 
+from eneo.ai_models.completion_models.completion_model import (
+    sends_strict_tool_schemas,
+)
 from eneo.ai_models.migration.base_migration_service import (
     BaseModelMigrationService,
 )
@@ -30,6 +33,7 @@ from eneo.completion_models.constants import (
 from eneo.completion_models.domain.completion_model_migration_history_repo import (
     CompletionModelMigrationHistoryRepo,
 )
+from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.completion_models.presentation.completion_model_models import (
     ValidationResult,
 )
@@ -79,11 +83,20 @@ class CompletionModelMigrationService(BaseModelMigrationService):
             issues.append("Target model is deprecated")
             issue_codes.append("target_deprecated")
 
-        if from_model.max_input_tokens > to_model.max_input_tokens:
-            issues.append(
-                f"Target model has lower input token limit: {to_model.max_input_tokens}"
+        try:
+            source_limit = from_model.capacity.require_input_tokens()
+            target_limit = to_model.capacity.require_input_tokens()
+        except UnknownModelCapacityError as error:
+            blockers.append(str(error))
+            blocker_codes.append(
+                f"unknown_model_capacity:{','.join(error.missing_dimensions)}"
             )
-            issue_codes.append(f"lower_token_limit:{to_model.max_input_tokens}")
+        else:
+            if source_limit > target_limit:
+                issues.append(
+                    f"Target model has lower input token limit: {target_limit}"
+                )
+                issue_codes.append(f"lower_token_limit:{target_limit}")
 
         if from_model.family != to_model.family:
             issues.append(
@@ -104,6 +117,13 @@ class CompletionModelMigrationService(BaseModelMigrationService):
         if from_model.supports_tool_calling and not to_model.supports_tool_calling:
             issues.append("Target model lacks tool calling support")
             issue_codes.append("lacks_tool_calling")
+
+        # Effective strict support is the same rule the resolved route applies.
+        if sends_strict_tool_schemas(from_model) and not sends_strict_tool_schemas(
+            to_model
+        ):
+            issues.append("Target model lacks strict tool schema support")
+            issue_codes.append("lacks_strict_tool_schema")
 
         target_level = (
             to_model.security_classification.security_level
@@ -145,6 +165,12 @@ class CompletionModelMigrationService(BaseModelMigrationService):
             warning_codes=issue_codes + info_codes,
             requires_confirmation=len(issues) > 0,
         )
+
+    @staticmethod
+    def _is_blocker_code(code: str) -> bool:
+        return code.startswith(
+            "unknown_model_capacity:"
+        ) or BaseModelMigrationService._is_blocker_code(code)
 
     # --------------------------------------------------------- special entities
     def _special_entity_migrators(self) -> dict[str, Any]:

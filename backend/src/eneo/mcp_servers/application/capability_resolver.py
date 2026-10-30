@@ -12,9 +12,9 @@ The resolved provider is then gated by the user's role permission for the
 purpose and by the space's security classification.
 """
 
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 from uuid import UUID
 
 from eneo.mcp_servers.domain.capabilities import (
@@ -33,24 +33,37 @@ from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
     from eneo.security_classifications.domain.entities.security_classification import (
         SecurityClassification,
     )
 
 
-async def get_active_capability_servers(
-    session: "AsyncSession", tenant_id: UUID, purpose: str
-) -> list["MCPServer"]:
-    """Return every active provider for ``purpose`` in the tenant.
+def usable_capability_tools(server: "MCPServer") -> list["MCPServerTool"]:
+    """Tools the proxy would actually expose: enabled, still on the remote,
+    and with an admin-approved definition."""
+    return [
+        tool
+        for tool in server.tools
+        if tool.is_enabled
+        and not tool.removed_from_remote
+        and (tool.description is not None or tool.input_schema is not None)
+    ]
 
-    Read through the server repository like every other server read, so the
-    tools carry the tenant's tool settings and audience groups, security
-    classification and backing model (built-in providers) are loaded for
-    resolution.
+
+async def active_capability_providers(
+    session: "AsyncSession",
+    tenant_id: UUID,
+    purposes: Iterable[str] = CAPABILITY_PURPOSES,
+) -> list["MCPServer"]:
+    """Return every active provider for any of ``purposes`` in the tenant.
+
+    Read through the server repository so each tool carries its tenant override,
+    audience groups, classification and backing model. Filter all requested
+    purposes in one query, in creation order.
     """
-    return await MCPServerRepoImpl(session, MCPServerMapper()).query(
-        tenant_id=tenant_id, purpose=purpose, is_enabled=True
+    return await MCPServerRepoImpl(session, MCPServerMapper()).query_for_purposes(
+        purposes, tenant_id=tenant_id, is_enabled=True
     )
 
 
@@ -74,8 +87,15 @@ def select_provider_for_user(
     return next((p for p in providers if p.is_default_provider()), None)
 
 
+class ClassifiedServer(Protocol):
+    """What the classification comparison reads of a server."""
+
+    @property
+    def effective_security_classification(self) -> "SecurityClassification | None": ...
+
+
 def meets_security_classification(
-    provider: "MCPServer",
+    provider: ClassifiedServer,
     space_security_classification: "SecurityClassification | None",
 ) -> bool:
     """False when the space's classification is stricter than the provider's.
@@ -92,18 +112,22 @@ def meets_security_classification(
 def general_servers_for_space(
     attached_servers: Sequence["MCPServer"],
     space_security_classification: "SecurityClassification | None",
+    *,
+    in_space: Callable[[UUID], bool],
 ) -> list["MCPServer"]:
     """The general-purpose servers among ``attached_servers`` the space may call.
 
     Capability-purpose servers are markers resolved separately. A general
-    server is called directly, so one whose classification has dropped below
-    the space's since it was attached is left out this turn; attachments are
-    never pruned here.
+    server is called directly, so one that the space no longer has
+    (``in_space``), or whose classification has dropped below the space's
+    since it was attached, is left out this turn; attachments are never
+    pruned here.
     """
     return [
         server
         for server in attached_servers
         if not is_capability_purpose(server.purpose)
+        and in_space(server.id)
         and meets_security_classification(server, space_security_classification)
     ]
 
@@ -126,14 +150,16 @@ async def resolve_capability_servers(
     user_group_ids: "set[UUID] | None" = None,
     allowed_purposes: "set[str] | None" = None,
     space_security_classification: "SecurityClassification | None" = None,
+    in_space: Callable[[UUID], bool],
 ) -> CapabilityResolution:
     """Resolve independent purposes to the providers serving the user.
 
     Capability-purpose servers among ``attached_servers`` are stripped (they
-    may be stale or deactivated), general servers below the space's security
-    classification are left out, and, for every requested purpose in
-    ``CAPABILITY_PURPOSES`` order, the provider serving the user is attached
-    in its place when the user's role allows the purpose (``allowed_purposes``,
+    may be stale or deactivated), general servers the space no longer has or
+    that are below its security classification are left out, and, for every
+    requested purpose in ``CAPABILITY_PURPOSES`` order, the provider serving
+    the user is attached in its place when the user's role allows the purpose
+    (``allowed_purposes``,
     None meaning every purpose), a provider exists for the user's groups or
     the tenant default, its backing model (if any) is enabled, it has usable
     tools, it meets the space's security classification, and the model can
@@ -141,18 +167,19 @@ async def resolve_capability_servers(
     turn.
     """
     general_servers = general_servers_for_space(
-        attached_servers, space_security_classification
+        attached_servers, space_security_classification, in_space=in_space
     )
     requested_purposes = set(requested_capabilities)
     if allowed_purposes is not None:
         requested_purposes &= allowed_purposes
+    purposes = tuple(p for p in CAPABILITY_PURPOSES if p in requested_purposes)
     capability_servers: list["MCPServer"] = []
-    if requested_purposes and supports_tool_calling:
-        for purpose in CAPABILITY_PURPOSES:
-            if purpose not in requested_purposes:
-                continue
-            providers = await get_active_capability_servers(session, tenant_id, purpose)
-            provider = select_provider_for_user(providers, user_group_ids or set())
+    if purposes and supports_tool_calling:
+        providers = await active_capability_providers(session, tenant_id, purposes)
+        for purpose in purposes:
+            provider = select_provider_for_user(
+                [p for p in providers if p.purpose == purpose], user_group_ids or set()
+            )
             if (
                 provider is not None
                 and provider.is_backing_model_available
@@ -203,6 +230,27 @@ def describe_capability_availability(
     return CapabilityAvailability(purpose=purpose, available=available, reason=reason)
 
 
+def availability_from_providers(
+    providers: Sequence["MCPServer"],
+    space_security_classification: "SecurityClassification | None" = None,
+    *,
+    user_group_ids: set[UUID] | None = None,
+    allowed_purposes: set[str] | None = None,
+) -> list[CapabilityAvailability]:
+    """Readiness of every purpose, in ``CAPABILITY_PURPOSES`` order, from
+    providers loaded once by ``active_capability_providers``."""
+    return [
+        describe_capability_availability(
+            providers,
+            purpose,
+            space_security_classification,
+            user_group_ids=user_group_ids,
+            allowed_purposes=allowed_purposes,
+        )
+        for purpose in CAPABILITY_PURPOSES
+    ]
+
+
 async def capability_availability(
     session: "AsyncSession",
     tenant_id: UUID,
@@ -212,19 +260,12 @@ async def capability_availability(
     allowed_purposes: set[str] | None = None,
 ) -> list[CapabilityAvailability]:
     """Stored readiness, never a live external connection-health claim."""
-    result: list[CapabilityAvailability] = []
-    for purpose in CAPABILITY_PURPOSES:
-        providers = await get_active_capability_servers(session, tenant_id, purpose)
-        result.append(
-            describe_capability_availability(
-                providers,
-                purpose,
-                space_security_classification,
-                user_group_ids=user_group_ids,
-                allowed_purposes=allowed_purposes,
-            )
-        )
-    return result
+    return availability_from_providers(
+        await active_capability_providers(session, tenant_id),
+        space_security_classification,
+        user_group_ids=user_group_ids,
+        allowed_purposes=allowed_purposes,
+    )
 
 
 async def validate_capability_additions(

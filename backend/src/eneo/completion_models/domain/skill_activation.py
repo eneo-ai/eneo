@@ -11,6 +11,7 @@ from eneo.ai_models.completion_models.completion_model import (
     FunctionDefinition,
     function_definition_to_tool,
 )
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.skill_context import (
     SkillContextMeasurement,
     measure_skill_context,
@@ -34,7 +35,7 @@ from eneo.skills.domain.skill import (
 )
 from eneo.tokens.token_utils import (
     TokenCountSource,
-    measure_provider_input_tokens,
+    measure_provider_input_reserve,
 )
 
 SKILL_ACTIVATION_TOOL_NAME = "eneo_activate_skill"
@@ -333,9 +334,10 @@ class SkillActivationRuntime:
         max_activations_per_turn: int,
         context_share_percent: int,
         model_route: str,
-        max_input_tokens: int,
+        max_input_tokens: int | None,
         supports_tool_calling: bool,
     ) -> SkillActivationRuntime:
+        max_input_tokens = ModelCapacity(max_input_tokens, None).require_input_tokens()
         ordered = tuple(sorted(skills, key=lambda skill: skill.position))
         initially_active = tuple(skill for skill in ordered if skill.initially_active)
         on_demand = tuple(skill for skill in ordered if not skill.initially_active)
@@ -998,7 +1000,7 @@ class SkillActivationRuntime:
             if not newly_accepted:
                 break
 
-            provider_measurement = measure_provider_input_tokens(
+            provider_measurement = measure_provider_input_reserve(
                 cast("list[dict[str, Any]]", staged_messages),
                 cast("list[dict[str, Any]]", provider_tools or []),
                 self._model_route,
@@ -1032,7 +1034,7 @@ class SkillActivationRuntime:
                         _probe_deferred,
                         _probe_accepted,
                     ) = stage_round(probe_rejections)
-                    probe_measurement = measure_provider_input_tokens(
+                    probe_measurement = measure_provider_input_reserve(
                         cast("list[dict[str, Any]]", probe_messages),
                         cast("list[dict[str, Any]]", provider_tools or []),
                         self._model_route,

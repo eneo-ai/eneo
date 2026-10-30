@@ -2,7 +2,8 @@
 
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { Copy } from "lucide-react";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
+import { Copy, Info } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, type ReactNode } from "react";
 import { useCopy } from "@/lib/hooks/use-copy";
@@ -46,13 +47,37 @@ export function DebugSection({
   );
 }
 
-/** A technical value (an id, a route) in a definition list, with a copy button. */
-export function CopyableValue({ label, value }: { label: string; value: string }) {
+/**
+ * A technical value (an id, a route) in a definition list, with a copy
+ * button; a `hint` saying what the value is for sits behind an info button
+ * beside the label, as a tooltip that opens on hover, focus or tap.
+ */
+export function CopyableValue({
+  label,
+  value,
+  hint
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
   const t = useTranslations();
   const { copy } = useCopy();
   return (
     <div className="min-w-0">
-      <dt className="text-ax-text-secondary text-xs">{label}</dt>
+      <dt className="text-ax-text-secondary flex items-center gap-1 text-xs">
+        {label}
+        {hint ? (
+          <Tooltip content={hint} touchTrigger="tap">
+            <IconButton
+              label={t("chat_debug_value_about", { label })}
+              icon={<Info className="size-3.5" />}
+              variant="ghost"
+              size="sm"
+            />
+          </Tooltip>
+        ) : null}
+      </dt>
       <dd className="mt-0.5 flex min-w-0 items-center gap-1">
         <code
           className="min-w-0 flex-1 truncate font-mono text-sm leading-5 font-medium"

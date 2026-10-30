@@ -33,7 +33,7 @@ async def test_revoke_by_owner_filters_user_ownership():
 
     repo = AsyncMock()
     repo.list_filtered.return_value = [key]
-    repo.update.return_value = key
+    repo.revoke_unrevoked.return_value = key
     audit = AsyncMock()
     user = SimpleNamespace(id=owner_id, tenant_id=tenant_id)
 

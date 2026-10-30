@@ -1,9 +1,12 @@
+from dataclasses import dataclass
 from enum import Enum, StrEnum
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic.config import JsonDict
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.extensions import MIMETYPE_EXTENSIONS_MAPPER
 from eneo.main.models import InDB
 
@@ -17,6 +20,25 @@ class FileType(str, Enum):
     TEXT = "text"
     IMAGE = "image"
     AUDIO = "audio"
+    DOCUMENT = "document"
+
+
+FILE_PUBLIC_EXAMPLE: JsonDict = {
+    "id": "00000000-0000-0000-0000-000000000701",
+    "name": "review-audio.mp3",
+    "mimetype": "audio/mpeg",
+    "size": 1843200,
+    "created_at": "2026-03-17T10:04:00Z",
+    "updated_at": "2026-03-17T10:04:00Z",
+}
+
+SIGNED_URL_RESPONSE_EXAMPLE: JsonDict = {
+    "url": (
+        "https://api.example.com/api/v1/files/"
+        "00000000-0000-0000-0000-000000000701/download/?token=signed-token"
+    ),
+    "expires_at": 1773742500,
+}
 
 
 class FileContentVariant(StrEnum):
@@ -35,6 +57,9 @@ class FileUsageKind(StrEnum):
     ASSISTANT_ATTACHMENT = "assistant_attachment"
     APP_ATTACHMENT = "app_attachment"
     APP_RUN_INPUT = "app_run_input"
+    FLOW_VERSION = "flow_version"
+    FLOW_TEMPLATE_ASSET = "flow_template_asset"
+    FLOW_RUNTIME = "flow_runtime"
 
 
 class FileUsageSummary(BaseModel):
@@ -42,11 +67,19 @@ class FileUsageSummary(BaseModel):
     count: int
 
 
+class FileFlowVersionHolder(BaseModel):
+    flow_id: UUID
+    version: int
+
+
 class FileDeletionPreview(BaseModel):
     file_id: UUID
     can_delete: bool
     affected_file_count: int
     blockers: list[FileUsageSummary]
+    # At most ten of the published flow versions that name the file (the
+    # `flow_version` blocker count is the full number).
+    flow_versions: list[FileFlowVersionHolder] = []
 
 
 class FileInUseError(Exception):
@@ -55,11 +88,19 @@ class FileInUseError(Exception):
     def __init__(self, preview: FileDeletionPreview) -> None:
         self.preview = preview
         self.details = preview.model_dump(mode="json")
-        super().__init__(
+        message = (
             "File is still in use and cannot be deleted. "
             "See details.blockers for the remaining references; "
             "retry only after those references have been removed."
         )
+        if preview.flow_versions:
+            message += (
+                " A file is protected while a flow version that names it exists; "
+                "unpublishing and run-history purge do not release it, and no "
+                "automatic version cleanup exists yet. details.flow_versions "
+                "lists the flows and version numbers."
+            )
+        super().__init__(message)
 
 
 class FileOriginalNotFoundError(Exception):
@@ -106,19 +147,69 @@ class FileBaseWithContent(FileBase):
 
 
 class FileInfo(InDB, FileBase):
-    user_id: UUID
+    owner_type: PrincipalType | None = None
+    owner_user_id: UUID | None = None
+    owner_service_id: UUID | None = None
     tenant_id: UUID
     revises_file_id: Optional[UUID] = None
+
+
+@dataclass(frozen=True, slots=True)
+class FileOwner:
+    """One authenticated principal that owns a File family."""
+
+    tenant_id: UUID
+    owner_type: PrincipalType
+    owner_user_id: UUID | None = None
+    owner_service_id: UUID | None = None
+
+    def __post_init__(self) -> None:
+        user_owner = (
+            self.owner_type is PrincipalType.USER
+            and self.owner_user_id is not None
+            and self.owner_service_id is None
+        )
+        service_owner = (
+            self.owner_type is PrincipalType.SERVICE_KEY
+            and self.owner_user_id is None
+            and self.owner_service_id is not None
+        )
+        if not (user_owner or service_owner):
+            raise ValueError("File owner identity does not match its principal type")
+
+    @property
+    def created_by_user_id(self) -> UUID | None:
+        return self.owner_user_id
+
+    def matches(self, file: "FileMetadata | FileInfo") -> bool:
+        return (
+            file.tenant_id == self.tenant_id
+            and file.owner_type is self.owner_type
+            and file.owner_user_id == self.owner_user_id
+            and file.owner_service_id == self.owner_service_id
+        )
 
 
 class FileMetadataCreate(BaseModel):
     name: str
     file_type: FileType
     mimetype: Optional[str] = None
-    user_id: UUID
+    owner_type: PrincipalType
+    owner_user_id: UUID | None = None
+    owner_service_id: UUID | None = None
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
     revises_file_id: Optional[UUID] = None
+
+    @model_validator(mode="after")
+    def validate_owner_identity(self) -> "FileMetadataCreate":
+        FileOwner(
+            tenant_id=self.tenant_id,
+            owner_type=self.owner_type,
+            owner_user_id=self.owner_user_id,
+            owner_service_id=self.owner_service_id,
+        )
+        return self
 
 
 class FileMetadata(InDB, FileMetadataCreate):
@@ -126,7 +217,9 @@ class FileMetadata(InDB, FileMetadataCreate):
 
 
 class File(InDB, FileBaseWithContent):
-    user_id: UUID
+    owner_type: PrincipalType
+    owner_user_id: UUID | None = None
+    owner_service_id: UUID | None = None
     tenant_id: UUID
     parent_file_id: Optional[UUID] = None
     # The earlier version of a conversation document this file was saved
@@ -140,6 +233,11 @@ class File(InDB, FileBaseWithContent):
 
 
 class FilePublic(InDB):
+    model_config = ConfigDict(
+        from_attributes=True,
+        json_schema_extra={"example": FILE_PUBLIC_EXAMPLE},
+    )
+
     name: str
     mimetype: str
     size: int
@@ -191,12 +289,32 @@ FILE_ORIGINAL_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS = 60 * 60
 
 
 class SignedURLRequest(BaseModel):
-    # Default 1 hour; capped at 7 days so a leaked URL cannot stay valid
-    # indefinitely.
-    expires_in: int = Field(
-        default=3600, ge=1, le=FILE_PROCESSING_SIGNED_URL_MAXIMUM_EXPIRY_SECONDS
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "expires_in": 3600,
+                "content_disposition": "attachment",
+            }
+        }
     )
-    content_disposition: ContentDisposition = ContentDisposition.ATTACHMENT
+
+    expires_in: int = Field(
+        default=3600,
+        gt=0,
+        le=86400,
+        description=(
+            "Lifetime of the signed URL in seconds, from 1 to 86400 (24 hours). The response "
+            "reports the resulting deadline as a Unix epoch integer in `expires_at`."
+        ),
+    )
+    content_disposition: ContentDisposition = Field(
+        default=ContentDisposition.ATTACHMENT,
+        description=(
+            "Whether the download should be offered as a file (`attachment`) or rendered in "
+            "place (`inline`). Fetch the returned URL without an authentication header; the "
+            "signature already carries the authorization."
+        ),
+    )
 
 
 class OriginalSignedURLRequest(SignedURLRequest):
@@ -208,5 +326,9 @@ class OriginalSignedURLRequest(SignedURLRequest):
 
 
 class SignedURLResponse(BaseModel):
+    model_config = ConfigDict(
+        json_schema_extra={"example": SIGNED_URL_RESPONSE_EXAMPLE}
+    )
+
     url: str
     expires_at: int  # Unix timestamp when the URL will expire

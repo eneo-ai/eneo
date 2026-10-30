@@ -1,0 +1,476 @@
+from __future__ import annotations
+
+import math
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Protocol, TypedDict
+from uuid import UUID
+
+from eneo.files.audio import AudioDecodeLimits, within_decode_limit
+from eneo.files.file_models import FileInfo, FileMetadata, FileOwner
+from eneo.files.file_repo import FileContentReferenceRecord
+from eneo.flows.domain.flow import FlowRuntimeInputConfig
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    effective_mapped_cardinality,
+    resolve_flow_mapped_execution_policy,
+)
+from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.runtime_input import (
+    build_runtime_input_config,
+    runtime_input_accept_mimetypes,
+)
+from eneo.flows.enums import FlowRuntimeInputFormat
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_input_limits import (
+    FLOW_INPUT_MAX_FILES_COUNT,
+    FlowInputLimits,
+    effective_flow_input_limit,
+    effective_max_files_per_run,
+    effective_runtime_max_files,
+)
+from eneo.flows.principal import FlowPrincipal
+from eneo.flows.runtime.input_files import (
+    ensure_input_file_budget,
+    measure_input_files,
+)
+from eneo.main.config import get_settings
+
+
+class _FileRepositoryProtocol(Protocol):
+    async def get_list_by_id_and_owner(
+        self,
+        ids: list[UUID],
+        owner: FileOwner,
+    ) -> list[FileMetadata]: ...
+
+    async def get_infos_with_references_by_ids(
+        self, file_ids: list[UUID]
+    ) -> tuple[list[FileInfo], list[FileContentReferenceRecord]]: ...
+
+
+class _RuntimeUploadRepositoryProtocol(Protocol):
+    async def audio_seconds_by_file(
+        self, *, file_ids: list[UUID]
+    ) -> dict[UUID, float]: ...
+
+    async def list_bound_file_ids_for_owner(
+        self,
+        *,
+        file_ids: list[UUID],
+        flow_id: UUID,
+        tenant_id: UUID,
+        principal: FlowPrincipal,
+        lock_for_binding: bool = False,
+    ) -> set[UUID]: ...
+
+
+@dataclass(frozen=True)
+class RuntimeStepInputSpec:
+    step: RuntimeStep
+    runtime_input: FlowRuntimeInputConfig
+    accepted_mimetypes: list[str]
+    max_files: int | None
+    max_file_size_bytes: int
+
+
+@dataclass(frozen=True)
+class FlowRunStepInputFiles:
+    file_ids: tuple[UUID, ...] = ()
+    live_transcript_id: UUID | None = None
+    single_recording: bool = False
+
+
+class FlowRunStepInputFileProjection(TypedDict):
+    step_id: UUID
+    step_order: int
+    file_ids: Sequence[UUID]
+
+
+FlowRunStepInputs = Mapping[UUID, FlowRunStepInputFiles]
+
+
+def runtime_file_not_bound_to_flow_error(
+    *, step_id: UUID, file_ids: Sequence[UUID]
+) -> FlowBadRequestException:
+    return FlowBadRequestException(
+        "One or more submitted runtime files were not uploaded for this flow.",
+        code=FlowApiErrorCode.RUN_FILE_NOT_BOUND_TO_FLOW,
+        context={
+            "step_id": str(step_id),
+            "file_ids": [str(file_id) for file_id in file_ids],
+        },
+    )
+
+
+def build_runtime_step_input_specs(
+    *,
+    steps: Sequence[RuntimeStep],
+    limits: FlowInputLimits,
+    mapped_policy: FlowMappedExecutionPolicy | None = None,
+) -> dict[UUID, RuntimeStepInputSpec]:
+    resolved_mapped_policy = mapped_policy or resolve_flow_mapped_execution_policy(None)
+    specs: dict[UUID, RuntimeStepInputSpec] = {}
+    for step in steps:
+        runtime_input = build_runtime_input_config(step.input_config)
+        if not runtime_input.enabled:
+            continue
+        specs[step.step_id] = RuntimeStepInputSpec(
+            step=step,
+            runtime_input=runtime_input,
+            accepted_mimetypes=runtime_input_accept_mimetypes(runtime_input),
+            max_files=(
+                effective_mapped_cardinality(
+                    published_max=runtime_input.max_files,
+                    mapped_policy=resolved_mapped_policy,
+                    input_max_files=effective_max_files_per_run(
+                        input_type=runtime_input.input_format,
+                        limits=limits,
+                    ),
+                )
+                if runtime_input.execution_mode == "per_source"
+                else effective_runtime_max_files(
+                    input_type=runtime_input.input_format,
+                    step_max_files=runtime_input.max_files,
+                    limits=limits,
+                )
+            ),
+            max_file_size_bytes=effective_flow_input_limit(
+                input_type=runtime_input.input_format,
+                limits=limits,
+            ),
+        )
+    return specs
+
+
+def primary_runtime_input_format(
+    input_configs: Sequence[dict[str, object] | None],
+) -> FlowRuntimeInputFormat | None:
+    """Runtime input format of a flow's first step that accepts runtime input.
+
+    `input_configs` must already be ordered by `step_order` ascending. Each
+    entry resolves through `build_runtime_input_config`, the same per-step
+    parser `build_runtime_step_input_specs` uses to populate the run
+    contract's `steps_requiring_input`, so a list's derived `input_type`
+    cannot diverge from what counts as accepting runtime input there. Returns
+    `None` when no step accepts runtime input.
+    """
+    for input_config in input_configs:
+        runtime_input = build_runtime_input_config(input_config)
+        if runtime_input.enabled:
+            return runtime_input.input_format
+    return None
+
+
+def normalize_step_inputs_payload(
+    raw_step_inputs: FlowRunStepInputs | None,
+) -> dict[UUID, list[UUID]]:
+    normalized: dict[UUID, list[UUID]] = {}
+    if raw_step_inputs is None:
+        return normalized
+
+    for step_id, payload in raw_step_inputs.items():
+        normalized_ids: list[UUID] = []
+        for file_id in payload.file_ids:
+            try:
+                normalized_ids.append(UUID(str(file_id)))
+            except (TypeError, ValueError) as exc:
+                raise FlowBadRequestException(
+                    "Each step_inputs.file_ids value must be a UUID.",
+                    code=FlowApiErrorCode.RUN_INVALID_STEP_INPUTS,
+                ) from exc
+        normalized[step_id] = list(dict.fromkeys(normalized_ids))
+
+    return normalized
+
+
+def validate_live_transcript_inputs(
+    *,
+    step_inputs: FlowRunStepInputs,
+    normalized_step_inputs: dict[UUID, list[UUID]],
+    specs: dict[UUID, RuntimeStepInputSpec],
+) -> dict[UUID, UUID]:
+    live_ids: dict[UUID, UUID] = {}
+    for step_id, submitted in step_inputs.items():
+        if submitted.live_transcript_id is None:
+            continue
+        spec = specs.get(step_id)
+        if (
+            len(normalized_step_inputs[step_id]) != 1
+            or spec is None
+            or spec.runtime_input.input_format is not FlowRuntimeInputFormat.AUDIO
+        ):
+            raise FlowBadRequestException(
+                "A live transcript requires exactly one audio file for the step.",
+                code=FlowApiErrorCode.RUN_LIVE_TRANSCRIPT_REQUIRES_ONE_AUDIO_FILE,
+            )
+        live_ids[step_id] = submitted.live_transcript_id
+    return live_ids
+
+
+async def validate_audio_lengths(
+    *,
+    specs: Mapping[UUID, RuntimeStepInputSpec],
+    normalized_step_inputs: Mapping[UUID, Sequence[UUID]],
+    single_recording_steps: frozenset[UUID],
+    runtime_upload_repo: _RuntimeUploadRepositoryProtocol,
+    limits: AudioDecodeLimits,
+) -> dict[UUID, int]:
+    """Holds each audio step's files to the longest recording as it is now, by the
+    decoded lengths measured as they were uploaded: every file, and one recording's
+    parts together, as transcription decodes them. A measured length over the limit is
+    refused before the run is accepted, so no client drops a recording it was told the
+    run would transcribe. Returns the limit each audio step
+    was admitted under, for its transcription to keep.
+
+    A file uploaded before Eneo measured length has none to hold: it is admitted
+    under the same limit, and the decode that transcribes it, which counts what it
+    decodes, refuses it when it is longer. A measured length over the limit is
+    refused here whatever the unmeasured parts add."""
+    ceiling = limits.longest_audio_seconds
+    admitted: dict[UUID, int] = {}
+    for step_id, requested in normalized_step_inputs.items():
+        spec = specs.get(step_id)
+        file_ids = list(requested)
+        if (
+            not file_ids
+            or spec is None
+            or spec.runtime_input.input_format is not FlowRuntimeInputFormat.AUDIO
+        ):
+            continue
+        lengths = await runtime_upload_repo.audio_seconds_by_file(file_ids=file_ids)
+        measured = [lengths[file_id] for file_id in file_ids if file_id in lengths]
+        together = step_id in single_recording_steps
+        groups = [measured] if together else [[length] for length in measured]
+        for group in groups:
+            if not within_decode_limit(group, ceiling):
+                raise FlowBadRequestException(
+                    "The audio is longer than this Eneo allows for a recording.",
+                    code=FlowApiErrorCode.RUN_AUDIO_EXCEEDS_LIMIT,
+                    # The shape the upload's refusal and the decode's carry.
+                    context={
+                        "limit": "duration_seconds",
+                        "measured": math.ceil(sum(group)),
+                        "ceiling": ceiling,
+                        "step_id": str(step_id),
+                    },
+                )
+        admitted[step_id] = ceiling
+    return admitted
+
+
+def validate_single_recording_inputs(
+    *,
+    step_inputs: FlowRunStepInputs,
+    specs: dict[UUID, RuntimeStepInputSpec],
+) -> frozenset[UUID]:
+    """The steps whose files are the parts of one recording: audio steps only."""
+    steps: set[UUID] = set()
+    for step_id, submitted in step_inputs.items():
+        if not submitted.single_recording:
+            continue
+        spec = specs.get(step_id)
+        if (
+            spec is None
+            or spec.runtime_input.input_format is not FlowRuntimeInputFormat.AUDIO
+        ):
+            raise FlowBadRequestException(
+                "Only an audio step can hold the parts of one recording.",
+                code=FlowApiErrorCode.RUN_SINGLE_RECORDING_REQUIRES_AUDIO_STEP,
+            )
+        steps.add(step_id)
+    return frozenset(steps)
+
+
+async def validate_submitted_step_inputs(
+    *,
+    flow_id: UUID,
+    steps: list[RuntimeStep],
+    specs: dict[UUID, RuntimeStepInputSpec],
+    normalized_step_inputs: dict[UUID, list[UUID]],
+    file_repo: _FileRepositoryProtocol,
+    runtime_upload_repo: _RuntimeUploadRepositoryProtocol,
+    principal: FlowPrincipal,
+    tenant_id: UUID,
+    inline_payload: object = None,
+) -> None:
+    step_by_id = {step.step_id: step for step in steps}
+    aggregate_count = 0
+    requested_ids_by_step: dict[UUID, list[UUID]] = {}
+
+    for step_id, requested_file_ids in normalized_step_inputs.items():
+        step = step_by_id.get(step_id)
+        if step is None:
+            raise FlowBadRequestException(
+                "Unknown step id in step_inputs.",
+                code=FlowApiErrorCode.RUN_UNKNOWN_STEP_INPUT,
+                context={"step_id": str(step_id)},
+            )
+
+        spec = specs.get(step_id)
+        if spec is None or not spec.runtime_input.enabled:
+            raise FlowBadRequestException(
+                "Runtime input is disabled for the requested step.",
+                code=FlowApiErrorCode.RUN_RUNTIME_INPUT_DISABLED,
+                context={"step_id": str(step_id)},
+            )
+
+        if spec.max_files is not None and len(requested_file_ids) > spec.max_files:
+            raise FlowBadRequestException(
+                f"Too many files were submitted for this step; the ceiling is {spec.max_files}.",
+                code=FlowApiErrorCode.RUN_STEP_INPUT_MAX_FILES_EXCEEDED,
+                context={
+                    "step_id": str(step_id),
+                    "max_files": spec.max_files,
+                    "file_count": len(requested_file_ids),
+                },
+            )
+        aggregate_count += len(requested_file_ids)
+        if requested_file_ids:
+            requested_ids_by_step[step_id] = requested_file_ids
+
+    aggregate_limit = aggregate_runtime_file_limit(specs=specs)
+    if aggregate_count > aggregate_limit:
+        raise FlowBadRequestException(
+            f"Submitted runtime files exceed the aggregate ceiling of {aggregate_limit} files for this flow.",
+            code=FlowApiErrorCode.RUN_AGGREGATE_MAX_FILES_EXCEEDED,
+            context={
+                "aggregate_max_files": aggregate_limit,
+                "file_count": aggregate_count,
+            },
+        )
+
+    if requested_ids_by_step:
+        all_requested_file_ids = list(
+            dict.fromkeys(
+                file_id
+                for requested_file_ids in requested_ids_by_step.values()
+                for file_id in requested_file_ids
+            )
+        )
+        owned_files = await file_repo.get_list_by_id_and_owner(
+            ids=all_requested_file_ids,
+            owner=principal.file_owner(tenant_id=tenant_id),
+        )
+        owned_file_ids = {file.id for file in owned_files}
+        files, references = await file_repo.get_infos_with_references_by_ids(
+            [file_id for file_id in all_requested_file_ids if file_id in owned_file_ids]
+        )
+        file_by_id = {file.id: file for file in files}
+        resolved_ids = set(file_by_id)
+
+        for step_id, requested_file_ids in requested_ids_by_step.items():
+            missing_ids = [
+                str(file_id)
+                for file_id in requested_file_ids
+                if file_id not in resolved_ids
+            ]
+            if missing_ids:
+                raise FlowBadRequestException(
+                    "One or more submitted runtime files are missing or not accessible.",
+                    code=FlowApiErrorCode.RUN_FILE_NOT_ACCESSIBLE,
+                    context={"step_id": str(step_id), "file_ids": missing_ids},
+                )
+
+        bound_ids = await runtime_upload_repo.list_bound_file_ids_for_owner(
+            file_ids=all_requested_file_ids,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+            principal=principal,
+            lock_for_binding=True,
+        )
+        sizes = measure_input_files(files=files, references=references)
+
+        for step_id, requested_file_ids in requested_ids_by_step.items():
+            spec = specs[step_id]
+            step_files = [file_by_id[file_id] for file_id in requested_file_ids]
+
+            unbound_ids = [
+                file_id for file_id in requested_file_ids if file_id not in bound_ids
+            ]
+            if unbound_ids:
+                raise runtime_file_not_bound_to_flow_error(
+                    step_id=step_id,
+                    file_ids=unbound_ids,
+                )
+
+            for file in step_files:
+                file_size = sizes[file.id].upload_bytes
+                if file_size <= spec.max_file_size_bytes:
+                    continue
+                raise FlowBadRequestException(
+                    "One or more submitted runtime files exceed the current flow input size limit.",
+                    code=FlowApiErrorCode.RUN_STEP_INPUT_FILE_TOO_LARGE,
+                    context={
+                        "step_id": str(step_id),
+                        "file_id": str(file.id),
+                        "size_bytes": file_size,
+                        "max_file_size_bytes": spec.max_file_size_bytes,
+                    },
+                )
+
+            if not spec.accepted_mimetypes:
+                continue
+
+            allowed = {mimetype.lower() for mimetype in spec.accepted_mimetypes}
+            for file in step_files:
+                mimetype = (file.mimetype or "").split(";", 1)[0].strip().lower()
+                if mimetype and mimetype in allowed:
+                    continue
+                raise FlowBadRequestException(
+                    "One or more submitted runtime files use a rejected MIME type.",
+                    code=FlowApiErrorCode.RUN_STEP_INPUT_MIMETYPE_REJECTED,
+                    context={
+                        "step_id": str(step_id),
+                        "file_id": str(file.id),
+                        "mimetype": mimetype or "missing",
+                    },
+                )
+
+        ensure_input_file_budget(
+            file_ids=[
+                file_id for ids in requested_ids_by_step.values() for file_id in ids
+            ],
+            sizes=sizes,
+            max_inline_text_bytes=get_settings().flow_max_inline_text_bytes,
+            file_max_size_bytes=max(
+                (
+                    spec.max_file_size_bytes
+                    for spec in specs.values()
+                    if spec.runtime_input.input_format != "audio"
+                ),
+                default=0,
+            ),
+            audio_max_size_bytes=max(
+                (
+                    spec.max_file_size_bytes
+                    for spec in specs.values()
+                    if spec.runtime_input.input_format == "audio"
+                ),
+                default=0,
+            ),
+            inline_payload=inline_payload,
+        )
+
+    required_missing = [
+        str(step_id)
+        for step_id, spec in specs.items()
+        if spec.runtime_input.required
+        and len(normalized_step_inputs.get(step_id, [])) == 0
+    ]
+    if required_missing:
+        raise FlowBadRequestException(
+            "Required runtime input files are missing.",
+            code=FlowApiErrorCode.RUN_REQUIRED_STEP_INPUT_MISSING,
+            context={"step_ids": required_missing},
+        )
+
+
+def aggregate_runtime_file_limit(*, specs: dict[UUID, RuntimeStepInputSpec]) -> int:
+    aggregate = 0
+    for spec in specs.values():
+        if spec.max_files is None:
+            return FLOW_INPUT_MAX_FILES_COUNT
+        aggregate += spec.max_files
+    return min(aggregate, FLOW_INPUT_MAX_FILES_COUNT)

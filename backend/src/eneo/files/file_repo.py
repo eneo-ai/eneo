@@ -1,5 +1,5 @@
 from collections import defaultdict
-from collections.abc import Collection, Mapping, Sequence
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from hashlib import sha256
 from typing import TypeVar
@@ -20,6 +20,7 @@ from eneo.files.file_models import (
     FileInfo,
     FileMetadata,
     FileMetadataCreate,
+    FileOwner,
     FileType,
 )
 from eneo.main.exceptions import NotFoundException
@@ -38,7 +39,9 @@ _FILE_METADATA_COLUMNS = (
     Files.name,
     Files.file_type,
     Files.mimetype,
-    Files.user_id,
+    Files.owner_type,
+    Files.owner_user_id,
+    Files.owner_service_id,
     Files.tenant_id,
     Files.parent_file_id,
     Files.revises_file_id,
@@ -59,6 +62,7 @@ class FileContentReferenceRecord:
     size_bytes: int
     media_type: str
     access_class: ContentAccessClass
+    state: ContentState
     storage_kind: StorageKind
 
 
@@ -237,6 +241,39 @@ def select_primary_file_reference(
     return None
 
 
+def primary_file_content_size_expression() -> sa.ColumnElement[int]:
+    """Project the same durable-or-legacy size used by ``FileInfo.size``."""
+
+    ranked_variants = [
+        (
+            sa.and_(
+                Files.file_type == file_type.value,
+                FileContentReferences.variant == variant.value,
+            ),
+            priority,
+        )
+        for file_type in FileType
+        for priority, variant in enumerate(primary_file_variants(file_type))
+    ]
+    durable_size = (
+        sa.select(ObjectContents.size_bytes)
+        .select_from(FileContentReferences)
+        .join(ObjectContents, ObjectContents.id == FileContentReferences.content_id)
+        .where(
+            FileContentReferences.file_id == Files.id,
+            sa.or_(*(condition for condition, _ in ranked_variants)),
+        )
+        .order_by(
+            sa.case(*ranked_variants, else_=len(ranked_variants)),
+            FileContentReferences.ordinal,
+        )
+        .limit(1)
+        .correlate(Files)
+        .scalar_subquery()
+    )
+    return sa.func.coalesce(durable_size, Files.legacy_size)
+
+
 def select_file_content_variant(
     references: list[FileContentReferenceRecord],
     legacy_content: Sequence[LegacyContentT],
@@ -312,10 +349,24 @@ def project_file_info(
         original_size=original.size_bytes if original is not None else None,
         mimetype=project_file_media_type(file, primary),
         file_type=file.file_type,
-        user_id=file.user_id,
+        owner_type=file.owner_type,
+        owner_user_id=file.owner_user_id,
+        owner_service_id=file.owner_service_id,
         tenant_id=file.tenant_id,
         revises_file_id=file.revises_file_id,
     )
+
+
+def _metadata_in_requested_order(
+    rows: Iterable[Files],
+    requested_ids: list[UUID],
+) -> list[FileMetadata]:
+    metadata_by_id = {row.id: FileMetadata.model_validate(row) for row in rows}
+    return [
+        metadata_by_id[file_id]
+        for file_id in dict.fromkeys(requested_ids)
+        if file_id in metadata_by_id
+    ]
 
 
 def project_file_media_type(
@@ -335,6 +386,15 @@ class FileRepository:
 
     def __init__(self, session: AsyncSession):
         self.session = session
+
+    @staticmethod
+    def _owned_by(file: type[Files], owner: FileOwner):
+        return sa.and_(
+            file.tenant_id == owner.tenant_id,
+            file.owner_type == owner.owner_type.value,
+            file.owner_user_id.is_not_distinct_from(owner.owner_user_id),
+            file.owner_service_id.is_not_distinct_from(owner.owner_service_id),
+        )
 
     @staticmethod
     def _family_has_content_state(
@@ -426,7 +486,7 @@ class FileRepository:
         self,
         *,
         parent_ids: list[UUID],
-        user_id: UUID | None = None,
+        owner: FileOwner | None = None,
         tenant_id: UUID | None = None,
         file_type: FileType | None = None,
     ) -> Select[tuple[Files]]:
@@ -436,13 +496,15 @@ class FileRepository:
             .join(parent, Files.parent_file_id == parent.id)
             .where(
                 Files.parent_file_id.in_(parent_ids),
-                Files.user_id == parent.user_id,
                 Files.tenant_id == parent.tenant_id,
+                Files.owner_type == parent.owner_type,
+                Files.owner_user_id.is_not_distinct_from(parent.owner_user_id),
+                Files.owner_service_id.is_not_distinct_from(parent.owner_service_id),
                 await self._visible_family(),
             )
         )
-        if user_id is not None:
-            query = query.where(parent.user_id == user_id)
+        if owner is not None:
+            query = query.where(self._owned_by(parent, owner))
         if tenant_id is not None:
             query = query.where(parent.tenant_id == tenant_id)
         if file_type is not None:
@@ -485,45 +547,41 @@ class FileRepository:
         self.session.add(reference)
         await self.session.flush()
 
-    async def get_list_by_id_and_user(
+    async def get_list_by_id_and_owner(
         self,
         ids: list[UUID],
-        user_id: UUID,
+        owner: FileOwner,
     ) -> list[FileMetadata]:
         if not ids:
             return []
         rows = await self.session.scalars(
-            sa.select(Files)
-            .where(
+            sa.select(Files).where(
                 Files.id.in_(ids),
-                Files.user_id == user_id,
+                self._owned_by(Files, owner),
                 await self._visible_family(),
             )
-            .order_by(Files.created_at)
         )
-        return [FileMetadata.model_validate(row) for row in rows]
+        return _metadata_in_requested_order(rows, ids)
 
     async def get_by_ids(self, ids: list[UUID]) -> list[FileMetadata]:
         if not ids:
             return []
         rows = await self.session.scalars(
-            sa.select(Files)
-            .where(Files.id.in_(ids), await self._visible_family())
-            .order_by(Files.created_at)
+            sa.select(Files).where(Files.id.in_(ids), await self._visible_family())
         )
-        return [FileMetadata.model_validate(row) for row in rows]
+        return _metadata_in_requested_order(rows, ids)
 
     async def get_by_parent_ids(
         self,
         parent_ids: list[UUID],
-        user_id: UUID,
+        owner: FileOwner,
     ) -> list[FileMetadata]:
         if not parent_ids:
             return []
         rows = await self.session.scalars(
             await self._visible_children_query(
                 parent_ids=parent_ids,
-                user_id=user_id,
+                owner=owner,
             )
         )
         return [FileMetadata.model_validate(row) for row in rows]
@@ -551,8 +609,12 @@ class FileRepository:
                     child,
                     sa.and_(
                         child.parent_file_id == parent.id,
-                        child.user_id == parent.user_id,
                         child.tenant_id == parent.tenant_id,
+                        child.owner_type == parent.owner_type,
+                        child.owner_user_id.is_not_distinct_from(parent.owner_user_id),
+                        child.owner_service_id.is_not_distinct_from(
+                            parent.owner_service_id
+                        ),
                         child.file_type == FileType.IMAGE.value,
                     ),
                 )
@@ -580,10 +642,18 @@ class FileRepository:
             unstable_parent_ids=unstable_parent_ids,
         )
 
-    async def get_by_id(self, file_id: UUID) -> FileMetadata:
-        row = await self.session.scalar(
-            sa.select(Files).where(Files.id == file_id, await self._visible_family())
+    async def get_by_id(
+        self,
+        file_id: UUID,
+        *,
+        tenant_id: UUID | None = None,
+    ) -> FileMetadata:
+        query = sa.select(Files).where(
+            Files.id == file_id, await self._visible_family()
         )
+        if tenant_id is not None:
+            query = query.where(Files.tenant_id == tenant_id)
+        row = await self.session.scalar(query)
         if row is None:
             raise NotFoundException()
         return FileMetadata.model_validate(row)
@@ -602,23 +672,40 @@ class FileRepository:
         self,
         *,
         file_id: UUID,
-        user_id: UUID,
-        tenant_id: UUID,
+        owner: FileOwner,
     ) -> FileMetadata | None:
         row = await self.session.scalar(
             sa.select(Files).where(
                 Files.id == file_id,
-                Files.user_id == user_id,
-                Files.tenant_id == tenant_id,
+                self._owned_by(Files, owner),
             )
         )
         return None if row is None else FileMetadata.model_validate(row)
 
-    async def get_list_by_user(self, user_id: UUID) -> list[FileMetadata]:
+    async def get_by_id_and_owner_for_key_share(
+        self,
+        *,
+        file_id: UUID,
+        owner: FileOwner,
+    ) -> FileMetadata | None:
+        """Fence deletion while an owned File is adopted by another resource."""
+
+        row = await self.session.scalar(
+            sa.select(Files)
+            .where(
+                Files.id == file_id,
+                self._owned_by(Files, owner),
+                await self._visible_family(),
+            )
+            .with_for_update(read=True, key_share=True)
+        )
+        return None if row is None else FileMetadata.model_validate(row)
+
+    async def get_list_by_owner(self, owner: FileOwner) -> list[FileMetadata]:
         rows = await self.session.scalars(
             sa.select(Files)
             .where(
-                Files.user_id == user_id,
+                self._owned_by(Files, owner),
                 Files.parent_file_id.is_(None),
                 await self._visible_family(),
             )
@@ -650,6 +737,7 @@ class FileRepository:
                 ObjectContents.size_bytes,
                 ObjectContents.verified_media_type,
                 ObjectContents.access_class,
+                ObjectContents.state,
                 ObjectContents.storage_kind,
             )
             .join(
@@ -677,6 +765,7 @@ class FileRepository:
                 size_bytes=row.size_bytes,
                 media_type=row.verified_media_type,
                 access_class=ContentAccessClass(row.access_class),
+                state=ContentState(row.state),
                 storage_kind=StorageKind(row.storage_kind),
             )
             for row in rows
@@ -832,6 +921,12 @@ class FileRepository:
         )
 
     async def get_infos_by_ids(self, file_ids: list[UUID]) -> list[FileInfo]:
+        infos, _ = await self.get_infos_with_references_by_ids(file_ids)
+        return infos
+
+    async def get_infos_with_references_by_ids(
+        self, file_ids: list[UUID]
+    ) -> tuple[list[FileInfo], list[FileContentReferenceRecord]]:
         metadata = await self.get_by_ids(file_ids)
         references = await self.get_content_references([file.id for file in metadata])
         legacy_infos = await self.get_legacy_infos([file.id for file in metadata])
@@ -845,24 +940,23 @@ class FileRepository:
             by_file[reference.file_id].append(reference)
         for content in legacy_infos:
             legacy_by_file[content.file_id].append(content)
-        return [
+        infos = [
             project_file_info(file, by_file[file.id], legacy_by_file[file.id])
             for file in metadata
         ]
+        return infos, references
 
     async def delete_by_owner_for_lifecycle(
         self,
         id: UUID,
-        user_id: UUID,
-        tenant_id: UUID,
+        owner: FileOwner,
     ) -> FileMetadata | None:
         row = (
             await self.session.execute(
                 sa.delete(Files)
                 .where(
                     Files.id == id,
-                    Files.user_id == user_id,
-                    Files.tenant_id == tenant_id,
+                    self._owned_by(Files, owner),
                 )
                 .returning(*_FILE_METADATA_COLUMNS)
             )

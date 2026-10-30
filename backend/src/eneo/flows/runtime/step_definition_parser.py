@@ -1,0 +1,768 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Mapping, Sequence, TypeGuard, cast
+from uuid import UUID
+
+from pydantic import ValidationError
+
+from eneo.flows.assistant_execution_snapshot import (
+    validate_assistant_execution_snapshot,
+)
+from eneo.flows.domain.flow import (
+    FlowPersistedJsonObject,
+    FlowStepRetrievalPolicy,
+    parse_flow_step_retrieval_policy,
+)
+from eneo.flows.domain.flow_step_validation import FlowGraphIssueCode
+from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.speaker_labels import SPEAKER_MAPPING_OUTPUT_CONTRACT
+from eneo.flows.domain.step_item_map import build_step_item_map_config
+from eneo.flows.domain.tool_input import read_published_tool_input_config
+from eneo.flows.enums import (
+    FLOW_INPUT_SOURCE_VALUES,
+    FLOW_INPUT_TYPE_VALUES,
+    FLOW_OUTPUT_TYPE_VALUES,
+    FlowOutputMode,
+    FlowOutputType,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_review_policy import parse_flow_step_review_policy
+from eneo.flows.input_binding_contract_rules import (
+    FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+    input_binding_key_refusal,
+    input_contract_binding_conflict,
+    is_structured_projection_binding,
+    source_ref_bindings,
+)
+from eneo.flows.output_modes import (
+    ALLOWED_OUTPUT_MODES,
+    compose_text_violation,
+    copy_input_violation,
+    render_verbatim_violation,
+    speaker_mapping_violation,
+    text_document_pass_through_violation,
+    transcribe_only_violation,
+)
+from eneo.flows.source_identity import has_required_runtime_managed_source_fields
+from eneo.flows.step_chain_rules import find_first_step_chain_violation
+from eneo.main.exceptions import BadRequestException
+
+ALLOWED_INPUT_SOURCES = set(FLOW_INPUT_SOURCE_VALUES)
+ALLOWED_INPUT_TYPES = set(FLOW_INPUT_TYPE_VALUES)
+ALLOWED_OUTPUT_TYPES = set(FLOW_OUTPUT_TYPE_VALUES)
+
+FLOW_VERSION_INVALID_STEP_ORDER = "flow_version_invalid_step_order"
+FLOW_VERSION_INVALID_STEP_IDENTIFIER = "flow_version_invalid_step_identifier"
+FLOW_VERSION_MISSING_STEP_IDENTIFIERS = "flow_version_missing_step_identifiers"
+_REMOVED_FLOW_MCP_STEP_FIELDS = frozenset(
+    {"mcp_policy", "mcp_servers", "mcp_tools_enabled"}
+)
+_REMOVED_FLOW_MCP_SNAPSHOT_FIELDS = frozenset(
+    {"mcp_servers", "mcp_tools", "tool_surface_hash"}
+)
+
+
+@dataclass(frozen=True)
+class PublishedStepIdentity:
+    step_id: UUID
+    step_order: int
+    assistant_id: UUID
+
+
+@dataclass(frozen=True)
+class _StepIdentity:
+    step_id: UUID
+    step_order: int
+    assistant_id: UUID
+    user_description: str | None
+
+
+@dataclass(frozen=True)
+class _StepInputFields:
+    input_source: str
+    input_type: str
+    input_config: FlowPersistedJsonObject | None
+    input_bindings: FlowPersistedJsonObject | None
+    input_contract: FlowPersistedJsonObject | None
+
+
+@dataclass(frozen=True)
+class _StepOutputFields:
+    output_mode: str
+    output_type: str
+    output_config: FlowPersistedJsonObject | None
+    output_contract: FlowPersistedJsonObject | None
+    output_classification_override: int | None
+    retrieval_policy: FlowStepRetrievalPolicy | None
+
+
+@dataclass(frozen=True)
+class _StepOptionalFields:
+    plan_step_ref: str | None
+    existing_step_ref: str | None
+    assistant_snapshot: FlowPersistedJsonObject | None
+    timeout_seconds: int | None
+
+
+def _is_json_object(value: object) -> TypeGuard[FlowPersistedJsonObject]:
+    return isinstance(value, dict)
+
+
+def _optional_json_object(value: object) -> FlowPersistedJsonObject | None:
+    return value if _is_json_object(value) else None
+
+
+def _optional_positive_int(value: object, field_name: str) -> int | None:
+    if value is None:
+        return None
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise BadRequestException(f"{field_name} must be an integer.")
+    if value <= 0:
+        raise BadRequestException(f"{field_name} must be greater than zero.")
+    return value
+
+
+def _step_scoped_message(
+    *,
+    step_order: int,
+    user_description: str | None,
+    message: str,
+) -> str:
+    step_label = f"Step {step_order}"
+    if user_description:
+        step_label = f"{step_label} ({user_description})"
+    exact_step_prefix = f"Step {step_order}: "
+    if message.startswith(exact_step_prefix):
+        field_message = message.removeprefix(exact_step_prefix)
+    else:
+        field_message = message.removeprefix("Step ")
+    return f"{step_label}: {field_message}"
+
+
+def _step_scoped_exception(
+    exc: BadRequestException,
+    *,
+    step_order: int,
+    user_description: str | None,
+) -> BadRequestException:
+    context = dict(exc.context or {})
+    context["step_order"] = step_order
+    if user_description is not None:
+        context["step_description"] = user_description
+    return BadRequestException(
+        _step_scoped_message(
+            step_order=step_order,
+            user_description=user_description,
+            message=str(exc),
+        ),
+        code=exc.code,
+        context=context,
+    )
+
+
+def _step_order_from_snapshot(item_dict: Mapping[str, object]) -> int:
+    step_order_value = item_dict["step_order"]
+    if isinstance(step_order_value, int) and not isinstance(step_order_value, bool):
+        return step_order_value
+    return int(str(step_order_value))
+
+
+def _published_step_order_from_snapshot(item: Mapping[str, object]) -> int:
+    step_order_raw = item.get("step_order", 0)
+    if isinstance(step_order_raw, bool):
+        raise BadRequestException(
+            "Invalid flow version step order.",
+            code=FLOW_VERSION_INVALID_STEP_ORDER,
+            context={"step_order": step_order_raw},
+        )
+    if isinstance(step_order_raw, int):
+        step_order = step_order_raw
+    elif isinstance(step_order_raw, str):
+        try:
+            step_order = int(step_order_raw)
+        except ValueError as exc:
+            raise BadRequestException(
+                "Invalid flow version step order.",
+                code=FLOW_VERSION_INVALID_STEP_ORDER,
+                context={"step_order": step_order_raw},
+            ) from exc
+    else:
+        raise BadRequestException(
+            "Invalid flow version step order.",
+            code=FLOW_VERSION_INVALID_STEP_ORDER,
+            context={"step_order": step_order_raw},
+        )
+    if step_order <= 0:
+        raise BadRequestException(
+            "Invalid flow version step order.",
+            code=FLOW_VERSION_INVALID_STEP_ORDER,
+            context={"step_order": step_order},
+        )
+    return step_order
+
+
+def _optional_step_description(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def _field_string(value: object, default: str) -> str:
+    if value is None:
+        return default
+    if isinstance(value, Enum):
+        return str(value.value)
+    return str(value)
+
+
+def _parse_published_step_identifier_fields(
+    item: Mapping[str, object],
+    *,
+    step_order: int,
+) -> tuple[UUID, UUID]:
+    step_id_raw = item.get("step_id")
+    assistant_id_raw = item.get("assistant_id")
+    if step_id_raw is None or assistant_id_raw is None:
+        raise BadRequestException(
+            f"Flow version step {step_order} is missing stable step identifiers.",
+            code=FLOW_VERSION_MISSING_STEP_IDENTIFIERS,
+            context={"step_order": step_order},
+        )
+
+    try:
+        step_id = UUID(str(step_id_raw))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise BadRequestException(
+            "Invalid flow version step identifier.",
+            code=FLOW_VERSION_INVALID_STEP_IDENTIFIER,
+            context={
+                "step_order": step_order,
+                "field": "step_id",
+                "value": step_id_raw,
+            },
+        ) from exc
+
+    try:
+        assistant_id = UUID(str(assistant_id_raw))
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise BadRequestException(
+            "Invalid flow version step identifier.",
+            code=FLOW_VERSION_INVALID_STEP_IDENTIFIER,
+            context={
+                "step_order": step_order,
+                "field": "assistant_id",
+                "value": assistant_id_raw,
+            },
+        ) from exc
+
+    return step_id, assistant_id
+
+
+def _parse_published_step_identity(
+    item: Mapping[str, object],
+) -> PublishedStepIdentity:
+    step_order = _published_step_order_from_snapshot(item)
+    step_id, assistant_id = _parse_published_step_identifier_fields(
+        item,
+        step_order=step_order,
+    )
+    return PublishedStepIdentity(
+        step_id=step_id,
+        step_order=step_order,
+        assistant_id=assistant_id,
+    )
+
+
+def parse_published_step_identities(
+    steps: Sequence[Mapping[str, object]],
+) -> list[PublishedStepIdentity]:
+    return [_parse_published_step_identity(step) for step in steps]
+
+
+def _generic_runtime_identity_exception(
+    exc: BadRequestException,
+) -> BadRequestException:
+    if exc.code in {
+        FLOW_VERSION_INVALID_STEP_ORDER,
+        FLOW_VERSION_INVALID_STEP_IDENTIFIER,
+        FLOW_VERSION_MISSING_STEP_IDENTIFIERS,
+    }:
+        return BadRequestException("Invalid step identifiers in flow snapshot.")
+    return exc
+
+
+def _parse_step_identity(
+    item: Mapping[str, object],
+    *,
+    step_order: int,
+    user_description: str | None,
+) -> _StepIdentity:
+    try:
+        step_id, assistant_id = _parse_published_step_identifier_fields(
+            item,
+            step_order=step_order,
+        )
+    except BadRequestException as exc:
+        raise _generic_runtime_identity_exception(exc) from exc
+    return _StepIdentity(
+        step_id=step_id,
+        step_order=step_order,
+        assistant_id=assistant_id,
+        user_description=user_description,
+    )
+
+
+def _reject_removed_flow_mcp_fields(item: Mapping[str, object]) -> None:
+    if _REMOVED_FLOW_MCP_STEP_FIELDS.intersection(item):
+        raise BadRequestException("Flow MCP fields are unsupported.")
+    assistant_snapshot = item.get("assistant_snapshot")
+    if isinstance(assistant_snapshot, Mapping):
+        snapshot = cast(Mapping[object, object], assistant_snapshot)
+        if _REMOVED_FLOW_MCP_SNAPSHOT_FIELDS.intersection(snapshot):
+            raise BadRequestException("Flow MCP fields are unsupported.")
+
+
+def _parse_input_fields(item: Mapping[str, object]) -> _StepInputFields:
+    input_source = _field_string(item.get("input_source"), "flow_input")
+    if input_source not in ALLOWED_INPUT_SOURCES:
+        raise BadRequestException(f"Unsupported input source '{input_source}'.")
+
+    raw_input_config = _parse_input_config(
+        raw_input_config=item.get("input_config"),
+        input_source=input_source,
+    )
+    build_runtime_input_config(raw_input_config)
+    build_step_item_map_config(raw_input_config)
+
+    input_type = _field_string(item.get("input_type"), "text")
+    if input_type not in ALLOWED_INPUT_TYPES:
+        raise BadRequestException(f"Unsupported input type '{input_type}'.")
+
+    return _StepInputFields(
+        input_source=input_source,
+        input_type=input_type,
+        input_config=raw_input_config,
+        input_bindings=_optional_json_object(item.get("input_bindings")),
+        input_contract=_optional_json_object(item.get("input_contract")),
+    )
+
+
+def _validate_input_contract_binding_compatibility(
+    input_fields: _StepInputFields,
+) -> None:
+    is_structured_projection = is_structured_projection_binding(
+        input_bindings=input_fields.input_bindings,
+        input_type=input_fields.input_type,
+    )
+    if is_structured_projection and any(
+        not ref.field_path for ref in source_ref_bindings(input_fields.input_bindings)
+    ):
+        raise BadRequestException(
+            "Structured JSON input_bindings.source_refs must select explicit field_path values.",
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": "source_refs"},
+        )
+    if is_structured_projection and input_fields.input_contract is None:
+        raise BadRequestException(
+            "Structured JSON input_bindings.source_refs require input_contract.",
+            code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+            context={
+                "field": "input_contract",
+                "conflict": "input_bindings.source_refs",
+            },
+        )
+    conflict = input_contract_binding_conflict(
+        input_bindings=input_fields.input_bindings,
+        input_contract=input_fields.input_contract,
+        input_type=input_fields.input_type,
+    )
+    if conflict is None:
+        return
+    if conflict == "source_refs":
+        raise BadRequestException(
+            "input_contract requires structured JSON input_bindings.source_refs "
+            "without question, text refs, or item templates.",
+            code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+            context={
+                "field": "input_contract",
+                "conflict": "input_bindings.source_refs",
+            },
+        )
+    raise BadRequestException(
+        "input_contract cannot validate input_bindings.question because the "
+        "question binding supplies the complete rendered step input. Remove "
+        "input_contract or remove input_bindings.question.",
+        code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+        context={
+            "field": "input_contract",
+            "conflict": "input_bindings.question",
+        },
+    )
+
+
+def _validate_supported_input_binding_keys(input_fields: _StepInputFields) -> None:
+    refusal = input_binding_key_refusal(input_fields.input_bindings)
+    if refusal is not None:
+        raise BadRequestException(
+            str(refusal),
+            code=FLOW_INPUT_BINDING_UNSUPPORTED_KEY,
+            context={"field": "input_bindings", "key": refusal.key},
+        ) from refusal
+
+
+def _parse_input_config(
+    *,
+    raw_input_config: object,
+    input_source: str,
+) -> FlowPersistedJsonObject | None:
+    if input_source == "http_get":
+        if not _is_json_object(raw_input_config):
+            raise BadRequestException("HTTP input source requires input_config object.")
+        raw_headers = raw_input_config.get("headers")
+        if raw_headers is not None and not isinstance(raw_headers, dict):
+            raise BadRequestException("HTTP input_config.headers must be an object.")
+        return raw_input_config
+    if input_source == "tool":
+        if not _is_json_object(raw_input_config):
+            raise _invalid_tool_config(
+                "Tool input source requires input_config object."
+            )
+        try:
+            # A stored definition is a published one, so its tool step is pinned.
+            read_published_tool_input_config(raw_input_config)
+        except ValidationError:
+            # Pydantic's message quotes the input value, so it is not passed on.
+            raise _invalid_tool_config(
+                "Tool input_config.tool is not a pinned tool configuration."
+            ) from None
+        return raw_input_config
+
+    if raw_input_config is None:
+        return None
+    if not _is_json_object(raw_input_config):
+        raise BadRequestException("Step input_config must be an object.")
+    return raw_input_config
+
+
+def _invalid_tool_config(message: str) -> BadRequestException:
+    return BadRequestException(
+        message, code=FlowApiErrorCode.TYPED_IO_TOOL_INVALID_CONFIG.value
+    )
+
+
+def _parse_output_fields(item: Mapping[str, object]) -> _StepOutputFields:
+    output_mode = _field_string(item.get("output_mode"), "pass_through")
+    if output_mode not in ALLOWED_OUTPUT_MODES:
+        raise BadRequestException(f"Unsupported output mode '{output_mode}'.")
+
+    output_type = _field_string(item.get("output_type"), "text")
+    if output_type not in ALLOWED_OUTPUT_TYPES:
+        raise BadRequestException(f"Unsupported output type '{output_type}'.")
+
+    raw_output_config = _parse_output_config(
+        raw_output_config=item.get("output_config"),
+        output_mode=output_mode,
+        output_type=output_type,
+    )
+    try:
+        retrieval_policy = parse_flow_step_retrieval_policy(
+            raw_output_config,
+            output_mode=output_mode,
+        )
+    except ValueError as exc:
+        raise BadRequestException(str(exc)) from exc
+    output_classification_override_raw = item.get("output_classification_override")
+    output_classification_override = (
+        output_classification_override_raw
+        if isinstance(output_classification_override_raw, int)
+        else None
+    )
+    output_contract = _optional_json_object(item.get("output_contract"))
+    if output_mode == "speaker_mapping":
+        if output_contract is not None:
+            raise BadRequestException(
+                "Speaker mapping steps cannot declare output_contract; it is fixed."
+            )
+        output_contract = dict(SPEAKER_MAPPING_OUTPUT_CONTRACT)
+    return _StepOutputFields(
+        output_mode=output_mode,
+        output_type=output_type,
+        output_config=raw_output_config,
+        output_contract=output_contract,
+        output_classification_override=output_classification_override,
+        retrieval_policy=retrieval_policy,
+    )
+
+
+def _parse_output_config(
+    *,
+    raw_output_config: object,
+    output_mode: str,
+    output_type: str,
+) -> FlowPersistedJsonObject | None:
+    if raw_output_config is None:
+        return None
+    if not _is_json_object(raw_output_config):
+        raise BadRequestException("Webhook output_config must be an object.")
+    output_config = raw_output_config
+
+    if output_mode == "speaker_mapping":
+        block = output_config.get("speaker_mapping")
+        if block is not None:
+            if not isinstance(block, dict):
+                raise BadRequestException(
+                    "Speaker mapping output_config.speaker_mapping must be an object."
+                )
+            participants_field: object = cast(dict[str, object], block).get(
+                "participants_field"
+            )
+            if participants_field is not None and not _non_empty_string(
+                participants_field
+            ):
+                raise BadRequestException(
+                    "Speaker mapping output_config.speaker_mapping.participants_field "
+                    "must be a non-empty string or null."
+                )
+            speaker_count_field: object = cast(dict[str, object], block).get(
+                "speaker_count_field"
+            )
+            if speaker_count_field is not None and not _non_empty_string(
+                speaker_count_field
+            ):
+                raise BadRequestException(
+                    "Speaker mapping output_config.speaker_mapping.speaker_count_field "
+                    "must be a non-empty string or null."
+                )
+            infer_names: object = cast(dict[str, object], block).get("infer_names")
+            if infer_names is not None and not isinstance(infer_names, bool):
+                raise BadRequestException(
+                    "Speaker mapping output_config.speaker_mapping.infer_names "
+                    "must be true or false."
+                )
+        return output_config
+
+    if output_mode == "template_fill":
+        bindings = output_config.get("bindings")
+        if not isinstance(bindings, dict):
+            raise BadRequestException(
+                "Template fill output_config.bindings must be an object."
+            )
+        if not _non_empty_string(output_config.get("template_asset_id")):
+            raise BadRequestException(
+                "Template fill output_config.template_asset_id is required."
+            )
+        if output_config.get("template_file_id") not in (None, ""):
+            raise BadRequestException(
+                "Template fill output_config.template_file_id is not supported; use template_asset_id."
+            )
+        if output_type != "docx":
+            raise BadRequestException(
+                "Template fill output_mode requires output_type 'docx'."
+            )
+        return output_config
+
+    raw_headers = output_config.get("headers")
+    if raw_headers is not None and not isinstance(raw_headers, dict):
+        raise BadRequestException("Webhook output_config.headers must be an object.")
+    return output_config
+
+
+def _parse_optional_fields(
+    item: Mapping[str, object],
+    *,
+    assistant_id: UUID,
+) -> _StepOptionalFields:
+    plan_step_ref = _non_empty_string(item.get("plan_step_ref"))
+    existing_step_ref = _non_empty_string(item.get("existing_step_ref"))
+    raw_assistant_snapshot = item.get("assistant_snapshot")
+    if raw_assistant_snapshot is not None and not isinstance(
+        raw_assistant_snapshot, dict
+    ):
+        raise BadRequestException("Assistant snapshot must be an object.")
+    assistant_snapshot = validate_assistant_execution_snapshot(
+        snapshot=cast(dict[str, object] | None, raw_assistant_snapshot),
+        assistant_id=assistant_id,
+    )
+    return _StepOptionalFields(
+        plan_step_ref=plan_step_ref,
+        existing_step_ref=existing_step_ref,
+        assistant_snapshot=assistant_snapshot,
+        timeout_seconds=_optional_positive_int(
+            item.get("timeout_seconds"),
+            "timeout_seconds",
+        ),
+    )
+
+
+def _non_empty_string(value: object) -> str | None:
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip()
+    return normalized or None
+
+
+def parse_runtime_steps(definition_json: Mapping[str, object]) -> list[RuntimeStep]:
+    steps = definition_json.get("steps")
+    if not isinstance(steps, list):
+        raise BadRequestException("Flow definition snapshot is missing steps.")
+    parsed: list[RuntimeStep] = []
+    for item in cast(list[object], steps):
+        if not isinstance(item, dict):
+            raise BadRequestException("Invalid step definition in flow snapshot.")
+        item_dict = cast(Mapping[str, object], item)
+        user_description = _optional_step_description(item_dict.get("user_description"))
+        try:
+            step_order = _step_order_from_snapshot(item_dict)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise BadRequestException(
+                "Invalid step identifiers in flow snapshot."
+            ) from exc
+        try:
+            _reject_removed_flow_mcp_fields(item_dict)
+            identity = _parse_step_identity(
+                item_dict,
+                step_order=step_order,
+                user_description=user_description,
+            )
+            input_fields = _parse_input_fields(item_dict)
+            _validate_supported_input_binding_keys(input_fields)
+            _validate_input_contract_binding_compatibility(input_fields)
+            output_fields = _parse_output_fields(item_dict)
+            transcribe_only_error = transcribe_only_violation(
+                step_order=identity.step_order,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if transcribe_only_error is not None:
+                raise BadRequestException(transcribe_only_error)
+            render_verbatim_error = render_verbatim_violation(
+                step_order=identity.step_order,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if render_verbatim_error is not None:
+                raise BadRequestException(render_verbatim_error)
+            copy_input_error = copy_input_violation(
+                step_order=identity.step_order,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if copy_input_error is not None:
+                raise BadRequestException(copy_input_error)
+            compose_text_error = compose_text_violation(
+                step_order=identity.step_order,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if compose_text_error is not None:
+                raise BadRequestException(compose_text_error)
+            text_document_pass_through_error = text_document_pass_through_violation(
+                step_order=identity.step_order,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if text_document_pass_through_error is not None:
+                raise BadRequestException(text_document_pass_through_error)
+            speaker_mapping_error = speaker_mapping_violation(
+                step_order=identity.step_order,
+                input_source=input_fields.input_source,
+                input_type=input_fields.input_type,
+                output_type=output_fields.output_type,
+                output_mode=output_fields.output_mode,
+            )
+            if speaker_mapping_error is not None:
+                raise BadRequestException(speaker_mapping_error)
+            runtime_input = build_runtime_input_config(input_fields.input_config)
+            if runtime_input.execution_mode == "per_source" and not (
+                has_required_runtime_managed_source_fields(
+                    output_fields.output_contract,
+                    "documents",
+                )
+            ):
+                raise BadRequestException(
+                    "Per-source steps require output_contract documents[] items to "
+                    "declare source_label and source_file_id as required string "
+                    "properties and extraction_warnings as a required array of "
+                    "strings."
+                )
+            if (
+                output_fields.output_mode == "transcribe_only"
+                and runtime_input.enabled
+                and runtime_input.input_format != "audio"
+            ):
+                raise BadRequestException(
+                    "Transcribe-only steps require runtime_input.input_format 'audio'."
+                )
+            review_policy = parse_flow_step_review_policy(
+                raw_policy=item_dict.get("review_policy"),
+                output_mode=FlowOutputMode(output_fields.output_mode),
+                output_type=FlowOutputType(output_fields.output_type),
+            )
+            optional_fields = _parse_optional_fields(
+                item_dict,
+                assistant_id=identity.assistant_id,
+            )
+        except BadRequestException as exc:
+            raise _step_scoped_exception(
+                exc,
+                step_order=step_order,
+                user_description=user_description,
+            ) from exc
+        parsed.append(
+            RuntimeStep(
+                step_id=identity.step_id,
+                step_order=identity.step_order,
+                assistant_id=identity.assistant_id,
+                user_description=identity.user_description,
+                plan_step_ref=optional_fields.plan_step_ref,
+                existing_step_ref=optional_fields.existing_step_ref,
+                input_source=input_fields.input_source,
+                input_bindings=input_fields.input_bindings,
+                input_config=input_fields.input_config,
+                output_mode=output_fields.output_mode,
+                output_config=output_fields.output_config,
+                output_classification_override=(
+                    output_fields.output_classification_override
+                ),
+                output_type=output_fields.output_type,
+                output_contract=output_fields.output_contract,
+                input_type=input_fields.input_type,
+                input_contract=input_fields.input_contract,
+                assistant_snapshot=optional_fields.assistant_snapshot,
+                review_policy=review_policy,
+                retrieval_policy=output_fields.retrieval_policy,
+                timeout_seconds=optional_fields.timeout_seconds,
+            )
+        )
+    step_orders = [step.step_order for step in parsed]
+    if len(step_orders) != len(set(step_orders)):
+        raise BadRequestException("Duplicate step_order detected in flow snapshot.")
+    expected_orders = list(range(1, len(parsed) + 1))
+    if step_orders != expected_orders:
+        raise BadRequestException("Step order must be contiguous and start at 1.")
+    _validate_http_post_output_is_terminal(parsed)
+    chain_violation = find_first_step_chain_violation(parsed)
+    if chain_violation is not None:
+        raise BadRequestException(chain_violation.message)
+    return parsed
+
+
+def _validate_http_post_output_is_terminal(steps: Sequence[RuntimeStep]) -> None:
+    terminal_step_order = len(steps)
+    for step in steps:
+        if step.output_mode == "http_post" and step.step_order != terminal_step_order:
+            raise BadRequestException(
+                f"Step {step.step_order}: output_mode 'http_post' is only supported "
+                "on the last step.",
+                code=FlowGraphIssueCode.FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL.value,
+                context={"step_order": step.step_order},
+            )

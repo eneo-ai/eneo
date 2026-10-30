@@ -40,7 +40,6 @@ export function initDocumentTemplates(client) {
       formData.append("is_default", isDefault ? "true" : "false");
       const res = await client.fetch("/api/v1/document-templates/", {
         method: "post",
-        //@ts-expect-error Typing for multipart/formdata upload does currently not work correctly
         requestBody: { "multipart/form-data": formData }
       });
       return res;
@@ -75,7 +74,6 @@ export function initDocumentTemplates(client) {
       const res = await client.fetch("/api/v1/document-templates/{id}/content/", {
         method: "put",
         params: { path: { id } },
-        //@ts-expect-error Typing for multipart/formdata upload does currently not work correctly
         requestBody: { "multipart/form-data": formData }
       });
       return res;

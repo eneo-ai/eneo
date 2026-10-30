@@ -17,6 +17,9 @@ bbb6affc0c3481700ac409ef976231746d3325bf  (app)/spaces/[spaceId]/apps/page.tsx
 9d7120c2702b7119cfaa0c0da752660aa01c39f9  (app)/spaces/[spaceId]/assistants/[assistantId]/edit/page.tsx
 d7eaec737d6ff9dd660bc05cc0b4419988fcfd2f  (app)/spaces/[spaceId]/assistants/page.tsx
 36410d4987933616f071e65308dd27357a0b8da6  (app)/spaces/[spaceId]/chat/page.tsx
+e3e0680ecb648ef6afef70331702e2b479c855e3  (app)/spaces/[spaceId]/flows/[flowId]/page.tsx
+8182d1f3d8edfb0e5658f16d3ac588e9da71e5fd  (app)/spaces/[spaceId]/flows/[flowId]/runs/[runId]/page.tsx
+ca093b2ea19a649ded4989a6dccbfd9039125d47  (app)/spaces/[spaceId]/flows/page.tsx
 4478ac2717ce9bf5462a1cee157a50056d88e2d3  (app)/spaces/[spaceId]/group-chats/[groupChatId]/edit/page.tsx
 f81cb3f15a4560ffa726a1c722d199bebb909d4f  (app)/spaces/[spaceId]/knowledge/collections/[collectionId]/page.tsx
 f4aa7f61fa7180df91f1fe8d75445686197b06de  (app)/spaces/[spaceId]/knowledge/integrations/[integrationKnowledgeId]/page.tsx
@@ -44,7 +47,7 @@ e72b8147f4715492e913ddbd19576edf73d65bf8  (public)/integrations/callback/token/p
 de874d2de02a6c9eaa1af7cdd14427fa1a61c604  (public)/login/page.tsx
 4b86b36bb9fc81b95fd06c43bbb22714553a74eb  (public)/module-login/failed/page.tsx
 9aa1942085111583297e5c8c7aab4faa8369ad43  (public)/password-change/page.tsx
-a12262b41d4c33386338602dfd599cd0cb1aec58  ../../next.config.ts
-f5652c3272406bb5aba080290f714c41ee5da7ea  ../proxy.ts
-838a6a8a1973715e23c2bd16cd007f091674b6ee  layout.tsx
+9b75c418a21ef09d500e7d651202111ce7cb56dd  ../../next.config.ts
+ec5340170d3a7f7ea3b807e69b045513ab7f6521  ../proxy.ts
+6b58b8498c4ec04cf2dbdeac53cc928538967f8a  layout.tsx
 2e69a4505b05ab01f4ff58f29753d9ddb2dba3e6  page.tsx

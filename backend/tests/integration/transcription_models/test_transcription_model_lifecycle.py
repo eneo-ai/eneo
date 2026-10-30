@@ -57,7 +57,10 @@ class TestTranscriptionModelSoftDelete:
             assert row.deleted_at is not None
 
             # Read paths no longer surface it.
-            repo = TranscriptionModelRepository(session, admin_user)
+            repo = TranscriptionModelRepository(
+                session=session,
+                tenant=container.tenant(),
+            )
             assert all(m.id != model_id for m in await repo.all())
             assert await repo.one_or_none(model_id) is None
 

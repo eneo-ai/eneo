@@ -1,7 +1,11 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
+import {
+  ChatMessage as AxChatMessage,
+  ChatMessageBubble,
+  ChatTokenizedText
+} from "@astryxdesign/core/Chat";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { List, ListItem } from "@astryxdesign/core/List";
@@ -12,7 +16,7 @@ import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useCallback, useMemo, useRef, type ReactNode } from "react";
+import { Fragment, useCallback, useMemo, useRef, type ReactNode } from "react";
 
 import {
   CitationSourcesProvider,
@@ -34,6 +38,7 @@ import { cn } from "@/lib/utils";
 
 import { deriveActivity, modelName, type ActivitySource } from "./activity";
 import type { ActivityTab } from "./activity-panel";
+import type { ChatReferences } from "./chat-references";
 import type { DocumentDraft } from "./side-panel/document-draft";
 import { ActivityPill } from "./activity-pill";
 import { sourceMeta } from "./activity-sources";
@@ -51,9 +56,13 @@ import {
   type ConversationDocument,
   type GeneratedDocument
 } from "./side-panel/document-versions";
-import { messageGeneratedFiles, messageToolCalls } from "./side-panel/message-tool-calls";
+import {
+  messageGeneratedFiles,
+  messageToolCalls,
+  type ToolCallRecord
+} from "./side-panel/message-tool-calls";
 import { isTableQuote, parseQuotedQuestion, quotedFileMatches } from "./side-panel/question-quote";
-import { useSidePanel } from "./side-panel/use-side-panel";
+import { useSidePanel, useSidePanelStore } from "./side-panel/use-side-panel";
 import {
   assistantClipboardContent,
   canCopyRichText,
@@ -165,10 +174,12 @@ function QuestionQuote({
 function Question({
   text: sent,
   conversationFiles,
+  references,
   children
 }: {
   text: string;
   conversationFiles: readonly PreviewFile[];
+  references?: ChatReferences;
   children?: ReactNode;
 }) {
   const t = useTranslations();
@@ -183,7 +194,11 @@ function Question({
       {(text || quote) && (
         <ChatMessageBubble className="bg-ax-muted rounded-ax-page flex max-w-[min(100%,32.5rem)] flex-col gap-2 px-[15px] py-2.5 text-[14.5px] leading-normal whitespace-pre-wrap">
           {quote && <QuestionQuote quote={quote} conversationFiles={conversationFiles} />}
-          {text}
+          {references ? (
+            <ChatTokenizedText tokens={references.tokens(text)}>{text}</ChatTokenizedText>
+          ) : (
+            text
+          )}
         </ChatMessageBubble>
       )}
       {children}
@@ -194,14 +209,20 @@ function Question({
 /** The user's question: a filled bubble on the right, attachments as file chips below. */
 function UserMessage({
   message,
-  conversationFiles
+  conversationFiles,
+  references
 }: {
   message: EneoUIMessage;
   conversationFiles: readonly PreviewFile[];
+  references?: ChatReferences;
 }) {
   const files = message.metadata?.files ?? [];
   return (
-    <Question text={messageText(message)} conversationFiles={conversationFiles}>
+    <Question
+      text={messageText(message)}
+      conversationFiles={conversationFiles}
+      references={references}
+    >
       {files.length > 0 && <MessageFiles files={files} />}
     </Question>
   );
@@ -215,14 +236,16 @@ function UserMessage({
 export function PendingQuestion({
   text,
   uploads,
-  conversationFiles = NO_FILES
+  conversationFiles = NO_FILES,
+  references
 }: {
   text: string;
   uploads: readonly PendingUpload[];
   conversationFiles?: readonly PreviewFile[];
+  references?: ChatReferences;
 }) {
   return (
-    <Question text={text} conversationFiles={conversationFiles}>
+    <Question text={text} conversationFiles={conversationFiles} references={references}>
       <PendingMessageFiles uploads={uploads} />
     </Question>
   );
@@ -559,7 +582,9 @@ function AssistantMessage({
   canDebug,
   sessionId,
   documents,
-  draft
+  draft,
+  references,
+  toolCards
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -575,8 +600,11 @@ function AssistantMessage({
   sessionId: string | null;
   documents: ConversationDocument[];
   draft: DocumentDraft | null;
+  references?: ChatReferences;
+  toolCards?: ToolCards;
 }) {
-  const panel = useSidePanel();
+  // Only a document link's click reads the panel; its document lines follow it themselves.
+  const panel = useSidePanelStore();
   const text = messageText(message);
   // The names an answer can mention a document by: each is a link to it.
   const names = useMemo(
@@ -620,9 +648,10 @@ function AssistantMessage({
   const sources = activity.sources;
   const sourceIds = sources.map((source) => source.sourceId);
   const citationPlugins = useCitationRemarkPlugins(sources.length, message.id);
+  const referencePlugins = references?.remarkPlugins;
   const remarkPlugins = useMemo(
-    () => [...citationPlugins, ...documentPlugins],
-    [citationPlugins, documentPlugins]
+    () => [...citationPlugins, ...documentPlugins, ...(referencePlugins ?? [])],
+    [citationPlugins, documentPlugins, referencePlugins]
   );
   const openSource = useCallback(
     (index: number, trigger: HTMLElement) =>
@@ -653,6 +682,11 @@ function AssistantMessage({
             onToggle={(trigger) => onActivityToggle?.(trigger)}
           />
         )}
+        {toolCards
+          ? messageToolCalls(message).map((call) => (
+              <Fragment key={call.toolCallId}>{toolCards(call)}</Fragment>
+            ))
+          : null}
         {isStreaming && !hasText && !activity.hasActivity && <ThinkingStatus />}
         {isStreaming && !hasText && <AnswerSkeleton />}
         {message.parts.map((part, index) => {
@@ -670,7 +704,7 @@ function AssistantMessage({
                   <MessageResponse
                     className={ANSWER_TEXT_CLASS}
                     remarkPlugins={remarkPlugins}
-                    components={answerLinkComponents}
+                    components={references?.components ?? answerLinkComponents}
                     isAnimating={streamingThis}
                   >
                     {resolveInrefs(
@@ -736,7 +770,9 @@ export function ChatMessage({
   sessionId = null,
   conversationFiles = NO_FILES,
   documents = NO_DOCUMENTS,
-  draft = null
+  draft = null,
+  references,
+  toolCards
 }: {
   message: EneoUIMessage;
   assistant: AssistantIdentity;
@@ -759,9 +795,19 @@ export function ChatMessage({
   documents?: ConversationDocument[];
   /** The document this answer is writing now, which the answer offers to show. */
   draft?: DocumentDraft | null;
+  /** What the conversation can refer to: pills in questions and answers. */
+  references?: ChatReferences;
+  /** A page's own card for a tool call of an answer (the flow chat's run card), drawn above the text. */
+  toolCards?: ToolCards;
 }) {
   if (message.role === "user") {
-    return <UserMessage message={message} conversationFiles={conversationFiles} />;
+    return (
+      <UserMessage
+        message={message}
+        conversationFiles={conversationFiles}
+        references={references}
+      />
+    );
   }
   return (
     <AssistantMessage
@@ -779,9 +825,17 @@ export function ChatMessage({
       sessionId={sessionId}
       documents={documents}
       draft={draft}
+      references={references}
+      toolCards={toolCards}
     />
   );
 }
+
+/**
+ * What a page draws for one tool call of an answer, or null for a call it
+ * has nothing to show for: the flow chat's run card for a started run.
+ */
+export type ToolCards = (call: ToolCallRecord) => ReactNode;
 
 const NO_FILES: PreviewFile[] = [];
 

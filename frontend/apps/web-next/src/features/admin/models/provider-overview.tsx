@@ -6,8 +6,8 @@ import { Link } from "@astryxdesign/core/Link";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
-import { QuietBanner } from "@/components/astryx/banner";
-import { TextInput } from "@/components/astryx/text-input";
+import { Banner } from "@astryxdesign/core/Banner";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
@@ -96,7 +96,7 @@ function AttentionBanner({
   }
 
   return (
-    <QuietBanner
+    <Banner
       status={
         rows.some((row) => row.notices.some((notice) => notice.tone === "error"))
           ? "error"
@@ -133,7 +133,7 @@ function AttentionBanner({
           <Text type="supporting">{t("provider_status_attention_hint")}</Text>
         </div>
       ) : null}
-    </QuietBanner>
+    </Banner>
   );
 }
 

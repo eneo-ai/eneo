@@ -9,7 +9,9 @@ from uuid import UUID
 from eneo.allowed_origins.origin_matching import origin_matches_pattern
 from eneo.authentication.api_key_request_context import resolve_client_ip
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
+from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
+    FLOW_RESOURCE_PERMISSION_FIELDS,
     PK_FORBIDDEN_RESOURCE_FIELDS,
     RESOURCE_PERMISSION_FIELDS,
     ApiKeyCreateRequest,
@@ -37,12 +39,37 @@ if TYPE_CHECKING:
     from eneo.users.user import UserInDB
 
 
+_ALL_RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
+    *RESOURCE_PERMISSION_FIELDS,
+    *FLOW_RESOURCE_PERMISSION_FIELDS,
+)
+
+
+def _resource_permissions_update_json(
+    rp: ResourcePermissions,
+) -> dict[str, object]:
+    include_fields = set(RESOURCE_PERMISSION_FIELDS)
+    include_fields.update(
+        field
+        for field in FLOW_RESOURCE_PERMISSION_FIELDS
+        if field in rp.model_fields_set
+    )
+    return rp.model_dump(mode="json", include=include_fields)
+
+
+def _default_public_resource_permissions_json() -> dict[str, object]:
+    return default_public_resource_permissions().model_dump(
+        mode="json", include=set(RESOURCE_PERMISSION_FIELDS)
+    )
+
+
 def _validate_public_resource_permissions(rp: ResourcePermissions) -> None:
     disallowed = [
         field
-        for field in RESOURCE_PERMISSION_FIELDS
+        for field in _ALL_RESOURCE_PERMISSION_FIELDS
         if getattr(rp, field)
         not in (
+            None,
             ResourcePermissionLevel.NONE,
             ResourcePermissionLevel.READ,
         )
@@ -57,7 +84,7 @@ def _validate_public_resource_permissions(rp: ResourcePermissions) -> None:
     forbidden = [
         field
         for field in PK_FORBIDDEN_RESOURCE_FIELDS
-        if getattr(rp, field) != ResourcePermissionLevel.NONE
+        if getattr(rp, field) not in (None, ResourcePermissionLevel.NONE)
     ]
     if forbidden:
         raise ApiKeyValidationError(
@@ -71,8 +98,8 @@ def _validate_public_resource_permissions(rp: ResourcePermissions) -> None:
 
 
 _SCOPE_RESOURCE_PERMISSION_FIELDS: dict[ApiKeyScopeType, tuple[str, ...]] = {
-    ApiKeyScopeType.TENANT: RESOURCE_PERMISSION_FIELDS,
-    ApiKeyScopeType.SPACE: RESOURCE_PERMISSION_FIELDS,
+    ApiKeyScopeType.TENANT: _ALL_RESOURCE_PERMISSION_FIELDS,
+    ApiKeyScopeType.SPACE: _ALL_RESOURCE_PERMISSION_FIELDS,
     ApiKeyScopeType.ASSISTANT: ("assistants", "conversations", "files"),
     ApiKeyScopeType.APP: ("apps", "files"),
 }
@@ -90,9 +117,9 @@ def _validate_scope_resource_permissions(
     allowed_fields = set(_SCOPE_RESOURCE_PERMISSION_FIELDS[scope_type])
     disallowed = [
         field
-        for field in RESOURCE_PERMISSION_FIELDS
+        for field in _ALL_RESOURCE_PERMISSION_FIELDS
         if field not in allowed_fields
-        and getattr(rp, field) != ResourcePermissionLevel.NONE
+        and getattr(rp, field) not in (None, ResourcePermissionLevel.NONE)
     ]
     if disallowed:
         raise ApiKeyValidationError(
@@ -105,9 +132,9 @@ def _validate_scope_resource_permissions(
         )
 
     required_field = _SCOPE_REQUIRED_RESOURCE_PERMISSION_FIELD.get(scope_type)
-    if (
-        required_field is not None
-        and getattr(rp, required_field) == ResourcePermissionLevel.NONE
+    if required_field is not None and getattr(rp, required_field) in (
+        None,
+        ResourcePermissionLevel.NONE,
     ):
         raise ApiKeyValidationError(
             status_code=400,
@@ -122,10 +149,12 @@ def _validate_scope_resource_permissions(
 class ApiKeyPolicyService:
     def __init__(
         self,
+        api_key_repo: ApiKeysV2Repository,
         space_service: "SpaceService | None" = None,
         user: "UserInDB | None" = None,
     ):
         super().__init__()
+        self.api_key_repo = api_key_repo
         self.space_service = space_service
         self.user = user
         self.settings = get_settings()
@@ -243,9 +272,31 @@ class ApiKeyPolicyService:
         await self._validate_expiration(request.expires_at)
         await self._validate_rate_limit(request.rate_limit)
 
-        return await self.ensure_creator_authorized(
+        space = await self.ensure_creator_authorized(
             scope_type=request.scope_type, scope_id=request.scope_id
         )
+        await self.refuse_flow_managed_assistant_scope(
+            scope_type=request.scope_type, scope_id=request.scope_id, status_code=400
+        )
+        return space
+
+    async def refuse_flow_managed_assistant_scope(
+        self,
+        *,
+        scope_type: ApiKeyScopeType,
+        scope_id: UUID | None,
+        status_code: int,
+    ) -> None:
+        """A flow-managed assistant is internal step configuration, never a
+        credential scope: no key is created, rotated or accepted for one."""
+        if scope_type != ApiKeyScopeType.ASSISTANT or scope_id is None:
+            return
+        if await self.api_key_repo.scope_is_flow_managed_assistant(scope_id):
+            raise ApiKeyValidationError(
+                status_code=status_code,
+                code="flow_managed_assistant",
+                message="Flow-managed assistants cannot be API key scopes.",
+            )
 
     async def ensure_creator_authorized(
         self,
@@ -427,14 +478,14 @@ class ApiKeyPolicyService:
                     ApiKeyScopeType.SPACE,
                 ):
                     updates["resource_permissions"] = (
-                        default_public_resource_permissions().model_dump(mode="json")
+                        _default_public_resource_permissions_json()
                     )
             else:
                 rp = ResourcePermissions.model_validate(raw_rp)
                 _validate_scope_resource_permissions(scope_type, rp)
                 if key_type == ApiKeyType.PK:
                     _validate_public_resource_permissions(rp)
-                updates["resource_permissions"] = rp.model_dump(mode="json")
+                updates["resource_permissions"] = _resource_permissions_update_json(rp)
 
     async def ensure_ownership_authorized(self, *, key: ApiKeyV2InDB):
         """Service keys: any scope-authorized user can manage.
@@ -469,6 +520,9 @@ class ApiKeyPolicyService:
                 code="invalid_api_key",
                 message=f"API key is {effective_state.value}.",
             )
+        await self.refuse_flow_managed_assistant_scope(
+            scope_type=key.scope_type, scope_id=key.scope_id, status_code=403
+        )
 
     async def enforce_guardrails(
         self,

@@ -1,8 +1,6 @@
 """Completion-model parameter controls.
 
-Resolution order is explicit metadata constrained by core model flags, reasoning
-fallback, tenant/LiteLLM sampling controls, then legacy temperature-only
-behavior.
+Explicit persisted capability evidence is the request-shape authority.
 """
 
 from __future__ import annotations
@@ -12,7 +10,7 @@ from collections.abc import Mapping
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, Field, FiniteFloat, ValidationError, model_validator
 
 logger = logging.getLogger(__name__)
 
@@ -20,20 +18,68 @@ logger = logging.getLogger(__name__)
 class ModelKwargCapability(BaseModel):
     supported: bool = False
     control: Literal["slider", "select"] | None = None
-    minimum: float | None = None
-    maximum: float | None = None
-    step: float | None = None
+    # Finite bounds, minimum <= maximum, and a finite positive step: a
+    # declared range must admit a value.
+    minimum: FiniteFloat | None = None
+    maximum: FiniteFloat | None = None
+    step: FiniteFloat | None = None
     options: list[str] | None = None
+    # The route's metadata could not tell which values it accepts (LiteLLM
+    # forwards the parameter but does not know the model). Not offered, so a
+    # request sends what it sends for an unsupported setting, but recorded
+    # apart from "unsupported" until rediscovery or an admin declaration
+    # settles it.
+    unknown: bool = False
+
+    @model_validator(mode="after")
+    def _unknown_values_are_not_offered(self) -> ModelKwargCapability:
+        if self.unknown and self.supported:
+            raise ValueError("a capability with unknown values cannot be offered")
+        return self
+
+    @model_validator(mode="after")
+    def _range_admits_a_value(self) -> ModelKwargCapability:
+        if (
+            self.minimum is not None
+            and self.maximum is not None
+            and self.minimum > self.maximum
+        ):
+            raise ValueError("minimum must not be greater than maximum")
+        if self.step is not None and self.step <= 0:
+            raise ValueError("step must be greater than zero")
+        return self
 
     def accepts(self, value: object | None) -> bool:
-        """Whether a typed model-setting value is allowed by this capability."""
+        """Whether a typed model-setting value is allowed by this capability:
+        one of a select's options, or a number within the advertised
+        minimum and maximum."""
         if value is None:
             return True
         if not self.supported:
             return False
         if self.control == "select":
             return self.options is not None and value in self.options
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            if self.minimum is not None and value < self.minimum:
+                return False
+            if self.maximum is not None and value > self.maximum:
+                return False
         return True
+
+
+# How each setting may be offered, following its ModelKwargs type (a test
+# pins the two together): a number (float, or int for whole numbers only)
+# as a slider; a named level (str) as a select with options. Which levels a
+# route offers is its own declaration.
+OFFERABLE_MODEL_SETTINGS: dict[str, type[float] | type[int] | type[str]] = {
+    "temperature": float,
+    "top_p": float,
+    "presence_penalty": float,
+    "frequency_penalty": float,
+    "top_k": int,
+    "reasoning_effort": str,
+    "verbosity": str,
+}
 
 
 class SupportedModelKwargs(BaseModel):
@@ -46,6 +92,30 @@ class SupportedModelKwargs(BaseModel):
         default_factory=ModelKwargCapability
     )
     top_k: ModelKwargCapability = Field(default_factory=ModelKwargCapability)
+
+    @model_validator(mode="after")
+    def _offered_settings_fit_their_type(self) -> SupportedModelKwargs:
+        # An offered setting must be declared in a shape that can admit its
+        # values; see OFFERABLE_MODEL_SETTINGS.
+        for name, kind in OFFERABLE_MODEL_SETTINGS.items():
+            capability: ModelKwargCapability = getattr(self, name)
+            if not capability.supported:
+                continue
+            if kind is str:
+                if capability.control != "select" or not any(
+                    option.strip() for option in capability.options or ()
+                ):
+                    raise ValueError(
+                        f"{name} can be offered only as a select with a non-blank option"
+                    )
+            elif capability.control != "slider":
+                raise ValueError(f"{name} can be offered only as a slider")
+            elif kind is int and any(
+                bound is not None and not bound.is_integer()
+                for bound in (capability.minimum, capability.maximum, capability.step)
+            ):
+                raise ValueError(f"{name} bounds and step must be whole numbers")
+        return self
 
 
 def _slider_capability(
@@ -60,12 +130,77 @@ def _slider_capability(
     )
 
 
+_CapabilityEvidence = Literal[
+    "admin_explicit",
+    "provider_discovered",
+    "catalog_backfill",
+]
+
+
+class _PersistedSupportedModelKwargs(SupportedModelKwargs):
+    evidence: _CapabilityEvidence = Field(alias="_evidence")
+
+
+def _persist_model_kwargs_capabilities(
+    capabilities: SupportedModelKwargs,
+    *,
+    evidence: _CapabilityEvidence,
+) -> dict[str, object]:
+    persisted = _PersistedSupportedModelKwargs.model_validate(
+        {**capabilities.model_dump(), "_evidence": evidence}
+    )
+    return persisted.model_dump(by_alias=True)
+
+
+def persist_explicit_model_kwargs_capabilities(
+    capabilities: SupportedModelKwargs,
+) -> dict[str, object]:
+    """Tag admin-authored value-domain evidence before JSONB persistence."""
+    return _persist_model_kwargs_capabilities(
+        capabilities,
+        evidence="admin_explicit",
+    )
+
+
+def persist_discovered_model_kwargs_capabilities(
+    capabilities: SupportedModelKwargs,
+) -> dict[str, object]:
+    """Tag a capability snapshot discovered for the exact provider route."""
+    return _persist_model_kwargs_capabilities(
+        capabilities,
+        evidence="provider_discovered",
+    )
+
+
 def _reasoning_effort_select() -> ModelKwargCapability:
     return ModelKwargCapability(
         supported=True,
         control="select",
         options=["low", "medium", "high"],
     )
+
+
+def request_may_think(*, reasoning_effort: object, route_reasons: bool) -> bool:
+    """Whether a request may think, given the effort it sent and its route.
+
+    A thinking call may yield no output while it thinks (providers that stream
+    their reasoning do yield it), and a caller cannot tell that quiet from a
+    hung call, so a caller that bounds silence needs to know which requests
+    may legitimately be quiet. Waiting too long for a hung call is the safer
+    error than failing a call that was still working, so an effort that was
+    sent decides and only "none" asks the model not to think: "minimal" still
+    thinks (LiteLLM maps it to a positive Gemini thinking budget), and any
+    other level is assumed to think. When no effort was sent the provider
+    keeps its own default, which is on for a reasoning model, so the route
+    decides: ``route_reasons`` is whether the route takes a reasoning effort
+    at all (``ResolvedCompletionModelRoute.may_reason_by_default``). The accepted trade-off: a reasoning
+    route that is off by default (Anthropic without thinking, for one) waits
+    longer on a HUNG call.
+    """
+
+    if isinstance(reasoning_effort, str) and reasoning_effort != "":
+        return reasoning_effort != "none"
+    return route_reasons
 
 
 def reasoning_effort_options_from_model_info(
@@ -96,22 +231,6 @@ def _default_supported_model_kwargs(*, reasoning: bool) -> SupportedModelKwargs:
 
     return SupportedModelKwargs(
         temperature=_slider_capability(minimum=0, maximum=2, step=0.01)
-    )
-
-
-def _tenant_supported_model_kwargs() -> SupportedModelKwargs:
-    return SupportedModelKwargs(
-        temperature=_slider_capability(minimum=0, maximum=2, step=0.01),
-        top_p=_slider_capability(minimum=0, maximum=1, step=0.01),
-        presence_penalty=_slider_capability(minimum=-2, maximum=2, step=0.1),
-        frequency_penalty=_slider_capability(minimum=-2, maximum=2, step=0.1),
-        top_k=ModelKwargCapability(
-            supported=True,
-            control="slider",
-            minimum=1,
-            maximum=100,
-            step=1,
-        ),
     )
 
 
@@ -212,6 +331,27 @@ def _apply_model_capability_flags(
     )
 
 
+def _legacy_discovered_snapshot(
+    stored: object,
+) -> _PersistedSupportedModelKwargs | None:
+    """Read a snapshot stored before evidence tags existed.
+
+    Develop stores untagged snapshots, and the pre-release migration that
+    tagged them was squashed away. They are provider-discovered records:
+    dropping them hides the settings configured against them, and the next
+    save erases those. A present `_evidence` key that did not validate is a
+    malformed record, not a legacy one.
+    """
+    if not isinstance(stored, Mapping) or "_evidence" in stored:
+        return None
+    try:
+        return _PersistedSupportedModelKwargs.model_validate(
+            {**stored, "_evidence": "provider_discovered"}
+        )
+    except ValidationError:
+        return None
+
+
 def coerce_model_kwargs_capabilities(
     model_kwargs_capabilities: object | None,
     *,
@@ -221,22 +361,34 @@ def coerce_model_kwargs_capabilities(
     if model_kwargs_capabilities is None:
         return None
 
-    if isinstance(model_kwargs_capabilities, SupportedModelKwargs):
+    if isinstance(model_kwargs_capabilities, _PersistedSupportedModelKwargs):
+        persisted = model_kwargs_capabilities
+    elif isinstance(model_kwargs_capabilities, SupportedModelKwargs):
         return model_kwargs_capabilities
+    else:
+        try:
+            persisted = _PersistedSupportedModelKwargs.model_validate(
+                model_kwargs_capabilities
+            )
+        except ValidationError:
+            persisted = _legacy_discovered_snapshot(model_kwargs_capabilities)
+            if persisted is None:
+                logger.warning(
+                    "Invalid completion model kwargs capabilities; omitting optional controls",
+                    extra={
+                        "completion_model_id": str(completion_model_id)
+                        if completion_model_id
+                        else None,
+                        "tenant_id": str(tenant_id) if tenant_id else None,
+                    },
+                )
+                # Fail closed: invalid stored data is a known "no optional
+                # controls", never an absent snapshot that discovery may widen.
+                return SupportedModelKwargs()
 
-    try:
-        return SupportedModelKwargs.model_validate(model_kwargs_capabilities)
-    except ValidationError:
-        logger.warning(
-            "Invalid completion model kwargs capabilities; using default fallback",
-            extra={
-                "completion_model_id": str(completion_model_id)
-                if completion_model_id
-                else None,
-                "tenant_id": str(tenant_id) if tenant_id else None,
-            },
-        )
-        return None
+    return SupportedModelKwargs.model_validate(
+        persisted.model_dump(exclude={"evidence"})
+    )
 
 
 def resolve_supported_model_kwargs(
@@ -256,22 +408,4 @@ def resolve_supported_model_kwargs(
     if override is not None:
         return _apply_model_capability_flags(override, reasoning=reasoning)
 
-    if reasoning:
-        return _apply_model_capability_flags(
-            _default_supported_model_kwargs(reasoning=reasoning),
-            reasoning=reasoning,
-        )
-
-    # Tenant models run through LiteLLM with drop_params=True, so this contract
-    # can expose the common sampling controls without duplicating provider
-    # support tables in the frontend.
-    if provider_type or litellm_model_name:
-        return _apply_model_capability_flags(
-            _tenant_supported_model_kwargs(),
-            reasoning=reasoning,
-        )
-
-    return _apply_model_capability_flags(
-        _default_supported_model_kwargs(reasoning=reasoning),
-        reasoning=reasoning,
-    )
+    return SupportedModelKwargs()

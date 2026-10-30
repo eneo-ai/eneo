@@ -1,14 +1,12 @@
 """Unit tests for the cross-provider /v1/models normalization helpers."""
 
+from eneo.model_providers.domain.endpoints import normalize_endpoint_base
 from eneo.model_providers.domain.model_provider_service import (
     _coerce_to_epoch,
     _extract_mode_hint,
     _normalize_live_model,
 )
-from eneo.model_providers.domain.provider_api import (
-    auth_headers_for,
-    normalize_endpoint_base,
-)
+from eneo.model_providers.domain.provider_api import auth_headers_for
 
 
 def test_normalizes_minimal_openai_compatible_shape() -> None:

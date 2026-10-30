@@ -2,11 +2,15 @@ import type { MetaRecord } from "nextra";
 
 const meta: MetaRecord = {
   index: "Overview",
+  flows: "Eneo Flows",
+  "flows-api-guide": "Flow Runtime API Reference",
   "oidc-federation": "Authentication & OIDC",
   "scim-provisioning": "SCIM Provisioning",
   "audit-logging": "Audit Logging",
+  "data-retention": "Data Retention & Deletion",
   skills: "Skills",
   "ai-providers": "AI Provider Configuration",
+  transcription: "Transcription & Speaker Identification",
   "mcp-servers": "MCP Servers",
   capabilities: "Functions",
   deployment: "Deploy Eneo",

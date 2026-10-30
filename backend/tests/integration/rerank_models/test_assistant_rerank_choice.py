@@ -7,6 +7,7 @@ rerank model, cleared again, and is refused for a model that is disabled.
 import pytest
 from sqlalchemy import select
 
+from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.database.tables.assistant_table import Assistants
 from eneo.main.exceptions import BadRequestException
 
@@ -30,7 +31,8 @@ async def test_choose_and_clear_an_enabled_reranker(db_container, rerank_model_f
 
     async with db_container() as container:
         updated, _ = await container.assistant_service().update_assistant(
-            assistant_id=assistant_id, rerank_model_id=reranker_id
+            assistant_id=assistant_id,
+            update=AssistantUpdateCommand(rerank_model_id=reranker_id),
         )
         assert updated.rerank_model_id == reranker_id
 
@@ -43,7 +45,8 @@ async def test_choose_and_clear_an_enabled_reranker(db_container, rerank_model_f
         assert stored == reranker_id
 
         updated, _ = await container.assistant_service().update_assistant(
-            assistant_id=assistant_id, rerank_model_id=None
+            assistant_id=assistant_id,
+            update=AssistantUpdateCommand(rerank_model_id=None),
         )
         assert updated.rerank_model_id is None
 
@@ -59,5 +62,6 @@ async def test_a_disabled_reranker_cannot_be_chosen(db_container, rerank_model_f
     async with db_container() as container:
         with pytest.raises(BadRequestException, match="rerank model is not available"):
             await container.assistant_service().update_assistant(
-                assistant_id=assistant_id, rerank_model_id=disabled_id
+                assistant_id=assistant_id,
+                update=AssistantUpdateCommand(rerank_model_id=disabled_id),
             )

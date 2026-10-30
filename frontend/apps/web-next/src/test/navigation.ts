@@ -59,6 +59,7 @@ export function resetNavigation(): void {
   }
   replaceUrl.mockClear();
   pushUrl.mockClear();
+  goHistory.mockClear();
   router.back.mockImplementation(() => window.history.back());
 }
 
@@ -110,6 +111,8 @@ export const replaceUrl = vi.fn((href: string | URL, options?: UrlOptions) =>
 export const pushUrl = vi.fn((href: string | URL, options?: UrlOptions) =>
   navigateUrl(href, false, options)
 );
+
+export const goHistory = vi.fn((delta: number) => window.history.go(delta));
 
 export function readUrlState(): UrlState {
   return window.history.state ?? {};

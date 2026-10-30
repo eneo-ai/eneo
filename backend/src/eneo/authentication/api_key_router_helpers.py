@@ -19,6 +19,7 @@ from eneo.authentication.auth_models import (
 )
 from eneo.main.config import get_settings
 from eneo.main.logging import get_logger
+from eneo.main.models import GeneralError
 from eneo.server.exception_handlers import extract_request_id
 
 logger = get_logger(__name__)
@@ -127,6 +128,27 @@ def raise_api_key_http_error(
         detail=detail,
         headers=exc.headers,
     ) from exc
+
+
+FLOW_MANAGED_ASSISTANT_SCOPE_NOTE = (
+    "Keys cannot be scoped to flow-managed (internal) step assistants."
+)
+
+
+def flow_managed_assistant_refusal(
+    status_code: int, action: str
+) -> dict[int | str, dict[str, Any]]:
+    """The documented response when ``action`` names a flow-managed assistant."""
+    return {
+        status_code: {
+            "model": GeneralError,
+            "description": (
+                f"`flow_managed_assistant`: {action} a key scoped to a "
+                "flow-managed (internal) step assistant is refused; other "
+                "errors use the same shape."
+            ),
+        }
+    }
 
 
 def paginate_keys(

@@ -3,7 +3,7 @@
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { ListItem } from "@astryxdesign/core/List";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { AppWindow, Bot, Search, User } from "lucide-react";
 import { useTranslations } from "use-intl";

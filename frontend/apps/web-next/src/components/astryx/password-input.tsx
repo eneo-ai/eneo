@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { TextInput, type TextInputProps } from "./text-input";
+import { TextInput, type TextInputProps } from "@astryxdesign/core/TextInput";
 
 /** A password field with an explicit reveal control that never submits its form. */
 export function PasswordInput(props: Omit<TextInputProps, "type">) {

@@ -84,8 +84,17 @@ class _PreparedFileProtocol(FileProtocol):
         upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
         max_size: int | None = None,
         limit_name: str | None = None,
+        pdf_limits: object = None,
+        audio_limits: object = None,
     ) -> AsyncGenerator[PreparedFileUpload]:
-        del upload_file, upload_admission_snapshot, max_size, limit_name
+        del (
+            upload_file,
+            upload_admission_snapshot,
+            max_size,
+            limit_name,
+            pdf_limits,
+            audio_limits,
+        )
         yield self._prepared
 
 
@@ -173,7 +182,10 @@ async def test_file_upload_reads_exact_bytes_without_an_object_store(
                 upload_admission=_inline_upload_admission(),
             )
             hydrated = await service.get_file_content(file_id)
-        download = await service.get_download_no_auth(file_id)
+        download = await service.get_download_no_auth(
+            file_id,
+            tenant_id=user.tenant_id,
+        )
         downloaded = b"".join([chunk async for chunk in download.chunks])
 
     assert hydrated.text == payload.decode()
@@ -459,7 +471,10 @@ async def test_signed_download_preserves_the_established_text_and_image_variants
             expected_name,
             _expected_file_media_type,
         ) in saved_cases:
-            download = await service.get_download_no_auth(file_id)
+            download = await service.get_download_no_auth(
+                file_id,
+                tenant_id=user.tenant_id,
+            )
             downloaded = b"".join([chunk async for chunk in download.chunks])
             assert downloaded == expected_bytes
             assert download.media_type == expected_media_type
@@ -608,6 +623,7 @@ async def test_audio_range_and_icon_primary_use_the_same_inline_owner(
         )
         ranged = await file_service.get_download_no_auth(
             audio_id,
+            tenant_id=user.tenant_id,
             range_header="bytes=3-8",
         )
         ranged_bytes = b"".join([chunk async for chunk in ranged.chunks])

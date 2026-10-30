@@ -19,6 +19,7 @@ from eneo.model_providers.infrastructure.outbound_headers_runtime import (
 )
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
+    lookup_provider_field,
 )
 from eneo.tenants.provider_field_config import get_field_definitions
 
@@ -27,6 +28,7 @@ if TYPE_CHECKING:
     from eneo.settings.encryption_service import EncryptionService
     from eneo.users.user import UserInDB
 
+# Read outside the setup fields by _build_litellm_provider_kwargs below.
 _OPTIONAL_PROVIDER_FIELDS = ("api_type", "organization")
 
 
@@ -86,6 +88,43 @@ class ResolvedLiteLLMProvider:
         )
 
 
+# Read for validation but deliberately not sent; the model route carries it.
+_UNSENT_PROVIDER_FIELDS = frozenset({"deployment_name"})
+
+
+def resolve_provider_request_identity(
+    *,
+    provider_type: str,
+    credentials: dict[str, Any],
+    config: dict[str, Any],
+) -> tuple[tuple[str, str | None], ...]:
+    """Return the non-secret provider settings that decide where a request runs.
+
+    Derived from the same field definitions the kwargs builder below uses, so
+    anything comparing provider configuration sees exactly what a request sees.
+    The API key is excluded: rotating it does not move the route, and callers
+    must not need to decrypt it.
+    """
+    fields = {
+        definition["name"]
+        for definition in get_field_definitions(provider_type)
+        if not definition["secret"]
+        and definition["name"] not in _UNSENT_PROVIDER_FIELDS
+    }
+    fields.update(_OPTIONAL_PROVIDER_FIELDS)
+    return tuple(
+        (
+            field,
+            lookup_provider_field(
+                credentials=credentials,
+                config=config,
+                field=field,
+            ),
+        )
+        for field in sorted(fields)
+    )
+
+
 def _build_litellm_provider_kwargs(
     credential_resolver: TenantModelCredentialResolver,
 ) -> dict[str, Any]:
@@ -104,7 +143,7 @@ def _build_litellm_provider_kwargs(
 
         # The deployment is already represented by the model route. Sending it
         # again changes semantics for some OpenAI-compatible endpoints.
-        if field == "deployment_name":
+        if field in _UNSENT_PROVIDER_FIELDS:
             credential_resolver.get_credential_field(
                 field=field,
                 required=required,

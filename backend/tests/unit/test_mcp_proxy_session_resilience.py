@@ -95,6 +95,36 @@ def test_reference_identity_labels_do_not_offer_disabled_or_view_only_tools():
     assert f"MCP {server.id}, tool tool" in after[0]["function"]["description"]
 
 
+def test_proxy_registry_exposes_only_enabled_tools_from_selected_server():
+    server_id = uuid4()
+    enabled_tool = MCPServerTool(
+        mcp_server_id=server_id,
+        name="lookup_case",
+        description="Fetch a case",
+        input_schema={"type": "object", "properties": {}},
+        is_enabled_by_default=True,
+    )
+    disabled_sibling = MCPServerTool(
+        mcp_server_id=server_id,
+        name="delete_case",
+        description="Delete a case",
+        input_schema={"type": "object", "properties": {}},
+        is_enabled_by_default=False,
+    )
+    server = MCPServer(
+        id=server_id,
+        tenant_id=uuid4(),
+        name="case-system",
+        http_url="http://localhost:8080/mcp",
+        tools=[enabled_tool, disabled_sibling],
+    )
+
+    proxy = MCPProxySession([server])
+
+    assert proxy.get_allowed_tool_names() == {"case-system__lookup_case"}
+    assert proxy.get_tool_count() == 1
+
+
 def _make_identity_scoped_server(name: str = "identity-server") -> MCPServer:
     server_id = uuid4()
     tools = [

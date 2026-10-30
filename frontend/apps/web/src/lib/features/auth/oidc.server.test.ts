@@ -9,7 +9,7 @@ vi.mock("$lib/core/environment.server", () => ({
   getBackendUrl: mocks.getBackendUrl
 }));
 
-vi.mock("./auth.server", () => ({
+vi.mock("$lib/features/auth/auth.server", () => ({
   setFrontendAuthCookie: mocks.setFrontendAuthCookie
 }));
 

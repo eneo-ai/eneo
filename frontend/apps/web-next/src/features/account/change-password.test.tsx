@@ -220,7 +220,7 @@ describe("ChangePasswordCard", () => {
     type(/^Nytt lösenord/, "Nytt-lösenord-2026");
     type(/^Bekräfta lösenord/, "Nytt-lösenord-2026");
 
-    api.POST.mockImplementation(() => refused(9061));
+    api.POST.mockImplementation(() => refused(9064));
     save();
     await waitFor(() =>
       expect(errorOf(field(/^Nuvarande lösenord/))).toContain(
@@ -234,7 +234,7 @@ describe("ChangePasswordCard", () => {
     type(/^Nuvarande lösenord/, "Gammalt-lösen1");
     expect(errorOf(field(/^Nuvarande lösenord/))).toBeNull();
 
-    api.POST.mockImplementation(() => refused(9059));
+    api.POST.mockImplementation(() => refused(9062));
     save();
     await waitFor(() =>
       expect(errorOf(field(/^Nytt lösenord/))).toContain(

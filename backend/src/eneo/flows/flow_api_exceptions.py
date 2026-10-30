@@ -1,0 +1,106 @@
+from __future__ import annotations
+
+from eneo.authentication.access_denial_code import AccessDenialCode
+from eneo.flows.domain.flow_run_recovery_policy import (
+    FlowRunAbandonmentDeadlineExceeded,
+    flow_run_abandonment_deadline,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunAbandonmentFacts
+from eneo.main.exceptions import (
+    BadRequestException,
+    ConflictException,
+    NotReadyException,
+    UnauthorizedException,
+    ValidationException,
+)
+
+
+class FlowBadRequestException(BadRequestException):
+    """Flow bad-request exception with code narrowed to FlowApiErrorCode."""
+
+    code: FlowApiErrorCode
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: FlowApiErrorCode,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message, code=code.value, context=context)
+        self.code = code
+
+
+class FlowConflictException(ConflictException):
+    """Flow conflict exception (409) with code narrowed to FlowApiErrorCode."""
+
+    code: FlowApiErrorCode
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: FlowApiErrorCode,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message, code=code.value, context=context)
+        self.code = code
+
+
+class FlowUnauthorizedException(UnauthorizedException):
+    """Flow forbidden exception with code narrowed to its two owner enums."""
+
+    code: FlowApiErrorCode | AccessDenialCode
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: FlowApiErrorCode | AccessDenialCode,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message, code=code.value, context=context)
+        self.code = code
+
+
+class FlowServiceUnavailableException(NotReadyException):
+    """Flow work the server has no capacity for right now (503): retry shortly."""
+
+    def __init__(self, message: str = "", *, code: FlowApiErrorCode) -> None:
+        super().__init__(message)
+        self.code = code
+
+
+class FlowValidationException(ValidationException):
+    """A well-formed Flow request the server cannot accept (422), with a code."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: FlowApiErrorCode,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.context = context
+
+
+def flow_run_abandonment_refusal(
+    exc: FlowRunAbandonmentDeadlineExceeded,
+) -> FlowBadRequestException:
+    facts = FlowRunAbandonmentFacts(
+        wait=exc.wait,
+        anchor_at=exc.anchor_at,
+        deadline=flow_run_abandonment_deadline(exc.anchor_at),
+        checkpoint_id=exc.checkpoint_id,
+    )
+    return FlowBadRequestException(
+        "Flow run exceeded its abandonment deadline.",
+        code=FlowApiErrorCode.RUN_ABANDONED,
+        context={
+            "abandonment": facts.model_dump(mode="json", exclude_none=True),
+            "retryable": False,
+        },
+    )

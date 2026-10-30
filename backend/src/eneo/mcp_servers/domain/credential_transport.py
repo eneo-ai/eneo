@@ -3,8 +3,9 @@
 A bearer token or API key sent over plain http can be read and replayed by
 anyone on the network path. RFC 6750 section 5.3 requires TLS for bearer
 tokens, and the MCP security best practices ask clients to require https and
-to accept http only for loopback during development. Registration and every
-connection the assistant MCP client opens apply this one rule.
+to accept http only for loopback during development. Registration, every
+connection the assistant MCP client opens and the unattended tool decision
+(server_credential_needs_https) apply this one rule.
 """
 
 from enum import Enum

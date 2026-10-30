@@ -9,12 +9,39 @@ export {
   readTraceId
 } from "./src/client/client.js";
 export {
+  createFlowRuntimeUploadTimeoutController,
+  type FlowRuntimeUploadTimeoutEvent,
+  type FlowRuntimeUploadTimeoutReason,
+  resolveFlowRuntimeUploadIdleTimeoutMs,
+  resolveFlowRuntimeUploadInitialTimeoutMs
+} from "./src/flows/runtime-upload-policy.js";
+export {
+  FLOW_RUN_STATUS_CAPABILITIES,
+  FLOW_RUN_STATUS_FILTER_ORDER,
+  type FlowRunStatusCapabilities,
+  type FlowRunStatusCapability
+} from "./src/flows/flow-run-status-capabilities.js";
+export {
+  FLOW_API_ERROR_CODE,
+  FLOW_API_ERROR_CODES,
+  type FlowApiErrorCode
+} from "./src/flows/flow-api-error-codes.js";
+export {
+  FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS,
+  type FlowRunReservedInputPayloadKey
+} from "./src/flows/flow-run-reserved-input-payload-keys.js";
+export {
   DEPLOYMENT_POLICY_CONFLICT_ERROR_CODE,
   OBJECT_STORE_NOT_SELECTABLE_ERROR_CODE
 } from "./src/errorCodes.js";
-export { JSONRequestBody } from "./src/types/fetch";
+export {
+  JSONRequestBody,
+  type EneoBinaryResponse,
+  type EneoFetchFunction,
+  type EneoStreamFunction
+} from "./src/types/fetch";
 export * from "./src/types/resources";
 export * from "./src/socket/types";
-export type { components } from "./src/types/schema";
+export type { components, operations } from "./src/types/schema";
 export type Eneo = ReturnType<typeof createEneo>;
 export type EneoSocket = ReturnType<typeof createEneoSocket>;

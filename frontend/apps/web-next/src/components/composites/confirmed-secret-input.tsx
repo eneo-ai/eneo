@@ -1,6 +1,6 @@
 "use client";
 
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { PasswordInput } from "@/components/astryx/password-input";
 import { useState } from "react";
 

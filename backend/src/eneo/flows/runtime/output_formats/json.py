@@ -1,0 +1,45 @@
+from __future__ import annotations
+
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.runtime.output_formats.base import (
+    ConformedModelOutput,
+    OutputFormatProcessingContext,
+    OutputFormatProcessingResult,
+    conform_model_output_keys,
+    json_schema_instructions,
+)
+
+
+class JsonOutputFormatSpec:
+    def prompt_instructions(
+        self, output_contract: FlowPersistedJsonObject | None
+    ) -> tuple[str, ...]:
+        return json_schema_instructions(output_contract)
+
+    def requests_structured_output(
+        self, output_contract: FlowPersistedJsonObject | None
+    ) -> bool:
+        return True
+
+    async def process_model_output(
+        self,
+        full_text: str,
+        *,
+        step_order: int,
+        output_contract: FlowPersistedJsonObject | None,
+        context: OutputFormatProcessingContext,
+    ) -> OutputFormatProcessingResult:
+        structured_output = context.parse_json_output(full_text)
+        conformed = ConformedModelOutput(diagnostics=(), conformed_text=None)
+        if output_contract is not None and context.json_contract_validation_enabled:
+            conformed = conform_model_output_keys(structured_output, output_contract)
+            await context.check_contract(
+                structured_output,
+                output_contract,
+                label=f"Step {step_order} output",
+            )
+        return OutputFormatProcessingResult(
+            structured_output=structured_output,
+            diagnostics=conformed.diagnostics,
+            conformed_text=conformed.conformed_text,
+        )

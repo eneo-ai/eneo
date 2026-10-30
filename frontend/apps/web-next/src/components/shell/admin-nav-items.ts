@@ -18,6 +18,7 @@ import {
   User,
   UserCheck,
   Users,
+  Workflow,
   Wrench,
   type LucideIcon
 } from "lucide-react";
@@ -42,15 +43,20 @@ export type AdminNavGroup = {
  * Anslutningar (what Eneo talks to) and Organisation (who and what it
  * manages). Every admin route is here, with the same gating as before:
  * templates only when the tenant uses templates, modules only with the
- * modules permission. No group exceeds seven items, so none needs to
- * collapse. The admin layout still redirects non-admins.
+ * modules permission, flows only when the tenant has them switched on
+ * (`settings.flows_enabled`, whatever the admin's own flow permissions; the
+ * admin layout admits admins only). No
+ * group exceeds seven items, so none needs to collapse. The admin layout
+ * still redirects non-admins.
  */
 export function adminNavGroups({
   usingTemplates,
-  canManageModules
+  canManageModules,
+  flowsEnabled = false
 }: {
   usingTemplates: boolean;
   canManageModules: boolean;
+  flowsEnabled?: boolean;
 }): AdminNavGroup[] {
   return [
     {
@@ -69,6 +75,9 @@ export function adminNavGroups({
         { href: "/admin/personal-assistant", icon: User, labelKey: "governance_title" },
         { href: "/admin/prompt-library", icon: Library, labelKey: "governance_tab_prompts" },
         { href: "/admin/skills", icon: SlidersHorizontal, labelKey: "admin_skills_nav_label" },
+        ...(flowsEnabled
+          ? [{ href: "/admin/flow-settings", icon: Workflow, labelKey: "flow_admin_nav_label" }]
+          : []),
         {
           href: "/admin/security-classifications",
           icon: Shield,

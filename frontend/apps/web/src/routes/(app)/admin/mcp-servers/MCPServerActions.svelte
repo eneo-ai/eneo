@@ -7,6 +7,7 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import * as DropdownMenu from "$lib/components/ui/dropdown-menu/index.js";
   import { getEneo } from "$lib/core/Eneo";
+  import { toastError } from "$lib/core/errors";
   import { invalidate } from "$app/navigation";
   import { writable, type Writable } from "svelte/store";
   import Pencil from "@lucide/svelte/icons/pencil";
@@ -59,6 +60,7 @@
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to sync tools:", error);
+      toastError(error);
     } finally {
       syncing = false;
     }

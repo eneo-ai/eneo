@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_content_loader import FileAttachmentGroup, FileContentLoader
 from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
 from eneo.files.file_repo import (
@@ -12,7 +13,11 @@ from eneo.files.file_repo import (
     LegacyFileContentRecord,
     LegacyFileInfoRecord,
 )
-from eneo.object_content.content import ContentAccessClass, StorageKind
+from eneo.object_content.content import (
+    ContentAccessClass,
+    ContentState,
+    StorageKind,
+)
 
 
 @pytest.mark.asyncio
@@ -26,7 +31,8 @@ async def test_loader_falls_back_to_frozen_legacy_variants() -> None:
         name="legacy.pdf",
         mimetype="application/pdf",
         file_type=FileType.TEXT,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=tenant_id,
         parent_file_id=None,
     )
@@ -96,7 +102,8 @@ async def test_loader_prefers_object_content_over_legacy_for_same_variant() -> N
         name="image.png",
         mimetype="image/png",
         file_type=FileType.IMAGE,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=tenant_id,
         parent_file_id=None,
     )
@@ -114,6 +121,7 @@ async def test_loader_prefers_object_content_over_legacy_for_same_variant() -> N
         size_bytes=len(payload),
         media_type="image/png",
         access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        state=ContentState.AVAILABLE,
         storage_kind=StorageKind.POSTGRES_INLINE,
     )
     repository = AsyncMock()
@@ -144,7 +152,8 @@ async def test_loader_resolves_each_variant_independently_during_backfill() -> N
         name="mixed.pdf",
         mimetype="application/pdf",
         file_type=FileType.TEXT,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=tenant_id,
         parent_file_id=None,
     )
@@ -165,6 +174,7 @@ async def test_loader_resolves_each_variant_independently_during_backfill() -> N
             size_bytes=len(original),
             media_type="application/pdf",
             access_class=ContentAccessClass.PRIVATE_RESOURCE,
+            state=ContentState.AVAILABLE,
             storage_kind=StorageKind.POSTGRES_INLINE,
         )
     ]
@@ -206,6 +216,90 @@ async def test_loader_resolves_each_variant_independently_during_backfill() -> N
 
 
 @pytest.mark.asyncio
+async def test_legacy_text_original_bytes_are_loaded_only_when_requested() -> None:
+    file_id = uuid4()
+    tenant_id = uuid4()
+    metadata = FileMetadata(
+        id=file_id,
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
+        name="template.docx",
+        mimetype=(
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        ),
+        file_type=FileType.TEXT,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
+        tenant_id=tenant_id,
+        parent_file_id=None,
+    )
+    extracted = b"legacy extracted text"
+    original = b"PK\x03\x04exact docx bytes"
+    repository = AsyncMock()
+    repository.get_content_references.return_value = []
+    repository.get_legacy_infos.return_value = [
+        LegacyFileInfoRecord(
+            file_id=file_id,
+            variant=FileContentVariant.EXTRACTED_TEXT,
+            checksum=sha256(extracted).hexdigest(),
+            size_bytes=len(extracted),
+            media_type="text/plain",
+            original_available=True,
+            transcription_available=False,
+        )
+    ]
+    payloads = {
+        FileContentVariant.EXTRACTED_TEXT: extracted,
+        FileContentVariant.ORIGINAL: original,
+    }
+
+    async def load_requested_legacy(
+        requests: dict[UUID, set[FileContentVariant]],
+    ) -> list[LegacyFileContentRecord]:
+        return [
+            LegacyFileContentRecord(
+                file_id=file_id,
+                variant=variant,
+                payload=payloads[variant],
+                media_type=(
+                    "text/plain"
+                    if variant is FileContentVariant.EXTRACTED_TEXT
+                    else metadata.mimetype or "application/octet-stream"
+                ),
+            )
+            for variant in requests[file_id]
+        ]
+
+    repository.get_legacy_content.side_effect = load_requested_legacy
+    object_content = AsyncMock()
+    object_content.read_content_bytes.return_value = {}
+    loader = FileContentLoader(repository, object_content)
+
+    default = (await loader.load([metadata], include_transcription=False))[file_id]
+    with_original = (
+        await loader.load(
+            [metadata],
+            include_transcription=False,
+            include_text_original_bytes=True,
+        )
+    )[file_id]
+
+    assert default.text == extracted.decode()
+    assert default.blob is None
+    assert with_original.text == extracted.decode()
+    assert with_original.blob == original
+    assert [call.args[0] for call in repository.get_legacy_content.await_args_list] == [
+        {file_id: {FileContentVariant.EXTRACTED_TEXT}},
+        {
+            file_id: {
+                FileContentVariant.EXTRACTED_TEXT,
+                FileContentVariant.ORIGINAL,
+            }
+        },
+    ]
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     ("max_batch_bytes", "expected_request_groups"),
     [
@@ -226,7 +320,8 @@ async def test_legacy_payload_batches_bound_distinct_legacy_files(
             name=f"legacy-{index}.png",
             mimetype="image/png",
             file_type=FileType.IMAGE,
-            user_id=uuid4(),
+            owner_type=PrincipalType.USER,
+            owner_user_id=uuid4(),
             tenant_id=tenant_id,
             parent_file_id=None,
         )
@@ -312,7 +407,8 @@ async def test_legacy_payload_batches_fetch_one_shared_file_once() -> None:
         name="shared-legacy.png",
         mimetype="image/png",
         file_type=FileType.IMAGE,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=tenant_id,
         parent_file_id=None,
     )

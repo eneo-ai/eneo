@@ -87,6 +87,7 @@ def _service(provider: ModelProvider) -> tuple[ModelProviderService, MagicMock]:
     repository.record_connection_check = AsyncMock(side_effect=record)
     repository.update = AsyncMock(side_effect=update)
     repository.get_by_name = AsyncMock(return_value=None)
+    repository.clear_route_declarations = AsyncMock(return_value=0)
     repository.create = AsyncMock(side_effect=lambda created: created)
     return ModelProviderService(repository, _ENCRYPTION), repository
 

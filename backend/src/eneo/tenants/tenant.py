@@ -3,11 +3,18 @@ from enum import Enum
 from typing import Any, Optional, cast
 from uuid import UUID
 
-from pydantic import BaseModel, Field, ValidationInfo, field_serializer, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationInfo,
+    field_serializer,
+    field_validator,
+)
 from pydantic.networks import HttpUrl
 
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
 from eneo.main.config import (
-    canonicalize_legacy_redirect_path,
     validate_redirect_path,
     validate_redirect_uri,
 )
@@ -71,6 +78,13 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
     federation_config: dict[str, Any] = Field(default_factory=dict)
     crawler_settings: dict[str, Any] = Field(default_factory=dict)
     api_key_policy: dict[str, Any] = Field(default_factory=dict)
+    flow_settings: dict[str, Any] = Field(default_factory=dict)
+    flow_runtime_upload_abandonment_days: Optional[int] = Field(
+        default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
     password_policy: dict[str, Any] = Field(default_factory=dict)
     favorite_providers: list[str] = Field(default_factory=list)
 
@@ -175,7 +189,9 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
 
         # Validate redirect_path (optional field)
         if "redirect_path" in v:
-            redirect_path = v["redirect_path"]
+            from eneo.main.config import canonicalize_legacy_redirect_path
+
+            redirect_path = canonicalize_legacy_redirect_path(v["redirect_path"])
             if not isinstance(redirect_path, str):
                 raise ValueError("redirect_path must be a string")
             try:
@@ -246,6 +262,28 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
 
         return v
 
+    @field_validator("flow_settings", mode="before")
+    @classmethod
+    def normalize_flow_settings(
+        cls,
+        v: dict[str, Any] | None,
+    ) -> dict[str, Any]:
+        from eneo.flows.flow_settings import normalize_flow_settings_object
+
+        return normalize_flow_settings_object(v)
+
+    @field_validator("flow_settings")
+    @classmethod
+    def validate_flow_settings(cls, v: dict[str, Any]) -> dict[str, Any]:
+        from eneo.flows.flow_settings import validate_flow_settings_object
+        from eneo.main.exceptions import BadRequestException
+
+        try:
+            return validate_flow_settings_object(v)
+        except BadRequestException as error:
+            # Pydantic field validation reports model errors as ValueError.
+            raise ValueError(str(error)) from error
+
     @field_serializer("crawler_settings")
     def serialize_active_crawler_settings(
         self,
@@ -258,6 +296,8 @@ class TenantInDB(PrivacyPolicyMixin, InDB):
 
 
 class TenantUpdatePublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     display_name: Optional[str] = None
     quota_limit: Optional[int] = None
     domain: Optional[str] = None
@@ -270,6 +310,22 @@ class TenantUpdatePublic(BaseModel):
 
 class TenantUpdate(TenantUpdatePublic):
     id: UUID
+    flow_settings: Optional[dict[str, Any]] = None
+    flow_runtime_upload_abandonment_days: Optional[int] = Field(
+        default=None,
+        strict=True,
+        ge=MIN_RETENTION_DAYS,
+        le=MAX_RETENTION_DAYS,
+    )
+
+    @field_validator("flow_settings", mode="before")
+    @classmethod
+    def validate_flow_settings_write(cls, v: object) -> object:
+        if v is None:
+            return None
+        from eneo.flows.flow_settings import validate_flow_settings_write
+
+        return validate_flow_settings_write(v)
 
 
 class ModelPricingVisibility(BaseModel):

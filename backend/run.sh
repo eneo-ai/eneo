@@ -2,6 +2,14 @@
 
 set -e
 
+# Prefer project virtualenv binaries when available (devcontainer + docker image).
+for venv_bin in "/workspace/backend/.venv/bin" "/app/.venv/bin"; do
+    if [[ -d "${venv_bin}" ]]; then
+        export PATH="${venv_bin}:${PATH}"
+        break
+    fi
+done
+
 # Check if running as worker
 if [[ "${RUN_AS_WORKER,,}" == "true" ]]; then
     worker_role="${WORKER_ROLE:-general}"
@@ -44,4 +52,9 @@ export INTERNAL_MCP_BASE_URL="${INTERNAL_MCP_BASE_URL:-http://localhost:8000}"
 # holds SSR sockets ~4s; gunicorn's default is 2s and it sends no
 # Keep-Alive hint), otherwise the server closes a socket the client still
 # considers live and an in-flight SSR fetch dies with ECONNRESET.
-exec gunicorn src.eneo.server.main:app --workers $workers --worker-class uvicorn.workers.UvicornWorker --keep-alive 75 --bind 0.0.0.0:8000
+exec gunicorn \
+    src.eneo.server.main:app \
+    --workers $workers \
+    --worker-class uvicorn.workers.UvicornWorker \
+    --keep-alive 75 \
+    --bind 0.0.0.0:8000

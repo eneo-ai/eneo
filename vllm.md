@@ -607,7 +607,6 @@ A compatible vLLM server must:
 | Credentials API | `/backend/src/eneo/tenants/presentation/tenant_credentials_router.py` | API endpoints for credential management |
 | Credential Resolver | `/backend/src/eneo/settings/credential_resolver.py` | Resolves and decrypts credentials |
 | Provider Config | `/backend/src/eneo/tenants/provider_field_config.py` | Defines required fields for vLLM |
-| OpenAI Response Handler | `/backend/src/eneo/completion_models/infrastructure/get_response_open_ai.py` | Handles API calls and error mapping |
 | Tenant Model | `/backend/src/eneo/tenants/tenant.py` | Tenant database model with credentials |
 
 ---

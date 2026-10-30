@@ -55,13 +55,22 @@ class SecurityClassification(Entity):
     @override
     @classmethod
     def to_domain(  # type: ignore[override]  # intentionally accepts Optional input and returns Optional — different from Entity.to_domain
-        cls, db_security_classification: Optional[SecurityDBModel] = None
+        cls,
+        db_security_classification: Optional[SecurityDBModel] = None,
+        *,
+        tenant_security_enabled: bool | None = None,
     ) -> "SecurityClassification | None":
+        """``tenant_security_enabled`` is the tenant's switch for a caller that
+        read it with the row; without it, the row's tenant is read."""
         if db_security_classification is None:
             return None
 
         # tenant relationship is non-optional per DB schema; always present when loaded
-        security_enabled = db_security_classification.tenant.security_enabled
+        security_enabled = (
+            db_security_classification.tenant.security_enabled
+            if tenant_security_enabled is None
+            else tenant_security_enabled
+        )
 
         return cls(
             id=db_security_classification.id,

@@ -1,0 +1,429 @@
+from __future__ import annotations
+
+from typing import Annotated, cast
+from uuid import UUID
+
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Path,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
+
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
+from eneo.database.database import AsyncSession
+from eneo.files.file_models import FilePublic
+from eneo.flows.api import flow_access_context
+from eneo.flows.api.flow_api_common import (
+    RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE,
+    error_response,
+)
+from eneo.flows.api.flow_models import FlowRunContractPublic
+from eneo.flows.api.flow_runtime_paths import (
+    DELETE_RUNTIME_FILE_PATH,
+    RUN_CONTRACT_PATH,
+    UPLOAD_STEP_RUNTIME_FILE_PATH,
+)
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.container.container import Container
+from eneo.main.exceptions import ErrorCodes
+from eneo.server.dependencies.container import (
+    get_container,
+    get_container_for_explicit_transaction,
+)
+
+router = APIRouter()
+
+
+def _upload_file_multipart_openapi_extra() -> dict[str, object]:
+    return {
+        "requestBody": {
+            "content": {
+                "multipart/form-data": {
+                    "schema": {
+                        "type": "object",
+                        "required": ["upload_file"],
+                        "properties": {
+                            "upload_file": {
+                                "type": "string",
+                                "format": "binary",
+                            }
+                        },
+                    }
+                }
+            }
+        }
+    }
+
+
+_FLOW_RUNTIME_UPLOAD_BAD_REQUEST_EXAMPLES: dict[str, dict[str, object]] = {
+    FlowApiErrorCode.FLOW_NOT_PUBLISHED.value: {
+        "summary": "Flow is not published.",
+        "value": {
+            "message": "Flow must be published before runtime files can be uploaded.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowApiErrorCode.FLOW_NOT_PUBLISHED.value,
+        },
+    },
+    FlowApiErrorCode.RUN_UNKNOWN_STEP_INPUT.value: {
+        "summary": "Runtime step id is not in the published contract.",
+        "value": {
+            "message": "Unknown runtime step id.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowApiErrorCode.RUN_UNKNOWN_STEP_INPUT.value,
+            "context": {"step_id": "3a6610d2-8b8b-4837-b260-8e66d2155405"},
+        },
+    },
+    FlowApiErrorCode.RUN_RUNTIME_INPUT_DISABLED.value: {
+        "summary": "Runtime input is disabled for the step.",
+        "value": {
+            "message": "Runtime input is not enabled for this step.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowApiErrorCode.RUN_RUNTIME_INPUT_DISABLED.value,
+        },
+    },
+    FlowApiErrorCode.RUNTIME_FILE_EMPTY.value: {
+        "summary": "Uploaded file is empty.",
+        "value": {
+            "message": "Uploaded file is empty.",
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowApiErrorCode.RUNTIME_FILE_EMPTY.value,
+            "context": {"flow_id": "d4f60ea3-8fb7-4ab5-9d89-73e9d9a9f818"},
+        },
+    },
+    FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH.value: {
+        "summary": "Published definition failed integrity verification.",
+        "value": {
+            "message": (
+                "Published flow definition checksum does not match the stored "
+                "snapshot. Do not retry this pinned version. Publish a valid "
+                "version and start a new run."
+            ),
+            "eneo_error_code": int(ErrorCodes.BAD_REQUEST),
+            "code": FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH.value,
+            "context": {
+                "expected_checksum": "recorded-published-checksum",
+                "current_checksum": "current-snapshot-checksum",
+            },
+        },
+    },
+}
+
+
+@router.get(
+    RUN_CONTRACT_PATH,
+    response_model=FlowRunContractPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_flow_run_contract",
+    summary="Get flow run contract",
+    description="""
+Return the canonical run-time contract for a published flow.
+
+Use this endpoint before rendering a run form to discover:
+- published flow version for stale-submit protection
+- terminal output type and delivery mode, so clients know whether the successful run
+  yields a payload, generated file, or outbound HTTP delivery
+- structured form fields
+- step-specific runtime input requirements
+- runtime upload timeout policy for browser and API clients
+- steps that can pause for human review, including the output shape a review UI should render
+  and the effective `expires_after_seconds` review window
+- aggregate file limits
+- published template readiness and capability state
+- for a flow that transcribes audio, whether a live transcript preview is available and
+  whether the run may choose `speaker_labels`
+
+Recommended consumer flow:
+1. Render `form_fields` as the run form.
+2. Upload files before run creation and attach each file id through `step_inputs[step_id].file_ids`.
+   For browser uploads, compute the initial timeout from the actual file size using
+   `runtime_upload_policy`, then keep the upload alive while progress events continue.
+3. Prebuild optional review screens from `steps_requiring_review`; use
+   `expires_after_seconds` to show the review deadline once the checkpoint opens.
+4. Start the run with `expected_flow_version=published_flow_version`.
+5. When a run reaches `awaiting_review`, call the active checkpoint endpoint for the immutable
+   step snapshot and editable payload.
+
+Service-key principals may use this endpoint for published-flow runtime only.
+    """,
+    responses={
+        400: error_response(
+            description=(
+                "Flow is not published, the runtime contract could not be resolved, "
+                "or the published snapshot failed integrity verification with "
+                "`flow_definition_checksum_mismatch`."
+            ),
+            message="Flow must be published before a run contract can be created.",
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
+        ),
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description=f"Flow not found in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
+            message="Flow not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
+async def get_flow_run_contract(
+    id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the published flow whose run contract should be returned."
+        ),
+    ],
+    request: Request,
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True, with_upload_admission=True)
+    ),
+):
+    access = await flow_access_context.enforce_flow_scope(
+        request,
+        container,
+        flow_id=id,
+        required_access=FlowApiAction.VIEW,
+        allow_service_key_principals=True,
+        require_published_for_service_key=True,
+    )
+    return await container.flow_run_contract_service().get_run_contract(
+        flow_id=id,
+        space=await container.space_service().get_space(access.flow.space_id),
+    )
+
+
+@router.post(
+    UPLOAD_STEP_RUNTIME_FILE_PATH,
+    response_model=FilePublic,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="upload_flow_runtime_file",
+    openapi_extra=_upload_file_multipart_openapi_extra(),
+    summary="Upload step runtime file",
+    description="""
+Upload a file for a specific published runtime-input step.
+
+The backend validates the step id, runtime-input enablement, MIME policy, and
+effective size limits for the published flow version before storing the file.
+Set the multipart file part's `Content-Type` to one of the step's
+`accepted_mimetypes` from the run contract. Missing, generic, or unsupported
+declared types are rejected even when the file contents can be detected.
+Use the returned file id in `step_inputs[step_id].file_ids` when creating the
+run. The same file id may be reused for other compatible runtime-input steps
+within this Flow. To use the same local source with another Flow, upload it
+through that Flow's runtime upload endpoint.
+    """,
+    responses={
+        400: error_response(
+            description=(
+                "Runtime step input is unknown, disabled, or invalid for upload, "
+                "or the published snapshot failed integrity verification with "
+                "`flow_definition_checksum_mismatch`."
+            ),
+            examples=_FLOW_RUNTIME_UPLOAD_BAD_REQUEST_EXAMPLES,
+        ),
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description=f"Flow not found in tenant scope. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}",
+            message="Flow not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        413: error_response(
+            description="Uploaded file exceeds the effective runtime-input limit.",
+            message="Uploaded file exceeds effective flow limit of 26214400 bytes.",
+            eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
+        ),
+        415: error_response(
+            description="Unsupported media type for the selected runtime step.",
+            message=(
+                "Unsupported file type 'application/pdf' for flow input type "
+                "'audio'. Allowed types: audio/mpeg, audio/wav."
+            ),
+            eneo_error_code=ErrorCodes.FILE_NOT_SUPPORTED,
+            code=FlowApiErrorCode.UNSUPPORTED_MEDIA_TYPE,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
+)
+async def upload_flow_runtime_file(
+    id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the published flow that owns the runtime-input step."
+        ),
+    ],
+    step_id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the published step that should receive the uploaded runtime file."
+        ),
+    ],
+    request: Request,
+    upload_file: UploadFile = File(...),
+    container: Container = Depends(
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_module_user=True,
+            with_upload_admission=True,
+        )
+    ),
+):
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await flow_access_context.enforce_flow_scope(
+            request,
+            container,
+            flow_id=id,
+            required_access=FlowApiAction.RUN,
+            allow_service_key_principals=True,
+            require_published_for_service_key=True,
+        )
+    return await container.flow_runtime_file_service().upload_runtime_file_for_step(
+        flow_id=id,
+        step_id=step_id,
+        upload_file=upload_file,
+    )
+
+
+@router.delete(
+    DELETE_RUNTIME_FILE_PATH,
+    response_model=None,
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_class=Response,
+    operation_id="delete_flow_runtime_file",
+    summary="Delete orphan runtime file",
+    description="""
+Delete an owned runtime file that was uploaded for a published Flow run but has not
+been attached to persisted run state. Use this to clean up an abandoned pre-run
+upload before creating a run. The file must be owned by the caller and bound to the
+Flow id in the path. Files already attached to Flow run inputs or outputs return a
+typed 409 conflict.
+    """,
+    responses={
+        204: {
+            "description": "Runtime file deleted successfully. No response body is returned."
+        },
+        400: error_response(
+            description="Flow is not published for runtime file deletion.",
+            message="Flow must be published before runtime files can be deleted.",
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
+        ),
+        403: error_response(
+            description="Forbidden: API key scope does not match flow space.",
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description=(
+                "Flow not found, or runtime file is not owned by the caller or "
+                f"was not uploaded for this Flow. {RETIRED_FLOW_MUTATION_NOT_FOUND_CLAUSE}"
+            ),
+            message="Not found",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        409: error_response(
+            description="Runtime file is already attached to persisted Flow run state.",
+            message="Runtime file is already attached to a flow run.",
+            eneo_error_code=ErrorCodes.CONFLICT,
+            code=FlowApiErrorCode.RUNTIME_FILE_ATTACHED,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.RUN),
+)
+async def delete_flow_runtime_file(
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the published flow used for runtime access."),
+    ],
+    file_id: Annotated[
+        UUID,
+        Path(description="Identifier of the owned orphan runtime file to delete."),
+    ],
+    request: Request,
+    container: Container = Depends(
+        get_container_for_explicit_transaction(
+            with_user=True,
+            with_module_user=True,
+            with_upload_admission=True,
+        )
+    ),
+) -> None:
+    session = cast(AsyncSession, container.session())
+    async with session.begin():
+        await flow_access_context.enforce_flow_scope(
+            request,
+            container,
+            flow_id=id,
+            required_access=FlowApiAction.RUN,
+            allow_service_key_principals=True,
+            require_published_for_service_key=True,
+        )
+        file = await container.flow_runtime_file_service().delete_runtime_file(
+            flow_id=id,
+            file_id=file_id,
+        )
+        user = container.user()
+        file_type = getattr(file, "file_type", None)
+        await container.audit_service().log(
+            tenant_id=user.tenant_id,
+            user=user,
+            action=ActionType.FILE_DELETED,
+            entity_type=EntityType.FILE,
+            entity_id=file.id,
+            description=f"Deleted runtime input file '{file.name}' for flow {id}",
+            metadata=AuditMetadata.standard(
+                actor=user,
+                target=file,
+                extra={
+                    "flow_id": str(id),
+                    "file_id": str(file_id),
+                    "size_bytes": file.size,
+                    "mimetype": getattr(file, "mimetype", None),
+                    "file_type": getattr(file_type, "value", file_type),
+                    "runtime_role": "flow_runtime_step_input",
+                },
+            ),
+            required=True,
+        )
+
+
+__all__ = ["router"]

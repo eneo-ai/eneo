@@ -8,6 +8,7 @@ from typing import Any, Optional, cast
 from uuid import UUID
 
 import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing_extensions import override
 
@@ -49,6 +50,22 @@ def escape_like(value: str) -> str:
     return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
 
 
+def _acted_as(principal_id: UUID) -> sa.ColumnElement[bool]:
+    """Rows a principal performed, also after its user or key row is deleted.
+
+    The actor columns become NULL when the row they reference is deleted; the
+    recorded actor block keeps the id, and a service principal block the key id
+    it acted through (both served by idx_audit_metadata_gin).
+    """
+    principal = str(principal_id)
+    return sa.or_(
+        AuditLogTable.actor_id == principal_id,
+        AuditLogTable.actor_api_key_id == principal_id,
+        AuditLogTable.log_metadata.contains({"actor": {"id": principal}}),
+        AuditLogTable.log_metadata.contains({"actor": {"actor_api_key_id": principal}}),
+    )
+
+
 class AuditLogRepositoryImpl(AuditLogRepository):
     """SQLAlchemy implementation of audit log repository."""
 
@@ -63,6 +80,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             id=table.id,
             tenant_id=table.tenant_id,
             actor_id=table.actor_id,
+            actor_api_key_id=table.actor_api_key_id,
             actor_type=ActorType(table.actor_type),
             action=ActionType(table.action),
             entity_type=EntityType(table.entity_type),
@@ -89,6 +107,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 id=audit_log.id,
                 tenant_id=audit_log.tenant_id,
                 actor_id=audit_log.actor_id,
+                actor_api_key_id=audit_log.actor_api_key_id,
                 actor_type=audit_log.actor_type.value,
                 action=audit_log.action.value,
                 entity_type=audit_log.entity_type.value,
@@ -108,6 +127,43 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         result = await self.session.scalar(query)
         assert result is not None
         return self._to_domain(result)
+
+    @override
+    async def create_if_absent(self, audit_log: AuditLog) -> AuditLog:
+        query = (
+            pg_insert(AuditLogTable)
+            .values(
+                id=audit_log.id,
+                tenant_id=audit_log.tenant_id,
+                actor_id=audit_log.actor_id,
+                actor_api_key_id=audit_log.actor_api_key_id,
+                actor_type=audit_log.actor_type.value,
+                action=audit_log.action.value,
+                entity_type=audit_log.entity_type.value,
+                entity_id=audit_log.entity_id,
+                timestamp=audit_log.timestamp,
+                description=audit_log.description,
+                log_metadata=audit_log.metadata,
+                outcome=audit_log.outcome.value,
+                ip_address=audit_log.ip_address,
+                user_agent=audit_log.user_agent,
+                request_id=audit_log.request_id,
+                error_message=audit_log.error_message,
+            )
+            .on_conflict_do_nothing(index_elements=[AuditLogTable.id])
+            .returning(AuditLogTable)
+        )
+        result = await self.session.scalar(query)
+        if result is not None:
+            return self._to_domain(result)
+
+        existing_log = await self.get_by_id(
+            audit_log_id=audit_log.id,
+            tenant_id=audit_log.tenant_id,
+        )
+        if existing_log is None:
+            raise RuntimeError("Audit log conflict did not return an existing row.")
+        return existing_log
 
     @override
     async def get_by_id(
@@ -150,7 +206,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             query = query.where(AuditLogTable.deleted_at.is_(None))
 
         if actor_id:
-            query = query.where(AuditLogTable.actor_id == actor_id)
+            query = query.where(_acted_as(actor_id))
 
         # Support both single action (deprecated) and multiple actions
         if actions:
@@ -170,8 +226,13 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         if search:
             safe_search = escape_like(search)
             search_pattern = f"%{safe_search}%"
+            # The trigram index is on lower(description); ILIKE cannot use it.
+            # Postgres lowercases both sides of ILIKE the same way, so this
+            # matches the same rows.
             query = query.where(
-                AuditLogTable.description.ilike(search_pattern, escape="\\")
+                sa.func.lower(AuditLogTable.description).like(
+                    sa.func.lower(search_pattern), escape="\\"
+                )
             )
 
         # Get total count
@@ -217,7 +278,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         actor_query = sa.select(AuditLogTable).where(
             sa.and_(
                 AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.actor_id == user_id,
+                _acted_as(user_id),
                 AuditLogTable.deleted_at.is_(None),
             )
         )
@@ -267,6 +328,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 id=row.id,
                 tenant_id=row.tenant_id,
                 actor_id=row.actor_id,
+                actor_api_key_id=row.actor_api_key_id,
                 actor_type=row.actor_type,
                 action=row.action,
                 entity_type=row.entity_type,
@@ -416,7 +478,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         )
 
         if actor_id:
-            query = query.where(AuditLogTable.actor_id == actor_id)
+            query = query.where(_acted_as(actor_id))
 
         if action:
             query = query.where(AuditLogTable.action == action.value)
@@ -473,6 +535,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             AuditLogTable.tenant_id,
             AuditLogTable.timestamp,
             AuditLogTable.actor_id,
+            AuditLogTable.actor_api_key_id,
             AuditLogTable.actor_type,
             AuditLogTable.action,
             AuditLogTable.entity_type,
@@ -492,7 +555,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         )
 
         if actor_id:
-            query = query.where(AuditLogTable.actor_id == actor_id)
+            query = query.where(_acted_as(actor_id))
 
         if action:
             query = query.where(AuditLogTable.action == action.value)
@@ -517,6 +580,9 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 "tenant_id": str(row.tenant_id),
                 "timestamp": row.timestamp.isoformat(),
                 "actor_id": str(row.actor_id) if row.actor_id else None,
+                "actor_api_key_id": (
+                    str(row.actor_api_key_id) if row.actor_api_key_id else None
+                ),
                 "actor_type": row.actor_type,
                 "action": row.action,
                 "entity_type": row.entity_type,
@@ -556,7 +622,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         actor_query = sa.select(AuditLogTable).where(
             sa.and_(
                 AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.actor_id == user_id,
+                _acted_as(user_id),
                 AuditLogTable.deleted_at.is_(None),
             )
         )
@@ -643,6 +709,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             AuditLogTable.tenant_id,
             AuditLogTable.timestamp,
             AuditLogTable.actor_id,
+            AuditLogTable.actor_api_key_id,
             AuditLogTable.actor_type,
             AuditLogTable.action,
             AuditLogTable.entity_type,
@@ -657,7 +724,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         ).where(
             sa.and_(
                 AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.actor_id == user_id,
+                _acted_as(user_id),
                 AuditLogTable.deleted_at.is_(None),
             )
         )
@@ -668,6 +735,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
             AuditLogTable.tenant_id,
             AuditLogTable.timestamp,
             AuditLogTable.actor_id,
+            AuditLogTable.actor_api_key_id,
             AuditLogTable.actor_type,
             AuditLogTable.action,
             AuditLogTable.entity_type,
@@ -709,6 +777,9 @@ class AuditLogRepositoryImpl(AuditLogRepository):
                 "tenant_id": str(row.tenant_id),
                 "timestamp": row.timestamp.isoformat(),
                 "actor_id": str(row.actor_id) if row.actor_id else None,
+                "actor_api_key_id": (
+                    str(row.actor_api_key_id) if row.actor_api_key_id else None
+                ),
                 "actor_type": row.actor_type,
                 "action": row.action,
                 "entity_type": row.entity_type,
@@ -755,7 +826,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         )
 
         if actor_id:
-            query = query.where(AuditLogTable.actor_id == actor_id)
+            query = query.where(_acted_as(actor_id))
 
         if action:
             query = query.where(AuditLogTable.action == action.value)
@@ -791,7 +862,7 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         actor_query = sa.select(AuditLogTable).where(
             sa.and_(
                 AuditLogTable.tenant_id == tenant_id,
-                AuditLogTable.actor_id == user_id,
+                _acted_as(user_id),
                 AuditLogTable.deleted_at.is_(None),
             )
         )

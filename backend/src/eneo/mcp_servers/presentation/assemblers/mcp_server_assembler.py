@@ -193,6 +193,9 @@ class MCPServerSettingsAssembler:
             for tool in sorted_tools
         ]
 
+        has_creds = bool(mcp_server.http_auth_config_schema)
+        credential_status = "ok" if has_creds else "missing"
+
         return MCPServerSettingsPublic(
             id=mcp_server.id,
             mcp_server_id=mcp_server.id,
@@ -223,6 +226,7 @@ class MCPServerSettingsAssembler:
             icon_url=mcp_server.icon_url,
             documentation_url=mcp_server.documentation_url,
             is_org_enabled=mcp_server.is_enabled,
+            credential_status=credential_status,
             tools=tools,
             security_classification=SecurityClassificationPublic.from_domain(
                 mcp_server.effective_security_classification,

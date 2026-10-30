@@ -29,6 +29,8 @@ const UNLOCALIZED_BY_DESIGN = new Map<number, string>([
   [9007, "BAD_REQUEST — the backend message carries the actual reason"],
   [9012, "VALIDATION_ERROR — field-level detail lives in the response"],
   [9013, "PYDANTIC_PARSE_ERROR — developer-facing, never shown as-is"],
+  [9056, "RESOURCE_GONE — the backend message identifies the expired resource"],
+  [9057, "CONFLICT — the backend message identifies the stale operation"],
 
   // Infrastructure and operator conditions. These reach logs and admins, not
   // end users in a normal session.

@@ -31,7 +31,8 @@ ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
 ENV NODE_OPTIONS=--max-old-space-size=8192
 RUN bun run --filter @eneo/ui prepare && bun run --filter @eneo/web prepare
 # This image ships apps/web; web-next has its own Dockerfile and build context.
-RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
+# Match frontend CI's heap budget for adapter-node bundling.
+RUN bun run --filter @eneo/ui build && NODE_OPTIONS=--max-old-space-size=8192 bun run --filter @eneo/web build
 
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md

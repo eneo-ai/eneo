@@ -1,6 +1,6 @@
 # Audit Logging Guide
 
-import { Callout, Tabs } from 'nextra/components'
+import { Callout, Tabs } from "nextra/components";
 
 Audit logging helps organizations track sensitive actions, meet compliance requirements, and investigate incidents. This guide explains how to enable, configure, and use audit logs in Eneo.
 
@@ -18,14 +18,44 @@ Audit logs capture actions such as:
 
 Logs are stored in PostgreSQL and are scoped to your tenant.
 
+## Flow audit guarantees
+
+Flow events use different guarantees based on what could be exposed or changed:
+
+| Guarantee                         | Used for                                                                                                                                                          | What happens if audit storage is unavailable                                                                                                                      |
+| --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Required in the state transaction | Run creation and terminal/review transitions, redispatch, runtime input upload or deletion, run-history policy changes, package import, and future purge receipts | The protected database change does not commit.                                                                                                                    |
+| Required before access            | Run input/result detail, active review payloads, evidence and provider-call views or exports, template/run-file download URLs, and Flow package export            | Eneo returns `503` and does not return protected content, package bytes, or a signed URL.                                                                         |
+| Configurable and asynchronous     | Routine Flow authoring and most tenant Flow-setting changes                                                                                                       | The action can succeed when its configured audit event is disabled or the audit queue is temporarily unavailable.                                                 |
+| Operational, best effort          | Executed Flow HTTP and transcription audit summaries                                                                                                              | Runtime step/attempt state, webhook delivery state, and provider-call evidence remain the durable records. The additional admin audit summary may be unavailable. |
+
+Required Flow events are safety records. They bypass the global, category, and
+action toggles, so an administrator cannot accidentally disable the record while
+performing the protected action. The toggles control configurable events only.
+
+Audit metadata contains identifiers, bounded counts, classifications, and status.
+It does not contain prompts, document or audio content, credentials, signed URLs,
+authorization headers, or raw provider request and response bodies. Routine run
+status polling and history use content-free summaries, so they are not audited.
+Opening run input/result detail or an active review payload is audited and fails
+with `503` if the required record cannot be committed.
+
+The Flow authoring screen's **Test HTTP request** action is not a runtime Flow
+step. It creates a configurable asynchronous audit event after the external
+request, but no step, attempt, or webhook-delivery record. A temporary audit-queue
+failure does not suppress the test result, so this action is not durable HTTP
+evidence. Execute the published Flow when durable runtime evidence is required.
+
 ## Enable audit logging
 
-Audit logging can be turned on or off globally in the admin UI.
+Configurable audit logging can be turned on or off globally in the admin UI.
 
 - Go to **Admin** and use the **Audit logging** toggle on the admin overview page to enable or disable logging for your tenant
 - The logs themselves, the per-category and per-action configuration, exports, and the retention setting live under **Admin → Analytics & logs → Audit Logs**
 
-When disabled, no new audit logs are created.
+When disabled, configurable events are not created. Required Flow safety events
+described above still record the protected action or deny it if the record cannot
+be persisted.
 
 ## Configure what gets logged
 
@@ -73,6 +103,10 @@ Audit log retention is configured per tenant, in days, on the Audit Logs page an
 
 Conversation data (questions and app runs) has its own retention hierarchy, set per space, assistant, or app. See [Retention](/docs/audit-logging#retention) on the technical page for the hierarchy, its limits, and the API.
 
+A flow authoring chat is an ordinary conversation and follows the same Space/conversation retention. This is separate from Flow run-history policy.
+
+Flow run and step history is never deleted by that scheduled worker. Its dedicated Organization → Space → Flow policy only sets eligibility or a human-review queue. See [Data retention and deletion](/guides/data-retention).
+
 ## Exporting audit logs
 
 Audit logs can be exported from the UI for compliance or incident response.
@@ -84,7 +118,14 @@ Exported files are retained for 24 hours before cleanup.
 
 ## UI walkthrough
 
-<Tabs items={['Access justification', 'Logs & filters', 'Configuration', 'Log details']}>
+<Tabs
+  items={[
+    "Access justification",
+    "Logs & filters",
+    "Configuration",
+    "Log details",
+  ]}
+>
   <Tabs.Tab>
     <div className="space-y-4">
       <a
@@ -117,7 +158,12 @@ Exported files are retained for 24 hours before cleanup.
   </Tabs.Tab>
   <Tabs.Tab>
     <div className="space-y-4">
-      <a href="/images/audit/logs-view.png" target="_blank" rel="noreferrer" className="block">
+      <a
+        href="/images/audit/logs-view.png"
+        target="_blank"
+        rel="noreferrer"
+        className="block"
+      >
         <img
           src="/images/audit/logs-view.png"
           alt="Audit logs view"
@@ -125,7 +171,12 @@ Exported files are retained for 24 hours before cleanup.
           className="w-full rounded-lg border border-slate-200 dark:border-slate-700"
         />
       </a>
-      <a href="/images/audit/user-filter.png" target="_blank" rel="noreferrer" className="block">
+      <a
+        href="/images/audit/user-filter.png"
+        target="_blank"
+        rel="noreferrer"
+        className="block"
+      >
         <img
           src="/images/audit/user-filter.png"
           alt="User search filter"
@@ -133,7 +184,12 @@ Exported files are retained for 24 hours before cleanup.
           className="w-full rounded-lg border border-slate-200 dark:border-slate-700"
         />
       </a>
-      <a href="/images/audit/action-filter.png" target="_blank" rel="noreferrer" className="block">
+      <a
+        href="/images/audit/action-filter.png"
+        target="_blank"
+        rel="noreferrer"
+        className="block"
+      >
         <img
           src="/images/audit/action-filter.png"
           alt="Action multi-select filter"
@@ -174,7 +230,12 @@ Exported files are retained for 24 hours before cleanup.
     </div>
   </Tabs.Tab>
   <Tabs.Tab>
-    <a href="/images/audit/log-details.png" target="_blank" rel="noreferrer" className="block">
+    <a
+      href="/images/audit/log-details.png"
+      target="_blank"
+      rel="noreferrer"
+      className="block"
+    >
       <img
         src="/images/audit/log-details.png"
         alt="Audit log details panel"
@@ -193,5 +254,7 @@ Exported files are retained for 24 hours before cleanup.
 - Use async exports for large time ranges.
 
 <Callout type="info">
-  Need developer details, or the plans for external audit sinks? See the [Audit Logging (Technical)](/docs/audit-logging) documentation and its [Roadmap](/docs/audit-logging#roadmap).
+  Need developer details, or the plans for external audit sinks? See the [Audit
+  Logging (Technical)](/docs/audit-logging) documentation and its
+  [Roadmap](/docs/audit-logging#roadmap).
 </Callout>

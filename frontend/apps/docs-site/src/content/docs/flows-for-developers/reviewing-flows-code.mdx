@@ -1,0 +1,112 @@
+# Reviewing Flows code
+
+Review from the public behavior inward. A large Flow change is usually safer as
+several owner-local changes with one integration proof than as a new cross-layer
+abstraction.
+
+## Where to start
+
+| Change | Start with | Prove |
+| --- | --- | --- |
+| Route or response | `eneo.flows.api` and its application service | OpenAPI/error mapping, authorization, and audit behavior |
+| Lifecycle transition | Application service and domain policy | valid/invalid transitions, CAS/idempotency, terminalization ownership |
+| Persistence | Infrastructure repository and `flow_tables.py` | tenant filter, composite ownership, lock behavior, lowest-layer integration test |
+| Execution | `runtime/executor.py` and the relevant step handler | published snapshot only, bounded inputs/effects, attempt/provider evidence |
+| Dispatch or recovery | `application/flow_dispatch.py`, recovery policy, platform adapter | commit-before-send, duplicate rejection, unknown-outcome convergence |
+| Review | checkpoint service and repository | actor scope, revision CAS, one active checkpoint, audit outbox |
+| Files or artifacts | runtime file service and file-row repositories | tenant/principal ownership, binding lock, signed access, retention behavior |
+| Evidence/export | evidence service, redaction owner, API adapter | tenant scope, same redaction policy, honest missing evidence, audit-before-response |
+| Retention eligibility or purge | Flow retention projection/resolver, administrator purge service, and purge repository; [retention contract](/guides/flows/retention-policy) | Flow → Space → Organization override resolution, preview non-mutation, authorization/audit, blockers, bounded whole-run purge |
+| Package portability | `eneo.flow_packages` plus the Flow adapter | archive safety, checksums, explicit mapping, unpublished target draft |
+| Authoring chat and flow tools | `flows/application/flow_authoring_operations.py`, `flow_authoring_chat.py`, `internal_mcp/flows.py` | the same editor update, validation, permissions and audit as the editor; edit mode and revision fencing |
+
+## Non-negotiable review checks
+
+### Tenant and actor boundaries
+
+- Every tenant-owned repository query includes `tenant_id`.
+- Composite relationships cannot bind a child to another tenant's parent.
+- User and service-principal shapes are exclusive and correctly attributed.
+- Evidence, review, artifact, file, package, and run operations repeat
+  authorization at their own boundary.
+- Mutating operations write the required audit entry or durable audit intent.
+
+### Runtime reliability
+
+- The API commits the run before dispatch.
+- Broker errors preserve accepted, rejected, and unknown outcomes distinctly.
+- Worker claim uses status/revision CAS and rejects duplicate deliveries.
+- Only `FlowRunTerminalizer` writes terminal lifecycle state.
+- Maintenance still progresses independently of saturated execution capacity.
+
+### Data and public contracts
+
+- Runs read immutable published definitions, never mutable draft steps.
+- Queryable state is relational; a new or changed JSONB column is parsed through
+  a typed model with a decided schema version and corruption behavior, and is
+  added to the reviewed list in `test_flow_jsonb_columns.py`.
+- OpenAPI changes regenerate `frontend/packages/eneo-js/src/types/schema.d.ts`.
+- English and Swedish translation catalogs stay in parity.
+- Hand-maintained docs describe ownership and behavior rather than duplicating
+  every enum or column.
+
+## Tests to retain
+
+Prefer the lowest layer that can express the behavior:
+
+- unit tests for policies, parsers, transitions, error mapping, and redaction;
+- repository integration tests for constraints, locks, CAS, tenancy, and
+  transaction boundaries;
+- API integration tests for auth, public contracts, audit, and streaming;
+- migration isolation tests for upgrade/downgrade and retained data;
+- focused frontend tests for Swedish labels, keyboard behavior, and accessible
+  names;
+- E2E only for the complete author and package journeys.
+
+Do not add tests that merely freeze a file count, restate an enum into another
+tuple, grep a migration source string, or require prose to equal generated
+output. Preserve architecture import guards when they prevent a real dependency
+violation.
+
+## Validation inside the devcontainer
+
+Backend focused loop:
+
+```bash
+cd /workspace/backend
+uv run ruff check src/eneo/flows tests/unit/flows tests/unittests/flows
+uv run pytest tests/unit/flows tests/unittests/flows -n auto -q
+```
+
+Migration isolation:
+
+```bash
+cd /workspace/backend
+ENEO_TEST_DOCKER_NETWORK=eneo uv run pytest -m migration_isolation \
+  tests/integration/migrations/test_final_flow_schema_migrations.py -q
+```
+
+Frontend contract checks:
+
+```bash
+cd /workspace/frontend
+bun run check
+bun run lint
+bun run build
+```
+
+Use focused security, audit, package, evidence, retention, and concurrency tests
+for the touched owners before running the broader suites. The repository's
+commit and pre-push hooks are required final gates.
+
+## Debugging a stuck run
+
+1. Read `GET /api/healthz/flows` with operator credentials.
+2. Compare run status/revision with dispatch and worker-claim fields.
+3. Check execution and maintenance worker health independently.
+4. Inspect active attempts, checkpoints, and pending webhook/audit intent.
+5. Let generation-fenced redispatch or reconciliation converge the row.
+6. Never clear dispatch, checkpoint, outbox, or terminal fields with ad-hoc SQL.
+
+See the [Flows operations runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/runbooks/flows.md)
+for thresholds and recovery guidance.

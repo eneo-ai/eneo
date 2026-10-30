@@ -3,6 +3,7 @@ text is bounded by mcp_app_resource_max_bytes, the wire response gets its own
 pre-decode ceiling in the httpx hook, and the client refuses to read while
 disconnected."""
 
+import asyncio
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
@@ -50,6 +51,21 @@ def _resource_result(
 
 
 class TestReadResource:
+    async def test_a_cancelled_caller_is_not_a_failed_read(self):
+        # Kills the mutant that turns the caller's cancellation into an
+        # MCPClientError: the caller's own timeout must still fire.
+        client = _make_client()
+        client.session = AsyncMock()
+
+        async def blocked(_uri):
+            await asyncio.Event().wait()
+
+        client.session.read_resource.side_effect = blocked
+
+        with pytest.raises(TimeoutError):
+            async with asyncio.timeout(0.01):
+                await client.read_resource("ui://weather/dashboard")
+
     async def test_returns_first_content_block(self):
         client = _make_client()
         client.session = AsyncMock()

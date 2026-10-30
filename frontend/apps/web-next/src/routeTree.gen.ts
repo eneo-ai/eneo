@@ -38,12 +38,15 @@ import { Route as AppDashboardAssistantIdChar123SessionIdChar125RouteImport } fr
 import { Route as AppSpacesSpaceIdIndexRouteImport } from "./routes/_app/spaces/$spaceId/index"
 import { Route as AppSpacesSpaceIdSplatRouteImport } from "./routes/_app/spaces/$spaceId/$"
 import { Route as AppSpacesSpaceIdChatRouteImport } from "./routes/_app/spaces/$spaceId/chat"
+import { Route as AppSpacesSpaceIdFlowsRouteImport } from "./routes/_app/spaces/$spaceId/flows"
 import { Route as AppSpacesSpaceIdMembersRouteImport } from "./routes/_app/spaces/$spaceId/members"
 import { Route as AppSpacesSpaceIdOverviewRouteImport } from "./routes/_app/spaces/$spaceId/overview"
 import { Route as AppSpacesSpaceIdSettingsRouteImport } from "./routes/_app/spaces/$spaceId/settings"
 import { Route as AppDashboardAppAppIdIndexRouteImport } from "./routes/_app/dashboard/app/$appId/index"
 import { Route as AppSpacesSpaceIdAppsIndexRouteImport } from "./routes/_app/spaces/$spaceId/apps/index"
 import { Route as AppSpacesSpaceIdAssistantsIndexRouteImport } from "./routes/_app/spaces/$spaceId/assistants/index"
+import { Route as AppSpacesSpaceIdFlowsIndexRouteImport } from "./routes/_app/spaces/$spaceId/flows/index"
+import { Route as AppSpacesSpaceIdFlowsFlowIdRouteImport } from "./routes/_app/spaces/$spaceId/flows/$flowId"
 import { Route as AppSpacesSpaceIdKnowledgeIndexRouteImport } from "./routes/_app/spaces/$spaceId/knowledge/index"
 import { Route as AppSpacesSpaceIdServicesIndexRouteImport } from "./routes/_app/spaces/$spaceId/services/index"
 import { Route as AppSpacesSpaceIdServicesServiceIdRouteImport } from "./routes/_app/spaces/$spaceId/services/$serviceId"
@@ -54,12 +57,14 @@ import { Route as AppDashboardAppAppIdResultsResultIdRouteImport } from "./route
 import { Route as AppSpacesSpaceIdAppsAppIdIndexRouteImport } from "./routes/_app/spaces/$spaceId/apps/$appId/index"
 import { Route as AppSpacesSpaceIdAppsAppIdEditRouteImport } from "./routes/_app/spaces/$spaceId/apps/$appId/edit"
 import { Route as AppSpacesSpaceIdAssistantsAssistantIdEditRouteImport } from "./routes/_app/spaces/$spaceId/assistants/$assistantId/edit"
+import { Route as AppSpacesSpaceIdFlowsFlowIdIndexRouteImport } from "./routes/_app/spaces/$spaceId/flows/$flowId/index"
 import { Route as AppSpacesSpaceIdGroupChatsGroupChatIdEditRouteImport } from "./routes/_app/spaces/$spaceId/group-chats/$groupChatId/edit"
 import { Route as AppSpacesSpaceIdKnowledgeCollectionsCollectionIdRouteImport } from "./routes/_app/spaces/$spaceId/knowledge/collections/$collectionId"
 import { Route as AppSpacesSpaceIdKnowledgeIntegrationsIndexRouteImport } from "./routes/_app/spaces/$spaceId/knowledge/integrations/index"
 import { Route as AppSpacesSpaceIdKnowledgeIntegrationsIntegrationKnowledgeIdRouteImport } from "./routes/_app/spaces/$spaceId/knowledge/integrations/$integrationKnowledgeId"
 import { Route as AppSpacesSpaceIdKnowledgeWebsitesWebsiteIdRouteImport } from "./routes/_app/spaces/$spaceId/knowledge/websites/$websiteId"
 import { Route as AppSpacesSpaceIdAppsAppIdResultsResultIdRouteImport } from "./routes/_app/spaces/$spaceId/apps/$appId/results/$resultId"
+import { Route as AppSpacesSpaceIdFlowsFlowIdRunsRunIdRouteImport } from "./routes/_app/spaces/$spaceId/flows/$flowId/runs/$runId"
 import { Route as AppSpacesSpaceIdKnowledgeIntegrationsWrapperWrapperIdRouteImport } from "./routes/_app/spaces/$spaceId/knowledge/integrations/wrapper/$wrapperId"
 
 const IndexRoute = IndexRouteImport.update({
@@ -208,6 +213,11 @@ const AppSpacesSpaceIdChatRoute = AppSpacesSpaceIdChatRouteImport.update({
   path: "/chat",
   getParentRoute: () => AppSpacesSpaceIdRoute,
 } as any)
+const AppSpacesSpaceIdFlowsRoute = AppSpacesSpaceIdFlowsRouteImport.update({
+  id: "/flows",
+  path: "/flows",
+  getParentRoute: () => AppSpacesSpaceIdRoute,
+} as any)
 const AppSpacesSpaceIdMembersRoute = AppSpacesSpaceIdMembersRouteImport.update({
   id: "/members",
   path: "/members",
@@ -242,6 +252,18 @@ const AppSpacesSpaceIdAssistantsIndexRoute =
     id: "/assistants/",
     path: "/assistants/",
     getParentRoute: () => AppSpacesSpaceIdRoute,
+  } as any)
+const AppSpacesSpaceIdFlowsIndexRoute =
+  AppSpacesSpaceIdFlowsIndexRouteImport.update({
+    id: "/",
+    path: "/",
+    getParentRoute: () => AppSpacesSpaceIdFlowsRoute,
+  } as any)
+const AppSpacesSpaceIdFlowsFlowIdRoute =
+  AppSpacesSpaceIdFlowsFlowIdRouteImport.update({
+    id: "/$flowId",
+    path: "/$flowId",
+    getParentRoute: () => AppSpacesSpaceIdFlowsRoute,
   } as any)
 const AppSpacesSpaceIdKnowledgeIndexRoute =
   AppSpacesSpaceIdKnowledgeIndexRouteImport.update({
@@ -303,6 +325,12 @@ const AppSpacesSpaceIdAssistantsAssistantIdEditRoute =
     path: "/assistants/$assistantId/edit",
     getParentRoute: () => AppSpacesSpaceIdRoute,
   } as any)
+const AppSpacesSpaceIdFlowsFlowIdIndexRoute =
+  AppSpacesSpaceIdFlowsFlowIdIndexRouteImport.update({
+    id: "/",
+    path: "/",
+    getParentRoute: () => AppSpacesSpaceIdFlowsFlowIdRoute,
+  } as any)
 const AppSpacesSpaceIdGroupChatsGroupChatIdEditRoute =
   AppSpacesSpaceIdGroupChatsGroupChatIdEditRouteImport.update({
     id: "/group-chats/$groupChatId/edit",
@@ -341,6 +369,12 @@ const AppSpacesSpaceIdAppsAppIdResultsResultIdRoute =
     path: "/apps/$appId/results/$resultId",
     getParentRoute: () => AppSpacesSpaceIdRoute,
   } as any)
+const AppSpacesSpaceIdFlowsFlowIdRunsRunIdRoute =
+  AppSpacesSpaceIdFlowsFlowIdRunsRunIdRouteImport.update({
+    id: "/runs/$runId",
+    path: "/runs/$runId",
+    getParentRoute: () => AppSpacesSpaceIdFlowsFlowIdRoute,
+  } as any)
 const AppSpacesSpaceIdKnowledgeIntegrationsWrapperWrapperIdRoute =
   AppSpacesSpaceIdKnowledgeIntegrationsWrapperWrapperIdRouteImport.update({
     id: "/knowledge/integrations/wrapper/$wrapperId",
@@ -376,16 +410,19 @@ export interface FileRoutesByFullPath {
   "/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
   "/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
   "/spaces/$spaceId/chat": typeof AppSpacesSpaceIdChatRoute
+  "/spaces/$spaceId/flows": typeof AppSpacesSpaceIdFlowsRouteWithChildren
   "/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
   "/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/spaces/$spaceId/flows/$flowId": typeof AppSpacesSpaceIdFlowsFlowIdRouteWithChildren
   "/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
   "/spaces/$spaceId/apps/": typeof AppSpacesSpaceIdAppsIndexRoute
   "/spaces/$spaceId/assistants/": typeof AppSpacesSpaceIdAssistantsIndexRoute
+  "/spaces/$spaceId/flows/": typeof AppSpacesSpaceIdFlowsIndexRoute
   "/spaces/$spaceId/knowledge/": typeof AppSpacesSpaceIdKnowledgeIndexRoute
   "/spaces/$spaceId/services/": typeof AppSpacesSpaceIdServicesIndexRoute
   "/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
@@ -397,8 +434,10 @@ export interface FileRoutesByFullPath {
   "/spaces/$spaceId/knowledge/integrations/$integrationKnowledgeId": typeof AppSpacesSpaceIdKnowledgeIntegrationsIntegrationKnowledgeIdRoute
   "/spaces/$spaceId/knowledge/websites/$websiteId": typeof AppSpacesSpaceIdKnowledgeWebsitesWebsiteIdRoute
   "/spaces/$spaceId/apps/$appId/": typeof AppSpacesSpaceIdAppsAppIdIndexRoute
+  "/spaces/$spaceId/flows/$flowId/": typeof AppSpacesSpaceIdFlowsFlowIdIndexRoute
   "/spaces/$spaceId/knowledge/integrations/": typeof AppSpacesSpaceIdKnowledgeIntegrationsIndexRoute
   "/spaces/$spaceId/apps/$appId/results/$resultId": typeof AppSpacesSpaceIdAppsAppIdResultsResultIdRoute
+  "/spaces/$spaceId/flows/$flowId/runs/$runId": typeof AppSpacesSpaceIdFlowsFlowIdRunsRunIdRoute
   "/spaces/$spaceId/knowledge/integrations/wrapper/$wrapperId": typeof AppSpacesSpaceIdKnowledgeIntegrationsWrapperWrapperIdRoute
 }
 export interface FileRoutesByTo {
@@ -437,6 +476,7 @@ export interface FileRoutesByTo {
   "/dashboard/app/$appId": typeof AppDashboardAppAppIdIndexRoute
   "/spaces/$spaceId/apps": typeof AppSpacesSpaceIdAppsIndexRoute
   "/spaces/$spaceId/assistants": typeof AppSpacesSpaceIdAssistantsIndexRoute
+  "/spaces/$spaceId/flows": typeof AppSpacesSpaceIdFlowsIndexRoute
   "/spaces/$spaceId/knowledge": typeof AppSpacesSpaceIdKnowledgeIndexRoute
   "/spaces/$spaceId/services": typeof AppSpacesSpaceIdServicesIndexRoute
   "/spaces/$spaceId/skills": typeof AppSpacesSpaceIdSkillsIndexRoute
@@ -448,8 +488,10 @@ export interface FileRoutesByTo {
   "/spaces/$spaceId/knowledge/integrations/$integrationKnowledgeId": typeof AppSpacesSpaceIdKnowledgeIntegrationsIntegrationKnowledgeIdRoute
   "/spaces/$spaceId/knowledge/websites/$websiteId": typeof AppSpacesSpaceIdKnowledgeWebsitesWebsiteIdRoute
   "/spaces/$spaceId/apps/$appId": typeof AppSpacesSpaceIdAppsAppIdIndexRoute
+  "/spaces/$spaceId/flows/$flowId": typeof AppSpacesSpaceIdFlowsFlowIdIndexRoute
   "/spaces/$spaceId/knowledge/integrations": typeof AppSpacesSpaceIdKnowledgeIntegrationsIndexRoute
   "/spaces/$spaceId/apps/$appId/results/$resultId": typeof AppSpacesSpaceIdAppsAppIdResultsResultIdRoute
+  "/spaces/$spaceId/flows/$flowId/runs/$runId": typeof AppSpacesSpaceIdFlowsFlowIdRunsRunIdRoute
   "/spaces/$spaceId/knowledge/integrations/wrapper/$wrapperId": typeof AppSpacesSpaceIdKnowledgeIntegrationsWrapperWrapperIdRoute
 }
 export interface FileRoutesById {
@@ -482,16 +524,19 @@ export interface FileRoutesById {
   "/_app/dashboard/$assistantId/{-$sessionId}": typeof AppDashboardAssistantIdChar123SessionIdChar125Route
   "/_app/spaces/$spaceId/$": typeof AppSpacesSpaceIdSplatRoute
   "/_app/spaces/$spaceId/chat": typeof AppSpacesSpaceIdChatRoute
+  "/_app/spaces/$spaceId/flows": typeof AppSpacesSpaceIdFlowsRouteWithChildren
   "/_app/spaces/$spaceId/members": typeof AppSpacesSpaceIdMembersRoute
   "/_app/spaces/$spaceId/overview": typeof AppSpacesSpaceIdOverviewRoute
   "/_app/spaces/$spaceId/settings": typeof AppSpacesSpaceIdSettingsRoute
   "/_app/spaces/$spaceId/": typeof AppSpacesSpaceIdIndexRoute
+  "/_app/spaces/$spaceId/flows/$flowId": typeof AppSpacesSpaceIdFlowsFlowIdRouteWithChildren
   "/_app/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/_app/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/_app/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/_app/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
   "/_app/spaces/$spaceId/apps/": typeof AppSpacesSpaceIdAppsIndexRoute
   "/_app/spaces/$spaceId/assistants/": typeof AppSpacesSpaceIdAssistantsIndexRoute
+  "/_app/spaces/$spaceId/flows/": typeof AppSpacesSpaceIdFlowsIndexRoute
   "/_app/spaces/$spaceId/knowledge/": typeof AppSpacesSpaceIdKnowledgeIndexRoute
   "/_app/spaces/$spaceId/services/": typeof AppSpacesSpaceIdServicesIndexRoute
   "/_app/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
@@ -503,8 +548,10 @@ export interface FileRoutesById {
   "/_app/spaces/$spaceId/knowledge/integrations/$integrationKnowledgeId": typeof AppSpacesSpaceIdKnowledgeIntegrationsIntegrationKnowledgeIdRoute
   "/_app/spaces/$spaceId/knowledge/websites/$websiteId": typeof AppSpacesSpaceIdKnowledgeWebsitesWebsiteIdRoute
   "/_app/spaces/$spaceId/apps/$appId/": typeof AppSpacesSpaceIdAppsAppIdIndexRoute
+  "/_app/spaces/$spaceId/flows/$flowId/": typeof AppSpacesSpaceIdFlowsFlowIdIndexRoute
   "/_app/spaces/$spaceId/knowledge/integrations/": typeof AppSpacesSpaceIdKnowledgeIntegrationsIndexRoute
   "/_app/spaces/$spaceId/apps/$appId/results/$resultId": typeof AppSpacesSpaceIdAppsAppIdResultsResultIdRoute
+  "/_app/spaces/$spaceId/flows/$flowId/runs/$runId": typeof AppSpacesSpaceIdFlowsFlowIdRunsRunIdRoute
   "/_app/spaces/$spaceId/knowledge/integrations/wrapper/$wrapperId": typeof AppSpacesSpaceIdKnowledgeIntegrationsWrapperWrapperIdRoute
 }
 export interface FileRouteTypes {
@@ -537,16 +584,19 @@ export interface FileRouteTypes {
     | "/dashboard/$assistantId/{-$sessionId}"
     | "/spaces/$spaceId/$"
     | "/spaces/$spaceId/chat"
+    | "/spaces/$spaceId/flows"
     | "/spaces/$spaceId/members"
     | "/spaces/$spaceId/overview"
     | "/spaces/$spaceId/settings"
     | "/spaces/$spaceId/"
+    | "/spaces/$spaceId/flows/$flowId"
     | "/spaces/$spaceId/services/$serviceId"
     | "/spaces/$spaceId/skills/$skillId"
     | "/spaces/$spaceId/skills/new"
     | "/dashboard/app/$appId/"
     | "/spaces/$spaceId/apps/"
     | "/spaces/$spaceId/assistants/"
+    | "/spaces/$spaceId/flows/"
     | "/spaces/$spaceId/knowledge/"
     | "/spaces/$spaceId/services/"
     | "/spaces/$spaceId/skills/"
@@ -558,8 +608,10 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/knowledge/integrations/$integrationKnowledgeId"
     | "/spaces/$spaceId/knowledge/websites/$websiteId"
     | "/spaces/$spaceId/apps/$appId/"
+    | "/spaces/$spaceId/flows/$flowId/"
     | "/spaces/$spaceId/knowledge/integrations/"
     | "/spaces/$spaceId/apps/$appId/results/$resultId"
+    | "/spaces/$spaceId/flows/$flowId/runs/$runId"
     | "/spaces/$spaceId/knowledge/integrations/wrapper/$wrapperId"
   fileRoutesByTo: FileRoutesByTo
   to:
@@ -598,6 +650,7 @@ export interface FileRouteTypes {
     | "/dashboard/app/$appId"
     | "/spaces/$spaceId/apps"
     | "/spaces/$spaceId/assistants"
+    | "/spaces/$spaceId/flows"
     | "/spaces/$spaceId/knowledge"
     | "/spaces/$spaceId/services"
     | "/spaces/$spaceId/skills"
@@ -609,8 +662,10 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/knowledge/integrations/$integrationKnowledgeId"
     | "/spaces/$spaceId/knowledge/websites/$websiteId"
     | "/spaces/$spaceId/apps/$appId"
+    | "/spaces/$spaceId/flows/$flowId"
     | "/spaces/$spaceId/knowledge/integrations"
     | "/spaces/$spaceId/apps/$appId/results/$resultId"
+    | "/spaces/$spaceId/flows/$flowId/runs/$runId"
     | "/spaces/$spaceId/knowledge/integrations/wrapper/$wrapperId"
   id:
     | "__root__"
@@ -642,16 +697,19 @@ export interface FileRouteTypes {
     | "/_app/dashboard/$assistantId/{-$sessionId}"
     | "/_app/spaces/$spaceId/$"
     | "/_app/spaces/$spaceId/chat"
+    | "/_app/spaces/$spaceId/flows"
     | "/_app/spaces/$spaceId/members"
     | "/_app/spaces/$spaceId/overview"
     | "/_app/spaces/$spaceId/settings"
     | "/_app/spaces/$spaceId/"
+    | "/_app/spaces/$spaceId/flows/$flowId"
     | "/_app/spaces/$spaceId/services/$serviceId"
     | "/_app/spaces/$spaceId/skills/$skillId"
     | "/_app/spaces/$spaceId/skills/new"
     | "/_app/dashboard/app/$appId/"
     | "/_app/spaces/$spaceId/apps/"
     | "/_app/spaces/$spaceId/assistants/"
+    | "/_app/spaces/$spaceId/flows/"
     | "/_app/spaces/$spaceId/knowledge/"
     | "/_app/spaces/$spaceId/services/"
     | "/_app/spaces/$spaceId/skills/"
@@ -663,8 +721,10 @@ export interface FileRouteTypes {
     | "/_app/spaces/$spaceId/knowledge/integrations/$integrationKnowledgeId"
     | "/_app/spaces/$spaceId/knowledge/websites/$websiteId"
     | "/_app/spaces/$spaceId/apps/$appId/"
+    | "/_app/spaces/$spaceId/flows/$flowId/"
     | "/_app/spaces/$spaceId/knowledge/integrations/"
     | "/_app/spaces/$spaceId/apps/$appId/results/$resultId"
+    | "/_app/spaces/$spaceId/flows/$flowId/runs/$runId"
     | "/_app/spaces/$spaceId/knowledge/integrations/wrapper/$wrapperId"
   fileRoutesById: FileRoutesById
 }
@@ -888,6 +948,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppSpacesSpaceIdChatRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
     }
+    "/_app/spaces/$spaceId/flows": {
+      id: "/_app/spaces/$spaceId/flows"
+      path: "/flows"
+      fullPath: "/spaces/$spaceId/flows"
+      preLoaderRoute: typeof AppSpacesSpaceIdFlowsRouteImport
+      parentRoute: typeof AppSpacesSpaceIdRoute
+    }
     "/_app/spaces/$spaceId/members": {
       id: "/_app/spaces/$spaceId/members"
       path: "/members"
@@ -929,6 +996,20 @@ declare module "@tanstack/react-router" {
       fullPath: "/spaces/$spaceId/assistants/"
       preLoaderRoute: typeof AppSpacesSpaceIdAssistantsIndexRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
+    }
+    "/_app/spaces/$spaceId/flows/": {
+      id: "/_app/spaces/$spaceId/flows/"
+      path: "/"
+      fullPath: "/spaces/$spaceId/flows/"
+      preLoaderRoute: typeof AppSpacesSpaceIdFlowsIndexRouteImport
+      parentRoute: typeof AppSpacesSpaceIdFlowsRoute
+    }
+    "/_app/spaces/$spaceId/flows/$flowId": {
+      id: "/_app/spaces/$spaceId/flows/$flowId"
+      path: "/$flowId"
+      fullPath: "/spaces/$spaceId/flows/$flowId"
+      preLoaderRoute: typeof AppSpacesSpaceIdFlowsFlowIdRouteImport
+      parentRoute: typeof AppSpacesSpaceIdFlowsRoute
     }
     "/_app/spaces/$spaceId/knowledge/": {
       id: "/_app/spaces/$spaceId/knowledge/"
@@ -1000,6 +1081,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppSpacesSpaceIdAssistantsAssistantIdEditRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
     }
+    "/_app/spaces/$spaceId/flows/$flowId/": {
+      id: "/_app/spaces/$spaceId/flows/$flowId/"
+      path: "/"
+      fullPath: "/spaces/$spaceId/flows/$flowId/"
+      preLoaderRoute: typeof AppSpacesSpaceIdFlowsFlowIdIndexRouteImport
+      parentRoute: typeof AppSpacesSpaceIdFlowsFlowIdRoute
+    }
     "/_app/spaces/$spaceId/group-chats/$groupChatId/edit": {
       id: "/_app/spaces/$spaceId/group-chats/$groupChatId/edit"
       path: "/group-chats/$groupChatId/edit"
@@ -1042,6 +1130,13 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppSpacesSpaceIdAppsAppIdResultsResultIdRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
     }
+    "/_app/spaces/$spaceId/flows/$flowId/runs/$runId": {
+      id: "/_app/spaces/$spaceId/flows/$flowId/runs/$runId"
+      path: "/runs/$runId"
+      fullPath: "/spaces/$spaceId/flows/$flowId/runs/$runId"
+      preLoaderRoute: typeof AppSpacesSpaceIdFlowsFlowIdRunsRunIdRouteImport
+      parentRoute: typeof AppSpacesSpaceIdFlowsFlowIdRoute
+    }
     "/_app/spaces/$spaceId/knowledge/integrations/wrapper/$wrapperId": {
       id: "/_app/spaces/$spaceId/knowledge/integrations/wrapper/$wrapperId"
       path: "/knowledge/integrations/wrapper/$wrapperId"
@@ -1074,9 +1169,44 @@ const AppAccountRouteWithChildren = AppAccountRoute._addFileChildren(
   AppAccountRouteChildren,
 )
 
+interface AppSpacesSpaceIdFlowsFlowIdRouteChildren {
+  AppSpacesSpaceIdFlowsFlowIdIndexRoute: typeof AppSpacesSpaceIdFlowsFlowIdIndexRoute
+  AppSpacesSpaceIdFlowsFlowIdRunsRunIdRoute: typeof AppSpacesSpaceIdFlowsFlowIdRunsRunIdRoute
+}
+
+const AppSpacesSpaceIdFlowsFlowIdRouteChildren: AppSpacesSpaceIdFlowsFlowIdRouteChildren =
+  {
+    AppSpacesSpaceIdFlowsFlowIdIndexRoute:
+      AppSpacesSpaceIdFlowsFlowIdIndexRoute,
+    AppSpacesSpaceIdFlowsFlowIdRunsRunIdRoute:
+      AppSpacesSpaceIdFlowsFlowIdRunsRunIdRoute,
+  }
+
+const AppSpacesSpaceIdFlowsFlowIdRouteWithChildren =
+  AppSpacesSpaceIdFlowsFlowIdRoute._addFileChildren(
+    AppSpacesSpaceIdFlowsFlowIdRouteChildren,
+  )
+
+interface AppSpacesSpaceIdFlowsRouteChildren {
+  AppSpacesSpaceIdFlowsFlowIdRoute: typeof AppSpacesSpaceIdFlowsFlowIdRouteWithChildren
+  AppSpacesSpaceIdFlowsIndexRoute: typeof AppSpacesSpaceIdFlowsIndexRoute
+}
+
+const AppSpacesSpaceIdFlowsRouteChildren: AppSpacesSpaceIdFlowsRouteChildren = {
+  AppSpacesSpaceIdFlowsFlowIdRoute:
+    AppSpacesSpaceIdFlowsFlowIdRouteWithChildren,
+  AppSpacesSpaceIdFlowsIndexRoute: AppSpacesSpaceIdFlowsIndexRoute,
+}
+
+const AppSpacesSpaceIdFlowsRouteWithChildren =
+  AppSpacesSpaceIdFlowsRoute._addFileChildren(
+    AppSpacesSpaceIdFlowsRouteChildren,
+  )
+
 interface AppSpacesSpaceIdRouteChildren {
   AppSpacesSpaceIdSplatRoute: typeof AppSpacesSpaceIdSplatRoute
   AppSpacesSpaceIdChatRoute: typeof AppSpacesSpaceIdChatRoute
+  AppSpacesSpaceIdFlowsRoute: typeof AppSpacesSpaceIdFlowsRouteWithChildren
   AppSpacesSpaceIdMembersRoute: typeof AppSpacesSpaceIdMembersRoute
   AppSpacesSpaceIdOverviewRoute: typeof AppSpacesSpaceIdOverviewRoute
   AppSpacesSpaceIdSettingsRoute: typeof AppSpacesSpaceIdSettingsRoute
@@ -1104,6 +1234,7 @@ interface AppSpacesSpaceIdRouteChildren {
 const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
   AppSpacesSpaceIdSplatRoute: AppSpacesSpaceIdSplatRoute,
   AppSpacesSpaceIdChatRoute: AppSpacesSpaceIdChatRoute,
+  AppSpacesSpaceIdFlowsRoute: AppSpacesSpaceIdFlowsRouteWithChildren,
   AppSpacesSpaceIdMembersRoute: AppSpacesSpaceIdMembersRoute,
   AppSpacesSpaceIdOverviewRoute: AppSpacesSpaceIdOverviewRoute,
   AppSpacesSpaceIdSettingsRoute: AppSpacesSpaceIdSettingsRoute,

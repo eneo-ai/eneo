@@ -15,6 +15,7 @@ Covers, for every capability purpose (web search, image generation):
 - tool edits addressed under a server path apply only to that server's tools
 """
 
+import logging
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -28,6 +29,7 @@ from eneo.main.exceptions import (
     NotFoundException,
     ProviderNotFoundException,
 )
+from eneo.mcp_servers.application import mcp_server_service as service_module
 from eneo.mcp_servers.application.mcp_server_service import (
     ConnectionResult,
     MCPServerService,
@@ -42,11 +44,65 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     MCPServerAudienceGroup,
     MCPServerTool,
 )
+from eneo.mcp_servers.infrastructure.client import mcp_client as mcp_client_module
+from eneo.mcp_servers.infrastructure.client.mcp_client import MCPClientError
 from eneo.mcp_servers.presentation.models import (
     MCPServerCreate,
     MCPServerPublic,
     MCPServerUpdate,
 )
+from tests.unit.mcp_test_server import one_tool_app, serve_test_app
+
+
+async def test_connection_logs_name_the_server_without_its_path_or_query(
+    caplog, monkeypatch
+):
+    # Kills full-address logging in the service and the connected transport.
+    service, _, _, user = _make_service()
+    monkeypatch.setattr(mcp_client_module.logger, "handlers", [caplog.handler])
+    monkeypatch.setattr(mcp_client_module.logger, "level", logging.DEBUG)
+    # Setting level directly leaves an earlier test's cached DEBUG answer.
+    monkeypatch.setattr(mcp_client_module.logger, "_cache", {})
+    app = one_tool_app(lambda _: None)
+    async with serve_test_app(app) as url:
+        server = _make_server(user.tenant_id)
+        server.http_url = f"{url}?token=address-secret"
+        with caplog.at_level(logging.DEBUG, logger="eneo"):
+            tools, result = await service._test_connection_and_discover_tools(server)
+    assert result.success and len(tools) == 1
+    messages = [
+        record.getMessage()
+        for record in caplog.records
+        if record.name.startswith("eneo.")
+    ]
+    assert any("Testing connection to MCP server" in message for message in messages)
+    assert any("Streamable HTTP transport connected" in message for message in messages)
+    assert all(
+        "/mcp" not in message and "address-secret" not in message
+        for message in messages
+    )
+
+
+@pytest.mark.parametrize("discovery", [False, True])
+@pytest.mark.parametrize("failure", ["Connection refused", "Connection timed out"])
+async def test_connection_error_text_names_the_server_without_its_path_or_query(
+    monkeypatch, discovery, failure
+):
+    # Kills full-address interpolation in either admin connection operation.
+    service, _, _, user = _make_service()
+    server = _make_server(user.tenant_id)
+    server.http_url = "https://tools.example/private-path?token=address-secret"
+    client = AsyncMock()
+    client.__aenter__.side_effect = MCPClientError(failure)
+    monkeypatch.setattr(service_module, "MCPClient", lambda *args, **kwargs: client)
+    if discovery:
+        result = (await service.discover_and_sync_tools(server)).connection
+    else:
+        _, result = await service._test_connection_and_discover_tools(server)
+    assert not result.success and result.error_message is not None
+    assert "https://tools.example" in result.error_message
+    assert "private-path" not in result.error_message
+    assert "address-secret" not in result.error_message
 
 
 def _make_service():

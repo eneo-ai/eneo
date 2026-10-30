@@ -72,7 +72,7 @@
   {liveTurnStatus}
 </p>
 
-<div class="border-border flex flex-col gap-2 border-b px-5 py-4 @container">
+<div class="border-border @container flex flex-col gap-2 border-b px-5 py-4">
   <label for="{idPrefix}-turn-select" class="text-xs font-medium">
     {m.chat_debug_select_turn()}
   </label>
@@ -145,7 +145,7 @@
   </div>
 </div>
 
-<div class="min-h-0 flex-1 overflow-y-auto overscroll-contain [scrollbar-gutter:stable] @container">
+<div class="@container min-h-0 flex-1 [scrollbar-gutter:stable] overflow-y-auto overscroll-contain">
   {#if panel.liveTurnPending}
     <div class="px-5 pt-5">
       <Alert.Root

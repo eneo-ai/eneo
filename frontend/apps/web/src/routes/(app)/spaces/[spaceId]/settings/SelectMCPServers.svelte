@@ -5,6 +5,7 @@
 <script lang="ts">
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
+  import * as Empty from "$lib/components/ui/empty/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
@@ -83,7 +84,7 @@
   }
 
   function getSpaceMCPServers(): SpaceMCPServer[] {
-    return ($currentSpace.mcp_servers ?? []) as unknown as SpaceMCPServer[];
+    return spaceServers($currentSpace);
   }
 
   const currentlySelectedServers = derived(currentSpace, ($currentSpace) =>
@@ -97,71 +98,92 @@
     return server?.tools ?? [];
   }
 
-  const loading = new SvelteSet<string>();
+  // Servers and tools whose own save is running. Their switch stays focusable
+  // (a disabled one would drop keyboard focus) and ignores input until it is done.
+  const saving = new SvelteSet<string>();
 
-  async function toggleServer(server: SelectableMCPServer) {
-    loading.add(server.id);
-
-    try {
-      if ($currentlySelectedServers.includes(server.id)) {
-        const newServers = $currentlySelectedServers
-          .filter((id) => id !== server.id)
-          .map((id) => ({ id }));
-        await updateSpace({ mcp_servers: newServers });
-      } else {
-        const newServers = [...$currentlySelectedServers, server.id].map((id) => ({ id }));
-
-        // When adding a server, enable all its tools for convenience
-        const spaceServers = getSpaceMCPServers();
-        const existingTools = spaceServers.flatMap(
-          (s) => s.tools?.map((t) => ({ tool_id: t.id, is_enabled: t.is_enabled })) ?? []
-        );
-
-        // Add all tools from the new server as enabled
-        const newServerTools =
-          server.tools?.map((t) => ({ tool_id: t.id, is_enabled: true })) ?? [];
-
-        await updateSpace({
-          mcp_servers: newServers,
-          mcp_tools: [...existingTools, ...newServerTools]
-        });
-      }
-    } catch (e) {
-      console.error("Failed to toggle server:", e);
-    }
-
-    loading.delete(server.id);
+  function spaceServers(space: { mcp_servers?: unknown }): SpaceMCPServer[] {
+    return (space.mcp_servers ?? []) as unknown as SpaceMCPServer[];
   }
 
-  async function toggleTool(tool: SpaceMCPTool) {
+  function spaceToolSettings(space: { mcp_servers?: unknown }) {
+    return spaceServers(space).flatMap(
+      (s) => s.tools?.map((t) => ({ tool_id: t.id, is_enabled: t.is_enabled })) ?? []
+    );
+  }
+
+  async function toggleServer(server: SelectableMCPServer) {
+    if (saving.has(server.id)) return;
+    saving.add(server.id);
+    const adding = !$currentlySelectedServers.includes(server.id);
+
     try {
-      // Get current tool settings from space
-      const spaceServers = getSpaceMCPServers();
-      const currentTools = spaceServers.flatMap(
-        (server) => server.tools?.map((t) => ({ tool_id: t.id, is_enabled: t.is_enabled })) ?? []
-      );
+      // Built when the update starts, from the space every earlier update has
+      // returned, so a quick second toggle keeps the first one's change.
+      await updateSpace((latest) => {
+        const selected = spaceServers(latest)
+          .map((s) => s.id)
+          .filter((id) => id !== server.id);
+        if (!adding) {
+          return { mcp_servers: selected.map((id) => ({ id })) };
+        }
+        // When adding a server, enable all its tools for convenience
+        const newServerTools =
+          server.tools?.map((t) => ({ tool_id: t.id, is_enabled: true })) ?? [];
+        return {
+          mcp_servers: [...selected, server.id].map((id) => ({ id })),
+          mcp_tools: [...spaceToolSettings(latest), ...newServerTools]
+        };
+      });
+    } finally {
+      saving.delete(server.id);
+    }
+  }
 
-      // Toggle this tool
-      const toolExists = currentTools.find((t) => t.tool_id === tool.id);
-      const newTools = toolExists
-        ? currentTools.map((t) =>
-            t.tool_id === tool.id ? { tool_id: t.tool_id, is_enabled: !t.is_enabled } : t
-          )
-        : [...currentTools, { tool_id: tool.id, is_enabled: !tool.is_enabled }];
+  // A tool setting built while its server is being switched off would name a
+  // tool the space no longer has, so a tool waits for its server's save too.
+  const toolBusy = (serverId: string, toolId: string) => saving.has(serverId) || saving.has(toolId);
 
-      await updateSpace({ mcp_tools: newTools });
-    } catch (e) {
-      console.error("Failed to toggle tool:", e);
+  async function toggleTool(serverId: string, tool: SpaceMCPTool) {
+    if (toolBusy(serverId, tool.id)) return;
+    saving.add(tool.id);
+    try {
+      // Built when the update starts, from the space every earlier update has
+      // returned, so a quick second toggle keeps the first one's change.
+      await updateSpace((latest) => {
+        const currentTools = spaceToolSettings(latest);
+        const toolExists = currentTools.some((t) => t.tool_id === tool.id);
+        return {
+          mcp_tools: toolExists
+            ? currentTools.map((t) =>
+                t.tool_id === tool.id ? { tool_id: t.tool_id, is_enabled: !t.is_enabled } : t
+              )
+            : [...currentTools, { tool_id: tool.id, is_enabled: !tool.is_enabled }]
+        };
+      });
+    } finally {
+      saving.delete(tool.id);
     }
   }
 </script>
 
-<Settings.Row title={m.tools()} description={m.mcp_settings_row_description()}>
+<Settings.Row
+  title={m.tools()}
+  description={$currentSpace.personal
+    ? m.mcp_settings_row_description_personal()
+    : m.mcp_settings_row_description()}
+>
   <svelte:fragment slot="description">
-    {#if ($currentSpace.mcp_servers?.length ?? 0) === 0}
+    {#if generalServers.length > 0 && ($currentSpace.mcp_servers?.length ?? 0) === 0}
       <Hint class="mt-2.5">{m.mcp_enable_server_hint()}</Hint>
     {/if}
   </svelte:fragment>
+
+  {#if generalServers.length === 0}
+    <Empty.Root class="border">
+      <Empty.Description>{m.mcp_no_org_servers_to_enable()}</Empty.Description>
+    </Empty.Root>
+  {/if}
 
   <div class:border={generalServers.length > 0} class="border-default overflow-hidden rounded-xl">
     {#each generalServers as server (server.id)}
@@ -208,7 +230,9 @@
                     <span class="font-medium">{server.name}</span>
                     {#if hasTools}
                       <span class="text-muted text-xs font-normal"
-                        >({serverTools.length} {m.tools()})</span
+                        >({serverTools.length === 1
+                          ? m.mcp_server_tool_count_one({ count: 1 })
+                          : m.mcp_server_tool_count_many({ count: serverTools.length })})</span
                       >
                     {/if}
                   </Field.Label>
@@ -231,12 +255,17 @@
                 </Field.Content>
                 <Switch
                   id={`${uid}-server-${server.id}`}
-                  checked={$currentlySelectedServers.includes(server.id)}
-                  onCheckedChange={() => {
-                    if (meetsClassification) {
-                      toggleServer(server);
+                  bind:checked={
+                    () => $currentlySelectedServers.includes(server.id),
+                    () => {
+                      if (meetsClassification) {
+                        toggleServer(server);
+                      }
                     }
-                  }}
+                  }
+                  aria-busy={saving.has(server.id) ? "true" : undefined}
+                  aria-disabled={meetsClassification ? undefined : "true"}
+                  class="aria-busy:opacity-60"
                   aria-describedby={server.description
                     ? `${uid}-server-${server.id}-description`
                     : undefined}
@@ -264,8 +293,9 @@
                     </Field.Content>
                     <Switch
                       id={`${uid}-tool-${tool.id}`}
-                      checked={tool.is_enabled}
-                      onCheckedChange={() => toggleTool(tool)}
+                      bind:checked={() => tool.is_enabled, () => toggleTool(server.id, tool)}
+                      aria-busy={toolBusy(server.id, tool.id) ? "true" : undefined}
+                      class="aria-busy:opacity-60"
                       aria-describedby={tool.description
                         ? `${uid}-tool-${tool.id}-description`
                         : undefined}

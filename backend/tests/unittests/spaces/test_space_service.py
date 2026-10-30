@@ -4,10 +4,20 @@ from uuid import uuid4
 
 import pytest
 
-from eneo.main.exceptions import BadRequestException, UnauthorizedException
+from eneo.main.exceptions import (
+    BadRequestException,
+    ConflictException,
+    UnauthorizedException,
+)
+from eneo.main.models import ModelId
 from eneo.roles.permissions import Permission
+from eneo.security_classifications.domain.entities.security_classification import (
+    SecurityClassification,
+)
 from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_service import SpaceService
+from eneo.spaces.space_update import LinkEdit
 from tests.fixtures import TEST_USER
 
 
@@ -65,6 +75,28 @@ async def test_create_space_is_created_with_latest_available_embedding_model(
     assert space.embedding_models == [embedding_models[0]]
 
 
+async def test_a_new_space_has_no_mcp_server_until_its_admin_activates_one(
+    service: SpaceService,
+):
+    # Kills the mutant that gives a new space every enabled server: a space
+    # admin activates the servers the space may use. Capabilities are not
+    # servers a space picks, and a new space still offers the tenant's.
+    space = SpaceFactory.create_space(name="space", tenant_id=TEST_USER.tenant_id)
+    service.factory.create_space.return_value = space
+    service.completion_model_service.get_available_completion_models.return_value = []
+    service.transcription_model_service.get_default_model.return_value = None
+    service.embedding_model_crud_service.get_embedding_models.return_value = []
+    service.repo.session.execute.return_value.scalars.return_value.all.return_value = [
+        MagicMock(purpose="general", tenant_id=TEST_USER.tenant_id),
+        MagicMock(purpose="web_search", tenant_id=TEST_USER.tenant_id),
+    ]
+
+    await service.create_space("space")
+
+    assert space.mcp_servers == []
+    assert space.enabled_capabilities == ["web_search"]
+
+
 async def test_raise_not_found_if_user_not_member_of_space(
     service: SpaceService, actor: MagicMock
 ):
@@ -99,6 +131,36 @@ async def test_get_applications_projection_rejects_unauthorized_access(
         await service.get_applications_projection(uuid4())
 
 
+async def test_the_transcription_space_is_read_for_the_space_the_actor_reads(
+    service: SpaceService, actor: MagicMock
+):
+    space = MagicMock()
+    service.repo.get_transcription_space.return_value = space
+    actor.can_read_space.return_value = True
+    actor.space.id = uuid4()
+
+    assert await service.get_transcription_space(actor) is space
+    service.repo.get_transcription_space.assert_awaited_once_with(actor.space.id)
+
+
+async def test_the_transcription_space_refuses_an_actor_get_space_refuses(
+    service: SpaceService, actor: MagicMock
+):
+    actor.can_read_space.return_value = False
+
+    with pytest.raises(UnauthorizedException) as refused:
+        await service.get_transcription_space(actor)
+    with pytest.raises(UnauthorizedException) as refused_full:
+        await service.get_space(uuid4())
+
+    assert (str(refused.value), refused.value.code, refused.value.context) == (
+        str(refused_full.value),
+        refused_full.value.code,
+        refused_full.value.context,
+    )
+    service.repo.get_transcription_space.assert_not_awaited()
+
+
 async def test_raise_unauthorized_if_user_can_not_edit(
     service: SpaceService, actor: MagicMock
 ):
@@ -108,6 +170,79 @@ async def test_raise_unauthorized_if_user_can_not_edit(
         await service.update_space(uuid4(), MagicMock())
 
 
+@pytest.mark.parametrize(("new_level", "removes_below"), [(20, None), (30, 30)])
+async def test_only_a_change_of_level_removes_the_links_below_it(
+    service: SpaceService, new_level: int, removes_below: int | None
+):
+    """Kills the mutant that derives the link removal from the classification
+    being sent (``is_provided``) instead of a change of its level: restating
+    the space's level must not delete the links below it, raising it must."""
+    current = SecurityClassification(
+        tenant_id=TEST_USER.tenant_id,
+        name="K20",
+        security_level=20,
+        security_enabled=True,
+    )
+    sent = SecurityClassification(
+        tenant_id=TEST_USER.tenant_id,
+        name=f"K{new_level}",
+        security_level=new_level,
+        security_enabled=True,
+    )
+    space = SpaceFactory.create_space(name="space", tenant_id=TEST_USER.tenant_id)
+    space.security_classification = current
+    service.repo.one.return_value = space
+    service.user = TEST_USER.model_copy(
+        update={
+            "tenant": TEST_USER.tenant.model_copy(update={"security_enabled": True})
+        }
+    )
+    service.security_classification_service.get_security_classification.return_value = (
+        sent
+    )
+
+    await service.update_space(space.id, security_classification=ModelId(id=uuid4()))
+
+    (_, change), _ = service.repo.update_settings.await_args
+    assert change.minimum_security_level == removes_below
+
+
+@pytest.mark.parametrize(
+    ("argument", "loaded", "field"),
+    [
+        ("embedding_model_ids", "linked_embedding_models", "embedding_models"),
+        (
+            "transcription_model_ids",
+            "linked_transcription_models",
+            "transcription_models",
+        ),
+    ],
+)
+async def test_a_link_list_edit_is_scoped_to_the_links_the_space_showed(
+    service: SpaceService, argument: str, loaded: str, field: str
+):
+    """Kills, per list: update_space scopes the edit to the usable models
+    only, to no links, or to another list's, instead of the ones the loaded
+    space shows. The completion and MCP server lists have integration
+    killers (test_explicit_removal_unlinks_the_model, test_space_mcp_audit)."""
+    shown_id = uuid4()
+    space = MagicMock()
+    for name in (
+        "linked_completion_models",
+        "linked_embedding_models",
+        "linked_transcription_models",
+        "mcp_servers",
+    ):
+        setattr(space, name, [MagicMock(id=uuid4())])
+    setattr(space, loaded, [MagicMock(id=shown_id)])
+    service.repo.one.return_value = space
+
+    await service.update_space(uuid4(), **{argument: []})
+
+    (_, change), _ = service.repo.update_settings.await_args
+    assert getattr(change, field) == LinkEdit((), frozenset({shown_id}))
+
+
 async def test_raise_unauthorized_if_user_can_not_delete(
     service: SpaceService, actor: MagicMock
 ):
@@ -115,6 +250,36 @@ async def test_raise_unauthorized_if_user_can_not_delete(
 
     with pytest.raises(UnauthorizedException):
         await service.delete_space(uuid4())
+
+
+async def test_delete_space_rejects_flow_delete_blockers_before_side_effects(
+    service: SpaceService, actor: MagicMock
+):
+    actor.can_delete_space.return_value = True
+    space_id = uuid4()
+    space = MagicMock(
+        id=space_id,
+        icon_id=uuid4(),
+        assistants=[],
+        apps=[],
+    )
+    service.get_space = AsyncMock(return_value=space)
+    service.repo.has_flow_delete_blockers.return_value = True
+    service.repo.has_active_legal_hold.return_value = False
+    service.api_key_scope_revoker = AsyncMock()
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.delete_space(space_id)
+
+    assert exc_info.value.code == "space_contains_flow_delete_blockers"
+    assert str(exc_info.value) == (
+        "Space contains Flow history or Flow-owned draft resources. "
+        "Remove draft Flows first; spaces with Flow run history require "
+        "Flow data purge before deletion."
+    )
+    service.api_key_scope_revoker.revoke_scope.assert_not_awaited()
+    service.repo.delete.assert_not_awaited()
+    service.icon_repo.delete_if_unreferenced.assert_not_awaited()
 
 
 async def test_only_admins_can_add_members(service: SpaceService, actor: MagicMock):
@@ -196,6 +361,26 @@ async def test_get_spaces_defaults_include_applications_to_false(
     service.repo.get_spaces_for_member.assert_called_once_with(
         include_applications=False
     )
+
+
+async def test_delete_space_names_a_legal_hold_as_the_blocker(
+    service: SpaceService, actor: MagicMock
+):
+    actor.can_delete_space.return_value = True
+    space_id = uuid4()
+    service.get_space = AsyncMock(
+        return_value=MagicMock(id=space_id, icon_id=None, assistants=[], apps=[])
+    )
+    service.repo.has_flow_delete_blockers.return_value = True
+    service.repo.has_active_legal_hold.return_value = True
+    service.api_key_scope_revoker = AsyncMock()
+
+    with pytest.raises(ConflictException) as exc_info:
+        await service.delete_space(space_id)
+
+    assert exc_info.value.code == "space_contains_legal_hold"
+    service.repo.delete.assert_not_awaited()
+    service.api_key_scope_revoker.revoke_scope.assert_not_awaited()
 
 
 @pytest.mark.parametrize(

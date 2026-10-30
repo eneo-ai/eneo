@@ -10,6 +10,7 @@ import pytest
 import sqlalchemy as sa
 from fastapi import UploadFile
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import AsyncSession, DatabaseSessionManager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
@@ -19,7 +20,7 @@ from eneo.database.tables.object_content_table import (
     ObjectStoreObjects,
 )
 from eneo.database.tables.users_table import Users
-from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_models import FileContentVariant, FileOwner, FileType
 from eneo.files.file_protocol import (
     FileProtocol,
     PendingFileContent,
@@ -27,6 +28,9 @@ from eneo.files.file_protocol import (
 )
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
+from eneo.files.file_size_service import FileSizeService
+from eneo.files.image import ImageExtractor
+from eneo.files.text import TextExtractor
 from eneo.object_content.content import (
     CapturedContent,
     ContentState,
@@ -68,8 +72,10 @@ class _PreparedFileProtocol(FileProtocol):
         upload_admission_snapshot: UploadAdmissionSnapshot | None = None,
         max_size: int | None = None,
         limit_name: str | None = None,
+        pdf_limits: object = None,
+        audio_limits: object = None,
     ) -> AsyncGenerator[PreparedFileUpload]:
-        del upload_file, max_size, limit_name
+        del upload_file, max_size, limit_name, pdf_limits, audio_limits
         self.seen_snapshot = upload_admission_snapshot
         yield self._prepared
 
@@ -513,7 +519,12 @@ async def test_cancellation_after_final_promotion_preserves_the_visible_family(
             root_id = roots[0].id
             repository = FileRepository(session)
             assert (await repository.get_by_id(root_id)).id == root_id
-            assert [file.id for file in await repository.get_list_by_user(user.id)] == [
+            owner = FileOwner(
+                tenant_id=user.tenant_id,
+                owner_type=PrincipalType.USER,
+                owner_user_id=user.id,
+            )
+            assert [file.id for file in await repository.get_list_by_owner(owner)] == [
                 root_id
             ]
             assert set(await session.scalars(sa.select(ObjectContents.state))) == {
@@ -598,7 +609,7 @@ async def test_inline_and_object_store_save_the_same_exact_bytes(
                     protocol=_PreparedFileProtocol(prepared("unused.mp3")),
                     object_content=content_service,
                     snapshot=snapshot_inline,
-                ).get_download_no_auth(file_id)
+                ).get_download_no_auth(file_id, tenant_id=user.tenant_id)
                 downloaded.append(b"".join([chunk async for chunk in download.chunks]))
 
         assert downloaded == [payload, payload]
@@ -619,6 +630,33 @@ async def test_inline_and_object_store_save_the_same_exact_bytes(
             real_object_store.store,
             await _remote_object_keys(object_content_database),
         )
+
+
+@pytest.mark.asyncio
+async def test_a_generated_document_saves_without_upload_admission(
+    object_content_database: DatabaseSessionManager,
+    real_object_store: RealObjectStore,
+) -> None:
+    """Kills the mutant that holds a tool-generated document to the upload
+    admission snapshot: the chat's FileService is built without one, so every
+    generated document would fail to save."""
+    payload = b"a,b\n1,2\n"
+    async with object_content_database.session() as session:
+        user = await _user(session)
+        saved = await FileService(
+            user=user,
+            repo=FileRepository(session),
+            protocol=FileProtocol(FileSizeService(), TextExtractor(), ImageExtractor()),
+            object_content=ObjectContentService(
+                real_object_store.settings, object_content_database
+            ),
+        ).save_generated_document(payload, "result.csv", "text/csv")
+
+    assert (saved.name, saved.mimetype, saved.original_available) == (
+        "result.csv",
+        "text/csv",
+        True,
+    )
 
 
 @pytest.mark.asyncio

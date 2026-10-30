@@ -264,7 +264,7 @@
       </p>
       <!-- svelte-ignore a11y_no_noninteractive_tabindex (bounded table must be keyboard-scrollable) -->
       <div
-        class="border-border focus-visible:ring-ring mt-4 max-h-72 overflow-auto border-y outline-none focus-visible:ring-2 [scrollbar-gutter:stable]"
+        class="border-border focus-visible:ring-ring mt-4 max-h-72 [scrollbar-gutter:stable] overflow-auto border-y outline-none focus-visible:ring-2"
         role="region"
         aria-label={m.skills_runtime_models_region({
           count: String(modelProjections.models.length)
@@ -292,12 +292,19 @@
                   {/if}
                 </Table.Cell>
                 <Table.Cell class="text-right tabular-nums">
-                  {m.skills_runtime_tokens({ count: model.max_input_tokens.toLocaleString() })}
+                  {model.max_input_tokens === null || model.max_input_tokens === undefined
+                    ? m.context_window_unknown()
+                    : m.skills_runtime_tokens({
+                        count: model.max_input_tokens.toLocaleString()
+                      })}
                 </Table.Cell>
                 <Table.Cell class="text-right tabular-nums">
-                  {m.skills_runtime_tokens({
-                    count: model.skill_context_token_allowance.toLocaleString()
-                  })}
+                  {model.skill_context_token_allowance === null ||
+                  model.skill_context_token_allowance === undefined
+                    ? m.context_window_unknown()
+                    : m.skills_runtime_tokens({
+                        count: model.skill_context_token_allowance.toLocaleString()
+                      })}
                 </Table.Cell>
                 <Table.Cell>
                   <Badge variant={model.supports_tool_calling ? "secondary" : "outline"}>

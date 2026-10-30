@@ -1,0 +1,425 @@
+from __future__ import annotations
+
+from collections.abc import Sequence
+from dataclasses import dataclass
+from enum import Enum, StrEnum
+from types import MappingProxyType
+from typing import Mapping
+
+
+class FlowStepPhase(StrEnum):
+    INPUT_RESOLUTION = "input_resolution"
+    TRANSCRIPTION = "transcription"
+    RETRIEVAL = "retrieval"
+    PROVIDER_REQUEST = "provider_request"
+    MAPPED_ITEM = "mapped_item"
+    FINALIZATION = "finalization"
+    STEP_EXECUTION = "step_execution"
+
+
+class FlowInputSource(str, Enum):
+    FLOW_INPUT = "flow_input"
+    PREVIOUS_STEP = "previous_step"
+    ALL_PREVIOUS_STEPS = "all_previous_steps"
+    HTTP_GET = "http_get"
+    TOOL = "tool"
+
+
+class FlowAuthoringInputSource(str, Enum):
+    """Input sources an authoring spec can carry.
+
+    A tool step travels with its configuration, which names the tool by the
+    ids of this instance only, so flow packages refuse that configuration. HTTP
+    input stays out: its config holds credentials that no spec may carry.
+    """
+
+    FLOW_INPUT = FlowInputSource.FLOW_INPUT.value
+    PREVIOUS_STEP = FlowInputSource.PREVIOUS_STEP.value
+    ALL_PREVIOUS_STEPS = FlowInputSource.ALL_PREVIOUS_STEPS.value
+    TOOL = FlowInputSource.TOOL.value
+
+
+class FlowInputType(str, Enum):
+    TEXT = "text"
+    JSON = "json"
+    IMAGE = "image"
+    AUDIO = "audio"
+    DOCUMENT = "document"
+    FILE = "file"
+    ANY = "any"
+
+
+class FlowAuthoringInputType(str, Enum):
+    TEXT = FlowInputType.TEXT.value
+    JSON = FlowInputType.JSON.value
+    AUDIO = FlowInputType.AUDIO.value
+    DOCUMENT = FlowInputType.DOCUMENT.value
+    FILE = FlowInputType.FILE.value
+    ANY = FlowInputType.ANY.value
+
+
+class FlowOutputType(str, Enum):
+    TEXT = "text"
+    JSON = "json"
+    PDF = "pdf"
+    DOCX = "docx"
+
+
+class FlowOutputDelivery(str, Enum):
+    PAYLOAD = "payload"
+    ARTIFACT = "artifact"
+    OUTBOUND_HTTP = "outbound_http"
+
+
+class FlowOutputMode(str, Enum):
+    PASS_THROUGH = "pass_through"
+    COMPOSE_TEXT = "compose_text"
+    COPY_INPUT = "copy_input"
+    HTTP_POST = "http_post"
+    TRANSCRIBE_ONLY = "transcribe_only"
+    TEMPLATE_FILL = "template_fill"
+    RENDER_VERBATIM = "render_verbatim"
+    # An LLM proposes which person each diarized speaker label is; the run then
+    # pauses for a reviewer to confirm. Authored by hand and carried by specs
+    # and packages.
+    SPEAKER_MAPPING = "speaker_mapping"
+
+
+class FlowPrimaryOutputExecutionKind(str, Enum):
+    COMPLETION_MODEL = "completion_model"
+    TRANSCRIPTION_MODEL = "transcription_model"
+    DETERMINISTIC = "deterministic"
+
+
+FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE: Mapping[
+    FlowOutputMode, FlowPrimaryOutputExecutionKind
+] = MappingProxyType(
+    {
+        FlowOutputMode.PASS_THROUGH: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
+        FlowOutputMode.COMPOSE_TEXT: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.COPY_INPUT: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.HTTP_POST: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
+        FlowOutputMode.TRANSCRIBE_ONLY: (
+            FlowPrimaryOutputExecutionKind.TRANSCRIPTION_MODEL
+        ),
+        FlowOutputMode.TEMPLATE_FILL: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.RENDER_VERBATIM: FlowPrimaryOutputExecutionKind.DETERMINISTIC,
+        FlowOutputMode.SPEAKER_MAPPING: FlowPrimaryOutputExecutionKind.COMPLETION_MODEL,
+    }
+)
+
+
+def flow_output_mode_primary_execution_kind(
+    mode: FlowOutputMode | str,
+) -> FlowPrimaryOutputExecutionKind:
+    return FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE[FlowOutputMode(mode)]
+
+
+FLOW_COMPLETION_MODEL_OUTPUT_MODES: frozenset[FlowOutputMode] = frozenset(
+    mode
+    for mode, execution_kind in FLOW_PRIMARY_OUTPUT_EXECUTION_KIND_BY_MODE.items()
+    if execution_kind is FlowPrimaryOutputExecutionKind.COMPLETION_MODEL
+)
+
+
+def flow_output_mode_uses_completion_model(
+    mode: FlowOutputMode | str,
+) -> bool:
+    """Whether the output mode invokes an assistant completion model."""
+
+    try:
+        output_mode = FlowOutputMode(mode)
+    except ValueError:
+        return False
+    return output_mode in FLOW_COMPLETION_MODEL_OUTPUT_MODES
+
+
+def flow_output_mode_has_outbound_delivery(mode: FlowOutputMode) -> bool:
+    return mode == FlowOutputMode.HTTP_POST
+
+
+def final_step_output_type(output_types: Sequence[str]) -> FlowOutputType | None:
+    """Terminal output type of a flow's last step, in step order.
+
+    This is the flow's single output-type derivation. The run contract's
+    `final_output.output_type` and any other terminal-output projection (for
+    example a flow list's derived `output_type`) resolve through this
+    function so they cannot drift apart.
+    """
+    if not output_types:
+        return None
+    return FlowOutputType(output_types[-1])
+
+
+def final_output_delivery(
+    *, output_type: FlowOutputType, output_mode: FlowOutputMode
+) -> FlowOutputDelivery:
+    """How a client receives the output of a flow's last step.
+
+    The run contract's `final_output.delivery` and a flow list's derived
+    `delivery` both resolve through this rule so they cannot drift apart.
+    """
+    if flow_output_mode_has_outbound_delivery(output_mode):
+        return FlowOutputDelivery.OUTBOUND_HTTP
+    if output_type in {FlowOutputType.PDF, FlowOutputType.DOCX}:
+        return FlowOutputDelivery.ARTIFACT
+    return FlowOutputDelivery.PAYLOAD
+
+
+class FlowAuthoringOutputMode(str, Enum):
+    """Output modes an authoring spec can carry.
+
+    Manual edits and flow packages travel as specs. HTTP
+    delivery stays out: its config holds credentials that no spec may carry.
+    """
+
+    PASS_THROUGH = FlowOutputMode.PASS_THROUGH.value
+    COMPOSE_TEXT = FlowOutputMode.COMPOSE_TEXT.value
+    COPY_INPUT = FlowOutputMode.COPY_INPUT.value
+    TRANSCRIBE_ONLY = FlowOutputMode.TRANSCRIBE_ONLY.value
+    TEMPLATE_FILL = FlowOutputMode.TEMPLATE_FILL.value
+    RENDER_VERBATIM = FlowOutputMode.RENDER_VERBATIM.value
+    SPEAKER_MAPPING = FlowOutputMode.SPEAKER_MAPPING.value
+
+
+FLOW_INPUT_SOURCE_VALUES = tuple(item.value for item in FlowInputSource)
+FLOW_INPUT_TYPE_VALUES = tuple(item.value for item in FlowInputType)
+FLOW_OUTPUT_MODE_VALUES = tuple(item.value for item in FlowOutputMode)
+FLOW_OUTPUT_TYPE_VALUES = tuple(item.value for item in FlowOutputType)
+
+
+class FlowRunPurpose(StrEnum):
+    PRODUCTION = "production"
+    TEST = "test"
+
+
+FLOW_RUN_PURPOSE_VALUES = tuple(item.value for item in FlowRunPurpose)
+
+
+class FlowRunStatus(str, Enum):
+    QUEUED = "queued"
+    RUNNING = "running"
+    AWAITING_REVIEW = "awaiting_review"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+@dataclass(frozen=True)
+class FlowRunStatusCapability:
+    status: FlowRunStatus
+    is_active: bool
+    should_poll: bool
+    is_terminal: bool
+    is_cancellable: bool
+    is_awaiting_review: bool
+    can_request_redispatch: bool
+
+
+FLOW_RUN_STATUS_CAPABILITIES: Mapping[FlowRunStatus, FlowRunStatusCapability] = (
+    MappingProxyType(
+        {
+            FlowRunStatus.QUEUED: FlowRunStatusCapability(
+                status=FlowRunStatus.QUEUED,
+                is_active=True,
+                should_poll=True,
+                is_terminal=False,
+                is_cancellable=True,
+                is_awaiting_review=False,
+                can_request_redispatch=True,
+            ),
+            FlowRunStatus.RUNNING: FlowRunStatusCapability(
+                status=FlowRunStatus.RUNNING,
+                is_active=True,
+                should_poll=True,
+                is_terminal=False,
+                is_cancellable=True,
+                is_awaiting_review=False,
+                can_request_redispatch=False,
+            ),
+            FlowRunStatus.AWAITING_REVIEW: FlowRunStatusCapability(
+                status=FlowRunStatus.AWAITING_REVIEW,
+                is_active=False,
+                should_poll=True,
+                is_terminal=False,
+                is_cancellable=True,
+                is_awaiting_review=True,
+                can_request_redispatch=False,
+            ),
+            FlowRunStatus.COMPLETED: FlowRunStatusCapability(
+                status=FlowRunStatus.COMPLETED,
+                is_active=False,
+                should_poll=False,
+                is_terminal=True,
+                is_cancellable=False,
+                is_awaiting_review=False,
+                can_request_redispatch=False,
+            ),
+            FlowRunStatus.FAILED: FlowRunStatusCapability(
+                status=FlowRunStatus.FAILED,
+                is_active=False,
+                should_poll=False,
+                is_terminal=True,
+                is_cancellable=False,
+                is_awaiting_review=False,
+                can_request_redispatch=False,
+            ),
+            FlowRunStatus.CANCELLED: FlowRunStatusCapability(
+                status=FlowRunStatus.CANCELLED,
+                is_active=False,
+                should_poll=False,
+                is_terminal=True,
+                is_cancellable=False,
+                is_awaiting_review=False,
+                can_request_redispatch=False,
+            ),
+        }
+    )
+)
+FLOW_RUN_STATUS_FILTER_ORDER = (
+    FlowRunStatus.COMPLETED,
+    FlowRunStatus.FAILED,
+    FlowRunStatus.RUNNING,
+    FlowRunStatus.QUEUED,
+    FlowRunStatus.AWAITING_REVIEW,
+    FlowRunStatus.CANCELLED,
+)
+
+ACTIVE_FLOW_RUN_STATUSES = frozenset(
+    status
+    for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
+    if capability.is_active
+)
+TERMINAL_FLOW_RUN_STATUSES = frozenset(
+    status
+    for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
+    if capability.is_terminal
+)
+TERMINAL_FLOW_RUN_STATUS_VALUES = tuple(
+    status.value for status in FlowRunStatus if status in TERMINAL_FLOW_RUN_STATUSES
+)
+NON_TERMINAL_FLOW_RUN_STATUS_VALUES = tuple(
+    status.value for status in FlowRunStatus if status not in TERMINAL_FLOW_RUN_STATUSES
+)
+CANCELLABLE_FLOW_RUN_STATUSES = frozenset(
+    status
+    for status, capability in FLOW_RUN_STATUS_CAPABILITIES.items()
+    if capability.is_cancellable
+)
+
+
+def normalize_flow_run_status(status: FlowRunStatus | str) -> FlowRunStatus:
+    if isinstance(status, FlowRunStatus):
+        return status
+    return FlowRunStatus(status)
+
+
+def is_terminal_flow_run_status(status: FlowRunStatus | str) -> bool:
+    return normalize_flow_run_status(status) in TERMINAL_FLOW_RUN_STATUSES
+
+
+class FlowRunLifecycleSource(str, Enum):
+    EXECUTOR_COMPLETED = "executor_completed"
+    EXECUTOR_FAILED = "executor_failed"
+    DISPATCH_FAILURE = "dispatch_failure"
+    FLOW_DELETED = "flow_deleted"
+    DEFINITION_CHECKSUM_MISMATCH = "definition_checksum_mismatch"
+    INVALID_FLOW_DEFINITION = "invalid_flow_definition"
+    ASSISTANT_SNAPSHOT_DRIFT = "assistant_snapshot_drift"
+    STEP_MISSING = "step_missing"
+    TASK_TIMEOUT = "task_timeout"
+    TASK_FAILURE = "task_failure"
+    MISSING_PRINCIPAL = "missing_principal"
+    STALE_RUNNING_RECONCILER = "stale_running_reconciler"
+    ABANDONMENT_RECONCILER = "abandonment_reconciler"
+    USER_CANCEL = "user_cancel"
+    REVIEW_REJECTED = "review_rejected"
+    REVIEW_CHECKPOINT_OPENED = "review_checkpoint_opened"
+    REVIEW_CHECKPOINT_EDITED = "review_checkpoint_edited"
+    REVIEW_CHECKPOINT_APPROVED = "review_checkpoint_approved"
+    REVIEW_CHECKPOINT_REJECTED = "review_checkpoint_rejected"
+    REVIEW_CHECKPOINT_RESUMED = "review_checkpoint_resumed"
+    REVIEW_CHECKPOINT_CANCELLED = "review_checkpoint_cancelled"
+    REVIEW_EXPIRED = "review_expired"
+    REVIEW_CHECKPOINT_EXPIRED = "review_checkpoint_expired"
+
+
+class FlowRunReviewCheckpointEditCause(str, Enum):
+    REVIEWER_EDIT = "reviewer_edit"
+    CORRECTIONS_FOLDED = "corrections_folded"
+
+
+class FlowRunReviewCheckpointState(str, Enum):
+    AWAITING_REVIEW = FlowRunStatus.AWAITING_REVIEW.value
+    EDITED = "edited"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    RESUMED = "resumed"
+    CANCELLED = FlowRunStatus.CANCELLED.value
+    EXPIRED = "expired"
+
+
+ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES = frozenset(
+    {
+        FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        FlowRunReviewCheckpointState.EDITED,
+        FlowRunReviewCheckpointState.APPROVED,
+    }
+)
+RECONCILABLE_REVIEW_CHECKPOINT_STATES = frozenset(
+    {
+        FlowRunReviewCheckpointState.AWAITING_REVIEW,
+        FlowRunReviewCheckpointState.EDITED,
+    }
+)
+
+
+class FlowStepResultStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+class FlowStepAttemptStatus(str, Enum):
+    STARTED = "started"
+    FAILED = "failed"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+ACTIVE_FLOW_STEP_RESULT_STATUSES = frozenset(
+    {
+        FlowStepResultStatus.PENDING,
+        FlowStepResultStatus.RUNNING,
+    }
+)
+ACTIVE_FLOW_STEP_RESULT_STATUS_VALUES = tuple(
+    status.value
+    for status in FlowStepResultStatus
+    if status in ACTIVE_FLOW_STEP_RESULT_STATUSES
+)
+OPEN_FLOW_STEP_ATTEMPT_STATUSES = frozenset(
+    {
+        FlowStepAttemptStatus.STARTED,
+    }
+)
+OPEN_FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(
+    status.value
+    for status in FlowStepAttemptStatus
+    if status in OPEN_FLOW_STEP_ATTEMPT_STATUSES
+)
+
+
+class FlowRuntimeInputFormat(str, Enum):
+    DOCUMENT = "document"
+    AUDIO = "audio"
+    FILE = "file"
+
+
+class FlowTemplateAssetStatus(str, Enum):
+    READY = "ready"
+    NEEDS_ACTION = "needs_action"
+    READ_ONLY = "read_only"
+    UNAVAILABLE = "unavailable"

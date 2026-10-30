@@ -6,14 +6,28 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.assistants.assistant import AssistantOrigin
+from eneo.assistants.assistant_repo import AssistantRepository
 from eneo.assistants.assistant_service import AssistantService
 from eneo.main.exceptions import BadRequestException
 
 
-def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=False):
+def _build_assistant_service_with_mocks(
+    *,
+    origin=AssistantOrigin.USER,
+    is_personal=True,
+    server_in_space=False,
+):
     service = object.__new__(AssistantService)
     assistant_id = uuid4()
-    assistant = SimpleNamespace(id=assistant_id, is_default=True, mcp_servers=[])
+    managing_flow_id = uuid4() if origin == AssistantOrigin.FLOW_MANAGED else None
+    assistant = SimpleNamespace(
+        id=assistant_id,
+        is_default=True,
+        mcp_servers=[],
+        origin=origin,
+        managing_flow_id=managing_flow_id,
+    )
     space = SimpleNamespace(
         id=uuid4(),
         get_assistant=lambda **_: assistant,
@@ -48,6 +62,43 @@ def _build_assistant_service_with_mocks(*, is_personal=True, server_in_space=Fal
     service.effective_config_service = None
     service._validate_attachments_fit = AsyncMock()
     return service, assistant_id, session
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("method_name", "kwargs", "expected_action"),
+    [
+        ("add_mcp_to_assistant", {}, "add_mcp_server"),
+        ("remove_mcp_from_assistant", {}, "remove_mcp_server"),
+        (
+            "update_assistant_mcp_config",
+            {"enabled": True, "config": {"mode": "safe"}, "priority": 1},
+            "update_mcp_server_config",
+        ),
+    ],
+)
+async def test_direct_mcp_mutations_reject_flow_managed_assistants(
+    method_name, kwargs, expected_action
+):
+    service, assistant_id, session = _build_assistant_service_with_mocks(
+        origin=AssistantOrigin.FLOW_MANAGED
+    )
+
+    with pytest.raises(BadRequestException) as exc:
+        await getattr(service, method_name)(
+            assistant_id=assistant_id,
+            mcp_server_id=uuid4(),
+            **kwargs,
+        )
+
+    assert exc.value.code == "flow_managed_assistant"
+    assert exc.value.context["assistant_id"] == str(assistant_id)
+    assert exc.value.context["action"] == expected_action
+    # Only the fit lock an addition takes first may run; no association is
+    # read or written.
+    session.scalar.assert_not_awaited()
+    assert session.execute.await_count <= 1
+    service.repo.add_mcp_server.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -168,3 +219,32 @@ async def test_add_mcp_to_assistant_skips_space_mapping_when_governed():
         service.space_repo.get_space_by_assistant.return_value.id,
         mcp_server_id,
     )
+
+
+@pytest.mark.asyncio
+async def test_prune_keeps_only_tool_overrides_inside_selected_servers():
+    repo = object.__new__(AssistantRepository)
+    selected_server_id = uuid4()
+    repo.session = SimpleNamespace(execute=AsyncMock())
+
+    await repo._prune_mcp_tool_overrides(uuid4(), [selected_server_id])
+
+    prune_stmt = repo.session.execute.await_args.args[0]
+    compiled = str(prune_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "assistant_mcp_server_tools" in compiled
+    assert "mcp_server_tools" in compiled
+    assert "NOT IN" in compiled
+    assert selected_server_id.hex in compiled
+
+
+@pytest.mark.asyncio
+async def test_prune_clears_every_tool_override_when_no_servers_remain():
+    repo = object.__new__(AssistantRepository)
+    repo.session = SimpleNamespace(execute=AsyncMock())
+
+    await repo._prune_mcp_tool_overrides(uuid4(), [])
+
+    prune_stmt = repo.session.execute.await_args.args[0]
+    compiled = str(prune_stmt.compile(compile_kwargs={"literal_binds": True}))
+    assert "assistant_mcp_server_tools" in compiled
+    assert "SELECT" not in compiled

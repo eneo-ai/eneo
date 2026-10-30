@@ -1,4 +1,6 @@
 import asyncio
+import json
+import time
 from datetime import datetime, timezone
 from typing import Any, Literal, cast
 
@@ -13,6 +15,15 @@ from eneo.authentication.endpoint_access import (
     Authorization,
     endpoint_access,
     require_endpoint_access,
+)
+from eneo.flows.runtime.flow_runtime_health import (
+    FlowRuntimeHealthResponse,
+    FlowRuntimeProbe,
+    FlowRuntimeProbeFailure,
+    build_flow_runtime_health_policy,
+    classify_flow_runtime_health,
+    flow_runtime_health_probe_failure_response,
+    load_flow_runtime_health_snapshot,
 )
 from eneo.internal_mcp import internal_mcp_mounts
 from eneo.main.config import get_settings
@@ -36,8 +47,16 @@ from eneo.server.middleware.request_context import RequestContextMiddleware
 from eneo.server.middleware.trace_id import TraceIdResponseMiddleware
 from eneo.server.models.api import VersionResponse
 from eneo.server.routers import router as api_router
+from eneo.tasks.health import load_task_worker_readiness
 
 logger = get_logger(__name__)
+
+_GENERAL_ERROR_SCHEMA_REF = "#/components/schemas/GeneralError"
+_HTTP_VALIDATION_ERROR_SCHEMA_REF = "#/components/schemas/HTTPValidationError"
+_FASTAPI_VALIDATION_ERROR_SCHEMA_NAMES = frozenset(
+    {"HTTPValidationError", "ValidationError"}
+)
+
 
 # Initialise OTEL before the FastAPI app is created so that SQLAlchemy,
 # Redis, and aiohttp auto-instrumentation is active before those
@@ -182,6 +201,10 @@ def determine_crawler_health(
     return status, flags, "; ".join(reasons)
 
 
+def _json_obj(value: Any) -> dict[str, Any]:
+    return cast(dict[str, Any], value) if isinstance(value, dict) else {}
+
+
 def _remove_invalid_defaults(schema: dict[str, Any]) -> None:
     """Remove invalid 'NOT_PROVIDED' defaults from OpenAPI schema recursively."""
     if schema.get("default") == "NOT_PROVIDED":
@@ -205,6 +228,212 @@ def _remove_invalid_defaults(schema: dict[str, Any]) -> None:
         if isinstance(variants, list):
             for sub_schema in cast(list[dict[str, Any]], variants):
                 _remove_invalid_defaults(sub_schema)
+
+
+def _resolve_openapi_schema_ref(
+    openapi_schema: dict[str, Any], schema: Any
+) -> dict[str, Any]:
+    if not isinstance(schema, dict):
+        return {}
+
+    schema_obj = cast(dict[str, Any], schema)
+    ref = schema_obj.get("$ref")
+    if not isinstance(ref, str):
+        return schema_obj
+
+    prefix = "#/components/schemas/"
+    if not ref.startswith(prefix):
+        return {}
+
+    component_name = ref.removeprefix(prefix)
+    components = _json_obj(openapi_schema.get("components"))
+    schemas = _json_obj(components.get("schemas"))
+    return _json_obj(schemas.get(component_name))
+
+
+def _schema_allows_null(schema: dict[str, Any]) -> bool:
+    if schema.get("type") == "null":
+        return True
+    options: list[Any] = cast(
+        list[Any], schema.get("anyOf") or schema.get("oneOf") or []
+    )
+    return any(
+        isinstance(option, dict) and cast(dict[str, Any], option).get("type") == "null"
+        for option in options
+    )
+
+
+def _object_schema(
+    openapi_schema: dict[str, Any], schema: Any, depth: int = 0
+) -> dict[str, Any]:
+    """The object schema behind a reference or an unambiguous composition.
+
+    A composition with more than one object option (a discriminated union)
+    is left alone: which option an example belongs to is not knowable from
+    the schema, and a wrong guess would add keys the right option forbids.
+    """
+    resolved = _resolve_openapi_schema_ref(openapi_schema, schema)
+    if "properties" in resolved:
+        return resolved
+    if depth > 8:
+        return {}
+    for key in ("allOf", "anyOf", "oneOf"):
+        candidates = [
+            candidate
+            for candidate in (
+                _object_schema(openapi_schema, option, depth + 1)
+                for option in cast(list[Any], resolved.get(key) or [])
+            )
+            if candidate
+        ]
+        if len(candidates) == 1:
+            return candidates[0]
+        if candidates:
+            return {}
+    return {}
+
+
+def _restore_example_nulls(
+    openapi_schema: dict[str, Any], schema: Any, example: Any, depth: int = 0
+) -> None:
+    if depth > 16:
+        return
+    if isinstance(example, list):
+        resolved = _resolve_openapi_schema_ref(openapi_schema, schema)
+        for item in cast(list[Any], example):
+            _restore_example_nulls(
+                openapi_schema, resolved.get("items"), item, depth + 1
+            )
+        return
+    if not isinstance(example, dict):
+        return
+    example_obj = cast(dict[str, Any], example)
+    object_schema = _object_schema(openapi_schema, schema)
+    properties = _json_obj(object_schema.get("properties"))
+    for name in cast(list[Any], object_schema.get("required") or []):
+        if name in example_obj or not isinstance(name, str):
+            continue
+        property_schema = _json_obj(properties.get(name))
+        if _schema_allows_null(property_schema):
+            example_obj[name] = None
+    for name, value in example_obj.items():
+        if name in properties:
+            _restore_example_nulls(openapi_schema, properties[name], value, depth + 1)
+
+
+def _restore_stripped_example_nulls(openapi_schema: dict[str, Any]) -> None:
+    """Put back the nulls FastAPI drops from declared examples.
+
+    `fastapi.openapi.utils.get_openapi` encodes the whole document with
+    `exclude_none=True`, so a `None` in a model or route example vanishes
+    together with its key. A required nullable property then looks absent and
+    the example no longer matches the schema it documents. Restoring `null`
+    for exactly those keys keeps the response contract strict (the field stays
+    required) and the example honest.
+    """
+    components = _json_obj(openapi_schema.get("components"))
+    for schema in _json_obj(components.get("schemas")).values():
+        if not isinstance(schema, dict):
+            continue
+        schema_obj = cast(dict[str, Any], schema)
+        if "example" in schema_obj:
+            _restore_example_nulls(openapi_schema, schema_obj, schema_obj["example"])
+        for example in cast(list[Any], schema_obj.get("examples") or []):
+            _restore_example_nulls(openapi_schema, schema_obj, example)
+
+    for path_item in _json_obj(openapi_schema.get("paths")).values():
+        for operation in _json_obj(path_item).values():
+            if not isinstance(operation, dict):
+                continue
+            operation_obj = cast(dict[str, Any], operation)
+            contents: list[dict[str, Any]] = [
+                _json_obj(_json_obj(operation_obj.get("requestBody")).get("content"))
+            ]
+            for response in _json_obj(operation_obj.get("responses")).values():
+                contents.append(_json_obj(_json_obj(response).get("content")))
+            for content in contents:
+                for media_object in content.values():
+                    if not isinstance(media_object, dict):
+                        continue
+                    media = cast(dict[str, Any], media_object)
+                    schema = media.get("schema")
+                    if "example" in media:
+                        _restore_example_nulls(openapi_schema, schema, media["example"])
+                    for named in _json_obj(media.get("examples")).values():
+                        named_obj = _json_obj(named)
+                        if "value" in named_obj:
+                            _restore_example_nulls(
+                                openapi_schema, schema, named_obj["value"]
+                            )
+
+
+def _normalize_multipart_upload_file_schemas(openapi_schema: dict[str, Any]) -> None:
+    """Expose UploadFile fields in the shape most OpenAPI client generators expect."""
+    paths = _json_obj(openapi_schema.get("paths"))
+
+    for path_item in paths.values():
+        if not isinstance(path_item, dict):
+            continue
+        path_operations = cast(dict[str, Any], path_item)
+        for operation in path_operations.values():
+            if not isinstance(operation, dict):
+                continue
+
+            operation_obj = cast(dict[str, Any], operation)
+            request_body = _json_obj(operation_obj.get("requestBody"))
+            content = _json_obj(request_body.get("content"))
+            multipart = _json_obj(content.get("multipart/form-data"))
+            request_schema = _resolve_openapi_schema_ref(
+                openapi_schema, multipart.get("schema")
+            )
+            properties = _json_obj(request_schema.get("properties"))
+
+            for property_schema in properties.values():
+                if not isinstance(property_schema, dict):
+                    continue
+                property_schema_obj = cast(dict[str, Any], property_schema)
+                if (
+                    property_schema_obj.get("type") == "string"
+                    and property_schema_obj.get("contentMediaType")
+                    == "application/octet-stream"
+                ):
+                    property_schema_obj.pop("contentMediaType", None)
+                    property_schema_obj["format"] = "binary"
+
+
+def _normalize_request_validation_error_responses(
+    openapi_schema: dict[str, Any],
+) -> None:
+    paths = _json_obj(openapi_schema.get("paths"))
+
+    for path, path_item in paths.items():
+        if path.startswith("/scim/"):
+            continue
+        if not isinstance(path_item, dict):
+            continue
+        for operation in _json_obj(path_item).values():
+            if not isinstance(operation, dict):
+                continue
+            operation_obj = _json_obj(operation)
+            response = _json_obj(_json_obj(operation_obj.get("responses")).get("422"))
+            content = _json_obj(response.get("content"))
+            app_json = _json_obj(content.get("application/json"))
+            schema = _json_obj(app_json.get("schema"))
+            if schema.get("$ref") == _HTTP_VALIDATION_ERROR_SCHEMA_REF:
+                app_json["schema"] = {"$ref": _GENERAL_ERROR_SCHEMA_REF}
+
+    components = _json_obj(openapi_schema.get("components"))
+    schemas = _json_obj(components.get("schemas"))
+    removed_schemas: dict[str, Any] = {}
+    for schema_name in _FASTAPI_VALIDATION_ERROR_SCHEMA_NAMES:
+        removed_schema = schemas.pop(schema_name, None)
+        if removed_schema is not None:
+            removed_schemas[schema_name] = removed_schema
+
+    openapi_json = json.dumps(openapi_schema)
+    for schema_name, schema in removed_schemas.items():
+        if f"#/components/schemas/{schema_name}" in openapi_json:
+            schemas[schema_name] = schema
 
 
 def get_application():
@@ -239,7 +468,7 @@ def get_application():
 
     add_exception_handlers(app)
 
-    def custom_openapi():
+    def custom_openapi() -> dict[str, Any]:
         if app.openapi_schema:
             return app.openapi_schema
 
@@ -253,17 +482,14 @@ def get_application():
 
         # WSO2 compatibility: Rename "default" security scheme to "APIKeyAuth"
         # WSO2 API Manager treats "default" as a reserved keyword expecting a boolean
-        if (
-            "components" in openapi_schema
-            and "securitySchemes" in openapi_schema["components"]
-        ):
-            schemes = openapi_schema["components"]["securitySchemes"]
-            if "default" in schemes:
-                schemes["APIKeyAuth"] = schemes.pop("default")
+        components = _json_obj(openapi_schema.get("components"))
+        security_schemes = _json_obj(components.get("securitySchemes"))
+        if "default" in security_schemes:
+            security_schemes["APIKeyAuth"] = security_schemes.pop("default")
 
         # Update all security references from "default" to "APIKeyAuth"
-        for path in cast(dict[str, Any], openapi_schema.get("paths", {})).values():
-            for operation in cast(dict[str, Any], path).values():
+        for path in _json_obj(openapi_schema.get("paths")).values():
+            for operation in _json_obj(path).values():
                 if isinstance(operation, dict) and "security" in operation:
                     security = cast(list[dict[str, list[Any]]], operation["security"])
                     operation["security"] = [
@@ -275,22 +501,25 @@ def get_application():
                     ]
 
         # WSO2 compatibility: Remove invalid "NOT_PROVIDED" defaults from schemas
-        if "components" in openapi_schema and "schemas" in openapi_schema["components"]:
-            for schema in openapi_schema["components"]["schemas"].values():
-                _remove_invalid_defaults(schema)
+        schemas = _json_obj(components.get("schemas"))
+        for schema in schemas.values():
+            if isinstance(schema, dict):
+                _remove_invalid_defaults(cast(dict[str, Any], schema))
+
+        _normalize_multipart_upload_file_schemas(openapi_schema)
+        _normalize_request_validation_error_responses(openapi_schema)
+        _restore_stripped_example_nulls(openapi_schema)
 
         # Fix only the missing SSE-related schemas that FastAPI doesn't auto-detect
-        if "components" not in openapi_schema:
-            openapi_schema["components"] = {}
-        if "schemas" not in openapi_schema["components"]:
-            openapi_schema["components"]["schemas"] = {}
+        components = _json_obj(openapi_schema.setdefault("components", {}))
+        schemas = _json_obj(components.setdefault("schemas", {}))
 
         # Import SSE models and enums
         from eneo.sessions.session import SSE_MODELS, EneoEventType
 
         # Add EneoEventType enum if not already there
-        if "EneoEventType" not in openapi_schema["components"]["schemas"]:
-            openapi_schema["components"]["schemas"]["EneoEventType"] = {
+        if "EneoEventType" not in schemas:
+            schemas["EneoEventType"] = {
                 "type": "string",
                 "enum": [item.value for item in EneoEventType],
             }
@@ -299,16 +528,16 @@ def get_application():
         # so that openapi-typescript can resolve all $ref pointers.
         for model in SSE_MODELS:
             model_name = model.__name__
-            if model_name not in openapi_schema["components"]["schemas"]:
+            if model_name not in schemas:
                 schema = model.model_json_schema(
                     ref_template="#/components/schemas/{model}"
                 )
                 # Extract $defs and promote them to top-level schemas
                 defs = schema.pop("$defs", {})
                 for def_name, def_schema in defs.items():
-                    if def_name not in openapi_schema["components"]["schemas"]:
-                        openapi_schema["components"]["schemas"][def_name] = def_schema
-                openapi_schema["components"]["schemas"][model_name] = schema
+                    if def_name not in schemas:
+                        schemas[def_name] = def_schema
+                schemas[model_name] = schema
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema
@@ -411,6 +640,91 @@ def get_application():
             raise HTTPException(status_code=503, detail=response_data["detail"])
 
         return response_data
+
+    @app.get(
+        "/api/healthz/flows",
+        response_model=FlowRuntimeHealthResponse,
+        dependencies=[Security(authenticate_super_api_key)],
+        description=(
+            "Return super-key-protected Flow runtime readiness signals derived from "
+            "persisted run, review, data-integrity, audit-outbox, webhook-outbox, and "
+            "platform task worker readiness."
+        ),
+        responses={
+            200: {
+                "description": (
+                    "Flow runtime health payload. Inspect the response status and flags "
+                    "for healthy, degraded, unhealthy, or unknown runtime signals."
+                )
+            },
+            401: {"description": "Missing or invalid Eneo super API key."},
+        },
+    )
+    @endpoint_access(
+        authentication=Authentication.SYSADMIN,
+        authorization=Authorization.SYSADMIN,
+        reason="Flow runtime diagnostics require deployment administrator access.",
+    )
+    async def flow_runtime_health() -> FlowRuntimeHealthResponse:
+        from eneo.server.dependencies.container import Container
+
+        settings = get_settings()
+        policy = build_flow_runtime_health_policy(
+            task_timeout_seconds=settings.task_execution_timeout_seconds
+        )
+        worker_readiness = await load_task_worker_readiness(timeout_seconds=1.0)
+        query_started_at = time.perf_counter()
+        query_now = datetime.now(timezone.utc)
+
+        async def _load_health_snapshot():
+            async with Container.session_scope() as session:
+                return await load_flow_runtime_health_snapshot(
+                    session=session,
+                    now=query_now,
+                    policy=policy,
+                )
+
+        try:
+            async with asyncio.timeout(2.0):
+                snapshot = await _load_health_snapshot()
+        except TimeoutError:
+            query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
+            logger.warning("DB query timeout in flow runtime health check")
+            return flow_runtime_health_probe_failure_response(
+                now=query_now,
+                policy=policy,
+                query_duration_ms=query_duration_ms,
+                failure=FlowRuntimeProbeFailure.TIMEOUT,
+                execution_worker_ready=worker_readiness.execution_ready,
+                maintenance_worker_ready=worker_readiness.maintenance_ready,
+            )
+        except Exception as exc:
+            query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
+            logger.warning(
+                "DB query error in flow runtime health check",
+                extra={"error": str(exc)},
+            )
+            return flow_runtime_health_probe_failure_response(
+                now=query_now,
+                policy=policy,
+                query_duration_ms=query_duration_ms,
+                failure=FlowRuntimeProbeFailure.ERROR,
+                execution_worker_ready=worker_readiness.execution_ready,
+                maintenance_worker_ready=worker_readiness.maintenance_ready,
+            )
+
+        query_duration_ms = int((time.perf_counter() - query_started_at) * 1000)
+        return classify_flow_runtime_health(
+            snapshot=snapshot,
+            now=query_now,
+            policy=policy,
+            probe=FlowRuntimeProbe(
+                db_query_ok=True,
+                db_query_duration_ms=query_duration_ms,
+                execution_worker_ready=worker_readiness.execution_ready,
+                maintenance_worker_ready=worker_readiness.maintenance_ready,
+            ),
+        )
 
     @app.get(
         "/api/readyz",
@@ -584,6 +898,7 @@ def get_application():
     _registered_endpoints = (
         get_livez,
         get_healthz,
+        flow_runtime_health,
         get_readyz,
         crawler_health,
         get_version,

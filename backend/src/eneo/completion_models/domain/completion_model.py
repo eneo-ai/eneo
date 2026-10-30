@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, Optional
 from typing_extensions import override
 
 from eneo.ai_models.ai_model import AIModel
+from eneo.completion_models.domain.model_capacity import ModelCapacity
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
     coerce_model_kwargs_capabilities,
@@ -19,20 +20,23 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.database.tables.ai_models_table import CompletionModels
-    from eneo.users.user import UserInDB
+    from eneo.tenants.tenant import TenantInDB
 
 
 class CompletionModel(AIModel):
+    """Declared capacity and capabilities for one model route."""
+
     def __init__(
         self,
-        user: "UserInDB",
+        *,
+        tenant: "TenantInDB",
         id: "UUID",
         created_at: "datetime",
         updated_at: "datetime",
         nickname: str,
         name: str,
-        max_input_tokens: int,
-        max_output_tokens: int,
+        max_input_tokens: Optional[int],
+        max_output_tokens: Optional[int],
         vision: bool,
         family: Optional[str],
         hosting: Optional[str],
@@ -48,6 +52,8 @@ class CompletionModel(AIModel):
         is_org_default: bool,
         reasoning: bool,
         supports_tool_calling: bool = False,
+        supports_strict_tool_schema: bool = False,
+        token_limit: Optional[int] = None,
         base_url: Optional[str] = None,
         litellm_model_name: Optional[str] = None,
         model_kwargs_capabilities: SupportedModelKwargs
@@ -64,7 +70,7 @@ class CompletionModel(AIModel):
         deleted_at: Optional["datetime"] = None,
     ):
         super().__init__(
-            user=user,
+            tenant=tenant,
             id=id,
             created_at=created_at,
             updated_at=updated_at,
@@ -93,6 +99,7 @@ class CompletionModel(AIModel):
         self.reasoning = reasoning
         self.vision = vision
         self.supports_tool_calling = supports_tool_calling
+        self.supports_strict_tool_schema = supports_strict_tool_schema
         self.max_input_tokens = max_input_tokens
         self.max_output_tokens = max_output_tokens
         self.deployment_name = deployment_name
@@ -107,6 +114,10 @@ class CompletionModel(AIModel):
         self.deleted_at = deleted_at
 
     @property
+    def capacity(self) -> ModelCapacity:
+        return ModelCapacity(self.max_input_tokens, self.max_output_tokens)
+
+    @property
     def can_access(self):
         return (
             super().can_access
@@ -115,8 +126,8 @@ class CompletionModel(AIModel):
         )
 
     @property
-    def token_limit(self) -> int:
-        """Backward-compat alias: returns max_input_tokens."""
+    def token_limit(self) -> int | None:
+        """Backward-compatible input ceiling alias; may be unknown."""
         return self.max_input_tokens
 
     def get_model_route(self, *, provider_type: str | None = None) -> str:
@@ -137,6 +148,10 @@ class CompletionModel(AIModel):
             tenant_id=self.tenant_id,
         )
 
+    @property
+    def supported_model_kwargs(self) -> SupportedModelKwargs:
+        return self.get_supported_model_kwargs()
+
     @override
     def get_credential_provider_name(self) -> str:
         """Get the credential provider name for this model."""
@@ -151,13 +166,12 @@ class CompletionModel(AIModel):
     def create_from_db(
         cls,
         completion_model_db: "CompletionModels",
-        user: "UserInDB",
+        tenant: "TenantInDB",
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
     ) -> "CompletionModel":
-        # Settings are now directly on the model table
         return cls(
-            user=user,
+            tenant=tenant,
             id=completion_model_db.id,
             created_at=completion_model_db.created_at,
             updated_at=completion_model_db.updated_at,
@@ -180,6 +194,7 @@ class CompletionModel(AIModel):
             is_org_default=completion_model_db.is_default,
             reasoning=completion_model_db.reasoning,
             supports_tool_calling=completion_model_db.supports_tool_calling,
+            supports_strict_tool_schema=completion_model_db.supports_strict_tool_schema,
             base_url=completion_model_db.base_url,
             litellm_model_name=completion_model_db.litellm_model_name,
             model_kwargs_capabilities=completion_model_db.model_kwargs_capabilities,

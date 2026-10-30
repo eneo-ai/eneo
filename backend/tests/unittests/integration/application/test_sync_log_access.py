@@ -64,6 +64,7 @@ def sync_log_database(integration_access):
         session.scalars.side_effect = connection.scalars
         repo = SpaceRepository(
             session=session,
+            tenant=integration_access.user.tenant,
             user=integration_access.user,
             factory=MagicMock(),
             file_content_loader=MagicMock(),

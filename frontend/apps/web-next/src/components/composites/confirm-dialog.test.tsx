@@ -1,9 +1,13 @@
 // @vitest-environment jsdom
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Button } from "@/components/ui/button";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { ConfirmDialog, ConfirmDialogControlled } from "./confirm-dialog";
 
 afterEach(cleanup);
@@ -205,4 +209,93 @@ it("ConfirmDialogControlled shows its body under the description", async () => {
   const dialog = await screen.findByRole("alertdialog", { name: "Byt klassning" });
   expect(within(dialog).getByText("Två assistenter")).toBeDefined();
   await expectNoAxeViolations(dialog);
+});
+
+describe("ConfirmDialog focus and layout", () => {
+  afterEach(() => setViewport("desktop"));
+
+  it("focuses Cancel on open and returns focus to an Astryx trigger when Escape cancels", async () => {
+    renderInApp(
+      <ConfirmDialog
+        trigger={<AstryxButton label="Rotera nyckeln" />}
+        title="Rotera nyckel"
+        description="Den gamla nyckeln slutar fungera."
+        confirmLabel="Rotera"
+        onConfirm={() => {}}
+      />
+    );
+    const trigger = screen.getByRole("button", { name: "Rotera nyckeln" });
+    expect(trigger.getAttribute("aria-haspopup")).toBe("dialog");
+
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("alertdialog", { name: "Rotera nyckel" });
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    await waitFor(() =>
+      expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Avbryt" }))
+    );
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("puts the destructive action above Cancel on a narrow screen", async () => {
+    setViewport("phone");
+    renderInApp(
+      <ConfirmDialogControlled
+        open
+        onOpenChange={() => {}}
+        title="Ta bort samling"
+        description="Det här går inte att ångra."
+        confirmLabel="Ta bort"
+        onConfirm={() => {}}
+      />
+    );
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort samling" });
+    expect(
+      within(dialog)
+        .getAllByRole("button")
+        .map((button) => button.textContent)
+    ).toEqual(["Ta bort", "Avbryt"]);
+  });
+});
+
+describe("ConfirmDialogControlled outside a menu", () => {
+  function MenuConfirm() {
+    const [open, setOpen] = useState(false);
+    return (
+      <>
+        <MoreMenu
+          label="Åtgärder för Avtal"
+          items={[{ label: "Ta bort", onClick: () => setOpen(true) }]}
+        />
+        <ConfirmDialogControlled
+          open={open}
+          onOpenChange={setOpen}
+          title="Ta bort samling"
+          description="Det här går inte att ångra."
+          confirmLabel="Ta bort"
+          onConfirm={() => {}}
+        />
+      </>
+    );
+  }
+
+  it("returns focus to the menu button when a menu item opened it", async () => {
+    renderInApp(<MenuConfirm />);
+    const menuButton = screen.getByRole("button", { name: "Åtgärder för Avtal" });
+    menuButton.focus();
+    fireEvent.click(menuButton);
+    const menu = document.getElementById(menuButton.getAttribute("aria-controls") ?? "")!;
+    const item = within(menu).getByRole("menuitem", { name: "Ta bort" });
+    item.focus();
+    fireEvent.click(item);
+
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort samling" });
+    await expectNoAxeViolations(document.body);
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => expect(dialog.hasAttribute("open")).toBe(false));
+    await waitFor(() => expect(document.activeElement).toBe(menuButton));
+  });
 });

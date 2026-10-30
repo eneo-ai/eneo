@@ -1,0 +1,295 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import Enum
+from typing import Literal
+
+from eneo.flows.flow_variable_definitions import (
+    PRIMARY_FLOW_INPUT_KEYS,
+    RESERVED_RUNTIME_VARIABLES,
+    STEP_INPUT_KEY_SHAPES,
+    VariableShape,
+    runtime_variable_shape,
+    step_input_key_shape,
+    variable_path_segments,
+)
+from eneo.flows.variable_resolver import (
+    iter_template_expressions,
+    runtime_step_alias_order,
+)
+
+
+class TemplateReferenceKind(str, Enum):
+    STEP = "step"
+    FORM_FIELD = "form_field"
+    RUNTIME = "runtime"
+    UNKNOWN = "unknown"
+
+
+TemplateReferencePathErrorCode = Literal[
+    "invalid_step_reference_format",
+    "structured_path_empty_segment",
+    "runtime_scalar_nested_access",
+    "runtime_sequence_non_numeric_index",
+    "step_input_key_required",
+    "unknown_flow_input_key",
+    "unknown_step_input_key",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class TemplateReference:
+    expression: str
+    head: str
+    tail: str
+    kind: TemplateReferenceKind
+    step_ref: str | None = None
+    step_order: int | None = None
+    structured_path: tuple[str, ...] | None = None
+    form_field_name: str | None = None
+    path_error_code: TemplateReferencePathErrorCode | None = None
+    path_error_context: dict[str, object] | None = None
+
+
+def analyze_template(
+    template: str,
+    *,
+    step_refs: dict[str, int],
+    form_field_names: set[str],
+    runtime_variables: frozenset[str] = RESERVED_RUNTIME_VARIABLES,
+) -> list[TemplateReference]:
+    references: list[TemplateReference] = []
+    for expression in iter_template_expressions(template):
+        references.append(
+            _analyze_expression(
+                expression=expression,
+                step_refs=step_refs,
+                form_field_names=form_field_names,
+                runtime_variables=runtime_variables,
+            )
+        )
+    return references
+
+
+def consumes_runtime_input(references: list[TemplateReference]) -> bool:
+    return any(
+        reference.head == "step_input"
+        and bool(reference.tail)
+        and reference.path_error_code is None
+        for reference in references
+    )
+
+
+def referenced_form_fields(
+    references: list[TemplateReference],
+    *,
+    form_field_names: set[str] | None = None,
+) -> set[str]:
+    if form_field_names is not None and any(
+        (reference.head == "flow_input" and not reference.tail)
+        or (reference.head == "flow" and reference.tail in {"", "input"})
+        for reference in references
+    ):
+        return set(form_field_names)
+    fields = {
+        reference.head
+        for reference in references
+        if reference.kind is TemplateReferenceKind.FORM_FIELD
+    }
+    fields.update(
+        reference.form_field_name
+        for reference in references
+        if reference.form_field_name is not None
+    )
+    return fields
+
+
+def _analyze_expression(
+    *,
+    expression: str,
+    step_refs: dict[str, int],
+    form_field_names: set[str],
+    runtime_variables: frozenset[str],
+) -> TemplateReference:
+    if "." in expression:
+        raw_head, raw_tail = expression.split(".", maxsplit=1)
+    else:
+        raw_head, raw_tail = expression, ""
+    head = raw_head.strip()
+    tail = raw_tail.strip()
+
+    if head in step_refs:
+        return _build_step_reference(
+            expression=expression,
+            head=head,
+            tail=tail,
+            step_ref=head,
+            step_order=step_refs[head],
+        )
+    if head in runtime_variables:
+        return _build_runtime_reference(
+            expression=expression,
+            head=head,
+            tail=tail,
+            form_field_names=form_field_names,
+        )
+    if head.startswith("step_"):
+        step_order = runtime_step_alias_order(head)
+        if step_order is not None:
+            return _build_step_reference(
+                expression=expression,
+                head=head,
+                tail=tail,
+                step_ref=head,
+                step_order=step_order,
+            )
+        return TemplateReference(
+            expression=expression,
+            head=head,
+            tail=tail,
+            kind=TemplateReferenceKind.STEP,
+            path_error_code="invalid_step_reference_format",
+        )
+    if head in form_field_names:
+        return TemplateReference(
+            expression=expression,
+            head=head,
+            tail=tail,
+            kind=TemplateReferenceKind.FORM_FIELD,
+        )
+    return TemplateReference(
+        expression=expression,
+        head=head,
+        tail=tail,
+        kind=TemplateReferenceKind.UNKNOWN,
+    )
+
+
+def _build_step_reference(
+    *,
+    expression: str,
+    head: str,
+    tail: str,
+    step_ref: str,
+    step_order: int,
+) -> TemplateReference:
+    structured_path: tuple[str, ...] | None = None
+    path_error_code: TemplateReferencePathErrorCode | None = None
+    if tail.startswith("output.structured."):
+        # Keep empty segments so publication cannot validate a different runtime path.
+        structured_path = tuple(
+            variable_path_segments(tail.removeprefix("output.structured."))
+        )
+        if not all(structured_path):
+            path_error_code = "structured_path_empty_segment"
+    return TemplateReference(
+        expression=expression,
+        head=head,
+        tail=tail,
+        kind=TemplateReferenceKind.STEP,
+        step_ref=step_ref,
+        step_order=step_order,
+        structured_path=structured_path,
+        path_error_code=path_error_code,
+    )
+
+
+def _build_runtime_reference(
+    *,
+    expression: str,
+    head: str,
+    tail: str,
+    form_field_names: set[str],
+) -> TemplateReference:
+    path_error_code: TemplateReferencePathErrorCode | None = None
+    path_error_context: dict[str, object] | None = None
+    form_field_name = None
+    root_shape = runtime_variable_shape(head)
+    if head == "flow_input" or (head == "flow" and tail.startswith("input.")):
+        input_tail = tail.removeprefix("input.") if head == "flow" else tail
+        form_field_name = _flow_input_form_field_name(input_tail, form_field_names)
+        path_error_code, path_error_context = _validate_flow_input_path(
+            input_tail, form_field_names
+        )
+    elif head == "step_input":
+        path_error_code, path_error_context = _validate_step_input_path(tail)
+    elif root_shape is VariableShape.SCALAR and tail:
+        path_error_code = "runtime_scalar_nested_access"
+        path_error_context = {"shape": root_shape.value}
+    elif root_shape is VariableShape.SEQUENCE and tail:
+        path_error_code, path_error_context = _validate_sequence_tail(tail)
+
+    return TemplateReference(
+        expression=expression,
+        head=head,
+        tail=tail,
+        kind=TemplateReferenceKind.RUNTIME,
+        form_field_name=form_field_name,
+        path_error_code=path_error_code,
+        path_error_context=path_error_context,
+    )
+
+
+def _flow_input_form_field_name(tail: str, form_field_names: set[str]) -> str | None:
+    if not tail:
+        return None
+    field_name = tail.split(".", maxsplit=1)[0].strip()
+    return field_name if field_name in form_field_names else None
+
+
+def _validate_flow_input_path(
+    tail: str, form_field_names: set[str]
+) -> tuple[TemplateReferencePathErrorCode | None, dict[str, object] | None]:
+    if not tail:
+        return None, None
+    key = tail.split(".", maxsplit=1)[0].strip()
+    known_keys = form_field_names | PRIMARY_FLOW_INPUT_KEYS
+    if key in known_keys:
+        return None, None
+    return "unknown_flow_input_key", {"known_keys": tuple(sorted(known_keys))}
+
+
+def _validate_step_input_path(
+    tail: str,
+) -> tuple[TemplateReferencePathErrorCode | None, dict[str, object] | None]:
+    if not tail:
+        return "step_input_key_required", None
+    segments = variable_path_segments(tail)
+    key = segments[0]
+    if not key:
+        return "step_input_key_required", None
+    key_shape = step_input_key_shape(key)
+    if key_shape is None:
+        return (
+            "unknown_step_input_key",
+            {"known_keys": tuple(STEP_INPUT_KEY_SHAPES.keys())},
+        )
+    remainder = segments[1:]
+    if not remainder:
+        return None, None
+    if key_shape is VariableShape.SCALAR:
+        return "runtime_scalar_nested_access", {"shape": key_shape.value}
+    if key_shape is VariableShape.SEQUENCE:
+        return _validate_sequence_segments(remainder)
+    return None, None
+
+
+def _validate_sequence_tail(
+    tail: str,
+) -> tuple[TemplateReferencePathErrorCode | None, dict[str, object] | None]:
+    return _validate_sequence_segments(variable_path_segments(tail))
+
+
+def _validate_sequence_segments(
+    segments: list[str],
+) -> tuple[TemplateReferencePathErrorCode | None, dict[str, object] | None]:
+    if not segments:
+        return None, None
+    first = segments[0]
+    # ASCII digits only: the resolver also takes other Unicode digits, which no
+    # author writes; the editor applies the same rule.
+    if not (first.isascii() and first.isdigit()):
+        return "runtime_sequence_non_numeric_index", None
+    if len(segments) > 1:
+        return "runtime_scalar_nested_access", {"shape": VariableShape.SCALAR.value}
+    return None, None

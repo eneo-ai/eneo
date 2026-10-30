@@ -4,6 +4,9 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
+
 pytestmark = pytest.mark.integration
 
 
@@ -267,11 +270,20 @@ class TestAccessSessionEndpoint:
             },
             headers=auth_headers,
         )
-        # Pydantic validates first and returns 422 for validation errors
         assert response.status_code == 422
-        # Pydantic error format includes validation details
-        error_detail = response.json()
-        assert "detail" in error_detail
+        error = GeneralError.model_validate(response.json())
+        assert error.eneo_error_code is ErrorCodes.VALIDATION_ERROR
+        assert error.code == "request_validation_error"
+        assert isinstance(error.details, dict)
+        errors = error.details.get("errors")
+        assert isinstance(errors, list)
+        # The type is the typed signal that the minimum-length rule fired; the
+        # message is redacted by the handler and covered by its own unit tests.
+        assert any(
+            entry["location"] == ["body", "description"]
+            and entry["type"] == "string_too_short"
+            for entry in errors
+        )
 
     async def test_create_session_success(self, client, auth_headers):
         """Verify successful session creation."""

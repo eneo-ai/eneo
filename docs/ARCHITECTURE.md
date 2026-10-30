@@ -259,6 +259,33 @@ graph LR
 
 ---
 
+## Flow external-effect boundary
+
+A Flow step can take its input from one MCP tool call (`input_source` `tool`),
+through the chain assistants use: the instance administrator registers the
+server and approves its tools, the space administrator switches the server and
+its tools on, and the author picks a tool in a step. Eneo does not know whether
+a tool changes something: a run that is started again calls the tool again, and
+Eneo does not prevent the repeated change.
+
+A step's model gets no MCP tools: Eneo rejects MCP-bearing current assistants,
+package imports, and historical published definitions before it mutates Flow
+state or performs external work. Package export leaves step assistants' MCP
+servers and tools out (it reports how many it left out) and refuses a flow that
+has a tool step.
+
+Standalone assistants and conversations retain their separately owned MCP
+behavior. Flow accepts HTTP GET as an input source and sends terminal HTTP POST
+output through the durable webhook outbox.
+
+The accepted
+[Flow launch scope and lifecycle ADR](adr/flow-launch-scope-and-lifecycle.md#4-flow-mcp-is-hard-disabled)
+owns the launch decision. The
+[Flow Developer Quickstart](flows/flow-developer-quickstart.md#step-schema)
+documents the supported step and effect boundary.
+
+---
+
 ## Backend Architecture (C4 Level 3)
 
 Deep dive into the FastAPI backend container showing the layered architecture with HTTP handling, domain services, domain entities, and infrastructure components. This demonstrates how Eneo implements domain-driven design principles with clear separation of concerns across layers.
@@ -476,7 +503,7 @@ Eneo supports enterprise multi-tenancy with complete data isolation, per-tenant 
 **Authentication Modes:**
 
 - **Single-Tenant (Default)** - Shared IdP via `OIDC_DISCOVERY_ENDPOINT` environment variables
-- **Federation Mode** - IdP config via sysadmin API (`FEDERATION_PER_TENANT_ENABLED=true`), supports:
+- **Federation Mode** - IdP config via sysadmin API (`FEDERATION_ENABLED=true`), supports:
   - Multi-tenant: Each tenant has their own IdP (Entra ID, MobilityGuard, Auth0, Okta)
   - Single-tenant with API management: Dynamic OIDC config without restarts
 
@@ -711,7 +738,9 @@ Eneo implements security at every layer to protect sensitive public sector data 
 - **Tenant Data Encryption**: Fernet encryption for tenant credentials and federation configs
 - **Password Security**: Bcrypt hashing with secure salts
 - **Audit Trails**: All actions logged for compliance
-- **Data Retention**: Automatic deletion per policy
+- **Data Retention**: Data-class-specific policy and cleanup. Configured
+  conversation and audit retention can run automatically; Flow run-history
+  policy does not authorize automatic deletion in the current release.
 
 **Multi-Tenant Security:**
 - Database isolation with row-level security

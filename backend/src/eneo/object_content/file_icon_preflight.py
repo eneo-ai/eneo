@@ -15,7 +15,10 @@ from sqlalchemy.pool import NullPool
 from alembic.script import ScriptDirectory
 from alembic.script.revision import ResolutionError
 from alembic.util.exc import CommandError
-from eneo.object_content.configuration import ObjectContentCoreSettings
+from eneo.object_content.configuration import (
+    ObjectContentCoreSettings,
+    load_object_content_core_settings,
+)
 
 _MIB = 1024 * 1024
 _PAGE_PARENT = "b4f2a9c1e7d3"
@@ -439,7 +442,7 @@ async def _inspect(
         report.blockers.append(
             PreflightIssue(
                 "oversized_legacy_items",
-                "Remaining legacy items exceed OBJECT_CONTENT_INLINE_MAXIMUM_BYTES. Resolve the per-item limit and measure database memory/capacity before starting adoption; batch limits do not override it.",
+                "Remaining legacy items exceed PostgreSQL inline capacity. Use object storage for larger items; batch limits do not override storage capacity.",
             )
         )
     if (
@@ -476,7 +479,7 @@ async def run_file_icon_preflight(
     """
     if timeout_seconds < 1:
         raise ValueError("timeout_seconds must be positive")
-    settings = core_settings or ObjectContentCoreSettings()
+    settings = core_settings or load_object_content_core_settings()
     report = FileIconPreflightReport(inline_maximum_bytes=settings.inline_maximum_bytes)
     engine = create_async_engine(
         make_url(database_url).set(drivername="postgresql+asyncpg"),

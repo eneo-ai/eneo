@@ -48,7 +48,7 @@ expandable technical details.
 Persisted business limits accept whole-byte values from 1 through
 9,007,199,254,740,991 so PostgreSQL and browser clients can round-trip the same
 integer exactly. This representation bound is not a business default or a
-capacity recommendation; the applicable operator ceiling can still make the
+capacity recommendation; the selected storage capacity can still make the
 effective limit lower.
 
 The default deployment uses PostgreSQL-inline storage and does not start
@@ -276,8 +276,7 @@ When readiness reports `ready`, an administrator can select **Object store** in
 external endpoints; there is no provider or vendor product branch.
 
 Remote-only settings are all-or-nothing. Do not model “off” with blank values:
-leave every remote-only variable absent. Core settings such as
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` and reconciliation bounds are valid
+leave every remote-only variable absent. Core reconciliation settings are valid
 without an endpoint. Any remote endpoint, credential, transport, multipart, or
 object-inventory value activates strict object-store validation.
 
@@ -305,23 +304,40 @@ external private CA read-only into both backend and worker, then set
 `OBJECT_CONTENT_CA_BUNDLE` in `env_backend.env`. Do not put credentials in the
 endpoint URL, command line, image, repository, logs, or backup manifest.
 
-Inline capacity and common reconciliation tuning live in `env_backend.env`.
-`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is an operator admission ceiling that
-bounds PostgreSQL row, WAL, backup, and process memory exposure; it is not a
-business limit. Lowering it affects new inline writes, not reads of existing
-rows. For PostgreSQL-inline session uploads, the effective limit is the smaller
-of the admin policy and this ceiling. **Admin > File storage** shows the configured
-limit, effective limit, and constraining source. Object-store session uploads
-use the same rule with the portable multipart envelope derived from configured
-transport settings. FastAPI/Starlette multipart parsing happens before route
-admission and may use temporary disk. Eneo rejects an oversized File or Icon
-before its own capture/spool or any storage mutation. Operators must use
-ingress/request-body limits and configure and monitor temporary-disk capacity
-to protect that earlier parsing boundary.
+### Upload limits and storage capacity
 
-Business limits apply to the user's original upload. Generated text, model
-input, and page variants may be larger and are bounded by the selected
-backend's operator ceiling instead of a second business limit.
+**Admin > File storage** owns upload policy. Changes apply to new admissions
+without restarting backend or workers. The limits apply to every Flow. **Flow settings > Uploads and runtimes** shows
+the effective sizes; file counts and recording duration remain editable there.
+
+`OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` is retired and ignored, with an actionable
+startup log. Old `UPLOAD_*` and `TRANSCRIPTION_MAX_FILE_SIZE` values were only
+migration seeds; removing them does not rewrite stored policy. After upgrading,
+check saved values in File storage. The migration removes retired per-tenant
+file/audio size overrides and logs their previous values; all other settings
+and existing files remain unchanged.
+
+PostgreSQL inline capacity is derived from its 1 GiB allocation envelope, the
+2× bytea hex expansion used by COPY/pg_dump, and room for row metadata. It is
+just below 512 MiB per payload. The API rejects policy values above the selected
+storage capacity and reports the affected field. Existing oversized policies
+remain stored; the page shows their lower effective value until corrected.
+For larger files, configure and select object storage in the same page. Its
+capacity follows the S3 multipart protocol and configured part size. There is
+no separate 2 GiB Flow file-size ceiling.
+
+Policy does not reserve resources. Inline uploads materialize bytes in memory;
+budget for payload copies in the API/driver and larger allocations in pg_dump.
+Verify memory, WAL and backup capacity at the selected sizes and concurrency.
+Object storage streams originals, but multipart parsing and processing need
+temporary disk. Text and Office extraction can still materialize whole files;
+a 10 GiB upload policy does not guarantee every format can be processed with
+bounded memory. Audio duration/decoded-size and PDF extraction protections are
+separate processing controls. Ingress limits must admit the chosen policy.
+
+Generated text and variants use storage capacity, not a second upload policy.
+Lower limits affect new admissions, not existing file access or deletion.
+Rollback does not restore the retired per-tenant size overrides.
 
 Object-store transport, bounded-memory spool, multipart, deletion, and orphan
 tuning is optional and should remain commented out until the endpoint is
@@ -457,7 +473,7 @@ removing configuration.
 ### Change the S3-compatible destination
 
 Changing hosting provider does not require staging content in PostgreSQL — and
-cannot, once any object exceeds the inline admission ceiling. Eneo does not
+cannot, once any object exceeds PostgreSQL inline capacity. Eneo does not
 copy buckets; the operator copies with their own tooling and Eneo performs the
 guarded switch. Object keys carry no endpoint or bucket, so a faithful copy is
 readable immediately.
@@ -470,7 +486,7 @@ readable immediately.
 2. Select `postgres_inline` for new writes in **Admin > File storage**, let queued
    moves and in-flight uploads finish, then select **Pause moves**. Both are
    required: an empty queue does not by itself stop a new move from starting
-   mid-copy. New uploads above `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` fail
+   mid-copy. New uploads above PostgreSQL inline capacity fail
    during this window.
 3. Copy only `v1/<deployment-id-hex>/` with `rclone copy --checksum` (never
    `sync`, which deletes at the destination) and preserve object metadata;
@@ -570,6 +586,78 @@ duration, connection-pool pressure, and the documented inline admission
 ceiling. Reads are linear in payload size and use bounded chunks after the
 database driver returns the bounded BYTEA value.
 
+Before deploying migration `202609211201`, stop or drain every worker that runs
+the `reconcile_object_content` cron (for the Compose worker, use
+`docker compose stop worker`, including all replicas). Upgrade every backend
+and worker that writes inline content before restarting those cron workers.
+Completion establishes a stable uncompressed-storage invariant only when every
+database-copy writer runs the corrected code throughout the sweep. The migration
+sets `inline_content_payloads.payload` to EXTERNAL without rewriting the table;
+the local reconciliation phase then converts existing compressed values at
+startup and every minute, including deployments without S3. To pause conversion,
+stop or drain all those workers again. Their other scheduled and queued jobs
+also wait until they resume. The move pause and File/Icon campaign pause do not
+pause conversion. Restarting the workers resumes committed progress.
+
+Conversion discovers one row per keyset page and commits one row per transaction,
+with a five-second lock timeout. `OBJECT_CONTENT_RECONCILIATION_BATCH_SIZE`
+limits rows examined per tick, including unchanged, locked, and rejected rows.
+Locked rows force another sweep without rewriting successful conversions.
+The worker summary reports `inline_conversion_scanned`, `converted`, `rejected`,
+`skipped`, `sweep_completed`, and `ready` (each with the `inline_conversion_`
+prefix). Durable evidence is in the singleton
+`object_content_reconciliation_state`: `inline_conversion_cursor_id` and
+`inline_conversion_upper_id` delimit the active sweep; scanned/converted counts
+are cumulative, while rejected/skipped counts describe the current or most
+recent sweep. `inline_conversion_completed_at` records the last sweep without
+skipped rows, even if corrupt rows were rejected. `inline_conversion_ready_at`
+records a completed sweep without rejected rows. It is an optional progress
+signal for operators; downloads do not read it. Rejected corrupt rows keep it
+unset and follow the existing backend-failure recovery path.
+
+Plan disk, WAL, backup, and replica headroom before restarting conversion.
+On the PostgreSQL 13 integration fixture, one compressible 1,048,576-byte payload
+occupied 12,009 bytes before reconstruction and 1,048,576 bytes afterward
+(`pg_column_size`); the isolated reconstruction UPDATE reported 1,118,865 WAL
+bytes through `EXPLAIN (ANALYZE, BUFFERS, WAL)`, excluding progress-record writes
+and subsequent vacuum work. These are fixture measurements, not capacity
+ceilings; measure representative deployment rows and replica lag. Reconstruction
+and hash verification require whole-value memory in PostgreSQL for each row,
+so this maintenance operation is not chunk-bounded. Old row versions also consume
+space until vacuum can reclaim them.
+
+Inline downloads choose their read path from each row's physical representation.
+Metadata reads compare `pg_column_size(payload)` with `octet_length(payload)`;
+both inspect headers without fetching or decompressing TOAST values. Uncompressed
+rows, including small heap values, use slice reads immediately, even while other
+rows remain compressed. Streaming eligibility does not wait for the conversion
+sweep. No additional operator action is needed to enable it; the coordinated
+upgrade drain and capacity planning for automatic conversion still apply.
+Conversion makes old compressed rows eligible for slice reads.
+
+Access checks, physical representation, payload length, and all reads share one
+read-only REPEATABLE READ transaction. Each slice query fetches at most
+`inline_io_chunk_bytes` through `substr`; its existing default is 256 KiB.
+The complete physical payload is hashed into a disk-backed verification spool,
+including for range requests. The transaction closes before a response or
+verified local path is exposed. Audio consumers can adopt that path by renaming
+it. Plan temporary disk capacity for the complete payload of each concurrent
+download. A failed read restarts from the beginning.
+
+Compressed rows retain whole-payload materialization in the same snapshot:
+repeated slices would decompress from the beginning through each slice end.
+A conversion committed during a download takes effect on its next snapshot.
+All inline writers must run the corrected storage code throughout conversion.
+Explicit batch reads also retain whole-payload materialization, with one source
+query per page of at most 500 unique access grants.
+
+Corruption reporting closes the snapshot first and fences the failure against
+the digest of the complete observed payload. That exceptional fence hashes the
+current whole payload in PostgreSQL and is not chunk-bounded. Local spool I/O
+failures do not mark durable content corrupt. See the
+[streaming-read measurement receipt](../goals/flows-scale/notes/receipts/eneo-q2h0-streaming-reads.md)
+for query counts, application RSS, PostgreSQL work, and latency measurements.
+
 For the bundled single-node reference, durable capacity is the
 `eneo_object_content_data` volume. Change `SEAWEEDFS_VOLUME_SIZE_LIMIT_MB` and
 `SEAWEEDFS_GARBAGE_THRESHOLD` in `.env` when measured operations justify it;
@@ -587,7 +675,8 @@ database-only or object-only backup complete in that state.
 
 For the bundled reference service:
 
-1. Put Eneo in maintenance and stop `backend` and `worker` so there are no new
+1. Put Eneo in maintenance and stop `backend`, `worker`,
+   `crawler-worker`, `task-execution-worker`, and `task-maintenance-worker` so there are no new
    writes or lifecycle transitions.
 2. Record the Eneo version, exact SeaweedFS manifest digest, stable deployment
    ID, PostgreSQL timestamp, and an operator backup ID. Do not record secrets.
@@ -595,7 +684,7 @@ For the bundled reference service:
    volume while writers remain stopped.
 4. Checksum both artifacts and the manifest; copy them to independent durable
    storage with the same retention policy.
-5. Restart the original pair only after both halves complete.
+5. Restart the stopped application roles only after both halves complete.
 
 Example commands (the utility image is digest-pinned):
 
@@ -603,7 +692,7 @@ Example commands (the utility image is digest-pinned):
 backup_id="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -m 0700 "backup-$backup_id"
 
-docker compose stop backend worker
+docker compose stop backend worker crawler-worker task-execution-worker task-maintenance-worker
 docker compose exec -T db pg_dump -U postgres -Fc eneo \
   >"backup-$backup_id/postgresql.dump"
 docker compose stop object-content
@@ -674,13 +763,17 @@ reopening traffic.
 The deployment-policy migration creates revision 1 with `postgres_inline`
 selected. It reads the four former upload-limit environment values once as
 migration seeds. A present positive integer is preserved exactly; an absent
-value uses the fresh-install default (10 MiB for session File, session image,
+value uses the historical seed (10 MiB for session File, session image,
 and knowledge File; 200 MiB for transcription audio). Blank, non-integer, zero,
 or negative values stop the migration with a named remediation error. After the
 migration, environment changes and restarts never overwrite the database
 policy. During an upgrade, keep the old release's values available until
 `db-init` succeeds, then remove them from active backend and worker
-configuration. Fresh installations do not need them.
+configuration. Fresh installations do not need them. Migration `202609202000`
+then raises values still at the historical seeds to 256 MiB for session and
+knowledge files and 384 MiB for audio. Other policy values remain unchanged.
+Its downgrade preserves all policy values because values matching the new
+defaults may have been chosen by an administrator.
 
 If a restore predates this migration, keep backend and worker stopped and run:
 
@@ -887,11 +980,14 @@ the deployment:
 docker compose up -d --force-recreate --no-deps worker
 ```
 
-Keep every item within `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`; the batch byte
+Keep every item within PostgreSQL inline capacity; the batch byte
 bound does not override that per-content ceiling. An `inline_payload_too_large`
-failure halts the campaign. After confirming capacity, raise the inline ceiling
-and `FILE_ICON_BACKFILL_RESUME_REVISION` together in `env_backend.env`, then
-recreate every backend and worker replica so both use the same safety ceiling.
+failure halts the campaign. A deployment halted by the retired env ceiling can
+retry after upgrading and increasing `FILE_ICON_BACKFILL_RESUME_REVISION` in
+`env_backend.env`. If an item exceeds the actual inline capacity, leave the
+campaign halted and resolve its migration path before retrying. Direct legacy
+adoption into object storage is not supported; changing an env value cannot
+raise PostgreSQL's capacity.
 
 ```bash
 docker compose up -d --force-recreate --no-deps backend worker

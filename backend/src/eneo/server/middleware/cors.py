@@ -17,6 +17,9 @@ from starlette.responses import JSONResponse, PlainTextResponse, Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from eneo.allowed_origins.get_origin_callback import get_origin
+from eneo.flow_packages.headers import (
+    FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
+)
 from eneo.main.exceptions import ErrorCodes
 from eneo.main.logging import get_logger
 from eneo.main.models import GeneralError
@@ -48,7 +51,11 @@ CORS_OPTIONS: CORSOptions = {
     "allow_headers": ("*",),
     "allow_credentials": True,
     # Trace headers a cross-origin caller may read, on every response.
-    "expose_headers": ("X-Trace-Id", "X-Correlation-ID"),
+    "expose_headers": (
+        "X-Trace-Id",
+        "X-Correlation-ID",
+        FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
+    ),
     "callback": get_origin,
 }
 

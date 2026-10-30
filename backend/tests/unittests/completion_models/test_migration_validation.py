@@ -23,17 +23,15 @@ from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.security_classifications.domain.entities.security_classification import (
     SecurityClassification,
 )
+from eneo.tenants.tenant import TenantInDB
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-class _MockUser:
-    def __init__(self):
-        self.id = uuid4()
-        self.tenant_id = uuid4()
-        self.tenant = None
+def _tenant() -> TenantInDB:
+    return TenantInDB.model_construct(id=uuid4(), name="Test Tenant")
 
 
 def _make_model(
@@ -45,14 +43,14 @@ def _make_model(
     vision: bool = False,
     reasoning: bool = False,
     supports_tool_calling: bool = False,
+    supports_strict_tool_schema: bool = False,
     is_deprecated: bool = False,
     security_classification: SecurityClassification | None = None,
     model_id=None,
 ) -> CompletionModel:
     """Build a minimal CompletionModel domain object for testing."""
-    user = _MockUser()
     return CompletionModel(
-        user=user,
+        tenant=_tenant(),
         id=model_id or uuid4(),
         created_at=datetime.now(),
         updated_at=datetime.now(),
@@ -75,6 +73,7 @@ def _make_model(
         is_org_default=False,
         reasoning=reasoning,
         supports_tool_calling=supports_tool_calling,
+        supports_strict_tool_schema=supports_strict_tool_schema,
         security_classification=security_classification,
     )
 
@@ -333,6 +332,51 @@ class TestToolCallingLoss:
         assert "lacks_tool_calling" not in result.warning_codes
 
 
+class TestStrictToolSchemaLoss:
+    """Migration compares the strict support each model effectively sends."""
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("source", "target", "warns"),
+        [
+            pytest.param((True, True), (True, False), True, id="target-declines"),
+            pytest.param(
+                (True, True),
+                (False, True),
+                True,
+                id="target-cannot-call-tools",
+            ),
+            pytest.param((True, True), (True, True), False, id="both-send-strict"),
+            pytest.param(
+                (False, True),
+                (True, False),
+                False,
+                id="source-never-sent-strict",
+            ),
+        ],
+    )
+    async def test_strict_tool_schema_loss_follows_effective_support(
+        self,
+        source: tuple[bool, bool],
+        target: tuple[bool, bool],
+        warns: bool,
+    ):
+        from_model = _make_model(
+            supports_tool_calling=source[0],
+            supports_strict_tool_schema=source[1],
+        )
+        to_model = _make_model(
+            supports_tool_calling=target[0],
+            supports_strict_tool_schema=target[1],
+        )
+
+        service = _build_service(repo_side_effect=[from_model, to_model])
+
+        result = await service.validate_migration(from_model.id, to_model.id, uuid4())
+
+        assert ("lacks_strict_tool_schema" in result.warning_codes) is warns
+
+
 class TestKwargsReset:
     """kwargs_reset is always present as an informational warning."""
 
@@ -533,3 +577,40 @@ class TestSecurityClassificationBlocker:
         assert result.warning_codes[0].startswith(
             "security_classification_insufficient"
         )
+
+
+@pytest.mark.parametrize("source_unknown", [False, True])
+async def test_unknown_input_capacity_is_a_migration_blocker(source_unknown):
+    source = _make_model(max_input_tokens=None if source_unknown else 100)
+    target = _make_model(max_input_tokens=100 if source_unknown else None)
+    service = _build_service(repo_side_effect=[source, target])
+    result = await service.validate_migration(source.id, target.id, _tenant().id)
+    assert result.compatible is False
+    assert "unknown_model_capacity:max_input_tokens" in result.warning_codes
+    assert service._is_blocker_code("unknown_model_capacity:max_input_tokens")
+
+
+@pytest.mark.parametrize("force_override", [False, True])
+async def test_unknown_capacity_blocks_execution_even_when_confirmed(force_override):
+    from eneo.main.exceptions import ValidationException
+
+    source = _make_model(max_input_tokens=None)
+    target = _make_model(max_input_tokens=100)
+    service = _build_service(repo_side_effect=[source, target, source, target])
+    service.history_repo = AsyncMock()
+    service.event_publisher = AsyncMock()
+    service._ensure_partial_migrations_keep_same_target = AsyncMock()
+    service._count_affected_entities = AsyncMock(return_value=1)
+    service._execute_migration_transactionally = AsyncMock(return_value={"total": 1})
+    service._after_execute = AsyncMock(return_value=(False, False))
+    with pytest.raises(
+        ValidationException, match="Unknown model capacity: max_input_tokens"
+    ):
+        await service.migrate_model_usage(
+            source.id,
+            target.id,
+            user=MagicMock(id=uuid4(), tenant_id=uuid4()),
+            confirm_migration=True,
+            force_override=force_override,
+        )
+    service._execute_migration_transactionally.assert_not_awaited()

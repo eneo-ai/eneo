@@ -44,6 +44,9 @@ class ToolContext(NamedTuple):
     container: Any
     user: Any
     assistant_id: UUID
+    # The chat session the completion runs in, when the token was minted for
+    # one; None for a token minted outside a conversation.
+    session_id: UUID | None = None
 
 
 def bearer_from_ctx(ctx: Context) -> str:
@@ -83,6 +86,23 @@ def mcp_server_id_from_token(token: str) -> UUID:
     return UUID(str(raw))
 
 
+def session_id_from_token(token: str) -> UUID | None:
+    """The chat session the completion this token was minted for runs in.
+
+    None when the token carries no ``session_id`` claim (a token minted for a
+    provider check or outside a conversation).
+    """
+    settings = get_settings()
+    _, claims = AuthService().get_jwt_payload_with_claims(
+        token,
+        key=str(settings.jwt_secret),
+        aud=INTERNAL_MCP_AUDIENCE,
+        algs=[settings.jwt_algorithm],
+    )
+    raw = claims.get("session_id")
+    return UUID(str(raw)) if raw else None
+
+
 def table_tools_from_token(token: str) -> bool:
     """Whether the completion this token was minted for attached the table tools."""
     settings = get_settings()
@@ -96,27 +116,56 @@ def table_tools_from_token(token: str) -> bool:
 
 
 @asynccontextmanager
-async def internal_tool_context(ctx: Context):
+async def internal_tool_context(
+    ctx: Context, *, transactional: bool = True, with_upload_admission: bool = False
+):
     """Bootstrap a user-bound container for the token's user + assistant.
 
     Yields :class:`ToolContext`. The container is bound to the authenticated
     user, so loading resources runs the normal permission checks (e.g.
-    ``SpaceActor`` for assistants). Internal tools are read-only; the
-    transaction simply closes on exit.
+    ``SpaceActor`` for assistants). The transaction commits when the block
+    exits normally and rolls back on an exception, so a tool that writes
+    (the flows server) persists exactly what its service did; such a tool
+    must record its audit entry through that service, like any other
+    mutation path.
     """
     # Imported lazily: the Container pulls in the whole service graph, so a
     # top-level import would create a cycle.
-    from eneo.main.container.container import Container
     from eneo.main.container.container_overrides import override_user
+    from eneo.main.container.request_container import request_container
 
     token = bearer_from_ctx(ctx)
     assistant_id = assistant_id_from_token(token)
+    session_id = session_id_from_token(token)
     async with sessionmanager.session() as session:
-        async with session.begin():
-            container = Container(session=providers.Object(session))
+
+        async def authenticated_scope() -> ToolContext:
+            container = request_container(session=providers.Object(session))
             user = await container.user_service().authenticate_internal_mcp_token(token)
             override_user(container=container, user=user)
-            yield ToolContext(container=container, user=user, assistant_id=assistant_id)
+            if with_upload_admission:
+                from eneo.server.dependencies.container import (
+                    load_container_upload_admission,
+                )
+
+                await load_container_upload_admission(container)
+            return ToolContext(
+                container=container,
+                user=user,
+                assistant_id=assistant_id,
+                session_id=session_id,
+            )
+
+        if transactional:
+            async with session.begin():
+                yield await authenticated_scope()
+        else:
+            # Runtime operations own their commit boundaries and post-commit
+            # dispatch, just as REST does. Finish authentication first; never
+            # wrap an independently durable run in an ambient tool transaction.
+            async with session.begin():
+                scope = await authenticated_scope()
+            yield scope
 
 
 def default_page_cap() -> int:
@@ -175,3 +224,24 @@ async def build_ephemeral_server(
         tools=tools,
         is_internal=True,
     )
+
+
+def request_for_bound_space(space_id: UUID):
+    """Request scope for an already authenticated, session-bound internal tool.
+
+    The caller must derive the space from its authorized durable binding, never
+    from model arguments. Core REST access policies then enforce that scope.
+    """
+    from fastapi import Request
+
+    request = Request(
+        {
+            "type": "http",
+            "method": "POST",
+            "path": "/internal-mcp/flows/mcp",
+            "headers": [],
+        }
+    )
+    request.state.api_key_scope_type = "space"
+    request.state.api_key_scope_id = space_id
+    return request

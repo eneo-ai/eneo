@@ -25,7 +25,8 @@ export function AdminSections() {
   const { settings, can } = useAppContext();
   const groups = adminNavGroups({
     usingTemplates: Boolean(settings.using_templates),
-    canManageModules: can("modules")
+    canManageModules: can("modules"),
+    flowsEnabled: settings.flows_enabled === true
   });
 
   return (

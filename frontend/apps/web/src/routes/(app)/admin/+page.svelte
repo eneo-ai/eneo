@@ -11,6 +11,7 @@
   import { toastError } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
   import { invalidate, invalidateAll } from "$app/navigation";
+  import { resolve } from "$app/paths";
 
   const { tenant, updateTenant } = getAppContext();
   const { setEnabled: setWhatsNewEnabled } = getWhatsNewStore();
@@ -201,6 +202,17 @@
             disabled={savingWhatsNew}
             onCheckedChange={(next) => handleToggleWhatsNew({ current: !next, next })}
           />
+        </Settings.Row>
+        <Settings.Row
+          title={m.api_keys_admin_runtime_settings_title()}
+          description={m.api_keys_admin_runtime_settings_description()}
+        >
+          <a
+            href={resolve("/(app)/admin/api-keys")}
+            class="text-accent-default hover:text-accent-default/80 text-sm font-medium"
+          >
+            {m.api_keys_manage_all()}
+          </a>
         </Settings.Row>
       </Settings.Group>
       <Settings.Group title={m.model_pricing()}>

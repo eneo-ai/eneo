@@ -3,6 +3,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.authentication.auth_models import ApiKeyListResponse, ApiKeyV2
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.modules.module import (
     ModuleInDB,
@@ -90,6 +91,40 @@ async def test_list_installations_derives_tenant_from_authenticated_user():
 
     assert result == [make_installation()]
     module_repo.get_installations.assert_awaited_once_with(TENANT_ID)
+
+
+async def test_list_service_keys_delegates_bounded_query_to_module_owner():
+    service, _module_repo, _tenant_service, broker, _audit_service = make_service()
+    expected = ApiKeyListResponse(items=[], limit=50, next_cursor=None)
+    broker.list_client_config_service_keys.return_value = expected
+
+    result = await service.list_service_keys(
+        limit=50,
+        cursor=None,
+        search="reports",
+    )
+
+    assert result == expected
+    broker.list_client_config_service_keys.assert_awaited_once_with(
+        tenant_id=TENANT_ID,
+        limit=50,
+        cursor=None,
+        search="reports",
+    )
+
+
+async def test_get_service_key_delegates_exact_lookup_to_module_owner():
+    service, _module_repo, _tenant_service, broker, _audit_service = make_service()
+    key = MagicMock(spec=ApiKeyV2)
+    broker.get_client_config_service_key.return_value = key
+
+    result = await service.get_service_key(service_key_id=SERVICE_KEY_ID)
+
+    assert result is key
+    broker.get_client_config_service_key.assert_awaited_once_with(
+        tenant_id=TENANT_ID,
+        service_key_id=SERVICE_KEY_ID,
+    )
 
 
 async def test_invalid_service_key_prevents_binding_and_audit():

@@ -1,0 +1,489 @@
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+from uuid import UUID
+
+from eneo.flow_packages.application.flow_package_import_planner import (
+    FlowPackageImportPlannerCandidates,
+)
+from eneo.flow_packages.application.flow_package_model_matching import (
+    hard_model_candidate_rejection_reasons,
+)
+from eneo.flow_packages.application.flow_package_template_uploads import (
+    resolve_flow_package_template_files,
+)
+from eneo.flow_packages.domain.flow_package_draft import normalize_flow_package_spec
+from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+from eneo.flow_packages.domain.flow_package_errors import (
+    FlowPackageErrorCode,
+    FlowPackageValidationError,
+)
+from eneo.flow_packages.domain.flow_package_import_plan import (
+    FlowPackageImportPlan,
+    FlowPackageImportTargetState,
+    FlowPackageLocalCandidate,
+    FlowPackageModelCandidate,
+)
+from eneo.flow_packages.domain.flow_package_import_record import (
+    FlowPackageImportSelection,
+    FlowPackageTemplateUploadIdentity,
+)
+from eneo.flow_packages.domain.flow_package_requirements import (
+    FlowPackageKnowledgeRequirement,
+    FlowPackageModelRequirement,
+    FlowPackageTemplateAssetRequirement,
+)
+from eneo.flow_packages.domain.flow_package_templates import FlowPackageTemplateFile
+from eneo.flows.application.flow_authoring_command import (
+    CreateFlowAuthoringCommand,
+    FlowAuthoringCommandService,
+    FlowPackageAuthoringOrigin,
+    TemplateImportIntent,
+)
+from eneo.flows.application.flow_service import FlowService
+from eneo.flows.flow_authoring_spec import FlowDraftSpecCore, StepSpec
+from eneo.flows.flow_resource_bindings import (
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotRef,
+    index_local_resource_bindings,
+)
+
+if TYPE_CHECKING:
+    from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedFlowPackageInstallSelection:
+    resource_bindings: tuple[LocalResourceBinding, ...]
+    required_slot_refs: frozenset[str]
+    selected_slot_refs: frozenset[str]
+
+
+@dataclass(frozen=True, slots=True)
+class FlowPackageInstallResult:
+    flow_id: UUID
+    flow_name: str
+    package_id: str
+    package_version: str
+    content_checksum: str
+    steps_created: int
+    resource_bindings_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class ResolvedFlowPackageInstallCommand:
+    envelope: FlowPackageEnvelope
+    import_plan: FlowPackageImportPlan
+    install_spec: FlowDraftSpecCore
+    selection: FlowPackageImportSelection
+    template_files: Mapping[str, FlowPackageTemplateFile] = field(
+        default_factory=lambda: dict[str, FlowPackageTemplateFile]()
+    )
+
+    @property
+    def default_transcription_model_id(self) -> UUID | None:
+        return self.import_plan.target_state.default_transcription_model_id
+
+
+async def resolve_flow_package_install_command(
+    *,
+    envelope: FlowPackageEnvelope,
+    import_plan: FlowPackageImportPlan,
+    expected_content_checksum: str,
+    expected_target_state: FlowPackageImportTargetState,
+    selection: FlowPackageImportSelection,
+    candidates: FlowPackageImportPlannerCandidates,
+    template_files: Mapping[str, FlowPackageTemplateFile] | None = None,
+    expected_template_upload_checksums: dict[str, str] | None = None,
+) -> ResolvedFlowPackageInstallCommand:
+    if (
+        expected_content_checksum != envelope.content_checksum
+        or import_plan.content_checksum != envelope.content_checksum
+    ):
+        raise FlowPackageValidationError(
+            code=FlowPackageErrorCode.CHECKSUM_MISMATCH,
+            message="Flow package does not match the reviewed import plan.",
+            context={
+                "expected_content_checksum": expected_content_checksum,
+                "current_content_checksum": envelope.content_checksum,
+            },
+        )
+    if expected_target_state != import_plan.target_state:
+        raise _target_state_changed(
+            expected=expected_target_state,
+            current=import_plan.target_state,
+        )
+    if import_plan.lacks_transcription_model:
+        raise FlowPackageValidationError(
+            code=FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE,
+            message=("The target space has no transcription model for this package."),
+            context={
+                "slot_ref": "model.flow_input_transcription",
+                "local_kind": LocalResourceKind.TRANSCRIPTION_MODEL.value,
+                "local_id": "unselected",
+            },
+        )
+
+    files = (
+        template_files
+        if template_files is not None
+        else await resolve_flow_package_template_files(envelope)
+    )
+    upload_checksums = {
+        requirement.slot_ref.ref: files[requirement.slot_ref.ref].checksum
+        for requirement in envelope.requirements.requirements
+        if isinstance(requirement, FlowPackageTemplateAssetRequirement)
+        and requirement.template is not None
+        and requirement.template.asset_path is None
+        and requirement.slot_ref.ref in files
+    }
+    if upload_checksums != (expected_template_upload_checksums or {}):
+        raise FlowPackageValidationError(
+            code=FlowPackageErrorCode.CHECKSUM_MISMATCH,
+            message="The Word template uploads changed after import planning.",
+        )
+    validated_selection = validate_flow_package_install_selection(
+        envelope=envelope,
+        selected_bindings=selection.bindings_tuple(),
+        candidates=candidates,
+        ready_template_refs=frozenset(files),
+    )
+    optional_knowledge_slot_refs = frozenset(
+        requirement.slot_ref.ref
+        for requirement in envelope.requirements.requirements
+        if isinstance(requirement, FlowPackageKnowledgeRequirement)
+        and not requirement.required
+    )
+    install_spec = _spec_with_unbound_optional_knowledge_refs_removed(
+        spec=normalize_flow_package_spec(envelope.spec),
+        selected_slot_refs=validated_selection.selected_slot_refs,
+        optional_knowledge_slot_refs=optional_knowledge_slot_refs,
+    )
+    return ResolvedFlowPackageInstallCommand(
+        envelope=envelope,
+        import_plan=import_plan,
+        install_spec=install_spec,
+        selection=FlowPackageImportSelection(
+            selected_bindings=list(validated_selection.resource_bindings),
+            template_uploads={
+                ref: FlowPackageTemplateUploadIdentity(
+                    checksum=checksum, filename=files[ref].filename
+                )
+                for ref, checksum in upload_checksums.items()
+            },
+        ),
+        template_files=files,
+    )
+
+
+def _target_state_changed(
+    *,
+    expected: FlowPackageImportTargetState,
+    current: FlowPackageImportTargetState,
+) -> FlowPackageValidationError:
+    return FlowPackageValidationError(
+        code=FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE,
+        message=("The target space transcription model changed after import planning."),
+        context={
+            "slot_ref": "model.flow_input_transcription",
+            "local_kind": LocalResourceKind.TRANSCRIPTION_MODEL.value,
+            "local_id": str(expected.default_transcription_model_id or "unselected"),
+            "current_local_id": str(
+                current.default_transcription_model_id or "unselected"
+            ),
+        },
+    )
+
+
+class FlowPackageInstallService:
+    def __init__(
+        self,
+        authoring_service: FlowAuthoringCommandService | None = None,
+    ) -> None:
+        self._authoring_service = authoring_service or FlowAuthoringCommandService()
+
+    async def install_as_draft(
+        self,
+        *,
+        command: ResolvedFlowPackageInstallCommand,
+        flow_service: FlowService,
+        space_id: UUID,
+        template_asset_service: FlowTemplateAssetService | None = None,
+    ) -> FlowPackageInstallResult:
+        envelope = command.envelope
+        authoring_command = CreateFlowAuthoringCommand(
+            space_id=space_id,
+            spec=command.install_spec,
+            origin=FlowPackageAuthoringOrigin(
+                package_id=envelope.manifest.package_id,
+                package_version=envelope.manifest.package_version,
+                content_checksum=envelope.content_checksum,
+            ),
+            resource_bindings=command.selection.bindings_tuple(),
+            default_transcription_model_id=command.default_transcription_model_id,
+            template_imports=tuple(
+                TemplateImportIntent(
+                    slot_ref=requirement.slot_ref,
+                    filename=command.template_files[requirement.slot_ref.ref].filename,
+                    content=command.template_files[requirement.slot_ref.ref].content,
+                )
+                for requirement in envelope.requirements.requirements
+                if isinstance(requirement, FlowPackageTemplateAssetRequirement)
+                and requirement.template is not None
+            ),
+        )
+        materialized = await self._authoring_service.apply(
+            command=authoring_command,
+            flow_service=flow_service,
+            template_asset_service=template_asset_service,
+        )
+        return FlowPackageInstallResult(
+            flow_id=materialized.flow_id,
+            flow_name=materialized.flow_name,
+            package_id=envelope.manifest.package_id,
+            package_version=envelope.manifest.package_version,
+            content_checksum=envelope.content_checksum,
+            steps_created=materialized.steps_created,
+            resource_bindings_count=len(command.selection.selected_bindings)
+            + len(command.template_files),
+        )
+
+
+def validate_flow_package_install_selection(
+    *,
+    envelope: FlowPackageEnvelope,
+    selected_bindings: tuple[LocalResourceBinding, ...],
+    candidates: FlowPackageImportPlannerCandidates,
+    ready_template_refs: frozenset[str] = frozenset(),
+) -> ValidatedFlowPackageInstallSelection:
+    selected_bindings_by_ref = index_local_resource_bindings(selected_bindings)
+    selected_slot_refs = frozenset(selected_bindings_by_ref)
+    resource_contract = envelope.validated_resource_contract()
+    declared_slot_refs = resource_contract.declared_slot_refs
+
+    _reject_template_asset_requirements(envelope)
+    _reject_unknown_selected_bindings(
+        selected_slot_refs=selected_slot_refs,
+        declared_slot_refs=declared_slot_refs,
+    )
+    for requirement in envelope.requirements.requirements:
+        if (
+            isinstance(requirement, FlowPackageTemplateAssetRequirement)
+            and requirement.template is not None
+        ):
+            if requirement.slot_ref.ref in selected_slot_refs:
+                raise FlowPackageValidationError(
+                    code=FlowPackageErrorCode.IMPORT_UNKNOWN_RESOURCE_BINDING,
+                    message="Package Word templates are installed from verified files, not local resource selections.",
+                    context={"slot_ref": requirement.slot_ref.ref},
+                )
+            if requirement.slot_ref.ref not in ready_template_refs:
+                raise FlowPackageValidationError(
+                    code=FlowPackageErrorCode.TEMPLATE_UPLOAD_REQUIRED,
+                    message="Upload the missing Word template before importing the flow.",
+                    context={
+                        "slot_ref": requirement.slot_ref.ref,
+                        "filename": requirement.template.filename,
+                    },
+                )
+    selected_slot_refs = selected_slot_refs | ready_template_refs
+    canonical_bindings = tuple(
+        LocalResourceBinding(
+            slot_ref=declared_slot_refs[slot_ref],
+            local_kind=binding.local_kind,
+            local_id=binding.local_id,
+        )
+        for slot_ref, binding in sorted(selected_bindings_by_ref.items())
+    )
+    _reject_unavailable_local_resources(
+        selected_bindings=canonical_bindings,
+        candidates=candidates,
+    )
+    _reject_ineligible_selected_models(
+        envelope=envelope,
+        selected_bindings=canonical_bindings,
+        candidates=candidates,
+    )
+
+    required_slot_refs = _install_required_slot_refs(envelope)
+    _reject_missing_required_bindings(
+        required_slot_refs=required_slot_refs,
+        selected_slot_refs=selected_slot_refs,
+    )
+
+    return ValidatedFlowPackageInstallSelection(
+        resource_bindings=canonical_bindings,
+        required_slot_refs=frozenset(required_slot_refs),
+        selected_slot_refs=selected_slot_refs,
+    )
+
+
+def _spec_with_unbound_optional_knowledge_refs_removed(
+    *,
+    spec: FlowDraftSpecCore,
+    selected_slot_refs: frozenset[str],
+    optional_knowledge_slot_refs: frozenset[str],
+) -> FlowDraftSpecCore:
+    """Remove only explicitly optional knowledge slots omitted by the importer."""
+
+    updated_steps: list[StepSpec] = []
+    changed = False
+    for step in spec.steps:
+        selected_knowledge_refs = [
+            ref
+            for ref in step.assistant_spec.knowledge_refs
+            if ref not in optional_knowledge_slot_refs or ref in selected_slot_refs
+        ]
+        if selected_knowledge_refs == step.assistant_spec.knowledge_refs:
+            updated_steps.append(step)
+            continue
+
+        changed = True
+        updated_steps.append(
+            step.model_copy(
+                update={
+                    "assistant_spec": step.assistant_spec.model_copy(
+                        update={"knowledge_refs": selected_knowledge_refs}
+                    )
+                }
+            )
+        )
+
+    if not changed:
+        return spec
+    return spec.model_copy(update={"steps": updated_steps})
+
+
+def _reject_template_asset_requirements(envelope: FlowPackageEnvelope) -> None:
+    for requirement in envelope.requirements.requirements:
+        if (
+            isinstance(requirement, FlowPackageTemplateAssetRequirement)
+            and requirement.template is None
+        ):
+            raise FlowPackageValidationError(
+                code=FlowPackageErrorCode.IMPORT_TEMPLATE_ASSETS_UNSUPPORTED,
+                message="Flow package import does not support template asset installation yet.",
+                context={"slot_ref": requirement.slot_ref.ref},
+            )
+
+
+def _reject_ineligible_selected_models(
+    *,
+    envelope: FlowPackageEnvelope,
+    selected_bindings: tuple[LocalResourceBinding, ...],
+    candidates: FlowPackageImportPlannerCandidates,
+) -> None:
+    requirements_by_ref = {
+        requirement.slot_ref.ref: requirement
+        for requirement in envelope.requirements.requirements
+        if isinstance(requirement, FlowPackageModelRequirement)
+    }
+    candidates_by_target = {
+        (candidate.local_kind, candidate.local_id): candidate
+        for candidate in candidates.models
+    }
+    for binding in selected_bindings:
+        requirement = requirements_by_ref.get(binding.slot_ref.ref)
+        if requirement is None:
+            continue
+        candidate = candidates_by_target.get((binding.local_kind, binding.local_id))
+        if candidate is None:
+            continue
+        rejection_reasons = hard_model_candidate_rejection_reasons(
+            requirement=requirement,
+            candidate=candidate,
+        )
+        if not rejection_reasons:
+            continue
+        raise FlowPackageValidationError(
+            code=FlowPackageErrorCode.IMPORT_SELECTED_MODEL_INELIGIBLE,
+            message="Selected model does not satisfy the package slot's hard requirements.",
+            context={
+                "slot_ref": binding.slot_ref.ref,
+                "local_kind": binding.local_kind.value,
+                "local_id": str(binding.local_id),
+                "reason": rejection_reasons[0].value,
+                "reason_count": len(rejection_reasons),
+            },
+        )
+
+
+def _reject_unknown_selected_bindings(
+    *,
+    selected_slot_refs: frozenset[str],
+    declared_slot_refs: dict[str, ResourceSlotRef],
+) -> None:
+    unknown_refs = sorted(selected_slot_refs - declared_slot_refs.keys())
+    if not unknown_refs:
+        return
+    raise FlowPackageValidationError(
+        code=FlowPackageErrorCode.IMPORT_UNKNOWN_RESOURCE_BINDING,
+        message="Flow package import selected an undeclared resource slot.",
+        context={"slot_ref": unknown_refs[0], "unknown_count": len(unknown_refs)},
+    )
+
+
+def _reject_unavailable_local_resources(
+    *,
+    selected_bindings: tuple[LocalResourceBinding, ...],
+    candidates: FlowPackageImportPlannerCandidates,
+) -> None:
+    available_targets = _available_candidate_targets(candidates)
+    for binding in selected_bindings:
+        target = (binding.local_kind, binding.local_id)
+        if target in available_targets:
+            continue
+        raise FlowPackageValidationError(
+            code=FlowPackageErrorCode.IMPORT_UNAVAILABLE_LOCAL_RESOURCE,
+            message="Flow package import selected a resource that is not available in the target space.",
+            context={
+                "slot_ref": binding.slot_ref.ref,
+                "local_kind": binding.local_kind.value,
+                "local_id": str(binding.local_id),
+            },
+        )
+
+
+def _available_candidate_targets(
+    candidates: FlowPackageImportPlannerCandidates,
+) -> frozenset[tuple[LocalResourceKind, UUID]]:
+    return frozenset(
+        (candidate.local_kind, candidate.local_id)
+        for candidate in _iter_candidates(candidates)
+    )
+
+
+def _iter_candidates(
+    candidates: FlowPackageImportPlannerCandidates,
+) -> Iterable[FlowPackageLocalCandidate | FlowPackageModelCandidate]:
+    yield from candidates.models
+    yield from candidates.knowledge
+    yield from candidates.template_assets
+
+
+def _install_required_slot_refs(
+    envelope: FlowPackageEnvelope,
+) -> frozenset[str]:
+    return frozenset(
+        requirement.slot_ref.ref
+        for requirement in envelope.active_requirements()
+        if requirement.required
+    )
+
+
+def _reject_missing_required_bindings(
+    *,
+    required_slot_refs: frozenset[str],
+    selected_slot_refs: frozenset[str],
+) -> None:
+    missing_refs = sorted(required_slot_refs - selected_slot_refs)
+    if not missing_refs:
+        return
+    raise FlowPackageValidationError(
+        code=FlowPackageErrorCode.IMPORT_MISSING_REQUIRED_RESOURCE_BINDING,
+        message="Flow package import is missing a required resource binding.",
+        context={"slot_ref": missing_refs[0], "missing_count": len(missing_refs)},
+    )

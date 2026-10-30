@@ -15,7 +15,9 @@ describe("sandbox child", () => {
     process.env.TOOL_RUNTIME_TOKEN = "must-not-leak-into-the-child-process";
     try {
       const result = await runIsolated({ job: { kind: "env" } }, 10_000);
-      const names = (result.names as string[]).filter((n) => !["PATH", "TMPDIR"].includes(n));
+      const names = (result.names as string[]).filter(
+        (n) => !["PATH", "TMPDIR"].includes(n),
+      );
       // Bun may add its own runtime markers; none of the parent's variables may appear.
       expect(names.filter((n) => n in process.env)).toEqual([]);
       expect(result.names).not.toContain("TOOL_RUNTIME_TOKEN");
@@ -27,12 +29,34 @@ describe("sandbox child", () => {
   test("runs a compute job and returns the outcome", async () => {
     const outcome = await runIsolated(
       {
-        job: { kind: "compute", code: "return input.a * input.b;", input: { a: 6, b: 7 } },
+        job: {
+          kind: "compute",
+          code: "return input.a * input.b;",
+          input: { a: 6, b: 7 },
+        },
         config,
       },
       10_000,
     );
     expect(outcome).toMatchObject({ ok: true, result: 42 });
+  });
+
+  test("returns a result larger than a pipe holds intact", async () => {
+    // The compute lane's own cap is raised so the reply is well past what a pipe buffers.
+    const roomy = computeConfigSchema.parse({ max_result_bytes: 384 * 1024 });
+    const outcome = (await runIsolated(
+      {
+        job: {
+          kind: "compute",
+          code: 'return "x".repeat(350_000);',
+          input: null,
+        },
+        config: roomy,
+      },
+      10_000,
+    )) as { ok: boolean; result: string };
+    expect(outcome.ok).toBe(true);
+    expect(outcome.result).toHaveLength(350_000);
   });
 
   test("writes a compute export into the directory the parent made for it", async () => {
@@ -51,7 +75,12 @@ describe("sandbox child", () => {
       const outcome = await runIsolated({ job, config }, 10_000);
       expect(outcome).toMatchObject({
         ok: true,
-        export: { columns: ["a", "b"], rows: 2, truncated: false, preview_rows: 2 },
+        export: {
+          columns: ["a", "b"],
+          rows: 2,
+          truncated: false,
+          preview_rows: 2,
+        },
       });
       expect(await Bun.file(outputPath).text()).toBe("a,b\r\n1,x\r\n2,y\r\n");
     } finally {
@@ -71,13 +100,8 @@ describe("sandbox child", () => {
       },
       10_000,
     );
-    const [fetchType, processType, bunType, requireType, globals] = outcome.result as [
-      string,
-      string,
-      string,
-      string,
-      string[],
-    ];
+    const [fetchType, processType, bunType, requireType, globals] =
+      outcome.result as [string, string, string, string, string[]];
     expect([fetchType, processType, bunType, requireType]).toEqual([
       "undefined",
       "undefined",
@@ -106,7 +130,10 @@ describe("sandbox child", () => {
 
 // Confinement needs landrun (`bun run build:landrun`) and a kernel with Landlock. Where either
 // is missing the runtime runs children unconfined, and these tests have nothing to check.
-const enforced = (await runIsolated({ job: { kind: "confinement" } }, 10_000)) as {
+const enforced = (await runIsolated(
+  { job: { kind: "confinement" } },
+  10_000,
+)) as {
   files: boolean;
   tcp: boolean;
 };
@@ -118,12 +145,15 @@ describe("confinement", () => {
     directory: string,
     script: string,
   ): Promise<Record<string, string>> {
-    const child = Bun.spawn([...confinement(job, directory), process.execPath, "-e", script], {
-      cwd: new URL("..", import.meta.url).pathname,
-      env: { PATH: process.env.PATH ?? "", TMPDIR: directory },
-      stdout: "pipe",
-      stderr: "ignore",
-    });
+    const child = Bun.spawn(
+      [...confinement(job, directory), process.execPath, "-e", script],
+      {
+        cwd: new URL("..", import.meta.url).pathname,
+        env: { PATH: process.env.PATH ?? "", TMPDIR: directory },
+        stdout: "pipe",
+        stderr: "ignore",
+      },
+    );
     return JSON.parse(await new Response(child.stdout).text());
   }
 
@@ -198,10 +228,12 @@ describe("confinement", () => {
           stderr: "ignore",
         },
       );
-      expect(JSON.parse(await new Response(child.stdout).text())).toMatchObject({
-        ok: false,
-        error: { code: "CONFINEMENT_UNAVAILABLE" },
-      });
+      expect(JSON.parse(await new Response(child.stdout).text())).toMatchObject(
+        {
+          ok: false,
+          error: { code: "CONFINEMENT_UNAVAILABLE" },
+        },
+      );
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -211,7 +243,10 @@ describe("confinement", () => {
     "a confined job still passes when confinement is required",
     async () => {
       const outcome = await runIsolated(
-        { job: { kind: "compute", code: "return 1 + 1;", input: null }, config },
+        {
+          job: { kind: "compute", code: "return 1 + 1;", input: null },
+          config,
+        },
         10_000,
         { requireConfinement: true },
       );

@@ -1,0 +1,842 @@
+"""Tests for DocumentRenderService PDF/DOCX generation."""
+
+from __future__ import annotations
+
+import io
+import zipfile
+
+import pdfplumber
+import pytest
+from docx import Document
+from docx.oxml.ns import qn
+
+from eneo.document_templates import runtime_client
+from eneo.flows.runtime.document_rendering.blocks import DocumentBlock, InlineTextRun
+from eneo.flows.runtime.document_rendering.limits import DocumentRenderLimits
+from eneo.flows.runtime.document_rendering.markdown_blocks import (
+    parse_markdown_blocks,
+)
+from eneo.flows.runtime.document_rendering.service import (
+    DocumentRenderService,
+    default_document_render_service,
+)
+from eneo.main.exceptions import TypedIOValidationException
+from tests.docx_template_fixtures import docx_paragraphs, docx_tables
+
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
+_render_service = default_document_render_service()
+
+
+# --- PDF rendering ---
+
+
+async def test_render_pdf_valid_blob():
+    blob, mimetype = await _render_service.render_document(
+        "Hello world", "pdf", step_order=1, title="Rapport"
+    )
+    assert isinstance(blob, bytes)
+    assert len(blob) > 0
+    assert blob[:5] == b"%PDF-"
+
+
+async def test_render_pdf_correct_mime():
+    _, mimetype = await _render_service.render_document(
+        "Test", "pdf", step_order=1, title="Rapport"
+    )
+    assert mimetype == "application/pdf"
+
+
+async def test_render_pdf_markdown_headings_and_lists_as_readable_document():
+    text = "# Titel\n\n## Sammanfattning\n\n- punkt ett\n- punkt två\n\n1. nästa steg"
+
+    blob, _ = await _render_service.render_document(
+        text, "pdf", step_order=1, title="Rapport"
+    )
+
+    with pdfplumber.open(io.BytesIO(blob)) as pdf:
+        page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert "Titel" in page_text
+    assert "Sammanfattning" in page_text
+    assert "punkt ett" in page_text
+    assert "# Titel" not in page_text
+    assert "## Sammanfattning" not in page_text
+
+
+async def test_render_pdf_markdown_table_outputs_cells_without_separator_row():
+    text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
+
+    blob, _ = await _render_service.render_document(
+        text, "pdf", step_order=1, title="Rapport"
+    )
+
+    with pdfplumber.open(io.BytesIO(blob)) as pdf:
+        page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert "Namn" in page_text
+    assert "Sundsvall" in page_text
+    assert "---" not in page_text
+
+
+def test_markdown_blocks_normalize_common_markdown_control_syntax():
+    blocks = parse_markdown_blocks(
+        [
+            "Medarbetarsamtal – Sammanfattning & Plan",
+            "",
+            "**Medarbetare:** [Leona](https://example.com)",
+            "---",
+            "1) **Sammanfattning**",
+            "- Träna `skrivande` hemma",
+        ]
+    )
+
+    assert [(block.kind, block.text, block.items) for block in blocks] == [
+        ("paragraph", "Medarbetarsamtal – Sammanfattning & Plan", ()),
+        ("paragraph", "Medarbetare: Leona", ()),
+        ("empty", "", ()),
+        ("numbered_list", "", ("Sammanfattning",)),
+        ("bullet_list", "", ("Träna skrivande hemma",)),
+    ]
+
+
+async def test_render_pdf_markdown_inline_syntax_as_readable_text():
+    text = (
+        "Medarbetarsamtal – Sammanfattning & Plan\n\n"
+        "**Medarbetare:** Leona\n"
+        "**Datum:** [Fyll i datum]\n\n"
+        "---\n\n"
+        "1) **Sammanfattning**\n"
+        "Leona visar tydliga framsteg inom **svenska** och `matematik`."
+    )
+
+    blob, _ = await _render_service.render_document(
+        text, "pdf", step_order=1, title="Rapport"
+    )
+
+    with pdfplumber.open(io.BytesIO(blob)) as pdf:
+        page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    assert "Medarbetare: Leona" in page_text
+    assert "Datum: [Fyll i datum]" in page_text
+    assert "1. Sammanfattning" in page_text
+    assert "svenska" in page_text
+    assert "matematik" in page_text
+    assert "**" not in page_text
+    assert "---" not in page_text
+    assert "`" not in page_text
+
+
+def test_markdown_blocks_keep_code_block_content_verbatim():
+    blocks = parse_markdown_blocks(
+        [
+            "```",
+            "**not bold**",
+            "---",
+            "```",
+        ]
+    )
+
+    assert blocks == [DocumentBlock(kind="code", text="**not bold**\n---")]
+
+
+def test_markdown_blocks_treat_setext_marker_as_rule_not_heading():
+    blocks = parse_markdown_blocks(
+        [
+            "**Datum:** [fyll i]",
+            "**Plats:** [fyll i]",
+            "---",
+        ]
+    )
+
+    assert blocks == [
+        DocumentBlock(
+            kind="paragraph",
+            text="Datum: [fyll i]\nPlats: [fyll i]",
+            runs=(
+                InlineTextRun("Datum:", bold=True),
+                InlineTextRun(" [fyll i]"),
+                InlineTextRun("\n"),
+                InlineTextRun("Plats:", bold=True),
+                InlineTextRun(" [fyll i]"),
+            ),
+        ),
+        DocumentBlock(kind="empty"),
+    ]
+
+
+def test_markdown_blocks_preserve_inline_run_semantics():
+    blocks = parse_markdown_blocks(["**Fet** och _kursiv_ samt `kod` och ~~struken~~"])
+
+    paragraph = blocks[0]
+    assert paragraph.text == "Fet och kursiv samt kod och struken"
+    assert paragraph.runs == (
+        InlineTextRun("Fet", bold=True),
+        InlineTextRun(" och "),
+        InlineTextRun("kursiv", italic=True),
+        InlineTextRun(" samt "),
+        InlineTextRun("kod", code=True),
+        InlineTextRun(" och "),
+        InlineTextRun("struken", strikethrough=True),
+    )
+
+
+# --- DOCX rendering ---
+
+
+async def test_render_docx_valid_blob():
+    blob, mimetype = await _render_service.render_document(
+        "Hello world", "docx", step_order=1, title="Rapport"
+    )
+    assert isinstance(blob, bytes)
+    assert len(blob) > 0
+    # DOCX is a ZIP file — starts with PK magic bytes
+    assert blob[:2] == b"PK"
+
+
+async def test_render_docx_correct_mime():
+    _, mimetype = await _render_service.render_document(
+        "Test", "docx", step_order=1, title="Rapport"
+    )
+    assert (
+        mimetype
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+
+
+async def test_render_docx_empty_output_still_valid():
+    """Empty markdown should still produce a readable DOCX file."""
+    blob, _ = await _render_service.render_document(
+        "", "docx", step_order=1, title="Rapport"
+    )
+    doc = Document(io.BytesIO(blob))
+    assert isinstance(blob, bytes)
+    assert len(docx_paragraphs(doc)) >= 1
+
+
+async def test_render_docx_preserves_swedish_characters():
+    """Swedish characters should survive DOCX rendering."""
+    text = "Svenska tecken: å ä ö"
+    blob, _ = await _render_service.render_document(
+        text, "docx", step_order=1, title="Rapport"
+    )
+    doc = Document(io.BytesIO(blob))
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
+    assert "å" in all_text
+    assert "ä" in all_text
+    assert "ö" in all_text
+
+
+async def test_render_docx_markdown_table_creates_table():
+    """Markdown table syntax should become a DOCX table."""
+    text = "| Namn | Värde |\n| --- | --- |\n| Kommun | Sundsvall |"
+    blob, _ = await _render_service.render_document(
+        text, "docx", step_order=1, title="Rapport"
+    )
+    doc = Document(io.BytesIO(blob))
+    assert len(docx_tables(doc)) == 1
+    assert docx_tables(doc)[0].cell(0, 0).text == "Namn"
+    assert docx_tables(doc)[0].cell(1, 1).text == "Sundsvall"
+
+
+async def test_render_docx_markdown_inline_syntax_as_readable_text():
+    text = (
+        "**Medarbetare:** Leona\n\n"
+        "---\n\n"
+        "1) **Sammanfattning**\n"
+        "Träna `skrivande` och ~~gamla mål~~."
+    )
+
+    blob, _ = await _render_service.render_document(
+        text, "docx", step_order=1, title="Rapport"
+    )
+
+    doc = Document(io.BytesIO(blob))
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
+    assert "Medarbetare: Leona" in all_text
+    assert "Sammanfattning" in all_text
+    assert "Träna skrivande och gamla mål." in all_text
+    assert "**" not in all_text
+    assert "---" not in all_text
+    assert "`" not in all_text
+    assert "~~" not in all_text
+
+
+async def test_render_docx_preserves_inline_bold_runs():
+    blob, _ = await _render_service.render_document(
+        "**Medarbetare:** Leona", "docx", step_order=1, title="Rapport"
+    )
+
+    doc = Document(io.BytesIO(blob))
+    paragraph = docx_paragraphs(doc)[0]
+    assert paragraph.runs[0].text == "Medarbetare:"
+    assert paragraph.runs[0].bold is True
+    assert "".join(run.text for run in paragraph.runs) == "Medarbetare: Leona"
+
+
+async def test_render_structured_docx_uses_schema_titles_and_tables():
+    """Validated JSON contracts should render as semantic DOCX content."""
+    blob, _ = await _render_service.render_structured_document(
+        {
+            "summary": "Kort sammanfattning",
+            "actions": [
+                {"task": "Läsa mer", "owner": "Leona"},
+                {"owner": "Lärare", "task": "Följa upp"},
+            ],
+        },
+        "docx",
+        step_order=1,
+        title="Rapport",
+        schema={
+            "title": "Utvecklingsrapport",
+            "type": "object",
+            "properties": {
+                "summary": {"title": "Sammanfattning", "type": "string"},
+                "actions": {
+                    "title": "Åtgärder",
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "owner": {"title": "Ansvarig", "type": "string"},
+                            "task": {"title": "Uppgift", "type": "string"},
+                        },
+                    },
+                },
+            },
+        },
+    )
+
+    doc = Document(io.BytesIO(blob))
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
+    assert "Utvecklingsrapport" in all_text
+    assert "Sammanfattning" in all_text
+    assert "Kort sammanfattning" in all_text
+    assert len(docx_tables(doc)) == 1
+    assert docx_tables(doc)[0].cell(0, 0).text == "Ansvarig"
+    assert docx_tables(doc)[0].cell(0, 1).text == "Uppgift"
+    assert docx_tables(doc)[0].cell(1, 1).text == "Läsa mer"
+
+
+async def test_render_structured_docx_pins_null_and_empty_array_values():
+    """Missing structured values should stay visible instead of disappearing."""
+    blob, _ = await _render_service.render_structured_document(
+        {"summary": None, "notes": []},
+        "docx",
+        step_order=1,
+        title="Rapport",
+        schema={
+            "type": "object",
+            "properties": {
+                "summary": {"title": "Sammanfattning", "type": "string"},
+                "notes": {"title": "Anteckningar", "type": "array"},
+            },
+        },
+    )
+
+    doc = Document(io.BytesIO(blob))
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
+    assert "Sammanfattning: -" in all_text
+    assert "Anteckningar" in all_text
+    assert "-" in all_text
+
+
+async def test_render_structured_docx_escapes_scalar_markdown_control_text():
+    """JSON strings are data and must not become document structure."""
+    blob, _ = await _render_service.render_structured_document(
+        {"summary": "Rad ett\n# Inte en rubrik\n```inte kod```"},
+        "docx",
+        step_order=1,
+        title="Rapport",
+        schema={
+            "type": "object",
+            "properties": {
+                "summary": {"title": "Sammanfattning", "type": "string"},
+            },
+        },
+    )
+
+    doc = Document(io.BytesIO(blob))
+    paragraph_texts = [paragraph.text for paragraph in docx_paragraphs(doc)]
+    assert (
+        "Sammanfattning: Rad ett\n# Inte en rubrik\n'''inte kod'''" in paragraph_texts
+    )
+    assert "Inte en rubrik" not in paragraph_texts
+
+
+async def test_render_structured_docx_table_cells_preserve_pipe_characters():
+    """Escaped Markdown table pipes should round-trip into DOCX table cells."""
+    blob, _ = await _render_service.render_structured_document(
+        {"rows": [{"name": "A | B", "value": "C"}]},
+        "docx",
+        step_order=1,
+        title="Rapport",
+        schema={"type": "object", "properties": {"rows": {"type": "array"}}},
+    )
+
+    doc = Document(io.BytesIO(blob))
+    assert len(docx_tables(doc)) == 1
+    assert docx_tables(doc)[0].cell(1, 0).text == "A | B"
+
+
+async def test_render_structured_pdf_table_does_not_truncate_long_cell_values():
+    """PDF fallback tables should prefer readable wrapping over lossy truncation."""
+    long_value = (
+        "Detaljerad uppföljning med tillräckligt många ord för att behöva "
+        "radbrytas i PDF-tabellen och ändå behålla unique-tail-token."
+    )
+
+    blob, _ = await _render_service.render_structured_document(
+        {"actions": [{"owner": "Leona", "task": long_value}]},
+        "pdf",
+        step_order=1,
+        title="Rapport",
+        schema={"type": "object", "properties": {"actions": {"type": "array"}}},
+    )
+
+    with pdfplumber.open(io.BytesIO(blob)) as pdf:
+        page_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    normalized_text = page_text.replace("-\n", "").replace("\n", " ")
+    assert "unique" in normalized_text
+    assert "tail" in normalized_text
+    assert "token" in normalized_text
+
+
+async def test_render_structured_pdf_table_repeats_headers_after_page_break():
+    rows = [
+        {
+            "owner": f"Person {index}",
+            "task": (
+                "Följ upp utvecklingsmål och dokumentera status med tillräcklig "
+                f"detalj för radbrytning {index}."
+            ),
+        }
+        for index in range(45)
+    ]
+
+    blob, _ = await _render_service.render_structured_document(
+        {"actions": rows},
+        "pdf",
+        step_order=1,
+        title="Rapport",
+        schema={
+            "type": "object",
+            "properties": {
+                "actions": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "owner": {"title": "Ansvarig", "type": "string"},
+                            "task": {"title": "Uppgift", "type": "string"},
+                        },
+                    },
+                }
+            },
+        },
+    )
+
+    with pdfplumber.open(io.BytesIO(blob)) as pdf:
+        assert len(pdf.pages) > 1
+        second_page_table = pdf.pages[1].extract_table()
+    assert second_page_table is not None
+    # A narrow column wraps its header inside the cell; the cell still holds it.
+    header = [(cell or "").replace("\n", "") for cell in second_page_table[0]]
+    assert header == ["Ansvarig", "Uppgift"]
+
+
+async def test_pdf_metadata_title_is_the_document_name():
+    blob, _ = await _render_service.render_document(
+        "Hej", "pdf", step_order=1, title="Nämndmöte 2026-09-23"
+    )
+
+    with pdfplumber.open(io.BytesIO(blob)) as pdf:
+        assert pdf.metadata["Title"] == "Nämndmöte 2026-09-23"
+
+
+async def test_document_render_service_raises_stable_error_without_leaking_details(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    async def failing_runtime(**_: object) -> tuple[bytes, str]:
+        raise runtime_client.RuntimeUnavailable("internal path /tmp/secret-file")
+
+    monkeypatch.setattr(runtime_client, "render_document", failing_runtime)
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _render_service.render_document(
+            "Hello", "pdf", step_order=1, title="Rapport"
+        )
+
+    assert exc_info.value.code == "typed_io_render_failed"
+    assert "secret-file" not in str(exc_info.value)
+
+
+async def test_document_render_service_rejects_outputs_over_render_limits():
+    service = DocumentRenderService()
+    text = "x" * 500_001
+
+    with pytest.raises(TypedIOValidationException, match="too large"):
+        await service.render_document(text, "pdf", step_order=1, title="Rapport")
+
+
+async def test_document_render_service_uses_injected_render_limits():
+    service = DocumentRenderService(limits=DocumentRenderLimits(max_source_chars=5))
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await service.render_document("123456", "pdf", step_order=1, title="Rapport")
+
+    assert exc_info.value.context == {
+        "metric": "source_chars",
+        "actual": 6,
+        "limit": 5,
+    }
+
+
+async def test_document_render_service_rejects_too_many_table_cells():
+    service = DocumentRenderService()
+    row = tuple(f"cell-{index}" for index in range(50))
+    rows = tuple(row for _ in range(1_001))
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await service.render_blocks(
+            [DocumentBlock(kind="table", rows=rows)],
+            "pdf",
+            step_order=1,
+            title="Rapport",
+        )
+
+    assert exc_info.value.code == "typed_io_render_failed"
+    assert exc_info.value.context == {
+        "metric": "table_cells",
+        "actual": 50_050,
+        "limit": 50_000,
+    }
+
+
+async def test_document_render_service_rejects_too_many_structured_list_items():
+    data: list[object] = [None] * 5_001
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _render_service.render_structured_document(
+            data, "pdf", step_order=1, title="Rapport"
+        )
+
+    assert exc_info.value.code == "typed_io_render_failed"
+    assert exc_info.value.context == {
+        "metric": "list_items",
+        "actual": 5_001,
+        "limit": 5_000,
+    }
+
+
+async def test_document_render_service_rejects_deep_structured_values_before_conversion():
+    data: list[object] = []
+    current = data
+    for _ in range(33):
+        child: list[object] = []
+        current.append(child)
+        current = child
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _render_service.render_structured_document(
+            data, "docx", step_order=1, title="Rapport"
+        )
+
+    assert exc_info.value.code == "typed_io_render_failed"
+    assert exc_info.value.context is not None
+    assert exc_info.value.context["metric"] == "structured_depth"
+
+
+async def test_render_docx_markdown_lists_and_code_blocks():
+    """Lists and fenced code blocks should be represented in DOCX text."""
+    text = "# Titel\n\n- punkt ett\n- punkt två\n\n```python\nprint('hej')\n```"
+    blob, _ = await _render_service.render_document(
+        text, "docx", step_order=1, title="Rapport"
+    )
+    doc = Document(io.BytesIO(blob))
+    all_text = "\n".join(paragraph.text for paragraph in docx_paragraphs(doc))
+    assert "Titel" in all_text
+    assert "punkt ett" in all_text
+    assert "print('hej')" in all_text
+
+
+async def test_render_docx_very_long_output():
+    """Very long markdown output should produce a valid DOCX without exceptions."""
+    text = ("Rad med innehåll och åäö.\n" * 5000).strip()
+    blob, _ = await _render_service.render_document(
+        text, "docx", step_order=1, title="Rapport"
+    )
+    doc = Document(io.BytesIO(blob))
+    assert len(blob) > 0
+    assert any("åäö" in paragraph.text for paragraph in docx_paragraphs(doc))
+
+
+# --- Error handling ---
+
+
+async def test_render_unsupported_type_raises():
+    with pytest.raises(TypedIOValidationException, match="Unsupported document type"):
+        await _render_service.render_document(
+            "Test", "html", step_order=1, title="Rapport"
+        )
+
+
+# --- Unicode rendering ---
+
+
+async def test_render_pdf_unicode_characters():
+    """Em-dash, Swedish chars, curly quotes must render without error."""
+    text = "Em-dash \u2014 and Swedish: \u00e5\u00e4\u00f6 and curly \u201cquotes\u201d"
+    blob, mimetype = await _render_service.render_document(
+        text, "pdf", step_order=1, title="Rapport"
+    )
+    assert isinstance(blob, bytes)
+    assert len(blob) > 0
+    assert blob[:5] == b"%PDF-"
+
+
+async def test_render_pdf_font_fallback():
+    """System font fallback should keep Unicode PDF rendering available."""
+    blob, _ = await _render_service.render_document(
+        "Em-dash \u2014 and curly \u201cquotes\u201d",
+        "pdf",
+        step_order=1,
+        title="Rapport",
+    )
+    assert isinstance(blob, bytes)
+    assert blob[:5] == b"%PDF-"
+
+
+async def test_single_field_json_envelope_unwraps_to_formatted_document() -> None:
+    # Live incident 2026-08-05 (run 4fc4b445): the writer wrapped good
+    # markdown in {"document_body": ...}; rendering the envelope verbatim
+    # produced a document of braces and escapes. A one-field string
+    # envelope carries no information beyond its key — unwrap it.
+    envelope = (
+        '{\n  "document_body": "# Mötesdokument\\n\\n'
+        '## Sammanfattning\\nKort text.\\n\\n- Beslut 1\\n- Beslut 2"\n}'
+    )
+
+    blob, _ = await _render_service.render_document(
+        envelope, "docx", step_order=5, title="Rapport"
+    )
+
+    document = Document(io.BytesIO(blob))
+    texts = [paragraph.text for paragraph in docx_paragraphs(document)]
+    assert "Mötesdokument" in texts[0]
+    assert not any("document_body" in text for text in texts)
+    assert not any(text.strip().startswith("{") for text in texts)
+
+
+async def test_multi_field_json_text_renders_verbatim() -> None:
+    # A multi-key object cannot be unwrapped losslessly; rendering it
+    # verbatim is honest and stays diagnosable.
+    text = '{"first": "a", "second": "b"}'
+
+    blob, _ = await _render_service.render_document(
+        text, "docx", step_order=2, title="Rapport"
+    )
+
+    document = Document(io.BytesIO(blob))
+    assert any("first" in paragraph.text for paragraph in docx_paragraphs(document))
+
+
+# --- DOCX writer contract (content-control body template) -------------------------
+
+
+def _docx_styled(blob: bytes) -> list[tuple[str, str]]:
+    from tests.docx_template_fixtures import docx_styled_paragraphs
+
+    return docx_styled_paragraphs(blob)
+
+
+async def test_generic_docx_contains_no_fixed_organisation_or_logo() -> None:
+    blob, _ = await _render_service.render_document(
+        "# Rapport\n\nText.", "docx", step_order=1, title="Rapport"
+    )
+    document = Document(io.BytesIO(blob))
+    assert document.core_properties.author == ""
+    assert document.core_properties.last_modified_by == ""
+    assert document.core_properties.language == "sv-SE"
+    with zipfile.ZipFile(io.BytesIO(blob)) as archive:
+        assert not any(name.startswith("word/media/") for name in archive.namelist())
+        furniture = [
+            archive.read(name).decode()
+            for name in archive.namelist()
+            if name.startswith(("word/header", "word/footer")) and name.endswith(".xml")
+        ]
+        assert all("Sundsvall" not in xml and "logotyp" not in xml for xml in furniture)
+        # A page number field, simple or complex.
+        assert any(
+            'w:instr="PAGE"' in xml or ">PAGE</w:instrText>" in xml for xml in furniture
+        )
+    for section in document.sections:
+        assert all(not paragraph.text for paragraph in section.header.paragraphs)
+        # The footer names the document and the page, nothing fixed.
+        footer = " ".join(paragraph.text for paragraph in section.footer.paragraphs)
+        for word in ("Rapport", "Sida", "av"):
+            footer = footer.replace(word, "")
+        assert not footer.strip()
+
+
+async def test_render_docx_preserves_a_short_pre_title_paragraph() -> None:
+    blob, _ = await _render_service.render_document(
+        "Sekretessklass: Begränsad\n\n# Rapport\n\nBrödtext.",
+        "docx",
+        step_order=1,
+        title="Rapport",
+    )
+
+    styled = _docx_styled(blob)
+    assert styled[0] == ("Normal", "Sekretessklass: Begränsad")
+    assert styled[1] == ("Heading 1", "Rapport")
+
+
+async def test_docx_title_is_the_document_name_not_its_first_heading() -> None:
+    blob, _ = await _render_service.render_document(
+        "# Rapport\n\nText.", "docx", step_order=1, title="Nämndmöte 2026-09-23"
+    )
+
+    assert Document(io.BytesIO(blob)).core_properties.title == "Nämndmöte 2026-09-23"
+
+
+async def test_render_docx_keeps_a_real_opening_paragraph() -> None:
+    blob, _ = await _render_service.render_document(
+        "Inledning som är innehåll.\n\nAndra stycket.\n\n# Rubrik",
+        "docx",
+        step_order=1,
+        title="Rapport",
+    )
+
+    assert ("Normal", "Inledning som är innehåll.") in _docx_styled(blob)
+
+
+async def test_render_docx_nested_lists_use_level_styles_and_numbering_restarts() -> (
+    None
+):
+    blob, _ = await _render_service.render_document(
+        "# T\n\n- A\n  - A1\n    - A2\n- B\n\n1. Ett\n2. Två\n\nText\n\n1. Ny",
+        "docx",
+        step_order=1,
+        title="Rapport",
+    )
+
+    styled = _docx_styled(blob)
+    assert ("List Bullet", "A") in styled
+    assert ("List Bullet 2", "A1") in styled
+    assert ("List Bullet 3", "A2") in styled
+    assert ("List Number", "Ny") in styled
+    # Each numbered list gets its own numbering instance, starting at 1.
+    document = Document(io.BytesIO(blob))
+    number_ids = {
+        paragraph.text: paragraph._p.pPr.numPr.numId.val
+        for paragraph in docx_paragraphs(document)
+        if paragraph.text in ("Ett", "Två", "Ny")
+    }
+    assert number_ids["Ett"] == number_ids["Två"] != number_ids["Ny"]
+    numbering = document.part.numbering_part.element
+    for label in ("Ett", "Ny"):
+        start = numbering.num_having_numId(number_ids[label]).find(
+            ".//" + qn("w:startOverride")
+        )
+        assert start is not None and start.get(qn("w:val")) == "1"
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "- Parent\n  1. Numbered child",
+        "1. Parent\n   - Bullet child",
+        "- A\n  - B\n    - C\n      - D",
+        "1. A\n\n   3. Child",
+        "1. Parent\n   1. Child\n\n   Continuation text.\n2. Next",
+    ],
+)
+async def test_document_render_rejects_unsupported_list_nesting(text: str) -> None:
+    with pytest.raises(TypedIOValidationException) as info:
+        await _render_service.render_document(
+            text, "docx", step_order=1, title="Rapport"
+        )
+    assert info.value.code == "typed_io_render_failed"
+
+
+async def test_nested_numbered_lists_restart_under_each_parent() -> None:
+    text = "1. A\n   1. A1\n   2. A2\n2. B\n   1. B1"
+    blob, _ = await _render_service.render_document(
+        text, "docx", step_order=1, title="Rapport"
+    )
+    document = Document(io.BytesIO(blob))
+    numbers = {
+        paragraph.text: paragraph._p.pPr.numPr.numId.val
+        for paragraph in docx_paragraphs(document)
+        if paragraph._p.pPr is not None and paragraph._p.pPr.numPr is not None
+    }
+    assert numbers["A"] == numbers["B"]
+    assert numbers["A1"] == numbers["A2"]
+    assert numbers["B1"] != numbers["A1"]
+    assert len(set(numbers.values())) == 3
+    numbering = document.part.numbering_part.element
+    starts = {
+        label: numbering.num_having_numId(num_id)
+        .find(".//" + qn("w:startOverride"))
+        .get(qn("w:val"))
+        for label, num_id in numbers.items()
+    }
+    assert starts["A1"] == "1"
+    assert starts["B1"] == "1"
+
+
+async def test_render_docx_writes_links_as_hyperlinks_and_inherits_style_emphasis() -> (
+    None
+):
+    blob, _ = await _render_service.render_document(
+        "# Titel\n\nLäs [riktlinjen](https://example.se/r) och **viktigt**.",
+        "docx",
+        step_order=1,
+        title="Rapport",
+    )
+
+    xml = zipfile.ZipFile(io.BytesIO(blob)).read("word/document.xml").decode()
+    assert xml.count("<w:hyperlink") == 1
+    relationships = (
+        zipfile.ZipFile(io.BytesIO(blob)).read("word/_rels/document.xml.rels").decode()
+    )
+    assert 'Target="https://example.se/r"' in relationships
+    # Absent emphasis is not written as an explicit "off", so a bold heading
+    # style keeps its weight.
+    assert '<w:b w:val="0"/>' not in xml and '<w:b w:val="false"/>' not in xml
+    document = Document(io.BytesIO(blob))
+    from tests.docx_template_fixtures import docx_paragraphs
+
+    title = next(p for p in docx_paragraphs(document) if p.text == "Titel")
+    assert title.runs[0].bold is None
+
+
+async def test_render_docx_tables_carry_a_repeating_header_row_and_table_style() -> (
+    None
+):
+    blob, _ = await _render_service.render_document(
+        "# T\n\n| A | B |\n|---|---|\n| 1 | 2 |",
+        "docx",
+        step_order=1,
+        title="Rapport",
+    )
+
+    from tests.docx_template_fixtures import docx_tables
+
+    table = docx_tables(blob)[0]
+    # The header row repeats on every page and is read as the header.
+    assert table.rows[0]._tr.trPr.find(qn("w:tblHeader")) is not None
+    assert all(run.bold for run in table.rows[0].cells[0].paragraphs[0].runs)
+
+
+async def test_render_docx_supports_six_heading_levels_and_rejects_skips() -> None:
+    blob, _ = await _render_service.render_document(
+        "# 1\n\n## 2\n\n### 3\n\n#### 4\n\n##### 5\n\n###### 6",
+        "docx",
+        step_order=1,
+        title="Rapport",
+    )
+    assert ("Heading 6", "6") in _docx_styled(blob)
+
+    with pytest.raises(TypedIOValidationException, match="skip a level"):
+        await _render_service.render_document(
+            "# 1\n\n### 3", "docx", step_order=1, title="Rapport"
+        )

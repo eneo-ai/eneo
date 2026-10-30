@@ -1,19 +1,18 @@
+import { Callout } from "nextra/components";
+
 # MCP Servers
 
 Model Context Protocol (MCP) servers give assistants access to external tools and live data. This guide covers setup, tool approval, user-specific catalogs, cross-turn state, and day-to-day operation.
 
-import { Callout } from 'nextra/components'
-
 <Callout type="info">
-  This guide covers administrator setup for external MCP servers. For the map
-  of where tools run and why, see [Tools and MCP
+  This guide covers administrator setup for external MCP servers. For the map of
+  where tools run and why, see [Tools and MCP
   Architecture](/docs/tool-architecture); for the deeper mechanics, including
   knowledge retrieval modes, Eneo's built-in loopback MCP servers, and how
   internal and external tools interoperate, see [Knowledge Retrieval and MCP
-  Interoperability](/docs/knowledge-retrieval-and-mcp). Servers that provide
-  a function (web search, image generation, ask a file, create a file or
-  charts) are managed as functions instead; see
-  [Functions](/guides/capabilities).
+  Interoperability](/docs/knowledge-retrieval-and-mcp). Servers that provide a
+  function (web search, image generation, ask a file, create a file or charts)
+  are managed as functions instead; see [Functions](/guides/capabilities).
 </Callout>
 
 ## Overview
@@ -22,15 +21,15 @@ MCP is an open protocol that lets AI assistants call external tools — such as 
 
 **Key concepts:**
 
-| Concept | Description |
-|---------|-------------|
-| **MCP Server** | A remote service that exposes tools via the MCP protocol |
-| **Tool** | A single function the server provides (e.g. `search_tickets`, `create_issue`) |
-| **Tool Sync** | Discovering tools from the remote server and detecting changes |
-| **Approved catalog** | The tool names, descriptions, and schemas an admin has accepted in Eneo |
-| **Live catalog** | The tools the remote server returns for the signed-in user during this request |
-| **Approval** | Admin review before a new or changed definition becomes active |
-| **Space** | Where you enable MCP servers so assistants can use their tools |
+| Concept              | Description                                                                    |
+| -------------------- | ------------------------------------------------------------------------------ |
+| **MCP Server**       | A remote service that exposes tools via the MCP protocol                       |
+| **Tool**             | A single function the server provides (e.g. `search_tickets`, `create_issue`)  |
+| **Tool Sync**        | Discovering tools from the remote server and detecting changes                 |
+| **Approved catalog** | The tool names, descriptions, and schemas an admin has accepted in Eneo        |
+| **Live catalog**     | The tools the remote server returns for the signed-in user during this request |
+| **Approval**         | Admin review before a new or changed definition becomes active                 |
+| **Space**            | Where you enable MCP servers so assistants can use their tools                 |
 
 For a server that receives user identity, Eneo exposes only the intersection of
 the two catalogs:
@@ -55,7 +54,7 @@ The server form has a **Function** selection. Leave it at **General tools** for 
 1. Click **Add MCP Server**
 2. Fill in the required fields:
    - **Name** — A display name for the server
-   - **Server URL** — The Streamable HTTP endpoint (e.g. `https://example.com/mcp`)
+   - **Server URL** — The Streamable HTTP endpoint (e.g. `https://example.com/mcp`). Enter the final address: Eneo does not follow redirects
 3. Configure optional settings:
    - **Description** — What the server does
    - **Authentication** — Choose between `Public` (no auth) or `Bearer Token`
@@ -65,10 +64,14 @@ The server form has a **Function** selection. Leave it at **General tools** for 
    - **Security Classification** — Restrict which spaces can use this server
 4. Click **Add MCP Server**
 
-Eneo will **test the connection** before saving. If the URL is unreachable or returns an error, the server is not created and you get an error message.
+Eneo will **test the connection** before saving. If the URL is unreachable or returns an error, the server is not created and the error message is shown at the top of the form.
 
 <Callout type="info">
-  On successful creation, Eneo connects to the server and stores the tools visible to the creating admin. These initial tools are enabled by default because the admin is explicitly adding the server. When identity forwarding is enabled, other users may have a different catalog; their additional tools enter the approval flow described below.
+  On successful creation, Eneo connects to the server and stores the tools
+  visible to the creating admin. These initial tools are enabled by default
+  because the admin is explicitly adding the server. When identity forwarding is
+  enabled, other users may have a different catalog; their additional tools
+  enter the approval flow described below.
 </Callout>
 
 ### Authentication
@@ -150,11 +153,11 @@ tool calls.
 Open **Tool catalog limits** in the server form to set two safeguards for that
 server:
 
-| Setting | Default | Allowed range |
-|---|---:|---:|
-| Maximum tools | 256 | 1–4,096 |
-| Maximum catalog size | 16 MiB | 1–64 MiB |
-| Maximum size per tool | 64 KiB | 1–1,024 KiB |
+| Setting               | Default | Allowed range |
+| --------------------- | ------: | ------------: |
+| Maximum tools         |     256 |       1–4,096 |
+| Maximum catalog size  |  16 MiB |      1–64 MiB |
+| Maximum size per tool |  64 KiB |   1–1,024 KiB |
 
 The sizes include tool names, descriptions, and input schemas as serialized
 JSON. The total-size limit prevents a large collection of individually valid
@@ -245,25 +248,26 @@ Use the toggle switch on each tool to enable or disable it. You can also use the
 The header shows the count of enabled tools, e.g. `2 / 5 enabled`.
 
 <Callout type="warning">
-  Disabling a tool in admin removes it globally for all spaces. To control tools per-space, manage them in the space settings instead.
+  Disabling a tool in admin removes it globally for all spaces. To control tools
+  per-space, manage them in the space settings instead.
 </Callout>
 
 ---
 
 ## Syncing Tools
 
-Over time, an MCP server may add new tools, change existing tool descriptions, or remove tools. To detect these changes, click **Sync Tools** in the tools panel.
+Over time, an MCP server may add new tools, change existing tool descriptions, or remove tools. To detect these changes, click **Sync Tools** in the tools panel or in the server's row menu. If the sync fails, the server's error message is shown as an error notification.
 
 ### What Happens During Sync
 
 Eneo connects to the remote server, fetches the current tool list, and compares it against what is stored locally:
 
-| Scenario | What happens |
-|----------|-------------|
-| **New tool** | Created with `pending` status — requires approval before it becomes active |
+| Scenario                                         | What happens                                                                                                 |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------------------------------ |
+| **New tool**                                     | Created with `pending` status — requires approval before it becomes active                                   |
 | **Changed tool** (description or schema updated) | Change is stored as pending — the tool continues using its **previous version** until the change is approved |
-| **Removed tool** (global catalog) | Marked as `removed from server` — requires approval to delete |
-| **Unchanged tool** | No action needed |
+| **Removed tool** (global catalog)                | Marked as `removed from server` — requires approval to delete                                                |
+| **Unchanged tool**                               | No action needed                                                                                             |
 
 For an identity-forwarding server, an admin sync is only the acting admin's
 view. Eneo therefore does not mark a tool as removed merely because that admin
@@ -282,7 +286,10 @@ the failed tool result. This does not change the server's configuration or
 disable its other tools.
 
 <Callout type="info">
-  **Why approval?** The approval step is a security measure. It prevents a compromised or misbehaving MCP server from silently injecting or modifying tool definitions. An admin must review and explicitly approve every change before it takes effect.
+  **Why approval?** The approval step is a security measure. It prevents a
+  compromised or misbehaving MCP server from silently injecting or modifying
+  tool definitions. An admin must review and explicitly approve every change
+  before it takes effect.
 </Callout>
 
 ### Pending Changes Banner
@@ -304,10 +311,10 @@ Use the **approve** (checkmark) or **reject** (X) buttons on individual tools, o
 
 #### What Approve and Reject Do
 
-| Action | New tool | Changed tool | Removed tool |
-|--------|----------|-------------|-------------|
-| **Approve** | Tool becomes active with the proposed description and schema | Pending values replace current values | Tool is deleted from the database |
-| **Reject** | Tool is deleted (never activated) | Pending values are discarded, current values remain | Removed flag is cleared, tool stays active |
+| Action      | New tool                                                     | Changed tool                                        | Removed tool                               |
+| ----------- | ------------------------------------------------------------ | --------------------------------------------------- | ------------------------------------------ |
+| **Approve** | Tool becomes active with the proposed description and schema | Pending values replace current values               | Tool is deleted from the database          |
+| **Reject**  | Tool is deleted (never activated)                            | Pending values are discarded, current values remain | Removed flag is cleared, tool stays active |
 
 ---
 
@@ -318,16 +325,61 @@ After configuring MCP servers in the admin panel, you make them available to ass
 ### Steps
 
 1. Go to **Space → Settings**
-2. In the **MCP Servers** section, toggle the servers you want to enable
+2. In the **Tools** row, toggle the servers you want to enable. A switch ignores further clicks while its own change is being saved.
 3. Optionally expand a server to enable/disable individual tools for that space
 
+A new space has no MCP server switched on. Only a user who may edit the space can switch servers on; if the organisation has no MCP server to switch on, the row says that an administrator adds them under **Admin → Tools**. In the assistant editor, a space without servers shows an empty state; users who may edit the space get a link to the space settings from it.
+
 When a server is added to a space, all its tools are enabled by default. You can then disable specific tools you don't need.
+
+When you switch a server off, the space's assistants stop calling it, even if an assistant still has it selected. The one exception is the personal assistant when an organisation policy grants it servers directly: it keeps calling those. The assistant editor then lists the servers the space has switched off, and the selection is removed when the assistant is saved.
 
 ### Security Classification
 
 If your organisation uses security classifications, an MCP server must meet the space's classification level to be selectable. Servers that don't meet the requirement are greyed out with a tooltip explaining why.
 
 For example, if a space is classified as "Confidential" (level 3), only MCP servers with a security classification at level 3 or higher can be enabled in that space.
+
+---
+
+## MCP in Flows
+
+A Flow step can take its input from the answer of one MCP tool: the step's
+input source is `tool`. See [Flows](/docs/flows) for how the step is
+configured and what it records.
+
+- The tool belongs to a general MCP server that the flow's space has activated,
+  it is switched on, and its definition is approved. Publishing asks every
+  level and refuses with the first one that says no; a run asks again before it
+  runs its tool steps and before the call.
+- The flow calls the tool once per step run, with nobody watching, using the
+  server's stored access. A tool that changes something changes it again when
+  the run is started again, and Eneo does not prevent a repeated change. A
+  server that forwards the signed-in user's identity cannot be used: a run has
+  no signed-in user at the server.
+- A tool whose changed definition waits for review, or that the server no
+  longer offers, is refused until an administrator has dealt with it. When the
+  tool's name or its approved input schema has changed since the flow was
+  published, the flow must be published again.
+- In the new web app, the **Tools** tab of an MCP server (**Admin → Tools →
+  MCP Servers**, then the server) shows how many published flows call a tool
+  of the server, and lists them with their space,
+  published version and the tools they call. A flow in a space you are a member
+  of links to the flow when you may manage flows. Drafts, unpublished flows and
+  deleted flows are not counted. A flow keeps the server in its published
+  version when the server's function changes, so it stays listed. Check the
+  list before you switch the server or a tool off: those flows' tool steps
+  then fail.
+
+Everything else of MCP stays outside Flows. A step's assistant does not use
+MCP servers or tools in a Flow, and a flow with a tool step cannot be exported
+as a Flow package.
+
+<Callout type="warning">
+  Do not configure MCP on an assistant managed by a Flow. Use a step with the
+  input source `tool`, or another supported Flow input, for the data the flow
+  needs, and the durable terminal webhook output for external delivery.
+</Callout>
 
 ---
 
@@ -382,15 +434,16 @@ that the model should reuse the handle from earlier results.
 
 ### Security and failure boundaries
 
-| Event | Eneo behavior |
-|---|---|
-| Live tool is not approved | Store as pending; do not expose it |
-| Live schema differs from approved schema | Continue using the approved schema until review |
-| User cannot see an approved tool | Omit it from this request |
-| Identity-scoped discovery fails or times out | Omit that server's tools from this request |
-| Catalog exceeds an admin limit | Reject the entire catalog for this request; save nothing |
+| Event                                             | Eneo behavior                                                                                                                                                                  |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Live tool is not approved                         | Store as pending; do not expose it                                                                                                                                             |
+| Live schema differs from approved schema          | Continue using the approved schema until review                                                                                                                                |
+| User cannot see an approved tool                  | Omit it from this request                                                                                                                                                      |
+| Identity-scoped discovery fails or times out      | Omit that server's tools from this request                                                                                                                                     |
+| Catalog exceeds an admin limit                    | Reject the entire catalog for this request; save nothing                                                                                                                       |
 | Server with a credential has a plain-http address | Do not connect. Without identity forwarding, the tool call reports that an administrator must switch the address to https; with it, omit that server's tools from this request |
-| Admin cannot see a user-only tool during sync | Keep the existing tool; absence is not deletion evidence |
+| Admin cannot see a user-only tool during sync     | Keep the existing tool; absence is not deletion evidence                                                                                                                       |
+| Server answers a request with a redirect          | Do not follow it; the request fails                                                                                                                                            |
 
 ### Checklist for MCP server operators
 
@@ -399,6 +452,7 @@ that the model should reuse the handle from earlier results.
 - Keep tool names stable and treat description/schema changes as reviewed contract changes.
 - If state continuity matters, mint explicit handles in tool results, bind them to the forwarded identity, and expire them with a TTL.
 - Ensure Eneo can reach the endpoint within the configured connect and list-tools timeouts.
+- Serve the MCP endpoint at the registered URL itself. Eneo does not follow a redirect (for example from `http` to `https`, or to a path with a trailing slash), so that a request and its credentials never go to an address that nobody registered.
 
 ---
 
@@ -409,16 +463,19 @@ that the model should reuse the handle from earlier results.
 **Symptoms:** Error message when adding a server
 
 **Solutions:**
+
 - Verify the URL is correct and the server is running
 - Check that the URL is reachable from the Eneo backend (firewall, DNS)
 - If using authentication, verify the token is correct and that the URL starts with `https://` (see [Credentials need https](#credentials-need-https))
 - The server must support **Streamable HTTP** transport
+- If the message says that the server answered with a redirect, register the address the server redirects to instead (the message names it when it is an `http` or `https` address of at most 200 characters that can be registered as it is written). Eneo does not follow redirects from an MCP server.
 
 ### Sync Shows No Tools
 
 **Symptoms:** After syncing, no tools appear
 
 **Solutions:**
+
 - Verify the MCP server actually exposes tools (check its documentation)
 - Check backend logs for connection errors
 - Try removing and re-adding the server
@@ -428,7 +485,8 @@ that the model should reuse the handle from earlier results.
 **Symptoms:** Assistants can't use tools even though the server is enabled
 
 **Solutions:**
-- Verify the server is enabled in the space settings (not just in admin)
+
+- Verify the server is switched on in the space settings (not just in admin). A server a space administrator switched off is not called, even by an assistant that still has it selected (except servers an organisation policy grants directly to the personal assistant)
 - Check that individual tools are toggled on in the space
 - If using security classifications, verify the server meets the space's classification level
 - Check that pending tool changes have been approved — new tools are inactive until approved
@@ -464,5 +522,6 @@ by the remote server.
 **Symptoms:** Tools stuck in pending state
 
 **Solutions:**
+
 - Approve or reject all pending changes
 - If the issue persists, try syncing again to refresh the state

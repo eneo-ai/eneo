@@ -1,0 +1,670 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from uuid import uuid4
+
+import pytest
+from pydantic import ValidationError
+
+from eneo.flows.domain.flow import (
+    FlowRunStatus,
+    FlowStepAttemptStatus,
+    FlowStepResult,
+    FlowStepResultStatus,
+)
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptExecutionInput,
+    FlowStepAttemptStart,
+    parse_flow_step_attempt_input,
+)
+from eneo.flows.domain.flow_webhook_delivery import (
+    WebhookDeliveryIntent,
+    WebhookPayloadRef,
+)
+from eneo.flows.domain.runtime import RuntimeStep, StepDiagnostic, StepExecutionOutput
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import (
+    FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+    FlowAttemptProvenance,
+    parse_attempt_provenance,
+)
+from eneo.flows.runtime.claim_resolution import StepClaimResolution
+from eneo.flows.runtime.step_attempt_runtime import (
+    build_generic_failure_plan,
+    build_step_gate_decision,
+    build_step_success_plan,
+    build_typed_failure_plan,
+    build_typed_failure_run_error_message,
+)
+from eneo.flows.runtime.step_execution_result import StepExecutionResult
+from eneo.flows.runtime.step_result_builder import (
+    build_activated_attempt_input,
+    build_attempt_provenance,
+    build_completed_step_result,
+    build_terminal_attempt_input,
+)
+
+
+def _claimed_result(*, step_order: int = 1) -> FlowStepResult:
+    now = datetime.now(timezone.utc)
+    return FlowStepResult(
+        id=uuid4(),
+        flow_run_id=uuid4(),
+        flow_id=uuid4(),
+        tenant_id=uuid4(),
+        step_id=uuid4(),
+        step_order=step_order,
+        assistant_id=uuid4(),
+        input_payload_json={"text": "input"},
+        effective_prompt="prompt",
+        output_payload_json={"text": "output"},
+        model_parameters_json={},
+        num_tokens_input=1,
+        num_tokens_output=1,
+        status=FlowStepResultStatus.RUNNING,
+        error_message=None,
+        flow_step_execution_hash="hash",
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _runtime_step(
+    *, input_source: str = "flow_input", output_mode: str = "pass_through"
+) -> RuntimeStep:
+    claimed = _claimed_result()
+    return RuntimeStep(
+        step_id=claimed.step_id,
+        step_order=claimed.step_order,
+        assistant_id=claimed.assistant_id,
+        user_description=None,
+        input_source=input_source,
+        input_bindings=None,
+        input_config=None,
+        output_mode=output_mode,
+        output_config=None,
+        output_type="text",
+        input_type="text",
+    )
+
+
+def _step_output() -> StepExecutionOutput:
+    return StepExecutionOutput(
+        input_text="hello",
+        source_text="hello",
+        input_source="flow_input",
+        used_question_binding=False,
+        full_text="done",
+        persisted_text="done",
+        generated_file_ids=[],
+        tool_calls_metadata=None,
+        num_tokens_input=2,
+        num_tokens_output=3,
+        effective_prompt="prompt",
+        model_parameters_json={"temperature": 0.2},
+    )
+
+
+def test_build_step_gate_decision_returns_cancel_plan_for_deleted_flow():
+    decision = build_step_gate_decision(
+        latest_run_status=FlowRunStatus.RUNNING,
+        flow_active=False,
+        claim_resolution=None,
+        step_id=uuid4(),
+    )
+
+    assert decision.action == "cancel_flow_deleted"
+    assert decision.result == {"status": "cancelled", "reason": "flow_deleted"}
+    assert decision.run_error_message == "Flow was deleted during execution."
+
+
+def test_build_step_gate_decision_returns_skip_for_terminal_run():
+    decision = build_step_gate_decision(
+        latest_run_status=FlowRunStatus.CANCELLED,
+        flow_active=True,
+        claim_resolution=None,
+        step_id=uuid4(),
+    )
+
+    assert decision.action == "return"
+    assert decision.result == {"status": "skipped", "reason": "run_cancelled"}
+
+
+def test_build_step_gate_decision_returns_failure_for_missing_step_result():
+    step_id = uuid4()
+    decision = build_step_gate_decision(
+        latest_run_status=FlowRunStatus.RUNNING,
+        flow_active=True,
+        claim_resolution=StepClaimResolution(action="missing_step_result"),
+        step_id=step_id,
+    )
+
+    assert decision.action == "fail_step_missing"
+    assert decision.result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_MISSING.value,
+    }
+    assert decision.run_error_message == f"Missing step result for step {step_id}"
+
+
+def test_build_step_gate_decision_appends_completed_result():
+    existing = _claimed_result()
+    decision = build_step_gate_decision(
+        latest_run_status=FlowRunStatus.RUNNING,
+        flow_active=True,
+        claim_resolution=StepClaimResolution(
+            action="append_completed", completed_result=existing
+        ),
+        step_id=existing.step_id,
+    )
+
+    assert decision.action == "append_completed"
+    assert decision.completed_result == existing
+
+
+def test_build_step_gate_decision_uses_continue_for_skip_resolution():
+    decision = build_step_gate_decision(
+        latest_run_status=FlowRunStatus.RUNNING,
+        flow_active=True,
+        claim_resolution=StepClaimResolution(action="skip"),
+        step_id=uuid4(),
+    )
+
+    assert decision.action == "continue"
+
+
+def test_build_typed_failure_plan_preserves_input_payload_and_prompt():
+    claimed = _claimed_result()
+    plan = build_typed_failure_plan(
+        claimed=claimed,
+        error_code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION,
+        error_message="Step 1 input invalid",
+        input_payload_json={"text": "bad", "input_source": "flow_input"},
+        effective_prompt="Prompt",
+    )
+
+    assert plan.attempt_status == FlowStepAttemptStatus.FAILED
+    assert plan.error_code is FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION
+    assert plan.failed_result.status == FlowStepResultStatus.FAILED
+    assert plan.failed_result.error_code == "typed_io_contract_violation"
+    assert plan.failed_result.input_payload_json == {
+        "text": "bad",
+        "input_source": "flow_input",
+    }
+    assert plan.failed_result.effective_prompt == "Prompt"
+    assert plan.return_result == {"status": "failed", "error": "Step 1 input invalid"}
+
+
+def test_typed_failure_run_error_uses_public_taxonomy_summary() -> None:
+    message = build_typed_failure_run_error_message(
+        step_order=1,
+        error_code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED,
+        error_message="provider secret must remain private",
+        contract_validation=None,
+    )
+
+    assert message == (
+        "Step 1: The transcription provider failed while processing audio "
+        "(typed_io_transcription_failed)."
+    )
+    assert ". (" not in message
+
+
+def test_typed_failure_run_error_preserves_contract_validation_summary() -> None:
+    message = build_typed_failure_run_error_message(
+        step_order=2,
+        error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        error_message="raw parse detail",
+        contract_validation={
+            "parse_attempted": True,
+            "parse_succeeded": False,
+            "schema_type_hint": "object",
+        },
+    )
+
+    assert message == (
+        "Step 2: expected valid JSON text for structured object input "
+        "(typed_io_output_parse_failed)."
+    )
+
+
+def test_variable_resolution_run_error_preserves_precise_resolver_message() -> None:
+    resolver_message = (
+        "Unknown variable reference: 'flow.input.question'. "
+        "Missing key 'question'. Available keys: case_id."
+    )
+
+    message = build_typed_failure_run_error_message(
+        step_order=3,
+        error_code=FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED,
+        error_message=resolver_message,
+        contract_validation=None,
+    )
+
+    assert message == (
+        f"Step 3: {resolver_message} (typed_io_variable_resolution_failed)."
+    )
+
+
+def test_typed_failure_plan_keeps_raw_detail_out_of_run_error() -> None:
+    claimed = _claimed_result()
+    raw_detail = (
+        "Step 1: HTTP GET input request failed for "
+        "https://internal.example.test/token=secret."
+    )
+    run_error_message = build_typed_failure_run_error_message(
+        step_order=1,
+        error_code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR,
+        error_message=raw_detail,
+        contract_validation=None,
+    )
+
+    plan = build_typed_failure_plan(
+        claimed=claimed,
+        error_code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR,
+        error_message=raw_detail,
+        run_error_message=run_error_message,
+    )
+
+    assert plan.failed_result.error_message == raw_detail
+    assert plan.run_error_message == (
+        "Step 1: The HTTP step could not connect to the target service "
+        "(typed_io_http_connection_error)."
+    )
+    assert "secret" not in plan.run_error_message
+    assert "internal.example.test" not in plan.run_error_message
+
+
+def test_build_generic_failure_plan_uses_public_error_contract():
+    claimed = _claimed_result()
+
+    plan = build_generic_failure_plan(
+        claimed=claimed,
+        public_error="Flow step 1 execution failed.",
+    )
+
+    assert plan.attempt_status == FlowStepAttemptStatus.FAILED
+    assert plan.error_code is FlowApiErrorCode.STEP_EXECUTION_FAILED
+    assert plan.error_message == "Flow step 1 execution failed."
+    assert plan.failed_result.error_code == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
+    assert plan.failed_result.error_message == "Flow step 1 execution failed."
+    assert plan.return_result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+    }
+
+
+def test_build_step_success_plan_follows_delivery_intents_not_output_mode():
+    claimed = _claimed_result()
+    step = _runtime_step(output_mode="http_post")
+    output = _step_output()
+
+    plan = build_step_success_plan(
+        claimed=claimed,
+        run_id=claimed.flow_run_id,
+        flow_id=claimed.flow_id,
+        tenant_id=claimed.tenant_id,
+        step=step,
+        result=StepExecutionResult(output=output),
+        output_payload_json={
+            "text": "done",
+        },
+        execution_hash="exec-hash",
+    )
+
+    assert plan.delivery_intents == ()
+    assert plan.step_result.status == FlowStepResultStatus.COMPLETED
+    assert plan.step_result.error_code is None
+    assert plan.step_result.output_payload_json == {
+        "text": "done",
+    }
+
+    claimed_without_http_mode = _claimed_result()
+    step = _runtime_step(output_mode="pass_through")
+    intent = WebhookDeliveryIntent(
+        flow_run_id=claimed_without_http_mode.flow_run_id,
+        step_id=step.step_id,
+        step_order=step.step_order,
+        attempt_no=2,
+        idempotency_key=(
+            f"{claimed_without_http_mode.flow_run_id}:{step.step_id}:2:webhook"
+        ),
+        payload=WebhookPayloadRef(
+            value=(
+                f"flow_run:{claimed_without_http_mode.flow_run_id}:"
+                f"step:{step.step_id}:attempt:2"
+            )
+        ),
+    )
+
+    plan = build_step_success_plan(
+        claimed=claimed_without_http_mode,
+        run_id=claimed_without_http_mode.flow_run_id,
+        flow_id=claimed_without_http_mode.flow_id,
+        tenant_id=claimed_without_http_mode.tenant_id,
+        step=step,
+        result=StepExecutionResult(
+            output=_step_output(),
+            delivery_intents=(intent,),
+        ),
+        output_payload_json={
+            "text": "done",
+        },
+        execution_hash="exec-hash",
+    )
+
+    assert plan.delivery_intents == (intent,)
+
+
+def test_build_attempt_provenance_omits_retired_runtime_projections() -> None:
+    generated_file_id = uuid4()
+    output = _step_output()
+    output.generated_file_ids = [generated_file_id]
+    output.artifacts = [
+        {
+            "file_id": str(generated_file_id),
+            "file_name": "answer.docx",
+        }
+    ]
+    output.tool_calls_metadata = [{"name": "lookup", "arguments": {"q": "case"}}]
+    output.raw_completion_text = "raw completion"
+    output.rag_metadata = {"status": "success"}
+    output.runtime_input_metadata = {"files_count": 1}
+    output.transcription_metadata = {"segments": [{"index": 1, "text": "hello"}]}
+    output.contract_validation = {"valid": True}
+    output.diagnostics = [
+        StepDiagnostic(
+            code="contract_warning",
+            message="Contract warning",
+            severity="warning",
+        )
+    ]
+    output.citation_sidecar = {"tracking_mode": "passive_inline_scan"}
+    provenance_payload = build_attempt_provenance(
+        output=output,
+    )
+
+    validated = FlowAttemptProvenance.model_validate(provenance_payload)
+    assert provenance_payload == validated.to_payload()
+    assert parse_attempt_provenance(provenance_payload).status == "tracked"
+    assert provenance_payload["schema_version"] == (
+        FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION
+    )
+    assert set(provenance_payload) == {
+        "schema_version",
+        "llm",
+        "rag",
+        "citations",
+    }
+    assert set(provenance_payload["llm"]) <= {
+        "tool_calls",
+        "raw_completion_text",
+    }
+
+
+def test_attempt_input_builders_preserve_exact_start_and_runtime_input() -> None:
+    start = FlowStepAttemptStart(
+        requested_model="openai/gpt-5.4-nano",
+        provider="openai",
+        resolved_timeout_seconds=1200,
+        input_text_length=5,
+        input_tokens_estimate=2,
+    )
+    output = _step_output()
+    activated = build_activated_attempt_input(
+        start=start,
+        resolved_input={"text": "hello", "input_source": "flow_input"},
+        completion_configuration=FlowStepAttemptCompletionConfiguration(
+            preferred_model_parameters=output.model_parameters_json,
+        ),
+        execution_inputs=(
+            FlowStepAttemptExecutionInput(
+                question="hello",
+                effective_prompt=output.effective_prompt,
+                assistant_context_version=1,
+            ),
+        ),
+    )
+
+    assert activated is not None
+    completed = build_terminal_attempt_input(
+        start=start,
+        resolved_input={"text": "hello", "input_source": "flow_input"},
+    )
+    parsed = parse_flow_step_attempt_input(completed.to_payload())
+
+    assert parsed.status == "tracked"
+    assert parsed.attempt_input is not None
+    assert parsed.attempt_input.start == start
+    assert parsed.attempt_input.resolved_input == {
+        "text": "hello",
+        "input_source": "flow_input",
+    }
+    assert activated.completion_configuration is not None
+    assert activated.completion_configuration.preferred_model_parameters == {
+        "temperature": 0.2
+    }
+    assert activated.execution_inputs is not None
+    assert activated.execution_inputs[0].question == "hello"
+    assert activated.execution_inputs[0].effective_prompt == "prompt"
+
+
+@pytest.mark.parametrize(
+    ("raw", "error_code"),
+    [
+        ([], "flow_step_attempt_input_invalid_type"),
+        ({"resolved_input": {}}, "flow_step_attempt_input_schema_version_missing"),
+        (
+            {"schema_version": "flow-step-attempt-input.v0", "resolved_input": {}},
+            "flow_step_attempt_input_schema_version_unsupported",
+        ),
+        (
+            {
+                "schema_version": "flow-step-attempt-input.v1",
+                "resolved_input": {},
+                "unexpected": True,
+            },
+            "flow_step_attempt_input_unknown_top_level_keys",
+        ),
+        (
+            {
+                "schema_version": "flow-step-attempt-input.v1",
+                "execution_inputs": [],
+            },
+            "flow_step_attempt_input_invalid_payload",
+        ),
+    ],
+)
+def test_attempt_input_parser_exports_explicit_corruption(
+    raw: object,
+    error_code: str,
+) -> None:
+    parsed = parse_flow_step_attempt_input(raw)
+
+    assert parsed.status == "corrupt"
+    assert parsed.marker is not None
+    assert parsed.marker.error_code == error_code
+    export_payload = parsed.to_export_payload()
+    assert export_payload is not None
+    assert export_payload["schema_version"] == "flow-step-attempt-input-marker.v1"
+    assert export_payload["error_code"] == error_code
+
+
+_TOOL_CALL_START: dict[str, object] = {
+    "mcp_server_id": "00000000-0000-0000-0000-000000000701",
+    "tool_id": "00000000-0000-0000-0000-000000000702",
+    "tool_name": "lookup_case",
+    "published_input_schema_sha256": "a" * 64,
+    "current_input_schema_sha256": "a" * 64,
+    "arguments": {"case_id": "A-17", "days": ["2026-01-03"], "limit": None},
+}
+_ANSWERED = {
+    "outcome": "answered",
+    "duration_ms": 12,
+    "answer_byte_size": 20,
+    "answer_sha256": "b" * 64,
+}
+_FAILED = {"outcome": "failed", "duration_ms": 0, "error_code": "typed_io_tool_timeout"}
+
+
+@pytest.mark.parametrize(
+    ("call", "tracked"),
+    [
+        pytest.param({"tool_call_start": _TOOL_CALL_START}, True, id="start-only"),
+        pytest.param(
+            {"tool_call_start": _TOOL_CALL_START, "tool_call_result": _ANSWERED},
+            True,
+            id="answered",
+        ),
+        pytest.param(
+            {"tool_call_start": _TOOL_CALL_START, "tool_call_result": _FAILED},
+            True,
+            id="failed",
+        ),
+        pytest.param(
+            {"resolved_input": {}, "tool_call_result": _ANSWERED},
+            False,
+            id="result-without-start",
+        ),
+        pytest.param(
+            {
+                "tool_call_start": _TOOL_CALL_START,
+                "tool_call_result": {**_ANSWERED, "answer_sha256": None},
+            },
+            False,
+            id="answered-without-hash",
+        ),
+        pytest.param(
+            {
+                "tool_call_start": _TOOL_CALL_START,
+                "tool_call_result": {**_FAILED, "error_code": None},
+            },
+            False,
+            id="failed-without-code",
+        ),
+        pytest.param(
+            {
+                "tool_call_start": _TOOL_CALL_START,
+                "tool_call_result": {**_FAILED, "answer_byte_size": 3},
+            },
+            False,
+            id="failed-with-an-answer",
+        ),
+        pytest.param(
+            {"tool_call_start": {**_TOOL_CALL_START, "arguments": ["A-17"]}},
+            False,
+            id="arguments-not-an-object",
+        ),
+        pytest.param(
+            {"tool_call_start": {**_TOOL_CALL_START, "answer": "x"}},
+            False,
+            id="unknown-start-key",
+        ),
+    ],
+)
+def test_a_tool_call_record_is_tracked_only_in_its_complete_shape(
+    call: dict[str, object], tracked: bool
+) -> None:
+    # Kills the mutants that leave the call fields out of the envelope or out
+    # of its at-least-one-field rule (a start alone would read as corrupt),
+    # or that accept a result without its start, an answered result without
+    # its hash, a failed one without its code or with an answer.
+    raw = {"schema_version": "flow-step-attempt-input.v1", **call}
+
+    parsed = parse_flow_step_attempt_input(raw)
+
+    assert parsed.status == ("tracked" if tracked else "corrupt")
+    if tracked:
+        assert parsed.to_export_payload() == raw
+
+
+def test_attempt_provenance_omits_empty_llm_section() -> None:
+    output = _step_output()
+    output.tool_calls_metadata = None
+    output.raw_completion_text = None
+
+    assert build_attempt_provenance(output=output) is None
+
+
+@pytest.mark.parametrize(
+    "retired_key",
+    [
+        "attempt_start",
+        "artifacts",
+        "template",
+        "runtime_input",
+        "transcription",
+        "guards",
+        "http",
+        "token_usage",
+        "agentic",
+    ],
+)
+def test_attempt_provenance_rejects_retired_parallel_owners(
+    retired_key: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowAttemptProvenance.model_validate({retired_key: {}})
+
+
+@pytest.mark.parametrize("retired_llm_key", ["effective_prompt", "model_parameters"])
+def test_attempt_provenance_rejects_retired_llm_owners(
+    retired_llm_key: str,
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowAttemptProvenance.model_validate(
+            {"llm": {retired_llm_key: {"preview": "retired"}}}
+        )
+
+
+def test_runtime_tool_calls_land_in_attempt_provenance_not_step_result() -> None:
+    claimed = _claimed_result()
+    step = _runtime_step()
+    output = _step_output()
+    output.tool_calls_metadata = [{"name": "lookup", "arguments": {"q": "case"}}]
+
+    step_result = build_completed_step_result(
+        claimed=claimed,
+        run_id=claimed.flow_run_id,
+        flow_id=claimed.flow_id,
+        tenant_id=claimed.tenant_id,
+        step=step,
+        output=output,
+        output_payload_json={"text": "done"},
+        execution_hash="exec-hash",
+    )
+    provenance_payload = build_attempt_provenance(
+        output=output,
+    )
+
+    parse_result = parse_attempt_provenance(provenance_payload)
+    assert parse_result.provenance is not None
+    assert parse_result.provenance.llm is not None
+    assert parse_result.provenance.llm.tool_calls is not None
+    assert "tool_calls" not in (step_result.input_payload_json or {})
+    assert "tool_calls" not in (step_result.output_payload_json or {})
+    assert provenance_payload["llm"]["tool_calls"]["preview"] == [
+        {"name": "lookup", "arguments": {"q": "case"}}
+    ]
+
+
+@pytest.mark.parametrize("text", [None, "", "aåö"])
+def test_typed_failure_retains_only_rejected_evidence(text: str | None) -> None:
+    from eneo.flows.domain.step_output import interpret_rejected_output
+
+    plan = build_typed_failure_plan(
+        claimed=_claimed_result(),
+        error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+        error_message="Invalid JSON",
+        rejected_output=text,
+        max_inline_text_bytes=4,
+    )
+    assert plan.failed_result.status == FlowStepResultStatus.FAILED
+    rejected = interpret_rejected_output(plan.failed_result.output_payload_json)
+    if text is None:
+        assert plan.failed_result.output_payload_json is None
+    else:
+        assert rejected is not None
+        assert rejected.text == ("aå" if text else "")
+        assert rejected.truncated_by_runtime is bool(text)

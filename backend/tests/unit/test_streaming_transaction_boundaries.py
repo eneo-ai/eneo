@@ -9,6 +9,7 @@ from uuid import uuid4
 import pytest
 
 import eneo.sessions.session_service as session_service_module
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import FileType
 from eneo.files.file_service import FileService
 from eneo.sessions.session_service import SessionService
@@ -203,7 +204,9 @@ async def test_file_service_save_image_starts_short_transaction_when_needed():
                 "size": len(b"image-bytes"),
                 "mimetype": "image/jpeg",
                 "file_type": "image",
-                "user_id": service.user.id,
+                "owner_type": PrincipalType.USER,
+                "owner_user_id": service.user.id,
+                "owner_service_id": None,
                 "tenant_id": service.user.tenant_id,
             },
         )
@@ -242,7 +245,9 @@ async def test_file_service_save_image_reuses_existing_transaction():
                 "size": len(b"image-bytes"),
                 "mimetype": "image/jpeg",
                 "file_type": "image",
-                "user_id": service.user.id,
+                "owner_type": PrincipalType.USER,
+                "owner_user_id": service.user.id,
+                "owner_service_id": None,
                 "tenant_id": service.user.tenant_id,
             },
         )

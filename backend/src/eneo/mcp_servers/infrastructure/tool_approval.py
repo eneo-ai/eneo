@@ -120,9 +120,9 @@ class ToolApprovalManager:
         self._namespace = f"eneo:{get_settings().environment}:mcp:approval"
 
     def set_redis_client(self, redis_client: aioredis.Redis) -> None:
-        """Set the Redis client if not already configured."""
-        if self._redis is None:
-            self._redis = redis_client
+        """Use the caller's current client; one from an earlier process
+        lifetime is closed. Approval state lives in Redis, not the client."""
+        self._redis = redis_client
 
     def _key(self, approval_id: str) -> str:
         return f"{self._namespace}:{approval_id}"

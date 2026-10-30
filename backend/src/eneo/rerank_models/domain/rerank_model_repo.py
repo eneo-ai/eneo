@@ -56,7 +56,7 @@ class RerankModelRepository:
         return [
             RerankModel.create_from_db(
                 rerank_model_db=rerank_model,
-                user=self.user,
+                tenant=self.user.tenant,
                 provider_name=provider_name,
                 provider_type=provider_type,
             )
@@ -73,7 +73,7 @@ class RerankModelRepository:
         rerank_model, provider_name, provider_type = row
         return RerankModel.create_from_db(
             rerank_model_db=rerank_model,
-            user=self.user,
+            tenant=self.user.tenant,
             provider_name=provider_name,
             provider_type=provider_type,
         )

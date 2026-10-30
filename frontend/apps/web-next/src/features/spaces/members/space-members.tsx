@@ -222,7 +222,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
   const [selected, setSelected] = useState<SearchableItem | null>(null);
   const [role, setRole] = useState<SpaceRoleValue>(space.available_roles[0]?.value ?? "editor");
   const [submitted, setSubmitted] = useState(false);
-  const searchRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
   const userProblem = submitted && !selected ? t("form_problem_choose_user") : null;
 
   // Users who are not members yet: the first ones on focus, then those matching
@@ -261,7 +261,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
   function add() {
     if (addMember.isPending) return;
     if (!selected) {
-      revealProblems(() => setSubmitted(true), searchRef.current?.querySelector("input"));
+      revealProblems(() => setSubmitted(true), searchRef.current);
       return;
     }
     addMember.mutate({ id: selected.id, role });
@@ -300,7 +300,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
             onChange={setSelected}
             hasEntriesOnFocus
             debounceMs={SEARCH_DEBOUNCE_MS}
-            emptySearchResultsText={t("no_results")}
+            emptySearchText={t("no_results")}
             status={userProblem ? { type: "error", message: userProblem } : undefined}
             width="100%"
           />

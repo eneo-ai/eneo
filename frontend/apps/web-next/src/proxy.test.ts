@@ -181,3 +181,24 @@ it("lets /module-login and /invite through signed out: they gate or explain them
     expect(response.headers.get("location"), path).toBeNull();
   }
 });
+
+it("hands the live transcription socket to the backend without the session cookie", async () => {
+  const signedIn = await signedInRequest("/api/eneo/api/v1/live-transcription", ANDROID);
+  signedIn.headers.set("upgrade", "websocket");
+  const response = await proxy(signedIn);
+  expect(response.headers.get("x-middleware-rewrite")).toBe(
+    "http://localhost:8123/api/v1/live-transcription"
+  );
+  const forwarded = response.headers.get("x-middleware-override-headers") ?? "";
+  expect(forwarded.split(",")).toContain("upgrade");
+  expect(forwarded.split(",")).not.toContain("cookie");
+});
+
+it("refuses the live transcription path without a session or without an upgrade", async () => {
+  const signedOut = new NextRequest("http://localhost:3100/api/eneo/api/v1/live-transcription", {
+    headers: { upgrade: "websocket" }
+  });
+  expect((await proxy(signedOut)).status).toBe(401);
+  const plain = await signedInRequest("/api/eneo/api/v1/live-transcription", ANDROID);
+  expect((await proxy(plain)).status).toBe(426);
+});

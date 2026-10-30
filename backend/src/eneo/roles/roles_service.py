@@ -43,8 +43,21 @@ class RolesService:
             for key, value in PERMISSIONS_WITH_DESCRIPTION.items()
         ]
 
+    def _reject_deprecated_role_permissions(
+        self, permissions: list[Permission] | None
+    ) -> None:
+        if permissions is None or Permission.FLOWS not in permissions:
+            return
+
+        raise BadRequestException(
+            "The legacy 'flows' permission can only be honored for existing roles. "
+            "Use the granular Flow permissions instead: flows_view, flows_run, "
+            "flows_manage, and flows_trace."
+        )
+
     @validate_permissions(Permission.ADMIN)
     async def create_role(self, role: RoleCreateRequest) -> RoleInDB:
+        self._reject_deprecated_role_permissions(role.permissions)
         role = RoleCreate(
             name=role.name, permissions=role.permissions, tenant_id=self.user.tenant_id
         )
@@ -99,6 +112,7 @@ class RolesService:
     @validate_permissions(Permission.ADMIN)
     async def update_role(self, role_update: RoleUpdateRequest, role_id: UUID):
         role = await self.get_role_by_uuid(role_id)
+        self._reject_deprecated_role_permissions(role_update.permissions)
 
         # Check if admin permission is being removed
         removing_admin = (

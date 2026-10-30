@@ -1,0 +1,1856 @@
+import { Callout } from "nextra/components";
+
+# Flow Runtime API Reference
+
+This guide is for developers building applications on top of published Eneo Flows, such as transcription services, municipality intake services, or other multi-step AI workflows.
+
+It focuses on the **runtime** API. For the mental model behind drafts, steps, ownership, and evidence, start with <a href="/docs/flows">Flows</a>.
+
+Reference owners: `FlowRuntimePathsPublic` defines runtime links, `FlowRunContractPublic` defines input/output fields, and `FlowApiErrorCode` defines machine-readable failures.
+
+## Before you start
+
+A few rules matter up front:
+
+- only **published** flows can be run
+- draft editing requires a user principal
+- a flow run is owned by the execution principal: a user principal or a service key
+- service keys can run published flows, but they can access only **their own** runs and artifacts
+
+### Authentication
+
+Runtime examples in this guide use `Authorization: Bearer ...` for a user token. API keys use the API-key header instead:
+
+```http
+X-API-Key: $ENEO_API_KEY
+```
+
+Do not put an API key in the bearer-token header. Both user-owned and service-owned API keys authenticate through `X-API-Key`; their ownership, scope, top-level permission, and resource permissions determine which Flow operations are allowed.
+
+For the underlying auth model, see:
+
+- <a href="/docs/api-key-management">API Key Management</a>
+- <a href="/guides/oidc-federation">Authentication & OIDC</a>
+
+<Callout type="warning">
+  Service keys do not get broad operator access. If a service key needs access
+  to its own run evidence, it needs <code>flows &gt;= read</code> plus the
+  appropriate explicit <code>flow_evidence</code> capability on the key.
+</Callout>
+
+## Authentication and principal model
+
+A Flow run is owned by the principal that created it.
+
+- **Human user** → owns their own run
+- **Service key** → owns the runs created with that key
+- **Space owner / space admin** → trusted in-space operator for support/debug surfaces
+- **Tenant admin** → trusted tenant-wide operator
+
+### What “own run” means
+
+An **own run** is a run created by the current principal. It does not mean “any run in my space”.
+
+That distinction matters because service keys and ordinary human members are intentionally not cross-run operators.
+
+## User-principal vs service-key runtime surfaces
+
+### Endpoint families that require a user principal
+
+| Endpoint family                           | Why it requires a user principal                        |
+| ----------------------------------------- | ------------------------------------------------------- |
+| Draft CRUD (`POST/PATCH/DELETE /flows/…`) | Drafts are user-principal-owned authoring objects       |
+| Publish / unpublish                       | Publishing is part of authoring governance              |
+| Template management and inspection        | Template configuration belongs to draft authoring       |
+| Flow-assistant authoring                  | Step-assistant configuration belongs to draft authoring |
+
+### Service-key runtime endpoint families
+
+| Endpoint family                                           | Current service-key rule                                                                                                                                   |
+| --------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /api/v1/flows/?space_id=...`                         | Allowed for published-flow discovery in the key's scoped space                                                                                             |
+| `GET /api/v1/flows/{id}/published/`                       | Allowed for a runtime-safe single-flow published projection                                                                                                |
+| `GET /api/v1/flows/{id}/`                                 | Allowed only when the key's space role is admin or owner. It returns the draft/current-definition view, so a runtime app should read `/published/` instead |
+| `GET /run-contract/`                                      | Allowed for published-flow runtime discovery                                                                                                               |
+| `GET /graph/`                                             | Allowed for published/runtime-safe topology and own-run snapshots                                                                                          |
+| Runtime uploads and orphan upload cleanup                 | Allowed for published flows                                                                                                                                |
+| Run creation                                              | Allowed for published flows                                                                                                                                |
+| Live transcription sessions                               | Allowed for published flows                                                                                                                                |
+| List / get / cancel / redispatch runs                     | Own runs only                                                                                                                                              |
+| Retry a failed run | Own runs only; the source must have an eligible completed prefix |
+| Review checkpoints: active, edit, approve, reject, resume | Own runs only, and the key needs `resource_permissions.flows = write`                                                                                      |
+| Step outputs                                              | Own runs only                                                                                                                                              |
+| Artifact downloads                                        | Own runs only                                                                                                                                              |
+| Evidence                                                  | Own runs only, and only when explicit evidence capability allows it                                                                                        |
+
+![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
+
+_Flows at a glance: user principals author and publish drafts, API consumers run published versions, and completed runs produce outputs, artifacts, and evidence._
+
+## Transfer a Flow package
+
+Flow package export, planning, and import are user-principal authoring
+operations. Export produces a bounded `.eneopkg` file with media type
+`application/vnd.eneo.package+zip` and manifest `kind: flow`, without local
+resource identifiers. The receiving operator uploads that same file to the
+target space's import-plan endpoint and reviews the required and optional model
+and knowledge mappings. Every required model or knowledge dependency needs a
+current, explicitly confirmed local mapping before import. Only a dependency
+declared optional may be omitted; in that case, the imported draft omits only
+that optional reference. Flow endpoints reject Assistant or App package kinds
+before interpreting Flow-specific package entries.
+
+Step citation settings and retrieval policy (`best_effort` or `fail_closed`)
+are preserved through export and import. Export excludes settings left over from
+inactive HTTP or template modes without changing the saved draft. Active HTTP
+integrations and template outputs remain unsupported; change those steps before
+exporting. Unknown settings are rejected rather than silently discarded.
+
+Runtime file-upload settings are preserved even when a step reads text from a
+previous step. Uploaded files supplement that text; choosing a text input does
+not make those settings nonportable.
+
+Within the editor, changing steps or sections does not wait for autosave.
+Pending edits remain tracked, and a failed save still allows navigation to the
+settings needed to correct it. Export, publish, and leaving the editor wait for
+both flow settings and step instructions to finish saving.
+
+Strict v1 provenance always contains `omissions`. Ordinary packages use an
+empty list. When source-local MCP server or tool associations exist on Flow
+step assistants, export still succeeds but omits those associations and records
+one closed advisory: `{ "kind": "mcp_attachment", "count": N }`, where `N` is
+the positive distinct-assistant count. MCP identities, configuration,
+credentials, and content never enter the package. Because provenance is covered
+by the content checksum, changing or deleting the advisory makes validation
+fail. Validation and import-plan responses project the same required list; do
+not supply a client-side compatibility default for older files.
+
+| Purpose                        | Endpoint                                                    |
+| ------------------------------ | ----------------------------------------------------------- |
+| Validate package bytes         | `POST /api/v1/flow-packages/validate/`                      |
+| Plan destination mappings      | `POST /api/v1/spaces/{space_id}/flow-packages/import-plan/` |
+| Import as an unpublished draft | `POST /api/v1/spaces/{space_id}/flow-packages/imports/`     |
+| Export a draft                 | `POST /api/v1/flows/{flow_id}/package-exports/`             |
+
+An affected export response includes
+`Eneo-Package-Omitted-Mcp-Assistant-Count`; an ordinary export omits the header.
+`@eneo/eneo-js` returns the binary result as `FlowPackageExportResponse` and
+projects the header into its generated `FlowPackageOmission[]` as `omissions`.
+It performs the same single Blob request: no package base64 conversion,
+preflight request, or client cache is required. Require the user to acknowledge
+the omission before saving, and show the import plan's advisory again before
+installation.
+
+Knowledge guidance describes how a destination operator can replace a local
+dependency without carrying source knowledge. `summary` and `setup_notes` are
+limited to 4,000 characters; `recommended_sources` and `do_not_include` are
+limited to 20 entries each; every normalized entry is limited to 1,000
+characters. Do not put local knowledge configuration or content in these
+fields.
+
+When installing, send the plan's `content_checksum`, `target_state`, and the
+exact confirmed mappings as `expected_content_checksum`,
+`expected_target_state`, and `selected_bindings`. Eneo rejects a changed
+package, missing resource, ineligible model, or changed audio-transcription
+default before it creates anything. It does not silently select a replacement.
+Create a fresh plan, review it, and retry after correcting one of those errors.
+Branch on the typed error code:
+
+- `flow_package_checksum_mismatch` means the submitted file no longer matches
+  the reviewed plan. Create a new plan from that exact file.
+- `flow_package_import_unavailable_local_resource` means a selected resource or
+  the reviewed target default disappeared or changed. Refresh the plan.
+- `flow_package_import_selected_model_ineligible` means the chosen model no
+  longer satisfies the package requirement. Refresh the plan and ask the user
+  to confirm another eligible model.
+
+An exact retry of a checksum, target-state, and mapping decision that already
+succeeded returns the existing import and draft instead of creating a
+duplicate. A new decision can still import another draft. Import never
+publishes the Flow; the operator reviews and publishes the new draft through
+the ordinary authoring journey. Flow packages do not carry Flow MCP or
+HTTP-mutation input behavior, and unsupported template assets fail before
+installation. A form field type outside the six Flow form types (`text`, `number`, `date`,
+`select`, `multiselect`, `list`; `string`, `email` and `textarea` import as
+`text`) is refused with `flow_package_flow_draft_invalid`, whose `context.reason`
+is `form_field_type_unsupported`, instead of silently remapping the type as earlier versions did (for example `radio` to `select`, `datetime` to `date`, and an unknown type to `text`).
+
+## Create a draft Flow
+
+`POST /api/v1/flows/` creates an empty draft from `space_id`, `name` and, optionally, `description` and `metadata_json`; it takes no `steps`, and a request that sends them fails request validation. Each step runs an assistant the flow owns, and those exist only once the flow does: create one per step with `POST /api/v1/flows/{id}/assistants/`, then send the steps, naming those assistants in `assistant_id`, with `PATCH /api/v1/flows/{id}/`. An update refuses a step whose assistant the flow does not own.
+
+## Update a draft Flow
+
+`PATCH /api/v1/flows/{id}/` replaces what it sends and keeps what it omits:
+
+- Without `steps`, every step row keeps its id and its columns. The save still drops configuration of a mode a step does not run, such as HTTP settings on a step that neither fetches nor delivers over HTTP, as every save does.
+- With `steps`, the list is the flow's steps. A saved step whose `id` is not in the list is deleted, the steps that are keep their ids, and an optional column a step item omits (`output_contract`, `review_policy`, `timeout_seconds`, ...) is stored as null. The required fields (`assistant_id`, `step_order`, `input_source`, `input_type`, `output_mode`, `output_type`) are not defaulted: a step item without one fails request validation.
+- An omitted `description` keeps the saved value; `null` clears it. An omitted `metadata_json` keeps the saved metadata, which the save still normalizes (a form field of a type an older writer saved, such as `email`, is read and stored as `text`); `null` clears it.
+- With a stale `expected_revision` the update is refused with `stale_revision` and nothing is written.
+
+The editor update, `PATCH /api/v1/flows/{id}/editor/`, writes differently: only the step columns and assistant fields it names, and the steps it moves, adds or removes. The flow authoring chat writes through it too.
+
+## Step limit
+
+A flow has at most 256 steps. The flow endpoints that write or evaluate a draft's steps (update, publish and the security classification preview) refuse more with `flow_step_limit_exceeded`. Its `context` carries `step_count` and `max_steps`, and its message tells the author to remove steps or split the work into several flows. The preview also caps the request body at 16 MiB (64 KiB for each of the 256 steps) and refuses a larger one with HTTP 413 and `flow_request_body_too_large`, before it parses the body; its `context.max_bytes` states the cap. The preview refuses a saved flow over the limit the same way when it is asked to explain the saved steps, and it answers a request with too many submitted steps with the same 400, not with a request-validation error.
+
+Package import has its own contract and applies the limit through it. Import planning and install refuse a package draft over the limit with `flow_package_flow_draft_invalid`, whose `context.reason` is `flow_step_limit_exceeded`. That response has no `step_count` or `max_steps`; its message states the limit and the number of steps in the package.
+
+## Draft revision and concurrent edits
+
+A draft flow carries one `draft_revision`, which `GET /api/v1/flows/{id}/` returns. Every write to the draft advances it by one: a flow update or editor update, a publish or unpublish, and an update of one of the flow's assistants with `PATCH /api/v1/flows/{id}/assistants/{assistant_id}/`, whose response carries the new `draft_revision`. Creating or deleting a flow assistant leaves it unchanged, because an assistant that no step uses is not part of the draft.
+
+Send the revision you hold as `expected_revision` with a flow update or an assistant update. If the draft has moved on since, in another tab or through a colleague's edit, the write is refused with HTTP 400 and code `stale_revision`, whose `context` carries `expected_revision`, and nothing is written. Read the flow again and redo the change. Without `expected_revision`, a write is fenced on the revision read at the start of that request. After an assistant update, send the returned `draft_revision` with the next flow update: a revision read before the assistant update is refused.
+
+## Preview security classification while authoring
+
+`POST /api/v1/flows/{id}/security-classification/preview` explains what the security classification rule makes of a draft before it is saved, so an editor can show what each step reads and which models can serve it instead of waiting for a refusal. It is a user-principal authoring endpoint. It reads the flow's assistants, so it needs the permission to edit flows in the space, and service keys are refused.
+
+The request carries the editor's unsaved state. `steps` uses the shape a flow update accepts; omit it to explain the saved steps. `assistants` is a list of `{ assistant_id, update }` entries, where `update` is the body an assistant update accepts; only a candidate model, knowledge or prompt affects the result.
+
+The response has one entry per step, in step order:
+
+| Field | Meaning |
+| --- | --- |
+| `reads` | The earlier steps the step reads, through its input source, its underlag and its prompt |
+| `input_level`, `knowledge_level` | The level the step's inputs carry and the highest level among its knowledge sources |
+| `external_source_level` | The level of the MCP server of the tool the step reads its input from; it is part of `input_level`. Null when the server has no classification, no longer exists or is not activated in the flow's space |
+| `required_model_level`, `model_level` | The level the step's model must clear and the level of its current model |
+| `qualifying_model_ids` | The space's usable completion models that clear the requirement, lowest level first |
+| `effective_output_level`, `output_floor` | The level the step's output carries and the lowest output override the rule accepts |
+| `violation` | The refusal a save would give, with its `code`, `required_level`, `current_level`, `cause` and source steps |
+
+The endpoint applies the rule a save applies, so a step reported without a violation is not refused for its classification by a save. The preview does not report what the tool decision refuses at publish: a tool whose server has a lower classification than the space is refused there with `typed_io_tool_not_allowed` (`context.refusal` `server_below_space_classification`). It writes nothing and records no audit event. While the organization has security classifications turned off, every level is `null` and no step has a violation.
+
+A save or publish that breaks the rule fails with `flow_step_tool_arguments_classification_write_down`, `flow_step_security_classification_mismatch` or `flow_step_output_classification_write_down`. Its `context` carries `step_order`, `step_id` when the step is saved, `required_level`, `current_level`, `cause` (`reads`, `external_source`, `knowledge` or `space`), `source_step_orders` and, for the model refusal, `qualifying_model_ids`. `flow_step_tool_arguments_classification_write_down` means that the arguments of the step's tool read earlier steps (`source_step_orders`) whose level, `required_level`, is above the level of the tool's server, `current_level` (`null` for a server without a classification). A run that starts on a flow that no longer passes the rule still fails with `flow_definition_invalid`.
+
+## List the tools a step can choose
+
+`GET /api/v1/flows/{id}/tool-options` lists the tools of the MCP servers the flow's space has activated, in the order of server name and then tool name, so an editor can offer the tools for a step whose `input_source` is `tool`. It is a user-principal authoring endpoint and needs the permission to edit flows in the space; service keys are refused. It answers the same refusals as the classification preview above.
+
+Each item has `mcp_server_id`, `mcp_server_name`, `mcp_server_security_level`, `tool_id`, `tool_name`, `tool_description`, `input_schema` and `refusal`. `tool_description` and `input_schema` are the tool's description and input schema as an administrator last approved them, the schema being the one a run checks the step's arguments against; both are `null` when the server gave none or the tool has not been approved yet, and a change the server made and nobody has approved is not shown. The list also has `security_classifications_enabled`, the organization's switch the classification rule reads. `mcp_server_security_level` is the level of the server's security classification, the level the classification rule compares; it is always `null` while the switch is off, and while it is on `null` means the server has no classification. The item carries nothing else of the server: no address, authentication settings or tags.
+
+`refusal` is `null` when no level of the MCP decision refuses the tool now. Otherwise it names the level that refuses the tool, with the same value as `tool_refusal` in a run's error. A refused tool is listed on purpose, so that an editor can show it as unavailable and the author can ask the person the reason names; only the tools of a server that is not a general one (a capability provider or one of Eneo's own servers), which no administrator can make usable by a flow, are left out whether or not the server is switched on. A personal space has no MCP servers, so its list is empty, and publishing a tool step there is refused with `space_is_personal`.
+
+A `refusal` of `null` is not a promise that the step publishes. Publishing also requires the approved input schema to be a valid JSON Schema (`typed_io_tool_invalid_schema`) and checks the step's security classification, which this list does not judge, and publishing and starting a run ask the decision again. A tool a step already uses is absent from the list when its server is no longer activated in the space.
+
+The permission is checked on the space as it is read for access decisions, without the tools of any MCP server. The list is not paged: one database statement reads it in its order. When the tools number more than 1,000, or the counted text of them (each tool's server name, tool name, approved description and approved input schema as its JSON text, which the list returns, and its server's address, which it does not) takes more than 8 MiB, that statement returns them only up to the first tool past the bound, and the list is refused with 413 `flow_tool_options_too_large`; it is never cut short. The error context gives both limits, as `max_tool_count` and `max_text_bytes`. A space administrator can switch off the MCP servers the flows in the space do not need.
+
+## List the published flows that use an MCP server
+
+`GET /api/v1/mcp-servers/{mcp_server_id}/flow-usage` lists the flows whose published version has a step that calls a tool of the server, so an administrator sees which flows a change to the server or a tool affects. It needs the admin permission, as managing MCP servers does. Drafts that are not published, unpublished flows and deleted flows are not listed.
+
+`total_count` counts every such flow, and `items` lists the first 100 by space name, then flow name. Each item has `flow_id`, `flow_name`, `space_id`, `space_name`, `published_version` and `tool_ids`, the server's tools the published steps call, each once. The read does not look the server up: a flow published with a server keeps it in its published version when the server's purpose changes or the server is deleted, so the server's id still lists those flows.
+
+## Common application patterns
+
+For endpoint-and-capability-first design walkthroughs, start with [Designing Flows](/guides/flows/designing-flows). This reference section keeps the deeper API field context.
+
+### Transcription service
+
+A typical transcription app uses a first step with `transcribe_only` on uploaded audio, then adds later steps for summarization, redaction, classification, or document generation. This is usually a good fit for a **service key**, because the integration should not depend on one employee account.
+
+### Municipality intake or case-work service
+
+A municipality service often combines:
+
+1. structured form fields and uploaded documents
+2. retrieval over approved knowledge sources
+3. generated text or DOCX output
+4. evidence and highlighted source passages for explainability
+
+This is where the run contract, runtime uploads, graph, artifacts, and evidence surfaces become especially valuable.
+
+## Integration sequence
+
+For a numbered consumer journey with errors to handle at each step, use [Integrating Flows](/guides/flows/integrating-flows). The sequence below is the compact reference checklist.
+
+For most consumer apps, the safest order is:
+
+1. list published flows in the scoped space
+2. fetch the published runtime projection for the chosen flow
+3. fetch the published run contract
+4. upload files if the flow requires them
+5. create a run with an optional `Idempotency-Key`
+6. poll the content-free run status endpoint
+7. if the run reaches `awaiting_review`, load the active review checkpoint
+8. edit, approve, reject, or resume the checkpoint
+9. fetch audited run detail, artifacts, or evidence when your principal needs them
+10. after a failure, inspect earlier effects and use failed-run retry if its completed prefix is eligible
+
+## Tenant flow settings for runtime operators
+
+Eneo also exposes **tenant-level Flow runtime settings** for operators and platform owners.
+
+These are admin surfaces, not end-user runtime endpoints:
+
+| Setting area                | Endpoint                                                                       | Purpose                                                                                                                  |
+| --------------------------- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------ |
+| Flow input limits           | `GET/PATCH /api/v1/settings/flow-input-limits`                                 | Read shared file/audio sizes and control file counts and recording duration                                                                   |
+| Flow document render limits | `GET/PATCH /api/v1/settings/flow-document-render-limits`                       | Control generated PDF/DOCX rendering limits                                                                              |
+| Flow runtime policy         | `GET/PATCH /api/v1/settings/flow-runtime-policy`                               | Control step timeouts and the run limit                                                                                  |
+| Mapped execution policy     | `GET/PATCH /api/v1/settings/flow-mapped-execution-policy`                      | Control provider-call fan-out and aggregate estimated-input-token ceilings for each mapped step attempt                  |
+| Flow evidence policy        | `GET/PATCH /api/v1/settings/flow-evidence-policy`                              | Control stricter raw evidence export behavior for classification-3 evidence                                              |
+| Knowledge evidence policy   | `GET/PATCH /api/v1/settings/flow-rag-evidence-policy`                          | Control how much retrieval evidence a run records and exposes                                                            |
+| Flow data eligibility       | `GET/PATCH /api/v1/settings/flow-retention-policy`                             | Inspect and change never-attached-upload and debug-evidence eligibility                                                  |
+| Flow run-history retention  | `GET/PUT /api/v1/settings/flow-run-retention-policy` and its Space/Flow routes | Inspect, replace, or inherit complete run-history policies and read the review queue                                     |
+
+File and audio sizes are managed deployment-wide in **Admin > File storage**.
+The Flow settings PATCH no longer accepts `file_max_size_bytes` or
+`audio_max_size_bytes` (422 for old clients). GET still returns the effective
+sizes used by uploads. The former duplicate size-ceiling fields are removed.
+
+Audio transcription reuses the verified digest and one original on disk—the verified download file for object-store audio, or a single write of inline audio hydrated within the deployment’s inline ceiling—with duration reused from the bounded local decode or measured lazily when only the remote engine runs; remote acceptance releases the original.
+
+Complete text from a generated step artifact is admitted for processing against the file upload ceiling before content is read; when a rendered prompt exceeds the inline storage ceiling, only its UTF-8 prefix is stored with `effective_prompt_truncated=true`, and the complete prompt is not persisted: the flow revision holds the template and the input aliases hold the material identities.
+
+Persisted input `text`, `source_text`, and execution `question` retain their own UTF-8 prefixes with corresponding `_truncated` flags; `material_aliases` separately records the flat artifact identities used by the input or prompt.
+
+Mapped execution has two independent positive-integer ceilings:
+
+- `max_provider_calls_per_mapped_step` limits the number of per-source or per-item provider calls in one step attempt. Lowering the tenant value clamps future attempts without rewriting published definitions.
+- `max_estimated_input_tokens_per_mapped_step` limits the aggregate estimated packaged input across the same attempt. A null value means no aggregate tenant token ceiling, while each provider call still obeys its model input limit.
+
+PATCH requests distinguish omission from null: omit a field to preserve it, or send null to remove its tenant override. Runtime admission occurs before the first provider call and records the requested, tenant, and effective ceilings together with actual provider-call and token receipts in attempt evidence.
+
+### Max concurrent flow runs
+
+`max_concurrent_runs` in `PATCH /api/v1/settings/flow-runtime-policy` limits how many runs may be queued or running when a new run is accepted; the new web app's flow administration (**Admin → Flows**) shows it as "Most concurrent runs". The server's capacity is the upper bound and the default: the execution worker's slots (`TASK_EXECUTION_MAX_JOBS`), unless the operator set `FLOW_MAX_CONCURRENT_RUNS_PER_TENANT`, which then keeps its meaning. A deployment that sets only `TASK_EXECUTION_MAX_JOBS` now gets that value as its capacity (it was 4); with neither set the capacity stays 4. A value above the capacity is refused with `max_concurrent_runs_exceeds_server_capacity`, a value equal to it restores the default, and `max_concurrent_runs_capacity` in the response reports the bound, and `max_concurrent_runs_override` the saved value even when the capacity limits it (send `max_concurrent_runs: null` to follow the capacity again). The setting gates the admission of new runs only: runs that were accepted continue, a review resume re-queues without consulting it, and a capacity of 0 stops new runs but not existing work. At the limit a new run is refused with `429`, `Retry-After: 60` and `flow_run_concurrency_limit_reached`.
+
+### Flow retention policy shape
+
+`GET /api/v1/settings/flow-retention-policy` exposes two independent Organization-level eligibility inputs:
+
+- `run_debug_evidence_days`
+- `flow_runtime_upload_abandonment_days`
+
+The inputs are nullable integers in the range `1..2555`. `flow_runtime_upload_abandonment_days` sets eligibility for runtime uploads that were never attached to a run input. Debug-evidence eligibility remains independently configured. Saving either value does not delete or redact Flow data, and the shared scheduled retention worker does not mutate Flow-owned data.
+
+Run and step history uses dedicated hierarchical endpoints:
+
+| Scope        | Read                                                               | Replace or clear                                                   |
+| ------------ | ------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Organization | `GET /api/v1/settings/flow-run-retention-policy`                   | `PUT /api/v1/settings/flow-run-retention-policy`                   |
+| Space        | `GET /api/v1/settings/flow-run-retention-policy/spaces/{space_id}` | `PUT /api/v1/settings/flow-run-retention-policy/spaces/{space_id}` |
+| Flow         | `GET /api/v1/settings/flow-run-retention-policy/flows/{flow_id}`   | `PUT /api/v1/settings/flow-run-retention-policy/flows/{flow_id}`   |
+
+Each write replaces one complete local policy:
+
+```json
+{
+  "policy": {
+    "mode": "review_required",
+    "days": 60
+  }
+}
+```
+
+Send `{ "policy": null }` to clear the local value and inherit. Partial policies are invalid. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`. The most specific complete Flow, Space, or Organization policy wins. A Flow can therefore use 90 days while its Space uses 60 and the Organization default remains 30.
+
+`preserve` makes history eligible for an explicit administrator purge without a separate review requirement. `review_required` adds eligible terminal runs to the read-only retention review queue and excludes them from this purge action. Neither mode schedules or performs deletion by itself.
+
+Queue reads are available at the Organization route ending in `/review-queue` and equivalent Space and Flow routes. They accept a bounded `limit` and an opaque keyset `cursor`, omit run inputs and outputs, and cannot approve or delete data. When `has_more` is true, pass `next_cursor` unchanged as the next request's `cursor`.
+
+Every Flow response includes a `run_history_retention` projection with `state`, `mode`, `effective_days`, `source`, and complete Organization, Space, and Flow contributors. The projection reports policy resolution; it does not claim that a particular run has been approved or purged.
+
+See [Flow run-history retention](/guides/flows/retention-policy) for the administrator workflow and [Data retention and deletion](/guides/data-retention) for the separate conversation and audit-log behavior.
+
+### Administrator purge of due run history
+
+An administrator can preview or delete one bounded batch of due Flow runs. These endpoints require the same admin permission as retention-policy updates and use the authenticated tenant:
+
+| Scope | POST endpoint |
+| --- | --- |
+| Organization | `/api/v1/settings/flow-run-retention-policy/purge` |
+| Space | `/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/purge` |
+| Flow | `/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/purge` |
+
+Send `{ "dry_run": true, "limit": 100 }` to preview. Both fields are optional: `dry_run` defaults to `true`, and `limit` defaults to `100` with an allowed range of `1..500`. The response includes `scope`, `dry_run`, `candidate_count`, `purged_count`, `purged_run_ids`, and `blocked` counts. `candidate_count` describes this bounded batch; it is not a total of all eligible runs.
+
+Only terminal runs whose effective policy is `preserve` and whose age has reached the configured threshold can be purged. The effective policy follows the same Flow, Space, then Organization inheritance as policy reads. Runs with no configured policy stay stored. Non-terminal runs are excluded from both deletion and diagnostics; the response does not include a `not_terminal` counter.
+
+Blocked counts cover the oldest 500 due terminal runs in the scope, ordered by retention anchor and then run ID, independently of the deletion batch limit. Each blocked run is counted once, in this order: `review_required`, `undelivered_audit`, then `unresolved_webhook`. `blocked.counted_runs` reports how many runs were examined, including eligible runs with no blocker. A one-row lookahead sets `blocked.complete` to `false` when more due terminal runs exist; those runs are not included in the counts. When `complete` is `true`, the counts cover all due terminal runs in the scope at the time of the diagnostic query. For example, a scope containing 501 due terminal runs returns `counted_runs: 500` and `complete: false`; exactly 500 returns `complete: true`.
+
+Send `dry_run: false` to delete a batch. Previewing does not reserve or approve candidates, so a later purge can return different counts. Concurrent work can defer runs, and `purged_count` can be lower than `candidate_count`. Each real request, including an empty batch, records one audit event with the resolved scope, deleted run IDs, and blocked counts. An audit failure rolls back deletion. Dry runs write no audit event.
+
+The SDK exposes all three scopes through `flows.retention.purge()`:
+
+```javascript
+const preview = await eneo.flows.retention.purge({
+  scope: "space",
+  spaceId,
+  limit: 100
+});
+
+const result = await eneo.flows.retention.purge({
+  scope: "space",
+  spaceId,
+  dry_run: false,
+  limit: 100
+});
+```
+
+Omit `scope` for the Organization, or use `{ scope: "flow", flowId }` for one Flow. Repeat the explicit action for further batches. A Space or Flow outside the authenticated tenant returns `404`; missing admin permission returns `403`. No automatic purge is scheduled.
+
+### Flow evidence policy shape
+
+`/api/v1/settings/flow-evidence-policy` controls who may make a raw evidence export of a run whose evidence is held to classification 3: its space is at classification 3 or higher now, the run recorded classification 3 or higher for its evidence, or the run produced evidence without a recorded level. A run records the level before its steps run, at its start and at every resume or retry, and the record only rises, so classifying the space lower afterwards does not lower it.
+
+Key flags currently include:
+
+- `allow_space_admin_raw_export_class3`
+- `allow_run_owner_raw_export_class3`
+- `allow_service_key_raw_export_class3`
+
+Whether a flow's evidence may be exported at all is not a tenant setting. Each flow decides it for itself, as described next.
+
+### Evidence export setting in `metadata_json`
+
+A flow allows export of its run evidence with:
+
+```json
+{ "metadata_json": { "evidence_policy": { "allow_export": true } } }
+```
+
+`allow_export` is `false` when absent. While it is not `true`, `GET .../evidence/export` answers `403` with the code `flow_run_evidence_export_disabled` for every caller who could otherwise export, tenant admins and service keys included; `GET .../evidence/` is unaffected. Turning it on widens nobody's access: role, run ownership, service-key capability and the classification-3 raw-export rules still decide, and a caller they refuse gets the same refusal whatever the setting is. The flow's current value applies to all of its runs, earlier runs and a deleted flow's runs included. Anyone who may edit the flow may change it, the change applies as soon as it is saved, and the flow's audit entry records the old and the new value. `evidence_policy` accepts no other field, and `allow_export` must be a JSON boolean.
+
+### Sensitive-flow governance in `metadata_json`
+
+For sensitive workflows, the flow definition may carry a `metadata_json.care_data_policy` object.
+
+Current supported fields are:
+
+- `sensitive`
+- `approval_mode`
+- `pre_approval_visibility`
+
+Common values for that review model are:
+
+- `approval_mode: "single_reviewer_outside_flow"`
+- `pre_approval_visibility: "uploader_and_reviewers"`
+
+This is the intended contract seam for workflows where review happens outside the flow but the workflow still needs explicit governance metadata.
+
+A sensitive flow has no export gate of its own: it follows `evidence_policy.allow_export` like any other flow, and the redacted export still withholds verbatim passage text.
+
+### 1) Discover what the published flow expects
+
+#### Get the published runtime projection
+
+```http
+GET /api/v1/flows/{flow_id}/published/
+```
+
+Use this when you already know the flow id and want a **runtime-safe single-flow view** instead of the user-principal current-definition endpoint.
+
+It is especially useful for service-key integrations because it gives you:
+
+- stable published metadata such as name, description, and published version
+- the canonical runtime paths to use next
+- a clean alternative to calling `GET /api/v1/flows/{flow_id}/`, which returns the draft view and is open to a service key only when the key's space role is admin or owner
+
+Example response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000001",
+  "space_id": "00000000-0000-0000-0000-000000000020",
+  "name": "Employee Review Summary",
+  "description": "Transcribe a review conversation and return a PDF summary.",
+  "published_version": 3,
+  "created_at": "2026-03-17T09:30:00Z",
+  "updated_at": "2026-03-17T10:00:00Z",
+  "runtime_paths": {
+    "run_contract": "/api/v1/flows/00000000-0000-0000-0000-000000000001/run-contract/",
+    "graph": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/",
+    "upload_step_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/steps/{step_id}/runtime-files/",
+    "delete_runtime_file_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runtime-files/{file_id}/",
+    "create_run": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
+    "list_runs": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/",
+    "cancel_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/cancel/",
+    "redispatch_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/redispatch/",
+    "review_checkpoints": {
+      "active_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/active/",
+      "edit_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/",
+      "approve_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+      "reject_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+      "resume_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+      "approve_and_continue_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/"
+    },
+    "get_graph_for_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/graph/?run_id={run_id}",
+    "get_run_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/",
+    "get_run_status_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/status/",
+    "list_steps_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/steps/",
+    "evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/",
+    "provider_calls_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/provider-calls/",
+    "export_evidence_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/evidence/export",
+    "artifact_signed_url_template": "/api/v1/flows/00000000-0000-0000-0000-000000000001/runs/{run_id}/artifacts/{file_id}/signed-url/"
+  }
+}
+```
+
+<Callout type="info">
+  Runtime paths are <strong>server-relative</strong> (for example{" "}
+  <code>/api/v1/...</code>), so callers should prepend their API base URL when
+  needed.
+</Callout>
+
+The full `runtime_paths` object includes `run_contract`, `graph`,
+`upload_step_runtime_file_template`, `delete_runtime_file_template`,
+`create_run`, `list_runs`, `cancel_run_template`, `redispatch_run_template`,
+`review_checkpoints`,
+`get_graph_for_run_template`, `get_run_template`, `get_run_status_template`, `list_steps_template`,
+`evidence_template`, `provider_calls_template`, `export_evidence_template`, and
+`artifact_signed_url_template`. The nested `review_checkpoints` object contains
+`active_template`, `edit_template`, `approve_template`, `reject_template`, and
+`resume_template`.
+
+#### Get the run contract
+
+```http
+GET /api/v1/flows/{flow_id}/run-contract/
+```
+
+<Callout type="info">
+  If you are integrating with a service key, the recommended discovery path is:
+  list published flows in the scoped space, fetch{" "}
+  <code>GET /api/v1/flows/{"{flow_id}"}/published/</code>, then call{" "}
+  <code>run-contract</code>. Do not build service-key discovery around{" "}
+  <code>GET /api/v1/flows/{"{flow_id}"}/</code>.
+</Callout>
+
+This endpoint is the canonical published runtime contract. It includes:
+
+- `published_flow_version` for version mismatch detection
+- `final_output` so clients know whether the terminal result is a payload or generated artifact
+- `form_fields` for structured input fields
+- `steps_requiring_input` for runtime step uploads
+- `runtime_upload_policy` for upload timeout behavior
+- `steps_requiring_review` for human-review UI preparation
+- `aggregate_max_files`, which is the combined runtime-step file limit when the published flow can calculate one
+- `template_readiness` for document-assembly readiness, such as whether a DOCX template is fully configured
+- `transcription` for a flow that transcribes recorded audio: whether the app can show live text (`live`) and whether a run may choose speaker labels (`speaker_labels`). It is `null` for any other flow; see [Live text and speaker labels](/guides/flows/integrating-flows#live-text-and-speaker-labels)
+
+Example:
+
+```bash
+curl -H "Authorization: Bearer $TOKEN" \
+  https://your-domain.example/api/v1/flows/$FLOW_ID/run-contract/
+```
+
+Response shape:
+
+```json
+{
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "published_flow_version": 3,
+  "final_output": {
+    "step_id": "00000000-0000-0000-0000-000000000104",
+    "step_order": 3,
+    "label": "Create Word report",
+    "output_type": "docx",
+    "output_mode": "pass_through",
+    "delivery": "artifact",
+    "output_contract": null
+  },
+  "form_fields": [
+    {
+      "name": "employee_name",
+      "type": "text",
+      "label": "Employee name",
+      "required": true
+    }
+  ],
+  "steps_requiring_input": [
+    {
+      "step_id": "00000000-0000-0000-0000-000000000101",
+      "step_order": 1,
+      "label": "Upload audio",
+      "description": "Provide the recorded review conversation.",
+      "required": true,
+      "input_format": "audio",
+      "max_files": 1,
+      "max_file_size_bytes": 52428800,
+      "accepted_mimetypes": ["audio/wav", "audio/mpeg"]
+    }
+  ],
+  "runtime_upload_policy": {
+    "min_timeout_seconds": 120,
+    "seconds_per_mebibyte": 8,
+    "max_timeout_seconds": 600,
+    "idle_timeout_seconds": 120
+  },
+  "steps_requiring_review": [
+    {
+      "step_id": "00000000-0000-0000-0000-000000000103",
+      "step_order": 2,
+      "label": "Review transcription",
+      "review_mode": "edit",
+      "output_type": "json",
+      "expires_after_seconds": 1209600,
+      "output_contract": {
+        "type": "object",
+        "properties": {
+          "transcription": { "type": "string" }
+        }
+      }
+    }
+  ],
+  "aggregate_max_files": 1,
+  "template_readiness": [
+    {
+      "step_id": "00000000-0000-0000-0000-000000000102",
+      "template_asset_id": null,
+      "template_file_id": null,
+      "template_name": null,
+      "checksum": null,
+      "published_flow_version": 3,
+      "status": "unavailable",
+      "can_edit": false,
+      "can_download": false,
+      "message_code": null
+    }
+  ],
+  "transcription": {
+    "live": { "available": true, "reason": null },
+    "speaker_labels": { "selectable": true, "required": false, "default": true }
+  }
+}
+```
+
+<Callout type="info">
+  If your UI caches flow configuration, pass <code>published_flow_version</code>{" "}
+  back into run creation so the server can reject stale submissions cleanly.
+</Callout>
+
+### 2) Upload files
+
+```http
+POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/
+Content-Type: multipart/form-data
+```
+
+Use the step-specific runtime upload path from `runtime_paths.upload_step_runtime_file_template`.
+Replace `{step_id}` with a step id from `steps_requiring_input` in the run contract.
+Upload files before `create_run`; `runtime` means runtime input, not an already-started run mutation.
+
+Example:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $TOKEN" \
+  -F "upload_file=@review-audio.mp3;type=audio/mpeg" \
+  https://your-domain.example/api/v1/flows/$FLOW_ID/steps/$STEP_ID/runtime-files/
+```
+
+Set the multipart file part's `Content-Type` to one of that step's
+`accepted_mimetypes` from the run contract. Missing, generic, or unsupported declared
+types are rejected even when Eneo can detect the file contents. In browser code, pass a
+`File` with the correct `type`; with curl, append `;type=...` as shown above.
+
+The returned file id belongs under `step_inputs[step_id].file_ids` when starting the run.
+You may reuse the same file id under multiple compatible step ids when several steps should
+process the same uploaded binary.
+
+Upload response shape:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000701",
+  "name": "review-audio.mp3",
+  "mimetype": "audio/mpeg",
+  "size": 1843200,
+  "created_at": "2026-03-17T10:04:00Z",
+  "updated_at": "2026-03-17T10:04:00Z"
+}
+```
+
+To abandon an upload before creating a run, call the cleanup path from
+`runtime_paths.delete_runtime_file_template`:
+
+```http
+DELETE /api/v1/flows/{flow_id}/runtime-files/{file_id}/
+```
+
+Cleanup is only for orphan runtime uploads. After a file id is attached through
+`step_inputs`, the run owns that mapping and deletion returns
+`flow_runtime_file_attached` with HTTP 409.
+
+### 3) Create the run
+
+```http
+POST /api/v1/flows/{flow_id}/runs/
+Idempotency-Key: your-stable-client-key
+```
+
+Minimal request shape:
+
+```json
+{
+  "expected_flow_version": 3,
+  "input_payload_json": {
+    "employee_name": "Alex Example"
+  },
+  "step_inputs": {
+    "00000000-0000-0000-0000-000000000101": {
+      "file_ids": ["00000000-0000-0000-0000-000000000701"]
+    }
+  }
+}
+```
+
+Within each step input, `file_ids` are parsed as UUIDs and duplicate ids are
+collapsed by first occurrence when the run is created. The remaining order is
+preserved in the run input and contributes to SDK-derived idempotency keys. If a
+prompt or document needs semantic ordering, model that ordering explicitly in the
+flow rather than relying on file attachment order alone.
+
+If the flow is still a draft, the API will return `flow_not_published`.
+
+#### Choose speaker labels
+
+When the run contract's `transcription.speaker_labels.selectable` is `true`, the request may add `speaker_labels`: `true` or `false` sets whether this run's transcript labels speakers, and `null` or omitting it keeps the flow's own setting (`transcription.speaker_labels.default`). A `true` or `false` value for a flow whose contract does not offer the choice returns `422` with code `flow_run_speaker_labels_not_selectable`. Labelling speakers makes the run take longer. See [Choose speaker labels for a run](/guides/flows/integrating-flows#choose-speaker-labels-for-a-run).
+
+#### How `input_payload_json` maps to form fields
+
+If the run contract exposes `form_fields`, send those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field type and required/optional settings. An optional field that you leave out or send as `null` reads as its empty value (`""` for text, `[]` for list and multiselect, `null` for number, date, and select), so leaving it out and sending it empty are the same request.
+
+Reserved `input_payload_json` keys: `expected_flow_version`, `file_ids`, `speaker_labels`, `max_speakers`, `step_inputs`, `transcript_regeneration`, `transkribering`. These keys are owned by Flow run orchestration, so use different form field names and keep runtime file bindings in top-level `step_inputs`.
+
+#### Why `Idempotency-Key` matters
+
+Run creation supports caller-supplied idempotency. Reusing the same key with the same payload returns the existing run. Reusing the same key with a different payload returns:
+
+- `400`
+- code: `flow_run_idempotency_conflict`
+
+This is especially useful for browser retries, webhook retries, and unreliable networks.
+
+#### Receiving terminal Flow webhooks
+
+There is no callback parameter on run creation. `FlowRunCreateRequest` accepts
+`run_label`, `expected_flow_version`, `input_payload_json`, `step_inputs`,
+`speaker_labels`, and `max_speakers`, and rejects other fields. Send
+`max_speakers` only when the run labels speakers and its contract offers
+`transcription.max_speakers`; see [Set a speaker-count limit](/guides/flows/integrating-flows#set-a-speaker-count-limit).
+A client cannot register a URL for Eneo to call back.
+Completion is discovered by polling the run.
+
+A push notification is instead something the **flow author** builds: a terminal
+step with output mode `http_post` and a destination configured at authoring
+time. The run contract then reports `final_output.delivery` as `outbound_http`,
+and the run detail response exposes each attempt read-only through
+`webhook_deliveries`. Everything below describes that authored delivery.
+
+Terminal HTTP POST output uses an **at-least-once sender contract**. A timeout,
+connection loss, worker crash, or claim expiry can occur after the receiver
+accepted a request but before Eneo committed its receipt, so duplicate POSTs
+are possible.
+
+There is no standard Eneo event envelope and no platform signature. The request
+URL, headers, and body all come from the flow author's `output_config`; when no
+body template is authored, Eneo posts the step's raw text. The only header Eneo
+adds itself is `Idempotency-Key`, so a receiver that needs to authenticate the
+sender must have the flow author configure that credential as an authored
+header. Agree the body shape and the authentication scheme with the flow author
+before you build the receiver; do not expect an HMAC signature header to verify.
+
+That `Idempotency-Key` is opaque and stable across retries of one Flow run,
+output step, and step attempt. Its scope is sender-side only: Eneo does not
+verify how long your receiver retains keys or how it handles replays. Your
+receiver must store the key for its required replay window and return the same
+logical result without repeating the mutation when the key is seen again.
+
+Each durable claim consumes one of five attempts before HTTP starts. HTTP `408`
+and `429`, `5xx`, and transport failures remain bounded-retryable; other `4xx`
+responses are terminal. If the fifth claim expires with an unknown remote
+outcome, Eneo dead-letters the delivery and fails the run without a sixth POST.
+
+When the run limit is reached, create returns HTTP `429`, `Retry-After: 60`, and
+code `flow_run_concurrency_limit_reached`. Branch on the HTTP status plus that
+string code, wait at least the advertised delay while polling existing runs,
+then submit the logical run again. Numeric `eneo_error_code: 9007` is a legacy
+category and is not the client control-flow contract.
+
+`GET /api/v1/flows/runs/capacity/` (`get_flow_run_capacity`) reports the same
+ceiling before you hit it. `FlowRunCapacityPublic` returns `tenant_id`,
+`active_runs`, `max_concurrent_runs`, and `available_slots` for the calling
+principal. `max_concurrent_runs` is the effective limit: an administrator
+may lower it below the server capacity with
+`PATCH /api/v1/settings/flow-runtime-policy` (see Max concurrent flow runs below).
+Queued runs count too. `Retry-After: 60` is a fixed hint, not a forecast; a run can
+hold its slot for hours, so pace on `available_slots`. The response is a snapshot rather than a
+reservation, so `create_flow_run` stays the authority; use it to pace a batch
+instead of discovering the limit as a rejection partway through.
+
+If you use `@eneo/eneo-js` (`frontend/packages/eneo-js`), the Flow client accepts `idempotencyKey` on `flows.runs.create(...)` and exposes `flows.runs.deriveUploadIntentIdempotencyKey(...)` to build a stable key from the published flow id/version plus the uploaded runtime file bindings you submit in `step_inputs`. It also exports `FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS` and `FlowRunReservedInputPayloadKey` for custom form validation. Use the same per-step file order for the key and the run creation request.
+
+Example:
+
+```js
+const stepInputs = {
+  [stepId]: { file_ids: [runtimeUpload.id] },
+};
+
+const idempotencyKey = await client.flows.runs.deriveUploadIntentIdempotencyKey(
+  {
+    flowId,
+    expectedFlowVersion: runContract.published_flow_version,
+    step_inputs: stepInputs,
+  },
+);
+
+await client.flows.runs.create({
+  flow: { id: flowId },
+  expected_flow_version: runContract.published_flow_version,
+  step_inputs: stepInputs,
+  idempotencyKey,
+});
+```
+
+### Audio-to-document runtime pattern
+
+For the full speech-to-structured-report shape, see [Designing Flows](/guides/flows/designing-flows#speech-to-structured-report). The notes here keep the runtime reference constraints.
+
+For an audio workflow that generates structured output or a DOCX artifact, the recommended runtime shape is:
+
+1. record audio in the browser **or** select an audio file
+2. upload the completed audio file through the published Flow runtime upload contract
+3. derive a stable `Idempotency-Key` from the uploaded file ids and current run payload
+4. create one published Flow run
+5. let the first step transcribe and the later steps produce the final structured output / DOCX artifact
+
+Important non-goals for this pattern:
+
+- no streaming audio into the run: live text while the browser records is a separate preview (see [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording)), and the run transcribes the uploaded file
+- no frontend chunk orchestration for oversized files
+- no separate browser-only retry protocol outside the shared `Idempotency-Key` contract
+
+Approval and visibility boundary for sensitive audio-to-document flows:
+
+- final approval is a **single authorized reviewer outside the flow**
+- before final approval, generated output and run evidence should be treated as visible only to the uploader and explicitly authorized reviewers
+- evidence export stays off until the flow's own `evidence_policy.allow_export` is turned on
+
+This keeps the published Flow runtime aligned with the same enterprise seams used elsewhere: typed policy metadata, admin-configurable retention/export controls, and idempotent completed-upload execution.
+
+### 4) Monitor and control the run
+
+Key endpoints:
+
+| Purpose                 | Endpoint                                                            |
+| ----------------------- | ------------------------------------------------------------------- |
+| Get status capabilities | `GET /api/v1/flows/runs/status-capabilities/`                       |
+| List run summaries      | `GET /api/v1/flows/{flow_id}/runs/`                                 |
+| Poll one run status     | `GET /api/v1/flows/{flow_id}/runs/{run_id}/status/`                 |
+| Get audited run detail  | `GET /api/v1/flows/{flow_id}/runs/{run_id}/`                        |
+| Cancel a run            | `POST /api/v1/flows/{flow_id}/runs/{run_id}/cancel/`                |
+| Redispatch a run        | `POST /api/v1/flows/{flow_id}/runs/{run_id}/redispatch/`            |
+| Retry a failed run | `POST /api/v1/flows/{flow_id}/runs/{run_id}/retry/` |
+
+Repeat the `status` query key to filter by more than one run status. The SDK
+keeps caller order and duplicates instead of comma-encoding the array:
+
+```http
+GET /api/v1/flows/{flow_id}/runs/?status=completed&status=failed&status=completed
+```
+
+```js
+const page = await client.flows.runs.list({
+  flowId,
+  status: ["completed", "failed", "completed"],
+  limit: 50,
+  offset: 0,
+});
+```
+
+Page through on `has_more`, not on `count`: `count` is the number of items in
+the page you just received, not the total number of matching runs. It cannot
+tell you whether pagination is complete, and using it as the stop condition
+typically stops after the first page and silently skips the rest.
+
+Typical polling loop:
+
+- create the run
+- poll `GET /runs/{run_id}/status/`
+- if the run reaches `awaiting_review`, load the active checkpoint and resolve it
+- once the run becomes terminal, fetch step outputs, artifacts, and any evidence you need
+
+The runtime API is asynchronous: create the run first, then poll for completion.
+
+Use `GET /api/v1/flows/runs/status-capabilities/` when building run-history,
+polling, cancellation, redispatch, and review UI logic. It returns canonical
+booleans such as `should_poll`, `is_terminal`, `is_cancellable`,
+`is_awaiting_review`, and `can_request_redispatch`, so your client does not need
+to hard-code lifecycle groups. Failed-run retry is validated separately against
+the source principal, current publication and reusable completed prefix.
+
+Current run status values:
+
+- `queued`
+- `running`
+- `awaiting_review`
+- `completed`
+- `failed`
+- `cancelled`
+
+`awaiting_review` is non-terminal. Keep polling and call the active checkpoint
+endpoint before deciding whether to edit, approve, reject, or resume the run.
+
+Three response models make the sensitivity boundary explicit. `POST /runs/`
+returns `FlowRunPublic`. History and `GET /runs/{run_id}/status/` return
+`FlowRunSummaryPublic`, which omits accepted input, result, result-file metadata,
+terminal errors, provider usage, and webhook deliveries. `GET /runs/{run_id}/`
+returns the content-bearing `FlowRunDetailPublic`, which is `FlowRunPublic` plus
+an always-present `webhook_deliveries` array. Detail access is audit-logged and
+returns `503` without content if the required record cannot be committed.
+
+Example run response:
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000301",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_version": 3,
+  "principal_type": null,
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "trace_id": "00000000-0000-0000-0000-000000000302",
+  "revision": 1,
+  "status": "queued",
+  "dispatch_pending_since": "2026-03-17T10:05:00Z",
+  "dispatch_attempt_count": 0,
+  "dispatch_last_attempt_at": null,
+  "dispatch_last_error": null,
+  "dispatch_next_attempt_at": "2026-03-17T10:05:00Z",
+  "dispatched_at": null,
+  "dispatch_exhausted_at": null,
+  "cancelled_at": null,
+  "started_at": null,
+  "finished_at": null,
+  "input_payload_json": { "employee_name": "Alex Example" },
+  "result": null,
+  "result_files": [],
+  "token_usage": null,
+  "transcription_usage": null,
+  "error": null,
+  "job_id": "00000000-0000-0000-0000-000000000401",
+  "created_at": "2026-03-17T10:05:00Z",
+  "updated_at": "2026-03-17T10:05:00Z",
+  "webhook_deliveries": []
+}
+```
+
+`TASK_EXECUTION_TIMEOUT_SECONDS` defaults to 28,800 seconds per worker invocation;
+a review checkpoint or requeue starts a fresh invocation. The default step budget
+and hard ceiling both equal the invocation timeout minus a 60-second finalization
+allowance. A step no longer has a separate one-hour boundary. Organisation runtime
+policy and a step's `timeout_seconds` can lower its budget within that ceiling.
+Each step's budget is also clamped to the invocation's remaining time minus the
+same finalization allowance, so earlier steps leave less time for later steps.
+
+One budget bounds the entire step attempt: preparation, provider calls, retries,
+mapped items, and finalization. Completion requests and remote transcription
+polling use the remaining attempt budget. A step refuses to start when only the
+invocation's finalization allowance remains. For `flow_step_timeout`,
+read `error.details.phase` and
+`completed_items` / `total_items` when present to locate the interruption.
+`provider_work_may_have_completed: true` means an interrupted provider request
+had an unknown outcome. Missing facts are unknown; `error.retryable` remains the
+authoritative retry signal.
+
+For a transcription failure, use the typed diagnosis in `error.details`:
+
+```json
+{
+  "schema_version": 1,
+  "code": "typed_io_transcription_failed",
+  "message": "Step 1: transcription failed for 'meeting.wav'.",
+  "source": "executor_failed",
+  "step_order": 1,
+  "retryable": false,
+  "details": {
+    "phase": "transcription",
+    "transcription_failure_kind": "capacity",
+    "transcription_service_reason": "Transcription capacity is unavailable.",
+    "transcription_stage": "transcribing"
+  }
+}
+```
+
+The [transcription failure kinds](/guides/flows/reference/errors#transcription-failures)
+are the machine-readable contract. The bounded service reason is human text.
+Stage and queue position describe the last observed poll when a failure or
+timeout interrupts transcription.
+
+#### Contract violation details
+
+For `typed_io_contract_violation`, `error.details.contract_violation` locates the
+failure when the platform's contract validator rejected a value:
+
+```json
+"details": {
+  "contract_violation": {
+    "side": "output",
+    "schema_rule": "required",
+    "json_pointer": "/summary"
+  }
+}
+```
+
+`side` is `input` or `output`: which of the step's contracts rejected the value.
+`schema_rule` is the JSON Schema keyword that failed, such as `required`, `type`
+or `maxItems`. `json_pointer` is an RFC 6901 pointer into the value the contract
+checked; the empty string is the whole value. The example says that the output's
+`summary` object broke `required`: the pointer names the object that lacks a
+property, not the property. The run-level `message` is generic. The name of the
+missing property is in the message of the step attempt.
+
+The pointer is the deepest location the contract declares: properties and array
+indices only. It stops before a key that comes from the data, for example a key
+under `additionalProperties` or `patternProperties`, so it can be an ancestor of
+the failing object. A missing `verdict` inside `people["a@b.se"]` gives
+`/people`, and the empty string when the first key comes from the data. It also
+stops where the contract reaches a property only through `allOf`, `anyOf` or
+`oneOf`. The field never contains the value itself.
+
+For a per-item, section or mapped step each call is checked against its own
+value, so a pointer from that check is relative to that call's value. When the
+calls are put together the platform checks the complete assembled output, and a
+failure there has a pointer into the assembled output. The rule can come from
+the bound the platform puts on the call: a section or mapped step asks the model
+for exactly one item, so `minItems` or `maxItems` can fail even when the
+contract you wrote has no such bound.
+
+The field is absent when the pointer would exceed 400 characters, when a runtime
+check outside the contract validator found the violation, and on runs that failed
+before the field existed. Absence means the location was not recorded, not that
+no violation occurred. Do not parse `message` for the location.
+
+External transcription submissions use one idempotency key for the tenant, run,
+step attempt, audio file and digest, and task. A confirmed admission refusal
+waits within the step budget, honours `Retry-After`, and checks cancellation.
+If the budget expires while admission is refused, the provider-call evidence
+records a known refusal. A lost submission response permits one resubmission
+with the same key. Preventing a second job requires the transcription service
+to support that header; the bounded resubmission alone cannot guarantee deduplication.
+Once a job ID is known, it is persisted before polling and retained through later
+failure, cancellation, or recovery. Eneo never resubmits because polling failed.
+
+#### What the two `retryable` fields mean
+
+`dispatch_last_error.retryable` is an internal recovery signal for the current
+dispatch epoch before terminalization. It tells you that the server may retry
+the same queued work; it does not tell a client to create another run.
+
+After terminalization, `error.retryable` answers a different question: whether
+a consumer may safely submit a new logical run. It is conservative and true
+only for `flow_dispatch_failed`, `flow_step_attempt_start_failed` and
+`flow_provider_rate_limited`, and for none of them when
+`error.details.tool_call_possible` is true: the run may already have called
+a tool, and a new run calls it again. A true
+value does not start work automatically; the consumer still decides whether
+and when to submit a new run.
+
+#### Retry a failed run from the first unfinished step
+
+Use this endpoint when a run fails after completing one or more steps. It creates
+a child run that imports the completed prefix and executes from the first
+unfinished step. The server chooses that step; the request has no body.
+
+```http
+POST /api/v1/flows/{flow_id}/runs/{run_id}/retry/
+Authorization: Bearer YOUR_TOKEN
+Idempotency-Key: retry-report-2026-09
+```
+
+A successful request returns `201`. This response excerpt shows a run that failed
+at step 3 after completing steps 1 and 2:
+
+```json
+{
+  "run": { "id": "CHILD_RUN_ID", "status": "queued" },
+  "created": true,
+  "source_run_id": "SOURCE_RUN_ID",
+  "first_executed_step_order": 3,
+  "reused_step_orders": [1, 2]
+}
+```
+
+`run` uses the normal `FlowRunPublic` shape. Poll its id to follow execution. With
+the SDK, call:
+
+```js
+const retry = await client.flows.runs.retryFromFailedStep({
+  flowId,
+  runId,
+  idempotencyKey: "retry-report-2026-09"
+});
+```
+
+Reuse the same key after a timeout or lost response. While the source history is
+available, an accepted request replays the same child with `200` and
+`created: false`, without dispatching again. A key used for a different request
+is refused. Use a new key only when you intend to create another child.
+
+The source must be failed, belong to the same user or service principal, and use
+the flow's current published version. The child keeps its label, purpose, semantic
+inputs, and every step's ordered input-file selections. Completed outputs are
+copied inline, including approved review edits. Imported steps have provenance
+linking them to their source and do not make provider calls. The child's usage
+counts only new calls made after the imported prefix.
+
+Retry refuses a stale version, a run with no completed prefix, prefix outputs
+stored in files, and prefix review checkpoints that are not approved. These
+refusals return `409`; the [error reference](/guides/flows/reference/errors) gives each
+code and recovery action. Existing input size and concurrency limits still apply.
+A missing `Idempotency-Key` returns `422`, and exhausted run capacity returns
+`429`. If the required creation audit fails, the transaction rolls back and the
+API returns `503`.
+
+The source remains unchanged. Its history may expire independently after the
+child is created: copied outputs and the child's own input-file references keep
+the child readable without the source history.
+
+#### What redispatch does
+
+`redispatch` is for **stale queued runs**. It asks the system to try dispatching a queued run again if it appears stuck before execution started. It is not the same as creating a brand-new run.
+
+If at least one broker delivery was accepted but no worker claimed the run
+before the bounded dispatch budget ended, the run remains `queued`. A
+redispatch request is the audited recovery action that starts one fresh bounded
+dispatch epoch. Send the run's observed `dispatch_exhausted_at` as
+`expected_dispatch_exhausted_at`; a retried request cannot rearm a later
+exhausted epoch. Automatic maintenance never resets that budget. By contrast,
+exhaustion where the broker never accepted a delivery remains terminal `failed`.
+
+If no stale queued work is found, the endpoint can still return `200` with `redispatched_count: 0`. Treat that as a no-op rather than as a new execution.
+
+The dispatch budget itself is bounded and fixed: at most five attempts, with
+delays of 30, 120, 300, and 900 seconds between them, and a sweep for stale
+queued runs every 30 seconds. Nothing in the runtime retries a failed provider
+call on the caller's behalf, so a model or transcription failure fails the step
+directly rather than being retried behind your back.
+
+#### Audit-outbox dead letters (operators only)
+
+When a Flow audit delivery exhausts its own budget it is dead-lettered. Recovery
+is an operator task, not part of the consumer runtime: no HTTP endpoint lists or
+redrives dead letters. Operators list, inspect and redrive one dead letter with
+the `eneo.cli.flow_audit_outbox` command, run through the deployment's own
+launcher, which supplies the operator identity. The procedure, the generation
+token and the exit statuses are in the
+[Flows operations runbook](https://github.com/eneo-ai/eneo/blob/develop/docs/runbooks/flows.md),
+under "Lifecycle audit outbox dead letters".
+
+#### Human review checkpoints
+
+The run contract's `steps_requiring_review` array tells you before run creation
+whether the published flow can pause for review. When a run reaches
+`awaiting_review`, use the path templates under `runtime_paths.review_checkpoints`.
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/active/
+PATCH /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/
+POST /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/
+POST /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/
+POST /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/
+```
+
+`GET .../review-checkpoints/active/` always answers `200 OK`. When nothing is
+awaiting review the body is the literal JSON `null`, not an empty object and not
+a `404`. Check for `null` before you dereference the response.
+
+Active checkpoint response shape, for the review step in the run contract above
+(`…000103`, `step_order: 2`):
+
+```json
+{
+  "id": "00000000-0000-0000-0000-000000000901",
+  "tenant_id": "00000000-0000-0000-0000-000000000010",
+  "flow_id": "00000000-0000-0000-0000-000000000001",
+  "flow_run_id": "00000000-0000-0000-0000-000000000301",
+  "step_id": "00000000-0000-0000-0000-000000000103",
+  "step_order": 2,
+  "attempt_no": 1,
+  "state": "awaiting_review",
+  "revision": 1,
+  "schema_version": 1,
+  "original_payload_json": {
+    "text": "{\"answer\": \"Draft answer.\"}",
+    "structured": {
+      "answer": "Draft answer."
+    }
+  },
+  "current_payload_json": {
+    "text": "{\"answer\": \"Draft answer.\"}",
+    "structured": {
+      "answer": "Draft answer."
+    }
+  },
+  "step_label": "Review transcription",
+  "review_mode": "edit",
+  "output_type": "json",
+  "output_contract": {
+    "type": "object",
+    "properties": {
+      "answer": {
+        "type": "string"
+      }
+    }
+  },
+  "next_step_ids": ["00000000-0000-0000-0000-000000000104"],
+  "requester_user_id": "00000000-0000-0000-0000-000000000030",
+  "requester_service_principal": null,
+  "requester_principal_type": "user",
+  "decided_by_user_id": null,
+  "decided_by_service_principal": null,
+  "decided_by_principal_type": null,
+  "edited_at": null,
+  "approved_at": null,
+  "rejected_at": null,
+  "resumed_at": null,
+  "cancelled_at": null,
+  "expires_at": "2026-03-31T10:05:30Z",
+  "expired_at": null,
+  "created_at": "2026-03-17T10:05:30Z",
+  "updated_at": "2026-03-17T10:05:30Z"
+}
+```
+
+Edit request body:
+
+```json
+{
+  "expected_checkpoint_revision": 1,
+  "edited_value": {
+    "answer": "Edited answer."
+  }
+}
+```
+
+Approve request body — `expected_checkpoint_revision` only. Approve cannot carry
+a payload, so edit first and approve with the revision the edit returned:
+
+```json
+{
+  "expected_checkpoint_revision": 2
+}
+```
+
+Reject request body — `reason` is **required** and must be 1 to 1024 characters.
+Omitting it returns `400` with code `flow_review_reject_reason_required`:
+
+```json
+{
+  "expected_checkpoint_revision": 2,
+  "reason": "The draft cannot be used for this case."
+}
+```
+
+Resume request body — `expected_checkpoint_revision` only, plus the required
+`Idempotency-Key` header:
+
+```json
+{
+  "expected_checkpoint_revision": 3
+}
+```
+
+Consumer sequence:
+
+1. Poll the run until `status` is `awaiting_review`.
+2. Call `active_template`. A `200` body of `null` means no checkpoint is open; stop here and keep polling. Otherwise render `current_payload_json`.
+3. Use `step_label`, `review_mode`, `output_type`, and `output_contract` to choose the review UI.
+4. Read `schema_version`; if the client does not support it, do not edit the checkpoint.
+5. For edits, send `expected_checkpoint_revision` and `edited_value`: the corrected step output itself, not the payload envelope and not a JSON Patch document.
+6. Send a string when `output_type` is `text` and a JSON object or array when it is `json`; a JSON value must satisfy `output_contract`, and its `text` rendering is derived by the server, so the two encodings never disagree.
+7. Send nothing else. Runtime-owned payload keys are carried over from the stored checkpoint, and an output whose text overflowed into a generated file cannot be edited at all — approve or reject it instead.
+8. Offer edit review only when `review_mode` is `edit`; a `view` checkpoint returns `flow_review_edit_not_allowed`. PDF and DOCX artifact outputs can use view review but are not publishable with edit review.
+9. Approve with the latest checkpoint `revision`, or reject with that revision **and** a non-empty `reason`.
+10. Resume the approved checkpoint with the latest `revision` and an `Idempotency-Key` header. Approve does not resume the run by itself. If you do not need to hold the run between the decision and the continuation, `POST .../approve-and-continue/` does both in one transaction with the checkpoint revision you observed and a required `Idempotency-Key`.
+
+`Idempotency-Key` behaves differently across these six endpoints, and getting it
+wrong is the most common integration mistake:
+
+| Endpoint                     | `Idempotency-Key`     | Note                                                                                                                 |
+| ---------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| `POST .../runs/`             | Optional, recommended | Same key + same body replays the existing run; same key + different body returns `400 flow_run_idempotency_conflict` |
+| `PATCH .../{checkpoint_id}/` | Not accepted          | Concurrency is controlled by `expected_checkpoint_revision`                                                          |
+| `POST .../approve/`          | Not accepted          | Same                                                                                                                 |
+| `POST .../reject/`           | Not accepted          | Same                                                                                                                 |
+| `POST .../resume/`           | **Required**          | Missing it returns `400 flow_review_idempotency_key_required`                                                        |
+| `POST .../approve-and-continue/` | **Required**      | Same rule as resume; a replayed key returns the current checkpoint and run without approving or dispatching again    |
+
+Generate the resume key **once per logical resume** and keep reusing that same
+key for every retry of that resume. Minting a new key on retry throws away the
+replay protection and can dispatch duplicate work.
+
+The revision is a compare token. If another reviewer changes the checkpoint
+first, the API returns `flow_review_stale_revision`; reload the active
+checkpoint and resubmit. Edits after `expires_at` return `flow_review_expired`.
+Edited JSON values are validated against the checkpoint `output_contract` and
+can return `typed_io_contract_violation`. A value of the wrong kind for the
+output type returns `typed_io_validation_failed`, a view-only or artifact step
+returns `flow_review_edit_not_allowed`, a file-backed output returns
+`flow_review_edit_file_backed_unsupported`, and an oversized value returns
+`flow_review_edit_output_too_large` — each before the checkpoint, step result,
+audit outbox, or dispatch state changes.
+
+Resume returns `202 Accepted`. Reusing the same resume idempotency key returns
+the current checkpoint and run without dispatching duplicate work.
+
+### 5) Read results
+
+#### Final run result
+
+Use the run endpoint as the canonical final-result read model:
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/
+```
+
+`result` is `null` while a run is incomplete or when it did not complete
+successfully. A completed run returns exactly one closed result shape:
+
+- `inline_text` contains the final `text`.
+- `file_backed_text` contains a bounded, non-authoritative `preview` and one
+  current-attempt generated-output `file`. Use the authorized artifact endpoint
+  to download the complete text only when `file.availability` is `available`.
+  When it is `content_purged`, treat the complete text as unavailable and handle
+  the artifact endpoint's `410`; never treat `preview` as the full result.
+- `structured` contains the authored `value` and the `output_contract` from
+  that run's published `flow_version`. Treat `value` as opaque application data;
+  do not infer another Eneo envelope inside it.
+- `artifact` contains current-attempt file metadata. Request a signed URL with
+  the authorized artifact endpoint before downloading a file.
+- `outbound_http` contains only `delivery_status: "delivered"`. It is a delivery
+  receipt and never exposes destination URLs, headers, credentials, or the sent
+  payload.
+
+Every historical list item is projected from its own `flow_version`, so do not
+interpret old structured results with the currently published contract. The
+generated `FlowRunResult` type supports an exhaustive switch:
+
+```ts
+import type { FlowRunResult } from "@eneo/eneo-js";
+
+function renderResult(result: FlowRunResult): string {
+  switch (result.kind) {
+    case "inline_text":
+      return result.text;
+    case "file_backed_text":
+      return result.file.availability === "available"
+        ? `Download complete text from file ${result.file.file_id}`
+        : "Complete text is no longer available";
+    case "structured":
+      return JSON.stringify(result.value);
+    case "artifact":
+      return `${result.files.length} file(s)`;
+    case "outbound_http":
+      return result.delivery_status;
+    default: {
+      const unreachable: never = result;
+      return unreachable;
+    }
+  }
+}
+```
+
+#### Step outputs
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/steps/
+```
+
+Use this endpoint when a consumer UI needs intermediate outputs, diagnostics,
+token counts, prompts, or step progress without depending on the heavier debug
+export. For the stable final result, use the run-level `result` above.
+
+`output_payload_json.text` is complete only when
+`output_payload_json.text_overflow` is absent. When the marker is present,
+`text` is a bounded preview, and its single `generated_file_ids` entry identifies
+the current-attempt `generated_output` item in `result_files`. Download that file
+only when `availability` is `available`. `content_purged` leaves the preview
+incomplete, and the artifact endpoint returns `410`. Final-result consumers
+should prefer the run-level `result`.
+
+Important runtime rule: initial execution creates one run for the whole published flow. If your UI wants per-step progress or completed-step results, create one run and then read the individual step states from this endpoint while the run is queued, running, awaiting review, completed, or failed.
+
+Example step-list response:
+
+```json
+[
+  {
+    "id": "00000000-0000-0000-0000-000000000501",
+    "flow_run_id": "00000000-0000-0000-0000-000000000301",
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "tenant_id": "00000000-0000-0000-0000-000000000010",
+    "step_id": "00000000-0000-0000-0000-000000000101",
+    "step_order": 1,
+    "assistant_id": "00000000-0000-0000-0000-000000000201",
+    "status": "completed",
+    "input_payload_json": {
+      "diagnostics": [
+        {
+          "code": "runtime_input_consumed",
+          "message": "Uploaded audio file was used.",
+          "severity": "info"
+        }
+      ]
+    },
+    "runtime_input_file_ids": ["00000000-0000-0000-0000-000000000701"],
+    "output_payload_json": {
+      "text": "Hello and welcome to the annual review..."
+    },
+    "result_files": [],
+    "current_attempt_no": 1,
+    "num_tokens_input": 0,
+    "num_tokens_output": 0,
+    "error_code": null,
+    "error_message": null,
+    "diagnostics": [
+      {
+        "code": "runtime_input_consumed",
+        "message": "Uploaded audio file was used.",
+        "severity": "info"
+      }
+    ],
+    "started_at": "2026-03-17T10:05:05Z",
+    "finished_at": "2026-03-17T10:05:30Z",
+    "created_at": "2026-03-17T10:05:05Z",
+    "updated_at": "2026-03-17T10:05:30Z"
+  }
+]
+```
+
+Current step status values are `pending`, `running`, `completed`, `failed`, and `cancelled`.
+
+#### Flow graph
+
+```http
+GET /api/v1/flows/{flow_id}/graph/
+GET /api/v1/flows/{flow_id}/graph/?run_id={run_id}
+```
+
+Without `run_id`, the API resolves the graph from the current published Flow version and returns no run annotations. Unpublished draft changes are never exposed; an unpublished Flow returns `404 Not Found`.
+
+With `run_id`, it resolves the graph from that run's published version snapshot and annotates the nodes with run execution results. That is useful when you want to show the exact step topology and status history for a finished run.
+
+#### Artifact downloads
+
+```http
+POST /api/v1/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/
+```
+
+This returns a time-limited signed download URL for an artifact produced by that run. The client chooses the requested lifetime through the signed-URL request payload.
+
+Request body:
+
+```json
+{
+  "expires_in": 3600,
+  "content_disposition": "attachment"
+}
+```
+
+`expires_in` defaults to `3600` seconds when omitted and must be an integer
+from `1` through `86400` seconds, inclusive.
+
+Typical response shape:
+
+```json
+{
+  "url": "https://api.example.com/api/v1/files/00000000-0000-0000-0000-000000000701/download/?token=signed-token",
+  "expires_at": 1773742500
+}
+```
+
+### 6) Evidence and explainability
+
+#### Evidence view
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/evidence/
+```
+
+Use this when you want the rich evidence payload for one run, including:
+
+- the run summary
+- the published definition snapshot
+- `definition_integrity`, containing `status`, `expected_checksum`, and `current_checksum`
+- step results
+- step attempts
+- the debug export payload
+
+Every admitted item in `step_attempts` has a required
+`resolved_input_lineage` union. Branch on its `status`:
+
+- `tracked` contains the exact persisted source edges used by that attempt,
+  including source attempt identity, selected JSON path, and either the
+  selected value's hash and byte size or the bound runtime file identity; it
+  does not copy the raw selected value
+- `not_tracked` means no lineage row and no valid identity-matching
+  attempt-retention marker establishes retention
+- `retention_purged` means a valid identity-matching attempt-retention marker
+  exists; its counts report how many lineage aggregates and edges were removed,
+  including zero
+- `corrupt` isolates malformed stored lineage behind a machine-readable marker
+
+An attempt of a step whose input is an MCP tool also has `tool_call_state`:
+`answered` or `failed` from the stored `input_payload_json.tool_call_result`,
+`in_progress` while the attempt is open and has only
+`input_payload_json.tool_call_start`, `interrupted` when the attempt closed
+without a result (whether the server acted is unknown), and `null` when the
+attempt recorded no call.
+
+The interactive evidence view applies the same admitted-attempt count and byte
+budgets to lineage, so a lineage cannot bypass evidence narrowing. Exports
+remain complete-or-refuse under their documented limits.
+
+When `definition_integrity.status = "verified"`, the evidence run uses the same
+redacted, typed `FlowRunPublic.result` projection as the canonical run endpoint.
+A completed run therefore exposes the same closed result kind here.
+
+Functional endpoints reject a published snapshot whose current checksum differs
+from its recorded checksum. Evidence also marks a checksum-matching snapshot invalid
+when canonical published-definition parsing fails. Evidence access is intentionally
+different: an authorized caller still receives the original stored snapshot for
+forensic inspection, with `definition_integrity.status = "invalid"`. Do not treat
+that snapshot as executable or retry an operation pinned to its version. Even when
+the stored run status is `completed`, `run.result` is `null` because no trustworthy
+final-output contract can be projected. Ask a Flow editor to publish a valid version
+and start a new run; keep the old run for evidence.
+In redacted evidence, `current_checksum` still describes the original stored snapshot,
+not the redacted projection.
+
+##### Provider token usage
+
+The evidence response embeds `provider_calls`, the first ordered page of durable
+provider-call lifecycle rows. Use the dedicated `provider-calls/` endpoint when a
+UI needs later pages or one attempt only:
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/provider-calls/?limit=100
+GET /api/v1/flows/{flow_id}/runs/{run_id}/provider-calls/?limit=100&after_event_id={event_id}
+GET /api/v1/flows/{flow_id}/runs/{run_id}/provider-calls/?attempt_id={attempt_id}
+```
+
+The default is `100` rows and the maximum is `500`. Rows stay ordered by step,
+attempt, call ordinal, and event id. Pass `next_after_event_id` as
+`after_event_id` while `has_more` is true. A cursor that does not belong to the
+same run and optional `attempt_id` filter returns `404` rather than silently
+starting another page.
+
+```js
+const page = await client.flows.runs.providerCalls({
+  id: runId,
+  flowId,
+  limit: 250,
+  afterEventId,
+  attemptId,
+});
+```
+
+Each row has an explicit lifecycle status:
+
+- `started` means the credential-free request identity was stored before provider
+  I/O. It is normally transient.
+- `completed` means the response and usage receipt were observed and stored.
+- `rejected` means the request was known to be rejected; inspect `outcome_reason`.
+- `outcome_unknown` means Eneo cannot prove the remote outcome. Provider work or
+  spend may still have occurred, so never infer zero spend or an automatically
+  safe retry.
+
+`request_schema_version = 2` identifies the current request-hash contract.
+`provider_request_hash` is the SHA-256 of Eneo's canonical non-streaming request
+intent at the provider-adapter boundary: requested model, provider, ordered
+messages, and allowlisted controls. Provider-side parameter dropping or transport
+enrichment is not reflected. The hash correlates that credential-free intent
+without copying the full request into this table. Request and response model ids,
+provider, response format, call reason, response id, and timestamps explain the
+dispatch. Mapped calls additionally expose
+`mapped_execution_mode`, the item or source index, and `mapped_source_id` when the
+runtime had one.
+
+`requested_capabilities` is a sorted list of the capabilities Eneo attempted in
+that provider request: `image_input`, `reasoning`, `structured_output`, and
+`tool_calling`. It is derived at the provider boundary after Eneo's adapter has
+removed an unsupported or empty `reasoning_effort`. The list explains request
+intent; it does not claim that the provider supported, honored, or completed the
+capability. An empty list means none of these four capabilities were requested.
+The field is always an array, so clients do not need a legacy or unknown branch.
+
+Input and output usage are independent: each completed row has a count and a
+matching `*_source`.
+
+- `provider` means the provider reported that count. An explicit `0` is a real,
+  measured zero.
+- `not_reported` means the provider did not report that dimension for the call.
+  Its count is `null` or omitted; treat it as unknown, never as zero.
+- `mixed` on an attempt aggregate means its calls do not share one source. If any
+  call is `not_reported`, the affected aggregate count is also `null` or omitted;
+  summing only the known calls would understate usage. Always check whether the
+  count is null instead of branching on the source alone.
+- `not_applicable` remains readable in historical evidence and for work where a
+  provider count does not apply. It is not the new representation for missing
+  provider usage.
+
+On a failed, cancelled, or interrupted attempt, an absent completed row
+does not prove that no provider request was sent. Inspect `started` and `outcome_unknown`
+rows together with the attempt error. If the local evidence write itself cannot
+be completed after bounded retries, the run fails with
+`flow_provider_call_evidence_persistence_failed` and structured
+`provider_call_evidence_gap` details instead of inventing a lifecycle state.
+Recording `request_cancelled` during active task cancellation is best-effort;
+if that final write is itself interrupted, stale-row recovery is the durable
+guarantee and records `stale_started` rather than claiming a known outcome.
+
+Run and attempt token totals are best-effort summaries that can include estimated
+counts. Use `provider_calls` when you need per-call evidence.
+
+#### Evidence export
+
+```http
+GET /api/v1/flows/{flow_id}/runs/{run_id}/evidence/export?format=json&detail=redacted
+GET /api/v1/flows/{flow_id}/runs/{run_id}/evidence/export?format=json&detail=raw
+```
+
+You can also pass a `reason` query parameter if you want the audit trail to capture why the export was performed.
+
+For a caller otherwise allowed to export, both requests answer `403 flow_run_evidence_export_disabled` until the flow's `metadata_json.evidence_policy.allow_export` is `true`. Do not retry: the flow's editor has to turn the setting on. An ordinary authorization refusal takes precedence: a caller who may not export gets it whatever the setting is.
+
+The default export is `detail=redacted` with reason `support_debug`. A raw export
+requires an explicit non-default reason between 3 and 500 characters. The
+eneo-js wrapper exposes both generated options:
+
+The JSON response uses manifest schema `flow-evidence-export.v18`. Version 18
+lets a step's `summary.step_overview[].input_lineage.upstream_step_orders` and
+`upstream_step_labels` be `null`: the recorded `input_source` of that step is
+not one this version recognises, so which earlier steps it read is unknown. An
+empty list still means the step read no earlier step. `input_source` keeps the
+recorded value, and a step with no recorded source ran as `flow_input`.
+
+Version 17 separates diagnostic metadata from content-bearing evidence. The nested
+`debug_export` uses `eneo.flow.debug-export.v3` and excludes prompts, inputs,
+outputs, free-form errors, definitions and source text. It retains identifiers,
+statuses, timings, error codes, finish reasons and available token/retrieval
+counts. Missing measurements remain unknown.
+
+The full definition remains at `bundle.definition_snapshot`. Current-attempt
+knowledge details move from `bundle.debug_export.steps[].rag` to
+`bundle.knowledge_traces`; diagnostic RAG summaries contain counts only. The
+authorized evidence bundle retains recorded prompts, inputs, outputs and
+knowledge details under the existing disclosure rules. Credential masking does
+not anonymize case data. Consumers must check the manifest and nested diagnostic
+schema versions; older debug exports may contain source content.
+
+Version 16 added exact per-attempt resolved-input lineage. Each attempt reports one typed
+state: `tracked` with the persisted source edges, `not_tracked`,
+`retention_purged` with the retained aggregate and edge counts, or `corrupt`
+with a machine-readable integrity marker. The projection is admitted under the
+same attempt-evidence limits as the rest of the bundle. Version 15 introduced
+the strict immutable attempt-input envelope. These format changes are versioned
+because they change the content-hashed bundle.
+
+Exports are synchronous and complete-or-refuse. Four size guards are fixed
+service-safety invariants, not organization policy, because they bound the
+memory and materialization cost of one server request:
+
+- Recorded passage content: `67,108,864` bytes (64 MiB). Both raw and redacted
+  exports first check the exact retained passage total before loading it. After
+  disclosure and redaction, a second check enforces the passage text the export
+  will actually carry.
+- Stored attempt provenance: `268,435,456` bytes (256 MiB). This stored JSONB
+  measurement is a compressed floor, so the materialized representation can be
+  larger.
+- Aggregate stored JSON: `268,435,456` bytes (256 MiB) across the emitted
+  bundle.
+- Aggregate logical JSON projection: `22,369,621` bytes (about 21.33 MiB).
+  This is derived from a 256 MiB per-request memory budget divided by the
+  measured peak-copy multiplier of 12.
+
+Exceeding any guard returns `413` with code
+`flow_evidence_export_too_large`; the error context identifies the guard that
+refused the export.
+
+A synchronous export includes all provider-call lifecycle rows and supports at
+most `10,000` such rows. Larger runs
+return `413` with code `flow_evidence_export_too_large`; consume the
+paginated `provider-calls/` endpoint instead. There is no offline or asynchronous
+export surface.
+
+The manifest's required
+`actor` identifies the caller that performed the export, not the run owner.
+Branch on `actor.type`: a user actor contains only `user_id`, while a
+`service_key` actor contains only `key_id`. Both actor variants reject additional
+fields.
+
+Run detail and evidence responses always contain a `webhook_deliveries` array;
+only `outbound_http` runs put entries in it. Entries are ordered by step and logical attempt and report
+the persisted `pending`, `delivered`, or `dead_lettered` state plus the charged
+`delivery_attempts` count. Raw and redacted evidence exports carry the same
+secret-free delivery metadata; URLs, headers, bodies, idempotency keys,
+claim/lease details, and free-form transport errors are never included. The content hash continues to cover only the exported `bundle`, so audit
+metadata such as the actor does not change the hash.
+
+```js
+const evidence = await client.flows.runs.exportEvidence({
+  id: runId,
+  flowId,
+  detail: "raw",
+  reason: "Investigate incident 42",
+});
+```
+
+For the full evidence and classification policy model, see <a href="/docs/flows">Flows</a>. The short version is:
+
+- `evidence/` is the inline inspection surface
+- redacted export is the normal support/compliance export
+- raw export is the strictest export surface and may be tightened further for evidence held to classification 3
+
+#### Service keys and evidence
+
+A service key can access evidence only for **its own runs**. It needs
+`resource_permissions.flows >= read` before `resource_permissions.flow_evidence`
+is evaluated. The evidence capability levels are:
+
+- `flow_evidence >= read` → evidence view
+- `flow_evidence >= write` → redacted export
+- `flow_evidence = admin` → raw export, still subject to classification-3 tenant policy
+
+#### RAG trace and highlighted passages
+
+If a step used knowledge, the evidence/debug payload includes RAG provenance such as retrieved sources, the verbatim retrieved passages, scores, and prompt-context inclusion metadata.
+
+In the web UI, that same trace can open the source document and highlight the exact passages that were retrieved. The trace records what was retrieved and what was included in the prompt context; it does not assert which passages materially influenced the model's answer, because the runtime records that influence as unknown.
+
+## Reference
+
+### Access matrix
+
+Use this table as the canonical quick-reference for runtime access decisions.
+
+| Endpoint family                                               | Service key                                                  | Editor                              | Viewer                               | Space owner / admin         | Tenant admin              |
+| ------------------------------------------------------------- | ------------------------------------------------------------ | ----------------------------------- | ------------------------------------ | --------------------------- | ------------------------- |
+| Draft CRUD                                                    | No                                                           | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| Publish / unpublish                                           | No                                                           | No                                  | No                                   | Yes                         | Yes                       |
+| Template management / flow-assistant authoring                | No                                                           | Per user-principal authoring policy | No                                   | Yes                         | Yes                       |
+| List published flows in a space                               | Yes, published only in scoped space                          | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| `GET /api/v1/flows/{id}/published/`                           | Yes                                                          | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| `GET /api/v1/flows/{id}/`                                     | Only with an admin or owner space role                       | Yes                                 | Read-only if visible by human policy | Yes                         | Yes                       |
+| Run contract / runtime-safe graph                             | Yes                                                          | Yes                                 | Yes                                  | Yes                         | Yes                       |
+| Runtime uploads / orphan cleanup                              | Own uploads for published Flows                              | Yes                                 | No                                   | Yes                         | Yes                       |
+| Create run / start a live transcription session               | Yes                                                          | Yes                                 | No                                   | Yes                         | Yes                       |
+| List / get / cancel / redispatch runs                 | Own runs only                                                | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Retry a failed run | Own runs only | Own runs only | No | Own runs only | Own runs only |
+| Review checkpoints: active / edit / approve / reject / resume | Own runs only, `resource_permissions.flows = write` required | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Step outputs / artifacts                                      | Own runs only                                                | Own runs only                       | No                                   | In-scope runs               | Tenant-wide runs          |
+| Evidence view / export                                        | Own runs only, explicit `flow_evidence` capability required  | Own runs, policy-gated              | No                                   | In-scope runs, policy-gated | Tenant-wide, policy-gated |
+
+### Principal visibility rules
+
+The published runtime API is intentionally not “open to anyone who can see the flow”.
+
+- user-principal run owners can inspect their own runs
+- trusted in-space operators (space owner and space admin) can inspect in-scope runs, artifacts, and evidence
+- tenant admins can inspect across the tenant
+- service keys can inspect only their **own** runs and evidence
+- user-principal run owners need `FLOWS_TRACE` for their own evidence access
+- a service key never becomes a user-principal operator just because the key is scoped to a space with admin-level permission
+- after a flow is deleted, the same rules still decide who may read its runs, results, reviews, transcripts and evidence, and that history follows the flow's run-history retention rule; every run action (create, cancel, redispatch, retry, review decisions, transcript edits, uploads) answers 404
+
+### Standard error envelope
+
+Use [The error envelope](/guides/flows/reference/errors#the-error-envelope) for the
+required fields, optional diagnostics, and JSON example. Branch on the string
+`code`; the legacy numeric category does not distinguish individual failures.
+
+### Service-key authorization errors
+
+Service-key clients can read published runtime projections and run published flows. Draft authoring and other user-principal actions remain user-token surfaces.
+
+| Code                                       | When it appears                                                      | Client action                                                 |
+| ------------------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------- |
+| `flow_service_key_admin_required`          | A non-admin service key reads `GET /api/v1/flows/{id}/`              | Use an admin/owner service key or call the published endpoint |
+| `flow_service_key_principal_not_supported` | A service key calls a Flow endpoint that still requires a user token | Use a user token, or switch to a published runtime endpoint   |
+| `flow_service_key_space_id_required`       | A service key lists flows with `GET /api/v1/flows/` without `space_id` | Send `space_id` for the space the key is scoped to          |
+
+`flow_service_key_admin_required` includes an API-adapter hint with an endpoint template:
+
+```json
+{
+  "runtime_endpoint_hint": {
+    "key": "published_flow_runtime",
+    "description": "Use the published runtime projection for service-key Flow clients.",
+    "endpoint_template": "/api/v1/flows/{id}/published/"
+  }
+}
+```
+
+Policy-layer denials such as `flow_service_key_principal_not_supported` may include only the runtime alternative key and description. Treat `endpoint_template` as optional and fall back to `GET /api/v1/flows/{id}/published/` when the hint is absent:
+
+```json
+{
+  "runtime_endpoint_hint": {
+    "key": "published_flow_runtime",
+    "description": "Use the published runtime projection for service-key Flow clients."
+  }
+}
+```
+
+### Flow error catalog
+
+The canonical consumer catalog for `FlowApiErrorCode` now lives in [Flow error reference](/guides/flows/reference/errors). Use that page for code-specific handling phases and recovery actions.
+
+### Minimal end-to-end runtime example
+
+A typical runtime-only integration looks like this:
+
+```text
+GET  /api/v1/flows/runs/status-capabilities/                 (cache status behavior)
+GET  /api/v1/flows/{flow_id}/run-contract/
+POST /api/v1/flows/{flow_id}/steps/{step_id}/runtime-files/ (optional)
+DELETE /api/v1/flows/{flow_id}/runtime-files/{file_id}/      (optional abandoned upload cleanup)
+POST /api/v1/flows/{flow_id}/runs/                           with Idempotency-Key
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/status/           (routine polling)
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/review-checkpoints/active/ (when awaiting_review)
+PATCH/POST review checkpoint edit/approve/reject/resume endpoints     (when awaiting_review)
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/                  (audited final detail)
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/steps/
+POST /api/v1/flows/{flow_id}/runs/{run_id}/retry/          (eligible failed run; Idempotency-Key required)
+POST /api/v1/flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/ (optional)
+GET  /api/v1/flows/{flow_id}/runs/{run_id}/evidence/        (optional)
+```
+
+## Troubleshooting
+
+For short capability answers and operational choices, see [Flows FAQ](/guides/flows/flows-faq). For Flow-specific codes, use [Flow error reference](/guides/flows/reference/errors) and branch on `code`, not message text.
+
+| Status | What it means on the Flow runtime surface                                                                                                                                                                                             | What to do                                                                                                      |
+| ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| `200`  | Success. Also returned by failed-run retry replay (`created: false`), `cancel` on an already-terminal run, and the active-checkpoint endpoint with literal `null` when none is open                                                                         | Read the response body; do not infer state from the status alone                                                |
+| `201`  | A run (including a retry child), a runtime file, or a live transcription session was created                                                                                                                                                                    | Keep the returned id. A live transcription session returns a ticket to use within 30 seconds                    |
+| `202`  | Review resume or approve-and-continue was accepted for asynchronous execution                                                                                                                                                                        | Poll the run; the work has not finished                                                                         |
+| `204`  | A runtime file or template file was deleted                                                                                                                                                                                           | No body to read                                                                                                 |
+| `400`  | The request shape, a state precondition, or the Flow contract is invalid. This is also where stale revisions and idempotency conflicts land                                                                                           | Read the Flow error `code` and follow its recovery. Reuse an idempotency key only for the request it belongs to |
+| `401`  | No credential (`authentication_error`) or an unusable one (`invalid_api_key`)                                                                                                                                                         | Fix the credential; do not retry the same key                                                                   |
+| `403`  | Scope, space permission, run ownership, or evidence policy refused the request, before the resource was resolved                                                                                                                      | Fix the principal or policy. A `403` does not tell you whether the resource exists                              |
+| `409`  | The request conflicts with current state, for example failed-run retry source/version/prefix refusal, deleting an attached runtime file (`flow_runtime_file_attached`), redispatch (`flow_run_redispatch_conflict`), deleting a template in use (`flow_template_in_use`), or starting live text for a flow that cannot offer it (`flow_live_transcription_unavailable`) | Follow the error code. For a retry with a stale version or unusable prefix, create a new run; repeating the request does not fix it. Stale review-checkpoint revisions use `400`. For `flow_live_transcription_unavailable`, record without live text |
+| `410`  | The artifact's bytes were purged by retention; only its metadata remains                                                                                                                                                              | Show the file as unavailable. `availability` already said `content_purged`                                      |
+| `413`  | An upload exceeded the step's `max_file_size_bytes`, or an evidence export exceeded its bound                                                                                                                                         | Read the effective limit from the run contract; page `provider-calls/` instead of exporting                     |
+| `415`  | An upload's declared or sniffed `Content-Type` is not in the step's `accepted_mimetypes`                                                                                                                                              | Set the part's `Content-Type` from the run contract                                                             |
+| `422`  | FastAPI request validation rejected the payload shape before Flow logic ran, or a run chose speaker labels that its run contract does not offer (`flow_run_speaker_labels_not_selectable`)                                            | Fix the request body against the schema. Send `speaker_labels` only when the run contract marks speaker labels as selectable |
+| `429`  | The tenant already has the maximum number of active runs                                                                                                                                                                              | Honor `Retry-After` (60 seconds), poll existing runs, then resubmit                                             |
+| `503`  | An evidence, provider-call, or redispatch dependency was unavailable                                                                                                                                                                  | Retry with backoff                                                                                              |
+
+## Practical takeaway
+
+If you treat Flows as a **published contract plus a versioned runtime**, the API becomes straightforward:
+
+- discover the contract
+- upload what the contract requires
+- create the run with idempotency
+- poll run and step results
+- fetch artifacts or evidence only within the visibility rules of the current principal
+
+That is the cleanest way to build robust web applications on top of Eneo Flows.

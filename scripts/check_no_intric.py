@@ -29,6 +29,8 @@ EXCLUDED_PATHSPECS = [
     ":!**/package-lock.json",
     ":!scripts/check_no_intric.py",
     ":!scripts/tests/test_no_intric.py",
+    # The guard's own CI job names it in full; develop excludes it and this
+    # branch should not quietly diverge on a shared guard.
     ":!.github/workflows/no-intric.yml",
 ]
 

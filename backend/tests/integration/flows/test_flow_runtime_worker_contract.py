@@ -1,0 +1,2045 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+from contextlib import nullcontext
+from dataclasses import dataclass
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
+
+import pytest
+import sqlalchemy as sa
+from dependency_injector import providers
+
+import eneo.flows.runtime.tasks as flow_runtime_tasks
+from eneo.ai_models.completion_models.completion_model import Completion, ModelKwargs
+from eneo.assistants.assistant import AssistantOrigin
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    SupportedModelKwargs,
+)
+from eneo.database.database import sessionmanager
+from eneo.database.tables.flow_tables import (
+    FlowProviderCalls,
+    FlowRunAuditOutbox,
+    FlowRuns,
+    FlowRunWebhookDeliveries,
+    FlowStepAttempts,
+    FlowStepResults,
+)
+from eneo.database.tables.token_usage_table import ProviderTokenUsages
+from eneo.flows.assistant_execution_snapshot import build_assistant_execution_snapshot
+from eneo.flows.domain.flow import (
+    Flow,
+    FlowPersistedJsonObject,
+    FlowRunStatus,
+    FlowStep,
+    FlowStepAttemptStatus,
+    FlowStepResult,
+    FlowStepResultStatus,
+)
+from eneo.flows.domain.flow_step_attempt_input import parse_flow_step_attempt_input
+from eneo.flows.enums import FlowRunLifecycleSource
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_input_envelope import read_semantic_flow_input_payload
+from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunExecutionOwner,
+    FlowRunRepository,
+)
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.published_definition import build_published_definition_json
+from eneo.flows.runtime.execution_heartbeat import FlowExecutionHeartbeats
+from eneo.flows.runtime.executor import (
+    _PROVIDER_RESPONSE_RECEIVED_DISCLOSURE,
+    _PROVIDER_WORK_AMBIGUITY_DISCLOSURE,
+    FlowRunExecutor,
+    FlowRunExecutorConfig,
+)
+from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.step_attempt_runtime import (
+    build_typed_failure_run_error_message,
+)
+from eneo.flows.runtime.tasks import enable_autobegin_for_flow_task_session
+from eneo.main.container.container import Container
+from eneo.main.exceptions import NotFoundException, TypedIOValidationException
+from tests.unit.test_tenant_model_adapter_json_stream import (
+    _Body,
+    _event,
+    _usage_event,
+)
+from tests.unit.test_tenant_model_adapter_json_stream import (
+    stream_route as _stream_route_fixture,
+)
+
+stream_route = _stream_route_fixture
+
+pytestmark = pytest.mark.usefixtures("object_content_runtime_ready")
+
+
+@pytest.mark.asyncio
+async def test_whitespace_abort_persists_raw_evidence_without_a_completion(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    stream_route,
+):
+    route = stream_route
+    raw = '{"fact":"å"}' + "\n        " * 114
+    body = _Body([_event(raw), _event(None, "stop")])
+    route.serve(body)
+
+    async def get_response(**kwargs):
+        observer = kwargs["provider_call_observer"]
+        for name in ("started", "completed", "rejected", "outcome_unknown"):
+            getattr(route.observer, name).side_effect = getattr(observer, name)
+        completion = await route.adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=route.observer,
+        )
+        return SimpleNamespace(completion=completion, total_token_count=0)
+
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(side_effect=get_response)
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        context.executor.max_inline_text_bytes = 1024
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"whitespace-abort-{uuid4()}",
+            retry_count=0,
+        )
+    assert result["status"] == "failed"
+    _, step, attempts, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert len(attempts) == 1
+    attempt = attempts[0]
+    assert attempt.error_code == "flow_llm_output_whitespace_abort"
+    assert attempt.finish_reason is None
+    assert attempt.num_tokens_input is None
+    assert attempt.num_tokens_output is None
+    assert step.error_code == attempt.error_code
+    assert attempt.output_payload_json == step.output_payload_json
+    output = attempt.output_payload_json
+    evidence = output["rejection_evidence"]
+    assert raw.startswith(output["rejected_output"])
+    assert raw.endswith(evidence["tail"])
+    assert evidence["tail"].isspace()
+    assert evidence["observed_bytes"] == len(raw.encode())
+    assert evidence["sha256"] == hashlib.sha256(raw.encode()).hexdigest()
+    assert evidence["sampling_status"] == "sampled"
+    assert len(json.dumps(output, ensure_ascii=False).encode()) <= 1024
+    assert _PROVIDER_RESPONSE_RECEIVED_DISCLOSURE not in attempt.error_message
+    assert _PROVIDER_WORK_AMBIGUITY_DISCLOSURE in attempt.error_message
+    completion_service.get_response.assert_awaited_once()
+    route.observer.completed.assert_not_awaited()
+    route.observer.rejected.assert_not_awaited()
+    route.observer.outcome_unknown.assert_awaited_once()
+    assert route.observer.outcome_unknown.await_args.args[1] == "request_cancelled"
+    assert len(route.requests) == 1
+    assert body.closed
+    async with sessionmanager.session() as session, session.begin():
+        receipts = list(
+            await session.scalars(
+                sa.select(FlowProviderCalls).where(
+                    FlowProviderCalls.flow_step_attempt_id == attempt.id
+                )
+            )
+        )
+        assert len(receipts) == 1
+        receipt = receipts[0]
+        assert receipt.status == "outcome_unknown"
+        assert receipt.num_tokens_input is None
+        assert receipt.num_tokens_output is None
+        assert receipt.outcome_reason == "request_cancelled"
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ProviderTokenUsages)
+                .where(ProviderTokenUsages.source_id == receipt.id)
+            )
+            == 0
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("bound", ["event_count", "retained_bytes"])
+@pytest.mark.filterwarnings("ignore::pydantic.warnings.PydanticDeprecatedSince211")
+async def test_stream_bounds_record_unknown_without_a_usage_row(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    stream_route,
+    monkeypatch,
+    bound,
+):
+    from eneo.completion_models.infrastructure import stream_collector
+
+    monkeypatch.setattr(
+        stream_collector, "STREAM_EVENT_LIMIT", 4 if bound == "event_count" else 1000
+    )
+    monkeypatch.setattr(
+        stream_collector,
+        "STREAM_RETAINED_BYTES_LIMIT",
+        4096 if bound == "retained_bytes" else 1_000_000,
+    )
+    route = stream_route
+    body = _Body([_event("{}")] + [_usage_event()] * 100 + [_event(None, "stop")])
+    route.serve(body)
+
+    async def get_response(**kwargs):
+        observer = kwargs["provider_call_observer"]
+        for name in ("started", "completed", "rejected", "outcome_unknown"):
+            getattr(route.observer, name).side_effect = getattr(observer, name)
+        completion = await route.adapter.get_response(
+            context=SimpleNamespace(),
+            model_kwargs={},
+            provider_call_observer=route.observer,
+        )
+        return SimpleNamespace(completion=completion, total_token_count=0)
+
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(side_effect=get_response)
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"stream-bound-{uuid4()}",
+            retry_count=0,
+        )
+    assert result["status"] == "failed"
+    _, _, attempts, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert len(attempts) == 1
+    completion_service.get_response.assert_awaited_once()
+    route.observer.completed.assert_not_awaited()
+    route.observer.rejected.assert_not_awaited()
+    route.observer.outcome_unknown.assert_awaited_once()
+    assert route.observer.outcome_unknown.await_args.args[1] == "provider_error"
+    assert len(route.requests) == 1
+    assert body.consumed < len(body.chunks)
+    assert body.closed
+    async with sessionmanager.session() as session, session.begin():
+        receipts = list(
+            await session.scalars(
+                sa.select(FlowProviderCalls).where(
+                    FlowProviderCalls.flow_step_attempt_id == attempts[0].id
+                )
+            )
+        )
+        assert len(receipts) == 1
+        receipt = receipts[0]
+        assert receipt.status == "outcome_unknown"
+        assert receipt.outcome_reason == "provider_error"
+        assert receipt.num_tokens_input is None
+        assert receipt.num_tokens_output is None
+        assert (
+            await session.scalar(
+                sa.select(sa.func.count())
+                .select_from(ProviderTokenUsages)
+                .where(ProviderTokenUsages.source_id == receipt.id)
+            )
+            == 0
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class _RuntimeWorkerContext:
+    executor: FlowRunExecutor
+    run_id: UUID
+    flow_id: UUID
+    tenant_id: UUID
+    run_revision: int
+
+
+class _RuntimeAssistant:
+    def __init__(
+        self,
+        *,
+        assistant_id: UUID,
+        model_id: UUID,
+        provider_id: UUID,
+        model_name: str,
+        prompt_text: str = "Answer the submitted question.",
+    ):
+        self.id = assistant_id
+        self.origin = AssistantOrigin.FLOW_MANAGED
+        self.prompt = SimpleNamespace(text=prompt_text)
+        self.completion_model = SimpleNamespace(
+            id=model_id,
+            name=model_name,
+            nickname=model_name,
+            litellm_model_name=model_name,
+            provider_type="openai",
+            provider_id=provider_id,
+            get_model_route=lambda: f"openai/{model_name}",
+            supported_model_kwargs=SupportedModelKwargs(),
+        )
+        self.completion_model_kwargs = ModelKwargs(temperature=0.2)
+        self.collections = []
+        self.websites = []
+        self.integration_knowledge_list = []
+        self.mcp_servers = []
+        self.attachments = []
+        self.inline_file_text = False
+
+    def get_prompt_text(self) -> str:
+        return self.prompt.text
+
+    def has_knowledge(self) -> bool:
+        return False
+
+    async def get_response(self, *, completion_service, **kwargs):
+        return await completion_service.get_response(**kwargs)
+
+
+def _build_flow(
+    *,
+    tenant_id: UUID,
+    space_id: UUID,
+    user_id: UUID,
+    assistant_id: UUID,
+    output_mode: str = "pass_through",
+    output_type: str = "text",
+    output_contract: FlowPersistedJsonObject | None = None,
+    form_fields: list[FlowPersistedJsonObject] | None = None,
+) -> Flow:
+    return Flow(
+        id=None,
+        tenant_id=tenant_id,
+        space_id=space_id,
+        name="Runtime Worker Contract Flow",
+        description="Runtime worker contract for run creation and execution.",
+        created_by_user_id=user_id,
+        owner_user_id=user_id,
+        published_version=None,
+        metadata_json={
+            "evidence_policy": {"allow_export": True},
+            "form_schema": {
+                "fields": (
+                    [{"name": "question", "type": "text"}]
+                    if form_fields is None
+                    else form_fields
+                )
+            },
+        },
+        data_retention_days=30,
+        created_at=None,
+        updated_at=None,
+        steps=[
+            FlowStep(
+                id=None,
+                flow_id=uuid4(),
+                tenant_id=tenant_id,
+                assistant_id=assistant_id,
+                step_order=1,
+                user_description="Answer the submitted question",
+                input_source="flow_input",
+                input_type="text",
+                input_contract=None,
+                output_mode=output_mode,
+                output_type=output_type,
+                output_contract=output_contract,
+                input_bindings={"question": "{{flow.input.question}}"},
+                output_classification_override=None,
+                input_config=None,
+                output_config=None,
+            )
+        ],
+    )
+
+
+async def _create_runtime_worker_context(
+    *,
+    session,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    completion_service,
+    output_mode: str = "pass_through",
+    output_type: str = "text",
+    output_contract: FlowPersistedJsonObject | None = None,
+    input_payload_json: FlowPersistedJsonObject | None = None,
+    form_fields: list[FlowPersistedJsonObject] | None = None,
+    prompt_text: str = "Answer the submitted question.",
+) -> _RuntimeWorkerContext:
+    enable_autobegin_for_flow_task_session(session)
+    setup_container = Container(
+        session=providers.Object(session),
+        user=providers.Object(admin_user),
+        tenant=providers.Object(test_tenant),
+    )
+    model = await completion_model_factory(session, "gpt-4o-mini")
+    space = await space_factory(session, "Runtime worker contract space", [model.id])
+    assistant = await assistant_factory(
+        session,
+        "Runtime Worker Assistant",
+        model.id,
+        space_id=space.id,
+    )
+    flow_repo = FlowRepository(session=session)
+    version_repo = FlowVersionRepository(session=session)
+    flow = await flow_repo.create(
+        flow=_build_flow(
+            tenant_id=admin_user.tenant_id,
+            space_id=space.id,
+            user_id=admin_user.id,
+            assistant_id=assistant.id,
+            output_mode=output_mode,
+            output_type=output_type,
+            output_contract=output_contract,
+            form_fields=form_fields,
+        ),
+        tenant_id=admin_user.tenant_id,
+    )
+    runtime_assistant = _RuntimeAssistant(
+        assistant_id=assistant.id,
+        model_id=model.id,
+        provider_id=model.provider_id,
+        model_name="gpt-4o-mini",
+        prompt_text=prompt_text,
+    )
+    assistant_snapshot = build_assistant_execution_snapshot(
+        assistant=runtime_assistant,
+    )
+    assert assistant_snapshot is not None
+    step = flow.steps[0]
+    definition_step = {
+        "step_id": str(step.id),
+        "assistant_id": str(step.assistant_id),
+        "step_order": 1,
+        "user_description": step.user_description,
+        "input_source": step.input_source,
+        "input_type": step.input_type,
+        "input_bindings": step.input_bindings,
+        "output_mode": step.output_mode,
+        "output_type": step.output_type,
+        "assistant_snapshot": assistant_snapshot,
+    }
+    if output_contract is not None:
+        definition_step["output_contract"] = output_contract
+    definition_json = build_published_definition_json(
+        flow_id=flow.id,
+        name=flow.name,
+        description=flow.description,
+        metadata_json=flow.metadata_json,
+        steps=[definition_step],
+    )
+    await version_repo.create(
+        flow_id=flow.id,
+        version=1,
+        definition_json=definition_json,
+        tenant_id=admin_user.tenant_id,
+    )
+    flow = await flow_repo.update(
+        flow=flow.model_copy(update={"published_version": 1}),
+        tenant_id=admin_user.tenant_id,
+    )
+    create_result = await setup_container.flow_run_service().create_run(
+        flow_id=flow.id,
+        input_payload_json=(
+            {"question": "What happened?"}
+            if input_payload_json is None
+            else input_payload_json
+        ),
+        expected_flow_version=1,
+        step_inputs=None,
+        idempotency_key=f"runtime-worker-contract-{uuid4()}",
+    )
+    assert create_result.created is True
+    run = create_result.run
+    audit_service = SimpleNamespace(log_async=AsyncMock(return_value=uuid4()))
+    worker_container = Container(
+        session=providers.Object(session),
+        tenant=providers.Object(test_tenant),
+    )
+    file_service = worker_container.file_service(user=admin_user)
+    executor = FlowRunExecutor(
+        # The worker opens this on a session of its own; here the executor's audit service serves.
+        read_audit_service=lambda: nullcontext(executor.audit_service),
+        runtime_actor=FlowRunActor.from_user(user=admin_user),
+        session=session,
+        flow_repo=worker_container.flow_repo(),
+        flow_run_repo=worker_container.flow_run_repo(),
+        flow_run_review_checkpoint_repo=worker_container.flow_run_review_checkpoint_repo(),
+        flow_run_terminalizer=worker_container.flow_run_terminalizer(),
+        flow_version_repo=worker_container.flow_version_repo(),
+        space_repo=worker_container.tenant_scoped_space_repo(),
+        completion_service=completion_service,
+        file_repo=worker_container.file_repo(),
+        file_content_loader=worker_container.file_content_loader(),
+        file_service=file_service,
+        template_asset_repo=worker_container.flow_template_asset_repo(),
+        encryption_service=worker_container.encryption_service(),
+        audit_service=audit_service,
+        references_service=worker_container.references_service(
+            datastore__create_embeddings_service__user=admin_user
+        ),
+        config=FlowRunExecutorConfig(
+            max_inline_text_bytes=1024 * 1024,
+            http_request_timeout_seconds=2.0,
+            http_max_timeout_seconds=2.0,
+            http_allow_private_networks=False,
+        ),
+    )
+
+    async def _load_assistant(assistant_id, state, *, snapshot=None):
+        if state.flow_space is None:
+            state.flow_space = await executor.space_repo.get_execution_space(
+                flow.space_id
+            )
+        return runtime_assistant
+
+    executor._load_assistant = AsyncMock(side_effect=_load_assistant)
+    assert flow.id is not None
+    assert step.id is not None
+    return _RuntimeWorkerContext(
+        executor=executor,
+        run_id=run.id,
+        flow_id=flow.id,
+        tenant_id=admin_user.tenant_id,
+        run_revision=run.revision,
+    )
+
+
+async def _failure_state_from_fresh_session(
+    *,
+    run_id: UUID,
+    tenant_id: UUID,
+) -> tuple[
+    FlowRuns | None,
+    FlowStepResults | None,
+    list[FlowStepAttempts],
+    list[FlowRunAuditOutbox],
+]:
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        run_row = await session.scalar(sa.select(FlowRuns).where(FlowRuns.id == run_id))
+        step_result_row = await session.scalar(
+            sa.select(FlowStepResults).where(FlowStepResults.flow_run_id == run_id)
+        )
+        attempt_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowStepAttempts)
+                    .where(FlowStepAttempts.flow_run_id == run_id)
+                    .order_by(FlowStepAttempts.attempt_no.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        outbox_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunAuditOutbox)
+                    .where(FlowRunAuditOutbox.flow_run_id == run_id)
+                    .where(FlowRunAuditOutbox.tenant_id == tenant_id)
+                    .order_by(FlowRunAuditOutbox.run_revision.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return run_row, step_result_row, attempt_rows, outbox_rows
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_tenant_scoped_space_repo_does_not_load_cross_tenant_assistant(
+    async_session,
+    db_container,
+    tenant_factory,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    model = await completion_model_factory(async_session, "gpt-4o-mini")
+    space = await space_factory(
+        async_session,
+        "Runtime worker tenant-isolation space",
+        [model.id],
+    )
+    assistant = await assistant_factory(
+        async_session,
+        "Runtime Worker Tenant Isolation Assistant",
+        model.id,
+        space_id=space.id,
+    )
+    other_tenant_row = await tenant_factory(
+        async_session,
+        name=f"runtime-space-other-{uuid4()}",
+    )
+    bootstrap_container = Container(session=providers.Object(async_session))
+    other_tenant = await bootstrap_container.tenant_repo().get(other_tenant_row.id)
+    assert other_tenant is not None
+    async with db_container(tenant=other_tenant) as other_tenant_container:
+        with pytest.raises(NotFoundException):
+            await other_tenant_container.tenant_scoped_space_repo().get_space_by_assistant(
+                assistant_id=assistant.id
+            )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("target_status", "expected_worker_result", "expected_step_status"),
+    [
+        (
+            FlowRunStatus.CANCELLED,
+            {"status": "skipped", "reason": "run_cancelled"},
+            FlowStepResultStatus.CANCELLED,
+        ),
+        (
+            FlowRunStatus.FAILED,
+            {"status": "failed", "error": "Run was terminalized as failed."},
+            FlowStepResultStatus.FAILED,
+        ),
+    ],
+)
+async def test_late_output_after_terminalization_does_not_complete_attempt_or_webhook(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    target_status,
+    expected_worker_result,
+    expected_step_status,
+):
+    completion_service = SimpleNamespace(get_response=AsyncMock())
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            output_mode="http_post",
+        )
+        await session.commit()
+
+        async def _terminalize_before_provider_success(**_kwargs):
+            async with sessionmanager.session() as terminal_session:
+                enable_autobegin_for_flow_task_session(terminal_session)
+                terminal_container = Container(
+                    session=providers.Object(terminal_session),
+                    tenant=providers.Object(test_tenant),
+                )
+                await terminal_container.flow_run_terminalizer().terminalize_run(
+                    run_id=context.run_id,
+                    tenant_id=context.tenant_id,
+                    target_status=target_status,
+                    source=(
+                        FlowRunLifecycleSource.USER_CANCEL
+                        if target_status == FlowRunStatus.CANCELLED
+                        else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
+                    ),
+                    error=FlowRunError.from_source(
+                        (
+                            FlowRunLifecycleSource.USER_CANCEL
+                            if target_status == FlowRunStatus.CANCELLED
+                            else FlowRunLifecycleSource.STALE_RUNNING_RECONCILER
+                        ),
+                        code=(
+                            FlowApiErrorCode.RUN_USER_CANCELLED
+                            if target_status == FlowRunStatus.CANCELLED
+                            else FlowApiErrorCode.RUN_WORKER_STALLED
+                        ),
+                        message=f"Run was terminalized as {target_status.value}.",
+                    ),
+                )
+                await terminal_session.commit()
+            return SimpleNamespace(
+                completion="late provider success",
+                total_token_count=13,
+            )
+
+        completion_service.get_response.side_effect = (
+            _terminalize_before_provider_success
+        )
+
+        worker_result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"late-output-{target_status.value}",
+            retry_count=0,
+        )
+
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert worker_result == expected_worker_result
+    assert run_row is not None
+    assert run_row.status == target_status.value
+    assert step_result_row is not None
+    assert step_result_row.status == expected_step_status.value
+    assert step_result_row.output_payload_json is None
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == (
+        FlowStepAttemptStatus.CANCELLED.value
+        if target_status == FlowRunStatus.CANCELLED
+        else FlowStepAttemptStatus.FAILED.value
+    )
+    assert FlowRunLifecycleSource.EXECUTOR_COMPLETED.value not in {
+        row.source for row in outbox_rows
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_task_timeout_terminalization_rejects_late_completed_step_write(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    tasks_module = flow_runtime_tasks
+    completion_service = SimpleNamespace(get_response=AsyncMock())
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        await session.commit()
+
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def _attempt_late_completed_step_write() -> FlowStepResult | None:
+        async with sessionmanager.session() as write_session:
+            enable_autobegin_for_flow_task_session(write_session)
+            result_row = await write_session.scalar(
+                sa.select(FlowStepResults).where(
+                    FlowStepResults.flow_run_id == context.run_id
+                )
+            )
+            assert result_row is not None
+            late_result = FlowStepResult.model_validate(result_row).model_copy(
+                update={
+                    "status": FlowStepResultStatus.COMPLETED,
+                    "output_payload_json": {"text": "late completed write"},
+                    "current_attempt_no": 1,
+                    "num_tokens_input": 1,
+                    "num_tokens_output": 1,
+                    "error_code": None,
+                    "error_message": None,
+                }
+            )
+            flow_run_repo = FlowRunRepository(
+                session=write_session,
+            )
+            saved = await flow_run_repo.save_step_result(
+                flow_run_id=context.run_id,
+                result=late_result,
+                tenant_id=context.tenant_id,
+                attempt_no=1,
+            )
+            await write_session.commit()
+            return saved
+
+    heartbeats = FlowExecutionHeartbeats(max_active=1)
+    monkeypatch.setattr(tasks_module, "execution_heartbeats", lambda: heartbeats)
+
+    async def _execute_until_cancelled(**_kwargs) -> dict[str, str]:
+        # As the real execution does: claim the run, then own it while it runs;
+        # the timeout ends only a run the task owns.
+        async with sessionmanager.session() as claim_session:
+            enable_autobegin_for_flow_task_session(claim_session)
+            assert await FlowRunRepository(
+                session=claim_session
+            ).mark_running_if_claimable(
+                run_id=context.run_id,
+                tenant_id=context.tenant_id,
+                expected_revision=context.run_revision,
+            )
+            await claim_session.commit()
+        async with heartbeats.track(
+            FlowRunExecutionOwner(
+                context.run_id, context.tenant_id, context.run_revision
+            )
+        ):
+            started.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError:
+                cancelled.set()
+                raise
+
+    monkeypatch.setattr(
+        tasks_module,
+        "get_settings",
+        lambda: SimpleNamespace(task_execution_timeout_seconds=0.01),
+    )
+    monkeypatch.setattr(
+        tasks_module, "_execute_flow_run_async", _execute_until_cancelled
+    )
+
+    task_result = await tasks_module.execute_flow_run_task(
+        run_id=str(context.run_id),
+        flow_id=str(context.flow_id),
+        tenant_id=str(context.tenant_id),
+        run_revision=context.run_revision,
+        principal_type="user",
+        principal_user_id=str(admin_user.id),
+        task_id="runtime-timeout-terminalization",
+        retry_count=0,
+    )
+    await heartbeats.stop()
+
+    assert task_result == {"status": "failed", "reason": "timeout"}
+    assert started.is_set()
+    assert cancelled.is_set()
+    assert await _attempt_late_completed_step_write() is None
+
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    run_error = FlowRunError.model_validate(run_row.error_json)
+    assert run_error.code == FlowApiErrorCode.RUN_TASK_TIMEOUT.value
+    assert run_error.source == FlowRunLifecycleSource.TASK_TIMEOUT
+    assert step_result_row is not None
+    assert step_result_row.status == FlowStepResultStatus.FAILED.value
+    assert step_result_row.output_payload_json is None
+    assert attempt_rows == []
+    assert len(outbox_rows) == 1
+    outbox_row = outbox_rows[0]
+    assert outbox_row.action == "flow_run_failed"
+    assert outbox_row.target_status == FlowRunStatus.FAILED.value
+    assert outbox_row.source == FlowRunLifecycleSource.TASK_TIMEOUT.value
+    assert outbox_row.error_code == FlowApiErrorCode.RUN_TASK_TIMEOUT.value
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_created_by_service_executes_to_terminal_worker_state(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(
+            session, "Runtime worker contract space", [model.id]
+        )
+        assistant = await assistant_factory(
+            session,
+            "Runtime Worker Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        run_correlation_id = f"runtime-worker-contract-{uuid4()}"
+        runtime_assistant = _RuntimeAssistant(
+            assistant_id=assistant.id,
+            model_id=model.id,
+            provider_id=model.provider_id,
+            model_name="gpt-4o-mini",
+        )
+        assistant_snapshot = build_assistant_execution_snapshot(
+            assistant=runtime_assistant,
+        )
+        assert assistant_snapshot is not None
+
+        step = flow.steps[0]
+        definition_json = build_published_definition_json(
+            flow_id=flow.id,
+            name=flow.name,
+            description=flow.description,
+            metadata_json=flow.metadata_json,
+            steps=[
+                {
+                    "step_id": str(step.id),
+                    "assistant_id": str(step.assistant_id),
+                    "step_order": 1,
+                    "user_description": step.user_description,
+                    "input_source": step.input_source,
+                    "input_type": step.input_type,
+                    "input_bindings": step.input_bindings,
+                    "output_mode": step.output_mode,
+                    "output_type": step.output_type,
+                    "assistant_snapshot": assistant_snapshot,
+                }
+            ],
+        )
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_json=definition_json,
+            tenant_id=admin_user.tenant_id,
+        )
+        flow = await flow_repo.update(
+            flow=flow.model_copy(update={"published_version": 1}),
+            tenant_id=admin_user.tenant_id,
+        )
+
+        create_result = await container.flow_run_service().create_run(
+            flow_id=flow.id,
+            input_payload_json={"question": "What happened?"},
+            expected_flow_version=1,
+            step_inputs=None,
+            idempotency_key=run_correlation_id,
+        )
+        assert create_result.created is True
+        run = create_result.run
+
+        completion_service = SimpleNamespace(
+            get_response=AsyncMock(
+                side_effect=[
+                    SimpleNamespace(
+                        completion="The run completed.",
+                        total_token_count=17,
+                    ),
+                    SimpleNamespace(
+                        completion="The rerun completed.",
+                        total_token_count=19,
+                    ),
+                ]
+            )
+        )
+        audit_service = SimpleNamespace(log_async=AsyncMock(return_value=uuid4()))
+        executor = FlowRunExecutor(
+            # The worker opens this on a session of its own; here the executor's audit service serves.
+            read_audit_service=lambda: nullcontext(executor.audit_service),
+            runtime_actor=FlowRunActor.from_user(user=admin_user),
+            session=session,
+            flow_repo=container.flow_repo(),
+            flow_run_repo=container.flow_run_repo(),
+            flow_run_review_checkpoint_repo=container.flow_run_review_checkpoint_repo(),
+            flow_run_terminalizer=container.flow_run_terminalizer(),
+            flow_version_repo=container.flow_version_repo(),
+            space_repo=container.space_repo(),
+            completion_service=completion_service,
+            file_repo=container.file_repo(),
+            file_content_loader=container.file_content_loader(),
+            file_service=container.file_service(user=admin_user),
+            template_asset_repo=container.flow_template_asset_repo(),
+            encryption_service=container.encryption_service(),
+            audit_service=audit_service,
+            references_service=container.references_service(),
+            config=FlowRunExecutorConfig(
+                max_inline_text_bytes=1024 * 1024,
+                http_request_timeout_seconds=2.0,
+                http_max_timeout_seconds=2.0,
+                http_allow_private_networks=False,
+            ),
+        )
+
+        async def _load_assistant(assistant_id, state, *, snapshot=None):
+            if state.flow_space is None:
+                state.flow_space = await executor.space_repo.get_execution_space(
+                    flow.space_id
+                )
+            return runtime_assistant
+
+        executor._load_assistant = AsyncMock(side_effect=_load_assistant)
+
+        worker_result = await executor.execute(
+            run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            run_revision=run.revision,
+            dispatch_task_id=run_correlation_id,
+            retry_count=0,
+        )
+
+        assert worker_result == {"status": "completed"}
+
+        run_row = await session.scalar(sa.select(FlowRuns).where(FlowRuns.id == run.id))
+        assert run_row is not None
+        assert run_row.status == FlowRunStatus.COMPLETED.value
+        assert run_row.output_payload_json == {
+            "text": "The run completed.",
+        }
+
+        step_result_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowStepResults).where(
+                        FlowStepResults.flow_run_id == run.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(step_result_rows) == 1
+        assert step_result_rows[0].status == FlowStepResultStatus.COMPLETED.value
+        assert step_result_rows[0].output_payload_json == {
+            "text": "The run completed.",
+        }
+
+        attempt_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowStepAttempts).where(
+                        FlowStepAttempts.flow_run_id == run.id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert len(attempt_rows) == 1
+        assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
+        assert attempt_rows[0].finished_at is not None
+        parsed_attempt_input = parse_flow_step_attempt_input(
+            attempt_rows[0].input_payload_json
+        )
+        assert parsed_attempt_input.status == "tracked"
+        assert parsed_attempt_input.attempt_input is not None
+        assert parsed_attempt_input.attempt_input.resolved_input["text"] == (
+            "What happened?"
+        )
+        assert parsed_attempt_input.attempt_input.execution_inputs is not None
+        assert parsed_attempt_input.attempt_input.execution_inputs[0].question == (
+            "What happened?"
+        )
+        assert step_result_rows[0].input_payload_json["text"] == "What happened?"
+        assert step_result_rows[0].input_payload_json["rag"]["status"] == (
+            "skipped_no_knowledge"
+        )
+        assert attempt_rows[0].output_payload_json == {
+            "text": "The run completed.",
+        }
+
+        evidence = (
+            await container.flow_run_evidence_service().get_redacted_evidence_bundle(
+                run_id=run.id
+            )
+        ).to_dict()
+        assert evidence["run"]["status"] == FlowRunStatus.COMPLETED.value
+        assert evidence["step_results"][0]["output_payload_json"] == {
+            "text": "The run completed.",
+        }
+
+        audit_service.log_async.assert_not_awaited()
+        outbox_row = await session.scalar(
+            sa.select(FlowRunAuditOutbox).where(
+                FlowRunAuditOutbox.flow_run_id == run.id
+            )
+        )
+        assert outbox_row is not None
+        assert outbox_row.action == "flow_run_completed"
+        assert outbox_row.source == "executor_completed"
+        assert outbox_row.target_status == FlowRunStatus.COMPLETED.value
+        assert outbox_row.entity_id == run.id
+        assert outbox_row.description == "flow_run_completed:executor_completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_omitted_optional_form_fields_resolve_as_empty_prompt_text(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    # A client that trusts `required: false` leaves optional fields out; the
+    # prompt must read them as empty instead of failing on a missing key.
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(completion="Klart.", total_token_count=1)
+        )
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            form_fields=[
+                {"name": "question", "type": "text", "required": True},
+                {"name": "vad_heter_talarna", "type": "list"},
+                {"name": "antal", "type": "number"},
+                {"name": "motesdatum", "type": "date"},
+                {"name": "prioritet", "type": "select", "options": ["hog"]},
+                {"name": "amnen", "type": "multiselect", "options": ["vard"]},
+                {"name": "anteckning", "type": "text"},
+            ],
+            prompt_text=(
+                "Talare: [{{flow_input.vad_heter_talarna}}] "
+                "Antal: [{{flow_input.antal}}] Datum: [{{flow_input.motesdatum}}] "
+                "Prioritet: [{{flow_input.prioritet}}] Ämnen: [{{flow_input.amnen}}] "
+                "Anteckning: [{{flow_input.anteckning}}]"
+            ),
+            input_payload_json={"question": "What happened?"},
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-optional-fields-{uuid4()}",
+            retry_count=0,
+        )
+
+    assert result == {"status": "completed"}
+    run_row, step_result_row, _, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert step_result_row is not None
+    assert step_result_row.effective_prompt == (
+        "Talare: [] Antal: [] Datum: [] Prioritet: [] Ämnen: [] Anteckning: []"
+    )
+    assert run_row is not None
+    assert read_semantic_flow_input_payload(run_row.input_payload_json) == {
+        "question": "What happened?",
+        "vad_heter_talarna": [],
+        "antal": None,
+        "motesdatum": None,
+        "prioritet": None,
+        "amnen": [],
+        "anteckning": "",
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("outcome", ["completed", "typed_failure", "generic_failure"])
+async def test_a_step_without_a_completion_model_keeps_what_it_read_and_names_no_model(
+    setup_database,
+    outcome,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            side_effect=AssertionError("this step asks no completion model")
+        )
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            output_mode="compose_text",
+        )
+        # Both failures happen after the attempt recorded what the step read.
+        if outcome == "typed_failure":
+            context.executor._process_typed_output = AsyncMock(
+                side_effect=TypedIOValidationException(
+                    "Step 1: the text could not be composed.",
+                    code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+                )
+            )
+        if outcome == "generic_failure":
+            context.executor._apply_output_cap = AsyncMock(
+                side_effect=RuntimeError("storage failed")
+            )
+        await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-no-completion-model-{uuid4()}",
+            retry_count=0,
+        )
+
+    run_row, _, attempt_rows, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    completed = outcome == "completed"
+    assert run_row is not None
+    assert run_row.status == (
+        FlowRunStatus.COMPLETED.value if completed else FlowRunStatus.FAILED.value
+    )
+    (attempt,) = attempt_rows
+    assert attempt.status == (
+        FlowStepAttemptStatus.COMPLETED.value
+        if completed
+        else FlowStepAttemptStatus.FAILED.value
+    )
+    # The assistant's completion model is gpt-4o-mini; nothing was sent to it.
+    assert attempt.requested_model is None
+    assert attempt.provider is None
+    recorded = parse_flow_step_attempt_input(attempt.input_payload_json).attempt_input
+    assert recorded is not None
+    assert recorded.completion_configuration is None
+    assert recorded.execution_inputs is None
+    assert recorded.start is not None
+    assert recorded.start.model_dump(exclude_none=True) == {
+        "resolved_timeout_seconds": recorded.start.resolved_timeout_seconds,
+        "input_text_length": len("What happened?"),
+    }
+    assert recorded.resolved_input is not None
+    assert recorded.resolved_input["text"] == "What happened?"
+    assert recorded.resolved_input["material_aliases"] == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_generic_step_failure_persists_failed_state_for_fresh_sessions(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(side_effect=RuntimeError("provider failed"))
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-generic-failure-{uuid4()}",
+            retry_count=0,
+        )
+
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+    }
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert FlowRunError.model_validate(run_row.error_json).message == (
+        f"Flow step 1 execution failed. {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
+    )
+    assert step_result_row is not None
+    assert step_result_row.status == FlowStepResultStatus.FAILED.value
+    assert step_result_row.error_message == (
+        f"Flow step 1 execution failed. {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
+    )
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == FlowStepAttemptStatus.FAILED.value
+    assert attempt_rows[0].error_code == FlowApiErrorCode.STEP_EXECUTION_FAILED.value
+    assert attempt_rows[0].finished_at is not None
+    assert [row.target_status for row in outbox_rows] == [FlowRunStatus.FAILED.value]
+    assert [row.source for row in outbox_rows] == [
+        FlowRunLifecycleSource.EXECUTOR_FAILED.value
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize("rejected_text", ["not json", "", "x" * 1023 + "åö"])
+async def test_typed_step_failure_persists_failed_state_for_fresh_sessions(
+    setup_database,
+    rejected_text,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    output_contract: FlowPersistedJsonObject = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {"summary": {"type": "string"}},
+        "additionalProperties": False,
+    }
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion=rejected_text,
+                total_token_count=1,
+            )
+        )
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            output_type="json",
+            output_contract=output_contract,
+        )
+        context.executor.max_inline_text_bytes = 1024
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-typed-failure-{uuid4()}",
+            retry_count=0,
+        )
+
+    expected_message = (
+        build_typed_failure_run_error_message(
+            step_order=1,
+            error_code=FlowApiErrorCode.TYPED_IO_OUTPUT_PARSE_FAILED,
+            error_message="The model output is not valid JSON.",
+            contract_validation=None,
+        )
+        + f" {_PROVIDER_RESPONSE_RECEIVED_DISCLOSURE}"
+    )
+    assert result["status"] == "failed"
+    assert result["error"] == expected_message
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert FlowRunError.model_validate(run_row.error_json).message == expected_message
+    assert step_result_row is not None
+    assert step_result_row.status == FlowStepResultStatus.FAILED.value
+    assert step_result_row.error_message is not None
+    assert (
+        "not valid JSON" if rejected_text else "response was empty"
+    ) in step_result_row.error_message
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == FlowStepAttemptStatus.FAILED.value
+    assert attempt_rows[0].error_code == "typed_io_output_parse_failed"
+    assert attempt_rows[0].finished_at is not None
+    assert [row.target_status for row in outbox_rows] == [FlowRunStatus.FAILED.value]
+    assert [row.source for row in outbox_rows] == [
+        FlowRunLifecycleSource.EXECUTOR_FAILED.value
+    ]
+
+    from eneo.flows.domain.step_output import interpret_rejected_output
+
+    retained = interpret_rejected_output(step_result_row.output_payload_json)
+    assert retained is not None
+    assert retained.text == ("x" * 1023 if len(rejected_text) > 1024 else rejected_text)
+    assert retained.truncated_by_runtime is (len(rejected_text.encode("utf-8")) > 1024)
+    assert attempt_rows[0].output_payload_json == step_result_row.output_payload_json
+    assert completion_service.get_response.await_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_contract_violation_fact_reaches_fresh_sessions_detail_and_evidence(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    from eneo.flows.api.flow_assembler import FlowAssembler
+
+    private_value = "Privat anteckning 4711"
+    output_contract: FlowPersistedJsonObject = {
+        "type": "object",
+        "required": ["summary"],
+        "properties": {
+            "summary": {
+                "type": "object",
+                "required": ["verdict"],
+                "properties": {
+                    "verdict": {"type": "string"},
+                    "note": {"type": "string"},
+                },
+            }
+        },
+    }
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion=json.dumps({"summary": {"note": private_value}}),
+                total_token_count=1,
+            )
+        )
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            output_type="json",
+            output_contract=output_contract,
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-contract-fact-{uuid4()}",
+            retry_count=0,
+        )
+
+    assert result["status"] == "failed"
+    fact = {"side": "output", "schema_rule": "required", "json_pointer": "/summary"}
+    run_row, _, attempt_rows, outbox_rows = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert run_row.error_json["code"] == "typed_io_contract_violation"
+    assert run_row.error_json["details"] == {"contract_violation": fact}
+    assert private_value not in json.dumps(run_row.error_json)
+    assert len(attempt_rows) == 1
+    # Lifecycle events carry the code and message only.
+    assert [(row.error_code, row.error_message) for row in outbox_rows] == [
+        (run_row.error_json["code"], run_row.error_json["message"])
+    ]
+
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        run_service = container.flow_run_service()
+        view = await run_service.get_run_detail_with_result_files_and_usage(
+            flow_id=context.flow_id, run_id=context.run_id
+        )
+        detail = (
+            FlowAssembler()
+            .to_run_detail_public(
+                view.run, evidence_access=await run_service.evidence_access(view.run)
+            )
+            .model_dump(mode="json")
+        )
+        assert detail["error"]["details"]["contract_violation"] == fact
+        statuses = await run_service.list_run_statuses(flow_id=context.flow_id)
+        summaries = [
+            FlowAssembler.to_run_summary_public(status).model_dump(mode="json")
+            for status in statuses
+        ]
+        assert [summary["id"] for summary in summaries] == [str(context.run_id)]
+        assert "contract_violation" not in json.dumps(summaries)
+        evidence = (
+            await container.flow_run_evidence_service().get_redacted_evidence_bundle(
+                run_id=context.run_id
+            )
+        ).to_dict()
+        assert evidence["run"]["error"]["details"]["contract_violation"] == fact
+
+
+@pytest.mark.parametrize(
+    ("text", "inline_ceiling"),
+    [
+        ("start å " + " answer" * 16384 + " end ö", 1024),
+        ("short å", 1024),
+        ("", 1024),
+        (None, 1024),
+        ("api_key=secret-head " + " answer" * 16384 + " password=secret-tail", 1024),
+        (
+            "start å " + " answer" * 16384 + " password=" + "boundary-credential" * 100,
+            1024,
+        ),
+        ("Partial", 128),
+        ('{"fact":"' + "x" * 489 + '"}' + "\n        " * 22755 + "     ", 1024),
+    ],
+    ids=[
+        "sampled",
+        "complete",
+        "empty",
+        "unavailable",
+        "redacted",
+        "credential-boundary",
+        "ceiling-128",
+        "raw-whitespace-runaway",
+    ],
+)
+async def test_truncated_completion_retains_bounded_evidence_for_fresh_sessions(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    text,
+    inline_ceiling,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion=Completion(
+                    text=text.strip() if text is not None else None,
+                    raw_text=text,
+                    raw_text_bytes=len(text.encode()) if text is not None else None,
+                    raw_text_sha256=hashlib.sha256(text.encode()).hexdigest()
+                    if text is not None
+                    else None,
+                    finish_reason="length",
+                    provider_response_id="cut-off",
+                ),
+                total_token_count=16384,
+            )
+        )
+    )
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        context.executor.max_inline_text_bytes = inline_ceiling
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-truncation-{uuid4()}",
+            retry_count=0,
+        )
+
+    assert result["status"] == "failed"
+    _, step_result, attempts, _ = await _failure_state_from_fresh_session(
+        run_id=context.run_id, tenant_id=context.tenant_id
+    )
+    assert len(attempts) == 1
+    attempt = attempts[0]
+    assert attempt.error_code == "flow_llm_output_truncated"
+    assert attempt.finish_reason == "length"
+    assert step_result is not None
+    payload = attempt.output_payload_json
+    assert payload == step_result.output_payload_json
+    payload_bytes = (
+        len(json.dumps(payload, ensure_ascii=False).encode("utf-8"))
+        if payload is not None
+        else 0
+    )
+    assert payload_bytes <= inline_ceiling
+    if inline_ceiling < 1024:
+        assert step_result.error_code == "flow_llm_output_truncated"
+        assert attempt.provider_response_id == "cut-off"
+        assert payload is None
+        assert "rejection_evidence" not in (payload or {})
+        completion_service.get_response.assert_awaited_once()
+        return
+    assert payload is not None
+    evidence = payload["rejection_evidence"]
+    if text is None:
+        assert evidence == {
+            "tail": "",
+            "observed_bytes": None,
+            "sha256": None,
+            "sampling_status": "unavailable",
+            "redaction_applied": False,
+        }
+    else:
+        from eneo.flows.flow_run_redaction import redact_string
+
+        redacted_text = redact_string(text, key=None)
+        assert evidence["observed_bytes"] == len(text.encode("utf-8"))
+        assert evidence["sha256"] == hashlib.sha256(text.encode("utf-8")).hexdigest()
+        if len(text) > 1024:
+            assert evidence["sampling_status"] == "sampled"
+            assert payload["rejected_output"]
+            assert evidence["tail"]
+            assert redacted_text.startswith(payload["rejected_output"])
+            assert redacted_text.endswith(evidence["tail"])
+            if text.endswith("     "):
+                assert evidence["observed_bytes"] == 205300
+                assert evidence["tail"].isspace()
+        else:
+            assert evidence["sampling_status"] == "complete"
+            assert payload["rejected_output"] == text
+            assert evidence["tail"] == ""
+    assert attempt.num_tokens_output is None
+    completion_service.get_response.assert_awaited_once()
+    async with sessionmanager.session() as session:
+        enable_autobegin_for_flow_task_session(session)
+        container = Container(
+            session=providers.Object(session),
+            user=providers.Object(admin_user),
+            tenant=providers.Object(test_tenant),
+        )
+        exported = await container.flow_run_evidence_service().export_evidence_json(
+            run_id=context.run_id
+        )
+        exported_output = exported["bundle"]["step_attempts"][0]["output_payload_json"]
+        assert exported_output["rejection_evidence"]["sha256"] == evidence["sha256"]
+        if text is not None and "password=" in text:
+            assert "secret-head" not in json.dumps(exported)
+            assert "secret-tail" not in json.dumps(exported)
+            assert "boundary-credential" not in json.dumps(exported)
+            assert evidence["redaction_applied"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_question_binding_variable_miss_persists_precise_typed_failure_without_provider_io(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    completion_service = SimpleNamespace(get_response=AsyncMock())
+
+    async with sessionmanager.session() as session:
+        # The binding reads a field the form does not declare; a declared
+        # optional field left out reads as empty instead of missing.
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            input_payload_json={},
+            form_fields=[],
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-variable-resolution-failure-{uuid4()}",
+            retry_count=0,
+        )
+
+    resolver_message = (
+        "Unknown variable reference: 'flow.input.question'. Missing key 'question'. "
+        "Available keys: expected_flow_version."
+    )
+    run_message = (
+        f"Step 1: {resolver_message} (typed_io_variable_resolution_failed). "
+        f"{_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
+    )
+    assert result == {"status": "failed", "error": run_message}
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert FlowRunError.model_validate(run_row.error_json).message == run_message
+    assert step_result_row is not None
+    assert step_result_row.status == FlowStepResultStatus.FAILED.value
+    assert step_result_row.error_message == (
+        f"{resolver_message} {_PROVIDER_WORK_AMBIGUITY_DISCLOSURE}"
+    )
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == FlowStepAttemptStatus.FAILED.value
+    assert (
+        attempt_rows[0].error_code
+        == FlowApiErrorCode.TYPED_IO_VARIABLE_RESOLUTION_FAILED.value
+    )
+    assert [row.target_status for row in outbox_rows] == [FlowRunStatus.FAILED.value]
+    completion_service.get_response.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_attempt_start_failure_persists_failed_state_for_fresh_sessions(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion="This should not run.",
+                total_token_count=1,
+            )
+        )
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+        )
+        context.executor.flow_run_repo.create_or_get_attempt_started = AsyncMock(
+            side_effect=RuntimeError("attempt start failed")
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-attempt-start-failure-{uuid4()}",
+            retry_count=0,
+        )
+
+    assert result == {
+        "status": "failed",
+        "error": FlowApiErrorCode.STEP_EXECUTION_FAILED.value,
+    }
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.FAILED.value
+    assert (
+        FlowRunError.model_validate(run_row.error_json).message
+        == "Flow step 1 execution failed."
+    )
+    assert step_result_row is not None
+    assert step_result_row.status == FlowStepResultStatus.FAILED.value
+    assert step_result_row.error_message == "Flow step 1 execution failed."
+    assert attempt_rows == []
+    assert [row.target_status for row in outbox_rows] == [FlowRunStatus.FAILED.value]
+    assert [row.source for row in outbox_rows] == [
+        FlowRunLifecycleSource.EXECUTOR_FAILED.value
+    ]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_webhook_output_enqueues_delivery_for_fresh_sessions(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+):
+    completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(
+                completion="Webhook payload text.",
+                total_token_count=1,
+            )
+        )
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=completion_service,
+            output_mode="http_post",
+        )
+        result = await context.executor.execute(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            dispatch_task_id=f"runtime-webhook-success-{uuid4()}",
+            retry_count=0,
+        )
+        delivery_rows = (
+            (
+                await session.execute(
+                    sa.select(FlowRunWebhookDeliveries).where(
+                        FlowRunWebhookDeliveries.flow_run_id == context.run_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+    assert result == {"status": "running"}
+    assert len(delivery_rows) == 1
+    assert delivery_rows[0].delivery_status == "pending"
+    assert delivery_rows[0].idempotency_key.endswith(":1:webhook")
+    (
+        run_row,
+        step_result_row,
+        attempt_rows,
+        outbox_rows,
+    ) = await _failure_state_from_fresh_session(
+        run_id=context.run_id,
+        tenant_id=context.tenant_id,
+    )
+
+    assert run_row is not None
+    assert run_row.status == FlowRunStatus.RUNNING.value
+    assert step_result_row is not None
+    assert step_result_row.status == FlowStepResultStatus.COMPLETED.value
+    assert step_result_row.output_payload_json == {
+        "text": "Webhook payload text.",
+    }
+    assert len(attempt_rows) == 1
+    assert attempt_rows[0].status == FlowStepAttemptStatus.COMPLETED.value
+    assert outbox_rows == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("service_identity", [False, True])
+async def test_task_bootstrap_binds_embedding_identity_for_user_and_service_runs(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+    service_identity,
+):
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.database.tables.service_principals_table import ServicePrincipals
+
+    service_id = None
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=SimpleNamespace(get_response=AsyncMock()),
+        )
+        if service_identity:
+            service_id = uuid4()
+            await session.execute(
+                sa.insert(ServicePrincipals).values(
+                    id=service_id,
+                    tenant_id=test_tenant.id,
+                    display_name="Flow worker",
+                    scope_type="tenant",
+                    state="active",
+                )
+            )
+            await session.execute(
+                sa.update(FlowRuns)
+                .where(FlowRuns.id == context.run_id)
+                .values(
+                    principal_type="service_key",
+                    principal_user_id=None,
+                    principal_service_id=service_id,
+                    runtime_service_permission="write",
+                )
+            )
+        await session.commit()
+
+    async def execute_after_bootstrap(executor, **kwargs):
+        references = executor.references_service
+        assert references is not None
+        embeddings = references.datastore.create_embeddings_service
+        assert embeddings.tenant.id == test_tenant.id
+        if service_identity:
+            assert embeddings.user is None
+        else:
+            assert embeddings.user.id == admin_user.id
+        return {"status": "completed"}
+
+    monkeypatch.setattr(FlowRunExecutor, "execute_claimed", execute_after_bootstrap)
+    try:
+        result = await flow_runtime_tasks._execute_flow_run_async(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            principal_type=PrincipalType.SERVICE_KEY
+            if service_identity
+            else PrincipalType.USER,
+            principal_user_id=None if service_identity else admin_user.id,
+            principal_service_id=service_id,
+            task_id=None,
+            retry_count=0,
+            invocation_deadline=None,
+        )
+        assert result == {"status": "completed"}
+    finally:
+        await flow_runtime_tasks.execution_heartbeats().stop()
+
+
+@pytest.mark.asyncio
+async def test_task_bootstrap_gives_the_executor_its_tool_reader_and_caller(
+    setup_database,
+    admin_user,
+    test_tenant,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    monkeypatch,
+):
+    # Kills the mutant that builds the worker's executor without the facts
+    # reader or the tool caller (every run with a tool step would fail on a
+    # wiring error), or reads the facts on another session than the run's.
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.mcp_servers.application.unattended_tool_call import UnattendedToolCaller
+    from eneo.mcp_servers.infrastructure.repo_impl.unattended_tool_facts_reader import (
+        UnattendedToolFactsReader,
+    )
+
+    async with sessionmanager.session() as session:
+        context = await _create_runtime_worker_context(
+            session=session,
+            admin_user=admin_user,
+            test_tenant=test_tenant,
+            completion_model_factory=completion_model_factory,
+            space_factory=space_factory,
+            assistant_factory=assistant_factory,
+            completion_service=SimpleNamespace(get_response=AsyncMock()),
+        )
+        await session.commit()
+
+    async def execute_after_bootstrap(executor, **kwargs):
+        assert isinstance(executor.tool_facts_reader, UnattendedToolFactsReader)
+        assert executor.tool_facts_reader._session is executor.session
+        assert isinstance(executor.tool_caller, UnattendedToolCaller)
+        assert executor._tool_input_deps().caller is executor.tool_caller
+        return {"status": "completed"}
+
+    monkeypatch.setattr(FlowRunExecutor, "execute_claimed", execute_after_bootstrap)
+    try:
+        result = await flow_runtime_tasks._execute_flow_run_async(
+            run_id=context.run_id,
+            flow_id=context.flow_id,
+            tenant_id=context.tenant_id,
+            run_revision=context.run_revision,
+            principal_type=PrincipalType.USER,
+            principal_user_id=admin_user.id,
+            principal_service_id=None,
+            task_id=None,
+            retry_count=0,
+            invocation_deadline=None,
+        )
+        assert result == {"status": "completed"}
+    finally:
+        await flow_runtime_tasks.execution_heartbeats().stop()

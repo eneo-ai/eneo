@@ -156,6 +156,20 @@ The system will query your server's `/v1/models` endpoint to discover available 
 
 ---
 
+## Model settings a completion model offers
+
+When a completion model is added, Eneo records which model settings its route offers (temperature, top p, reasoning effort, verbosity and so on) from LiteLLM's metadata for the provider type and model name. Assistants, apps and flow steps offer only those settings, and a stored value the model no longer offers is left out of requests. Leaving a setting out does not always mean the provider's default applies: on an `openai` provider whose route accepts `reasoning_effort`, Eneo may add a reasoning effort of its own to a request that sets none.
+
+**Unknown reasoning levels.** For an OpenAI-compatible endpoint serving a model LiteLLM does not know, LiteLLM forwards `reasoning_effort` but cannot say which levels the endpoint accepts. Eneo records the reasoning levels as *unknown* (`"unknown": true` on the setting in the model's `supported_model_kwargs`) rather than guessing them. An unknown setting is not offered, exactly like an unsupported one, so requests are built as they would be for an unsupported setting. A model LiteLLM knows without reasoning levels is recorded as unsupported.
+
+---
+
+## Transcription and speaker identification
+
+A transcription model is added like any other model, with the steps under [Adding a Provider](#adding-a-provider-admin-ui). Live transcription, where an app shows the text while someone records, needs a transcription model on a provider of type vLLM that is marked for live use. The steps for that, for speaker identification services such as Vemsa, and the settings on the vadsa and Vemsa servers are in [Transcription and speaker identification](/guides/transcription).
+
+---
+
 ## Outbound headers
 
 A provider can send extra HTTP headers with every request it makes. A value can be fixed text, or resolved per request from the attributes your identity provider provisions for the user (see [Whose attributes are sent](#whose-attributes-are-sent)), or a mix of both. This is useful when the endpoint is a gateway, proxy or internal service that treats callers differently, for example to rate-limit per department or route by organisational unit. Eneo gives the values no meaning; what the receiving endpoint does with them is up to you.

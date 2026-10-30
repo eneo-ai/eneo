@@ -5,13 +5,18 @@ from hashlib import sha256
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_content_loader import FileContentLoader
 from eneo.files.file_models import FileContentVariant, FileMetadata, FileType
 from eneo.files.file_repo import (
     FileContentReferenceRecord,
     original_download_variants,
 )
-from eneo.object_content.content import ContentAccessClass, StorageKind
+from eneo.object_content.content import (
+    ContentAccessClass,
+    ContentState,
+    StorageKind,
+)
 
 
 def _metadata(file_type: FileType, *, parent_file_id=None) -> FileMetadata:
@@ -23,7 +28,8 @@ def _metadata(file_type: FileType, *, parent_file_id=None) -> FileMetadata:
         name="file",
         mimetype="image/png" if file_type is FileType.IMAGE else "text/plain",
         file_type=file_type,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
         parent_file_id=parent_file_id,
     )
@@ -48,6 +54,7 @@ def _reference(
         size_bytes=len(payload),
         media_type=metadata.mimetype,
         access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        state=ContentState.AVAILABLE,
         storage_kind=storage_kind,
     )
 

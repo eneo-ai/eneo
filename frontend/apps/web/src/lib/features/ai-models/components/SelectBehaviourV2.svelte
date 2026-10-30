@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createEventDispatcher } from "svelte";
   import {
     behaviourList,
     getBehaviour,
@@ -25,6 +26,10 @@
 
   export let selectedModel: CompletionModelWithSupportedKwargs | null = null;
   export let aria: AriaProps = { "aria-label": m.select_model_behaviour() };
+
+  const dispatch = createEventDispatcher<{
+    change: { kwArgs: ModelKwArgs };
+  }>();
 
   const behaviourLabels: Record<ModelBehaviour, string> = {
     creative: m.creative(),
@@ -60,6 +65,7 @@
             };
       kwArgs = customArgs;
     }
+    dispatch("change", { kwArgs });
   }
 
   let customTemp: number = 1;
@@ -70,6 +76,7 @@
         ...kwArgs,
         ...args
       };
+      dispatch("change", { kwArgs });
     }
   }
 

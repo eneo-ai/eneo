@@ -25,8 +25,9 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.database.tables.flow_tables import FlowRuns
 from eneo.database.tables.users_table import Users
-from eneo.main.exceptions import SystemUserProtected
+from eneo.main.exceptions import SystemUserProtected, UserDeletionBlocked
 from eneo.users.user import (
     PaginationParams,
     SearchFilters,
@@ -193,6 +194,52 @@ async def test_regular_user_can_still_be_soft_deleted(db_container, admin_user):
             sa.select(Users.deleted_at).where(Users.id == other_id)
         )
         assert deleted_at is not None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_hard_delete_translates_retained_flow_run_fk(db_container, admin_user):
+    async with db_container() as container:
+        session = container.session()
+        repo = container.user_repo()
+        user_id = uuid4()
+
+        await session.execute(
+            sa.insert(Users).values(
+                id=user_id,
+                email=f"retained-flow+{user_id.hex[:8]}@example.com",
+                username=f"retained-flow+{user_id.hex[:8]}",
+                email_verified=True,
+                state=UserState.ACTIVE.value,
+                used_tokens=0,
+                tenant_id=admin_user.tenant_id,
+                is_system_user=False,
+            )
+        )
+        await session.execute(sa.text("SET LOCAL session_replication_role = replica"))
+        await session.execute(
+            sa.insert(FlowRuns).values(
+                id=uuid4(),
+                flow_id=uuid4(),
+                flow_version=1,
+                principal_type="user",
+                principal_user_id=user_id,
+                tenant_id=admin_user.tenant_id,
+                trace_id=uuid4(),
+                revision=1,
+                status="queued",
+                dispatch_attempt_count=0,
+            )
+        )
+        await session.execute(sa.text("SET LOCAL session_replication_role = origin"))
+
+        with pytest.raises(
+            UserDeletionBlocked,
+            match="runs, rerun operations, or review checkpoints",
+        ):
+            await repo.hard_delete(user_id)
+
+        await session.rollback()
 
 
 @pytest.mark.asyncio

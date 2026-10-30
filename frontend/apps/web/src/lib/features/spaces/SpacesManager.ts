@@ -38,6 +38,8 @@ type SpacesManagerParams = {
   eneo: Eneo;
 };
 
+type SpaceUpdate = Parameters<Eneo["spaces"]["update"]>[0]["update"];
+
 function SpacesManager(data: SpacesManagerParams) {
   // Setup variables --------------------------------------------------------
   const { eneo } = data;
@@ -53,7 +55,6 @@ function SpacesManager(data: SpacesManagerParams) {
   // Function definitions --------------------------------------------------------
   let navigationVersion = 0;
   let refreshSequence = 0;
-  let spaceUpdates = 0;
   const refreshVersions = { applications: 0, knowledge: 0 };
 
   /** Will update the current space if a new space is passed in via page data */
@@ -75,12 +76,23 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
+  // Every full-space response replaces the current space, so an older one
+  // landing after a newer update would bring back links that update changed.
+  // Updates run one at a time (spaceUpdates) and each applied update bumps
+  // appliedSpaceUpdates, so a full read started before it is dropped instead
+  // of installed. A read of one part (applications or knowledge) merges into
+  // the space as it stands, so it keeps such an update and is not dropped.
+  // A response is only installed while the space it belongs to is still
+  // current and no navigation happened since the read began.
+  let appliedSpaceUpdates = 0;
+  let spaceUpdates: Promise<unknown> = Promise.resolve();
+
   /** Re-reads the current space, or one part of it; false when the request failed. */
   async function refreshCurrentSpace(type?: "applications" | "knowledge"): Promise<boolean> {
     const requestedSpace = get(currentSpace);
     const navigation = navigationVersion;
     const request = ++refreshSequence;
-    const updates = spaceUpdates;
+    const updates = appliedSpaceUpdates;
     if (type) refreshVersions[type] = request;
     else {
       refreshVersions.applications = request;
@@ -91,7 +103,7 @@ function SpacesManager(data: SpacesManagerParams) {
       requestedSpace.id === get(currentSpace).id &&
       (type
         ? refreshVersions[type] === request
-        : updates === spaceUpdates &&
+        : updates === appliedSpaceUpdates &&
           Object.values(refreshVersions).every((version) => version === request));
     try {
       if (type) {
@@ -121,15 +133,42 @@ function SpacesManager(data: SpacesManagerParams) {
     }
   }
 
-  /** Will update a given space. If no space is specified will update the current space. */
-  async function updateSpace(
-    update: Parameters<typeof eneo.spaces.update>[0]["update"],
+  /** Will update a given space. If no space is specified will update the current space.
+   *  Updates run one at a time, each after the previous has settled, and stay bound
+   *  to the space that was current (or given) when called. Pass a function to build
+   *  the update from that space as it stands when the update starts. */
+  function updateSpace(
+    update: SpaceUpdate | ((current: Space) => SpaceUpdate),
     space?: { id: string } | undefined
-  ) {
-    const { id } = space ?? get(currentSpace);
-    const navigation = navigationVersion;
+  ): Promise<Space | undefined> {
+    const target = {
+      id: (space ?? get(currentSpace)).id,
+      isCurrent: space === undefined,
+      navigation: navigationVersion
+    };
+    const run = () => applySpaceUpdate(update, target);
+    const result = spaceUpdates.then(run, run);
+    spaceUpdates = result;
+    return result;
+  }
+
+  async function applySpaceUpdate(
+    update: SpaceUpdate | ((current: Space) => SpaceUpdate),
+    target: { id: string; isCurrent: boolean; navigation: number }
+  ): Promise<Space | undefined> {
+    const { id } = target;
     try {
-      const updatedSpace = await eneo.spaces.update({ space: { id }, update });
+      let resolvedUpdate: SpaceUpdate;
+      if (typeof update === "function") {
+        // The edit belongs to the space it was made on. If the user has moved
+        // to another space since, it is built from that space as the server has it.
+        const $currentSpace = get(currentSpace);
+        const base = $currentSpace.id === id ? $currentSpace : await eneo.spaces.get({ id });
+        resolvedUpdate = update(base);
+      } else {
+        resolvedUpdate = update;
+      }
+      const updatedSpace = await eneo.spaces.update({ space: { id }, update: resolvedUpdate });
       userSpaces.update((spaces) => {
         const idx = spaces.findIndex((space) => space.id === updatedSpace.id);
         if (idx > -1) {
@@ -137,11 +176,17 @@ function SpacesManager(data: SpacesManagerParams) {
         }
         return spaces;
       });
-      // The mutation still updates the list, but a late response cannot replace
-      // the space reached since it began, including navigation back to this id.
-      if (space === undefined && navigation === navigationVersion && id === get(currentSpace).id) {
-        // A full re-read still in flight began before this and must not put the old space back.
-        spaceUpdates++;
+      // The mutation still updates the list, but only an update of the current
+      // space replaces it, and only while that space is still the current one:
+      // a late response cannot replace the space reached since it began,
+      // including navigation back to this id.
+      if (
+        target.isCurrent &&
+        target.navigation === navigationVersion &&
+        id === get(currentSpace).id
+      ) {
+        // A re-read still in flight began before this and must not put the old space back.
+        appliedSpaceUpdates += 1;
         currentSpace.set(updatedSpace);
       }
       return updatedSpace;

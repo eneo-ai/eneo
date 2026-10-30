@@ -40,20 +40,23 @@ enabled when needed.
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
-![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, Worker (ARQ), and AI Providers](/diagrams/eneo-architecture.svg)
+![Eneo System Architecture showing Client Layer, Reverse Proxy (Traefik), Frontend (SvelteKit), Backend API (FastAPI), Database (PostgreSQL with pgvector), Redis Cache/Queue, ARQ workers, and AI Providers](/diagrams/eneo-architecture.svg)
 
 </div>
 
-| Service            | Technology               | Port         | Role                                                   |
-| ------------------ | ------------------------ | ------------ | ------------------------------------------------------ |
-| **Frontend**       | SvelteKit                | 3000         | Web interface, SSR                                     |
-| **Backend**        | FastAPI (Python)         | 8000         | API server, authentication                             |
-| **Worker**         | ARQ                      | -            | Background processing, document indexing               |
-| **Database**       | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                            |
-| **Redis**          | Redis 7                  | 6379         | Cache, task queue                                      |
-| **Object content** | S3-compatible endpoint   | 8333 private | Durable original and derived bytes (optional)          |
-| **db-init**        | Python                   | -            | One-time database initialization                       |
-| **Modules**        | Separate containers      | per module   | Optional module apps on `module_net` (Compose overlay) |
+| Service                | Technology               | Port         | Role                                                   |
+| ---------------------- | ------------------------ | ------------ | ------------------------------------------------------ |
+| **Frontend**           | SvelteKit                | 3000         | Web interface, SSR                                     |
+| **Backend**            | FastAPI (Python)         | 8000         | API server, authentication                             |
+| **General worker**     | ARQ                      | -            | Uploads, crawling, integrations, and audit jobs        |
+| **Execution worker**   | ARQ                      | -            | Flow runtime execution on its own capacity queue       |
+| **Maintenance worker** | ARQ                      | -            | Flow recovery, expiry, and outbox scheduling           |
+| **Tools runtime**      | Bun                      | 3010 private | Isolated execution for bundled tools, enabled by admins |
+| **Database**           | PostgreSQL 16 + pgvector | 5432         | Data storage, vector search                            |
+| **Redis**              | Redis 7                  | 6379         | Cache and independent ARQ task queues                  |
+| **Object content**     | S3-compatible endpoint   | 8333 private | Durable original and derived bytes (optional)          |
+| **db-init**            | Python                   | -            | One-time database initialization                       |
+| **Modules**            | Separate containers      | per module   | Optional module apps on `module_net` (Compose overlay) |
 
 <Callout type="info">
   **Traefik is provided as an example reverse proxy**, not a requirement. You
@@ -94,6 +97,7 @@ Before running `docker compose up`:
 - set `PUBLIC_ORIGIN` in the backend and frontend files;
 - have at least one AI provider API key ready for **Admin → Models**;
 - create the `proxy_tier` network;
+- set the three required third-party image digest suffixes (Traefik, pgvector, Redis) in `.env`;
 - download the complete `release.env` and `release.json` bundle from the selected release;
 - leave the optional object-store block commented unless you have chosen and
   prepared that storage path.
@@ -154,6 +158,19 @@ echo "URL_SIGNING_KEY=$(openssl rand -hex 32)"
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 24)"
 ```
 
+Set the three third-party image digest suffixes in `.env`. Enter only the
+64-character hexadecimal value after `sha256:`:
+
+```dotenv
+TRAEFIK_IMAGE_DIGEST=
+PGVECTOR_IMAGE_DIGEST=
+REDIS_IMAGE_DIGEST=
+```
+
+Use organization-approved Traefik, pgvector, and Redis release digests. The Eneo
+application images come from the release bundle's `release.env`, which pins them
+by digest. Preserve both with the deployment backup.
+
 Edit `env_db.env`:
 
 - `POSTGRES_PASSWORD` - paste the generated value (the template ships
@@ -189,9 +206,9 @@ Edit `docker-compose.yml`:
 - Replace `your-domain.com` with your actual domain (4 locations)
 - Replace `your-email@domain.com` with your email for Let's Encrypt
 
-The default `.env` needs no object-store values. Eneo uses bounded
-PostgreSQL-inline content. To enable the optional SeaweedFS profile or an
-external compatible endpoint, follow
+After setting the required image digests, the default `.env` needs no
+object-store values. Eneo uses bounded PostgreSQL-inline content. To enable the
+optional SeaweedFS profile or an external compatible endpoint, follow
 [Object Content Storage](/guides/object-content-storage) before deployment.
 
 ### Create Docker network and deploy
@@ -232,13 +249,13 @@ Then add your first model provider in **Admin → Models** (see
 
 The Docker Compose stack uses five networks:
 
-| Network                                 | Services                                        | Purpose                                                                |
-| --------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------- |
-| `proxy_tier` (external)                 | Traefik, frontend, backend, worker              | Ingress and outbound access for APIs, OIDC, and crawls                 |
-| `data_net` (`internal: true`)           | db, redis, backend, worker, db-init             | Data layer without internet egress, isolated from Traefik and frontend |
-| `module_net` (`internal: true`)         | Traefik, backend, optional module containers    | Modules reach only `backend:8000`; no internet egress                  |
-| `tool_runtime_net` (`internal: true`)   | tool-runtime, backend, worker                   | Bundled tools runtime; no internet, database, or Redis route           |
-| `object_content_net` (`internal: true`) | optional object-content, backend, worker        | Private S3-compatible byte plane when enabled; never routed publicly   |
+| Network                                 | Services                                                                         | Purpose                                                                       |
+| --------------------------------------- | -------------------------------------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `proxy_tier` (external)                 | Traefik, frontend, backend, general worker, execution worker, maintenance worker | Ingress and outbound access for APIs, OIDC, crawls, model calls, and webhooks |
+| `data_net` (`internal: true`)           | db, redis, backend, all three workers, db-init                                   | Data layer without internet egress, isolated from Traefik and frontend        |
+| `module_net` (`internal: true`)         | Traefik, backend, optional module containers                                     | Modules reach only `backend:8000`; no internet egress                         |
+| `tool_runtime_net` (`internal: true`)   | tool-runtime, backend, general worker                                            | Bundled tools runtime; no internet, database, or Redis route                  |
+| `object_content_net` (`internal: true`) | optional object-content, backend, general worker, execution worker               | Private S3-compatible byte plane when enabled; never routed publicly          |
 
 PostgreSQL and Redis are only attached to `data_net`. They are not reachable from frontend, Traefik, or module containers, and they have no outbound internet access.
 
@@ -397,11 +414,10 @@ value and a comment.
     template seed that policy once and are otherwise ignored.
 
     <Callout type="info">
-      Operators keep `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` (template:
-      `10485760`) as a PostgreSQL, WAL, backup, and process safety ceiling. For
-      an inline session upload, the effective limit is the smaller value; the
-      admin page shows the configured value, effective value, and constraining
-      source.
+      File storage is the upload-policy owner. PostgreSQL inline capacity is just
+      below 512 MiB per payload to support COPY/pg_dump backups. Choose object
+      storage for larger files. The retired `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`
+      environment setting no longer lowers saved policy.
     </Callout>
 
     **Crawler Settings:**
@@ -412,10 +428,10 @@ value and a comment.
     | `CLOSESPIDER_ITEMCOUNT` | `20000` | Max pages and linked files per crawl |
     | `CRAWL_JOB_CONCURRENCY_LIMIT` | `WORKER_MAX_JOBS` | Cluster-wide crawl admission limit across crawler replicas |
     | `CRAWL_HEARTBEAT_INTERVAL_SECONDS` | `300` | PostgreSQL lease renewal interval |
-    | `CRAWLER_BLOCK_PRIVATE_NETWORKS` | `false` | Also refuse private (intranet) ranges; loopback, link-local and metadata addresses are always refused |
+    | `CRAWLER_BLOCK_PRIVATE_NETWORKS` | `false` | Also refuse private (intranet) ranges; loopback, link-local, metadata and platform-service addresses are always refused |
 
     <Callout type="warning">
-      **Crawler network access.** The crawler only fetches `http(s)` URLs. Loopback, link-local (including the cloud metadata address), unspecified and multicast destinations are always refused at connection time, including after redirects. Private (intranet) ranges are allowed by default so intranet sites can be indexed; set `CRAWLER_BLOCK_PRIVATE_NETWORKS=true` on backend and worker to refuse them as well. The worker's `HTTP_PROXY`/`HTTPS_PROXY` are not used for crawling.
+      **Crawler network access.** The crawler only fetches `http(s)` URLs. Loopback, link-local (including the cloud metadata address), unspecified and multicast destinations are always refused at connection time, including after redirects. So are the Azure WireServer address `168.63.129.16` and the IETF protocol-assignments block `192.0.0.0/24`, except its globally reachable anycast addresses `192.0.0.9` and `192.0.0.10`. Private (intranet) ranges are allowed by default so intranet sites can be indexed; set `CRAWLER_BLOCK_PRIVATE_NETWORKS=true` on backend and worker to refuse them as well. The worker's `HTTP_PROXY`/`HTTPS_PROXY` are not used for crawling.
     </Callout>
 
     **Background Worker:**
@@ -426,11 +442,63 @@ value and a comment.
 
     <Callout type="info">
       Each API or worker process owns its own database pool. Budget PostgreSQL
-      `max_connections` for the sum of every API, general-worker, and
-      crawler-worker process pool, plus operational headroom. Tune
+      `max_connections` for the sum of every API, general-worker,
+      task-worker, and crawler-worker process pool, plus operational headroom. Tune
       `WORKER_MAX_JOBS` per worker process for its CPU, memory, and
       database-active workload.
     </Callout>
+
+    **Flows live transcription:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS` | `300` | Ends a live transcription session that receives no audio for this many seconds. A recording sends audio the whole time, silence included, so only a paused or stalled recording reaches it |
+    | `FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS` | `60` | How long Eneo waits for the model server's final text after a recording stops. Raise it for a server that falls behind, such as a CPU server or a busy GPU |
+
+    Both values must be greater than zero. A live session also accepts at most
+    `FLOW_AUDIO_MAX_DURATION_SECONDS` of audio (template value `18000`, 5 hours),
+    the same limit as an uploaded recording. To set up a model for live
+    transcription, see [Set up live transcription](/guides/transcription#set-up-live-transcription).
+
+    **Flows authoring chat:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `FLOW_AUTHORING_CHAT_IDLE_MINUTES` | `45` | Minutes without a question or an edit mode change after which turning on a flow chat's edit mode starts a new conversation. Earlier conversations are kept but no longer answered. Must be greater than zero |
+
+    **Flows contract checks:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `FLOW_CONTRACT_CHECK_SLOTS` | `2` | Contract checks each backend or worker process runs at once, each in its own process; at most `TASK_EXECUTION_MAX_JOBS`, since a run checks one value at a time. Each busy one can take up to `FLOW_CONTRACT_CHECK_CHILD_MEMORY_BYTES`, so raise it only with memory to spare |
+    | `FLOW_CONTRACT_CHECK_CHILD_MEMORY_BYTES` | `536870912` (512 MiB) | Memory one contract check's process may take on Linux; at least `134217728` (128 MiB), which the largest request at the default `FLOW_MAX_INLINE_TEXT_BYTES` needs to arrive. The default holds a value at that ceiling in its costliest decoded shape: deeply nested lists, about 440 MiB measured while checked, with `anyOf`, `uniqueItems` or a recursive `$ref` alike. An `anyOf` or `oneOf` keeps only the first error of each failing branch, so a valid 3 MiB array of 400,000 integers under a two-branch `oneOf` passes. A check past it ends with `typed_io_contract_not_checked`, valid value or not, and the log names this setting. Raise it together with `FLOW_MAX_INLINE_TEXT_BYTES` |
+
+    **Flows HTTP destinations:**
+
+    | Variable | Default | Description |
+    |----------|---------|-------------|
+    | `FLOW_HTTP_ALLOW_PRIVATE_NETWORKS` | `false` | Lets a flow's HTTP input, HTTP output (webhook) and the editor's connection test reach private networks: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` and IPv6 unique-local `fc00::/7`. Off, they reach public addresses only |
+    | `FLOW_HTTP_DNS_WORKERS` | `16` | Threads that resolve host names for flow HTTP, separate from every other lookup in the process. A lookup that stalls keeps its thread until the resolver answers, so this bounds what unreachable flow destinations can occupy; a lookup with no free thread fails at once and is retried later |
+    | `FLOW_TOOL_ALLOW_PRIVATE_NETWORKS` | `true` | Lets a flow step call a tool of an MCP server whose address is on a private network: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16` and IPv6 unique-local `fc00::/7`. On by default, unlike the HTTP setting, because only an instance administrator registers an MCP server and internal servers are the normal case. Off, a flow calls tools of servers on public addresses only. The registered address is vetted before the call, and every connection the call opens is vetted again when it is opened and goes to an address the policy allows then; the call follows no redirect. Like flow HTTP requests, the call ignores `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` |
+    | `MCP_CLIENT_CALL_TIMEOUT_SECONDS` | `60` | Deadline for an MCP tool call. For a flow step that takes its input from a tool it bounds resolving the server's name and, separately, the exchange with the server (connecting, initializing, the call, closing); the step's own timeout can leave less |
+
+    <Callout type="warning">
+      **Flow network access.** A flow may only send to `http` or `https` URLs, and only to the addresses above. Loopback, link-local (including the cloud metadata address `169.254.169.254`), carrier-grade NAT (`100.64.0.0/10`), `0.0.0.0/8`, `240.0.0.0/4`, `192.0.0.0/24`, the documentation, benchmarking and 6to4-relay blocks, multicast, unspecified and IPv6 site-local addresses, and the Azure WireServer address `168.63.129.16` are refused whatever this setting says. So are the IPv4-mapped (`::ffff:0:0/96`), 6to4 (`2002::/16`), Teredo (`2001::/32`) and NAT64 well-known (`64:ff9b::/96`) prefixes, wherever they point. A network-specific NAT64 prefix (RFC 6052 section 3.4) inside global unicast is an ordinary address to this check, which does not look up translator prefixes or the IPv4 address behind them: keep such a translator from mapping to internal IPv4 ranges. The check runs on the address the connection actually uses, so a host name that changes its answer between lookups cannot reach an internal host, and redirects are not followed. A request's connect timeout covers resolving the host name and the TCP connection attempts (at most three addresses); the TLS handshake and the response are timed separately. Flow HTTP requests ignore `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` (a warning is logged when one is set) and still trust `SSL_CERT_FILE` and `SSL_CERT_DIR`. Before this release `true` switched every check off; set it only if flows must call services on your private network. Set it on backend and worker.
+    </Callout>
+
+    **Flow tools behind an internal certificate authority:** a flow run's tool
+    and HTTP steps run on the `task-execution-worker`, not on the backend. For an
+    MCP server whose certificate comes from your organisation's own CA, set
+    `SSL_CERT_FILE` on the `task-execution-worker` as well as on the backend,
+    and mount the file it names on both. `SSL_CERT_FILE` replaces the bundled
+    public roots: httpx loads that file instead of its own (certifi) bundle, so
+    the file must hold the public roots and your internal CA together.
+    `env_backend.env`, which sets the variable, is read by both services. Tool
+    and HTTP steps ignore
+    `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY`, so an MCP server a flow calls
+    must be reachable from the worker without a proxy.
+
+    **Known limitation:** the IPv4-mapped, 6to4, Teredo and NAT64 well-known prefixes are refused even when they stand for a public IPv4 host. On an IPv6-only network whose DNS64 uses the well-known prefix `64:ff9b::/96`, flows cannot call IPv4-only sites; a network-specific prefix is not refused.
 
     **Dynamic Credential Management:**
 
@@ -590,7 +658,7 @@ not match.
 | Owner                                 | Responsibility                                                                                                                                          |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Administrator with Storage permission | Choose one deployment-wide target for eligible new File, Icon, and knowledge-original writes and set business upload limits in **Admin > File storage** |
-| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity, backups, and `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES`                 |
+| Operator                              | Run PostgreSQL and any optional compatible endpoint; own credentials, TLS, capacity and backups                 |
 
 Policy changes take effect without a backend or worker restart. They affect
 eligible new writes only; existing content stays in its recorded backend until
@@ -695,7 +763,7 @@ that origin in `allowed_origins`.
 
 **Requirements:**
 
-- WebSocket support (for real-time features)
+- WebSocket support on `/api/*`. The backend serves the `/api/v1/ws` socket and, for live transcription, `/api/v1/live-transcription`. A proxy that upgrades only `/api/v1/ws` needs the same rule for `/api/v1/live-transcription`.
 - TLS termination with valid certificate
 - No response compression on backend routes (for Traefik: no `compress`
   middleware). The backend gzips JSON, HTML, JavaScript, CSS and SVG itself and
@@ -913,25 +981,27 @@ key or a tenant ID. The container side is covered in
 
 ### Common Issues
 
-| Symptom                              | Likely Cause                                            | Fix                                                                                                                                   |
-| ------------------------------------ | ------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| Can't login with default credentials | `DEFAULT_*` vars commented or db-init didn't run        | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                                                                   |
-| Can't see Users page in Admin        | `USING_ACCESS_MANAGEMENT=false` (default is `true`)     | Set to `true`, restart backend                                                                                                        |
-| Frontend shows wrong API URL         | `PUBLIC_ENEO_BACKEND_URL` incorrect                     | Set to the external origin (not localhost in prod)                                                                                    |
-| Browser requests hit `/api/api/v1/…` | `PUBLIC_ENEO_BACKEND_URL` ends with `/api`              | Use the bare origin, e.g. `https://eneo.example.com`                                                                                  |
-| Large file uploads fail              | Admin policy or applicable operator ceiling is lower    | Review configured, effective, and source values in Admin > File storage                                                               |
-| "Failed to decrypt credential"       | `ENCRYPTION_KEY` missing or changed                     | Set correct key or re-enter credentials                                                                                               |
-| Credentials API returns 404          | `TENANT_CREDENTIALS_ENABLED=false`                      | Set to `true`, requires `ENCRYPTION_KEY`                                                                                              |
-| OIDC redirect fails                  | `PUBLIC_ORIGIN` mismatch                                | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`)                                          |
-| Crawls not processing                | Crawler worker unavailable or execution leases expired  | Check `/api/healthz/crawler`; an increasing `oldest_active_age_seconds` or nonzero `expired_leases` identifies stalled lifecycle work |
-| Crawls/uploads not working           | Worker not running or no embedding model                | Check both workers are running, enable embedding model in Admin → Models                                                              |
-| Can't create Apps                    | No transcription model enabled                          | Admin → Models → Transcription models tab, enable Whisper                                                                             |
-| JWT token invalid                    | Backend `JWT_SECRET` changed since the token was issued | Tokens signed with the old key are rejected; sign in again                                                                            |
-| Worker jobs stuck or slow            | Worker overloaded                                       | Reduce `WORKER_MAX_JOBS` or increase resources                                                                                        |
-| `ECONNREFUSED 127.0.0.1:8000`        | Frontend using localhost instead of Docker service      | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost)                                                   |
-| HTTP to HTTPS redirect broken        | Missing Traefik label                                   | Ensure `traefik.enable=true` label on traefik service                                                                                 |
-| 502 Bad Gateway                      | Domain not replaced in docker-compose.yml               | Replace `your-domain.com` in all 4 locations                                                                                          |
-| SCIM provisioning returns 404        | Reverse proxy does not forward `/scim`                  | Route `/scim/*` to the backend (see [Reverse Proxy Requirements](#reverse-proxy-requirements))                                        |
+| Symptom                               | Likely Cause                                            | Fix                                                                                            |
+| ------------------------------------- | ------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| Can't login with default credentials  | `DEFAULT_*` vars commented or db-init didn't run        | Uncomment vars in env_backend.env, check `docker logs eneo_db_init`                            |
+| Can't see Users page in Admin         | `USING_ACCESS_MANAGEMENT=false` (default is `true`)     | Set to `true`, restart backend                                                                 |
+| Frontend shows wrong API URL          | `PUBLIC_ENEO_BACKEND_URL` incorrect                     | Set to the external origin (not localhost in prod)                                             |
+| Browser requests hit `/api/api/v1/…`  | `PUBLIC_ENEO_BACKEND_URL` ends with `/api`              | Use the bare origin, e.g. `https://eneo.example.com`                                           |
+| Large file uploads fail               | Admin policy or selected storage capacity is lower    | Review configured, effective, and source values in Admin > File storage                        |
+| "Failed to decrypt credential"        | `ENCRYPTION_KEY` missing or changed                     | Set correct key or re-enter credentials                                                        |
+| Credentials API returns 404           | `TENANT_CREDENTIALS_ENABLED=false`                      | Set to `true`, requires `ENCRYPTION_KEY`                                                       |
+| OIDC redirect fails                   | `PUBLIC_ORIGIN` mismatch                                | Must match in backend, frontend, AND the IdP redirect URI (`{PUBLIC_ORIGIN}/login/callback`)   |
+| Crawls not processing                 | Crawler worker unavailable or execution leases expired  | Check `/api/healthz/crawler`; an increasing `oldest_active_age_seconds` or nonzero `expired_leases` identifies stalled lifecycle work |
+| Crawls/uploads not working            | Worker not running or no embedding model                | Check both workers are running, enable embedding model in Admin → Models                       |
+| Flow remains queued                   | Execution worker not running                            | Check `task-execution-worker`; its queue is separate from the general worker                   |
+| Flow recovery or outboxes are delayed | Maintenance worker not running                          | Check `task-maintenance-worker` and `/api/healthz/flows`                                       |
+| Can't create Apps                     | No transcription model enabled                          | Admin → Models → Transcription models tab, enable Whisper                                      |
+| JWT token invalid                     | Backend `JWT_SECRET` changed since the token was issued | Tokens signed with the old key are rejected; sign in again                                     |
+| Worker jobs stuck or slow             | Worker overloaded                                       | Reduce `WORKER_MAX_JOBS` or increase resources                                                 |
+| `ECONNREFUSED 127.0.0.1:8000`         | Frontend using localhost instead of Docker service      | Set `ENEO_BACKEND_SERVER_URL=http://backend:8000` (use service name, not localhost)            |
+| HTTP to HTTPS redirect broken         | Missing Traefik label                                   | Ensure `traefik.enable=true` label on traefik service                                          |
+| 502 Bad Gateway                       | Domain not replaced in docker-compose.yml               | Replace `your-domain.com` in all 4 locations                                                   |
+| SCIM provisioning returns 404         | Reverse proxy does not forward `/scim`                  | Route `/scim/*` to the backend (see [Reverse Proxy Requirements](#reverse-proxy-requirements)) |
 
 ### Database Shared Memory Errors
 
@@ -1038,8 +1108,9 @@ docker compose logs -f
 # Specific service
 docker compose logs -f backend
 
-# Last 100 lines
-docker compose logs --tail=100 backend worker
+# Last 100 lines for the API and all worker roles
+docker compose logs --tail=100 backend worker crawler-worker \
+  task-execution-worker task-maintenance-worker
 ```
 
 ---
@@ -1049,7 +1120,8 @@ docker compose logs --tail=100 backend worker
 ### One version for the application
 
 The standard stack includes the isolated tools runtime. Frontend, backend and
-runtime share one version and source revision; workers use the backend image.
+runtime share one version and source revision; all three workers and db-init
+use the backend image.
 Download `release.env` and `release.json` from the selected release. The bundle
 pins all application images by digest and is published only after the combined
 image checks pass.
@@ -1079,6 +1151,17 @@ confinement and file-origin issues. A version mismatch warns while calls remain
 allowed. Installing the runtime does not enable capabilities. To omit it, add
 `-f docker-compose.yml -f docker-compose.without-tools.yml`; stop any existing
 runtime container first. Ordinary chat and backend readiness remain independent.
+
+### Third-party image digests
+
+<Callout type="warning">
+  The production Compose file requires immutable digests for Traefik, pgvector,
+  and Redis. Missing or empty digest inputs stop Compose before deployment.
+</Callout>
+
+Set the three digest suffixes in `.env`. Compose builds each image identity as
+`repository@sha256:<digest-suffix>`. Use organization-approved digests and keep
+the previous set with the matching backup for rollback.
 
 ### Backups
 
@@ -1113,8 +1196,8 @@ docker run --rm -v eneo_eneo_redis_data:/data -v $(pwd):/backup ubuntu \
 ```
 
 If object-store rows exist, also archive `eneo_eneo_object_content_data` while
-backend, worker, and the object-content service are stopped, or take the
-matching versioned snapshot in your external provider. Follow the
+the backend, all three workers, and the object-content service are stopped, or
+take the matching versioned snapshot in your external provider. Follow the
 [object-content backup and restore
 procedure](/guides/object-content-storage#back-up-and-restore), including
 checksum and skew-recovery checks.
@@ -1125,6 +1208,9 @@ checksum and skew-recovery checks.
 ### Select a complete release bundle
 
 Replace `release.env` and `release.json` together with the new release bundle. Keep the old bundle for rollback. Application image tags have no `v` prefix.
+
+Update the three third-party digest suffixes in `.env` only when you adopt reviewed
+Traefik, pgvector, or Redis artifacts.
 
 ### Rename environment variables that are no longer read
 
@@ -1154,6 +1240,8 @@ File/Icon adoption, do not use a rolling `docker compose up`. Stop all backend
 replicas, let the old worker drain its executable knowledge jobs, then stop all
 old workers before starting `db-init`. The schema expansion installs a database
 write fence because old File/Icon code still changes legacy payload columns.
+Keep `backend`, `worker`, `crawler-worker`, `task-execution-worker`, and
+`task-maintenance-worker` stopped through the recovery point and `db-init`.
 
 Follow the [File and Icon storage upgrade
 checklist](/guides/file-icon-storage-upgrade#before-you-start). Keep the API
@@ -1186,7 +1274,7 @@ the 2.3 file and no running container, stopping it does nothing.
 For PostgreSQL-inline content or an external endpoint:
 
 ```bash
-docker compose --env-file .env --env-file release.env stop backend worker crawler-worker
+docker compose --env-file .env --env-file release.env stop backend worker crawler-worker task-execution-worker task-maintenance-worker
 docker compose --env-file .env --env-file release.env pull
 docker compose --env-file .env --env-file release.env run --rm db-init
 docker compose --env-file .env --env-file release.env up -d
@@ -1200,12 +1288,12 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
-  config --quiet
+  config --images
 docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
-  stop backend worker crawler-worker
+  stop backend worker crawler-worker task-execution-worker task-maintenance-worker
 docker compose \
   --profile object-content \
   -f docker-compose.yml \
@@ -1294,8 +1382,8 @@ docker image prune -a
 
 <Callout type="info">
 
-**Rollback:** Revert pinned version tags, stop writes, and restore the paired
-backup. PostgreSQL-inline and external-endpoint deployments use plain
+**Rollback:** Restore the previous `.env` digest set, stop writes, and restore
+the paired backup. PostgreSQL-inline and external-endpoint deployments use plain
 `docker compose`. A bundled-store deployment must use the overlay and profile
 for stop, restore, and `up`; otherwise the store and its private network are
 omitted.
@@ -1305,9 +1393,9 @@ docker compose \
   --profile object-content \
   -f docker-compose.yml \
   -f docker-compose.object-content.yml \
-  stop backend worker crawler-worker object-content
+  stop backend worker crawler-worker task-execution-worker task-maintenance-worker object-content
 # Restore the matching PostgreSQL dump and object-store snapshot as described
-# in the linked procedure, then start the pinned versions:
+# in the linked procedure, then start the previous digest set:
 docker compose \
   --profile object-content \
   -f docker-compose.yml \
@@ -1329,7 +1417,7 @@ The reference `docker-compose.yml` sets a fixed `container_name` on every
 service, so `docker compose up --scale ...` is refused. To run more than one
 backend or worker replica, define additional services without `container_name`
 (or run the images under an orchestrator) and place the backend replicas behind
-your load balancer. Additional workers are safe. Crawls run only on
+your load balancer. Additional workers are safe: crawl admission and leases live in PostgreSQL. Crawls run only on
 `crawler-worker` services, each with its own `/tmp`. `WORKER_MAX_JOBS` applies
 per process, while `CRAWL_JOB_CONCURRENCY_LIMIT` and
 `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` cap running crawls across all crawler
@@ -1467,6 +1555,10 @@ The flag defaults to `false`. Both an enabled flag and a valid HTTP(S) destinati
 are required. The invitation appears in the signed-in shell and opens a new tab,
 leaving the current app available. Setting the flag back to `false` hides it; the
 beta remains reachable by its URL. The banner is discoverability, not access control.
+
+Flows are built, run and administered only in the new app. `NEW_APP_URL` alone,
+without the banner flag, makes the Svelte space menu's **Flows** entry open that
+space's flows page in the new app; without it the Svelte app shows no Flows entry.
 
 To withdraw the beta, disable the invitation and stop the `web-next` service or
 remove its ingress. Keep the shared backend and database running. Do not downgrade

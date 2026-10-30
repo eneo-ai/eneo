@@ -59,7 +59,12 @@ function PanelTitle({
   };
 
   return (
-    <h2 className="flex min-w-0">
+    // The popover wraps its trigger in an inline-flex box sized to the
+    // trigger's content less the button's negative margins, so the title
+    // lost 16px and was cut short however much room the header had; the
+    // wrapper fills the row instead, and the title truncates only for want
+    // of room.
+    <h2 className="flex min-w-0 [&>div]:min-w-0 [&>div]:flex-1">
       <Popover
         isOpen={open}
         onOpenChange={setOpen}

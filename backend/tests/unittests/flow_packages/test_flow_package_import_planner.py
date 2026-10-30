@@ -1,0 +1,1102 @@
+from __future__ import annotations
+
+import json
+from dataclasses import replace
+from datetime import datetime, timezone
+from uuid import UUID
+
+import pytest
+from pydantic import TypeAdapter, ValidationError
+
+from eneo.flow_packages.application.flow_package_import_planner import (
+    FlowPackageImportPlannerCandidates,
+    build_flow_package_import_plan,
+)
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+from eneo.flow_packages.domain.flow_package_errors import (
+    FlowPackageErrorCode,
+    FlowPackageValidationError,
+)
+from eneo.flow_packages.domain.flow_package_import_plan import (
+    MAX_IMPORT_PLAN_SUGGESTIONS,
+    FlowPackageDependencyResolutionEntry,
+    FlowPackageImportPlan,
+    FlowPackageImportPlanStatus,
+    FlowPackageLocalCandidate,
+    FlowPackageModelCandidate,
+    FlowPackageModelDependencyResolution,
+    FlowPackageModelMatchIssue,
+)
+from eneo.flow_packages.domain.flow_package_manifest import (
+    EneoPackageKind,
+    FlowPackageManifest,
+)
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
+    FlowPackageKnowledgeRequirement,
+    FlowPackageModelGuidance,
+    FlowPackageModelIdentity,
+    FlowPackageModelKind,
+    FlowPackageModelMatchingPreferences,
+    FlowPackageModelRequirement,
+    FlowPackageRequirementEntry,
+    FlowPackageRequirementKind,
+    FlowPackageRequirementSet,
+    FlowPackageTemplateAssetRequirement,
+)
+from eneo.flow_packages.infrastructure.flow_package_zip_reader import read_flow_package
+from eneo.flow_packages.infrastructure.flow_package_zip_writer import write_flow_package
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.domain.flow_step_validation import (
+    FlowGraphIssueCode,
+    FlowStepValidationError,
+)
+from eneo.flows.flow_authoring_spec import (
+    MAX_FLOW_AUTHORING_STEPS,
+    AssistantSpec,
+    FlowDraftSpecCore,
+    FormFieldSpec,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
+from eneo.flows.flow_authoring_variable_rewriting import (
+    flow_step_validation_views_from_draft_spec,
+)
+from eneo.flows.flow_resource_bindings import (
+    LocalResourceKind,
+    ResourceSlotKind,
+    ResourceSlotRef,
+)
+from eneo.flows.flow_validators import (
+    collect_step_graph_issues,
+    validate_step_graph,
+    validate_steps,
+)
+from eneo.flows.runtime.step_input_resolution import resolve_step_input
+from tests.unittests.flows.test_input_binding_contract_rules import (
+    _wildcard_projection_case,
+)
+from tests.unittests.flows.test_resolved_input_runtime import (
+    _publish_step,
+    _resolution_deps,
+    _result,
+    _run,
+    _step,
+    _wildcard_runtime_step,
+)
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "valid",
+        "text",
+        "scalar_leaf",
+        "object_leaf",
+        "wildcard_prefix_items",
+        "leaf_prefix_items",
+        "two_wildcards",
+        "trailing_wildcard",
+        "non_array",
+        "collision",
+        "wrong_destination",
+    ],
+)
+@pytest.mark.asyncio
+async def test_wildcard_projection_planner_publish_runtime_parity(case):
+    bindings, source, projected = _wildcard_projection_case()
+    input_type = InputType.TEXT if case == "text" else InputType.JSON
+    if case in {"scalar_leaf", "object_leaf"}:
+        source["properties"]["sektioner"]["items"]["properties"]["underlag"][
+            "properties"
+        ]["krav"]["properties"]["uppgifter"] = {
+            "type": "string" if case == "scalar_leaf" else "object"
+        }
+    elif case == "non_array":
+        source["properties"]["sektioner"]["type"] = "object"
+    elif case in {"wildcard_prefix_items", "leaf_prefix_items"}:
+        array_schema = source["properties"]["sektioner"]
+        if case == "leaf_prefix_items":
+            array_schema = array_schema["items"]["properties"]["underlag"][
+                "properties"
+            ]["krav"]["properties"]["uppgifter"]
+            array_schema["items"] = False
+        array_schema["prefixItems"] = [{"type": "string"}]
+    elif case == "two_wildcards":
+        bindings["source_refs"][0]["field_path"] = "sektioner.*.underlag.*.uppgifter"
+    elif case == "trailing_wildcard":
+        bindings["source_refs"][0]["field_path"] = "sektioner.*"
+    elif case == "collision":
+        bindings["source_refs"].append(dict(bindings["source_refs"][0]))
+    elif case == "wrong_destination":
+        projected = source
+    envelope = _envelope(
+        requirements=[],
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="consume",
+                name="Consume",
+                assistant_spec=AssistantSpec(instructions="Use the projected facts."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=input_type,
+                input_bindings=_wildcard_projection_case()[0],
+                input_contract=None if case == "text" else projected,
+            )
+        ],
+    )
+    envelope.spec.steps[1] = envelope.spec.steps[1].model_copy(
+        update={"input_bindings": bindings}
+    )
+    envelope.spec.steps[0].output_type = OutputType.JSON
+    envelope.spec.steps[0].output_contract = source
+    producer = replace(
+        _step(step_order=1, input_source="flow_input"),
+        user_description="Extract",
+        output_type="json",
+        output_contract=source,
+    )
+    consumer = replace(
+        _wildcard_runtime_step(),
+        user_description="Consume",
+        input_type=input_type.value,
+        input_bindings=bindings,
+        input_contract=None if case == "text" else projected,
+    )
+    published = [_publish_step(producer), _publish_step(consumer)]
+    if case != "valid":
+        error_code = (
+            "flow_input_contract_inapplicable"
+            if case == "wrong_destination"
+            else "flow_input_binding_unsupported_key"
+        )
+        with pytest.raises(FlowPackageValidationError) as imported:
+            await build_flow_package_import_plan(
+                envelope, candidates=FlowPackageImportPlannerCandidates()
+            )
+        assert imported.value.context["reason"] == error_code
+        with pytest.raises(FlowStepValidationError) as published_error:
+            validate_steps(published, require_complete_template_fill_config=True)
+        assert published_error.value.code == error_code
+        return
+
+    plan = await build_flow_package_import_plan(
+        envelope, candidates=FlowPackageImportPlannerCandidates()
+    )
+    assert plan.can_install_as_draft
+    assert plan.can_publish_after_import
+    assert (
+        flow_step_validation_views_from_draft_spec(envelope.spec.steps)[
+            1
+        ].input_contract
+        == projected
+    )
+    validate_steps(published, require_complete_template_fill_config=True)
+    resolved = await resolve_step_input(
+        step=consumer,
+        context={},
+        run=_run(),
+        prior_results=[
+            _result(
+                output_payload={
+                    "structured": {
+                        "sektioner": [
+                            {"underlag": {"krav": {"uppgifter": [{"text": "A"}]}}},
+                            {"underlag": {"krav": {"uppgifter": []}}},
+                            {
+                                "underlag": {
+                                    "krav": {
+                                        "uppgifter": [{"text": "A"}, {"text": "B"}]
+                                    }
+                                }
+                            },
+                        ]
+                    }
+                }
+            )
+        ],
+        deps=_resolution_deps(),
+    )
+    assert resolved.structured == {
+        "underlag": {
+            "krav": {"uppgifter": [{"text": "A"}, {"text": "A"}, {"text": "B"}]}
+        }
+    }
+
+
+@pytest.mark.parametrize("with_item_map", [False, True])
+async def test_imported_section_processing_planner_publish_parity(
+    with_item_map: bool,
+) -> None:
+    bindings, source, projected = _wildcard_projection_case()
+    bindings["source_refs"][0]["step_ref"] = "extract"
+    # Uploads give the sections their one material.
+    input_config: FlowPersistedJsonObject = {
+        "text_processing": {"mode": "process_each_section"},
+        "runtime_input": {"enabled": True},
+    }
+    if with_item_map:
+        input_config["item_map"] = {"enabled": True, "max_items": 3}
+    original = _envelope(
+        requirements=[],
+        input_config=input_config,
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="consume",
+                name="Consume",
+                assistant_spec=AssistantSpec(instructions="Use the projected facts."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.JSON,
+                input_bindings=bindings,
+                input_contract=projected,
+            )
+        ],
+    )
+    original.spec.steps[0].output_type = OutputType.JSON
+    original.spec.steps[0].output_contract = source
+    envelope = FlowPackageEnvelope.build_for_export(
+        manifest_metadata=original.manifest,
+        draft=original.draft,
+        requirements=original.requirements,
+        provenance=original.provenance,
+    )
+    imported = read_flow_package(write_flow_package(envelope))
+    published = flow_step_validation_views_from_draft_spec(imported.spec.steps)
+
+    if with_item_map:
+        message = "Section processing cannot be nested with item_map or per_source."
+        with pytest.raises(FlowPackageValidationError, match=message) as planned:
+            await build_flow_package_import_plan(
+                imported, candidates=FlowPackageImportPlannerCandidates()
+            )
+        assert planned.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+        assert planned.value.context == {"reason": "flow_step_invalid"}
+        with pytest.raises(FlowStepValidationError, match=message) as rejected:
+            validate_step_graph(published, require_complete_template_fill_config=True)
+        assert rejected.value.code == "flow_step_invalid"
+    else:
+        plan = await build_flow_package_import_plan(
+            imported, candidates=FlowPackageImportPlannerCandidates()
+        )
+        assert plan.can_install_as_draft
+        assert plan.can_publish_after_import
+        validate_step_graph(published, require_complete_template_fill_config=True)
+
+
+async def test_planner_returns_unresolved_required_when_no_matching_model_exists() -> (
+    None
+):
+    envelope = _envelope(
+        requirements=[
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured")
+            )
+        ]
+    )
+
+    plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    assert len(plan.dependency_resolutions) == 1
+    resolution = plan.dependency_resolutions[0]
+    assert resolution.status is FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED
+    assert resolution.install_blocks is True
+    assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is True
+    assert resolution.auto_select_allowed is False
+    assert resolution.suggestions == []
+    assert plan.can_install_as_draft is False
+    assert plan.can_publish_after_import is False
+
+
+async def test_planner_resolves_required_model_when_exact_candidate_exists() -> None:
+    envelope = _envelope(
+        requirements=[
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+                used_by_steps=["extract"],
+                guidance=FlowPackageModelGuidance(
+                    summary="Use a strong structured extraction model."
+                ),
+                matching_preferences=FlowPackageModelMatchingPreferences(
+                    tested_with=[_identity("openai", "gpt-5.4-mini")]
+                ),
+            )
+        ]
+    )
+    candidate = _model_candidate(
+        local_id="11111111-1111-4111-8111-111111111111",
+        label="Structured model",
+        provider="openai",
+        model="gpt-5.4-mini",
+    )
+
+    plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(models=[candidate]),
+    )
+
+    resolution = plan.dependency_resolutions[0]
+    assert resolution.status is FlowPackageImportPlanStatus.RESOLVED_EXACT
+    assert resolution.install_blocks is False
+    assert resolution.publish_blocks is False
+    assert resolution.selection_required_for_install is True
+    assert resolution.auto_select_allowed is True
+    assert resolution.required is True
+    assert resolution.used_by_steps == ["extract"]
+    assert isinstance(resolution, FlowPackageModelDependencyResolution)
+    assert resolution.guidance is not None
+    assert resolution.guidance.summary == "Use a strong structured extraction model."
+    assert resolution.suggestions == [candidate]
+    assert resolution.eligible_candidate_count == 1
+    assert resolution.selection_warnings == []
+    assert resolution.total_candidate_count == 1
+    assert plan.can_install_as_draft is True
+    assert plan.can_publish_after_import is True
+
+
+async def test_planner_preserves_model_rejection_telemetry() -> None:
+    envelope = _envelope(
+        requirements=[
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+            )
+        ]
+    )
+    candidate = _model_candidate(
+        local_id="12121212-1212-4212-8212-121212121212",
+        label="Unknown model",
+        provider="local",
+        model="unknown",
+    )
+
+    plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(models=[candidate]),
+    )
+
+    resolution = plan.dependency_resolutions[0]
+    assert isinstance(resolution, FlowPackageModelDependencyResolution)
+    assert resolution.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
+    assert resolution.install_blocks is False
+    assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is True
+    assert resolution.auto_select_allowed is False
+    assert resolution.selection_warnings == [
+        FlowPackageModelMatchIssue.MODEL_IDENTITY_NOT_PREFERRED
+    ]
+
+
+async def test_planner_blocks_required_knowledge_without_candidates() -> None:
+    envelope = _envelope(
+        requirements=[
+            FlowPackageKnowledgeRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
+            )
+        ]
+    )
+
+    plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    resolution = plan.dependency_resolutions[0]
+    assert resolution.status is FlowPackageImportPlanStatus.UNRESOLVED_REQUIRED
+    assert resolution.install_blocks is True
+    assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is True
+    assert resolution.auto_select_allowed is False
+    assert resolution.suggestions == []
+    assert plan.can_install_as_draft is False
+    assert plan.can_publish_after_import is False
+
+
+async def test_planner_marks_required_knowledge_with_suggestions_as_confirmation_only() -> (
+    None
+):
+    envelope = _envelope(
+        requirements=[
+            FlowPackageKnowledgeRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
+            )
+        ]
+    )
+    candidate = _candidate(
+        local_kind=LocalResourceKind.COLLECTION,
+        local_id="22222222-2222-4222-8222-222222222222",
+        label="Local policy",
+    )
+
+    plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(knowledge=[candidate]),
+    )
+
+    resolution = plan.dependency_resolutions[0]
+    assert resolution.status is FlowPackageImportPlanStatus.REQUIRES_HUMAN_CONFIRMATION
+    assert resolution.install_blocks is False
+    assert resolution.publish_blocks is False
+    assert resolution.selection_required_for_install is True
+    assert resolution.auto_select_allowed is False
+    assert resolution.suggestions == [candidate]
+    assert resolution.total_candidate_count == 1
+    assert plan.can_install_as_draft is True
+    assert plan.can_publish_after_import is True
+
+
+async def test_planner_skips_optional_requirement_without_candidates() -> None:
+    envelope = _envelope(
+        requirements=[
+            FlowPackageKnowledgeRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
+                required=False,
+            )
+        ]
+    )
+
+    plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    resolution = plan.dependency_resolutions[0]
+    assert resolution.status is FlowPackageImportPlanStatus.SKIPPED_OPTIONAL
+    assert resolution.install_blocks is False
+    assert resolution.publish_blocks is False
+    assert resolution.selection_required_for_install is False
+    assert resolution.auto_select_allowed is False
+    assert resolution.suggestions == []
+    assert plan.can_install_as_draft is True
+    assert plan.can_publish_after_import is True
+
+
+async def test_planner_marks_template_assets_as_unsupported_until_installer_exists() -> (
+    None
+):
+    envelope = _envelope(
+        requirements=[
+            FlowPackageTemplateAssetRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.TEMPLATE_ASSET, "report-docx"),
+            )
+        ]
+    )
+
+    plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    resolution = plan.dependency_resolutions[0]
+    assert resolution.status is FlowPackageImportPlanStatus.UNSUPPORTED
+    assert resolution.install_blocks is True
+    assert resolution.publish_blocks is True
+    assert resolution.selection_required_for_install is False
+    assert resolution.auto_select_allowed is False
+    assert resolution.suggestions == []
+
+
+async def test_import_plan_resolutions_are_discriminated_by_requirement_kind() -> None:
+    envelope = _envelope(
+        requirements=[
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+            ),
+            FlowPackageKnowledgeRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
+            ),
+        ]
+    )
+
+    plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+    resolution_adapter = TypeAdapter(FlowPackageDependencyResolutionEntry)
+    reparsed_resolutions = [
+        resolution_adapter.validate_json(resolution.model_dump_json())
+        for resolution in plan.dependency_resolutions
+    ]
+
+    assert isinstance(reparsed_resolutions[0], FlowPackageModelDependencyResolution)
+    assert reparsed_resolutions[1].kind is FlowPackageRequirementKind.KNOWLEDGE
+
+
+async def test_planner_caps_and_orders_suggestions_deterministically() -> None:
+    envelope = _envelope(
+        requirements=[
+            FlowPackageKnowledgeRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
+            )
+        ]
+    )
+    candidates = [
+        _candidate(
+            local_kind=LocalResourceKind.COLLECTION,
+            local_id=f"11111111-1111-4111-8111-{index:012d}",
+            label=f"Policy {60 - index:02d}",
+        )
+        for index in range(60)
+    ]
+
+    first_plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(knowledge=candidates),
+    )
+    second_plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(
+            knowledge=list(reversed(candidates))
+        ),
+    )
+
+    first_resolution = first_plan.dependency_resolutions[0]
+    assert len(first_resolution.suggestions) == MAX_IMPORT_PLAN_SUGGESTIONS
+    assert first_resolution.total_candidate_count == 60
+    assert [candidate.label for candidate in first_resolution.suggestions] == [
+        f"Policy {index:02d}" for index in range(1, 11)
+    ]
+    assert first_plan.model_dump(mode="json") == second_plan.model_dump(mode="json")
+
+
+async def test_planner_accepts_zero_requirements_as_publishable() -> None:
+    plan = await build_flow_package_import_plan(
+        _envelope(
+            requirements=[],
+            assistant=AssistantSpec(instructions="No package resources."),
+        ),
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    assert plan.package_summary.name == "Demo"
+    assert plan.kind == "flow"
+    assert plan.payload_schema == "eneo.flow_package.v1"
+    assert plan.package_summary.description == ""
+    assert plan.package_summary.spec_hash == "0" * 64
+    assert plan.package_summary.steps_count == 1
+    assert plan.package_summary.requirements_count == 0
+    assert plan.package_summary.requirements_by_kind == {}
+    assert plan.dependency_resolutions == []
+    assert plan.can_publish_after_import is True
+
+
+def test_envelope_rejects_draft_ref_not_declared_by_requirements() -> None:
+    envelope = _envelope(
+        requirements=[],
+        assistant=AssistantSpec(
+            instructions="Use selected model.",
+            model_ref="model.undeclared",
+        ),
+    )
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        envelope.validated_resource_contract()
+
+    assert (
+        exc_info.value.code
+        is FlowPackageErrorCode.IMPORT_DRAFT_REFERENCES_UNDECLARED_SLOT
+    )
+    assert exc_info.value.context == {
+        "slot_ref": "model.undeclared",
+        "unknown_count": 1,
+    }
+
+
+async def test_planner_rejects_invalid_flow_graph_before_install() -> None:
+    resource_free_assistant = AssistantSpec(instructions="No package resources.")
+    envelope = _envelope(
+        requirements=[],
+        assistant=resource_free_assistant,
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="also-extract",
+                name="Extract",
+                assistant_spec=resource_free_assistant,
+                input_source=InputSource.PREVIOUS_STEP,
+            )
+        ],
+    )
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        await build_flow_package_import_plan(
+            envelope,
+            candidates=FlowPackageImportPlannerCandidates(),
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context["reason"] == "duplicate_step_name"
+
+
+@pytest.mark.parametrize(
+    ("instructions", "question", "form_fields"),
+    [
+        pytest.param(
+            "Sammanfatta {{ indata_text }}", None, ["namn"], id="prompt-alias"
+        ),
+        pytest.param(
+            "Sammanfatta.", "{{ flow . input . text }}", ["namn"], id="question-path"
+        ),
+    ],
+)
+async def test_planner_refuses_a_package_that_reads_run_text_its_form_run_never_collects(
+    instructions: str, question: str | None, form_fields: list[str]
+) -> None:
+    envelope = _envelope(
+        requirements=[], assistant=AssistantSpec(instructions=instructions)
+    )
+    step = envelope.draft.spec.steps[0]
+    if question is not None:
+        step.input_bindings = {"question": question}
+    envelope.draft.spec.form_fields = [
+        FormFieldSpec(name=name, type="text", label=name) for name in form_fields
+    ]
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        await build_flow_package_import_plan(
+            envelope, candidates=FlowPackageImportPlannerCandidates()
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context["reason"] == "flow_input_alias_not_received"
+
+
+async def test_planner_accepts_a_package_that_reads_the_run_text_of_a_free_text_run() -> (
+    None
+):
+    envelope = _envelope(
+        requirements=[],
+        assistant=AssistantSpec(instructions="Sammanfatta {{ indata_text }}"),
+    )
+
+    await build_flow_package_import_plan(
+        envelope, candidates=FlowPackageImportPlannerCandidates()
+    )
+
+
+async def test_planner_refuses_a_package_with_more_steps_than_a_flow_can_have() -> None:
+    assistant = AssistantSpec(instructions="No package resources.")
+
+    def package(step_count: int) -> FlowPackageEnvelope:
+        return _envelope(
+            requirements=[],
+            assistant=assistant,
+            extra_steps=[
+                StepSpec(
+                    plan_step_ref=f"step-{index}",
+                    name=f"Step {index}",
+                    assistant_spec=assistant,
+                    input_source=InputSource.PREVIOUS_STEP,
+                )
+                for index in range(2, step_count + 1)
+            ],
+        )
+
+    plan = await build_flow_package_import_plan(
+        package(MAX_FLOW_AUTHORING_STEPS),
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+    assert plan.package_summary.steps_count == MAX_FLOW_AUTHORING_STEPS
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        await build_flow_package_import_plan(
+            package(MAX_FLOW_AUTHORING_STEPS + 1),
+            candidates=FlowPackageImportPlannerCandidates(),
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context == {"reason": "flow_step_limit_exceeded"}
+    # The package contract carries no counts; its message states them.
+    assert str(MAX_FLOW_AUTHORING_STEPS) in str(exc_info.value)
+    assert str(MAX_FLOW_AUTHORING_STEPS + 1) in str(exc_info.value)
+
+
+async def test_planner_rejects_section_step_whose_prompt_reads_json_step() -> None:
+    original = _envelope(
+        requirements=[],
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="summary",
+                name="Summary",
+                assistant_spec=AssistantSpec(instructions="Sammanfatta."),
+                input_source=InputSource.PREVIOUS_STEP,
+            ),
+            StepSpec(
+                plan_step_ref="notes",
+                name="Notes",
+                # The input reads the text summary; the prompt reads the JSON step.
+                assistant_spec=AssistantSpec(
+                    instructions="Anteckna utifrån {{ extract.output.text }}."
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_config={"text_processing": {"mode": "process_each_section"}},
+                output_type=OutputType.JSON,
+                output_contract={
+                    "type": "object",
+                    "properties": {
+                        "records": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {"note": {"type": "string"}},
+                            },
+                        }
+                    },
+                },
+            ),
+        ],
+    )
+    original.spec.steps[0].output_type = OutputType.JSON
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        await build_flow_package_import_plan(
+            original, candidates=FlowPackageImportPlannerCandidates()
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context == {
+        "reason": FlowGraphIssueCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value
+    }
+
+
+async def test_planner_rejects_empty_flow_before_reporting_publishable() -> None:
+    envelope = _envelope(
+        requirements=[],
+        assistant=AssistantSpec(instructions="No package resources."),
+    ).model_copy(
+        update={
+            "draft": FlowPackageFlowDraft(
+                schema_version=1,
+                spec=FlowDraftSpecCore(flow_name="Empty", steps=[]),
+            )
+        }
+    )
+
+    with pytest.raises(FlowPackageValidationError) as exc_info:
+        await build_flow_package_import_plan(
+            envelope,
+            candidates=FlowPackageImportPlannerCandidates(),
+        )
+
+    assert exc_info.value.code is FlowPackageErrorCode.FLOW_DRAFT_INVALID
+    assert exc_info.value.context == {"reason": "no_executable_steps"}
+
+
+@pytest.mark.parametrize(
+    "input_type, input_config",
+    [
+        (InputType.AUDIO, None),
+        (
+            InputType.DOCUMENT,
+            {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "input_format": "audio",
+                }
+            },
+        ),
+    ],
+)
+async def test_planner_fills_only_a_marked_default_transcription_model(
+    input_type: InputType,
+    input_config: FlowPersistedJsonObject | None,
+) -> None:
+    envelope = _envelope(
+        requirements=[],
+        assistant=AssistantSpec(instructions="Transcribe audio."),
+        input_type=input_type,
+        input_config=input_config,
+    )
+    model_id = "77777777-7777-4777-8777-777777777777"
+    usable = FlowPackageImportPlannerCandidates(
+        models=[
+            _model_candidate(
+                local_id=model_id,
+                label="Transcription",
+                model_kind=FlowPackageModelKind.TRANSCRIPTION_MODEL,
+            )
+        ]
+    )
+
+    no_model = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+        default_transcription_model_id=None,
+    )
+    unmarked = await build_flow_package_import_plan(
+        envelope, candidates=usable, default_transcription_model_id=None
+    )
+    marked = await build_flow_package_import_plan(
+        envelope, candidates=usable, default_transcription_model_id=UUID(model_id)
+    )
+
+    # Nowhere to take a model from: the package cannot be installed here.
+    assert no_model.target_state.audio_transcription_required is True
+    assert no_model.transcription_model_available is False
+    assert no_model.can_install_as_draft is False
+    assert no_model.can_publish_after_import is False
+    # A usable model nobody marked is not chosen: the draft is installed
+    # without one and cannot be published until its author chooses.
+    assert unmarked.target_state.audio_transcription_required is True
+    assert unmarked.target_state.default_transcription_model_id is None
+    assert unmarked.transcription_model_available is True
+    assert unmarked.can_install_as_draft is True
+    assert unmarked.can_publish_after_import is False
+    assert marked.target_state.default_transcription_model_id == UUID(model_id)
+    assert marked.can_install_as_draft is True
+    assert marked.can_publish_after_import is True
+
+
+@pytest.mark.parametrize(
+    "input_source", [InputSource.FLOW_INPUT, InputSource.PREVIOUS_STEP]
+)
+def test_audio_upload_graph_requires_transcription_model(
+    input_source: InputSource,
+) -> None:
+    upload_config: FlowPersistedJsonObject = {
+        "runtime_input": {"enabled": True, "required": True, "input_format": "audio"},
+    }
+    envelope = _envelope(
+        requirements=[],
+        input_type=InputType.DOCUMENT
+        if input_source is InputSource.FLOW_INPUT
+        else InputType.TEXT,
+        input_config=upload_config if input_source is InputSource.FLOW_INPUT else None,
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="upload",
+                name="Upload audio",
+                assistant_spec=AssistantSpec(instructions="Pass through."),
+                input_source=InputSource.PREVIOUS_STEP,
+                input_type=InputType.TEXT,
+                input_config=upload_config,
+            )
+        ]
+        if input_source is InputSource.PREVIOUS_STEP
+        else None,
+    )
+    steps = flow_step_validation_views_from_draft_spec(envelope.spec.steps)
+    issues = collect_step_graph_issues(
+        steps,
+        metadata_json={"wizard": {"transcription_enabled": True}},
+        require_complete_template_fill_config=True,
+    )
+    assert FlowGraphIssueCode.FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED in {
+        issue.code for issue in issues
+    }
+
+
+async def test_planner_omits_model_slot_that_no_step_reads() -> None:
+    # The spec loader strips model_ref from a rendering step, so a package that
+    # declared a model only for such steps carries a slot nothing reads. The
+    # plan neither shows it nor requires a binding for it.
+    envelope = _envelope(
+        requirements=[
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+            ),
+            FlowPackageModelRequirement(
+                slot_ref=_slot_ref(ResourceSlotKind.MODEL, "render"),
+                used_by_steps=["render"],
+            ),
+        ],
+        extra_steps=[
+            StepSpec(
+                plan_step_ref="render",
+                name="Render",
+                assistant_spec=AssistantSpec(
+                    instructions="Render the text.",
+                    model_ref="model.render",
+                ),
+                input_source=InputSource.PREVIOUS_STEP,
+                output_mode=OutputMode.RENDER_VERBATIM,
+                output_type=OutputType.PDF,
+            )
+        ],
+    )
+
+    plan = await build_flow_package_import_plan(
+        envelope,
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    assert [entry.slot_ref.ref for entry in plan.dependency_resolutions] == [
+        "model.structured"
+    ]
+    assert plan.package_summary.requirements_count == 1
+    assert plan.package_summary.requirements_by_kind == {
+        FlowPackageRequirementKind.MODEL: 1,
+    }
+
+
+async def test_planner_summary_counts_requirements_by_kind() -> None:
+    plan = await build_flow_package_import_plan(
+        _envelope(
+            requirements=[
+                FlowPackageModelRequirement(
+                    slot_ref=_slot_ref(ResourceSlotKind.MODEL, "structured"),
+                ),
+                FlowPackageKnowledgeRequirement(
+                    slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "policy"),
+                ),
+                FlowPackageKnowledgeRequirement(
+                    slot_ref=_slot_ref(ResourceSlotKind.KNOWLEDGE, "guidance"),
+                    required=False,
+                ),
+            ]
+        ),
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    assert plan.package_summary.requirements_count == 3
+    assert plan.package_summary.requirements_by_kind == {
+        FlowPackageRequirementKind.MODEL: 1,
+        FlowPackageRequirementKind.KNOWLEDGE: 2,
+    }
+    assert plan.can_install_as_draft is False
+
+
+async def test_import_plan_storage_projection_round_trips_without_computed_fields() -> (
+    None
+):
+    plan = await build_flow_package_import_plan(
+        _envelope(
+            requirements=[],
+            assistant=AssistantSpec(instructions="No package resources."),
+        ),
+        candidates=FlowPackageImportPlannerCandidates(),
+    )
+
+    stored = plan.storage_json()
+    reparsed = FlowPackageImportPlan.model_validate_json(json.dumps(stored))
+
+    assert "can_install_as_draft" not in stored
+    assert "can_publish_after_import" not in stored
+    assert reparsed == plan
+
+
+def test_candidate_bucket_rejects_wrong_non_model_local_resource_kind() -> None:
+    with pytest.raises(
+        ValidationError,
+        match="cannot satisfy knowledge package candidates",
+    ):
+        FlowPackageImportPlannerCandidates(
+            knowledge=[
+                FlowPackageLocalCandidate(
+                    local_kind=LocalResourceKind.COMPLETION_MODEL,
+                    local_id=UUID("44444444-4444-4444-8444-444444444444"),
+                    label="Wrong bucket",
+                )
+            ]
+        )
+
+
+def _envelope(
+    *,
+    requirements: list[FlowPackageRequirementEntry],
+    assistant: AssistantSpec | None = None,
+    extra_steps: list[StepSpec] | None = None,
+    input_type: InputType = InputType.TEXT,
+    input_config: FlowPersistedJsonObject | None = None,
+) -> FlowPackageEnvelope:
+    default_assistant = AssistantSpec(
+        instructions="Extract facts.",
+        model_ref=(
+            "model.structured"
+            if any(
+                isinstance(requirement, FlowPackageModelRequirement)
+                for requirement in requirements
+            )
+            else None
+        ),
+    )
+    spec = FlowDraftSpecCore(
+        flow_name="Demo",
+        steps=[
+            StepSpec(
+                plan_step_ref="extract",
+                name="Extract",
+                assistant_spec=assistant or default_assistant,
+                input_source=InputSource.FLOW_INPUT,
+                input_type=input_type,
+                input_config=input_config,
+            ),
+            *(extra_steps or []),
+        ],
+    )
+    return FlowPackageEnvelope(
+        manifest=FlowPackageManifest(
+            schema_version=1,
+            kind=EneoPackageKind.FLOW,
+            package_id="se.demo.flow",
+            package_version="1.0.0",
+            name="Demo",
+            content_checksum="0" * 64,
+        ),
+        draft=FlowPackageFlowDraft(schema_version=1, spec=spec),
+        requirements=FlowPackageRequirementSet(
+            schema_version=1,
+            requirements=requirements,
+        ),
+        provenance=FlowPackageProvenance(
+            schema_version=1,
+            exported_at=datetime(2026, 5, 18, tzinfo=timezone.utc),
+            omissions=[],
+        ),
+        spec_hash="0" * 64,
+        manifest_hash="0" * 64,
+        requirements_hash="0" * 64,
+        provenance_hash="0" * 64,
+        content_checksum="0" * 64,
+    )
+
+
+def _slot_ref(kind: ResourceSlotKind, slot: str) -> ResourceSlotRef:
+    return ResourceSlotRef(kind=kind, slot=slot, label=slot.replace("-", " ").title())
+
+
+def _candidate(
+    *,
+    local_kind: LocalResourceKind,
+    local_id: str,
+    label: str,
+) -> FlowPackageLocalCandidate:
+    return FlowPackageLocalCandidate(
+        local_kind=local_kind,
+        local_id=UUID(local_id),
+        label=label,
+    )
+
+
+def _model_candidate(
+    *,
+    local_id: str,
+    label: str,
+    provider: str = "local",
+    model: str = "model",
+    model_kind: FlowPackageModelKind = FlowPackageModelKind.COMPLETION_MODEL,
+) -> FlowPackageModelCandidate:
+    local_kind = (
+        LocalResourceKind.COMPLETION_MODEL
+        if model_kind is FlowPackageModelKind.COMPLETION_MODEL
+        else LocalResourceKind.TRANSCRIPTION_MODEL
+    )
+    return FlowPackageModelCandidate(
+        local_kind=local_kind,
+        local_id=UUID(local_id),
+        label=label,
+        model_kind=model_kind,
+        identity=_identity(provider, model),
+        max_input_tokens=64000
+        if model_kind is FlowPackageModelKind.COMPLETION_MODEL
+        else None,
+    )
+
+
+def _identity(provider: str, model: str) -> FlowPackageModelIdentity:
+    return FlowPackageModelIdentity(provider=provider, model=model)

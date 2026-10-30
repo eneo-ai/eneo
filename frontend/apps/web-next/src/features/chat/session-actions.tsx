@@ -6,15 +6,14 @@ import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { revealProblems } from "@/components/composites/field-problem";
 import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
-import { TextInput } from "@/components/astryx/text-input";
-import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
+import { TextInput } from "@astryxdesign/core/TextInput";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { browserApi } from "@/lib/api/browser";
-import { dropFromRecentConversations, invalidateConversationLists } from "@/lib/api/conversations";
+import { invalidateConversationLists, patchConversationLists } from "@/lib/api/conversations";
 import { unwrap } from "@/lib/api/errors";
-import type { CursorPage } from "@/lib/api/pagination";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
 
@@ -60,6 +59,7 @@ export function useSessionMutations(
         })
       ),
     onSuccess: (_, { id, name }) => {
+      patchConversationLists(queryClient, historyLists, id, name);
       invalidate();
       onRenamed?.(id, name);
     },
@@ -76,18 +76,7 @@ export function useSessionMutations(
     onSuccess: (_, id) => {
       // Drop the row at once (the refetch follows), so the history never shows
       // a deleted conversation and focus can move on from its row.
-      dropFromRecentConversations(queryClient, id);
-      queryClient.setQueriesData<InfiniteData<CursorPage<{ id: string }>>>(historyLists, (data) =>
-        data
-          ? {
-              ...data,
-              pages: data.pages.map((page) => ({
-                ...page,
-                items: page.items.filter((item) => item.id !== id)
-              }))
-            }
-          : data
-      );
+      patchConversationLists(queryClient, historyLists, id, null);
       invalidate();
       onDeleted?.(id);
     },

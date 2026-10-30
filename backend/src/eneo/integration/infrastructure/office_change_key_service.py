@@ -140,7 +140,3 @@ class OfficeChangeKeyService:
                 f"No cached ChangeKeys found for integration {integration_knowledge_id}. "
                 f"Pattern: {pattern}"
             )
-
-    async def close(self) -> None:
-        """Close Redis connection."""
-        await self.redis_client.close()

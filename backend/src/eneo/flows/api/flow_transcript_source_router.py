@@ -1,0 +1,410 @@
+from __future__ import annotations
+
+from typing import Annotated, Any, Literal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Path, Query, Request
+from fastapi.responses import JSONResponse
+from pydantic import BaseModel, ConfigDict, Field
+
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.access_denial_code import AccessDenialCode
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
+from eneo.flows.api import flow_access_context
+from eneo.flows.api.flow_api_common import (
+    RETIRED_FLOW_HISTORY_READ_CLAUSE,
+    error_response,
+)
+from eneo.flows.application.flow_run_evidence_service import (
+    RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
+)
+from eneo.flows.application.flow_run_evidence_snapshot import (
+    flow_run_evidence_snapshot_transaction,
+)
+from eneo.flows.application.flow_trace_audit import (
+    log_flow_trace_audit_or_raise,
+    raise_flow_trace_audit_unavailable,
+)
+from eneo.flows.domain.flow import FlowRunStatusSnapshot
+from eneo.flows.domain.transcript_source import (
+    TranscriptComponentOmissions,
+    TranscriptSourceBounds,
+    TranscriptSourceOmissionReason,
+)
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.container.container import Container
+from eneo.main.exceptions import (
+    AuditLoggingUnavailableException,
+    ErrorCodes,
+    FileTooLargeException,
+)
+from eneo.server.dependencies.container import get_container_for_explicit_transaction
+from eneo.users.user import UserInDB
+
+router = APIRouter()
+TRANSCRIPT_SOURCE_PAGE_SIZE = 200
+
+
+class TranscriptSourcePageIdentity(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: UUID
+    step_id: UUID
+    attempt_no: int
+
+
+TRANSCRIPT_SOURCE_SEGMENT_EXAMPLE: dict[str, Any] = {
+    "segment_index": 0,
+    "file_index": 0,
+    "start": 0.0,
+    "end": 3.2,
+    "speaker": "SPEAKER_00",
+    "text": "Vi ses imorgon.",
+}
+
+TRANSCRIPT_SPEAKER_REVIEW_EXAMPLE: dict[str, Any] = {
+    "files": [
+        {
+            "version": 1,
+            "overlap_detection": "available",
+            "file_index": 0,
+            "file_id": "00000000-0000-0000-0000-000000000701",
+            "overlaps": [
+                {
+                    "id": "00000000-0000-0000-0000-000000000701:overlap_0000",
+                    "start": 1.0,
+                    "end": 1.5,
+                    "detected_speaker_count": 2,
+                }
+            ],
+        }
+    ]
+}
+
+
+class TranscriptSourceSegmentPublic(BaseModel):
+    """One structured transcript line as it is stored. Keys not listed here
+    are passed through unchanged."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"example": TRANSCRIPT_SOURCE_SEGMENT_EXAMPLE},
+    )
+
+    segment_index: int = Field(
+        ge=0,
+        description=(
+            "Absolute index of the line in the attempt's transcript source. "
+            "Corrections and word timings address lines by this index."
+        ),
+    )
+    file_index: int = Field(
+        ge=0,
+        description=(
+            "Which uploaded audio file the times belong to, counted from 0 in "
+            "upload order. A multi-file transcript restarts its times at 0 for "
+            "each file."
+        ),
+    )
+    start: float = Field(description="Seconds from the start of that audio file.")
+    end: float = Field(description="Seconds from the start of that audio file.")
+    speaker: str | None = Field(
+        description=(
+            "Diarization label of the line (`SPEAKER_00`), or null when the "
+            "transcription labelled no speakers. Names given to speakers are "
+            "transcript corrections, not part of the source."
+        ),
+    )
+    text: str = Field(description="The line's text as the transcription produced it.")
+    speaker_attribution: str | None = Field(
+        default=None,
+        description=(
+            "How sure the speaker service is of the line's speaker; "
+            "`provisional` means overlapping speech made the speaker "
+            "uncertain. Present only on lines the speaker service marked."
+        ),
+    )
+    overlap_ids: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Overlaps in `speaker_review` this line falls in, by their `id`. "
+            "Present only on lines the speaker service marked."
+        ),
+    )
+
+
+class TranscriptSpeakerOverlapPublic(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    id: str = Field(
+        description=(
+            "Overlap id, prefixed with its audio file's id. Lines in the overlap "
+            "list it in their `overlap_ids`."
+        ),
+    )
+    start: float = Field(description="Seconds from the start of its audio file.")
+    end: float = Field(description="Seconds from the start of its audio file.")
+    detected_speaker_count: int | None = Field(
+        default=None,
+        description="How many voices the speaker service heard in the overlap.",
+    )
+
+
+class TranscriptSpeakerReviewFilePublic(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    file_index: int = Field(
+        ge=0,
+        description="The audio file this review covers, counted from 0 in upload order.",
+    )
+    file_id: str | None = Field(default=None, description="Id of that audio file.")
+    version: int | None = Field(
+        default=None,
+        description="Version of the speaker service's review contract.",
+    )
+    overlap_detection: str | None = Field(
+        default=None,
+        description=(
+            "Whether the speaker service looked for overlapping speech: "
+            "`available` or `unavailable`."
+        ),
+    )
+    overlaps: list[TranscriptSpeakerOverlapPublic] = Field(
+        default_factory=list[TranscriptSpeakerOverlapPublic],
+        description="Stretches where more than one voice was heard.",
+    )
+
+
+class TranscriptSpeakerReviewPublic(BaseModel):
+    """The speaker service's review detail, passed through as it was stored;
+    members not listed here are kept."""
+
+    model_config = ConfigDict(
+        extra="allow",
+        json_schema_extra={"example": TRANSCRIPT_SPEAKER_REVIEW_EXAMPLE},
+    )
+
+    files: list[TranscriptSpeakerReviewFilePublic] = Field(
+        description="One review per audio file the speaker service labelled.",
+    )
+
+
+class PresentTranscriptSourcePage(TranscriptSourcePageIdentity):
+    status: Literal["present"] = "present"
+    source_hash: str
+    bounds: TranscriptSourceBounds
+    component_omissions: TranscriptComponentOmissions
+    start_segment_index: int
+    page_size: int
+    max_response_bytes: int
+    next_segment_index: int | None
+    segments: list[TranscriptSourceSegmentPublic]
+    speaker_review: TranscriptSpeakerReviewPublic | None = Field(
+        default=None,
+        description=(
+            "Speaker review detail, on the first page only "
+            "(`start_segment_index=0`); null when none was stored."
+        ),
+    )
+
+
+class OmittedTranscriptSourcePage(TranscriptSourcePageIdentity):
+    status: Literal["omitted"] = "omitted"
+    reason: TranscriptSourceOmissionReason
+    bounds: TranscriptSourceBounds
+
+
+class UnavailableTranscriptSourcePage(TranscriptSourcePageIdentity):
+    status: Literal["unavailable_pre_row"] = "unavailable_pre_row"
+
+
+TranscriptSourcePage = Annotated[
+    PresentTranscriptSourcePage
+    | OmittedTranscriptSourcePage
+    | UnavailableTranscriptSourcePage,
+    Field(discriminator="status"),
+]
+
+
+@router.get(
+    "/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/",
+    response_model=TranscriptSourcePage,
+    operation_id="get_flow_run_transcript_source",
+    summary="Get transcript source detail for one attempt",
+    description=(
+        "Returns up to 200 segments with absolute indexes and the complete source hash. "
+        "Follow next_segment_index until null. Send source_hash unchanged as "
+        "segments_hash when saving corrections or regenerating. Speaker review detail "
+        "is included only at start_segment_index=0. Component omissions describe "
+        "production evidence, not the current availability of word timings. "
+        "Content authorization and a committed access audit are required."
+        f" {RETIRED_FLOW_HISTORY_READ_CLAUSE}"
+    ),
+    responses={
+        200: {
+            "content": {
+                "application/json": {
+                    "example": {
+                        "status": "unavailable_pre_row",
+                        "run_id": "00000000-0000-0000-0000-000000000301",
+                        "step_id": "00000000-0000-0000-0000-000000000101",
+                        "attempt_no": 1,
+                    }
+                }
+            }
+        },
+        403: error_response(
+            description="The caller cannot access this run's content.",
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="The run or named step attempt does not exist.",
+            message="Flow run step attempt not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        413: error_response(
+            description="The encoded detail response exceeds its byte limit.",
+            message="Transcript source detail exceeds the response size limit.",
+            eneo_error_code=ErrorCodes.FILE_TOO_LARGE,
+        ),
+        503: error_response(
+            description="Required access audit logging is unavailable.",
+            message="Evidence audit logging is unavailable.",
+            eneo_error_code=ErrorCodes.INTERNAL_SERVER_ERROR,
+            code=FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED,
+            context={"audit_required": True},
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.VIEW),
+)
+async def get_flow_run_transcript_source(
+    flow_id: UUID,
+    run_id: UUID,
+    step_id: UUID,
+    attempt_no: Annotated[int, Path(ge=1)],
+    request: Request,
+    start_segment_index: Annotated[int, Query(ge=0)] = 0,
+    container: Container = Depends(
+        get_container_for_explicit_transaction(with_user=True, with_module_user=True)
+    ),
+) -> JSONResponse:
+    committed_audit_context: tuple[UserInDB, FlowRunStatusSnapshot] | None = None
+    try:
+        async with flow_run_evidence_snapshot_transaction(container):
+            await flow_access_context.enforce_flow_scope(
+                request,
+                container,
+                flow_id=flow_id,
+                required_access=FlowApiAction.VIEW,
+                allow_service_key_principals=True,
+                history=True,
+            )
+            run = await container.flow_run_access_policy().load_run_status(
+                run_id=run_id, flow_id=flow_id, access_kind="content", history=True
+            )
+            state = (
+                await container.flow_transcript_source_service().get_page_for_attempt(
+                    run=run,
+                    step_id=step_id,
+                    attempt_no=attempt_no,
+                    start=start_segment_index,
+                    limit=TRANSCRIPT_SOURCE_PAGE_SIZE,
+                )
+            )
+            identity = TranscriptSourcePageIdentity(
+                run_id=run.id, step_id=step_id, attempt_no=attempt_no
+            ).model_dump()
+            page: TranscriptSourcePage
+            if state.status == "present":
+                source = state.page
+                if source.segments is None or source.source_hash is None:
+                    raise ValueError(
+                        "Present transcript source lacks segments or hash."
+                    )
+                end = min(
+                    start_segment_index + TRANSCRIPT_SOURCE_PAGE_SIZE, source.total
+                )
+                page = PresentTranscriptSourcePage(
+                    **identity,
+                    source_hash=source.source_hash,
+                    bounds=source.bounds,
+                    component_omissions=state.component_omissions,
+                    start_segment_index=start_segment_index,
+                    page_size=TRANSCRIPT_SOURCE_PAGE_SIZE,
+                    max_response_bytes=RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
+                    next_segment_index=end if end < source.total else None,
+                    segments=[
+                        TranscriptSourceSegmentPublic.model_validate(
+                            {**segment, "segment_index": index}
+                        )
+                        for index, segment in enumerate(
+                            source.segments, start=start_segment_index
+                        )
+                    ],
+                )
+                payload = page.model_dump(
+                    mode="json", exclude={"segments", "speaker_review"}
+                )
+                # Each line goes out with exactly the keys it was stored with.
+                payload["segments"] = [
+                    segment.model_dump(mode="json", exclude_unset=True)
+                    for segment in page.segments
+                ]
+                if start_segment_index == 0:
+                    # Stored verbatim from the speaker service; not reshaped.
+                    payload["speaker_review"] = source.speaker_review
+            elif state.status == "omitted":
+                page = OmittedTranscriptSourcePage(
+                    **identity, reason=state.reason, bounds=state.bounds
+                )
+                payload = page.model_dump(mode="json")
+            else:
+                page = UnavailableTranscriptSourcePage(**identity)
+                payload = page.model_dump(mode="json")
+            response = JSONResponse(payload)
+            if len(response.body) > RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES:
+                raise FileTooLargeException(
+                    "Transcript source detail exceeds the response size limit."
+                )
+            user = container.user()
+            await log_flow_trace_audit_or_raise(
+                container=container,
+                user=user,
+                run=run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                description=f"Viewed transcript source for flow run {run.id}",
+                extra={
+                    "evidence_detail": "transcript_source",
+                    "step_id": str(step_id),
+                    "attempt_no": attempt_no,
+                },
+            )
+            committed_audit_context = (user, run)
+    except AuditLoggingUnavailableException:
+        raise
+    except Exception as exc:
+        if committed_audit_context is not None:
+            audit_user, audited_run = committed_audit_context
+            raise_flow_trace_audit_unavailable(
+                user=audit_user,
+                run=audited_run,
+                action=ActionType.FLOW_EVIDENCE_VIEWED,
+                cause=exc,
+            )
+        raise
+    return response
+
+
+__all__ = ["router"]

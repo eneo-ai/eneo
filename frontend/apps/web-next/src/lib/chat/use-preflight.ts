@@ -72,7 +72,7 @@ export function deriveContextUsage({
   lockedOutputTokens: number;
   fallbackContextLimit: number;
 }) {
-  const contextLimit = preflight?.context_window || fallbackContextLimit || 0;
+  const contextLimit = preflight?.max_input_tokens || fallbackContextLimit || 0;
   const pendingTextTokens = preflight?.input_tokens ?? 0;
   const pendingFileTokens = preflight?.file_tokens ?? 0;
   const projectedTotal =

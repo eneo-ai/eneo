@@ -1,0 +1,1968 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import pytest
+from test_flow_run_service import (
+    _attempts_page,
+    _file_repo,
+    _flow,
+    _flow_repo,
+    _provider_call_repo,
+    _run,
+    _step_result_record,
+    _trace_user,
+    _version,
+    flow_run_repo_mock,
+)
+
+from eneo.database.tables.flow_tables import FlowOutboxDeliveryStatus
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.flows.application import flow_run_evidence_service
+from eneo.flows.application.flow_run_access_policy import FlowRunAccessPolicy
+from eneo.flows.application.flow_run_evidence_service import (
+    EMBEDDED_PROVIDER_CALL_LIMIT,
+    EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+    EVIDENCE_EXPORT_MAX_PASSAGE_BYTES,
+    EVIDENCE_EXPORT_MAX_STORED_PROVENANCE_BYTES,
+    PROVIDER_CALL_EXPORT_MAX_EVENTS,
+    RUN_VIEW_MAX_LOADED_ATTEMPTS,
+    RUN_VIEW_MAX_LOADED_LOGICAL_BYTES,
+    RUN_VIEW_MAX_LOADED_PASSAGE_BYTES,
+    FlowRunEvidenceService,
+)
+from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
+from eneo.flows.domain.flow import FlowStepAttempt, FlowStepAttemptStatus
+from eneo.flows.domain.provider_call import (
+    ProviderCallEvidence,
+    ProviderCallEvidencePage,
+)
+from eneo.flows.domain.rag_evidence import (
+    RetrievedKnowledgeEvidence,
+    RetrievedPassage,
+    RetrievedSource,
+    mapped_aggregate_payload,
+)
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_evidence_policy import (
+    FlowHistoryAccessContext,
+    flow_evidence_metadata_facts,
+)
+from eneo.flows.flow_run_provenance import (
+    FlowAttemptProvenance,
+    RagProvenance,
+    parse_resolved_input_edges,
+)
+from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileMetadata
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallEvidenceMeasurement,
+)
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunEvidenceMeasurements,
+    FlowRunEvidenceRowCounts,
+    StepAttemptEvidenceSize,
+    StepAttemptPage,
+)
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointEvidenceMeasurement,
+)
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryEvidenceMeasurement,
+    FlowRunWebhookDeliveryRead,
+    FlowRunWebhookDeliveryRepository,
+)
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionEvidenceMeasurement
+from eneo.flows.published_definition import published_definition_checksum
+from eneo.main.exceptions import (
+    FileTooLargeException,
+    NotFoundException,
+    ResourceGoneException,
+    UnauthorizedException,
+)
+
+
+def _transcript_source_service():
+    from eneo.flows.infrastructure.flow_transcript_source_repo import (
+        TranscriptSourceExportMeasurement,
+    )
+
+    service = AsyncMock()
+    service.count_for_export.return_value = 0
+    service.measure_for_export.return_value = TranscriptSourceExportMeasurement(0, 0, 0)
+    service.get_for_export.return_value = []
+    return service
+
+
+def _seed_flow_repo(flow_repo, flow) -> None:
+    """Answer both flow reads the access policy makes with the real flow.
+
+    The disclosure decision reads a narrow typed evidence-access context; a
+    double that returned a mock there would withhold every passage.
+    """
+    flow_repo.get.return_value = flow
+    evidence_facts = flow_evidence_metadata_facts(flow.metadata_json)
+    flow_repo.get_history_access_context.return_value = FlowHistoryAccessContext(
+        flow_id=flow.id,
+        space_id=flow.space_id,
+        published=True,
+        retired=False,
+        sensitive=evidence_facts.sensitive,
+        evidence_export_allowed=evidence_facts.export_allowed,
+        classification_level=0,
+    )
+
+
+def _access_policy_double() -> AsyncMock:
+    """Access-policy double that answers the disclosure question it must answer.
+
+    The real policy returns a typed passage-disclosure decision; a double that
+    returned a mock here would silently mask every passage.
+    """
+    policy = AsyncMock(spec=FlowRunAccessPolicy)
+    policy.passage_disclosure_for_run.return_value = "text_disclosed"
+    return policy
+
+
+def _webhook_delivery_repo() -> AsyncMock:
+    repo = AsyncMock(spec=FlowRunWebhookDeliveryRepository)
+    repo.list_run_delivery_statuses.return_value = []
+    return repo
+
+
+def _provider_call_evidence() -> ProviderCallEvidence:
+    now = datetime.now(timezone.utc)
+    return ProviderCallEvidence(
+        event_id=uuid4(),
+        attempt_id=uuid4(),
+        step_id=uuid4(),
+        step_order=1,
+        attempt_no=1,
+        ordinal=1,
+        call_kind="completion",
+        status="completed",
+        request_schema_version=2,
+        provider_request_hash="a" * 64,
+        requested_model="openai/gpt-4o-mini",
+        provider="openai",
+        response_format="json_schema",
+        requested_capabilities=("structured_output",),
+        call_reason="initial",
+        mapped_execution_mode=None,
+        mapped_item_index=None,
+        mapped_source_index=None,
+        mapped_source_id=None,
+        response_model="gpt-4o-mini-2026-07-01",
+        provider_response_id="response-1",
+        num_tokens_input=12,
+        num_tokens_output=None,
+        input_source="provider",
+        output_source="not_reported",
+        outcome_reason=None,
+        requested_at=now,
+        finished_at=now,
+    )
+
+
+def _corrections_repo():
+    repo = AsyncMock()
+    repo.list_revisions_for_run.return_value = []
+    repo.measure_revision_evidence.return_value = (
+        FlowRunReviewCheckpointEvidenceMeasurement.empty()
+    )
+    repo.measure_revision_evidence_row_count.return_value = 0
+    return repo
+
+
+def _seed_empty_evidence_measurements(service: FlowRunEvidenceService) -> None:
+    service.flow_run_review_checkpoint_repo.list_review_checkpoint_edits_for_run.return_value = []
+    service.flow_run_review_checkpoint_repo.measure_edit_evidence.return_value = (
+        FlowRunReviewCheckpointEvidenceMeasurement.empty()
+    )
+    service.flow_run_review_checkpoint_repo.measure_edit_evidence_row_count.return_value = 0
+    service.flow_run_repo.measure_evidence_sections.return_value = (
+        FlowRunEvidenceMeasurements.empty()
+    )
+    service.flow_run_repo.measure_evidence_row_counts.return_value = (
+        FlowRunEvidenceRowCounts(0, 0, 0, 0)
+    )
+    service.flow_version_repo.measure_definition_evidence.return_value = (
+        FlowVersionEvidenceMeasurement.empty()
+    )
+    service.flow_run_review_checkpoint_repo.measure_evidence.return_value = (
+        FlowRunReviewCheckpointEvidenceMeasurement.empty()
+    )
+    service.flow_run_review_checkpoint_repo.measure_evidence_row_count.return_value = 0
+    service.provider_call_repo.measure_evidence.return_value = (
+        FlowProviderCallEvidenceMeasurement.empty()
+    )
+    service.provider_call_repo.measure_evidence_row_count.return_value = 0
+    service.webhook_delivery_repo.measure_evidence.return_value = (
+        FlowRunWebhookDeliveryEvidenceMeasurement.empty()
+    )
+    service.webhook_delivery_repo.measure_evidence_row_count.return_value = 0
+    service.flow_run_repo.list_resolved_input_edges_by_attempt_id.side_effect = (
+        lambda *, attempt_ids, **_: {
+            attempt_id: parse_resolved_input_edges(None) for attempt_id in attempt_ids
+        }
+    )
+
+
+def _service_for_empty_run(
+    *,
+    user,
+    provider_call_repo: AsyncMock,
+    access_policy: AsyncMock | None = None,
+):
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    flow_run_repo.list_result_files.return_value = []
+    flow_version_repo = AsyncMock()
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    review_checkpoint_repo = AsyncMock()
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    resolved_access_policy = access_policy or _access_policy_double()
+    resolved_access_policy.load_run.return_value = run
+    service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
+        transcript_corrections_repo=_corrections_repo(),
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=provider_call_repo,
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
+        access_policy=resolved_access_policy,
+    )
+    _seed_empty_evidence_measurements(service)
+    return service, run
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrections", [False, True])
+@pytest.mark.parametrize("after_revision", [None, 2])
+@pytest.mark.parametrize("budget", [128, 1024])
+async def test_history_page_passes_budget_remaining_after_baseline(
+    user, monkeypatch, corrections, after_revision, budget
+):
+    service, run = _service_for_empty_run(
+        user=user, provider_call_repo=_provider_call_repo()
+    )
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES", budget
+    )
+    checkpoint_id = uuid4()
+    step_id = uuid4()
+    if corrections:
+        reader = service.transcript_corrections_repo.list_revisions
+        baseline_reader = service.transcript_corrections_repo.get_revision_for_step
+        previous = SimpleNamespace(
+            revision=2,
+            occurrences_json=[{"corrected": "é"}],
+            speaker_edits_json=[],
+            speaker_names={"SPEAKER_00": "Åsa"},
+        )
+    else:
+        repo = service.flow_run_review_checkpoint_repo
+        baseline_reader = repo.get_review_checkpoint_history_baseline
+        reader = repo.list_review_checkpoint_edits
+        previous = SimpleNamespace(
+            revision=after_revision or 1,
+            payload_json={"text": "edited é"},
+            payload_sha256="a" * 64,
+        )
+    baseline_reader.return_value = (previous, None)
+    reader.return_value = ([], False, None)
+    if corrections:
+        page = await service.list_transcript_correction_revisions(
+            run=run, step_id=step_id, after_revision=after_revision, limit=200
+        )
+        scope = {"run_id": run.id, "step_id": step_id}
+    else:
+        page = await service.list_review_checkpoint_edits(
+            run=run,
+            checkpoint_id=checkpoint_id,
+            after_revision=after_revision,
+            limit=200,
+        )
+        scope = {"checkpoint_id": checkpoint_id}
+    reader.assert_awaited_with(
+        **scope,
+        tenant_id=user.tenant_id,
+        after_revision=after_revision,
+        limit=200,
+        logical_byte_budget=budget
+        - len(canonical_json_bytes(page.baseline.model_dump(mode="json"))),
+    )
+    if not corrections or after_revision is not None:
+        assert baseline_reader.await_args.kwargs["logical_byte_budget"] == budget
+    if corrections:
+        # The names are part of the baseline the budget is spent on.
+        assert page.baseline.speaker_names == (
+            {"SPEAKER_00": "Åsa"} if after_revision is not None else {}
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "corrections, after_revision, baseline_blocked",
+    [
+        (False, None, True),
+        (False, 2, True),
+        (True, 2, True),
+        (False, None, False),
+        (True, None, False),
+    ],
+)
+async def test_history_page_maps_obstruction_metadata_to_size_error(
+    user, monkeypatch, corrections, after_revision, baseline_blocked
+):
+    service, run = _service_for_empty_run(
+        user=user, provider_call_repo=_provider_call_repo()
+    )
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES", 1024
+    )
+    obstruction = (
+        after_revision or (1 if corrections or baseline_blocked else 2),
+        2048,
+    )
+    baseline = SimpleNamespace(
+        revision=after_revision or 1,
+        payload_json={},
+        payload_sha256="a" * 64,
+        occurrences_json=[],
+        speaker_edits_json=[],
+        speaker_names={},
+    )
+    if corrections:
+        baseline_reader = service.transcript_corrections_repo.get_revision_for_step
+        reader = service.transcript_corrections_repo.list_revisions
+    else:
+        baseline_reader = service.flow_run_review_checkpoint_repo.get_review_checkpoint_history_baseline
+        reader = service.flow_run_review_checkpoint_repo.list_review_checkpoint_edits
+    baseline_reader.return_value = (
+        (None, obstruction) if baseline_blocked else (baseline, None)
+    )
+    reader.return_value = ([], True, obstruction)
+    with pytest.raises(FileTooLargeException) as exc:
+        if corrections:
+            await service.list_transcript_correction_revisions(
+                run=run, step_id=uuid4(), after_revision=after_revision, limit=200
+            )
+        else:
+            await service.list_review_checkpoint_edits(
+                run=run, checkpoint_id=uuid4(), after_revision=after_revision, limit=200
+            )
+    assert exc.value.code == FlowApiErrorCode.REVIEW_HISTORY_TOO_LARGE.value
+    assert exc.value.context == {
+        "revision": obstruction[0],
+        "logical_bytes": 2048,
+        "max_logical_bytes": 1024,
+    }
+    if baseline_blocked:
+        reader.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_evidence_embeds_first_bounded_provider_call_page(user):
+    user = _trace_user(user)
+    provider_call_repo = _provider_call_repo()
+    event = _provider_call_evidence()
+    page = ProviderCallEvidencePage(
+        items=(event,),
+        count=1,
+        total_count=2,
+        has_more=True,
+        next_after_event_id=event.event_id,
+    )
+    provider_call_repo.list_evidence_page.return_value = page
+    service, run = _service_for_empty_run(
+        user=user,
+        provider_call_repo=provider_call_repo,
+    )
+
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
+
+    assert evidence["provider_calls"] == page.model_dump(mode="json")
+    provider_call_repo.list_evidence_page.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        limit=EMBEDDED_PROVIDER_CALL_LIMIT,
+        total_count_limit=EMBEDDED_PROVIDER_CALL_LIMIT + 1,
+        logical_byte_budget=(
+            flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_list_provider_calls_authorizes_run_and_forwards_page_cursor(user):
+    user = _trace_user(user)
+    provider_call_repo = _provider_call_repo()
+    access_policy = _access_policy_double()
+    service, run = _service_for_empty_run(
+        user=user,
+        provider_call_repo=provider_call_repo,
+        access_policy=access_policy,
+    )
+    after_event_id = uuid4()
+    attempt_id = uuid4()
+
+    page = await service.list_provider_calls(
+        run_id=run.id,
+        flow_id=run.flow_id,
+        limit=375,
+        after_event_id=after_event_id,
+        attempt_id=attempt_id,
+        run=run,
+    )
+
+    assert page.total_count == 0
+    access_policy.ensure_can_access_run.assert_awaited_once_with(
+        run,
+        access_kind="evidence_view",
+        history=False,
+    )
+    provider_call_repo.list_evidence_page.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        limit=375,
+        after_event_id=after_event_id,
+        attempt_id=attempt_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_v16_hash_covers_all_provider_call_events(user):
+    user = _trace_user(user)
+    provider_call_repo = _provider_call_repo()
+    event = _provider_call_evidence()
+    service, run = _service_for_empty_run(
+        user=user,
+        provider_call_repo=provider_call_repo,
+    )
+    provider_call_repo.list_evidence_page.return_value = ProviderCallEvidencePage(
+        items=(event,),
+        count=1,
+        total_count=1,
+        has_more=False,
+        next_after_event_id=None,
+    )
+
+    export_with_event = await service.export_evidence_json(run_id=run.id)
+    provider_call_repo.list_evidence_page.return_value = ProviderCallEvidencePage(
+        items=(event.model_copy(update={"requested_capabilities": ()}),),
+        count=1,
+        total_count=1,
+        has_more=False,
+        next_after_event_id=None,
+    )
+    export_without_capability = await service.export_evidence_json(run_id=run.id)
+    provider_call_repo.list_evidence_page.return_value = ProviderCallEvidencePage(
+        items=(),
+        count=0,
+        total_count=0,
+        has_more=False,
+        next_after_event_id=None,
+    )
+    export_without_event = await service.export_evidence_json(run_id=run.id)
+
+    assert export_with_event["schema_version"] == "flow-evidence-export.v18"
+    assert export_with_event["bundle"]["provider_calls"]["items"][0]["event_id"] == str(
+        event.event_id
+    )
+    assert (
+        export_with_event["content_hash"] != export_without_capability["content_hash"]
+    )
+    assert export_with_event["content_hash"] != export_without_event["content_hash"]
+    assert all(
+        call.kwargs["limit"] == PROVIDER_CALL_EXPORT_MAX_EVENTS + 1
+        for call in provider_call_repo.list_evidence_page.await_args_list
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_rejects_more_than_provider_call_safety_boundary(user):
+    user = _trace_user(user)
+    provider_call_repo = _provider_call_repo()
+    provider_call_repo.list_evidence_page.return_value = ProviderCallEvidencePage(
+        items=(),
+        count=0,
+        total_count=PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
+        has_more=True,
+        next_after_event_id=uuid4(),
+    )
+    service, run = _service_for_empty_run(
+        user=user,
+        provider_call_repo=provider_call_repo,
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id)
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value
+    assert exc_info.value.context["limit"] == "provider_call_events"
+    assert (
+        exc_info.value.context["provider_call_count"]
+        == PROVIDER_CALL_EXPORT_MAX_EVENTS + 1
+    )
+    assert (
+        exc_info.value.context["max_provider_call_events"]
+        == PROVIDER_CALL_EXPORT_MAX_EVENTS
+    )
+    # The hint may only name recovery paths that exist. There is no offline or
+    # asynchronous export surface to send a caller to.
+    # Recovery guidance must reach the client, so it lives in the typed
+    # context — and may only name recovery paths that exist.
+    hint = str(exc_info.value.context.get("hint", ""))
+    assert "provider-calls" in hint
+    assert "offline" not in hint.lower()
+    assert "administrator" not in hint.lower()
+    assert exc_info.value.context["limit"] == "provider_call_events"
+
+
+@pytest.mark.asyncio
+async def test_evidence_exports_identical_safe_webhook_delivery_metadata(user):
+    user = _trace_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    review_checkpoint_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    webhook_delivery_repo = _webhook_delivery_repo()
+    access_policy = _access_policy_double()
+    flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
+    run = _run(user=user, flow_id=flow.id)
+    access_policy.load_run.return_value = run
+    now = datetime.now(timezone.utc)
+    delivery = FlowRunWebhookDeliveryRead(
+        id=uuid4(),
+        step_id=uuid4(),
+        step_order=2,
+        attempt_no=1,
+        delivery_status=FlowOutboxDeliveryStatus.DEAD_LETTERED,
+        delivery_attempts=5,
+        next_delivery_at=None,
+        delivered_at=None,
+        dead_lettered_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    flow_run_repo.list_result_files.return_value = []
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    webhook_delivery_repo.list_run_delivery_statuses.return_value = [delivery]
+    service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
+        transcript_corrections_repo=_corrections_repo(),
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        webhook_delivery_repo=webhook_delivery_repo,
+        access_policy=access_policy,
+    )
+    _seed_empty_evidence_measurements(service)
+
+    redacted = await service.export_evidence_json(run_id=run.id)
+    raw = await service.export_evidence_json(
+        run_id=run.id,
+        detail="raw",
+        export_reason="delivery-audit",
+    )
+
+    expected = {
+        "id": str(delivery.id),
+        "step_id": str(delivery.step_id),
+        "step_order": 2,
+        "attempt_no": 1,
+        "delivery_status": "dead_lettered",
+        "delivery_attempts": 5,
+        "next_delivery_at": None,
+        "delivered_at": None,
+        "dead_lettered_at": now.isoformat(),
+        "created_at": now.isoformat(),
+        "updated_at": now.isoformat(),
+    }
+    assert redacted["bundle"]["webhook_deliveries"] == [expected]
+    assert raw["bundle"]["webhook_deliveries"] == [expected]
+    assert "idempotency_key" not in expected
+    assert "payload_ref" not in expected
+    assert "delivery_last_error" not in expected
+    assert "claim_token" not in expected
+    webhook_delivery_repo.list_run_delivery_statuses.assert_awaited_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_evidence_loads_run_through_access_policy(user):
+    user = _trace_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    review_checkpoint_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
+    run = _run(user=user, flow_id=flow.id)
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    flow_run_repo.list_result_files.return_value = []
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
+        transcript_corrections_repo=_corrections_repo(),
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
+    )
+    _seed_empty_evidence_measurements(service)
+
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
+
+    assert evidence["run"]["id"] == str(run.id)
+    flow_run_repo.get.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        flow_id=None,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_evidence_preserves_corrupt_snapshot_with_integrity_status(user):
+    user = _trace_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    review_checkpoint_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
+    run = _run(user=user, flow_id=flow.id)
+    version = _version(user=user, flow=flow, version=run.flow_version).model_copy(
+        update={"definition_checksum": "stored-checksum-does-not-match"}
+    )
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    flow_run_repo.list_result_files.return_value = []
+    flow_version_repo.get.return_value = version
+    service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
+        transcript_corrections_repo=_corrections_repo(),
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
+    )
+    _seed_empty_evidence_measurements(service)
+
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
+
+    assert evidence["definition_snapshot"] == version.definition_json
+    assert evidence["definition_integrity"] == {
+        "status": "invalid",
+        "expected_checksum": "stored-checksum-does-not-match",
+        "current_checksum": published_definition_checksum(version.definition_json),
+    }
+    flow_version_repo.get.assert_awaited_once_with(
+        flow_id=run.flow_id,
+        version=run.flow_version,
+        tenant_id=user.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_evidence_populates_runtime_input_file_metadata_from_repo(user):
+    user = _trace_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    review_checkpoint_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
+    run = _run(user=user, flow_id=flow.id)
+    stale_payload_file_id = uuid4()
+    relational_file_id = uuid4()
+    result = _step_result_record(
+        run,
+        step_order=1,
+        input_payload_json={
+            "runtime_input": {
+                "file_ids": [str(stale_payload_file_id)],
+                "files_count": 1,
+            }
+        },
+    )
+    assert result.id is not None
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = [result]
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    flow_run_repo.list_result_files.return_value = []
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {
+        result.id: (
+            FlowRunStepInputFileMetadata(
+                file_id=relational_file_id,
+                name="relational.pdf",
+                checksum="relational-checksum",
+                size=256,
+                mimetype="application/pdf",
+                file_type=FileType.DOCUMENT,
+                text_size_bytes=12,
+                has_text=True,
+                has_transcription=False,
+            ),
+        )
+    }
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
+        transcript_corrections_repo=_corrections_repo(),
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
+    )
+    _seed_empty_evidence_measurements(service)
+
+    evidence = (await service.get_redacted_evidence_bundle(run_id=run.id)).to_dict()
+
+    assert evidence["step_results"][0]["runtime_input_file_ids"] == [
+        str(relational_file_id)
+    ]
+    runtime_input = evidence["step_results"][0]["input_payload_json"]["runtime_input"]
+    assert runtime_input["files"] == [
+        {
+            "id": str(relational_file_id),
+            "name": "relational.pdf",
+            "checksum": "relational-checksum",
+            "size": 256,
+            "mimetype": "application/pdf",
+            "file_type": "document",
+            "text_size_bytes": 12,
+            "has_text": True,
+            "has_transcription": False,
+        }
+    ]
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        step_results=[result],
+        limit=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+        logical_byte_budget=(
+            flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
+        ),
+    )
+
+
+@pytest.mark.asyncio
+async def test_export_evidence_json_rejects_injected_run_id_mismatch(user):
+    service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
+        transcript_corrections_repo=_corrections_repo(),
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=AsyncMock(),
+        provider_call_repo=_provider_call_repo(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
+    )
+    run = _run(user=user, flow_id=uuid4())
+
+    with pytest.raises(UnauthorizedException) as exc_info:
+        await service.export_evidence_json(
+            run_id=uuid4(),
+            run=run,
+        )
+
+    assert exc_info.value.code == "flow_run_access_denied"
+    assert exc_info.value.context == {"auth_layer": "flow_run_argument"}
+
+
+@pytest.mark.asyncio
+async def test_preloaded_run_is_revalidated_before_evidence_is_returned(
+    user,
+    monkeypatch,
+):
+    user = _trace_user(user)
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    review_checkpoint_repo = AsyncMock()
+    flow_version_repo = AsyncMock()
+    flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
+    run = _run(user=user, flow_id=flow.id)
+    access_policy = FlowRunAccessPolicy(
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+    )
+    ensure_can_access_run = AsyncMock()
+    monkeypatch.setattr(
+        access_policy,
+        "ensure_can_access_run",
+        ensure_can_access_run,
+    )
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page([])
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    flow_run_repo.list_result_files.return_value = []
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
+    service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
+        transcript_corrections_repo=_corrections_repo(),
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
+        access_policy=access_policy,
+    )
+    _seed_empty_evidence_measurements(service)
+
+    await service.get_redacted_evidence_bundle(run_id=run.id, run=run)
+
+    ensure_can_access_run.assert_awaited_once_with(
+        run,
+        access_kind="evidence_view",
+        history=False,
+    )
+    flow_run_repo.get.assert_not_awaited()
+
+
+def _attempt_with_passage_bytes(run, *, byte_count: int, attempt_no: int = 1):
+    passage = "x" * byte_count
+    now = datetime.now(timezone.utc)
+    return FlowStepAttempt(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=1,
+        attempt_no=attempt_no,
+        dispatch_task_id=None,
+        status=FlowStepAttemptStatus.COMPLETED,
+        error_code=None,
+        # Built through the production provenance envelope: a bare dict would be
+        # read back as corrupt and hide what this test is checking.
+        provenance_json=FlowAttemptProvenance(
+            rag=RagProvenance.model_validate(
+                RetrievedKnowledgeEvidence(
+                    sources=[
+                        RetrievedSource(
+                            id=f"source-{attempt_no}",
+                            id_short=f"source-{attempt_no}"[:8],
+                            title="Beslutsunderlag",
+                            matched_chunk_count=1,
+                            recorded_passage_count=1,
+                            best_score=0.8,
+                            passages=[
+                                RetrievedPassage.record(
+                                    chunk_no=1,
+                                    score=0.8,
+                                    retrieved_text=passage,
+                                    max_bytes=byte_count,
+                                )
+                            ],
+                        )
+                    ]
+                ).write_into({"status": "success", "unique_sources": 1})
+            )
+        ).to_payload(),
+        started_at=now,
+        finished_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _service_with_attempts(*, user, attempts_bytes: list[int], access_kind_run=None):
+    flow_repo = _flow_repo()
+    flow_run_repo = flow_run_repo_mock()
+    flow = _flow(user=user)
+    _seed_flow_repo(flow_repo, flow)
+    run = access_kind_run or _run(user=user, flow_id=flow.id)
+    attempts = [
+        _attempt_with_passage_bytes(run, byte_count=size, attempt_no=index + 1)
+        for index, size in enumerate(attempts_bytes)
+    ]
+    flow_run_repo.get.return_value = run
+    flow_run_repo.list_step_results.return_value = []
+    flow_run_repo.list_step_attempts.return_value = _attempts_page(attempts)
+    flow_run_repo.list_result_files.return_value = []
+    flow_run_repo.list_current_step_input_file_metadata_by_step_result_id.return_value = {}
+    flow_version_repo = AsyncMock()
+    flow_version_repo.get.return_value = _version(user=user, flow=flow, version=1)
+    review_checkpoint_repo = AsyncMock()
+    review_checkpoint_repo.list_review_checkpoints_for_run.return_value = []
+    access_policy = _access_policy_double()
+    access_policy.load_run.return_value = run
+    service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
+        transcript_corrections_repo=_corrections_repo(),
+        user=user,
+        flow_repo=flow_repo,
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=_provider_call_repo(),
+        flow_run_review_checkpoint_repo=review_checkpoint_repo,
+        flow_version_repo=flow_version_repo,
+        file_repo=_file_repo(),
+        webhook_delivery_repo=_webhook_delivery_repo(),
+        access_policy=access_policy,
+    )
+    _seed_empty_evidence_measurements(service)
+    return service, run
+
+
+def _passage_texts_from_payload(payload) -> list[object]:
+    return [
+        passage.get("text")
+        for attempt in payload["step_attempts"]
+        for reference in (
+            (attempt.get("provenance_json") or {}).get("rag", {}).get("references", [])
+        )
+        for passage in reference["passages"]
+    ]
+
+
+@pytest.mark.asyncio
+async def test_interactive_view_omits_passages_beyond_the_view_budget(
+    user, monkeypatch
+) -> None:
+    user = _trace_user(user)
+    monkeypatch.setattr(
+        FlowRunEvidenceService,
+        "_rag_evidence_policy",
+        lambda self: FlowRagEvidencePolicy(max_recorded_passage_bytes_per_run_view=150),
+    )
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100, 100])
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    texts = _passage_texts_from_payload(bundle.to_dict())
+    assert texts.count(None) == 0
+    assert len([text for text in texts if text]) == 1
+    omission = bundle.debug_export["run"]["summary"]["knowledge_evidence_view"]
+    assert omission["byte_budget"] == 150
+    assert omission["returned_passage_bytes"] == 100
+    assert omission["passages_omitted"] == 1
+    assert omission["passage_bytes_omitted"] == 100
+    assert omission["attempts_with_omitted_passages"] == 1
+
+
+@pytest.mark.asyncio
+async def test_raw_export_returns_every_retained_passage(user, monkeypatch) -> None:
+    """An export is the record of what is retained; it is never quietly trimmed."""
+    user = _trace_user(user)
+    monkeypatch.setattr(
+        FlowRunEvidenceService,
+        "_rag_evidence_policy",
+        lambda self: FlowRagEvidencePolicy(max_recorded_passage_bytes_per_run_view=150),
+    )
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100, 100])
+
+    payload = await service.export_evidence_json(run_id=run.id, detail="raw")
+
+    texts = _passage_texts_from_payload(payload["bundle"])
+    assert texts == ["x" * 100, "x" * 100]
+    assert (
+        payload["bundle"]["debug_export"]["run"]["summary"]["knowledge_evidence_view"]
+        is None
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_export_too_large_to_carry_fails_explicitly(user, monkeypatch) -> None:
+    user = _trace_user(user)
+    # Patch the imported module object: `eneo.flows` uses lazy exports, so a
+    # dotted string path only resolves when the submodule happens to be loaded.
+    monkeypatch.setattr(
+        flow_run_evidence_service, "EVIDENCE_EXPORT_MAX_PASSAGE_BYTES", 150
+    )
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100, 100])
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id, detail="raw")
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value
+
+
+async def test_raw_export_preflight_refuses_on_exact_passage_bytes(user) -> None:
+    """A raw export that cannot fit refuses before a single attempt is loaded.
+
+    The measure is the exact recorded-passage aggregate each RAG payload
+    stores about itself — not whole-provenance size, which would refuse runs
+    whose bulk is unrelated provenance.
+    """
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100])
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
+            attempt_count=12,
+            stored_provenance_bytes=1024,
+            recorded_passage_bytes=EVIDENCE_EXPORT_MAX_PASSAGE_BYTES + 1,
+        )
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(
+            run_id=run.id, detail="raw", export_reason="tillsyn"
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value
+    assert exc_info.value.context["limit"] == "recorded_passage_bytes"
+    assert "run view" in exc_info.value.context["hint"]
+    service.flow_run_repo.list_step_attempts.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_export_preflight_refuses_section_rows_before_loading(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    service.flow_run_repo.measure_evidence_row_counts.return_value = replace(
+        service.flow_run_repo.measure_evidence_row_counts.return_value,
+        step_results=EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING + 1,
+    )
+    service.flow_version_repo.measure_definition_evidence.return_value = (
+        FlowVersionEvidenceMeasurement.empty()
+    )
+    service.flow_run_review_checkpoint_repo.measure_evidence.return_value = (
+        FlowRunReviewCheckpointEvidenceMeasurement.empty()
+    )
+    service.provider_call_repo.measure_evidence.return_value = (
+        FlowProviderCallEvidenceMeasurement.empty()
+    )
+    service.webhook_delivery_repo.measure_evidence.return_value = (
+        FlowRunWebhookDeliveryEvidenceMeasurement.empty()
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id)
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value
+    assert exc_info.value.context["section"] == "step_results"
+    assert exc_info.value.context["limit"] == "section_rows"
+    service.flow_run_repo.list_step_results.assert_not_called()
+
+
+def _set_section_row_count(
+    service: FlowRunEvidenceService,
+    *,
+    section: str,
+    row_count: int,
+) -> None:
+    if section == "step_results":
+        current = service.flow_run_repo.measure_evidence_row_counts.return_value
+        service.flow_run_repo.measure_evidence_row_counts.return_value = replace(
+            current, step_results=row_count
+        )
+    elif section == "step_attempts":
+        current = service.flow_run_repo.measure_evidence_row_counts.return_value
+        service.flow_run_repo.measure_evidence_row_counts.return_value = replace(
+            current, step_attempts=row_count
+        )
+    elif section == "result_files":
+        current = service.flow_run_repo.measure_evidence_row_counts.return_value
+        service.flow_run_repo.measure_evidence_row_counts.return_value = replace(
+            current, result_files=row_count
+        )
+    elif section == "runtime_input_files":
+        current = service.flow_run_repo.measure_evidence_row_counts.return_value
+        service.flow_run_repo.measure_evidence_row_counts.return_value = replace(
+            current, runtime_input_files=row_count
+        )
+    elif section == "review_checkpoints":
+        service.flow_run_review_checkpoint_repo.measure_evidence_row_count.return_value = row_count
+    elif section == "review_checkpoint_edits":
+        service.flow_run_review_checkpoint_repo.measure_edit_evidence_row_count.return_value = row_count
+    elif section == "transcript_correction_revisions":
+        service.transcript_corrections_repo.measure_revision_evidence_row_count.return_value = row_count
+    elif section == "webhook_deliveries":
+        service.webhook_delivery_repo.measure_evidence_row_count.return_value = (
+            row_count
+        )
+    elif section == "provider_calls":
+        service.provider_call_repo.measure_evidence_row_count.return_value = row_count
+    else:
+        raise AssertionError(f"Unhandled evidence section: {section}")
+
+
+@pytest.mark.parametrize(
+    ("section", "limit", "limit_kind"),
+    [
+        (
+            "review_checkpoint_edits",
+            EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+            "section_rows",
+        ),
+        (
+            "transcript_correction_revisions",
+            EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+            "section_rows",
+        ),
+        ("step_results", EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING, "section_rows"),
+        ("step_attempts", EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING, "section_rows"),
+        ("result_files", EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING, "section_rows"),
+        (
+            "runtime_input_files",
+            EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+            "section_rows",
+        ),
+        (
+            "review_checkpoints",
+            EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+            "section_rows",
+        ),
+        (
+            "webhook_deliveries",
+            EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+            "section_rows",
+        ),
+        ("provider_calls", PROVIDER_CALL_EXPORT_MAX_EVENTS, "provider_call_events"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_each_export_section_accepts_max_and_refuses_max_plus_one(
+    user,
+    section: str,
+    limit: int,
+    limit_kind: str,
+) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    _set_section_row_count(service, section=section, row_count=limit)
+
+    await service.export_evidence_json(run_id=run.id)
+
+    _set_section_row_count(service, section=section, row_count=limit + 1)
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id)
+
+    assert exc_info.value.context["section"] == section
+    assert exc_info.value.context["limit"] == limit_kind
+
+
+@pytest.mark.asyncio
+async def test_export_refuses_aggregate_logical_bytes_before_loading(
+    user, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    monkeypatch.setattr(
+        flow_run_evidence_service,
+        "EVIDENCE_EXPORT_MAX_AGGREGATE_LOGICAL_JSON_BYTES",
+        5,
+    )
+    service.flow_run_repo.measure_evidence_sections.return_value = replace(
+        FlowRunEvidenceMeasurements.empty(),
+        run_logical_json_bytes=3,
+        step_result_logical_json_bytes=3,
+    )
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id)
+
+    assert exc_info.value.context["section"] == "whole_bundle"
+    assert exc_info.value.context["limit"] == "aggregate_logical_json_bytes"
+    service.flow_run_repo.list_step_results.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_export_charges_fixed_serialized_cost_for_each_emitted_row(
+    user, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    monkeypatch.setattr(
+        flow_run_evidence_service,
+        "EVIDENCE_EXPORT_MAX_AGGREGATE_LOGICAL_JSON_BYTES",
+        4_095,
+    )
+    service.flow_run_repo.measure_evidence_sections.return_value = replace(
+        FlowRunEvidenceMeasurements.empty(),
+        run_row_count=2,
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id)
+
+    assert exc_info.value.context["limit"] == "aggregate_logical_json_bytes"
+    assert exc_info.value.context["aggregate_logical_json_bytes"] == 4_096
+    service.flow_run_repo.list_step_results.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_export_refuses_aggregate_stored_bytes_before_loading(
+    user, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    monkeypatch.setattr(
+        flow_run_evidence_service,
+        "EVIDENCE_EXPORT_MAX_AGGREGATE_STORED_JSON_BYTES",
+        5,
+    )
+    service.flow_run_repo.measure_evidence_sections.return_value = replace(
+        FlowRunEvidenceMeasurements.empty(),
+        run_stored_json_bytes=3,
+        step_result_stored_json_bytes=3,
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id)
+
+    assert exc_info.value.context["section"] == "whole_bundle"
+    assert exc_info.value.context["limit"] == "aggregate_stored_json_bytes"
+    service.flow_run_repo.list_step_results.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_view_bounds_other_fan_out_sections_and_records_omissions(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    _set_section_row_count(
+        service,
+        section="step_results",
+        row_count=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS + 1,
+    )
+    admitted = _step_result_record(run, step_order=1)
+    service.flow_run_repo.list_step_results.return_value = [
+        admitted
+    ] * flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    assert service.flow_run_repo.list_step_results.await_args.kwargs["limit"] == (
+        flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS
+    )
+    assert bundle.debug_export["run"]["summary"]["omissions"] == [
+        {
+            "reason": "row_limit",
+            "section": "step_results",
+            "rows_omitted": 1,
+            "count_truncated": True,
+        }
+    ]
+
+
+def _models_used_beyond(ceiling: int) -> dict:
+    """One step that answered through ceiling + 1 distinct models."""
+    return {uuid4(): tuple(f"model-{index:05d}" for index in range(ceiling + 1))}
+
+
+@pytest.mark.asyncio
+async def test_view_bounds_models_used_and_records_the_overflow(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    ceiling = flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS
+    models = _models_used_beyond(ceiling)
+    service.provider_call_repo.list_models_used_by_step.return_value = models
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    # The repository is asked for one more than the view may carry.
+    assert (
+        service.provider_call_repo.list_models_used_by_step.await_args.kwargs["limit"]
+        == ceiling + 1
+    )
+    carried = bundle.debug_export["run"]["summary"]["models_used"]
+    assert len(carried) <= ceiling
+    assert {
+        "reason": "row_limit",
+        "section": "provider_calls",
+        "rows_omitted": 1,
+        "count_truncated": True,
+    } in bundle.debug_export["run"]["summary"]["omissions"]
+
+
+@pytest.mark.asyncio
+async def test_export_refuses_instead_of_truncating_models_used(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    ceiling = flow_run_evidence_service.EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING
+    service.provider_call_repo.list_models_used_by_step.return_value = (
+        _models_used_beyond(ceiling)
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id)
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_EXPORT_TOO_LARGE.value
+    assert exc_info.value.context["section"] == "provider_calls"
+    assert exc_info.value.context["limit"] == "section_rows"
+    assert exc_info.value.context["max_section_rows"] == ceiling
+
+
+@pytest.mark.asyncio
+async def test_view_refuses_to_materialize_a_section_over_its_logical_budget(
+    user,
+) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    # The bounded read admits no row: the one row is over the section's
+    # logical byte budget, so the view says so instead of loading it.
+    _set_section_row_count(service, section="result_files", row_count=1)
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    read_kwargs = service.flow_run_repo.list_result_files.await_args.kwargs
+    assert read_kwargs["limit"] == (
+        flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS
+    )
+    assert read_kwargs["logical_byte_budget"] == (
+        flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES
+    )
+    assert bundle.debug_export["run"]["summary"]["omissions"] == [
+        {
+            "reason": "logical_bytes",
+            "section": "result_files",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        }
+    ]
+
+
+async def test_redacted_export_also_refuses_on_the_passage_load_guard(user) -> None:
+    """Retained passage bytes bound the load for redacted exports too.
+
+    Withholding happens after materialization, so a redacted export of a run
+    whose retained passages exceed the load ceiling would still expand them in
+    memory first. The refusal names the load limit; disclosed-byte accounting
+    still governs the finished document below that ceiling.
+    """
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100])
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
+            attempt_count=12,
+            stored_provenance_bytes=1024,
+            recorded_passage_bytes=EVIDENCE_EXPORT_MAX_PASSAGE_BYTES + 1,
+        )
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id, export_reason="tillsyn")
+
+    assert exc_info.value.context["limit"] == "recorded_passage_bytes"
+    service.flow_run_repo.list_step_attempts.assert_not_called()
+
+
+async def test_export_preflight_refuses_oversized_materialization(user) -> None:
+    """Either export kind refuses when loading itself would cost too much.
+
+    Stored provenance size is the load cost, RAG or not, and is reported as
+    exactly that — never as a passage count.
+    """
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100])
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
+            attempt_count=12,
+            stored_provenance_bytes=EVIDENCE_EXPORT_MAX_STORED_PROVENANCE_BYTES + 1,
+            recorded_passage_bytes=0,
+        )
+    )
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        await service.export_evidence_json(run_id=run.id, export_reason="tillsyn")
+
+    assert exc_info.value.context["limit"] == "stored_provenance_bytes"
+    service.flow_run_repo.list_step_attempts.assert_not_called()
+
+
+async def test_view_preflight_never_refuses_and_never_narrows_small_runs(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100])
+
+    await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    service.flow_run_repo.list_step_attempts.assert_awaited_once()
+    assert service.flow_run_repo.list_step_attempts.await_args.kwargs["limit"] is None
+
+
+async def test_view_narrows_attempt_load_and_reports_unloaded_history(user) -> None:
+    """A run with deep attempt history loads a bounded page and says so.
+
+    The response must state how many attempt rows were not loaded — otherwise
+    a narrowed view would read as the complete history.
+    """
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100])
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
+            attempt_count=501,
+            stored_provenance_bytes=RUN_VIEW_MAX_LOADED_LOGICAL_BYTES + 1,
+            recorded_passage_bytes=0,
+        )
+    )
+    # The narrowed statement returns one admitted attempt plus a truncation
+    # sentinel. The lower-bound totals travel with the rows so all counts
+    # describe one snapshot.
+    page = service.flow_run_repo.list_step_attempts.return_value
+    service.flow_run_repo.list_step_attempts.return_value = StepAttemptPage(
+        attempts=page.attempts,
+        total_count=501,
+        current_total=2,
+        current_admitted=1,
+        count_truncated=True,
+        current_step_orders_not_loaded=(2,),
+    )
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    call_kwargs = service.flow_run_repo.list_step_attempts.await_args.kwargs
+    assert call_kwargs["limit"] == RUN_VIEW_MAX_LOADED_ATTEMPTS
+    assert call_kwargs["logical_byte_budget"] == RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
+    assert call_kwargs["passage_byte_budget"] == RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
+    omission = bundle.debug_export["run"]["summary"]["knowledge_evidence_view"]
+    assert omission["attempts_not_loaded"] == 500
+    assert omission["count_truncated"] is True
+    # One of the two current attempts did not fit: the response says so
+    # instead of letting that step read as having no retrieval evidence.
+    assert omission["current_attempts_not_loaded"] == 1
+    assert omission["current_step_orders_not_loaded"] == [2]
+
+
+async def test_view_reports_corrupt_passage_aggregates(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    service.flow_run_repo.measure_step_attempt_evidence.return_value = (
+        StepAttemptEvidenceSize(
+            attempt_count=2,
+            stored_provenance_bytes=1024,
+            recorded_passage_bytes=0,
+            corrupt_passage_aggregates=2,
+        )
+    )
+    service.flow_run_repo.list_step_attempts.return_value = StepAttemptPage(
+        attempts=[],
+        total_count=2,
+        current_total=0,
+        current_admitted=0,
+        count_truncated=False,
+        corrupt_passage_aggregates=2,
+    )
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    call_kwargs = service.flow_run_repo.list_step_attempts.await_args.kwargs
+    assert call_kwargs["limit"] == RUN_VIEW_MAX_LOADED_ATTEMPTS
+    assert call_kwargs["logical_byte_budget"] == RUN_VIEW_MAX_LOADED_LOGICAL_BYTES
+    assert call_kwargs["passage_byte_budget"] == RUN_VIEW_MAX_LOADED_PASSAGE_BYTES
+    omission = bundle.debug_export["run"]["summary"]["knowledge_evidence_view"]
+    assert omission is not None
+    assert omission["attempts_not_loaded"] == 2
+    assert omission["corrupt_passage_aggregates"] == 2
+    assert omission["count_truncated"] is False
+
+
+async def test_redacted_export_is_not_charged_for_withheld_text(
+    user, monkeypatch
+) -> None:
+    """A withheld passage carries no text, so it cannot make an export refuse.
+
+    Charging retained bytes here would reject a classified run's redacted
+    export because of content the document will not contain.
+    """
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100, 100])
+    service.access_policy.passage_disclosure_for_run.return_value = (
+        "text_withheld_sensitive_flow"
+    )
+    monkeypatch.setattr(
+        flow_run_evidence_service, "EVIDENCE_EXPORT_MAX_PASSAGE_BYTES", 150
+    )
+
+    payload = await service.export_evidence_json(run_id=run.id, export_reason="tillsyn")
+
+    texts = _passage_texts_from_payload(
+        {"step_attempts": payload["bundle"]["step_attempts"]}
+        if "bundle" in payload
+        else payload
+    )
+    assert all(text is None for text in texts)
+
+
+def _mapped_attempt_with_passage_bytes(run, *, byte_count: int, attempt_no: int = 1):
+    """A mapped step attempt whose single call recorded one passage."""
+    passage = "y" * byte_count
+    now = datetime.now(timezone.utc)
+    call = RetrievedKnowledgeEvidence(
+        sources=[
+            RetrievedSource(
+                id="mapped-source",
+                id_short="mapped-s",
+                title="Bilaga",
+                matched_chunk_count=1,
+                recorded_passage_count=1,
+                best_score=0.9,
+                passages=[
+                    RetrievedPassage.record(
+                        chunk_no=1,
+                        score=0.9,
+                        retrieved_text=passage,
+                        max_bytes=byte_count,
+                    )
+                ],
+            )
+        ]
+    ).write_into({"status": "success", "unique_sources": 1})
+    mapped = {
+        "status": "success",
+        "execution_mode": "per_item",
+        "mapped_calls_complete": True,
+        "items": [call],
+    }
+    mapped.update(mapped_aggregate_payload([call]))
+    return FlowStepAttempt(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=1,
+        attempt_no=attempt_no,
+        dispatch_task_id=None,
+        status=FlowStepAttemptStatus.COMPLETED,
+        error_code=None,
+        provenance_json=FlowAttemptProvenance(
+            rag=RagProvenance.model_validate(mapped)
+        ).to_payload(),
+        started_at=now,
+        finished_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+async def test_mapped_view_omission_is_counted_once(user, monkeypatch) -> None:
+    """One omitted mapped passage reports as one, not two.
+
+    The mapped root carries the sum of its calls, so a walker that added the
+    root and the leaves together would double every count. The public summary
+    must show the single omission exactly once.
+    """
+    user = _trace_user(user)
+    monkeypatch.setattr(
+        FlowRunEvidenceService,
+        "_rag_evidence_policy",
+        lambda self: FlowRagEvidencePolicy(max_recorded_passage_bytes_per_run_view=0),
+    )
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    service.flow_run_repo.list_step_attempts.return_value = _attempts_page(
+        [_mapped_attempt_with_passage_bytes(run, byte_count=100)]
+    )
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    omission = bundle.debug_export["run"]["summary"]["knowledge_evidence_view"]
+    assert omission["passages_omitted"] == 1
+    assert omission["passage_bytes_omitted"] == 100
+
+
+def _input_file_service(
+    user, *, attached: bool, references: list[object], file_tenant_id=None
+):
+    user = _trace_user(user)
+    file = SimpleNamespace(
+        id=uuid4(), name="meeting.mp3", tenant_id=file_tenant_id or user.tenant_id
+    )
+    flow_run_repo = AsyncMock()
+    flow_run_repo.is_step_input_file = AsyncMock(return_value=attached)
+    file_repo = AsyncMock()
+    file_repo.get_by_id = AsyncMock(return_value=file)
+    file_repo.get_content_references = AsyncMock(return_value=references)
+    access_policy = AsyncMock()
+    access_policy.load_run = AsyncMock(return_value=SimpleNamespace(id=uuid4()))
+    service = FlowRunEvidenceService(
+        transcript_source_service=_transcript_source_service(),
+        transcript_corrections_repo=_corrections_repo(),
+        user=user,
+        flow_repo=AsyncMock(),
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=AsyncMock(),
+        flow_run_review_checkpoint_repo=AsyncMock(),
+        flow_version_repo=AsyncMock(),
+        file_repo=file_repo,
+        webhook_delivery_repo=AsyncMock(),
+        access_policy=access_policy,
+    )
+    return service, file, access_policy
+
+
+async def test_run_input_file_is_served_under_the_artifact_access_policy(
+    user,
+) -> None:
+    """Whoever may download the run's artifacts may fetch the audio it read."""
+    service, file, access_policy = _input_file_service(
+        user,
+        attached=True,
+        references=[SimpleNamespace(variant=FileContentVariant.ORIGINAL)],
+    )
+
+    result = await service.get_run_input_file(
+        run_id=uuid4(), flow_id=uuid4(), file_id=file.id
+    )
+
+    assert result is file
+    assert access_policy.load_run.await_args.kwargs["access_kind"] == "artifact"
+
+
+async def test_run_input_file_must_be_attached_to_the_run(user) -> None:
+    service, file, _ = _input_file_service(user, attached=False, references=[])
+
+    with pytest.raises(NotFoundException) as excinfo:
+        await service.get_run_input_file(
+            run_id=uuid4(), flow_id=uuid4(), file_id=file.id
+        )
+
+    assert excinfo.value.code == FlowApiErrorCode.RUN_INPUT_FILE_NOT_FOUND.value
+
+
+async def test_run_input_file_without_original_content_is_gone(user) -> None:
+    service, file, _ = _input_file_service(user, attached=True, references=[])
+
+    with pytest.raises(ResourceGoneException) as excinfo:
+        await service.get_run_input_file(
+            run_id=uuid4(), flow_id=uuid4(), file_id=file.id
+        )
+
+    assert (
+        excinfo.value.code == FlowApiErrorCode.RUN_INPUT_FILE_CONTENT_UNAVAILABLE.value
+    )
+
+
+@pytest.mark.parametrize(
+    "section", ["review_checkpoint_edits", "transcript_correction_revisions"]
+)
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reason", ["row_limit", "logical_bytes"])
+async def test_history_sections_record_row_and_byte_omissions(
+    user, section, reason, monkeypatch
+):
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.flows.domain.flow import FlowRunReviewCheckpointEdit
+    from eneo.flows.domain.transcript_corrections import (
+        FlowTranscriptCorrectionRevision,
+    )
+    from tests.unittests.flows.test_flow_run_evidence import _review_checkpoint_for_run
+
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_ROWS", 3
+    )
+    service, run = _service_with_attempts(user=_trace_user(user), attempts_bytes=[])
+    checkpoint = _review_checkpoint_for_run(run)
+    service.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run.return_value = [
+        checkpoint
+    ]
+    common = dict(
+        id=uuid4(),
+        tenant_id=run.tenant_id,
+        flow_id=run.flow_id,
+        flow_run_id=run.id,
+        edited_by_user_id=run.principal_user_id,
+        edited_by_service_id=None,
+        edited_by_principal_type=PrincipalType.USER,
+        created_at=checkpoint.created_at,
+        revision=2,
+    )
+    _set_section_row_count(
+        service,
+        section=section,
+        row_count=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS + 1,
+    )
+    if section == "review_checkpoint_edits":
+        reader = (
+            service.flow_run_review_checkpoint_repo.list_review_checkpoint_edits_for_run
+        )
+        item = FlowRunReviewCheckpointEdit(
+            **common,
+            checkpoint_id=checkpoint.id,
+            cause="reviewer_edit",
+            corrections_revision_id=None,
+            payload_json={"text": "edited"},
+            payload_sha256_before="a" * 64,
+            payload_sha256_after="b" * 64,
+        )
+    else:
+        reader = service.transcript_corrections_repo.list_revisions_for_run
+        item = FlowTranscriptCorrectionRevision(
+            **common,
+            correction_set_id=uuid4(),
+            step_id=checkpoint.step_id,
+            occurrences_json=[],
+            speaker_edits_json=[],
+            speaker_names={},
+            segments_hash="a" * 64,
+        )
+    reader.return_value = [item] * 3 if reason == "row_limit" else []
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+    omissions = bundle.debug_export["run"]["summary"]["omissions"]
+    assert any(
+        item["section"] == section and item["reason"] == reason for item in omissions
+    )
+    reader.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        limit=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS,
+        logical_byte_budget=flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES,
+    )
+
+
+def _seed_view_section_rows(
+    service: FlowRunEvidenceService, rows: dict[str, int]
+) -> None:
+    """Answer the view preflight's row counts the way the real repositories do."""
+    for section, row_count in rows.items():
+        _set_section_row_count(service, section=section, row_count=row_count)
+
+
+@pytest.mark.asyncio
+async def test_view_of_a_small_run_reports_no_omissions(user) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[100])
+    _seed_view_section_rows(service, {"step_results": 0, "provider_calls": 0})
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    summary = bundle.debug_export["run"]["summary"]
+    assert summary["omissions"] == []
+    assert summary["knowledge_evidence_view"] is None
+    assert len(bundle.step_attempts) == 1
+
+
+@pytest.mark.asyncio
+async def test_view_reports_every_section_omission_in_read_order(
+    user, monkeypatch
+) -> None:
+    """Pins the omission manifest the row-count preflight produces.
+
+    Every row-counted section is short of its count here, so each records the
+    omission kind its returned rows imply, in the order the view reads them.
+    """
+    from tests.unittests.flows.test_flow_run_evidence import _review_checkpoint_for_run
+
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_ROWS", 2
+    )
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    _seed_view_section_rows(
+        service,
+        {
+            "step_results": 3,
+            "review_checkpoints": 2,
+            "review_checkpoint_edits": 3,
+            "transcript_correction_revisions": 1,
+            "result_files": 1,
+            "provider_calls": 1,
+            "webhook_deliveries": 1,
+            "runtime_input_files": 1,
+        },
+    )
+    service.flow_run_repo.list_step_results.return_value = [
+        _step_result_record(run, step_order=1),
+        _step_result_record(run, step_order=2),
+    ]
+    service.flow_run_review_checkpoint_repo.list_review_checkpoints_for_run.return_value = [
+        _review_checkpoint_for_run(run)
+    ]
+
+    bundle = await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    assert bundle.debug_export["run"]["summary"]["omissions"] == [
+        {
+            "reason": "row_limit",
+            "section": "step_results",
+            "rows_omitted": 1,
+            "count_truncated": True,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "review_checkpoints",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "review_checkpoint_edits",
+            "rows_omitted": 3,
+            "count_truncated": True,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "transcript_correction_revisions",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "result_files",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "provider_calls",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "logical_bytes",
+            "section": "webhook_deliveries",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+        {
+            "reason": "parent_section_omitted",
+            "section": "runtime_input_files",
+            "rows_omitted": 1,
+            "count_truncated": False,
+        },
+    ]
+
+
+_SECTION_BYTE_MEASURES = (
+    ("flow_run_repo", "measure_evidence_sections"),
+    ("flow_version_repo", "measure_definition_evidence"),
+    ("flow_run_review_checkpoint_repo", "measure_evidence"),
+    ("flow_run_review_checkpoint_repo", "measure_edit_evidence"),
+    ("transcript_corrections_repo", "measure_revision_evidence"),
+    ("provider_call_repo", "measure_evidence"),
+    ("webhook_delivery_repo", "measure_evidence"),
+)
+
+
+@pytest.mark.asyncio
+async def test_view_preflight_counts_rows_without_measuring_section_bytes(
+    user,
+) -> None:
+    """Omissions consume only row counts, and every view read keeps its own
+    byte budget, so the view never sizes section JSON. The attempt preflight
+    still sizes attempts: it decides whether the attempt load is narrowed."""
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    ceiling = flow_run_evidence_service.RUN_VIEW_MAX_LOADED_SECTION_ROWS
+
+    await service.get_redacted_evidence_bundle(run_id=run.id)
+
+    for repo_name, method_name in _SECTION_BYTE_MEASURES:
+        getattr(getattr(service, repo_name), method_name).assert_not_awaited()
+    service.transcript_source_service.measure_for_export.assert_not_awaited()
+    service.flow_run_repo.measure_step_attempt_evidence.assert_awaited_once_with(
+        run_id=run.id, tenant_id=run.tenant_id, candidate_limit=ceiling + 1
+    )
+    row_scope = {"run_id": run.id, "tenant_id": run.tenant_id}
+    # Attempts are sized above, so the view skips the attempt row count.
+    service.flow_run_repo.measure_evidence_row_counts.assert_awaited_once_with(
+        **row_scope, ceiling=ceiling, count_step_attempts=False
+    )
+    for counter in (
+        service.flow_run_review_checkpoint_repo.measure_evidence_row_count,
+        service.flow_run_review_checkpoint_repo.measure_edit_evidence_row_count,
+        service.transcript_corrections_repo.measure_revision_evidence_row_count,
+        service.webhook_delivery_repo.measure_evidence_row_count,
+    ):
+        counter.assert_awaited_once_with(**row_scope, ceiling=ceiling)
+    service.provider_call_repo.measure_evidence_row_count.assert_awaited_once_with(
+        **row_scope, ceiling=EMBEDDED_PROVIDER_CALL_LIMIT
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("detail", ["raw", "redacted"])
+async def test_export_preflight_still_measures_every_section_in_order(
+    user, detail
+) -> None:
+    user = _trace_user(user)
+    service, run = _service_with_attempts(user=user, attempts_bytes=[])
+    awaited: list[str] = []
+
+    def record(name, mock):
+        result = mock.return_value
+
+        def side_effect(*_args, **_kwargs):
+            awaited.append(name)
+            return result
+
+        mock.side_effect = side_effect
+
+    measures = (
+        ("flow_run_repo", "measure_evidence_sections"),
+        ("flow_version_repo", "measure_definition_evidence"),
+        ("flow_run_repo", "measure_step_attempt_evidence"),
+        *_SECTION_BYTE_MEASURES[2:],
+        ("transcript_source_service", "measure_for_export"),
+    )
+    for repo_name, method_name in measures:
+        record(
+            f"{repo_name}.{method_name}",
+            getattr(getattr(service, repo_name), method_name),
+        )
+
+    await service.export_evidence_json(run_id=run.id, detail=detail)
+
+    assert awaited == [
+        f"{repo_name}.{method_name}" for repo_name, method_name in measures
+    ]
+    candidate_limit = EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING + 1
+    service.flow_run_repo.measure_evidence_sections.assert_awaited_once_with(
+        run_id=run.id, tenant_id=run.tenant_id, candidate_limit=candidate_limit
+    )
+    service.provider_call_repo.measure_evidence.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        candidate_limit=PROVIDER_CALL_EXPORT_MAX_EVENTS + 1,
+    )
+    service.transcript_source_service.measure_for_export.assert_awaited_once_with(
+        run_id=run.id, candidate_limit=candidate_limit
+    )
+    # The export refuses on the attempt row count, so it keeps counting attempts.
+    service.flow_run_repo.measure_evidence_row_counts.assert_awaited_once_with(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        ceiling=EVIDENCE_EXPORT_DEFAULT_FAN_OUT_ROW_CEILING,
+    )

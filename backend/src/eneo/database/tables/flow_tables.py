@@ -1,0 +1,2820 @@
+from datetime import date, datetime
+from decimal import Decimal
+from enum import Enum
+from typing import Any, Optional
+from uuid import UUID, uuid4
+
+import sqlalchemy as sa
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    UniqueConstraint,
+)
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
+from sqlalchemy.orm import Mapped, mapped_column
+
+from eneo.authentication.principal_types import PrincipalType
+from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
+from eneo.database.tables.assistant_table import Assistants
+from eneo.database.tables.base_class import (
+    BaseCrossReference,
+    BasePublic,
+    BaseWithTableName,
+)
+from eneo.database.tables.files_table import Files, file_usage
+from eneo.database.tables.job_table import Jobs
+from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.tenant_table import Tenants
+from eneo.database.tables.users_table import Users
+from eneo.files.file_models import FileUsageKind
+from eneo.flow_packages.domain.flow_package_import_record import (
+    FlowPackageImportSource,
+    FlowPackageImportStatus,
+)
+from eneo.flows.domain.flow_retention_hold import (
+    MAX_FLOW_RETENTION_HOLD_REASON_LENGTH,
+)
+from eneo.flows.domain.flow_run_retention_policy import FLOW_RUN_RETENTION_MODE_VALUES
+from eneo.flows.domain.provider_call import (
+    PROVIDER_CALL_KIND_VALUES,
+    PROVIDER_CALL_REASON_VALUES,
+    PROVIDER_CALL_REJECTION_REASON_VALUES,
+    PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES,
+    PROVIDER_CALL_RESPONSE_FORMAT_VALUES,
+    PROVIDER_CALL_STATUS_VALUES,
+    PROVIDER_CALL_TOKEN_SOURCE_VALUES,
+    PROVIDER_CALL_UNKNOWN_REASON_VALUES,
+)
+from eneo.flows.enums import (
+    ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES,
+    FLOW_INPUT_SOURCE_VALUES,
+    FLOW_INPUT_TYPE_VALUES,
+    FLOW_OUTPUT_MODE_VALUES,
+    FLOW_OUTPUT_TYPE_VALUES,
+    FLOW_RUN_PURPOSE_VALUES,
+    RECONCILABLE_REVIEW_CHECKPOINT_STATES,
+    TERMINAL_FLOW_RUN_STATUS_VALUES,
+    FlowRunLifecycleSource,
+    FlowRunReviewCheckpointState,
+    FlowRunStatus,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+    FlowTemplateAssetStatus,
+)
+from eneo.flows.flow_resource_bindings import (
+    FLOW_RESOURCE_BINDING_SOURCE_VALUES,
+    RESOURCE_SLOT_LOCAL_KIND_PAIRS,
+    RESOURCE_SLOT_PATTERN,
+    UUID_SHAPED_RESOURCE_REF_PATTERN,
+    LocalResourceKind,
+    ResourceSlotKind,
+)
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_run_provenance import FLOW_RESOLVED_INPUT_MAX_EDGES
+
+FLOW_STEP_INPUT_SOURCE_VALUES = FLOW_INPUT_SOURCE_VALUES
+FLOW_STEP_INPUT_TYPE_VALUES = FLOW_INPUT_TYPE_VALUES
+FLOW_STEP_OUTPUT_MODE_VALUES = FLOW_OUTPUT_MODE_VALUES
+FLOW_STEP_OUTPUT_TYPE_VALUES = FLOW_OUTPUT_TYPE_VALUES
+FLOW_RUN_STATUS_VALUES = tuple(item.value for item in FlowRunStatus)
+FLOW_RUN_LIFECYCLE_SOURCE_VALUES = tuple(item.value for item in FlowRunLifecycleSource)
+FLOW_RUN_HISTORY_RETENTION_DAYS_RANGE_CHECK = (
+    "flow_run_history_retention_days IS NULL OR "
+    f"(flow_run_history_retention_days >= {MIN_RETENTION_DAYS} "
+    f"AND flow_run_history_retention_days <= {MAX_RETENTION_DAYS})"
+)
+FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
+    item.value for item in FlowRunReviewCheckpointState
+)
+FLOW_STEP_REVIEW_MODE_VALUES = tuple(item.value for item in FlowStepReviewMode)
+FLOW_RUN_ACTIVE_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
+    state.value
+    for state in FlowRunReviewCheckpointState
+    if state in ACTIVE_FLOW_RUN_REVIEW_CHECKPOINT_STATES
+)
+FLOW_RUN_RECONCILABLE_REVIEW_CHECKPOINT_STATE_VALUES = tuple(
+    state.value
+    for state in FlowRunReviewCheckpointState
+    if state in RECONCILABLE_REVIEW_CHECKPOINT_STATES
+)
+FLOW_RUN_AUDIT_TARGET_STATUS_VALUES = tuple(
+    dict.fromkeys(
+        (
+            FlowRunStatus.COMPLETED.value,
+            FlowRunStatus.FAILED.value,
+            FlowRunStatus.CANCELLED.value,
+            *FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES,
+        )
+    )
+)
+
+
+class FlowOutboxDeliveryStatus(str, Enum):
+    PENDING = "pending"
+    DELIVERED = "delivered"
+    DEAD_LETTERED = "dead_lettered"
+
+
+# Keep table-specific tuple names because each SQL CHECK constraint belongs to
+# one table; the enum owns the shared vocabulary.
+FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES = tuple(
+    item.value for item in FlowOutboxDeliveryStatus
+)
+FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES = tuple(
+    item.value for item in FlowOutboxDeliveryStatus
+)
+FLOW_STEP_RESULT_STATUS_VALUES = tuple(item.value for item in FlowStepResultStatus)
+FLOW_STEP_ATTEMPT_STATUS_VALUES = tuple(item.value for item in FlowStepAttemptStatus)
+FLOW_RUNTIME_UPLOAD_OWNER_TYPE_VALUES = tuple(item.value for item in PrincipalType)
+FLOW_RUN_PRINCIPAL_TYPE_VALUES = tuple(item.value for item in PrincipalType)
+FLOW_RUN_STEP_RESULT_FILE_SOURCE_VALUES = ("generated_output", "declared_artifact")
+MODULE_HEALTH_STATUS_VALUES = ("healthy", "unhealthy", "unknown")
+MODULE_COMPAT_STATUS_VALUES = ("compatible", "incompatible", "unknown")
+FLOW_TEMPLATE_ASSET_STATUS_VALUES = tuple(
+    item.value for item in FlowTemplateAssetStatus
+)
+FLOW_RESOURCE_SLOT_KIND_VALUES = tuple(item.value for item in ResourceSlotKind)
+FLOW_RESOURCE_LOCAL_RESOURCE_KIND_VALUES = tuple(
+    item.value for item in LocalResourceKind
+)
+FLOW_RESOURCE_SLOT_LOCAL_KIND_PAIR_VALUES = RESOURCE_SLOT_LOCAL_KIND_PAIRS
+FLOW_PACKAGE_IMPORT_SOURCE_VALUES = tuple(
+    item.value for item in FlowPackageImportSource
+)
+FLOW_PACKAGE_IMPORT_STATUS_VALUES = tuple(
+    item.value for item in FlowPackageImportStatus
+)
+
+
+def _check_values(values: tuple[str, ...]) -> str:
+    return ",".join(f"'{value}'" for value in values)
+
+
+def _index_values(values: tuple[str, ...]) -> str:
+    return ", ".join(f"'{value}'" for value in values)
+
+
+FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE = (
+    f"status IN ({_index_values(TERMINAL_FLOW_RUN_STATUS_VALUES)})"
+)
+
+
+def _principal_fk_index(table_name: str, column: str) -> Index:
+    """Referencing-side index of a nullable user, service-principal or API-key FK.
+
+    Deleting that principal probes the column by equality; the partial predicate
+    keeps the NULL half of the user/service XOR columns out of the index.
+    """
+    return Index(
+        f"ix_{table_name}_{column}",
+        column,
+        postgresql_where=sa.text(f"{column} IS NOT NULL"),
+    )
+
+
+def _flow_run_listing_index(name: str, *starter: str, **options: Any) -> Index:
+    """A flow's runs (or one starter's, for runs listed as their own) in the
+    started_at order of ``run_list_order``, so a run list page is read in
+    index order without a sort.
+
+    Measured on 305k runs, 200k in one flow (revision 202610241000): the
+    started_at page went from 27k buffers to 26, and a starter's own page
+    from up to 25k buffers to 7-28. ``ix_flow_runs_flow_id_status`` serves
+    lookups by flow_id alone.
+    """
+    return Index(
+        name,
+        "tenant_id",
+        "flow_id",
+        *starter,
+        sa.text("coalesce(started_at, created_at) DESC"),
+        sa.text("created_at DESC"),
+        sa.text("id DESC"),
+        **options,
+    )
+
+
+def _flow_run_status_count_index(name: str, starter: str) -> Index:
+    """One starter's runs of a flow by status, so the run list's status count
+    for a member or a service key reads the index alone.
+
+    Measured on 1M runs, 600k in one flow (revision 202610241100): a heavy
+    member's unsearched count went from 60.6 ms (sequential scan) to 7.9 ms
+    (index-only scan), other members' and a service key's from 6-10 to
+    0.5-0.9 ms. The admin count does not use these indexes. Searched counts
+    now start from them too: most are about even, but the heavy member's went
+    from 265 to 306 ms (+16 %, 77k -> 86k buffers).
+    """
+    return Index(
+        name,
+        "tenant_id",
+        "flow_id",
+        starter,
+        "status",
+        postgresql_where=sa.text(f"{starter} IS NOT NULL"),
+    )
+
+
+def _check_value_pairs(values: tuple[tuple[str, str], ...]) -> str:
+    return ",".join(f"('{left}','{right}')" for left, right in values)
+
+
+class Flows(BasePublic):
+    """Stores mutable Flow drafts and publish pointers. Writer: FlowRepository. Purpose: keep authoring state separate from immutable runtime versions."""
+
+    name: Mapped[str] = mapped_column(nullable=False)
+    description: Mapped[Optional[str]] = mapped_column(nullable=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    owner_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    published_version: Mapped[Optional[int]] = mapped_column(nullable=True)
+    metadata_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    flow_run_history_retention_mode: Mapped[Optional[str]] = mapped_column(
+        sa.String(32), nullable=True
+    )
+    flow_run_history_retention_days: Mapped[Optional[int]] = mapped_column(
+        nullable=True
+    )
+    snapshot_allocation_high_water_mark: Mapped[int] = mapped_column(
+        nullable=False, server_default="0"
+    )
+    draft_revision: Mapped[int] = mapped_column(nullable=False, server_default="0")
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            FLOW_RUN_HISTORY_RETENTION_DAYS_RANGE_CHECK,
+            name="ck_flows_flow_run_history_retention_days_range",
+        ),
+        CheckConstraint(
+            "(flow_run_history_retention_mode IS NULL AND "
+            "flow_run_history_retention_days IS NULL) OR "
+            "(flow_run_history_retention_mode IS NOT NULL AND "
+            "flow_run_history_retention_days IS NOT NULL)",
+            name="ck_flows_flow_run_history_retention_complete",
+        ),
+        CheckConstraint(
+            "flow_run_history_retention_mode IS NULL OR "
+            "flow_run_history_retention_mode IN "
+            f"({','.join(repr(value) for value in FLOW_RUN_RETENTION_MODE_VALUES)})",
+            name="ck_flows_flow_run_history_retention_mode",
+        ),
+        UniqueConstraint("id", "tenant_id", name="uq_flows_id_tenant_id"),
+        UniqueConstraint(
+            "id",
+            "tenant_id",
+            "space_id",
+            name="uq_flows_id_tenant_id_space_id",
+        ),
+        ForeignKeyConstraint(
+            ["id", "published_version"],
+            ["flow_versions.flow_id", "flow_versions.version"],
+            ondelete="NO ACTION",
+            onupdate="NO ACTION",
+            name="fk_flows_published_version",
+        ),
+        # W13: active flow names are unique per space.
+        Index(
+            "uq_flows_space_id_name_active",
+            "space_id",
+            "name",
+            unique=True,
+            postgresql_where=sa.text("deleted_at IS NULL"),
+        ),
+        Index("ix_flows_space_deleted", "space_id", "deleted_at"),
+        _principal_fk_index("flows", "created_by_user_id"),
+        _principal_fk_index("flows", "owner_user_id"),
+    )
+
+
+class FlowSteps(BasePublic):
+    """Stores ordered draft step configuration. Writer: FlowRepository. Purpose: define the editable step graph before publish freezes a version."""
+
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    assistant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Assistants.id, ondelete="RESTRICT"),
+        nullable=False,
+    )
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    timeout_seconds: Mapped[Optional[int]] = mapped_column(nullable=True)
+    user_description: Mapped[Optional[str]] = mapped_column(nullable=True)
+    input_source: Mapped[str] = mapped_column(
+        sa.String(64),
+        nullable=False,
+        server_default="flow_input",
+    )
+    input_type: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="any",
+    )
+    input_contract: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    output_mode: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="pass_through",
+    )
+    output_type: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="text",
+    )
+    output_contract: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    input_bindings: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    output_classification_override: Mapped[Optional[int]] = mapped_column(nullable=True)
+    input_config: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    output_config: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    review_policy: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+
+    __table_args__ = (
+        UniqueConstraint("flow_id", "step_order", name="uq_flow_steps_flow_step_order"),
+        UniqueConstraint("flow_id", "id", name="uq_flow_steps_flow_id_id"),
+        UniqueConstraint("id", "tenant_id", name="uq_flow_steps_id_tenant_id"),
+        CheckConstraint(
+            "step_order >= 1",
+            name="ck_flow_steps_step_order_positive",
+        ),
+        CheckConstraint(
+            f"input_source IN ({_check_values(FLOW_STEP_INPUT_SOURCE_VALUES)})",
+            name="ck_flow_steps_input_source",
+        ),
+        CheckConstraint(
+            f"input_type IN ({_check_values(FLOW_STEP_INPUT_TYPE_VALUES)})",
+            name="ck_flow_steps_input_type",
+        ),
+        CheckConstraint(
+            f"output_mode IN ({_check_values(FLOW_STEP_OUTPUT_MODE_VALUES)})",
+            name="ck_flow_steps_output_mode",
+        ),
+        CheckConstraint(
+            f"output_type IN ({_check_values(FLOW_STEP_OUTPUT_TYPE_VALUES)})",
+            name="ck_flow_steps_output_type",
+        ),
+        CheckConstraint(
+            "NOT (input_type = 'text' AND output_mode = 'pass_through' "
+            "AND output_type IN ('pdf','docx'))",
+            name="ck_flow_steps_no_text_document_pass_through",
+        ),
+        CheckConstraint(
+            "timeout_seconds IS NULL OR timeout_seconds > 0",
+            name="ck_flow_steps_timeout_seconds_positive",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_steps_flow_tenant",
+        ),
+        Index("ix_flow_steps_assistant_id", "assistant_id"),
+    )
+
+
+class FlowVersions(BaseCrossReference):
+    """Stores immutable Flow snapshots, published or not yet.
+
+    Writer: FlowVersionRepository. Publication history is write-once by application
+    contract; database constraints do not yet enforce snapshot immutability.
+    """
+
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        primary_key=True,
+    )
+    version: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    first_published_at: Mapped[datetime | None] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    source_draft_revision: Mapped[int | None] = mapped_column(nullable=True)
+    definition_checksum: Mapped[str] = mapped_column(nullable=False)
+    definition_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_versions_flow_tenant",
+        ),
+        sa.PrimaryKeyConstraint(
+            "flow_id", "version", name="uq_flow_versions_flow_version"
+        ),
+    )
+
+
+class FlowVersionFileReferences(BaseWithTableName):
+    """Protect frozen snapshot files. FlowVersionRepository owns these links.
+
+    Snapshot creation records them in the snapshot's transaction, and a
+    migration backfilled earlier versions. A file is protected while a flow
+    version that names it exists; unpublishing and run-history purge do not
+    release it, and no automatic version cleanup exists yet. Immutability of the reference set is an
+    application contract.
+    """
+
+    flow_id: Mapped[UUID] = mapped_column(primary_key=True)
+    version: Mapped[int] = mapped_column(primary_key=True)
+    tenant_id: Mapped[UUID] = mapped_column(nullable=False)
+    file_id: Mapped[UUID] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_VERSION), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_id", "version"],
+            ["flow_versions.flow_id", "flow_versions.version"],
+            ondelete="CASCADE",
+            name="fk_flow_version_file_references_version",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_version_file_references_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_version_file_references_file_tenant",
+        ),
+    )
+
+
+class FlowTemplateAssets(BasePublic):
+    """Stores DOCX template assets for a Flow. Writer: FlowTemplateAssetRepository. Purpose: bind uploaded template files and placeholder indexes to authoring."""
+
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    file_id: Mapped[UUID] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_TEMPLATE_ASSET), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(nullable=False)
+    checksum: Mapped[str] = mapped_column(nullable=False)
+    mimetype: Mapped[Optional[str]] = mapped_column(nullable=True)
+    placeholders: Mapped[list[str]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+    created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    updated_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="ready",
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+
+    __table_args__ = (
+        UniqueConstraint(
+            "id", "tenant_id", name="uq_flow_template_assets_id_tenant_id"
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_template_assets_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_template_assets_file_tenant",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(FLOW_TEMPLATE_ASSET_STATUS_VALUES)})",
+            name="ck_flow_template_assets_status",
+        ),
+        Index(
+            "ix_flow_template_assets_flow_active",
+            "flow_id",
+            "updated_at",
+            postgresql_where=sa.text("deleted_at IS NULL"),
+        ),
+        _principal_fk_index("flow_template_assets", "created_by_user_id"),
+        _principal_fk_index("flow_template_assets", "updated_by_user_id"),
+    )
+
+
+class FlowResourceBindings(BasePublic):
+    """Stores local resource bindings for a Flow. Writer: FlowRepository. Purpose: keep tenant-local resource ids outside portable flow packages."""
+
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    slot_kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    slot: Mapped[str] = mapped_column(sa.String(96), nullable=False)
+    slot_label: Mapped[str] = mapped_column(sa.String(160), nullable=False)
+    local_resource_kind: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    local_resource_id: Mapped[UUID] = mapped_column(nullable=False)
+    source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "flow_id",
+            "slot_kind",
+            "slot",
+            name="uq_flow_resource_bindings_flow_slot",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_resource_bindings_flow_tenant",
+        ),
+        CheckConstraint(
+            f"slot_kind IN ({_check_values(FLOW_RESOURCE_SLOT_KIND_VALUES)})",
+            name="ck_flow_resource_bindings_slot_kind",
+        ),
+        CheckConstraint(
+            f"slot ~ '{RESOURCE_SLOT_PATTERN}'",
+            name="ck_flow_resource_bindings_slot_format",
+        ),
+        CheckConstraint(
+            f"slot !~* '{UUID_SHAPED_RESOURCE_REF_PATTERN}'",
+            name="ck_flow_resource_bindings_slot_not_uuid",
+        ),
+        CheckConstraint(
+            "length(btrim(slot_label)) > 0",
+            name="ck_flow_resource_bindings_slot_label_not_empty",
+        ),
+        CheckConstraint(
+            "local_resource_kind IN "
+            f"({_check_values(FLOW_RESOURCE_LOCAL_RESOURCE_KIND_VALUES)})",
+            name="ck_flow_resource_bindings_local_resource_kind",
+        ),
+        CheckConstraint(
+            "(slot_kind, local_resource_kind) IN "
+            f"({_check_value_pairs(FLOW_RESOURCE_SLOT_LOCAL_KIND_PAIR_VALUES)})",
+            name="ck_flow_resource_bindings_slot_local_kind_pair",
+        ),
+        CheckConstraint(
+            f"source IN ({_check_values(FLOW_RESOURCE_BINDING_SOURCE_VALUES)})",
+            name="ck_flow_resource_bindings_source",
+        ),
+        Index(
+            "ix_flow_resource_bindings_local_target",
+            "local_resource_kind",
+            "local_resource_id",
+        ),
+        Index("ix_flow_resource_bindings_tenant_flow", "tenant_id", "flow_id"),
+    )
+
+
+class FlowLiveTranscripts(BasePublic):
+    """Clean live-session text, owned by the admitting tenant and user."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), index=True
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Users.id, ondelete="CASCADE"), index=True
+    )
+    flow_id: Mapped[UUID] = mapped_column(index=True)
+    flow_version: Mapped[int]
+    step_id: Mapped[UUID]
+    model_id: Mapped[UUID]
+    recording_id: Mapped[str] = mapped_column(sa.String(64))
+    text: Mapped[str] = mapped_column(sa.Text)
+    segments: Mapped[list[dict[str, str | float]] | None] = mapped_column(
+        JSONB(none_as_null=True)
+    )
+    received_audio_seconds: Mapped[float] = mapped_column(sa.Double)
+    expires_at: Mapped[datetime | None] = mapped_column(sa.TIMESTAMP(timezone=True))
+    bound_file_id: Mapped[UUID | None] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_RUNTIME), index=True
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_live_transcripts_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["bound_file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_live_transcripts_file_tenant",
+        ),
+        CheckConstraint(
+            "received_audio_seconds >= 0 AND flow_version >= 1",
+            name="ck_flow_live_transcripts_bounds",
+        ),
+        Index(
+            "ix_flow_live_transcripts_unbound_expiry",
+            "expires_at",
+            "id",
+            postgresql_where=sa.text("bound_file_id IS NULL"),
+        ),
+    )
+
+
+class FlowRuntimeUploadedFiles(BaseCrossReference):
+    """Stores reusable runtime upload files. Writer: FlowRuntimeUploadRepository. Purpose: bind pre-run uploads to a Flow, step, tenant, and principal."""
+
+    file_id: Mapped[UUID] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_RUNTIME), primary_key=True
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    uploaded_for_step_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        comment=(
+            "Published runtime step id that accepted the upload; provenance "
+            "metadata, not a draft flow_steps foreign key."
+        ),
+    )
+    owner_type: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    owner_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="RESTRICT"),
+        nullable=True,
+    )
+    owner_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("service_principals.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    audio_seconds: Mapped[Optional[float]] = mapped_column(
+        sa.Float,
+        nullable=True,
+        comment=(
+            "Decoded audio length, measured at upload under "
+            "the tenant's longest recording; null for other files and older uploads."
+        ),
+    )
+
+    __table_args__ = (
+        # The step-input FK targets the full runtime provenance tuple; file_id
+        # remains the logical one-row key for a stored runtime upload.
+        UniqueConstraint(
+            "file_id",
+            "flow_id",
+            "tenant_id",
+            name="uq_flow_runtime_uploaded_files_file_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_runtime_uploaded_files_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_runtime_uploaded_files_file_tenant",
+        ),
+        CheckConstraint(
+            f"owner_type IN ({_check_values(FLOW_RUNTIME_UPLOAD_OWNER_TYPE_VALUES)})",
+            name="ck_flow_runtime_uploaded_files_owner_type",
+        ),
+        CheckConstraint(
+            "("
+            "owner_type = 'user' "
+            "AND owner_user_id IS NOT NULL "
+            "AND owner_service_id IS NULL"
+            ") OR ("
+            "owner_type = 'service_key' "
+            "AND owner_user_id IS NULL "
+            "AND owner_service_id IS NOT NULL"
+            ")",
+            name="ck_flow_runtime_uploaded_files_owner_identity",
+        ),
+        CheckConstraint(
+            "audio_seconds IS NULL OR audio_seconds >= 0",
+            name="ck_flow_runtime_uploaded_files_audio_seconds",
+        ),
+        Index(
+            "ix_flow_runtime_uploaded_files_user_owner",
+            "tenant_id",
+            "flow_id",
+            "owner_user_id",
+            "created_at",
+            postgresql_where=sa.text("owner_type = 'user'"),
+        ),
+        Index(
+            "ix_flow_runtime_uploaded_files_service_owner",
+            "tenant_id",
+            "flow_id",
+            "owner_service_id",
+            "created_at",
+            postgresql_where=sa.text("owner_type = 'service_key'"),
+        ),
+        # Abandoned-upload selection reads oldest-first by created_at, file_id.
+        Index(
+            "ix_flow_runtime_uploaded_files_created_at_file_id",
+            "created_at",
+            "file_id",
+        ),
+        _principal_fk_index("flow_runtime_uploaded_files", "owner_user_id"),
+        _principal_fk_index("flow_runtime_uploaded_files", "owner_service_id"),
+    )
+
+
+class FlowPackageImports(BasePublic):
+    """Stores Flow package import outcomes. Writer: FlowPackageImportRepository. Purpose: retain operational results only while their owning Flow or space exists."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    space_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Spaces.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[Optional[UUID]] = mapped_column(
+        nullable=True,
+        index=True,
+    )
+    created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    package_id: Mapped[str] = mapped_column(sa.String(128), nullable=False)
+    package_version: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    content_checksum: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    import_plan_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    selected_mappings_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    failure_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"source IN ({_check_values(FLOW_PACKAGE_IMPORT_SOURCE_VALUES)})",
+            name="ck_flow_package_imports_source",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(FLOW_PACKAGE_IMPORT_STATUS_VALUES)})",
+            name="ck_flow_package_imports_status",
+        ),
+        CheckConstraint(
+            "content_checksum ~ '^[0-9a-f]{64}$'",
+            name="ck_flow_package_imports_content_checksum",
+        ),
+        CheckConstraint(
+            "("
+            "status = 'draft_created' AND flow_id IS NOT NULL AND failure_json IS NULL"
+            ") OR ("
+            "status = 'failed' AND flow_id IS NULL AND failure_json IS NOT NULL"
+            ")",
+            name="ck_flow_package_imports_terminal_shape",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id", "space_id"],
+            ["flows.id", "flows.tenant_id", "flows.space_id"],
+            ondelete="CASCADE",
+            onupdate="NO ACTION",
+            name="fk_flow_package_imports_flow_tenant_space",
+        ),
+        Index(
+            "ix_flow_package_imports_tenant_space_created",
+            "tenant_id",
+            "space_id",
+            "created_at",
+        ),
+        Index(
+            "ix_flow_package_imports_space_checksum_created",
+            "space_id",
+            "content_checksum",
+            "created_at",
+        ),
+        _principal_fk_index("flow_package_imports", "created_by_user_id"),
+    )
+
+
+class FlowSuggestionDismissals(BasePublic):
+    """Stores the suggestions a flow's editors chose to hide. Writer: FlowSuggestionDismissalRepository. Purpose: leave a dismissed suggestion out of the flow's suggestions for every editor until its premise changes (a changed premise is another fingerprint); deleted with the flow, never carried by a package."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
+    )
+    flow_id: Mapped[UUID] = mapped_column(nullable=False)
+    fingerprint: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    # The suggestion's code when it was dismissed, for the record; the
+    # fingerprint alone decides what is hidden.
+    code: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    dismissed_by: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
+    )
+    dismissed_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_suggestion_dismissals_flow_tenant",
+        ),
+        # One dismissal per suggestion of a flow; its index serves the read of
+        # a flow's dismissals, the flow FK cascade and the tenant FK cascade.
+        UniqueConstraint(
+            "tenant_id",
+            "flow_id",
+            "fingerprint",
+            name="uq_flow_suggestion_dismissals_tenant_flow_fingerprint",
+        ),
+        CheckConstraint(
+            "fingerprint ~ '^[0-9a-f]{64}$'",
+            name="ck_flow_suggestion_dismissals_fingerprint",
+        ),
+        _principal_fk_index("flow_suggestion_dismissals", "dismissed_by"),
+    )
+
+
+class FlowRuns(BasePublic):
+    """Stores one execution of a published Flow version. Writer: FlowRunRepository. Purpose: persist principal, status, input, output, and lifecycle anchors."""
+
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+    )
+    flow_version: Mapped[int] = mapped_column(nullable=False)
+    principal_type: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="user",
+    )
+    principal_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="RESTRICT"),
+        nullable=True,
+    )
+    principal_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("service_principals.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
+    created_by_api_key_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("api_keys_v2.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    runtime_service_permission: Mapped[Optional[str]] = mapped_column(
+        sa.String(32),
+        nullable=True,
+    )
+    evidence_classification_level: Mapped[Optional[int]] = mapped_column(nullable=True)
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    trace_id: Mapped[UUID] = mapped_column(
+        default=uuid4,
+        server_default=sa.text("gen_random_uuid()"),
+        nullable=False,
+        index=True,
+    )
+    idempotency_key: Mapped[Optional[str]] = mapped_column(
+        sa.String(255),
+        nullable=True,
+    )
+    request_fingerprint: Mapped[Optional[str]] = mapped_column(
+        sa.String(64),
+        nullable=True,
+    )
+    revision: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="1",
+        comment=(
+            "Monotonic lifecycle compare-and-swap token; its value on entry to "
+            "queued identifies the dispatch epoch."
+        ),
+    )
+    purpose: Mapped[str] = mapped_column(nullable=False, server_default="production")
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="queued",
+        index=True,
+    )
+    dispatch_pending_since: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    dispatch_attempt_count: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="0",
+    )
+    dispatch_last_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    dispatch_last_error: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+    dispatch_next_attempt_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    dispatched_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    dispatch_exhausted_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    execution_heartbeat_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    run_label: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
+    # The day the run is about (a meeting's), from the form field with role run_date.
+    run_date: Mapped[Optional[date]] = mapped_column(sa.Date(), nullable=True)
+    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    output_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    error_json: Mapped[Optional[dict[str, Any]]] = mapped_column(JSONB, nullable=True)
+    job_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Jobs.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "char_length(run_label) BETWEEN 1 AND 120",
+            name="ck_flow_runs_run_label_length",
+        ),
+        CheckConstraint(
+            f"purpose IN ({_check_values(FLOW_RUN_PURPOSE_VALUES)})",
+            name="ck_flow_runs_purpose",
+        ),
+        CheckConstraint(
+            f"principal_type IN ({_check_values(FLOW_RUN_PRINCIPAL_TYPE_VALUES)})",
+            name="ck_flow_runs_principal_type",
+        ),
+        CheckConstraint(
+            "("
+            "(principal_type = 'user' "
+            "AND principal_user_id IS NOT NULL "
+            "AND principal_service_id IS NULL "
+            "AND runtime_service_permission IS NULL) "
+            "OR "
+            "(principal_type = 'service_key' "
+            "AND principal_user_id IS NULL "
+            "AND principal_service_id IS NOT NULL "
+            "AND runtime_service_permission IN ('read','write','admin'))"
+            ")",
+            name="ck_flow_runs_principal_identity",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(FLOW_RUN_STATUS_VALUES)})",
+            name="ck_flow_runs_status",
+        ),
+        CheckConstraint(
+            "dispatch_attempt_count >= 0",
+            name="ck_flow_runs_dispatch_attempt_count_nonnegative",
+        ),
+        CheckConstraint(
+            "status <> 'running' OR execution_heartbeat_at IS NOT NULL",
+            name="ck_flow_runs_running_execution_heartbeat",
+        ),
+        CheckConstraint(
+            "dispatch_last_error IS NULL "
+            "OR jsonb_typeof(dispatch_last_error) = 'object'",
+            name="ck_flow_runs_dispatch_last_error_object",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_runs_flow_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_id", "flow_version"],
+            ["flow_versions.flow_id", "flow_versions.version"],
+            ondelete="RESTRICT",
+            name="fk_flow_runs_flow_version",
+        ),
+        UniqueConstraint("id", "tenant_id", name="uq_flow_runs_id_tenant_id"),
+        UniqueConstraint("id", "flow_id", name="uq_flow_runs_id_flow_id"),
+        Index("ix_flow_runs_job_id", "job_id"),
+        Index("ix_flow_runs_flow_id_status", "flow_id", "status"),
+        Index("ix_flow_runs_tenant_created_at", "tenant_id", "created_at"),
+        Index(
+            "ix_flow_runs_queued_dispatch_due",
+            "tenant_id",
+            "dispatch_next_attempt_at",
+            "id",
+            postgresql_where=sa.text(
+                "status = 'queued' "
+                "AND dispatch_next_attempt_at IS NOT NULL "
+                "AND dispatch_exhausted_at IS NULL"
+            ),
+        ),
+        Index(
+            "uq_flow_runs_idempotency_user_key",
+            "tenant_id",
+            "flow_id",
+            "principal_user_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=sa.text(
+                "principal_type = 'user' AND idempotency_key IS NOT NULL"
+            ),
+        ),
+        Index(
+            "uq_flow_runs_idempotency_service_key",
+            "tenant_id",
+            "flow_id",
+            "principal_service_id",
+            "idempotency_key",
+            unique=True,
+            postgresql_where=sa.text(
+                "principal_type = 'service_key' AND idempotency_key IS NOT NULL"
+            ),
+        ),
+        Index(
+            "ix_flow_runs_service_principal_created_at",
+            "tenant_id",
+            "principal_service_id",
+            sa.text("created_at DESC"),
+            postgresql_where=sa.text("principal_type = 'service_key'"),
+        ),
+        Index(
+            "ix_flow_runs_running_execution_heartbeat",
+            "execution_heartbeat_at",
+            "id",
+            postgresql_include=("tenant_id", "revision"),
+            postgresql_where=sa.text("status = 'running'"),
+        ),
+        Index(
+            "ix_flow_runs_exhausted_dispatch_wait",
+            "dispatch_pending_since",
+            "id",
+            postgresql_include=("tenant_id", "revision"),
+            postgresql_where=sa.text(
+                "status = 'queued' AND dispatch_exhausted_at IS NOT NULL"
+            ),
+        ),
+        Index(
+            "ix_flow_runs_awaiting_review_created",
+            "created_at",
+            "id",
+            postgresql_include=("tenant_id", "revision"),
+            postgresql_where=sa.text("status = 'awaiting_review'"),
+        ),
+        Index(
+            "ix_flow_runs_tenant_terminal_retention_anchor",
+            "tenant_id",
+            sa.text("coalesce(finished_at, created_at)"),
+            "id",
+            postgresql_include=("flow_id",),
+            postgresql_where=sa.text(
+                FLOW_RUN_TERMINAL_RETENTION_ANCHOR_INDEX_PREDICATE
+            ),
+        ),
+        _flow_run_listing_index(
+            "ix_flow_runs_flow_listing", postgresql_include=("status",)
+        ),
+        _flow_run_listing_index(
+            "ix_flow_runs_flow_user_listing",
+            "principal_user_id",
+            postgresql_where=sa.text("principal_user_id IS NOT NULL"),
+        ),
+        _flow_run_listing_index(
+            "ix_flow_runs_flow_service_listing",
+            "principal_service_id",
+            postgresql_where=sa.text("principal_service_id IS NOT NULL"),
+        ),
+        _flow_run_status_count_index(
+            "ix_flow_runs_flow_user_status", "principal_user_id"
+        ),
+        _flow_run_status_count_index(
+            "ix_flow_runs_flow_service_status", "principal_service_id"
+        ),
+        _principal_fk_index("flow_runs", "principal_user_id"),
+        _principal_fk_index("flow_runs", "principal_service_id"),
+        _principal_fk_index("flow_runs", "created_by_api_key_id"),
+    )
+
+
+class FlowRetentionHolds(BasePublic):
+    """Stores legal holds on Flow run history. Writer: FlowRetentionHoldRepository. Purpose: exclude held runs from the history purge and the debug redaction until release or end date; released holds stay as part of the record."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"), nullable=False
+    )
+    flow_id: Mapped[UUID] = mapped_column(nullable=False)
+    # No FK: a held run is never deleted, and a run hold is checked against its
+    # flow when placed.
+    flow_run_id: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    reason: Mapped[str] = mapped_column(sa.Text, nullable=False)
+    # Passing it does not end the hold; it flags the hold for review.
+    review_by: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    ends_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    created_by_actor: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    created_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
+    )
+    released_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    released_by_actor: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    released_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"), nullable=True
+    )
+    release_reason: Mapped[Optional[str]] = mapped_column(sa.Text, nullable=True)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_id", "tenant_id"],
+            ["flows.id", "flows.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_retention_holds_flow_tenant",
+        ),
+        CheckConstraint(
+            "char_length(reason) BETWEEN 1 AND "
+            f"{MAX_FLOW_RETENTION_HOLD_REASON_LENGTH}",
+            name="ck_flow_retention_holds_reason_length",
+        ),
+        CheckConstraint(
+            "ends_at IS NULL OR ends_at > created_at",
+            name="ck_flow_retention_holds_ends_after_created",
+        ),
+        CheckConstraint(
+            "review_by > created_at",
+            name="ck_flow_retention_holds_review_after_created",
+        ),
+        CheckConstraint(
+            "(released_at IS NULL AND released_by_actor IS NULL AND "
+            "released_by_user_id IS NULL AND release_reason IS NULL) OR "
+            "(released_at IS NOT NULL AND released_by_actor IS NOT NULL AND "
+            "release_reason IS NOT NULL AND char_length(release_reason) BETWEEN 1 AND "
+            f"{MAX_FLOW_RETENTION_HOLD_REASON_LENGTH})",
+            name="ck_flow_retention_holds_release_complete",
+        ),
+        # The hold predicate's two arms: a flow hold by flow, a run hold by run.
+        Index(
+            "ix_flow_retention_holds_active_flow_id",
+            "flow_id",
+            postgresql_where=sa.text("released_at IS NULL"),
+        ),
+        Index(
+            "ix_flow_retention_holds_active_flow_run_id",
+            "flow_run_id",
+            postgresql_where=sa.text("released_at IS NULL AND flow_run_id IS NOT NULL"),
+        ),
+        # The Flow FK cascade and a Flow's hold history, released holds included.
+        Index("ix_flow_retention_holds_flow_id_tenant_id", "flow_id", "tenant_id"),
+        # The admin list and the tenant FK cascade.
+        Index("ix_flow_retention_holds_tenant_created", "tenant_id", "created_at"),
+        _principal_fk_index("flow_retention_holds", "created_by_user_id"),
+        _principal_fk_index("flow_retention_holds", "released_by_user_id"),
+    )
+
+
+class FlowStepResults(BasePublic):
+    """Stores current per-step runtime results. Writer: FlowRunRepository. Purpose: keep step status, payloads, diagnostics, and output metadata per run."""
+
+    flow_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowRuns.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    assistant_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Assistants.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    current_attempt_no: Mapped[Optional[int]] = mapped_column(
+        nullable=True,
+        server_default="1",
+    )
+    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    effective_prompt: Mapped[Optional[str]] = mapped_column(nullable=True)
+    output_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    model_parameters_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    num_tokens_input: Mapped[Optional[int]] = mapped_column(nullable=True)
+    num_tokens_output: Mapped[Optional[int]] = mapped_column(nullable=True)
+    status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default="pending",
+    )
+    error_code: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
+    flow_step_execution_hash: Mapped[Optional[str]] = mapped_column(nullable=True)
+    started_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True), nullable=True
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "step_order >= 1",
+            name="ck_flow_step_results_step_order_positive",
+        ),
+        CheckConstraint(
+            "current_attempt_no IS NULL OR current_attempt_no >= 1",
+            name="ck_flow_step_results_current_attempt_no_positive",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(FLOW_STEP_RESULT_STATUS_VALUES)})",
+            name="ck_flow_step_results_status",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_step_results_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_step_results_run_flow",
+        ),
+        UniqueConstraint(
+            "flow_run_id", "step_id", name="uq_flow_step_results_run_step"
+        ),
+        Index(
+            "ix_flow_step_results_run_flow_step", "flow_run_id", "flow_id", "step_id"
+        ),
+        Index(
+            "ix_flow_step_results_run_step_order",
+            "flow_run_id",
+            "step_order",
+        ),
+        Index("ix_flow_step_results_assistant_id", "assistant_id"),
+    )
+
+
+class FlowStepAttempts(BasePublic):
+    """Stores individual step execution attempts. Writer: FlowRunRepository. Purpose: preserve retry diagnostics, timings, prompts, and raw attempt payloads."""
+
+    flow_run_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowRuns.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(nullable=False)
+    dispatch_task_id: Mapped[Optional[str]] = mapped_column(nullable=True)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
+    requested_model: Mapped[Optional[str]] = mapped_column(nullable=True)
+    response_model: Mapped[Optional[str]] = mapped_column(nullable=True)
+    provider: Mapped[Optional[str]] = mapped_column(nullable=True)
+    finish_reason: Mapped[Optional[str]] = mapped_column(nullable=True)
+    provider_response_id: Mapped[Optional[str]] = mapped_column(nullable=True)
+    num_tokens_input: Mapped[Optional[int]] = mapped_column(nullable=True)
+    num_tokens_output: Mapped[Optional[int]] = mapped_column(nullable=True)
+    provenance_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    input_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    output_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    flow_step_execution_hash: Mapped[Optional[str]] = mapped_column(nullable=True)
+    started_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+
+    __table_args__ = (
+        CheckConstraint(
+            "step_order >= 1",
+            name="ck_flow_step_attempts_step_order_positive",
+        ),
+        CheckConstraint(
+            "attempt_no >= 1",
+            name="ck_flow_step_attempts_attempt_no_positive",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(FLOW_STEP_ATTEMPT_STATUS_VALUES)})",
+            name="ck_flow_step_attempts_status",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_step_attempts_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_step_attempts_run_flow",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            name="uq_flow_step_attempts_run_step_attempt",
+        ),
+        Index(
+            "ix_flow_step_attempts_run_flow_step_attempt",
+            "flow_run_id",
+            "flow_id",
+            "step_id",
+            "attempt_no",
+        ),
+        Index(
+            "ix_flow_step_attempts_run_step_order_attempt",
+            "flow_run_id",
+            "step_order",
+            "attempt_no",
+        ),
+    )
+
+
+class FlowStepAttemptResolvedInputs(BaseCrossReference):
+    """Stores one immutable resolved-input aggregate per Flow step attempt, and the attempt's forwarding facts once its first model call returns. Writer: FlowRunRepository. Purpose: preserve exact dependency evidence without widening the hot attempt row."""
+
+    flow_step_attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowStepAttempts.id, ondelete="CASCADE"),
+        primary_key=True,
+    )
+    resolved_input_edges_jsonb: Mapped[dict[str, Any]] = mapped_column(
+        JSONB(none_as_null=True),
+        nullable=False,
+    )
+    resolved_input_edge_count: Mapped[int] = mapped_column(
+        sa.SmallInteger,
+        sa.Computed(
+            "CASE WHEN jsonb_typeof(resolved_input_edges_jsonb) = 'object' AND "
+            "jsonb_typeof(resolved_input_edges_jsonb -> 'edges') = 'array' "
+            "THEN jsonb_array_length(resolved_input_edges_jsonb -> 'edges') "
+            "ELSE -1 END",
+            persisted=True,
+        ),
+        nullable=False,
+    )
+    # Forwarding facts of the attempt's first model call (overlap between its
+    # inputs and with its output): numbers and edge indexes only, written once
+    # after the call. Null for steps that call no model and for attempts
+    # recorded before the facts existed.
+    forwarding_facts_jsonb: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB(none_as_null=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            f"resolved_input_edge_count BETWEEN 0 AND {FLOW_RESOLVED_INPUT_MAX_EDGES}",
+            name="ck_flow_step_attempt_resolved_input_count",
+        ),
+    )
+
+
+class FlowProviderCalls(BasePublic):
+    """Stores one durable lifecycle row per Flow provider request. Writer: FlowProviderCallRepository. Purpose: preserve credential-free request identity, terminal outcome, token or audio usage, and mapped source evidence outside attempt JSONB."""
+
+    flow_step_attempt_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowStepAttempts.id, ondelete="CASCADE"),
+        nullable=False,
+    )
+    # A completion call consumes resolved inputs, so it may only exist once that
+    # evidence is activated. A transcription call runs while the step input is
+    # still being produced, so it has no aggregate to point at.
+    resolved_inputs_attempt_id: Mapped[Optional[UUID]] = mapped_column()
+    summarization_input: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True)
+    )
+    # A long-material digest call: its stage, the sources it read and, for a
+    # map call, its segment. References only; the text stays out.
+    digest_call: Mapped[Optional[dict[str, object]]] = mapped_column(
+        JSONB(none_as_null=True)
+    )
+    ordinal: Mapped[int] = mapped_column(nullable=False)
+    call_kind: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    request_schema_version: Mapped[int] = mapped_column(sa.SmallInteger, nullable=False)
+    provider_request_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    requested_model: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    provider: Mapped[Optional[str]] = mapped_column(sa.String(128))
+    response_format: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    requested_capabilities: Mapped[list[str]] = mapped_column(
+        ARRAY(sa.String(32)), nullable=False
+    )
+    resolved_input_edge_indexes: Mapped[list[int]] = mapped_column(
+        ARRAY(sa.SmallInteger), nullable=False
+    )
+    call_reason: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    mapped_execution_mode: Mapped[Optional[str]] = mapped_column(sa.String(32))
+    mapped_item_index: Mapped[Optional[int]] = mapped_column()
+    mapped_source_index: Mapped[Optional[int]] = mapped_column()
+    mapped_source_id: Mapped[Optional[str]] = mapped_column(sa.Text())
+    response_model: Mapped[Optional[str]] = mapped_column(sa.String(255))
+    provider_response_id: Mapped[Optional[str]] = mapped_column(sa.String(512))
+    num_tokens_input: Mapped[Optional[int]] = mapped_column()
+    num_tokens_output: Mapped[Optional[int]] = mapped_column()
+    audio_seconds: Mapped[Optional[Decimal]] = mapped_column(sa.Numeric(12, 3))
+    input_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
+    output_source: Mapped[Optional[str]] = mapped_column(sa.String(32))
+    outcome_reason: Mapped[Optional[str]] = mapped_column(sa.String(64))
+    requested_at: Mapped[datetime] = mapped_column(
+        sa.DateTime(timezone=True), nullable=False
+    )
+    finished_at: Mapped[Optional[datetime]] = mapped_column(sa.DateTime(timezone=True))
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["resolved_inputs_attempt_id"],
+            ["flow_step_attempt_resolved_inputs.flow_step_attempt_id"],
+            name="fk_flow_provider_calls_resolved_inputs",
+        ),
+        UniqueConstraint(
+            "flow_step_attempt_id",
+            "ordinal",
+            name="uq_flow_provider_calls_attempt_ordinal",
+        ),
+        CheckConstraint(
+            f"call_kind IN ({_check_values(PROVIDER_CALL_KIND_VALUES)})",
+            name="ck_flow_provider_calls_kind",
+        ),
+        CheckConstraint(
+            "ordinal >= 1",
+            name="ck_flow_provider_calls_ordinal_positive",
+        ),
+        CheckConstraint(
+            f"status IN ({_check_values(PROVIDER_CALL_STATUS_VALUES)})",
+            name="ck_flow_provider_calls_status",
+        ),
+        CheckConstraint(
+            f"response_format IN ({_check_values(PROVIDER_CALL_RESPONSE_FORMAT_VALUES)})",
+            name="ck_flow_provider_calls_response_format",
+        ),
+        CheckConstraint(
+            "(cardinality(requested_capabilities) = 0 OR "
+            "array_ndims(requested_capabilities) = 1) AND "
+            "requested_capabilities <@ ARRAY["
+            f"{_check_values(PROVIDER_CALL_REQUESTED_CAPABILITY_VALUES)}"
+            "]::varchar(32)[] AND cardinality(requested_capabilities) <= 4",
+            name="ck_flow_provider_calls_capabilities_allowed",
+        ),
+        CheckConstraint(
+            "(('structured_output' = ANY(requested_capabilities)) = "
+            "(response_format IN ('json_object', 'json_schema')))",
+            name="ck_flow_provider_calls_capabilities_response_format",
+        ),
+        CheckConstraint(
+            "(cardinality(resolved_input_edge_indexes) = 0 OR "
+            "array_ndims(resolved_input_edge_indexes) = 1) AND "
+            "array_position(resolved_input_edge_indexes, NULL) IS NULL AND "
+            f"cardinality(resolved_input_edge_indexes) <= {FLOW_RESOLVED_INPUT_MAX_EDGES} "
+            "AND 0 <= ALL(resolved_input_edge_indexes) AND "
+            f"{FLOW_RESOLVED_INPUT_MAX_EDGES} > ALL(resolved_input_edge_indexes)",
+            name="ck_flow_provider_calls_resolved_input_indexes",
+        ),
+        CheckConstraint(
+            f"call_reason IN ({_check_values(PROVIDER_CALL_REASON_VALUES)})",
+            name="ck_flow_provider_calls_reason",
+        ),
+        CheckConstraint(
+            "request_schema_version = 2 AND provider_request_hash ~ '^[0-9a-f]{64}$'",
+            name="ck_flow_provider_calls_request_identity",
+        ),
+        CheckConstraint(
+            "length(requested_model) > 0",
+            name="ck_flow_provider_calls_requested_model_nonempty",
+        ),
+        CheckConstraint(
+            "provider IS NULL OR length(provider) > 0",
+            name="ck_flow_provider_calls_provider_nonempty",
+        ),
+        CheckConstraint(
+            "num_tokens_input IS NULL OR num_tokens_input >= 0",
+            name="ck_flow_provider_calls_input_tokens_nonnegative",
+        ),
+        CheckConstraint(
+            "num_tokens_output IS NULL OR num_tokens_output >= 0",
+            name="ck_flow_provider_calls_output_tokens_nonnegative",
+        ),
+        CheckConstraint(
+            "input_source IS NULL OR input_source IN "
+            f"({_check_values(PROVIDER_CALL_TOKEN_SOURCE_VALUES)})",
+            name="ck_flow_provider_calls_input_source",
+        ),
+        CheckConstraint(
+            "output_source IS NULL OR output_source IN "
+            f"({_check_values(PROVIDER_CALL_TOKEN_SOURCE_VALUES)})",
+            name="ck_flow_provider_calls_output_source",
+        ),
+        CheckConstraint(
+            "(input_source IS NULL AND num_tokens_input IS NULL) OR "
+            "(input_source IN ('not_reported', 'not_applicable') "
+            "AND num_tokens_input IS NULL) OR "
+            "(input_source NOT IN ('not_reported', 'not_applicable') "
+            "AND num_tokens_input IS NOT NULL)",
+            name="ck_flow_provider_calls_input_usage_shape",
+        ),
+        CheckConstraint(
+            "(output_source IS NULL AND num_tokens_output IS NULL) OR "
+            "(output_source IN ('not_reported', 'not_applicable') "
+            "AND num_tokens_output IS NULL) OR "
+            "(output_source NOT IN ('not_reported', 'not_applicable') "
+            "AND num_tokens_output IS NOT NULL)",
+            name="ck_flow_provider_calls_output_usage_shape",
+        ),
+        CheckConstraint(
+            "(call_kind = 'completion' AND audio_seconds IS NULL "
+            "AND resolved_inputs_attempt_id = flow_step_attempt_id "
+            "AND input_source IS DISTINCT FROM 'not_applicable' "
+            "AND output_source IS DISTINCT FROM 'not_applicable') OR "
+            "(call_kind = 'transcription' AND audio_seconds IS NOT NULL "
+            "AND audio_seconds >= 0 "
+            "AND resolved_inputs_attempt_id IS NULL "
+            "AND cardinality(resolved_input_edge_indexes) = 0 "
+            "AND response_format = 'none' "
+            "AND cardinality(requested_capabilities) = 0 "
+            "AND call_reason = 'initial' "
+            "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
+            "AND input_source IS NOT DISTINCT FROM "
+            "  CASE WHEN status = 'completed' THEN 'not_applicable' END "
+            "AND output_source IS NOT DISTINCT FROM "
+            "  CASE WHEN status = 'completed' THEN 'not_applicable' END)",
+            name="ck_flow_provider_calls_kind_shape",
+        ),
+        CheckConstraint(
+            "(status = 'started' AND finished_at IS NULL AND outcome_reason IS NULL "
+            "AND response_model IS NULL "
+            "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
+            "AND input_source IS NULL AND output_source IS NULL) OR "
+            "(status = 'completed' AND outcome_reason IS NULL "
+            "AND input_source IS NOT NULL AND output_source IS NOT NULL "
+            "AND finished_at IS NOT NULL) OR "
+            "(status = 'rejected' AND finished_at IS NOT NULL "
+            f"AND outcome_reason IN ({_check_values(PROVIDER_CALL_REJECTION_REASON_VALUES)}) "
+            "AND response_model IS NULL "
+            "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
+            "AND input_source IS NULL AND output_source IS NULL) OR "
+            "(status = 'outcome_unknown' AND finished_at IS NOT NULL "
+            f"AND outcome_reason IN ({_check_values(PROVIDER_CALL_UNKNOWN_REASON_VALUES)}) "
+            "AND response_model IS NULL "
+            "AND num_tokens_input IS NULL AND num_tokens_output IS NULL "
+            "AND input_source IS NULL AND output_source IS NULL)",
+            name="ck_flow_provider_calls_lifecycle_shape",
+        ),
+        CheckConstraint(
+            "(mapped_execution_mode IS NULL AND mapped_item_index IS NULL "
+            "AND mapped_source_index IS NULL AND mapped_source_id IS NULL) OR "
+            "(mapped_execution_mode = 'per_item' AND mapped_item_index >= 1 "
+            "AND mapped_source_index IS NULL) OR "
+            "(mapped_execution_mode = 'per_source' AND mapped_source_index >= 1 "
+            "AND mapped_item_index IS NULL)",
+            name="ck_flow_provider_calls_mapped_context",
+        ),
+        Index(
+            "ix_flow_provider_calls_started_requested_at",
+            "requested_at",
+            postgresql_where=sa.text("status = 'started'"),
+        ),
+        # Run purge deletes resolved-input rows; the NO ACTION FK check probes this.
+        Index(
+            "ix_flow_provider_calls_resolved_inputs_attempt_id",
+            "resolved_inputs_attempt_id",
+            postgresql_where=sa.text("resolved_inputs_attempt_id IS NOT NULL"),
+        ),
+    )
+
+
+class FlowRunReviewCheckpoints(BasePublic):
+    """Stores human review pauses for Flow runs. Writer: FlowRunReviewCheckpointRepository. Purpose: track editable checkpoint state, revisions, decisions, and expiry."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id,
+            ondelete="CASCADE",
+            name="fk_review_checkpoints_tenant",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id,
+            ondelete="CASCADE",
+            name="fk_review_checkpoints_flow",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(nullable=False)
+    state: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default=FlowRunReviewCheckpointState.AWAITING_REVIEW.value,
+    )
+    revision: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    schema_version: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    original_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    current_payload_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    step_label: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
+    review_mode: Mapped[str] = mapped_column(sa.String(16), nullable=False)
+    output_type: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    output_contract_json: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=True,
+    )
+    requester_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            Users.id,
+            ondelete="RESTRICT",
+            name="fk_review_checkpoints_requester_user",
+        ),
+        nullable=True,
+    )
+    requester_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="RESTRICT",
+            name="fk_review_checkpoints_requester_service",
+        ),
+        nullable=True,
+    )
+    requester_principal_type: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+    )
+    decided_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            Users.id,
+            ondelete="RESTRICT",
+            name="fk_review_checkpoints_decided_by_user",
+        ),
+        nullable=True,
+    )
+    decided_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="RESTRICT",
+            name="fk_review_checkpoints_decided_by_service",
+        ),
+        nullable=True,
+    )
+    decided_by_principal_type: Mapped[Optional[str]] = mapped_column(
+        sa.String(32),
+        nullable=True,
+    )
+    next_step_ids_json: Mapped[Optional[list[str]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    resume_idempotency_key: Mapped[Optional[str]] = mapped_column(
+        sa.String(255),
+        nullable=True,
+    )
+    edited_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    approved_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    rejected_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    resumed_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    cancelled_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+    expired_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.DateTime(timezone=True),
+        nullable=True,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_review_checkpoints_id_tenant"),
+        UniqueConstraint("id", "flow_run_id", name="uq_review_checkpoints_id_run"),
+        CheckConstraint(
+            f"state IN ({_check_values(FLOW_RUN_REVIEW_CHECKPOINT_STATE_VALUES)})",
+            name="ck_flow_run_review_checkpoints_state",
+        ),
+        CheckConstraint(
+            "revision >= 1",
+            name="ck_flow_run_review_checkpoints_revision",
+        ),
+        CheckConstraint(
+            "schema_version >= 1",
+            name="ck_flow_run_review_checkpoints_schema_version",
+        ),
+        CheckConstraint(
+            f"review_mode IN ({_check_values(FLOW_STEP_REVIEW_MODE_VALUES)})",
+            name="ck_flow_run_review_checkpoints_review_mode",
+        ),
+        CheckConstraint(
+            f"output_type IN ({_check_values(FLOW_STEP_OUTPUT_TYPE_VALUES)})",
+            name="ck_flow_run_review_checkpoints_output_type",
+        ),
+        CheckConstraint(
+            "("
+            "requester_principal_type = 'user' "
+            "AND requester_user_id IS NOT NULL "
+            "AND requester_service_id IS NULL"
+            ") OR ("
+            "requester_principal_type = 'service_key' "
+            "AND requester_user_id IS NULL "
+            "AND requester_service_id IS NOT NULL"
+            ")",
+            name="ck_flow_run_review_checkpoints_requester_principal",
+        ),
+        CheckConstraint(
+            "decided_by_principal_type IS NULL "
+            "OR ("
+            "decided_by_principal_type = 'user' "
+            "AND decided_by_user_id IS NOT NULL "
+            "AND decided_by_service_id IS NULL"
+            ") OR ("
+            "decided_by_principal_type = 'service_key' "
+            "AND decided_by_user_id IS NULL "
+            "AND decided_by_service_id IS NOT NULL"
+            ")",
+            name="ck_flow_run_review_checkpoints_decider_principal",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_review_checkpoints_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_review_checkpoints_run_flow",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "step_id", "attempt_no"],
+            [
+                "flow_step_attempts.flow_run_id",
+                "flow_step_attempts.step_id",
+                "flow_step_attempts.attempt_no",
+            ],
+            ondelete="RESTRICT",
+            name="fk_flow_run_review_checkpoints_step_attempt",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            name="uq_flow_run_review_checkpoints_run_step_attempt",
+        ),
+        Index(
+            "uq_flow_run_review_checkpoints_one_active_per_run",
+            "flow_run_id",
+            unique=True,
+            postgresql_where=sa.text(
+                "state IN ('awaiting_review', 'edited', 'approved')"
+            ),
+        ),
+        Index(
+            "uq_flow_run_review_checkpoints_resume_key",
+            "tenant_id",
+            "flow_run_id",
+            "resume_idempotency_key",
+            unique=True,
+            postgresql_where=sa.text("resume_idempotency_key IS NOT NULL"),
+        ),
+        Index(
+            "ix_flow_run_review_checkpoints_run_step_attempt",
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+        ),
+        Index(
+            "ix_flow_run_review_checkpoints_tenant_created_at",
+            "tenant_id",
+            "created_at",
+        ),
+        Index(
+            "ix_flow_run_review_checkpoints_tenant_expires_at_reconcilable",
+            "tenant_id",
+            "expires_at",
+            postgresql_where=sa.text("state IN ('awaiting_review', 'edited')"),
+        ),
+        Index(
+            "ix_flow_review_approved_wait",
+            "approved_at",
+            "flow_run_id",
+            postgresql_include=("tenant_id", "id"),
+            postgresql_where=sa.text("state = 'approved'"),
+        ),
+        _principal_fk_index("flow_run_review_checkpoints", "requester_user_id"),
+        _principal_fk_index("flow_run_review_checkpoints", "requester_service_id"),
+        _principal_fk_index("flow_run_review_checkpoints", "decided_by_user_id"),
+        _principal_fk_index("flow_run_review_checkpoints", "decided_by_service_id"),
+    )
+
+
+class FlowRunStepInputFiles(BasePublic):
+    """Stores files bound as step inputs for a run attempt. Writer: FlowRunRepository. Purpose: make runtime file override intent relational and auditable."""
+
+    flow_run_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(nullable=False)
+    file_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Files.id, ondelete="RESTRICT"),
+        info=file_usage(FileUsageKind.FLOW_RUNTIME),
+        nullable=False,
+        index=True,
+    )
+    ordinal: Mapped[int] = mapped_column(nullable=False)
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_step_input_files_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_step_input_files_run_flow",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "flow_id", "tenant_id"],
+            [
+                "flow_runtime_uploaded_files.file_id",
+                "flow_runtime_uploaded_files.flow_id",
+                "flow_runtime_uploaded_files.tenant_id",
+            ],
+            ondelete="RESTRICT",
+            name="fk_flow_run_step_input_files_runtime_upload",
+        ),
+        CheckConstraint(
+            "attempt_no >= 1",
+            name="ck_flow_run_step_input_files_attempt_no_positive",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            "file_id",
+            name="uq_flow_run_step_input_files_run_step_attempt_file",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            "ordinal",
+            name="uq_flow_run_step_input_files_run_step_attempt_ordinal",
+        ),
+        Index(
+            "ix_flow_run_step_input_files_tenant_file",
+            "tenant_id",
+            "file_id",
+        ),
+        Index(
+            "ix_flow_run_step_input_files_run_step_attempt",
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+        ),
+        Index(
+            "ix_flow_run_step_input_files_flow_step",
+            "flow_id",
+            "step_id",
+        ),
+    )
+
+
+class FlowRunStepResultFiles(BasePublic):
+    """Stores files produced by step results. Writer: FlowRunRepository. Purpose: connect generated artifacts to the run, step, attempt, and file owner graph."""
+
+    flow_run_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    step_result_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowStepResults.id, ondelete="CASCADE"),
+        nullable=False,
+    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(nullable=False)
+    file_id: Mapped[UUID] = mapped_column(
+        info=file_usage(FileUsageKind.FLOW_RUNTIME), nullable=False, index=True
+    )
+    ordinal: Mapped[int] = mapped_column(nullable=False)
+    source: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+
+    __table_args__ = (
+        CheckConstraint(
+            f"source IN ({_check_values(FLOW_RUN_STEP_RESULT_FILE_SOURCE_VALUES)})",
+            name="ck_flow_run_step_result_files_source",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_step_result_files_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="CASCADE",
+            name="fk_flow_run_step_result_files_run_flow",
+        ),
+        ForeignKeyConstraint(
+            ["file_id", "tenant_id"],
+            ["files.id", "files.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_step_result_files_file_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "step_id", "attempt_no"],
+            [
+                "flow_step_attempts.flow_run_id",
+                "flow_step_attempts.step_id",
+                "flow_step_attempts.attempt_no",
+            ],
+            ondelete="CASCADE",
+            name="fk_flow_run_step_result_files_step_attempt",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            "file_id",
+            name="uq_flow_run_step_result_files_run_step_attempt_file",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            "ordinal",
+            name="uq_flow_run_step_result_files_run_step_attempt_ordinal",
+        ),
+        Index(
+            "ix_flow_run_step_result_files_tenant_file",
+            "tenant_id",
+            "file_id",
+        ),
+        Index(
+            "ix_flow_run_step_result_files_run_step_attempt",
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+        ),
+        Index(
+            "ix_flow_run_step_result_files_step_result",
+            "step_result_id",
+        ),
+    )
+
+
+class FlowRunAuditOutbox(BasePublic):
+    """Stores durable Flow lifecycle audit intents. Writer: FlowRunAuditOutboxRepository. Purpose: deliver content-free audit logs while preserving run transaction order."""
+
+    __tablename__ = "flow_run_audit_outbox"  # type: ignore[assignment]
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    run_revision: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="1",
+    )
+    review_checkpoint_id: Mapped[Optional[UUID]] = mapped_column(
+        nullable=True,
+        index=True,
+    )
+    checkpoint_revision: Mapped[Optional[int]] = mapped_column(nullable=True)
+    payload_sha256_before: Mapped[Optional[str]] = mapped_column(
+        sa.String(64), nullable=True
+    )
+    payload_sha256_after: Mapped[Optional[str]] = mapped_column(
+        sa.String(64), nullable=True
+    )
+    description: Mapped[str] = mapped_column(nullable=False)
+    action: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    entity_type: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    entity_id: Mapped[UUID] = mapped_column(nullable=False)
+    actor_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="SET NULL"),
+        nullable=True,
+    )
+    actor_type: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    actor_api_key_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("api_keys_v2.id", ondelete="SET NULL"),
+        nullable=True,
+    )
+    # Who acted, captured in the run transaction; delivery copies it unchanged.
+    actor_snapshot: Mapped[Optional[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=True
+    )
+    source: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    target_status: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    error_code: Mapped[Optional[str]] = mapped_column(nullable=True)
+    error_message: Mapped[Optional[str]] = mapped_column(nullable=True)
+    delivery_status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default=FlowOutboxDeliveryStatus.PENDING.value,
+    )
+    delivery_attempts: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="0",
+    )
+    next_delivery_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+        server_default=sa.func.now(),
+    )
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    dead_lettered_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    delivery_last_error: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
+
+    __table_args__ = (
+        Index(
+            "uq_flow_run_audit_outbox_run_revision",
+            "flow_run_id",
+            "run_revision",
+            unique=True,
+            postgresql_where=sa.text("review_checkpoint_id IS NULL"),
+        ),
+        Index(
+            "uq_flow_run_audit_outbox_checkpoint_revision",
+            "review_checkpoint_id",
+            "checkpoint_revision",
+            unique=True,
+            postgresql_where=sa.text("review_checkpoint_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_flow_run_audit_outbox_actor_id",
+            "actor_id",
+            postgresql_where=sa.text("actor_id IS NOT NULL"),
+        ),
+        Index(
+            "ix_flow_run_audit_outbox_actor_api_key_id",
+            "actor_api_key_id",
+            postgresql_where=sa.text("actor_api_key_id IS NOT NULL"),
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_audit_outbox_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_audit_outbox_run_flow",
+        ),
+        ForeignKeyConstraint(
+            ["review_checkpoint_id"],
+            ["flow_run_review_checkpoints.id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_audit_outbox_review_checkpoint",
+        ),
+        CheckConstraint(
+            f"target_status IN ({_check_values(FLOW_RUN_AUDIT_TARGET_STATUS_VALUES)})",
+            name="ck_flow_run_audit_outbox_target_status",
+        ),
+        CheckConstraint(
+            "("
+            "(review_checkpoint_id IS NULL AND checkpoint_revision IS NULL) "
+            "OR "
+            "(review_checkpoint_id IS NOT NULL AND checkpoint_revision IS NOT NULL)"
+            ")",
+            name="ck_flow_run_audit_outbox_checkpoint_key",
+        ),
+        CheckConstraint(
+            "description = action || ':' || source",
+            name="ck_flow_run_audit_outbox_description",
+        ),
+        CheckConstraint(
+            f"source IN ({_check_values(FLOW_RUN_LIFECYCLE_SOURCE_VALUES)})",
+            name="ck_flow_run_audit_outbox_source",
+        ),
+        CheckConstraint(
+            "delivery_attempts >= 0",
+            name="ck_flow_run_audit_outbox_delivery_attempts",
+        ),
+        CheckConstraint(
+            "delivery_status IN "
+            f"({_check_values(FLOW_RUN_AUDIT_OUTBOX_DELIVERY_STATUS_VALUES)})",
+            name="ck_flow_run_audit_outbox_delivery_status",
+        ),
+        CheckConstraint(
+            "("
+            "(delivery_status = 'pending' "
+            "AND delivered_at IS NULL "
+            "AND dead_lettered_at IS NULL) "
+            "OR "
+            "(delivery_status = 'delivered' "
+            "AND delivered_at IS NOT NULL "
+            "AND dead_lettered_at IS NULL) "
+            "OR "
+            "(delivery_status = 'dead_lettered' "
+            "AND delivered_at IS NULL "
+            "AND dead_lettered_at IS NOT NULL)"
+            ")",
+            name="ck_flow_run_audit_outbox_delivery_timestamps",
+        ),
+        # The due-row claim reads the pending-delivery index in key order.
+        CheckConstraint(
+            "delivery_status <> 'pending' OR next_delivery_at IS NOT NULL",
+            name="ck_flow_run_audit_outbox_pending_next_delivery",
+        ),
+        Index("ix_flow_run_audit_outbox_tenant_created", "tenant_id", "created_at"),
+        Index("ix_flow_run_audit_outbox_action", "action"),
+        Index(
+            "ix_flow_run_audit_outbox_pending_delivery",
+            "next_delivery_at",
+            "created_at",
+            postgresql_where=sa.text("delivery_status = 'pending'"),
+        ),
+        Index(
+            "ix_flow_run_audit_outbox_dead_lettered",
+            "dead_lettered_at",
+            postgresql_where=sa.text("delivery_status = 'dead_lettered'"),
+        ),
+    )
+
+
+class FlowRunWebhookDeliveries(BasePublic):
+    """Stores HTTP step delivery outbox rows. Writer: FlowRunWebhookDeliveryRepository. Purpose: claim, retry, dead-letter, and finalize webhook deliveries durably."""
+
+    __tablename__ = "flow_run_webhook_deliveries"  # type: ignore[assignment]
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Tenants.id, ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(Flows.id, ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(
+        nullable=False,
+        index=True,
+    )
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    step_order: Mapped[int] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    payload_ref: Mapped[str] = mapped_column(sa.String(255), nullable=False)
+    delivery_status: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+        server_default=FlowOutboxDeliveryStatus.PENDING.value,
+    )
+    delivery_attempts: Mapped[int] = mapped_column(
+        nullable=False,
+        server_default="0",
+    )
+    next_delivery_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+        server_default=sa.func.now(),
+    )
+    claim_token: Mapped[Optional[UUID]] = mapped_column(nullable=True)
+    claimed_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    claim_expires_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    delivered_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    dead_lettered_at: Mapped[Optional[datetime]] = mapped_column(
+        sa.TIMESTAMP(timezone=True),
+        nullable=True,
+    )
+    delivery_last_error: Mapped[Optional[str]] = mapped_column(sa.Text(), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            name="uq_flow_run_webhook_deliveries_attempt",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_webhook_deliveries_run_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "flow_id"],
+            ["flow_runs.id", "flow_runs.flow_id"],
+            ondelete="RESTRICT",
+            name="fk_flow_run_webhook_deliveries_run_flow",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "step_id", "attempt_no"],
+            [
+                "flow_step_attempts.flow_run_id",
+                "flow_step_attempts.step_id",
+                "flow_step_attempts.attempt_no",
+            ],
+            ondelete="RESTRICT",
+            name="fk_flow_run_webhook_deliveries_step_attempt",
+        ),
+        CheckConstraint(
+            "attempt_no >= 1",
+            name="ck_flow_run_webhook_deliveries_attempt_no",
+        ),
+        CheckConstraint(
+            "delivery_attempts >= 0",
+            name="ck_flow_run_webhook_deliveries_delivery_attempts",
+        ),
+        CheckConstraint(
+            "idempotency_key <> ''",
+            name="ck_flow_run_webhook_deliveries_idempotency_key",
+        ),
+        CheckConstraint(
+            "payload_ref <> ''",
+            name="ck_flow_run_webhook_deliveries_payload_ref",
+        ),
+        CheckConstraint(
+            "delivery_status IN "
+            f"({_check_values(FLOW_RUN_WEBHOOK_DELIVERY_STATUS_VALUES)})",
+            name="ck_flow_run_webhook_deliveries_status",
+        ),
+        CheckConstraint(
+            "("
+            "(delivery_status = 'pending' "
+            "AND delivered_at IS NULL "
+            "AND dead_lettered_at IS NULL) "
+            "OR "
+            "(delivery_status = 'delivered' "
+            "AND delivered_at IS NOT NULL "
+            "AND dead_lettered_at IS NULL) "
+            "OR "
+            "(delivery_status = 'dead_lettered' "
+            "AND delivered_at IS NULL "
+            "AND dead_lettered_at IS NOT NULL)"
+            ")",
+            name="ck_flow_run_webhook_deliveries_delivery_timestamps",
+        ),
+        # The due-row claim reads the pending-delivery index in key order.
+        CheckConstraint(
+            "delivery_status <> 'pending' OR next_delivery_at IS NOT NULL",
+            name="ck_flow_run_webhook_deliveries_pending_next_delivery",
+        ),
+        CheckConstraint(
+            "("
+            "(claim_token IS NULL AND claimed_at IS NULL AND claim_expires_at IS NULL) "
+            "OR "
+            "(delivery_status = 'pending' "
+            "AND claim_token IS NOT NULL "
+            "AND claimed_at IS NOT NULL "
+            "AND claim_expires_at IS NOT NULL)"
+            ")",
+            name="ck_flow_run_webhook_deliveries_claim_shape",
+        ),
+        Index(
+            "ix_flow_run_webhook_deliveries_tenant_created",
+            "tenant_id",
+            "created_at",
+        ),
+        Index(
+            "ix_flow_run_webhook_deliveries_pending_delivery",
+            "next_delivery_at",
+            "created_at",
+            postgresql_where=sa.text("delivery_status = 'pending'"),
+        ),
+        Index(
+            "ix_flow_run_webhook_deliveries_pending_run_tenant",
+            "flow_run_id",
+            "tenant_id",
+            postgresql_where=sa.text("delivery_status = 'pending'"),
+        ),
+        Index(
+            "ix_flow_run_webhook_deliveries_dead_lettered",
+            "dead_lettered_at",
+            postgresql_where=sa.text("delivery_status = 'dead_lettered'"),
+        ),
+    )
+
+
+class FlowTranscriptCorrections(BasePublic):
+    """Stores non-destructive transcript corrections per transcription step result. Writer: FlowTranscriptCorrectionsRepository. Purpose: keep user-confirmed char-range replacements applied on read, never rewriting the stored transcript."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id,
+            ondelete="CASCADE",
+            name="fk_transcript_corrections_tenant",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id,
+            ondelete="CASCADE",
+            name="fk_transcript_corrections_flow",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    occurrences_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+    speaker_edits_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'[]'::jsonb"),
+    )
+    # A person's name per speaker label; null is explicitly no name.
+    speaker_names: Mapped[dict[str, str | None]] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=sa.text("'{}'::jsonb"),
+    )
+    revision: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    schema_version: Mapped[int] = mapped_column(nullable=False, server_default="1")
+    segments_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    edited_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            Users.id,
+            ondelete="RESTRICT",
+            name="fk_transcript_corrections_edited_by_user",
+        ),
+        nullable=True,
+    )
+    edited_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(
+            "service_principals.id",
+            ondelete="RESTRICT",
+            name="fk_transcript_corrections_edited_by_service",
+        ),
+        nullable=True,
+    )
+    edited_by_principal_type: Mapped[str] = mapped_column(
+        sa.String(32),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        UniqueConstraint("id", "tenant_id", name="uq_transcript_corrections_id_tenant"),
+        CheckConstraint(
+            "revision >= 1",
+            name="ck_flow_transcript_corrections_revision",
+        ),
+        CheckConstraint(
+            "schema_version >= 1",
+            name="ck_flow_transcript_corrections_schema_version",
+        ),
+        CheckConstraint(
+            "("
+            "edited_by_principal_type = 'user' "
+            "AND edited_by_user_id IS NOT NULL "
+            "AND edited_by_service_id IS NULL"
+            ") OR ("
+            "edited_by_principal_type = 'service_key' "
+            "AND edited_by_user_id IS NULL "
+            "AND edited_by_service_id IS NOT NULL"
+            ")",
+            name="ck_flow_transcript_corrections_editor_principal",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_transcript_corrections_run_tenant",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            name="uq_flow_transcript_corrections_run_step",
+        ),
+        _principal_fk_index("flow_transcript_corrections", "edited_by_user_id"),
+        _principal_fk_index("flow_transcript_corrections", "edited_by_service_id"),
+    )
+
+
+class FlowTranscriptCorrectionRevisions(BasePublic):
+    """Stores committed correction snapshots. Writer: FlowTranscriptCorrectionsRepository. Purpose: preserve correction content and authors for review history."""
+
+    tenant_id: Mapped[UUID] = mapped_column(nullable=False)
+    correction_set_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowTranscriptCorrections.id, ondelete="CASCADE"), nullable=False
+    )
+    flow_id: Mapped[UUID] = mapped_column(nullable=False)
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    revision: Mapped[int] = mapped_column(nullable=False)
+    occurrences_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False
+    )
+    speaker_edits_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB, nullable=False
+    )
+    speaker_names: Mapped[dict[str, str | None]] = mapped_column(
+        JSONB, nullable=False, server_default=sa.text("'{}'::jsonb")
+    )
+    segments_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    edited_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="RESTRICT"), nullable=True
+    )
+    edited_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("service_principals.id", ondelete="RESTRICT"), nullable=True
+    )
+    edited_by_principal_type: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "correction_set_id", "revision", name="uq_correction_revisions_set_revision"
+        ),
+        CheckConstraint("revision >= 1", name="ck_correction_revisions_revision"),
+        ForeignKeyConstraint(
+            ["correction_set_id", "tenant_id"],
+            ["flow_transcript_corrections.id", "flow_transcript_corrections.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_correction_revisions_set_tenant",
+        ),
+        CheckConstraint(
+            "(edited_by_principal_type = 'user' AND edited_by_user_id IS NOT NULL "
+            "AND edited_by_service_id IS NULL) OR "
+            "(edited_by_principal_type = 'service_key' AND edited_by_user_id IS NULL "
+            "AND edited_by_service_id IS NOT NULL)",
+            name="ck_correction_revisions_editor_principal",
+        ),
+        _principal_fk_index(
+            "flow_transcript_correction_revisions", "edited_by_user_id"
+        ),
+        _principal_fk_index(
+            "flow_transcript_correction_revisions", "edited_by_service_id"
+        ),
+    )
+
+
+class FlowRunReviewCheckpointEdits(BasePublic):
+    """Stores committed review payload replacements. Writer: FlowRunReviewCheckpointRepository. Purpose: preserve payloads, authors, digests, and the correction revision used by each fold."""
+
+    tenant_id: Mapped[UUID] = mapped_column(nullable=False)
+    flow_id: Mapped[UUID] = mapped_column(nullable=False)
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    checkpoint_id: Mapped[UUID] = mapped_column(
+        ForeignKey(FlowRunReviewCheckpoints.id, ondelete="CASCADE"), nullable=False
+    )
+    revision: Mapped[int] = mapped_column(nullable=False)
+    cause: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+    corrections_revision_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(FlowTranscriptCorrectionRevisions.id, ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
+    payload_json: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    payload_sha256_before: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    payload_sha256_after: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    edited_by_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="RESTRICT"), nullable=True
+    )
+    edited_by_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("service_principals.id", ondelete="RESTRICT"), nullable=True
+    )
+    edited_by_principal_type: Mapped[str] = mapped_column(sa.String(32), nullable=False)
+
+    __table_args__ = (
+        UniqueConstraint(
+            "checkpoint_id", "revision", name="uq_checkpoint_edits_checkpoint_revision"
+        ),
+        CheckConstraint("revision >= 1", name="ck_checkpoint_edits_revision"),
+        CheckConstraint(
+            "cause IN ('reviewer_edit', 'corrections_folded')",
+            name="ck_checkpoint_edits_cause",
+        ),
+        CheckConstraint(
+            "(corrections_revision_id IS NOT NULL) = (cause = 'corrections_folded')",
+            name="ck_checkpoint_edits_correction_reference",
+        ),
+        ForeignKeyConstraint(
+            ["checkpoint_id", "tenant_id"],
+            ["flow_run_review_checkpoints.id", "flow_run_review_checkpoints.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_checkpoint_edits_checkpoint_tenant",
+        ),
+        ForeignKeyConstraint(
+            ["checkpoint_id", "flow_run_id"],
+            [
+                "flow_run_review_checkpoints.id",
+                "flow_run_review_checkpoints.flow_run_id",
+            ],
+            ondelete="CASCADE",
+            name="fk_checkpoint_edits_checkpoint_run",
+        ),
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_checkpoint_edits_run_tenant",
+        ),
+        CheckConstraint(
+            "(edited_by_principal_type = 'user' AND edited_by_user_id IS NOT NULL "
+            "AND edited_by_service_id IS NULL) OR "
+            "(edited_by_principal_type = 'service_key' AND edited_by_user_id IS NULL "
+            "AND edited_by_service_id IS NOT NULL)",
+            name="ck_checkpoint_edits_editor_principal",
+        ),
+        _principal_fk_index("flow_run_review_checkpoint_edits", "edited_by_user_id"),
+        _principal_fk_index("flow_run_review_checkpoint_edits", "edited_by_service_id"),
+    )
+
+
+class FlowStepTranscriptWords(BasePublic):
+    """Stores per-word timings for one transcription step's stored segments. Writer: FlowTranscriptWordsRepository. Purpose: keep word-level seek and confidence data out of the step result's bounded payload while anchoring it to the same segment array by content hash."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id,
+            ondelete="CASCADE",
+            name="fk_step_transcript_words_tenant",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id,
+            ondelete="CASCADE",
+            name="fk_step_transcript_words_flow",
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    segments_hash: Mapped[str] = mapped_column(sa.String(64), nullable=False)
+    alignment: Mapped[Optional[str]] = mapped_column(sa.String(32), nullable=True)
+    words_json: Mapped[list[dict[str, Any]]] = mapped_column(
+        JSONB,
+        nullable=False,
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_step_transcript_words_run_tenant",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            name="uq_flow_step_transcript_words_run_step",
+        ),
+    )
+
+
+class FlowStepTranscriptSources(BasePublic):
+    """Immutable attempt evidence. Writer: FlowTranscriptSourceRepository.insert."""
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Tenants.id, ondelete="CASCADE", name="fk_step_transcript_sources_tenant"
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_id: Mapped[UUID] = mapped_column(
+        ForeignKey(
+            Flows.id, ondelete="CASCADE", name="fk_step_transcript_sources_flow"
+        ),
+        nullable=False,
+        index=True,
+    )
+    flow_run_id: Mapped[UUID] = mapped_column(nullable=False, index=True)
+    step_id: Mapped[UUID] = mapped_column(nullable=False)
+    attempt_no: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    source_hash: Mapped[str | None] = mapped_column(sa.String(64), nullable=True)
+    segments_json: Mapped[list[dict[str, Any]] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+    detail_json: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True), nullable=True
+    )
+    segments_bytes: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    detail_bytes: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    words_bytes: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    segments_count: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    words_count: Mapped[int] = mapped_column(sa.Integer, nullable=False)
+    segments_omitted_reason: Mapped[int | None] = mapped_column(
+        sa.SmallInteger, nullable=True
+    )
+    detail_omitted_reason: Mapped[int | None] = mapped_column(
+        sa.SmallInteger, nullable=True
+    )
+    words_omitted_reason: Mapped[int | None] = mapped_column(
+        sa.SmallInteger, nullable=True
+    )
+
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["flow_run_id", "tenant_id"],
+            ["flow_runs.id", "flow_runs.tenant_id"],
+            ondelete="CASCADE",
+            name="fk_flow_step_transcript_sources_run_tenant",
+        ),
+        UniqueConstraint(
+            "flow_run_id",
+            "step_id",
+            "attempt_no",
+            name="uq_flow_step_transcript_sources_attempt",
+        ),
+        CheckConstraint(
+            "attempt_no >= 1 AND segments_bytes >= 0 AND detail_bytes >= 0 AND words_bytes >= 0 AND segments_count >= 0 AND words_count >= 0",
+            name="ck_transcript_sources_bounds",
+        ),
+    )

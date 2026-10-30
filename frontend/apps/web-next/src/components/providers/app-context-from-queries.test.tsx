@@ -75,6 +75,7 @@ function Probe() {
     <div>
       <span data-testid="user">{context.user.username}</span>
       <span data-testid="tenant">{context.tenant.display_name}</span>
+      <span data-testid="flows">{String(context.featureFlags.flows)}</span>
       <span data-testid="seen">{seenVersion === undefined ? "unknown" : String(seenVersion)}</span>
       <button onClick={() => setClicks(clicks + 1)}>{`Klick ${clicks}`}</button>
       <button onClick={() => void markLatestSeen()}>Markera sedd</button>
@@ -162,6 +163,24 @@ it("takes a refreshed layout's newer data without remounting the app", async () 
   await waitFor(() => expect(screen.getByTestId("tenant").textContent).toBe("Timrå kommun"));
   expect(screen.getByRole("button", { name: "Klick 1" })).toBeTruthy();
   expect(browserGet).not.toHaveBeenCalled();
+});
+
+it("updates Flows availability when settings or permissions change, keeping the app mounted", async () => {
+  const user = testAppContext({ permissions: ["flows_view"] }).user;
+  backend.set(ME, ok(user));
+  backend.set(SETTINGS, ok({ ...signedIn.settings, flows_enabled: false }));
+  const { queryClient } = await renderApp();
+  fireEvent.click(screen.getByRole("button", { name: "Klick 0" }));
+  expect(screen.getByTestId("flows").textContent).toBe("false");
+
+  backend.set(SETTINGS, ok({ ...signedIn.settings, flows_enabled: true }));
+  await queryClient.invalidateQueries({ queryKey: sessionKeys.settings });
+  await waitFor(() => expect(screen.getByTestId("flows").textContent).toBe("true"));
+
+  backend.set(ME, ok({ ...user, roles: [], predefined_roles: [] }));
+  await queryClient.invalidateQueries({ queryKey: sessionKeys.me });
+  await waitFor(() => expect(screen.getByTestId("flows").textContent).toBe("false"));
+  expect(screen.getByRole("button", { name: "Klick 1" })).toBeTruthy();
 });
 
 it("keeps known What's new markers when a refreshed layout could not read them", async () => {

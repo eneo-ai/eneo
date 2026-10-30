@@ -1,18 +1,137 @@
+import type { CompletionModel, ImageModel, RerankModel, TranscriptionModel } from "@eneo/eneo-js";
 import { describe, expect, it, vi } from "vitest";
 
 vi.mock("$lib/paraglide/messages", () => ({
   m: new Proxy({}, { get: (_target, key) => () => String(key) })
 }));
 
-import type { ImageModel, RerankModel } from "@eneo/eneo-js";
 import {
   applyCatalogModelToDraft,
+  completionCreateCapabilities,
+  completionUpdateCapabilities,
   createEmptyDraft,
+  declareStrictToolSchema,
   draftToWizardModel,
   findDraftCostOverflow,
   isDraftComplete,
-  modelToDraft
+  isStrictToolSchemaDeclared,
+  modelToDraft,
+  setDraftModelName,
+  completionUpdateCeilings,
+  hasValidCompletionTokenBudgets,
+  hasValidDeclaredCapacity,
+  applyCatalogueCeilings,
+  transcriptionCreateCapabilities,
+  transcriptionUpdateCapabilities
 } from "./draft";
+
+function completionModel(
+  capabilities: { supports_tool_calling?: boolean; supports_strict_tool_schema?: boolean } = {}
+): CompletionModel {
+  return {
+    id: "m1",
+    name: "gpt-old",
+    nickname: "GPT",
+    hosting: "eu",
+    description: "",
+    max_input_tokens: 128000,
+    max_output_tokens: 4096,
+    vision: false,
+    reasoning: false,
+    is_deprecated: false,
+    supported_model_kwargs: {},
+    token_limit: 128000,
+    supports_tool_calling: capabilities.supports_tool_calling ?? true,
+    supports_strict_tool_schema: capabilities.supports_strict_tool_schema ?? true
+  };
+}
+
+describe("the strict tool-schema declaration belongs to one route", () => {
+  it("is shown for a saved model while its identifier stays, and not sent unless touched", () => {
+    const draft = modelToDraft(completionModel(), "completion");
+    expect(isStrictToolSchemaDeclared(draft)).toBe(true);
+    // Saving an unrelated field must not re-assert a declaration the server
+    // may have withdrawn since the form was opened.
+    expect(completionUpdateCapabilities(draft)).toEqual({
+      vision: false,
+      reasoning: false,
+      supports_tool_calling: true
+    });
+  });
+
+  it("becomes ineffective when the identifier is edited, and returns with it", () => {
+    const draft = modelToDraft(completionModel(), "completion");
+    draft.name = "gpt-new";
+    expect(isStrictToolSchemaDeclared(draft)).toBe(false);
+    draft.name = "gpt-old";
+    expect(isStrictToolSchemaDeclared(draft)).toBe(true);
+    // Untouched either way: the update leaves the flag to the server.
+    expect("supports_strict_tool_schema" in completionUpdateCapabilities(draft)).toBe(false);
+  });
+
+  it("compares the identifier as a request submits it, so surrounding whitespace is no move", () => {
+    const draft = modelToDraft(completionModel(), "completion");
+    draft.name = " gpt-old ";
+    expect(isStrictToolSchemaDeclared(draft)).toBe(true);
+    expect(draftToWizardModel(draft).name).toBe("gpt-old");
+    draft.name = " gpt-new ";
+    declareStrictToolSchema(draft, true);
+    expect(draft.strictToolSchemaRoute).toBe("gpt-new");
+    expect(draftToWizardModel(draft).supportsStrictToolSchema).toBe(true);
+  });
+
+  it("is withdrawn or declared again for the new route only by an explicit choice", () => {
+    const draft = modelToDraft(completionModel(), "completion");
+    draft.name = "gpt-new";
+    declareStrictToolSchema(draft, true);
+    expect(draft.strictToolSchemaRoute).toBe("gpt-new");
+    expect(completionUpdateCapabilities(draft)).toEqual({
+      vision: false,
+      reasoning: false,
+      supports_tool_calling: true,
+      supports_strict_tool_schema: true
+    });
+    declareStrictToolSchema(draft, false);
+    expect(completionUpdateCapabilities(draft).supports_strict_tool_schema).toBe(false);
+  });
+
+  it("does not survive picking a catalog model with another identifier", () => {
+    const draft = modelToDraft(completionModel(), "completion");
+    const next = applyCatalogModelToDraft(
+      draft,
+      { name: "gpt-new", supports_function_calling: true },
+      "completion"
+    );
+    expect(next.supportsToolCalling).toBe(true);
+    expect(isStrictToolSchemaDeclared(next)).toBe(false);
+    expect(draftToWizardModel(next).supportsStrictToolSchema).toBe(false);
+  });
+
+  it("creates with a total capability projection", () => {
+    const draft = createEmptyDraft("completion", "openai");
+    draft.name = "gpt-new";
+    draft.supportsToolCalling = true;
+    expect(completionCreateCapabilities(draftToWizardModel(draft))).toEqual({
+      vision: false,
+      reasoning: false,
+      supports_tool_calling: true,
+      supports_strict_tool_schema: false
+    });
+    declareStrictToolSchema(draft, true);
+    expect(
+      completionCreateCapabilities(draftToWizardModel(draft)).supports_strict_tool_schema
+    ).toBe(true);
+  });
+
+  it("starts undeclared for a saved model without the flag", () => {
+    const saved = modelToDraft(
+      completionModel({ supports_strict_tool_schema: false }),
+      "completion"
+    );
+    expect(isStrictToolSchemaDeclared(saved)).toBe(false);
+    expect("supports_strict_tool_schema" in completionUpdateCapabilities(saved)).toBe(false);
+  });
+});
 
 const imageModel = {
   id: "im-1",
@@ -94,6 +213,127 @@ describe("image model drafts", () => {
 
     expect(isDraftComplete(draft, "image")).toBe(true);
     expect(isDraftComplete({ ...draft, displayName: "" }, "image")).toBe(false);
+  });
+});
+
+function transcriptionModel(supportsRealtime: boolean): TranscriptionModel {
+  return {
+    id: "tm-1",
+    name: "pianissimo-sv",
+    nickname: "Pianissimo",
+    is_deprecated: false,
+    cost_per_minute: null,
+    provider_type: "hosted_vllm",
+    supports_realtime: supportsRealtime
+  };
+}
+
+describe("live transcription on transcription models", () => {
+  it("round-trips a saved model's flag into the create and update requests", () => {
+    const draft = modelToDraft(transcriptionModel(true), "transcription");
+
+    expect(transcriptionCreateCapabilities(draftToWizardModel(draft))).toEqual({
+      supports_realtime: true
+    });
+    expect(transcriptionUpdateCapabilities(draft)).toEqual({ supports_realtime: true });
+  });
+
+  it("starts off, and an update states it even when off", () => {
+    const created = createEmptyDraft("transcription", "hosted_vllm");
+    expect(transcriptionCreateCapabilities(draftToWizardModel(created))).toEqual({
+      supports_realtime: false
+    });
+
+    // The patch carries the flag either way, so turning it off reaches the server.
+    const saved = modelToDraft(transcriptionModel(false), "transcription");
+    expect(transcriptionUpdateCapabilities(saved)).toEqual({ supports_realtime: false });
+  });
+});
+
+it("keeps both limits when the identifier changes, and back again", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  const original = draft.name;
+  const input = draft.maxInputTokensStr;
+  const output = draft.maxOutputTokensStr;
+  setDraftModelName(draft, "route-b");
+  setDraftModelName(draft, original);
+  expect([draft.maxInputTokensStr, draft.maxOutputTokensStr]).toEqual([input, output]);
+  // Untouched limits are left out of the patch, so the server keeps them.
+  expect(completionUpdateCeilings(draft)).toEqual({});
+  expect(draftToWizardModel(draft)).not.toHaveProperty("contextWindowTokens");
+});
+
+it("states only the ceilings the admin touched, and never sends a blank one", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  // An unrelated edit says nothing about capacity the admin never opened.
+  expect(completionUpdateCeilings(draft)).toEqual({});
+
+  draft.maxInputTokensStr = "400000";
+  draft.maxInputTokensTouched = true;
+  expect(completionUpdateCeilings(draft)).toEqual({ max_input_tokens: 400000 });
+
+  draft.maxOutputTokensStr = "";
+  draft.maxOutputTokensTouched = true;
+  // The API refuses null; the save guard refuses the blank field first.
+  expect(completionUpdateCeilings(draft)).toEqual({ max_input_tokens: 400000 });
+});
+
+it("keeps every capacity value when the route changes", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  const before = [draft.maxInputTokensStr, draft.maxOutputTokensStr];
+
+  setDraftModelName(draft, "another-route");
+
+  expect(before.every(Boolean)).toBe(true);
+  expect([draft.maxInputTokensStr, draft.maxOutputTokensStr]).toEqual(before);
+  expect(hasValidCompletionTokenBudgets(draft)).toBe(true);
+  expect(completionUpdateCeilings(draft)).toEqual({});
+});
+
+it("requires both limits before a completion model can be saved", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  draft.maxInputTokensStr = "";
+  expect(hasValidCompletionTokenBudgets(draft)).toBe(false);
+  draft.maxInputTokensStr = "1000";
+  draft.maxOutputTokensStr = "";
+  expect(hasValidCompletionTokenBudgets(draft)).toBe(false);
+  draft.maxOutputTokensStr = "500";
+  expect(hasValidCompletionTokenBudgets(draft)).toBe(true);
+});
+
+it("holds an edit only to the capacity it states", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  draft.maxInputTokensStr = "";
+  draft.maxOutputTokensStr = "";
+  // A stated value has to be a positive whole number; that both are stated
+  // is hasValidCompletionTokenBudgets' concern.
+  expect(hasValidDeclaredCapacity(draft)).toBe(true);
+  draft.maxInputTokensStr = "0";
+  expect(hasValidDeclaredCapacity(draft)).toBe(false);
+  draft.maxInputTokensStr = "-5";
+  expect(hasValidDeclaredCapacity(draft)).toBe(false);
+  draft.maxInputTokensStr = "1000";
+  expect(hasValidDeclaredCapacity(draft)).toBe(true);
+});
+
+it("declares only the ceilings a catalogue answer actually states", () => {
+  const draft = modelToDraft(completionModel(), "completion");
+  draft.maxInputTokensStr = "32000";
+  draft.maxOutputTokensStr = "4000";
+
+  // The catalogue knows this route's output ceiling but not its input one.
+  applyCatalogueCeilings(draft, { max_input_tokens: null, max_output_tokens: 8000 });
+
+  expect(draft.maxOutputTokensStr).toBe("8000");
+  expect(draft.maxInputTokensStr).toBe("32000");
+  // The unstated dimension is not a declaration, so a save stays silent about
+  // it and the stored limit is kept.
+  expect(completionUpdateCeilings(draft)).toEqual({ max_output_tokens: 8000 });
+
+  applyCatalogueCeilings(draft, { max_input_tokens: 64000 });
+  expect(completionUpdateCeilings(draft)).toEqual({
+    max_input_tokens: 64000,
+    max_output_tokens: 8000
   });
 });
 

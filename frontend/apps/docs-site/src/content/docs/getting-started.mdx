@@ -9,12 +9,14 @@ Welcome to Eneo! This guide will help you get started whether you're a municipal
 If you're a public sector organization interested in deploying Eneo:
 
 #### 1. Learn & Evaluate
+
 - Explore the [key features](/) and understand what Eneo can do
 - Review our [audit logging](/guides/audit-logging) capabilities
 - Check out the [deployment guide](/guides/deployment) for infrastructure requirements
 - Contact us at digitalisering@sundsvall.se for guidance from other municipalities
 
 #### 2. Test Drive
+
 Set up a development instance to explore the platform:
 
 ```bash
@@ -33,10 +35,12 @@ cd backend && uv run worker              # Terminal 3: uploads and crawls
 ```
 
 Access your instance at http://localhost:3000 with default credentials:
+
 - Email: `user@example.com`
 - Password: `ChangeMePassword1!`
 
 #### 3. Deploy to Production
+
 When you're ready to deploy:
 
 1. Review the [deployment guide](/guides/deployment)
@@ -46,11 +50,12 @@ When you're ready to deploy:
 
 ---
 
-### 💻 For Developers
+### For Developers
 
 Contributing to Eneo? Here's how to get started:
 
 #### Prerequisites
+
 - Docker Desktop with DevContainers support
 - VS Code with Dev Containers extension
 - Git
@@ -67,6 +72,7 @@ code .
 ```
 
 The DevContainer includes:
+
 - Python 3.11 with uv (backend dependencies installed with `uv sync`)
 - Bun for the frontend workspace (`bun run setup` installs and builds the packages)
 - PostgreSQL with pgvector and Redis as sidecar containers
@@ -80,7 +86,10 @@ cd backend && uv run python init_db.py   # first run only
 
 cd backend && uv run start               # Terminal 1: Backend (port 8123)
 cd frontend && bun run dev               # Terminal 2: Frontend (port 3000)
-cd backend && uv run worker              # Terminal 3: Worker
+cd backend && uv run worker              # Terminal 3: General ARQ worker
+cd backend && uv run task-execution-worker    # Terminal 4: Platform execution worker
+cd backend && uv run task-maintenance-worker  # Terminal 5: Platform maintenance worker and scheduler
+cd backend && uv run arq src.eneo.worker.arq.CrawlerWorkerSettings  # Terminal 6: Crawler worker
 ```
 
 #### Manual Setup
@@ -88,6 +97,7 @@ cd backend && uv run worker              # Terminal 3: Worker
 If you prefer manual setup or need more control:
 
 **Requirements:**
+
 - Python 3.11 (the backend is pinned to `>=3.11,<3.12`) and [uv](https://docs.astral.sh/uv/)
 - Bun 1.3
 - PostgreSQL with the pgvector extension and Redis (for example in Docker)
@@ -109,18 +119,28 @@ cd ../frontend
 cp apps/web/.env.example apps/web/.env
 bun run setup                # bun install + builds the shared UI package
 
-# Start services (requires 3 terminals)
+# Start services (requires separate terminals)
 # Terminal 1: Backend
 cd backend && uv run start
 
 # Terminal 2: Frontend
 cd frontend && bun run dev
 
-# Terminal 3: Worker
+# Terminal 3: General ARQ worker
 cd backend && uv run worker
+
+# Terminal 4: Platform execution worker
+cd backend && uv run task-execution-worker
+
+# Terminal 5: Platform maintenance worker and scheduler
+cd backend && uv run task-maintenance-worker
+
+# Terminal 6: Crawler worker (website crawls)
+cd backend && uv run arq src.eneo.worker.arq.CrawlerWorkerSettings
 ```
 
 #### Access Your Development Environment
+
 - **Platform**: http://localhost:3000
 - **API Documentation**: http://localhost:8123/docs
 - **Default Login**: `user@example.com` / `ChangeMePassword1!`
@@ -136,7 +156,7 @@ cd backend && uv run worker
    - Backend: FastAPI with Python 3.11
    - Frontend: SvelteKit with TypeScript
    - Database: PostgreSQL with pgvector
-   - Cache/Queue: Redis with ARQ
+   - Cache/Queue: Redis with ARQ and Celery
 
 3. **Make Your First Contribution**
    - Find an open issue on [GitHub](https://github.com/eneo-ai/eneo/issues)
@@ -149,20 +169,41 @@ cd backend && uv run worker
 ## Common Issues
 
 ### DevContainer Issues
+
 If the DevContainer fails to start:
+
 1. Ensure Docker Desktop is running and has free disk space
 2. Try rebuilding the container: `Dev Containers: Rebuild Container`
 
 ### Database Connection Issues
+
 If you can't connect to the database:
+
 1. Ensure PostgreSQL is running
 2. Check `POSTGRES_*` and `REDIS_*` in `backend/.env`, and the backend URLs in `frontend/apps/web/.env`
 3. Verify port 5432 is not in use by another service (the DevContainer publishes PostgreSQL on it)
 
 ### File Upload Issues
+
 File uploads and web crawls require the worker service to be running:
+
 ```bash
 cd backend && uv run worker
+```
+
+Flow runs require both platform worker processes:
+
+```bash
+cd backend && uv run task-execution-worker
+cd backend && uv run task-maintenance-worker
+```
+
+Keep the general `uv run worker` process running as well. It consumes a
+different ARQ queue for uploads, integrations, audit jobs, and crawl scheduling.
+Website crawls run on their own queue, so also start the crawler worker:
+
+```bash
+cd backend && uv run arq src.eneo.worker.arq.CrawlerWorkerSettings
 ```
 
 ## Get Help

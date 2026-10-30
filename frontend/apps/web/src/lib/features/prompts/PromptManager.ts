@@ -49,6 +49,15 @@ function createPromptManager(params: PromptManagerParams) {
 
   init();
 
+  // Refresh prompt history each time the dialog re-opens (not on initial mount)
+  let dialogHasBeenClosed = false;
+  showPromptVersionDialog.subscribe((isOpen) => {
+    if (isOpen && browser && dialogHasBeenClosed) {
+      void refreshPrompts();
+    }
+    if (!isOpen) dialogHasBeenClosed = true;
+  });
+
   async function deletePrompt({ id }: { id: string }) {
     try {
       await eneo.prompts.delete({ id });

@@ -22,7 +22,7 @@ from eneo.files.file_models import (
     FileType,
     Limit,
 )
-from eneo.files.text import TextMimeTypes
+from eneo.files.mime_support import supported_text_mimes
 from eneo.governance_policy.domain.policy_resolver import (
     select_effective_inline_file_text,
 )
@@ -103,7 +103,7 @@ class AssistantAssembler:
         return FileRestrictions(
             accepted_file_types=[
                 AcceptedFileType.for_mimetype(mimetype=mimetype, size_limit=max_size)
-                for mimetype in TextMimeTypes.values()
+                for mimetype in supported_text_mimes()
             ],
             limit=Limit(
                 max_files=settings.attachment_max_files,

@@ -3,7 +3,7 @@ import binascii
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from enum import Enum
-from typing import TYPE_CHECKING, Literal, Optional
+from typing import TYPE_CHECKING, Final, Literal, Optional
 from uuid import UUID
 
 from pydantic import (
@@ -83,13 +83,12 @@ def is_service_api_key(user: "UserInDB") -> bool:
 def audit_actor_for(user: "UserInDB") -> tuple[UUID | None, ActorType]:
     """Resolve (actor_id, actor_type) for an audit_log entry on this request.
 
-    Service keys have no real user row — passing the synthetic user.id into
-    audit_log.actor_id (FK to users.id) would FK-violate. Mirror the gating
-    pattern used by user_service._log_api_key_used: emit (None, SYSTEM) for
-    service keys, (user.id, USER) for real users.
+    Service keys have no real user row, so the synthetic user.id must not be
+    written to audit_log.actor_id. The audit log stores those actors through
+    actor_api_key_id instead.
     """
     if is_service_api_key(user):
-        return None, ActorType.SYSTEM
+        return None, ActorType.API_KEY
     return user.id, ActorType.USER
 
 
@@ -144,6 +143,15 @@ class ResourcePermissionLevel(str, Enum):
     ADMIN = "admin"
 
 
+FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE: Final[str] = (
+    "Service keys (`sk_`) need `resource_permissions.flows >= read` before "
+    "`resource_permissions.flow_evidence` is evaluated. For own-run evidence, "
+    "`flow_evidence >= read` allows view, `flow_evidence >= write` allows redacted "
+    "export, and `flow_evidence = admin` allows raw export when tenant Flow evidence "
+    "policy also permits it."
+)
+
+
 class ResourcePermissions(BaseModel):
     """Per-resource-type permission overrides for API keys.
 
@@ -153,6 +161,22 @@ class ResourcePermissions(BaseModel):
     same shape, but policy validation caps each resource at ``read``.
     """
 
+    flows: ResourcePermissionLevel | None = Field(
+        default=None,
+        description=(
+            "Explicit Flow runtime access. `read` can inspect published flows, "
+            "runtime paths, run contracts, own run status, and active human-review "
+            "checkpoints. `write` can upload runtime inputs, create published-flow "
+            "runs, cancel own runs, and edit, approve, reject, or resume human-review "
+            "checkpoints for runs created by that same API key. `admin` satisfies "
+            "DELETE-level Flow resource checks, but service-key principals still "
+            "cannot use endpoints whose Flow policy requires a user principal. "
+            "Evidence endpoints still require `resource_permissions.flows >= read` "
+            "before evidence capability is evaluated. Null means this key has no "
+            "fine-grained Flow grant; keys without resource_permissions use their "
+            "top-level permission."
+        ),
+    )
     assistants: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     apps: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     spaces: ResourcePermissionLevel = ResourcePermissionLevel.NONE
@@ -161,6 +185,14 @@ class ResourcePermissions(BaseModel):
     files: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     jobs: ResourcePermissionLevel = ResourcePermissionLevel.NONE
     prompts: ResourcePermissionLevel = ResourcePermissionLevel.NONE
+    flow_evidence: ResourcePermissionLevel = Field(
+        default=ResourcePermissionLevel.NONE,
+        description=(
+            f"{FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE} Personal keys (`pk_`) "
+            "cannot set this field. Omitted or `none` means this key has no "
+            "fine-grained evidence grant."
+        ),
+    )
 
     model_config = ConfigDict(extra="forbid")
 
@@ -177,7 +209,17 @@ RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
 )
 
 
-PK_FORBIDDEN_RESOURCE_FIELDS: tuple[str, ...] = ("jobs", "prompts")
+FLOW_RESOURCE_PERMISSION_FIELDS: tuple[str, ...] = (
+    "flows",
+    "flow_evidence",
+)
+
+
+PK_FORBIDDEN_RESOURCE_FIELDS: tuple[str, ...] = (
+    "jobs",
+    "prompts",
+    "flow_evidence",
+)
 
 
 _LEVEL_TO_PERMISSION: dict[int, ApiKeyPermission] = {
@@ -196,10 +238,12 @@ def derive_permission_from_resource_permissions(
     Returns the highest permission level found across all resource types.
     If all resource types are ``none``, defaults to ``read``.
     """
-    max_level = max(
-        PERMISSION_LEVEL_ORDER.get(getattr(rp, field).value, 0)
-        for field in RESOURCE_PERMISSION_FIELDS
-    )
+    max_level = 0
+    for field in (*RESOURCE_PERMISSION_FIELDS, *FLOW_RESOURCE_PERMISSION_FIELDS):
+        level = getattr(rp, field)
+        if level is None:
+            continue
+        max_level = max(max_level, PERMISSION_LEVEL_ORDER.get(level.value, 0))
     return _LEVEL_TO_PERMISSION.get(max_level, ApiKeyPermission.READ)
 
 
@@ -230,6 +274,11 @@ class ApiKeyState(str, Enum):
     SUSPENDED = "suspended"
     REVOKED = "revoked"
     EXPIRED = "expired"
+
+
+class ServicePrincipalState(str, Enum):
+    ACTIVE = "active"
+    DISABLED = "disabled"
 
 
 class ApiKeyStateReasonCode(str, Enum):
@@ -376,8 +425,32 @@ class ApiKeyV2(BaseModel):
         return resource_permissions.model_dump(mode="json", exclude_unset=True)
 
 
+class ServicePrincipalInDB(BaseModel):
+    id: UUID
+    tenant_id: UUID
+    display_name: str
+    description: Optional[str] = None
+    scope_type: ApiKeyScopeType
+    scope_id: Optional[UUID] = None
+    state: ServicePrincipalState
+    created_by_user_id: Optional[UUID] = None
+    disabled_at: Optional[datetime] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class FlowServicePrincipalActorPublic(BaseModel):
+    id: UUID
+    display_name: str
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ApiKeyV2InDB(ApiKeyV2):
     tenant_id: UUID
+    service_principal_id: Optional[UUID] = None
     created_by_key_id: Optional[UUID] = None
     delegation_depth: int = 0
     key_hash: str

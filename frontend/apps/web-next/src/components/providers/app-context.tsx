@@ -10,6 +10,10 @@ export type AppContextData = {
   settings: Schema<"SettingsPublic">;
   federationStatus: Schema<"FederationStatusResponse">;
   limits: Schema<"Limits">;
+  featureFlags: {
+    /** The tenant enables Flows and the current user may view them. */
+    flows: boolean;
+  };
   /** Deployment-configured links (env). `null` when not configured: hide the link. */
   links: {
     /** ACCESSIBILITY_STATEMENT_URL: the organisation's tillgänglighetsredogörelse. */

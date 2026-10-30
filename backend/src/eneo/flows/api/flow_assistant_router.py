@@ -1,0 +1,472 @@
+from __future__ import annotations
+
+from typing import Annotated
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Path, Request, status
+
+from eneo.assistants.api.assistant_models import AssistantUpdatePublic
+from eneo.assistants.api.assistant_update_adapter import (
+    to_flow_assistant_update_command,
+)
+from eneo.assistants.assistant_update import AssistantUpdateCommand
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.access_denial_code import AccessDenialCode
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
+from eneo.flows.api import flow_access_context
+from eneo.flows.api.flow_api_common import error_response
+from eneo.flows.api.flow_definition_access import require_flow_edit_access
+from eneo.flows.api.flow_models import (
+    FlowAssistantCreateRequest,
+    FlowAssistantPatchRequest,
+    FlowAssistantPublic,
+    FlowAssistantUpdatePublic,
+    FlowAssistantUpdateRequest,
+)
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowUnauthorizedException
+from eneo.main.container.container import Container
+from eneo.main.exceptions import ErrorCodes
+from eneo.server.dependencies.container import get_container
+
+router = APIRouter()
+
+
+def flow_assistant_update_command(
+    assistant_in: FlowAssistantUpdateRequest,
+) -> AssistantUpdateCommand:
+    """The command a flow-managed assistant update applies, and a preview evaluates."""
+    return to_flow_assistant_update_command(
+        AssistantUpdatePublic.model_validate(
+            assistant_in.model_dump(
+                exclude_unset=True,
+                include=set(FlowAssistantUpdateRequest.model_fields),
+            )
+        )
+    )
+
+
+# Mutations commit before the response is sent; see flow_authoring_router.
+_MUTATING_CONTAINER = get_container(
+    with_user=True, with_module_user=True, transaction_scope="function"
+)
+
+_DRAFT_OWNERSHIP_DESCRIPTION = (
+    " The caller must own the draft; tenant admins and space owners may override "
+    "draft ownership. Existing action, space permission and API-key scope checks apply."
+)
+_MUTATION_FORBIDDEN_DESCRIPTION = (
+    "Caller lacks permission, API-key scope, or draft ownership to manage assistants "
+    "for this flow. Tenant admins and space owners may override draft ownership."
+)
+
+_FLOW_ASSISTANT_PUBLIC_EXAMPLE: dict[str, object] = {
+    "id": "00000000-0000-0000-0000-000000000201",
+    "name": "Flow Step Assistant",
+    "space_id": "00000000-0000-0000-0000-000000000020",
+    "completion_model_kwargs": {},
+    "logging_enabled": False,
+    "attachments": [],
+    "allowed_attachments": {
+        "accepted_file_types": [],
+        "limit": {"max_files": 0, "max_size": 0},
+    },
+    "groups": [],
+    "websites": [],
+    "integration_knowledge_list": [],
+    "published": False,
+    "user": {
+        "id": "00000000-0000-0000-0000-000000000030",
+        "email": "flow-builder@example.com",
+        "username": "Flow Builder",
+    },
+    "tools": {"assistants": []},
+    "type": "assistant",
+    "description": "Summarizes extracted contract fields into a reviewer-ready note.",
+    "insight_enabled": False,
+    "metadata_json": {"origin": "flow_managed"},
+}
+
+
+async def require_flow_assistant_read_access(
+    request: Request,
+    container: Container,
+    *,
+    flow_id: UUID,
+) -> None:
+    """Refuse a caller who may not edit flows in the flow's space.
+
+    Its callers read nothing of the space, so the check reads the space
+    without its MCP catalog."""
+    actor = await flow_access_context.resolve_flow_space_actor(
+        request,
+        container,
+        flow_id=flow_id,
+        required_access=FlowApiAction.EDIT,
+    )
+    if not actor.can_edit_flows():
+        raise FlowUnauthorizedException(
+            "You do not have permission to edit flows in this space.",
+            code=AccessDenialCode.INSUFFICIENT_SPACE_PERMISSION,
+            context={"auth_layer": "space_membership"},
+        )
+
+
+@router.post(
+    "/{id}/assistants/",
+    response_model=FlowAssistantPublic,
+    status_code=status.HTTP_201_CREATED,
+    operation_id="create_flow_assistant",
+    summary="Create Flow Assistant",
+    description=(
+        "Create a flow-managed assistant owned by the specified draft flow. Each flow "
+        "step runs an assistant its flow owns, so create one here for a step before "
+        "adding the step. The created assistant is returned with the caller's "
+        "effective permissions and is referenced by step `assistant_id` values in a "
+        "flow update (`PATCH /api/v1/flows/{id}/`)." + _DRAFT_OWNERSHIP_DESCRIPTION
+    ),
+    responses={
+        201: {
+            "description": (
+                "Flow-managed assistant created and returned with effective permissions."
+            ),
+            "content": {
+                "application/json": {"example": _FLOW_ASSISTANT_PUBLIC_EXAMPLE}
+            },
+        },
+        403: error_response(
+            description=_MUTATION_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow not found in tenant scope.",
+            message="Flow not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def create_flow_assistant(
+    id: Annotated[
+        UUID,
+        Path(
+            description="Identifier of the flow that will own the new flow-managed assistant."
+        ),
+    ],
+    request: Request,
+    assistant_in: FlowAssistantCreateRequest,
+    container: Container = Depends(_MUTATING_CONTAINER),
+):
+    await require_flow_edit_access(request, container, flow_id=id)
+    flow_service = container.flow_service()
+    assistant_assembler = container.assistant_assembler()
+    user = container.user()
+
+    created_assistant, permissions = await flow_service.create_flow_assistant(
+        flow_id=id,
+        name=assistant_in.name,
+    )
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.ASSISTANT_CREATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=created_assistant.id,
+        description=f"Created flow-managed assistant '{created_assistant.name}' for flow {id}",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=created_assistant,
+            extra={"flow_id": str(id), "origin": "flow_managed"},
+        ),
+    )
+    return assistant_assembler.from_assistant_to_model(
+        created_assistant, permissions=permissions
+    )
+
+
+@router.get(
+    "/{id}/assistants/{assistant_id}/",
+    response_model=FlowAssistantPublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="get_flow_assistant",
+    summary="Get Flow Assistant",
+    description=(
+        "Return one flow-managed assistant that belongs to the specified flow, together "
+        "with effective permissions for the caller. Use this endpoint before rendering "
+        "an assistant-edit screen so the UI does not accidentally edit a global or "
+        "unrelated assistant. The assistant id must be one owned by this flow."
+    ),
+    responses={
+        200: {
+            "description": (
+                "Flow-managed assistant returned with effective caller permissions."
+            ),
+            "content": {
+                "application/json": {"example": _FLOW_ASSISTANT_PUBLIC_EXAMPLE}
+            },
+        },
+        403: error_response(
+            description="Caller lacks permission or API key scope to access assistants for this flow.",
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow or flow-managed assistant not found in tenant scope.",
+            message="Flow assistant not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def get_flow_assistant(
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the requested assistant."),
+    ],
+    assistant_id: Annotated[
+        UUID, Path(description="Identifier of the flow-managed assistant to return.")
+    ],
+    request: Request,
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
+):
+    await require_flow_assistant_read_access(request, container, flow_id=id)
+    flow_service = container.flow_service()
+    assistant_assembler = container.assistant_assembler()
+    assistant, permissions = await flow_service.get_flow_assistant(
+        flow_id=id,
+        assistant_id=assistant_id,
+    )
+    return assistant_assembler.from_assistant_to_model(
+        assistant, permissions=permissions
+    )
+
+
+@router.patch(
+    "/{id}/assistants/{assistant_id}/",
+    response_model=FlowAssistantUpdatePublic,
+    status_code=status.HTTP_200_OK,
+    operation_id="update_flow_assistant",
+    summary="Update Flow Assistant",
+    description=(
+        "Update a flow-managed assistant that belongs to the specified draft flow. "
+        "Only fields accepted by `FlowAssistantPatchRequest` are applied; omitted fields "
+        "are left unchanged. Use this endpoint for assistant details that should travel "
+        "with the flow authoring experience, not for updating unrelated shared assistants. "
+        "The assistant is part of the flow's draft: the update advances the flow's "
+        "`draft_revision` by one and returns it, fenced on `expected_revision` like a "
+        "flow update." + _DRAFT_OWNERSHIP_DESCRIPTION
+    ),
+    responses={
+        200: {
+            "description": (
+                "Flow-managed assistant updated and returned with effective permissions "
+                "and the flow's new `draft_revision`."
+            ),
+            "content": {
+                "application/json": {
+                    "example": {**_FLOW_ASSISTANT_PUBLIC_EXAMPLE, "draft_revision": 4}
+                }
+            },
+        },
+        400: error_response(
+            description=(
+                "The flow's draft has moved on since `expected_revision` (or since "
+                "the revision this request read); nothing is written. A published "
+                "flow is refused with `flow_unpublish_required`."
+            ),
+            message=(
+                "Flödet har ändrats sedan det lästes in, till exempel i en annan "
+                "flik eller av en kollega. Ladda om sidan och gör om din senaste "
+                "ändring."
+            ),
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.STALE_REVISION,
+            context={
+                "flow_id": "00000000-0000-4000-8000-000000000001",
+                "expected_revision": 3,
+            },
+        ),
+        403: error_response(
+            description=_MUTATION_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow or flow-managed assistant not found in tenant scope.",
+            message="Flow assistant not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def update_flow_assistant(
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the assistant to update."),
+    ],
+    assistant_id: Annotated[
+        UUID, Path(description="Identifier of the flow-managed assistant to update.")
+    ],
+    request: Request,
+    assistant_in: FlowAssistantPatchRequest,
+    container: Container = Depends(_MUTATING_CONTAINER),
+):
+    await require_flow_edit_access(request, container, flow_id=id)
+    flow_service = container.flow_service()
+    assistant_assembler = container.assistant_assembler()
+    user = container.user()
+    update = flow_assistant_update_command(assistant_in)
+
+    (
+        updated_assistant,
+        permissions,
+        draft_revision,
+    ) = await flow_service.update_flow_assistant(
+        flow_id=id,
+        assistant_id=assistant_id,
+        update=update,
+        expected_revision=assistant_in.expected_revision,
+    )
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        actor_id=user.id,
+        action=ActionType.ASSISTANT_UPDATED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=updated_assistant.id,
+        description=f"Updated flow-managed assistant '{updated_assistant.name}' for flow {id}",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=updated_assistant,
+            extra={"flow_id": str(id), "origin": "flow_managed"},
+        ),
+    )
+    return {
+        **assistant_assembler.from_assistant_to_model(
+            updated_assistant, permissions=permissions
+        ).model_dump(by_alias=True),
+        "draft_revision": draft_revision,
+    }
+
+
+@router.delete(
+    "/{id}/assistants/{assistant_id}/",
+    status_code=status.HTTP_204_NO_CONTENT,
+    response_model=None,
+    operation_id="delete_flow_assistant",
+    summary="Delete Flow Assistant",
+    description=(
+        "Delete a flow-managed assistant from the specified draft flow. The assistant id "
+        "must belong to this flow. Deleting it removes the assistant, revokes the API "
+        "keys scoped to it, deletes its icon when the icon is the tenant's own and "
+        "nothing else uses it, and writes an audit event in the same transaction, so "
+        "the assistant is never deleted without its audit row. An assistant that a step of "
+        "the flow still uses, or that a run which has not finished still uses, cannot "
+        "be deleted (400 `flow_managed_assistant`); `context.reason` is "
+        "`step_reference` (remove or replace that step) or `unfinished_run_reference` "
+        "(retry after the run of `context.flow_version` finishes)."
+        + _DRAFT_OWNERSHIP_DESCRIPTION
+    ),
+    responses={
+        400: error_response(
+            description=(
+                "A step of the flow (`context.reason` `step_reference`) or a run that "
+                "has not finished (`unfinished_run_reference`, with "
+                "`context.flow_version`) still uses the assistant. A published flow "
+                "is refused with `flow_unpublish_required`."
+            ),
+            message=(
+                "An unfinished run of version 3 still uses this assistant. Retry "
+                "after it finishes."
+            ),
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=FlowApiErrorCode.FLOW_MANAGED_ASSISTANT,
+            context={
+                "flow_id": "00000000-0000-4000-8000-000000000001",
+                "assistant_ids": ["00000000-0000-4000-8000-000000000002"],
+                "reason": "unfinished_run_reference",
+                "flow_version": 3,
+            },
+        ),
+        403: error_response(
+            description=_MUTATION_FORBIDDEN_DESCRIPTION,
+            message="API key space scope does not match requested flow.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "api_key_scope"},
+        ),
+        404: error_response(
+            description="Flow or flow-managed assistant not found in tenant scope.",
+            message="Flow assistant not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def delete_flow_assistant(
+    id: Annotated[
+        UUID,
+        Path(description="Identifier of the flow that owns the assistant to delete."),
+    ],
+    assistant_id: Annotated[
+        UUID, Path(description="Identifier of the flow-managed assistant to delete.")
+    ],
+    request: Request,
+    container: Container = Depends(_MUTATING_CONTAINER),
+):
+    await require_flow_edit_access(request, container, flow_id=id)
+    flow_service = container.flow_service()
+    user = container.user()
+    assistant, _ = await flow_service.get_flow_assistant(
+        flow_id=id, assistant_id=assistant_id
+    )
+    await flow_service.delete_flow_assistant(flow_id=id, assistant_id=assistant_id)
+
+    await container.audit_service().log(
+        tenant_id=user.tenant_id,
+        user=user,
+        required=True,
+        action=ActionType.ASSISTANT_DELETED,
+        entity_type=EntityType.ASSISTANT,
+        entity_id=assistant_id,
+        description=f"Deleted flow-managed assistant '{assistant.name}' for flow {id}",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=assistant,
+            extra={"flow_id": str(id), "origin": "flow_managed"},
+        ),
+    )
+
+
+__all__ = ["router"]

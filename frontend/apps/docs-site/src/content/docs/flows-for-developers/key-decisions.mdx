@@ -1,0 +1,189 @@
+# Key decisions
+
+These decisions describe the current architecture. Historical planning
+documents may describe deleted pre-release features; this page and the current
+implementation take precedence for maintainer work.
+
+## 1. Conversational authoring uses the shared Flow authoring boundary
+
+A flow is edited conversationally from an ordinary assistant chat bound to the
+flow. Its loopback flow tools call the same authoring operations as the editor
+update, so they write normal Flow drafts through the core's validation,
+permissions, classification and audit, and own no separate runtime or
+persistence. Package installation materializes drafts through
+`FlowAuthoringCommandService`.
+
+## 2. Published versions are immutable runtime truth
+
+Authors edit mutable Flow and step rows. Publishing writes a checksummed
+definition snapshot. Runs execute that snapshot and never read mutable draft
+steps for behavior. A changed draft requires a new published version and a new
+run.
+
+## 3. Platform tasks own transport
+
+Flow code dispatches through a queue-neutral platform interface. The current
+platform adapter uses ARQ, with separate execution and maintenance capacity.
+Flow domain/application code does not import ARQ, and Flows deploys no private
+worker, beat process, health contract, or Celery dependency.
+
+## 4. Database state is authoritative under retries
+
+Dispatch, worker claim, review, and terminalization use revisions,
+idempotency keys, row locks, and compare-and-swap transitions. Broker acceptance
+is not proof of execution. An unknown outcome stays recoverable until a worker
+claim or bounded exhaustion converges it.
+
+## 5. Attempts are evidence, not partial reruns
+
+The attempt ledger records retries, provider calls, resolved inputs, and
+terminal evidence. The user-facing partial-rerun/invalidation feature was
+removed. Repeating a Flow creates a new run, preserving the previous run and
+making repeated external effects explicit.
+
+## 6. Terminalization owns the whole lifecycle transaction
+
+`FlowRunTerminalizer` writes the terminal run status, closes open work,
+resolves checkpoints, finalizes webhook intent, and creates the audit-outbox
+record atomically. Runtime handlers may request terminalization but may not
+perform partial terminal writes.
+
+## 7. Retention uses complete hierarchical policies
+
+Run-history policy resolves Flow → Space → Organization from dedicated
+`flow_run_history_retention_mode` and `flow_run_history_retention_days` columns.
+A child either inherits or replaces the complete pair. `preserve` marks manual
+purge eligibility; `review_required` adds a human-review requirement. Neither
+mode authorizes scheduled deletion. The existing administrator settings API
+can preview or explicitly purge eligible history; review-required and held runs
+remain stored. [Flow run-history retention](/guides/flows/retention-policy) owns
+the permissions, eligibility, and audit contract. The product has no
+classification retention plane, minimum-retention barriers, or tombstones.
+
+## 8. Tenant ownership is relational
+
+Every tenant-owned query filters by tenant, and composite foreign keys enforce
+ownership for Flow/run/file/checkpoint relationships. User and service-principal
+actor shapes are mutually exclusive and explicitly attributed. Authorization
+checks are repeated at evidence, artifact, review, package, and execution
+boundaries.
+A review turn takes its grant before its evidence snapshot opens, so a turn
+never holds one pooled connection while it waits for a second. A key scoped to
+a hidden (flow-managed) assistant is refused by the grant as it is by the
+request's authorization.
+
+## 9. JSONB needs a typed owner
+
+JSONB is used for versioned payloads and evidence envelopes, not as a substitute
+for queryable lifecycle state. A new JSONB column is parsed through a typed
+model, and its schema version and corruption behavior are decided when the
+column is added. Some older payload columns do not meet that yet (the
+`flow_step_results` payloads carry no schema version). A small test only flags
+a new JSONB column for review and does not check parsing, so reviewers check
+the rule. Queryable transitions and ownership belong in relational columns and
+constraints.
+
+## 10. Outboxes preserve accountable effects
+
+Audit and terminal webhook effects are committed as database intents with the
+lifecycle transition. Maintenance delivery is idempotent and bounded. Pending
+or dead-lettered mandatory delivery state blocks retention from deleting the
+owning run.
+
+## 11. Packages are portable but not executable on import
+
+`.eneopkg` archives are versioned and checksummed, exclude credentials and
+tenant-private identifiers, and require explicit dependency mapping. Import
+creates an unpublished draft in the target tenant. Package mechanics live in
+`eneo.flow_packages`, outside the Flow runtime.
+
+## 12. Generated API types remain generated; developer prose does not
+
+OpenAPI and SDK types are regenerated from the backend contract. Architecture
+and developer pages are maintained by hand at the level of ownership and
+behavior. Tests should exercise the lowest layer that owns behavior rather than
+restating every enum, column, or Markdown line.
+
+## 13. Flows reach the network through one egress package
+
+Every connection to a destination a flow author chose (HTTP input, terminal
+webhook output, the editor's connection test) goes through
+`eneo.flows.runtime.egress`. The address classification is shared with the
+crawler (`eneo.main.destination_policy`); flows accept less: public unicast, plus
+RFC 1918 and unique-local IPv6 when `FLOW_HTTP_ALLOW_PRIVATE_NETWORKS` is set.
+The check runs inside the connection the client opens, on the address it will
+use, so nothing is sent before a vetted connection exists and a DNS answer that
+changes between lookups is not an attack. One deadline covers resolution and
+every TCP connection attempt (the TLS handshake and the response are timed
+separately), and name resolution runs on its own bounded thread pool
+(`FLOW_HTTP_DNS_WORKERS`) so stalled destinations cannot starve the rest of the
+process. A DNS answer longer than 64 entries is treated as unresolvable. A destination the sender refuses is not retried by webhook delivery. A
+new transport (SFTP, FTP, SMTP) must connect to an address from the same
+vetting, never resolve a name itself, and vet follow-up connections such as FTP
+passive data channels. A test fails when flow code imports a network client, a
+process API or an unlisted third-party package anywhere else; it guards known
+sinks only, and dynamic imports are outside it. Two transcription endpoints are
+named exceptions: the external service an operator configures, and the provider
+`api_base` a tenant administrator sets for live transcription.
+
+The call of an MCP tool for a step's input (`input_source` `tool`) is not opened
+by this package: the MCP client opens it, to a server an instance administrator
+registered. Before each call the flow vets that server's registered address with
+the same policy, with private networks allowed unless
+`FLOW_TOOL_ALLOW_PRIVATE_NETWORKS` is off. The call follows no redirect. The flow
+gives the MCP client this package's HTTP client, so every connection of the call
+is vetted when it is opened and goes to a vetted IP literal, as for flow HTTP,
+and the call ignores `HTTP_PROXY`, `HTTPS_PROXY` and `ALL_PROXY` too.
+
+## 14. Write semantics are per operation
+
+What a write leaves out means something different for each way a draft is
+written. The authoring command and the flow update each own their row.
+
+| Operation | An omitted value | A null value | A step left out |
+| --- | --- | --- | --- |
+| Full replace (create: package install) | Takes its default: input type `text`, output mode `pass_through`, output type `text`; bindings, contracts, configs and review policy are null. | Same as omitted | Not applicable |
+| Editor update (`PATCH /api/v1/flows/{id}/editor/`, also the authoring chat's flow tools) | A step column a step edit does not name keeps its saved value. | A named column is written null. | Kept, unless `step_order` is sent: a saved step it leaves out is removed |
+| Manual update (`PATCH /api/v1/flows/{id}/`) | Without `steps`, every step row and id is kept; an omitted `description` is kept. An optional column a sent step item omits is stored as null; a required field (`assistant_id`, `step_order`, `input_source`, `input_type`, `output_mode`, `output_type`) it omits fails request validation. An omitted `metadata_json` is normalized as saved (legacy form field types are read as `text`). | `description` and `metadata_json` are cleared | A saved step missing from a sent `steps` list is deleted |
+
+An unnamed column of an edited step changes in two ways only. A step alias
+the step reads follows its producer when the edit moves that producer, and a
+configuration of a mode the step does not run is dropped from a step the edit
+lists (also when it lists the step only for assistant fields); a flow update without `steps` drops such configuration from every
+step. A stored credential is never encrypted again: a carried configuration
+hands it to the flow update as a reference to the stored ciphertext. A form
+field an edit carries keeps the type an older writer saved (`email`,
+`string` and `textarea` stay as saved and are read as `text`) for as long as
+the edit does not change the type the platform reads: editing its label,
+requiredness or place keeps it, changing it to another type writes the new one.
+
+## 15. One capability owner, three projections
+
+`eneo.flows.flow_capability_manifest` owns which (source, input type, output
+type, output mode) cells a single step can occupy. Three projections read it and
+nothing else lists capabilities. `inspectable` is the set of tuple shapes the
+manifest rules admit as persisted step shapes, HTTP and image shapes included;
+a persisted image shape is one the runtime still rejects as unsupported input
+(graph validation `unsupported_input_type`). `editable_existing` is the subset
+an authoring spec can carry per axis.
+`proposable_new` lists the cells a new step may be created in; a cell outside
+it is `not_exposed` with a permanent reason.
+
+Three boundaries stay separate. The saved-step snapshot listing is a separate
+per-axis portability check: it asks only whether the authoring vocabulary can
+carry each field of a saved step. So an HTTP cell is inspectable but not
+portable, and a bound JSON step outside the cell table can still be portable.
+The listing never judges whether the step may run. Per-step authoring
+feasibility is what the manifest cells state for one step on its own. Whether a
+whole flow is accepted is decided
+by the platform validators that see bindings and neighbouring steps, for example
+the audio-to-document chain refusal and a JSON input read from all previous
+steps when typed bindings supply it. A cell being a projection member does not
+promise that every flow using it publishes.
+
+## Related
+
+- [The data schema](/docs/flows-for-developers/data-schema)
+- [The run lifecycle](/docs/flows-for-developers/run-lifecycle)
+- [Reviewing Flows code](/docs/flows-for-developers/reviewing-flows-code)
+- [Flow architecture](https://github.com/eneo-ai/eneo/blob/develop/docs/flows/architecture.md)

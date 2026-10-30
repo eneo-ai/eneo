@@ -1,14 +1,41 @@
+import copy
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
+import pytest
+from pydantic import BaseModel, ValidationError
+
+from eneo.flows import flow_runtime_policy
+from eneo.flows.domain.mapped_execution_policy import FlowMappedExecutionPolicy
+from eneo.flows.flow_evidence_policy import (
+    FLOW_EVIDENCE_POLICY_STORAGE_VERSION,
+    FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY,
+)
+from eneo.flows.flow_input_limits import FLOW_INPUT_MAX_FILES_COUNT
+from eneo.flows.flow_retention_policy import (
+    FLOW_RETENTION_POLICY_STORAGE_VERSION,
+    FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY,
+)
 from eneo.main.config import get_settings as get_app_settings
+from eneo.main.exceptions import BadRequestException
+from eneo.object_content.content import StorageKind
+from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.object_content.runtime import ObjectContentRuntime
 from eneo.settings.setting_service import SettingService
 from eneo.settings.settings import (
+    FlowDocumentRenderLimitsUpdate,
+    FlowEvidencePolicyUpdate,
+    FlowInputLimitsUpdate,
+    FlowMappedExecutionPolicyUpdate,
+    FlowRetentionPolicyPublic,
+    FlowRetentionPolicyUpdate,
+    FlowRuntimePolicyUpdate,
     SettingsBase,
     SettingsInDB,
     SettingsPublic,
     SettingsUpsert,
 )
+from eneo.tenants.tenant_repo import FlowSettingsChange
 from tests.fixtures import TEST_USER, TEST_UUID
 
 TEST_SETTINGS = SettingsPublic()
@@ -16,6 +43,22 @@ TEST_SETTINGS_EXPECTED = SettingsInDB(
     user_id=TEST_USER.id,
     id=TEST_UUID,
 )
+
+
+def _upload_admission(
+    *,
+    file_maximum_bytes: int = 50_000_000,
+    audio_maximum_bytes: int = 50_000_000,
+) -> UploadAdmissionSnapshot:
+    return UploadAdmissionSnapshot(
+        policy_revision=1,
+        new_write_storage_target=StorageKind.POSTGRES_INLINE,
+        session_file_maximum_bytes=file_maximum_bytes,
+        session_image_maximum_bytes=50_000_000,
+        session_audio_maximum_bytes=audio_maximum_bytes,
+        knowledge_file_maximum_bytes=10_000_000,
+        knowledge_audio_maximum_bytes=25_000_000,
+    )
 
 
 class MockRepo:
@@ -53,11 +96,16 @@ class MockFeatureFlagService:
 class MockTenantRepo:
     """Mock tenant repo for testing."""
 
+    def __init__(self):
+        self.tenant = None
+
     async def get(self, tenant_id):
         # Return a mock tenant with provisioning=False
         from eneo.tenants.tenant import TenantInDB, TenantState
 
-        return TenantInDB(
+        if self.tenant is not None:
+            return self.tenant
+        self.tenant = TenantInDB(
             id=tenant_id,
             name="Test Tenant",
             quota_limit=1024**3,
@@ -67,6 +115,31 @@ class MockTenantRepo:
             state=TenantState.ACTIVE,
             provisioning=False,
         )
+        return self.tenant
+
+    async def update_tenant(self, update):
+        tenant = await self.get(update.id)
+        self.tenant = tenant.model_copy(
+            update=update.model_dump(exclude_unset=True, exclude={"id"})
+        )
+        return self.tenant
+
+    async def update_flow_settings(
+        self, tenant_id, transform, *, extra_values=None, read_columns=()
+    ):
+        # Same contract as TenantRepository.update_flow_settings: only the
+        # named columns are written; old values come from the read it replaces.
+        tenant = await self.get(tenant_id)
+        values = dict(extra_values or {})
+        names = list(dict.fromkeys([*read_columns, *values]))
+        before = tenant.flow_settings
+        after = transform(copy.deepcopy(before))
+        self.tenant = tenant.model_copy(update={"flow_settings": after, **values})
+        return FlowSettingsChange(
+            before=before,
+            after=after,
+            columns_before={name: getattr(tenant, name) for name in names},
+        )
 
 
 class MockAuditService:
@@ -74,6 +147,107 @@ class MockAuditService:
 
     async def log_async(self, *args, **kwargs):
         pass
+
+    async def log(self, *args, **kwargs):
+        pass
+
+
+class MockDataRetentionService:
+    pass
+
+
+def _assert_extra_forbidden(model: type[BaseModel], payload: dict[str, object]) -> None:
+    with pytest.raises(ValidationError) as exc_info:
+        model.model_validate({**payload, "unexpected": True})
+
+    assert any(
+        error.get("type") == "extra_forbidden" for error in exc_info.value.errors()
+    )
+
+
+def test_flow_settings_update_models_reject_unknown_fields() -> None:
+    cases: tuple[tuple[type[BaseModel], dict[str, object]], ...] = (
+        (FlowInputLimitsUpdate, {"max_files_per_run": 10}),
+        (FlowDocumentRenderLimitsUpdate, {"max_source_chars": 500_000}),
+        (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": 900}),
+        (FlowEvidencePolicyUpdate, {"allow_run_owner_raw_export_class3": True}),
+        (FlowRetentionPolicyUpdate, {"run_debug_evidence_days": 14}),
+    )
+
+    for model, payload in cases:
+        _assert_extra_forbidden(model, payload)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "run_debug_evidence_days",
+        "flow_runtime_upload_abandonment_days",
+    ),
+)
+@pytest.mark.parametrize("value", [0, 2556, True, 7.5, "7"])
+def test_flow_retention_policy_update_rejects_invalid_days(
+    field_name: str,
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowRetentionPolicyUpdate.model_validate({field_name: value})
+
+
+def test_flow_retention_policy_update_accepts_nullable_range_boundaries() -> None:
+    for value in (None, 1, 2555):
+        update = FlowRetentionPolicyUpdate(
+            run_debug_evidence_days=value,
+            flow_runtime_upload_abandonment_days=value,
+        )
+        assert update.run_debug_evidence_days == value
+        assert update.flow_runtime_upload_abandonment_days == value
+
+
+@pytest.mark.parametrize("value", [0, 2556, True, 7.5, "7"])
+def test_flow_retention_policy_public_rejects_invalid_debug_evidence_days(
+    value: object,
+) -> None:
+    with pytest.raises(ValidationError):
+        FlowRetentionPolicyPublic.model_validate(
+            {
+                "run_debug_evidence_days": value,
+                "flow_runtime_upload_abandonment_days": None,
+            }
+        )
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    (
+        "allow_space_admin_raw_export_class3",
+        "allow_run_owner_raw_export_class3",
+        "allow_service_key_raw_export_class3",
+    ),
+)
+def test_flow_evidence_policy_update_rejects_null_flags(field_name: str) -> None:
+    with pytest.raises(ValidationError):
+        FlowEvidencePolicyUpdate.model_validate({field_name: None})
+
+
+def test_flow_evidence_policy_update_refuses_the_retired_sensitive_export_switch() -> (
+    None
+):
+    # Export is each flow's own setting; the tenant switch no longer exists.
+    with pytest.raises(ValidationError):
+        FlowEvidencePolicyUpdate.model_validate({"allow_sensitive_flow_exports": True})
+
+
+def test_flow_settings_update_models_keep_intentional_null_clear_contracts() -> None:
+    cases: tuple[tuple[type[BaseModel], dict[str, object | None]], ...] = (
+        (FlowInputLimitsUpdate, {"max_files_per_run": None}),
+        (FlowDocumentRenderLimitsUpdate, {"max_source_chars": None}),
+        (FlowRuntimePolicyUpdate, {"default_step_timeout_seconds": None}),
+        (FlowRetentionPolicyUpdate, {"run_debug_evidence_days": None}),
+    )
+
+    for model, payload in cases:
+        assert model.model_validate(payload).model_dump(exclude_unset=True) == payload
 
 
 async def test_get_settings_if_settings():
@@ -88,6 +262,7 @@ async def test_get_settings_if_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -110,6 +285,7 @@ async def test_update_settings():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -135,6 +311,7 @@ async def test_update_settings_creates_row_when_missing():
         feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
     )
 
@@ -148,17 +325,1193 @@ async def test_update_settings_creates_row_when_missing():
     }
 
 
-async def test_settings_project_object_content_as_a_read_only_capability():
+async def test_get_flow_input_limits_ignores_retired_tenant_sizes():
     repo = MockRepo()
-    runtime = MagicMock(spec=ObjectContentRuntime)
-    runtime.enabled = True
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "input_limits": {
+                    "file_max_size_bytes": 12_000_000,
+                    "audio_max_size_bytes": 28_000_000,
+                }
+            }
+        }
+    )
+
     service = SettingService(
         repo=repo,
         user=TEST_USER,
         ai_models_service=MockRepo(),
         feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(),
+    )
+
+    limits = await service.get_flow_input_limits()
+
+    assert limits.file_max_size_bytes == _upload_admission().session_file_maximum_bytes
+    assert (
+        limits.audio_max_size_bytes == _upload_admission().session_audio_maximum_bytes
+    )
+
+
+async def test_get_flow_input_limits_resolves_stored_null_counts_to_defaults():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "input_limits": {
+                    "max_files_per_run": None,
+                    "audio_max_files_per_run": None,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(),
+    )
+
+    limits = await service.get_flow_input_limits()
+
+    # A stored null is "not configured": both counts resolve to the deployment
+    # defaults; there is no unlimited file count.
+    assert limits.max_files_per_run == FLOW_INPUT_MAX_FILES_COUNT
+    assert limits.audio_max_files_per_run == 10
+
+
+async def test_get_flow_input_limits_resolved_returns_domain_limits():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "input_limits": {
+                    "file_max_size_bytes": 13_000_000,
+                    "audio_max_size_bytes": 29_000_000,
+                    "max_files_per_run": 7,
+                    "audio_max_files_per_run": 3,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(),
+    )
+
+    limits = await service.get_flow_input_limits_resolved()
+
+    assert limits.file_max_size_bytes == _upload_admission().session_file_maximum_bytes
+    assert (
+        limits.audio_max_size_bytes == _upload_admission().session_audio_maximum_bytes
+    )
+    assert limits.max_files_per_run == 7
+    assert limits.audio_max_files_per_run == 3
+
+
+async def test_get_mapped_execution_policy_resolved_returns_domain_policy():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "mapped_execution": {
+                    "version": 1,
+                    "max_provider_calls_per_mapped_step": 8,
+                    "max_estimated_input_tokens_per_mapped_step": 120_000,
+                }
+            }
+        }
+    )
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    policy = await service.get_mapped_execution_policy_resolved()
+
+    assert policy == FlowMappedExecutionPolicy(
+        max_provider_calls_per_mapped_step=8,
+        max_estimated_input_tokens_per_mapped_step=120_000,
+    )
+
+
+def _mapped_policy_service(tenant_repo: MockTenantRepo) -> SettingService:
+    return SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+
+async def test_unset_mapped_policy_resolves_to_deployment_default():
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(update={"flow_settings": {}})
+    service = _mapped_policy_service(tenant_repo)
+
+    policy = await service.get_mapped_execution_policy_resolved()
+
+    assert policy.max_provider_calls_per_mapped_step == (
+        get_app_settings().flow_mapped_step_max_provider_calls_default
+    )
+
+
+async def test_update_mapped_policy_null_stores_explicit_disable():
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "mapped_execution": {
+                    "version": 1,
+                    "max_provider_calls_per_mapped_step": 8,
+                }
+            }
+        }
+    )
+    service = _mapped_policy_service(tenant_repo)
+
+    updated = await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(max_provider_calls_per_mapped_step=None)
+    )
+
+    assert updated.max_provider_calls_per_mapped_step is None
+    stored = tenant_repo.tenant.flow_settings["mapped_execution"]
+    assert stored["max_provider_calls_per_mapped_step"] is None
+    resolved = await service.get_mapped_execution_policy_resolved()
+    assert resolved.max_provider_calls_per_mapped_step is None
+
+
+async def test_restore_mapped_call_ceiling_default_returns_to_inheritance():
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "mapped_execution": {
+                    "version": 1,
+                    "max_provider_calls_per_mapped_step": 8,
+                }
+            }
+        }
+    )
+    service = _mapped_policy_service(tenant_repo)
+
+    updated = await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(restore_max_provider_calls_default=True)
+    )
+
+    assert updated.max_provider_calls_source == "deployment_default"
+    assert updated.max_provider_calls_per_mapped_step == (
+        get_app_settings().flow_mapped_step_max_provider_calls_default
+    )
+    assert "mapped_execution" not in (tenant_repo.tenant.flow_settings or {})
+
+
+async def test_restore_is_mutually_exclusive_with_setting_a_ceiling():
+    service = _mapped_policy_service(MockTenantRepo())
+
+    with pytest.raises(BadRequestException):
+        await service.update_mapped_execution_policy(
+            FlowMappedExecutionPolicyUpdate(
+                restore_max_provider_calls_default=True,
+                max_provider_calls_per_mapped_step=10,
+            )
+        )
+
+
+async def test_mapped_policy_get_reports_source_for_each_state():
+    tenant_repo = MockTenantRepo()
+    service = _mapped_policy_service(tenant_repo)
+    inherited = await service.get_mapped_execution_policy()
+    assert inherited.max_provider_calls_source == "deployment_default"
+
+    await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(max_provider_calls_per_mapped_step=8)
+    )
+    configured = await service.get_mapped_execution_policy()
+    assert configured.max_provider_calls_source == "organization"
+
+    await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(max_provider_calls_per_mapped_step=None)
+    )
+    disabled = await service.get_mapped_execution_policy()
+    assert disabled.max_provider_calls_source == "organization_disabled"
+    assert disabled.max_provider_calls_per_mapped_step is None
+
+
+async def test_flows_respect_large_admin_storage_policy():
+    service = SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(
+            file_maximum_bytes=10 * 1024**3,
+            audio_maximum_bytes=10 * 1024**3,
+        ),
+    )
+
+    limits = await service.get_flow_input_limits()
+
+    assert limits.file_max_size_bytes == 10 * 1024**3
+    assert limits.audio_max_size_bytes == 10 * 1024**3
+
+
+async def test_restore_audits_the_actual_policy_transition():
+    captured: list[dict] = []
+
+    class RecordingAuditService(MockAuditService):
+        async def log_async(self, *args, **kwargs):
+            captured.append(kwargs.get("metadata") or {})
+
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "mapped_execution": {
+                    "version": 1,
+                    "max_provider_calls_per_mapped_step": 8,
+                }
+            }
+        }
+    )
+    service = SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=RecordingAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    await service.update_mapped_execution_policy(
+        FlowMappedExecutionPolicyUpdate(restore_max_provider_calls_default=True)
+    )
+
+    assert captured, "restore must be audited"
+    metadata = captured[-1]
+    assert metadata["restored_call_ceiling_default"] is True
+    changes = metadata["changes"]
+    assert changes["max_provider_calls_per_mapped_step"]["old"] == 8
+    assert changes["max_provider_calls_per_mapped_step"]["new"] == (
+        get_app_settings().flow_mapped_step_max_provider_calls_default
+    )
+    assert changes["max_provider_calls_source"] == {
+        "old": "organization",
+        "new": "deployment_default",
+    }
+
+
+async def test_mapped_policy_get_reports_invalid_source_for_corrupt_storage():
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={"flow_settings": {"mapped_execution": {"version": 99}}}
+    )
+    service = _mapped_policy_service(tenant_repo)
+
+    policy = await service.get_mapped_execution_policy()
+
+    assert policy.max_provider_calls_source == "invalid"
+    assert policy.max_provider_calls_per_mapped_step is None
+
+
+async def test_update_flow_input_limits_persists_and_audits():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(
+            file_maximum_bytes=10_000_000,
+            audio_maximum_bytes=40_000_000,
+        ),
+    )
+
+    updated = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(audio_max_files_per_run=3)
+    )
+
+    assert updated.audio_max_files_per_run == 3
+    assert updated.file_max_size_bytes == 10_000_000
+
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["input_limits"]["audio_max_files_per_run"] == 3
+    assert len(calls) == 1
+    assert calls[0]["metadata"]["setting"] == "flow_input_limits"
+    assert calls[0]["metadata"]["changes"] == {
+        "audio_max_files_per_run": {"old": 10, "new": 3}
+    }
+
+
+async def test_update_flow_input_limits_scrubs_unknown_top_level_flow_settings():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "evidence_polici": {"classification_3": {}},
+                "input_limits": {"max_files_per_run": 25},
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(),
+    )
+
+    await service.update_flow_input_limits(FlowInputLimitsUpdate(max_files_per_run=30))
+
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "evidence_polici" not in tenant.flow_settings
+    assert tenant.flow_settings["input_limits"]["max_files_per_run"] == 30
+
+
+async def test_update_flow_input_limits_null_clears_nullable_overrides():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "input_limits": {
+                    "max_files_per_run": 25,
+                    "audio_max_files_per_run": 8,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(),
+    )
+
+    updated = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(max_files_per_run=None, audio_max_files_per_run=None)
+    )
+
+    # Clearing the overrides resolves both counts to the deployment defaults.
+    assert updated.max_files_per_run == FLOW_INPUT_MAX_FILES_COUNT
+    assert updated.audio_max_files_per_run == 10
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "max_files_per_run" not in tenant.flow_settings["input_limits"]
+    assert "audio_max_files_per_run" not in tenant.flow_settings["input_limits"]
+
+
+async def test_update_flow_input_limits_rejects_empty_patch():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    with pytest.raises(
+        BadRequestException, match="At least one flow input limit field"
+    ):
+        await service.update_flow_input_limits(FlowInputLimitsUpdate())
+
+
+async def test_get_flow_document_render_limits_reads_tenant_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "document_render_limits": {
+                    "max_source_chars": 750_000,
+                    "max_table_cells": 75_000,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    limits = await service.get_flow_document_render_limits()
+
+    assert limits.max_source_chars == 750_000
+    assert limits.max_table_cells == 75_000
+
+
+async def test_update_flow_document_render_limits_persists_and_audits():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    updated = await service.update_flow_document_render_limits(
+        FlowDocumentRenderLimitsUpdate(max_source_chars=800_000)
+    )
+
+    assert updated.max_source_chars == 800_000
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["document_render_limits"]["max_source_chars"] == 800_000
+    assert calls[0]["metadata"]["setting"] == "flow_document_render_limits"
+    assert calls[0]["metadata"]["changes"] == {
+        "max_source_chars": {"old": 500_000, "new": 800_000}
+    }
+
+
+async def test_update_flow_document_render_limits_null_clears_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "document_render_limits": {
+                    "max_source_chars": 800_000,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    updated = await service.update_flow_document_render_limits(
+        FlowDocumentRenderLimitsUpdate(max_source_chars=None)
+    )
+
+    assert updated.max_source_chars == 500_000
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "document_render_limits" not in tenant.flow_settings
+
+
+async def test_update_flow_document_render_limits_rejects_empty_patch():
+    service = SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=MockTenantRepo(),
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    with pytest.raises(
+        BadRequestException, match="At least one flow document render limit"
+    ):
+        await service.update_flow_document_render_limits(
+            FlowDocumentRenderLimitsUpdate()
+        )
+
+
+async def test_get_flow_evidence_policy_reads_tenant_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "evidence_policy": {
+                    "classification_3": {
+                        "allow_space_admin_raw_export": True,
+                        "allow_run_owner_raw_export": False,
+                        "allow_service_key_raw_export": True,
+                    }
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    policy = await service.get_flow_evidence_policy()
+
+    assert policy.allow_space_admin_raw_export_class3 is True
+    assert policy.allow_run_owner_raw_export_class3 is False
+    assert policy.allow_service_key_raw_export_class3 is True
+
+
+async def test_update_flow_evidence_policy_persists_and_audits():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    updated = await service.update_flow_evidence_policy(
+        FlowEvidencePolicyUpdate(
+            allow_service_key_raw_export_class3=True,
+        )
+    )
+
+    assert updated.allow_service_key_raw_export_class3 is True
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert (
+        tenant.flow_settings["evidence_policy"][
+            FLOW_EVIDENCE_POLICY_STORAGE_VERSION_KEY
+        ]
+        == FLOW_EVIDENCE_POLICY_STORAGE_VERSION
+    )
+    assert (
+        tenant.flow_settings["evidence_policy"]["classification_3"][
+            "allow_service_key_raw_export"
+        ]
+        is True
+    )
+    assert calls[0]["metadata"]["setting"] == "flow_evidence_policy"
+
+
+async def test_update_flow_evidence_policy_rejects_empty_patch():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    with pytest.raises(
+        BadRequestException, match="At least one flow evidence policy field"
+    ):
+        await service.update_flow_evidence_policy(FlowEvidencePolicyUpdate())
+
+
+async def test_get_flow_evidence_policy_requires_admin_permission():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "evidence_policy": {
+                    "classification_3": {
+                        "allow_service_key_raw_export": True,
+                    }
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER.model_copy(update={"roles": []}),
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    with pytest.raises(Exception, match="Need permission admin"):
+        await service.get_flow_evidence_policy()
+
+
+async def test_get_flow_runtime_policy_reads_tenant_override(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "runtime_policy": {
+                    "default_step_timeout_seconds": 1200,
+                    "max_step_timeout_seconds": 2400,
+                }
+            }
+        }
+    )
+
+    monkeypatch.setattr(
+        flow_runtime_policy,
+        "get_settings",
+        lambda: SimpleNamespace(
+            task_execution_timeout_seconds=3600,
+            task_execution_max_jobs=4,
+            flow_max_concurrent_runs_per_tenant=8,
+            model_fields_set={"flow_max_concurrent_runs_per_tenant"},
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    policy = await service.get_flow_runtime_policy()
+
+    assert policy.default_step_timeout_seconds == 1200
+    assert policy.max_step_timeout_seconds == 2400
+    assert policy.hard_ceiling_seconds == 3540
+
+
+def test_task_timeout_below_reserve_and_work_margin_fails_settings_load(caplog):
+    from eneo.main.config import Settings
+
+    with pytest.raises(SystemExit):
+        Settings.model_validate(
+            {**get_app_settings().model_dump(), "task_execution_timeout_seconds": 64}
+        )
+
+    assert "TASK_EXECUTION_TIMEOUT_SECONDS must be at least 65" in caplog.text
+
+
+async def test_update_flow_runtime_policy_persists_and_audits(monkeypatch):
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+    monkeypatch.setattr(
+        flow_runtime_policy,
+        "get_settings",
+        lambda: SimpleNamespace(
+            task_execution_timeout_seconds=3600,
+            task_execution_max_jobs=4,
+            flow_max_concurrent_runs_per_tenant=8,
+            model_fields_set={"flow_max_concurrent_runs_per_tenant"},
+        ),
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(
+            default_step_timeout_seconds=1200,
+            max_step_timeout_seconds=2400,
+        )
+    )
+
+    assert updated.default_step_timeout_seconds == 1200
+    assert updated.max_step_timeout_seconds == 2400
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["runtime_policy"] == {
+        "version": 1,
+        "default_step_timeout_seconds": 1200,
+        "max_step_timeout_seconds": 2400,
+    }
+    assert calls[0]["metadata"]["setting"] == "flow_runtime_policy"
+
+
+def _runtime_policy_service(monkeypatch, *, capacity=8, flow_settings=None):
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log_async = _capture
+    monkeypatch.setattr(
+        flow_runtime_policy,
+        "get_settings",
+        lambda: SimpleNamespace(
+            task_execution_timeout_seconds=3600,
+            task_execution_max_jobs=4,
+            flow_max_concurrent_runs_per_tenant=capacity,
+            model_fields_set={"flow_max_concurrent_runs_per_tenant"},
+        ),
+    )
+    service = SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+    return service, tenant_repo, calls
+
+
+async def test_update_flow_runtime_policy_stores_a_run_limit_and_audits_it(
+    monkeypatch,
+):
+    service, tenant_repo, calls = _runtime_policy_service(monkeypatch)
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=2)
+    )
+
+    assert (updated.max_concurrent_runs, updated.max_concurrent_runs_capacity) == (2, 8)
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["runtime_policy"] == {
+        "version": 1,
+        "max_concurrent_runs": 2,
+    }
+    assert calls[0]["metadata"] == {
+        "setting": "flow_runtime_policy",
+        "changes": {"max_concurrent_runs": {"old": 8, "new": 2}},
+    }
+    resolved = await service.get_flow_runtime_policy_resolved()
+    assert resolved.max_concurrent_runs == 2
+
+
+async def test_update_flow_runtime_policy_run_limit_equal_to_the_capacity_inherits(
+    monkeypatch,
+):
+    service, tenant_repo, _ = _runtime_policy_service(monkeypatch)
+    await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=2)
+    )
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=8)
+    )
+
+    assert updated.max_concurrent_runs == 8
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "runtime_policy" not in tenant.flow_settings
+
+
+async def test_update_flow_runtime_policy_null_run_limit_removes_the_override(
+    monkeypatch,
+):
+    service, tenant_repo, _ = _runtime_policy_service(monkeypatch)
+    await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=2)
+    )
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=None)
+    )
+
+    assert updated.max_concurrent_runs == 8
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "runtime_policy" not in tenant.flow_settings
+
+
+async def test_update_flow_runtime_policy_refuses_a_run_limit_above_the_capacity(
+    monkeypatch,
+):
+    service, tenant_repo, calls = _runtime_policy_service(monkeypatch)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_runtime_policy(
+            FlowRuntimePolicyUpdate(max_concurrent_runs=9)
+        )
+
+    assert exc_info.value.code == "max_concurrent_runs_exceeds_server_capacity"
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "runtime_policy" not in tenant.flow_settings
+    assert calls == []
+
+
+async def test_get_flow_runtime_policy_clamps_a_stored_run_limit_above_a_lowered_capacity(
+    monkeypatch,
+):
+    service, tenant_repo, _ = _runtime_policy_service(monkeypatch, capacity=3)
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "runtime_policy": {"version": 1, "max_concurrent_runs": 6}
+            }
+        }
+    )
+
+    policy = await service.get_flow_runtime_policy()
+
+    assert (policy.max_concurrent_runs, policy.max_concurrent_runs_capacity) == (3, 3)
+
+
+async def test_get_flow_runtime_policy_exposes_a_saved_value_the_capacity_clamps(
+    monkeypatch,
+):
+    service, tenant_repo, _ = _runtime_policy_service(monkeypatch, capacity=3)
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "runtime_policy": {"version": 1, "max_concurrent_runs": 6}
+            }
+        }
+    )
+
+    clamped = await service.get_flow_runtime_policy()
+    assert (clamped.max_concurrent_runs, clamped.max_concurrent_runs_override) == (3, 6)
+
+    reset = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(max_concurrent_runs=None)
+    )
+    assert (reset.max_concurrent_runs, reset.max_concurrent_runs_override) == (3, None)
+
+
+@pytest.mark.parametrize("value", [0, -1, True, False, "3", 3.0, 2.5, [], {}])
+def test_flow_runtime_policy_update_accepts_only_a_positive_integer_run_limit(value):
+    with pytest.raises(ValidationError):
+        FlowRuntimePolicyUpdate.model_validate({"max_concurrent_runs": value})
+
+
+async def test_get_flow_retention_policy_reads_tenant_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "retention_policy": {
+                    "source_audio_days": 3,
+                    "run_debug_evidence_days": 7,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    policy = await service.get_flow_retention_policy()
+
+    assert policy.run_debug_evidence_days == 7
+
+
+async def test_update_flow_retention_policy_persists_and_audits():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    audit_service = MockAuditService()
+    calls = []
+
+    async def _capture(*args, **kwargs):
+        calls.append(kwargs)
+
+    audit_service.log = _capture
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=audit_service,
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    updated = await service.update_flow_retention_policy(
+        FlowRetentionPolicyUpdate(run_debug_evidence_days=14)
+    )
+
+    assert updated.run_debug_evidence_days == 14
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["retention_policy"] == {
+        "run_debug_evidence_days": 14,
+        FLOW_RETENTION_POLICY_STORAGE_VERSION_KEY: FLOW_RETENTION_POLICY_STORAGE_VERSION,
+    }
+    metadata = calls[0]["metadata"]
+    assert set(metadata) == {"old_policy", "new_policy"}
+    assert metadata["old_policy"]["run_debug_evidence_days"] is None
+    assert metadata["new_policy"]["run_debug_evidence_days"] == 14
+
+
+async def test_update_flow_retention_policy_can_clear_override():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "retention_policy": {
+                    "source_audio_days": 3,
+                    "run_debug_evidence_days": 7,
+                }
+            }
+        }
+    )
+
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    updated = await service.update_flow_retention_policy(
+        FlowRetentionPolicyUpdate(run_debug_evidence_days=None)
+    )
+
+    assert updated.run_debug_evidence_days is None
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert "retention_policy" not in tenant.flow_settings
+
+
+async def test_update_flow_retention_policy_rejects_deleted_fields():
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        FlowRetentionPolicyUpdate(source_audio_days=3)
+
+
+async def test_update_flow_retention_policy_rejects_stored_unknown_keys():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={"flow_settings": {"retention_policy": {"unexpected_days": 7}}}
+    )
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_retention_policy(
+            FlowRetentionPolicyUpdate(run_debug_evidence_days=14)
+        )
+
+    assert exc_info.value.code == "flow_settings_invalid_payload"
+    assert "unexpected_days" in str(exc_info.value)
+
+
+async def test_update_flow_runtime_policy_scrubs_stale_retention_policy_keys():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    tenant_repo.tenant = tenant.model_copy(
+        update={
+            "flow_settings": {
+                "retention_policy": {
+                    "source_audio_days": 3,
+                    "run_debug_evidence_days": 7,
+                }
+            }
+        }
+    )
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    updated = await service.update_flow_runtime_policy(
+        FlowRuntimePolicyUpdate(default_step_timeout_seconds=1200)
+    )
+
+    assert updated.default_step_timeout_seconds == 1200
+    tenant = await tenant_repo.get(TEST_USER.tenant_id)
+    assert tenant.flow_settings["runtime_policy"] == {
+        "version": 1,
+        "default_step_timeout_seconds": 1200,
+    }
+    assert tenant.flow_settings["retention_policy"] == {"run_debug_evidence_days": 7}
+
+
+async def test_update_flow_retention_policy_rejects_empty_patch():
+    repo = MockRepo()
+    tenant_repo = MockTenantRepo()
+    service = SettingService(
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+    )
+
+    with pytest.raises(
+        BadRequestException, match="At least one flow retention policy field"
+    ):
+        await service.update_flow_retention_policy(FlowRetentionPolicyUpdate())
+
+
+async def test_settings_project_object_content_as_a_read_only_capability():
+    repo = MockRepo()
+    runtime = MagicMock(spec=ObjectContentRuntime)
+    runtime.enabled = True
+    service = SettingService(
+        tenant_repo=MockTenantRepo(),
+        repo=repo,
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
         object_content=runtime,
     )
@@ -180,6 +1533,69 @@ def test_settings_write_model_accepts_an_echoed_public_response() -> None:
     assert "object_content_enabled" not in writable.model_dump()
 
 
+def _flow_limits_service(tenant_repo: "MockTenantRepo") -> SettingService:
+    return SettingService(
+        repo=MockRepo(),
+        user=TEST_USER,
+        ai_models_service=MockRepo(),
+        feature_flag_service=MockFeatureFlagService(),
+        tenant_repo=tenant_repo,
+        audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
+        skill_repo=MagicMock(),
+        upload_admission=_upload_admission(),
+    )
+
+
+async def test_the_longest_recording_is_an_admin_setting_under_the_flow_ceiling():
+    settings = get_app_settings()
+    service = _flow_limits_service(MockTenantRepo())
+
+    limits = await service.get_flow_input_limits()
+    assert limits.audio_max_duration_seconds == min(
+        settings.flow_audio_max_duration_seconds,
+        settings.flow_audio_max_duration_ceiling_seconds,
+    )
+    assert (
+        limits.audio_max_duration_ceiling_seconds
+        == settings.flow_audio_max_duration_ceiling_seconds
+    )
+
+    longer = settings.flow_audio_max_duration_ceiling_seconds
+    updated = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(audio_max_duration_seconds=longer)
+    )
+    assert updated.audio_max_duration_seconds == longer
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await service.update_flow_input_limits(
+            FlowInputLimitsUpdate(audio_max_duration_seconds=longer + 1)
+        )
+    assert exc_info.value.code == "flow_settings_invalid_payload"
+    assert exc_info.value.context == {
+        "field": "audio_max_duration_seconds",
+        "requested_seconds": longer + 1,
+        "maximum_seconds": longer,
+    }
+
+    reset = await service.update_flow_input_limits(
+        FlowInputLimitsUpdate(audio_max_duration_seconds=None)
+    )
+    assert reset.audio_max_duration_seconds == limits.audio_max_duration_seconds
+
+
+async def test_a_default_below_a_minute_still_reads_back(monkeypatch):
+    # The shared env default may be shorter than the minute an admin can write.
+    settings = get_app_settings().model_copy(
+        update={"flow_audio_max_duration_seconds": 30}
+    )
+    monkeypatch.setattr("eneo.flows.flow_input_limits.get_settings", lambda: settings)
+
+    limits = await _flow_limits_service(MockTenantRepo()).get_flow_input_limits()
+
+    assert limits.audio_max_duration_seconds == 30
+
+
 async def test_whats_new_toggle_reads_the_tenant_flag_and_writes_it():
     class RecordingFlags(MockFeatureFlagService):
         def __init__(self):
@@ -196,7 +1612,9 @@ async def test_whats_new_toggle_reads_the_tenant_flag_and_writes_it():
         feature_flag_service=flags,
         tenant_repo=MockTenantRepo(),
         audit_service=MockAuditService(),
+        data_retention_service=MockDataRetentionService(),
         skill_repo=MagicMock(),
+        upload_admission=_upload_admission(),
     )
     written: list[tuple[str, bool]] = []
 

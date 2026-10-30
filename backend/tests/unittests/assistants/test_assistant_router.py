@@ -30,10 +30,16 @@ from eneo.assistants.api.assistant_router import (
     leave_feedback,
     update_assistant,
 )
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.entity_types import EntityType
 from eneo.main.exceptions import UnauthorizedException
-from eneo.sessions.session import SessionFeedback, SessionInDB
+from eneo.main.models import NOT_PROVIDED, ModelId
+from eneo.sessions.session import (
+    SessionFeedback,
+    SessionInDB,
+    SessionMetadataPublic,
+)
 from eneo.skills.domain.skill import (
     ResolvedSkillBinding,
     SkillActivationMode,
@@ -91,6 +97,28 @@ def mock_assistant():
     return assistant
 
 
+def _router_assistant(assistant_id: uuid.UUID):
+    assistant = MagicMock()
+    assistant.id = assistant_id
+    assistant.name = "Assistant"
+    assistant.space_id = uuid.uuid4()
+    assistant.origin = AssistantOrigin.USER
+    assistant.managing_flow_id = None
+    assistant.completion_model = MagicMock(id=uuid.uuid4(), nickname="gpt")
+    assistant.completion_model_kwargs = MagicMock(temperature=None, top_p=None)
+    assistant.description = None
+    assistant.insight_enabled = False
+    assistant.data_retention_days = None
+    assistant.collections = []
+    assistant.websites = []
+    assistant.attachments = []
+    assistant.integration_knowledge_list = []
+    assistant.mcp_servers = []
+    assistant.mcp_tools = []
+    assistant.type.value = "standard"
+    return assistant
+
+
 @pytest.fixture
 def mock_space():
     """Create a mock space object."""
@@ -125,7 +153,17 @@ def mock_container(mock_user, mock_assistant, mock_response, mock_space):
     assistant_service = AsyncMock()
     assistant_service.ask.return_value = mock_response
     assistant_service.get_assistant.return_value = (mock_assistant, None)
+    assistant_service.get_assistant_with_effective_config.return_value = (
+        mock_assistant,
+        None,
+        None,
+    )
+    assistant_service.is_help_assistant.return_value = False
     container.assistant_service.return_value = assistant_service
+
+    assistant_assembler = MagicMock()
+    assistant_assembler.from_assistant_to_model.return_value = MagicMock()
+    container.assistant_assembler.return_value = assistant_assembler
 
     # Space service
     space_service = AsyncMock()
@@ -333,6 +371,89 @@ class TestAskAssistant:
         audit_service.log_async.assert_called_once()
 
 
+class TestUpdateAssistant:
+    async def test_preserves_completion_model_when_field_absent(
+        self,
+        mock_container,
+    ):
+        assistant_id = uuid.uuid4()
+        old_assistant = _router_assistant(assistant_id)
+        updated_assistant = _router_assistant(assistant_id)
+        service = mock_container.assistant_service.return_value
+        service.get_assistant.return_value = (old_assistant, [])
+        service.update_assistant.return_value = (updated_assistant, [])
+        mock_container.assistant_assembler.return_value.from_assistant_to_model.return_value = MagicMock()
+
+        await update_assistant(
+            id=assistant_id,
+            assistant=AssistantUpdatePublic(name="Renamed"),
+            request=_request(),
+            container=mock_container,
+        )
+
+        update = service.update_assistant.await_args.kwargs["update"]
+        assert update.completion_model_id is NOT_PROVIDED
+        assert not update.is_set("completion_model_id")
+
+    async def test_preserves_completion_model_when_field_is_null(
+        self,
+        mock_container,
+    ):
+        assistant_id = uuid.uuid4()
+        old_assistant = _router_assistant(assistant_id)
+        updated_assistant = _router_assistant(assistant_id)
+        service = mock_container.assistant_service.return_value
+        service.get_assistant.return_value = (old_assistant, [])
+        service.update_assistant.return_value = (updated_assistant, [])
+        mock_container.assistant_assembler.return_value.from_assistant_to_model.return_value = MagicMock()
+
+        await update_assistant(
+            id=assistant_id,
+            assistant=AssistantUpdatePublic(name="Renamed", completion_model=None),
+            request=_request(),
+            container=mock_container,
+        )
+
+        update = service.update_assistant.await_args.kwargs["update"]
+        assert update.completion_model_id is NOT_PROVIDED
+        assert not update.is_set("completion_model_id")
+
+    @pytest.mark.parametrize("old_model", ["gpt", None])
+    async def test_changes_and_audits_the_chosen_completion_model(
+        self,
+        mock_container,
+        old_model,
+    ):
+        assistant_id = uuid.uuid4()
+        chosen_model_id = uuid.uuid4()
+        old_assistant = _router_assistant(assistant_id)
+        if old_model is None:
+            old_assistant.completion_model = None
+        updated_assistant = _router_assistant(assistant_id)
+        updated_assistant.completion_model = MagicMock(
+            id=chosen_model_id, nickname="gemma"
+        )
+        service = mock_container.assistant_service.return_value
+        service.get_assistant.return_value = (old_assistant, [])
+        service.update_assistant.return_value = (updated_assistant, [])
+        mock_container.assistant_assembler.return_value.from_assistant_to_model.return_value = MagicMock()
+
+        await update_assistant(
+            id=assistant_id,
+            assistant=AssistantUpdatePublic(
+                completion_model=ModelId(id=chosen_model_id),
+            ),
+            request=_request(),
+            container=mock_container,
+        )
+
+        update = service.update_assistant.await_args.kwargs["update"]
+        assert update.completion_model_id == chosen_model_id
+        audit_log = mock_container.audit_service.return_value.log_async
+        metadata = audit_log.await_args.kwargs["metadata"]
+        assert metadata["changes"]["model"] == {"old": old_model, "new": "gemma"}
+
+
 class TestAssistantResponseStructure:
     """Tests verifying the AssistantResponse model structure.
 
@@ -387,10 +508,9 @@ class TestAssistantSessionPagination:
         self, mock_container
     ):
         assistant_id = uuid.uuid4()
-        session = SessionInDB(
+        session = SessionMetadataPublic(
             id=uuid.uuid4(),
             name="Session",
-            user_id=uuid.uuid4(),
             created_at=None,
         )
         session_service = AsyncMock()
@@ -507,6 +627,8 @@ async def test_update_assistant_audits_mode_only_skill_change_without_bodies(
         id=assistant_id,
         name="Assistant",
         space_id=space_id,
+        origin=AssistantOrigin.USER,
+        managing_flow_id=None,
     )
     updated_assistant = SimpleNamespace(
         id=assistant_id,
@@ -568,7 +690,9 @@ async def test_update_assistant_audits_mode_only_skill_change_without_bodies(
 
     assert result is response
     service.update_assistant.assert_awaited_once()
-    assert service.update_assistant.await_args.kwargs["skill_binding_intents"] == [
+    assert service.update_assistant.await_args.kwargs[
+        "update"
+    ].skill_binding_intents == [
         SkillBindingIntent(
             reference=SkillBindingReference(
                 skill_id=reference.skill_id,

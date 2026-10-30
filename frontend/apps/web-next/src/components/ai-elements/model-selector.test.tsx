@@ -202,6 +202,74 @@ describe("ModelSelector", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("offers the default first, names its model and marks that model in the list", async () => {
+    const onSelectDefault = vi.fn();
+    const { container, onSelect } = renderSelector({
+      size: "sm",
+      defaultChoice: {
+        label: "Använd standard",
+        modelId: "sonnet",
+        isSelected: true,
+        onSelect: onSelectDefault
+      }
+    });
+    const button = screen.getByRole("button", {
+      name: "Chattmodell: Claude Sonnet 4 (standard)"
+    });
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(button);
+    const options = await screen.findAllByRole("option");
+    expect(options[0]!.textContent).toContain("Använd standard");
+    expect(options[0]!.textContent).toContain("Claude Sonnet 4");
+    expect(options[0]!.getAttribute("aria-selected")).toBe("true");
+    const sonnet = screen.getByRole("option", { name: /^Claude Sonnet 4/ });
+    expect(sonnet.textContent).toContain("Standard · 200K kontext");
+
+    fireEvent.click(screen.getByRole("option", { name: /GPT-4o mini/ }));
+    expect(onSelect).toHaveBeenCalledWith("gpt-4o-mini");
+    expect(onSelectDefault).not.toHaveBeenCalled();
+  });
+
+  it("picks the default through its own callback", async () => {
+    const onSelectDefault = vi.fn();
+    const { onSelect } = renderSelector({
+      defaultChoice: {
+        label: "Använd standard",
+        modelId: "sonnet",
+        isSelected: false,
+        onSelect: onSelectDefault
+      }
+    });
+    fireEvent.click(trigger());
+    fireEvent.click(await screen.findByRole("option", { name: /^Använd standard/ }));
+
+    expect(onSelectDefault).toHaveBeenCalledTimes(1);
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("shows a form field's own label, help text and problem", async () => {
+    const { container } = renderSelector({
+      id: "flow-model",
+      field: { label: "Modell för flödesassistenten", description: "Kan använda verktyg." },
+      defaultChoice: {
+        label: "Ytans standardmodell",
+        modelId: null,
+        isSelected: true,
+        onSelect: vi.fn()
+      },
+      status: { type: "error", message: "Modellen kan inte använda verktyg." }
+    });
+    const button = screen.getByRole("button", {
+      name: "Modell för flödesassistenten: Ytans standardmodell"
+    });
+    expect(button.id).toBe("flow-model");
+    expect(screen.getByText("Modell för flödesassistenten")).toBeTruthy();
+    expect(screen.getByText("Kan använda verktyg.")).toBeTruthy();
+    expect(screen.getByText("Modellen kan inte använda verktyg.")).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
   it("is a 44 px target on touch, and its rows are too", async () => {
     setViewport("phone");
     renderSelector({ size: "sm" });

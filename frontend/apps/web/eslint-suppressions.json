@@ -4,11 +4,6 @@
       "count": 1
     }
   },
-  "src/lib/components/layout/Page/Header.svelte": {
-    "eneo/no-raw-color": {
-      "count": 1
-    }
-  },
   "src/lib/components/CodeBlock.svelte": {
     "eneo/no-raw-color": {
       "count": 35
@@ -17,6 +12,11 @@
   "src/lib/components/chart/theme.ts": {
     "eneo/no-raw-color": {
       "count": 90
+    }
+  },
+  "src/lib/components/layout/Page/Header.svelte": {
+    "eneo/no-raw-color": {
+      "count": 1
     }
   },
   "src/lib/components/ui/alert-dialog/alert-dialog-overlay.svelte": {
@@ -42,11 +42,6 @@
   "src/lib/components/ui/calendar/calendar-year-select.svelte": {
     "eneo/no-raw-color": {
       "count": 2
-    }
-  },
-  "src/lib/components/ui/checkbox/checkbox.svelte": {
-    "eneo/no-raw-color": {
-      "count": 4
     }
   },
   "src/lib/components/ui/dropdown-menu/dropdown-menu-item.svelte": {
@@ -272,16 +267,6 @@
   "src/routes/(app)/spaces/[spaceId]/apps/[appId]/results/[resultId]/+page.svelte": {
     "eneo/no-raw-color": {
       "count": 1
-    }
-  },
-  "src/lib/features/apps/components/AudioRecorder.svelte": {
-    "eneo/no-raw-color": {
-      "count": 18
-    }
-  },
-  "src/lib/features/apps/components/InputAudioRecording.svelte": {
-    "eneo/no-raw-color": {
-      "count": 10
     }
   },
   "src/routes/(app)/spaces/[spaceId]/chat/insights/InsightsPage.svelte": {

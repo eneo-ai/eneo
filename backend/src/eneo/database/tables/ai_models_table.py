@@ -27,8 +27,8 @@ class CompletionModels(BasePublic):
     name: Mapped[str] = mapped_column()
     nickname: Mapped[str] = mapped_column()
     open_source: Mapped[Optional[bool]] = mapped_column()
-    max_input_tokens: Mapped[int] = mapped_column()
-    max_output_tokens: Mapped[int] = mapped_column()
+    max_input_tokens: Mapped[int | None] = mapped_column()
+    max_output_tokens: Mapped[int | None] = mapped_column()
     is_deprecated: Mapped[bool] = mapped_column(server_default="False")
     nr_billion_parameters: Mapped[Optional[int]] = mapped_column()
     hf_link: Mapped[Optional[str]] = mapped_column()
@@ -42,6 +42,11 @@ class CompletionModels(BasePublic):
     vision: Mapped[bool] = mapped_column(server_default="False")
     reasoning: Mapped[bool] = mapped_column(server_default="False")
     supports_tool_calling: Mapped[bool] = mapped_column(server_default="False")
+    # Declared like supports_tool_calling: an admin marks the model once its
+    # provider route is known to accept strict tool schemas. Undeclared means
+    # unsupported, and renaming the model or moving the provider endpoint
+    # withdraws the declaration, because it was made against that route.
+    supports_strict_tool_schema: Mapped[bool] = mapped_column(server_default="False")
     base_url: Mapped[Optional[str]] = mapped_column()
     litellm_model_name: Mapped[Optional[str]] = mapped_column()
     model_kwargs_capabilities: Mapped[Optional[dict[str, object]]] = mapped_column(
@@ -120,6 +125,10 @@ class TranscriptionModels(BasePublic):
     description: Mapped[Optional[str]] = mapped_column()
     org: Mapped[Optional[str]] = mapped_column()
     base_url: Mapped[str] = mapped_column()
+
+    # True when the provider serves this model over the realtime WebSocket that
+    # live transcription uses (vLLM dialect); see transcription_models/domain/realtime.py.
+    supports_realtime: Mapped[bool] = mapped_column(server_default="False")
 
     # USD per minute of audio processed. NULL = unknown / self-hosted.
     # Numeric(20, 6) = 14 integer digits → cap is < 10^14 USD/minute, matching

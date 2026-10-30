@@ -4,10 +4,12 @@
 # Complete production stack with Traefik reverse proxy and Let's Encrypt SSL
 #
 # BEFORE DEPLOYING:
-#   1. Replace "your-email@domain.com" with your email (1 line, marked CHANGE THIS)
-#   2. Replace "your-domain.com" with your domain (4 lines, marked CHANGE THIS)
-#   3. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
-#   4. Create external network: docker network create proxy_tier
+#   1. Copy .env.template to .env, set the third-party image digests, and
+#      download the selected release's release.env (see docs/DEPLOYMENT.md)
+#   2. Replace "your-email@domain.com" with your email (1 line, marked CHANGE THIS)
+#   3. Replace "your-domain.com" with your domain (4 lines, marked CHANGE THIS)
+#   4. Configure environment files (env_backend.env, env_frontend.env, env_db.env)
+#   5. Create external network: docker network create proxy_tier
 #
 # CUSTOMIZATION NOTE:
 #   This is a reference configuration. Customize for your organization's
@@ -29,7 +31,9 @@
 #   proxy_tier (external) - Traefik, frontend, backend, worker. Internet-facing
 #                           traffic and outbound access (LLM APIs, OIDC, crawls).
 #   data_net   (internal) - PostgreSQL and Redis. No internet egress, and only
-#                           backend, worker and db-init can reach them. Frontend,
+#                           backend, workers, and db-init
+#                           services (execution worker, maintenance worker,
+#                           beat scheduler) can reach them. Frontend,
 #                           Traefik and future module containers cannot.
 #   module_net (internal) - Traefik and backend. Reserved for optional module
 #                           containers. Modules get no internet egress; all
@@ -51,7 +55,7 @@ name: eneo
 
 services:
   traefik:
-    image: traefik:v3
+    image: traefik@sha256:${TRAEFIK_IMAGE_DIGEST:?Set TRAEFIK_IMAGE_DIGEST in .env}
     container_name: eneo_traefik
     restart: unless-stopped
     command:
@@ -172,6 +176,7 @@ services:
     container_name: eneo_worker
     init: true
     restart: unless-stopped
+    stop_grace_period: 70s  # arq drain (60 s) + margin
     environment:
       - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://tool-runtime:3010}
       - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-}
@@ -195,6 +200,58 @@ services:
       - tool_runtime_net
       - proxy_tier
       - data_net
+    depends_on:
+      - backend
+
+  task-execution-worker:
+    # Platform execution-capacity worker.
+    image: ${ENEO_BACKEND_IMAGE:-ghcr.io/eneo-ai/eneo-backend:${ENEO_VERSION:?Select one Eneo release or use release.env}}
+    container_name: eneo_task_execution_worker
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 70s  # arq drain (60 s) + margin
+    command: ["task-execution-worker"]
+    env_file:
+      - env_backend.env
+    volumes:
+      - eneo_backend_data:/app/data
+      - eneo_temp_files:/tmp
+    networks:
+      # data_net carries Redis and PostgreSQL; proxy_tier carries outbound calls.
+      - proxy_tier
+      - data_net
+    healthcheck:
+      test: ["CMD", "task-execution-worker", "--check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    depends_on:
+      - backend
+
+  task-maintenance-worker:
+    # Platform maintenance-capacity worker and scheduler.
+    image: ${ENEO_BACKEND_IMAGE:-ghcr.io/eneo-ai/eneo-backend:${ENEO_VERSION:?Select one Eneo release or use release.env}}
+    container_name: eneo_task_maintenance_worker
+    init: true
+    restart: unless-stopped
+    stop_grace_period: 70s  # arq drain (60 s) + margin
+    command: ["task-maintenance-worker"]
+    env_file:
+      - env_backend.env
+    volumes:
+      - eneo_backend_data:/app/data
+      - eneo_temp_files:/tmp
+    networks:
+      # data_net for Redis/DB; proxy_tier for outbound webhook delivery.
+      - proxy_tier
+      - data_net
+    healthcheck:
+      test: ["CMD", "task-maintenance-worker", "--check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     depends_on:
       - backend
 
@@ -234,7 +291,7 @@ services:
       - backend
 
   db:
-    image: pgvector/pgvector:pg16
+    image: pgvector/pgvector@sha256:${PGVECTOR_IMAGE_DIGEST:?Set PGVECTOR_IMAGE_DIGEST in .env}
     container_name: eneo_db
     restart: unless-stopped
     # PostgreSQL places parallel-query and per-connection shared memory in
@@ -244,6 +301,26 @@ services:
     # Time for a clean shutdown checkpoint before the container is killed;
     # the default 10 s can force crash recovery on the next start.
     stop_grace_period: 2m
+    # CONNECTION CEILING. PostgreSQL defaults to 100, which this stack
+    # exceeds before any tuning. Each backend and ARQ worker
+    # process owns an independent pool (beat opens none; db-init uses
+    # one transient connection), so the deployment's maximum demand is
+    # the SUM across roles — and every role reads env_backend.env, so a
+    # tuning profile raises worker pools too.
+    #
+    # THE AGGREGATE BUDGET TABLE LIVES IN env_backend.template and is
+    # the single owner of this arithmetic. In short: the shipped
+    # default profile configures a maximum of 210 (backend, general,
+    # execution, maintenance, and crawler processes), so 400 covers it
+    # plus the 3 reserved superuser slots and headroom. The Large
+    # profile (350) fits too; more replicas than this stack ships
+    # belong behind a connection pooler.
+    #
+    # These are CONFIGURED MAXIMA, not observed usage. Pool
+    # right-sizing needs measured peak checkouts and is deferred to the
+    # launch-load measurement (L5); this slice only removes the
+    # contradiction between the shipped defaults and the stock ceiling.
+    command: ["postgres", "-c", "max_connections=400"]
     env_file:
       - env_db.env
     volumes:
@@ -257,7 +334,7 @@ services:
       retries: 5
 
   redis:
-    image: redis:7-alpine
+    image: redis@sha256:${REDIS_IMAGE_DIGEST:?Set REDIS_IMAGE_DIGEST in .env}
     container_name: eneo_redis
     restart: unless-stopped
     # Optional: define REDIS_PASSWORD in the deployment .env to require

@@ -70,6 +70,23 @@ describe("globals.css", () => {
     expect(contract).not.toMatch(/#[0-9a-f]{3,8}\b|oklch\(|rgba?\(/i);
   });
 
+  it("moves the shadcn layer on Astryx's motion scale, not Tailwind's defaults", () => {
+    // Astryx components animate with --duration-fast and --ease-standard; the
+    // transition-* and ease-out utilities of the legacy layer must match them.
+    const declarations = new Map<string, string>();
+    postcss.parse(css).walkRules(".transition-colors", (rule: Rule) => {
+      rule.walkDecls((decl) => {
+        declarations.set(decl.prop, decl.value);
+      });
+    });
+    expect(declarations.get("transition-duration")).toBe(
+      "var(--tw-duration, var(--duration-fast))"
+    );
+    expect(declarations.get("transition-timing-function")).toBe(
+      "var(--tw-ease, var(--ease-standard))"
+    );
+  });
+
   it("pins color-scheme to the next-themes class", () => {
     expect(css).toMatch(/:root\.dark,\s*:root\.dark \[data-astryx-theme\]:not\(\[data-theme\]\)/);
   });

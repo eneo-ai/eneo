@@ -25,8 +25,10 @@ from eneo.audit.domain.entity_types import EntityType
 from eneo.authentication.api_key_lifecycle import ApiKeyLifecycleService
 from eneo.authentication.api_key_resolver import ApiKeyValidationError
 from eneo.authentication.api_key_router_helpers import (
+    FLOW_MANAGED_ASSISTANT_SCOPE_NOTE,
     build_api_key_usage_page,
     build_api_key_usage_summary,
+    flow_managed_assistant_refusal,
     paginate_keys,
     raise_api_key_http_error,
 )
@@ -1622,7 +1624,6 @@ async def list_api_keys_admin(
         expires_within_days=query.expires_within_days,
         ownership=query.ownership.value if query.ownership else None,
         min_permission=query.min_permission.value if query.min_permission else None,
-        eligible_for_module_binding=query.eligible_for_module_binding,
     )
     total_count = await repo.count(
         tenant_id=tenant_id,
@@ -1636,7 +1637,6 @@ async def list_api_keys_admin(
         expires_within_days=query.expires_within_days,
         ownership=query.ownership.value if query.ownership else None,
         min_permission=query.min_permission.value if query.min_permission else None,
-        eligible_for_module_binding=query.eligible_for_module_binding,
     )
 
     paginated = paginate_keys(
@@ -2027,13 +2027,16 @@ async def suspend_api_key_admin(
     response_model=ApiKeyV2,
     tags=["Admin API Keys"],
     summary="Reactivate tenant API key",
-    description="Reactivate a suspended API key.",
+    description=(
+        f"Reactivate a suspended API key. {FLOW_MANAGED_ASSISTANT_SCOPE_NOTE}"
+    ),
     responses={
         200: {
             "description": "Reactivated tenant API key.",
             "content": {"application/json": {"example": _ADMIN_API_KEY_EXAMPLE}},
         },
         **responses.get_responses([400, 401, 403, 404, 429]),
+        **flow_managed_assistant_refusal(403, "Reactivating"),
     },
 )
 @endpoint_access(
@@ -2063,7 +2066,10 @@ async def reactivate_api_key_admin(
     response_model=ApiKeyCreatedResponse,
     tags=["Admin API Keys"],
     summary="Rotate tenant API key",
-    description="Rotate an API key and return the new one-time secret.",
+    description=(
+        "Rotate an API key and return the new one-time secret. "
+        f"{FLOW_MANAGED_ASSISTANT_SCOPE_NOTE}"
+    ),
     responses={
         200: {
             "description": "Rotated tenant API key and one-time secret.",
@@ -2072,6 +2078,7 @@ async def reactivate_api_key_admin(
             },
         },
         **responses.get_responses([400, 401, 403, 404, 429]),
+        **flow_managed_assistant_refusal(403, "Rotating"),
     },
 )
 @endpoint_access(

@@ -23,9 +23,6 @@ from eneo.database.tables.info_blobs_table import InfoBlobs, InfoBlobVersionStat
 from eneo.database.tables.model_providers_table import ModelProviders
 from eneo.database.tables.spaces_table import SpacesEmbeddingModels
 from eneo.database.tables.websites_table import Websites
-from eneo.embedding_models.domain.embedding_model_repo import (
-    EmbeddingModelRepository,
-)
 from eneo.embedding_models.infrastructure.embedding_model_cleanup_worker import (
     cleanup_orphaned_embedding_models,
 )
@@ -246,7 +243,7 @@ class TestEmbeddingModelSoftDelete:
             ).scalar_one()
             assert row.deleted_at is not None
 
-            repo = EmbeddingModelRepository(session, admin_user)
+            repo = container.embedding_model_repo2()
             assert all(m.id != model_id for m in await repo.all())
             assert await repo.one_or_none(model_id) is None
 

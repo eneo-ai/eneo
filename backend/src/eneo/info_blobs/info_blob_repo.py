@@ -951,6 +951,52 @@ class InfoBlobRepository:
         items = await self.delegate.get_records_from_query(query)
         return [InfoBlobInDBNoText.model_validate(record) for record in items]
 
+    async def get_reference_metadata_by_ids(
+        self, info_blob_ids: list[UUID]
+    ) -> dict[str, dict[str, object | None]]:
+        if not info_blob_ids:
+            return {}
+
+        stmt = (
+            sa.select(InfoBlobs)
+            .where(InfoBlobs.id.in_(info_blob_ids))
+            .options(selectinload(InfoBlobs.group))
+            .options(selectinload(InfoBlobs.website))
+            .options(selectinload(InfoBlobs.integration_knowledge))
+        )
+        result = await self.session.execute(stmt)
+
+        metadata_by_id: dict[str, dict[str, object | None]] = {}
+        for blob in result.scalars():
+            source_kind = None
+            source_container_name = None
+            source_container_id = None
+            if blob.group_id is not None:
+                source_kind = "collection"
+                source_container_id = str(blob.group_id)
+                source_container_name = getattr(blob.group, "name", None)
+            elif blob.website_id is not None:
+                source_kind = "website"
+                source_container_id = str(blob.website_id)
+                source_container_name = getattr(blob.website, "name", None)
+            elif blob.integration_knowledge_id is not None:
+                source_kind = "integration_knowledge"
+                source_container_id = str(blob.integration_knowledge_id)
+                source_container_name = getattr(
+                    blob.integration_knowledge, "name", None
+                )
+
+            metadata_by_id[str(blob.id)] = {
+                "source_title": blob.title,
+                "source_url": blob.url,
+                "source_kind": source_kind,
+                "source_container_kind": source_kind,
+                "source_container_name": source_container_name,
+                "source_container_id": source_container_id,
+            }
+
+        return metadata_by_id
+
     async def get(self, id: UUID) -> InfoBlobInDB:
         record = await self.delegate.get(id)
         if record is None:
@@ -1129,16 +1175,14 @@ class InfoBlobRepository:
         )
         return InfoBlobInDB.model_validate(record) if record is not None else None
 
-    async def get_by_group(self, group_id: UUID) -> list[InfoBlobInDB]:
-        query = (
+    async def get_by_group(self, group_id: UUID) -> list[InfoBlobInDBNoText]:
+        records = await self.session.scalars(
             sa.select(InfoBlobs)
             .where(InfoBlobs.group_id == group_id, active_info_blob_version())
             .order_by(InfoBlobs.created_at)
-            .options(selectinload(InfoBlobs.group))
-            .options(selectinload(InfoBlobs.embedding_model))
+            .options(defer(InfoBlobs.text), selectinload(InfoBlobs.group))
         )
-        records = await self.delegate.get_models_from_query(query)
-        return [InfoBlobInDB.model_validate(record) for record in records]
+        return [InfoBlobInDBNoText.model_validate(record) for record in records]
 
     async def get_by_website(
         self,

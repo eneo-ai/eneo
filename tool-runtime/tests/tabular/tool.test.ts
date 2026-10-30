@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -10,6 +11,7 @@ import { tabularConfigSchema } from "../../src/tools/tabular/config";
 import type { downloadFile } from "../../src/tools/tabular/download";
 import {
   executeIngest,
+  executeJsonExtract,
   executeQuery,
   toCsv,
 } from "../../src/tools/tabular/execute";
@@ -41,6 +43,10 @@ const ORIGIN = "http://backend:8000";
 const FILE_A = "11111111-1111-4111-8111-111111111111";
 const FILE_B = "22222222-2222-4222-8222-222222222222";
 const FILE_C = "33333333-3333-4333-8333-333333333333";
+const FILE_D = "44444444-4444-4444-8444-444444444444";
+const FILE_E = "55555555-5555-4555-8555-555555555555";
+const FILE_F = "66666666-6666-4666-8666-666666666666";
+const FILE_G = "77777777-7777-4777-8777-777777777777";
 const alice: CallContext = {
   tenantId: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
   userId: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb",
@@ -58,6 +64,35 @@ const SALES = Buffer.from("region,amount\nnorth,100\nsouth,250.5\nnorth,50\n");
 // A report export: a title and a blank line above the header.
 const REPORT = Buffer.from(
   "Rapport budgetutfall 2024,,\n,,\nKommun,Belopp,Ar\nSundsvall,100,2024\nTimra,200,2024\n",
+);
+// An API export: an envelope with records at two depths, nested objects and arrays, and
+// one long text value (longer than query_json returns in one call).
+const DOC = Buffer.from(
+  JSON.stringify({
+    meta: { count: 3, source: "api", note: "n".repeat(17_000) },
+    items: [
+      {
+        id: 1,
+        name: "a",
+        amount: 10.5,
+        tags: ["x", "y"],
+        addr: { city: "Sundsvall" },
+      },
+      { id: 2, name: "b", amount: 20, tags: [], addr: { city: "Umeå" } },
+      { id: 3, name: "c", amount: 30, addr: { city: "Sundsvall" } },
+    ],
+    log: { entries: [{ at: "2024-01-01", level: "info" }] },
+  }),
+);
+const LINES = Buffer.from(
+  '{"id":1,"v":{"k":"a"}}\n{"id":2,"v":{"k":"b"}}\n{"id":3,"v":{"k":"a"}}\n',
+);
+const BROKEN = Buffer.from('{"id": 1,,}');
+// A flow draft: 25 steps whose contracts each name their own fields, 3,780 distinct key
+// paths in 87 KB. Inferring a record type for it costs thousands of times its size in
+// memory, so the loader has to keep the document as text.
+const WIDE = readFileSync(
+  join(import.meta.dir, "fixtures", "wide-document.json"),
 );
 let workbook: Buffer;
 let root: string;
@@ -98,7 +133,27 @@ function setup(
         }
       : raw.includes(FILE_C)
         ? { bytes: REPORT, contentType: "text/csv", name: "rapport.csv" }
-        : { bytes: SALES, contentType: "text/csv", name: "sales.csv" };
+        : raw.includes(FILE_D)
+          ? { bytes: DOC, contentType: "application/json", name: "export.json" }
+          : raw.includes(FILE_E)
+            ? {
+                bytes: LINES,
+                contentType: "application/x-ndjson",
+                name: "events.jsonl",
+              }
+            : raw.includes(FILE_F)
+              ? {
+                  bytes: BROKEN,
+                  contentType: "application/json",
+                  name: "broken.json",
+                }
+              : raw.includes(FILE_G)
+                ? {
+                    bytes: WIDE,
+                    contentType: "application/json",
+                    name: "draft.json",
+                  }
+                : { bytes: SALES, contentType: "text/csv", name: "sales.csv" };
   }) as unknown as typeof downloadFile;
   // In-process executor: the sandbox boundary has its own test below.
   const executor: TabularExecutor = {
@@ -107,6 +162,7 @@ function setup(
       return executeIngest(job);
     },
     query: (job) => executeQuery(job),
+    extractJson: (job) => executeJsonExtract(job),
   };
   const tools = tabularTools({
     config: { ...config, ...limits },
@@ -190,7 +246,7 @@ describe("file references", () => {
 
   test("a file of another kind is refused before downloading, with the way to read it", async () => {
     const { tool, downloads } = setup("types");
-    for (const filename of ["a.json", "Analys av risker.md"])
+    for (const filename of ["a.parquet", "Analys av risker.md"])
       await expect(
         tool("inspect_table").execute(
           { files: [{ url: url(FILE_A), filename }] },
@@ -389,6 +445,38 @@ describe("inspect and query", () => {
     });
   });
 
+  test("cuts long cells and stops the rows at the result's byte budget", async () => {
+    const { tool } = setup("bounded");
+    const query = (sql: string) =>
+      tool("query_table").execute(
+        { file: { url: url(FILE_A), filename: "sales.csv" }, sql },
+        alice,
+      ) as Promise<{
+        rows: unknown[][];
+        returned_rows: number;
+        truncated: boolean;
+        clipped_cells?: number;
+        cells_hint?: string;
+      }>;
+    const clipped = await query(
+      "SELECT region, repeat('x', 50000) AS big FROM t",
+    );
+    expect(clipped).toMatchObject({
+      returned_rows: 3,
+      truncated: false,
+      clipped_cells: 3,
+    });
+    expect(String(clipped.rows[0]![1])).toHaveLength(4_001);
+    expect(clipped.cells_hint).toContain("4,000");
+    // 243 rows of 3,000 characters are more than the budget holds.
+    const bounded = await query(
+      "SELECT repeat('x', 3000) AS big FROM t a, t b, t c, t d, t e",
+    );
+    expect(bounded.truncated).toBe(true);
+    expect(bounded.returned_rows).toBeLessThan(243);
+    expect(bounded).not.toHaveProperty("clipped_cells");
+  });
+
   test("rejects anything but one SELECT", async () => {
     const { tool } = setup("reject");
     for (const sql of [
@@ -403,6 +491,194 @@ describe("inspect and query", () => {
           alice,
         ),
       ).rejects.toMatchObject({ code: "QUERY_REJECTED" });
+  });
+});
+
+describe("JSON files", () => {
+  test("a JSON document is read by path, its structure first", async () => {
+    const { tool } = setup("json-path");
+    const read = (path?: string) =>
+      tool("query_json").execute(
+        {
+          file: { url: url(FILE_D), filename: "export.json" },
+          ...(path ? { path } : {}),
+        },
+        alice,
+      );
+    const described = (await read()) as {
+      root_type: string;
+      values: number;
+      structure: string;
+      structure_truncated: boolean;
+    };
+    expect(described).toMatchObject({
+      root_type: "OBJECT",
+      values: 1,
+      structure_truncated: false,
+    });
+    expect(JSON.parse(described.structure)).toMatchObject({
+      meta: { count: expect.any(String), source: "VARCHAR" },
+      items: [{ id: expect.any(String), addr: { city: "VARCHAR" } }],
+    });
+    expect(await read("$.meta.count")).toMatchObject({
+      found: true,
+      type: "UBIGINT",
+      matches: 1,
+      value: "3",
+      truncated: false,
+    });
+    expect(await read("$.items[#-1].addr")).toMatchObject({
+      type: "OBJECT",
+      value: '{"city":"Sundsvall"}',
+    });
+    expect(await read("$.items")).toMatchObject({
+      type: "ARRAY",
+      array_length: 3,
+    });
+    expect(await read("$.items[*].name")).toMatchObject({
+      matches: 3,
+      value: '["a","b","c"]',
+    });
+    expect(await read("$.nope.deeper")).toMatchObject({
+      found: false,
+      matches: 0,
+      value: null,
+      hint: expect.stringContaining("Nothing is at this path"),
+    });
+    // A long value is cut and the model is told to narrow the path, not to page.
+    const long = (await read("$.meta.note")) as {
+      truncated: boolean;
+      total_chars: number;
+      value: string;
+      hint: string;
+    };
+    expect(long.truncated).toBe(true);
+    expect(long.total_chars).toBe(17_002);
+    expect(long.value).toHaveLength(16_000);
+    expect(long.hint).toContain("Narrow the path");
+    // A path must start at the root, and only JSON documents are read this way.
+    await expect(read("items[0]")).rejects.toThrow();
+    for (const file of [
+      { url: url(FILE_A), filename: "sales.csv" },
+      { url: url(FILE_E), filename: "events.jsonl" },
+    ])
+      await expect(
+        tool("query_json").execute({ file, path: "$" }, alice),
+      ).rejects.toMatchObject({ code: "UNSUPPORTED_FILE" });
+  });
+
+  test("a JSON document is not a table", async () => {
+    const { tool } = setup("json-not-a-table");
+    await expect(
+      tool("inspect_table").execute(
+        { files: [{ url: url(FILE_D), filename: "export.json" }] },
+        alice,
+      ),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_FILE" });
+    await expect(
+      tool("query_table").execute(
+        {
+          file: { url: url(FILE_D), filename: "export.json" },
+          sql: "SELECT 1",
+        },
+        alice,
+      ),
+    ).rejects.toMatchObject({ code: "UNSUPPORTED_FILE" });
+  });
+
+  test("a document with thousands of distinct keys is read within the ordinary memory limit", async () => {
+    const { tool } = setup("json-wide");
+    const described = (await tool("query_json").execute(
+      { file: { url: url(FILE_G), filename: "draft.json" } },
+      alice,
+    )) as { root_type: string; structure_truncated: boolean; hint?: string };
+    expect(described).toMatchObject({
+      root_type: "OBJECT",
+      structure_truncated: true,
+    });
+    expect(described.hint).toContain("part of the tree");
+    expect(
+      await tool("query_json").execute(
+        { file: { url: url(FILE_G), filename: "draft.json" }, path: "$.k0" },
+        alice,
+      ),
+    ).toMatchObject({ found: true, value: "1" });
+  });
+
+  test("JSON Lines are one sheet of records, queried like any sheet", async () => {
+    const { tool } = setup("jsonl");
+    const inspected = (await tool("inspect_table").execute(
+      { files: [{ url: url(FILE_E), filename: "events.jsonl" }] },
+      alice,
+    )) as {
+      files: Array<{
+        json?: unknown;
+        sheets: Array<{
+          name: string;
+          parsed_rows: number;
+          columns: Array<{ name: string }>;
+        }>;
+      }>;
+    };
+    expect(inspected.files[0]).not.toHaveProperty("json");
+    expect(inspected.files[0]!.sheets).toMatchObject([
+      { name: "records", parsed_rows: 3 },
+    ]);
+    // Nested objects are dotted columns.
+    expect(inspected.files[0]!.sheets[0]!.columns.map((c) => c.name)).toEqual([
+      "id",
+      "v.k",
+    ]);
+    expect(
+      await tool("query_table").execute(
+        {
+          file: { url: url(FILE_E), filename: "events.jsonl" },
+          sql: 'SELECT "v.k", COUNT(*) AS n FROM t GROUP BY 1 ORDER BY 1',
+        },
+        alice,
+      ),
+    ).toMatchObject({
+      rows: [
+        ["a", "2"],
+        ["b", "1"],
+      ],
+    });
+    // A native row selection filters the records before SQL; the one sheet needs no name.
+    expect(
+      await tool("query_table").execute(
+        {
+          file: {
+            url: url(FILE_E),
+            filename: "events.jsonl",
+            source_rows: [2, 4],
+          },
+          sql: "SELECT SUM(id) AS total FROM t",
+        },
+        alice,
+      ),
+    ).toMatchObject({ source_rows: [2, 4], rows: [["4"]], parsed_rows: 2 });
+    await expect(
+      tool("query_table").execute(
+        {
+          file: { url: url(FILE_E), filename: "events.jsonl", sheet: "Nope" },
+          sql: "SELECT 1",
+        },
+        alice,
+      ),
+    ).rejects.toMatchObject({ code: "UNKNOWN_SHEET" });
+  });
+
+  test("a malformed file is refused as such", async () => {
+    const { tool } = setup("json-broken");
+    await expect(
+      tool("query_json").execute(
+        { file: { url: url(FILE_F), filename: "broken.json" } },
+        alice,
+      ),
+    ).rejects.toMatchObject({
+      code: "INVALID_FILE",
+      message: expect.stringContaining("not valid JSON"),
+    });
   });
 });
 
@@ -503,7 +779,7 @@ describe("cache", () => {
     let builds = 0;
     const build = async () => {
       builds++;
-      return [] as SheetMetadata[];
+      return { sheets: [] as SheetMetadata[] };
     };
     await cache.getOrBuild("k", build);
     await Bun.sleep(5);
@@ -517,7 +793,9 @@ describe("cache", () => {
   test("an idle runtime still removes expired entries from disk", async () => {
     const dir = join(root, "sweep");
     const cache = new SheetCache(dir, 20, config.cache_max_bytes);
-    await cache.getOrBuild("k", async () => [] as SheetMetadata[]);
+    await cache.getOrBuild("k", async () => ({
+      sheets: [] as SheetMetadata[],
+    }));
     expect(await readdir(dir)).toHaveLength(1);
     const timer = cache.sweepEvery(10);
     try {
@@ -544,7 +822,7 @@ describe("sandbox", () => {
               ? { source_rows: [...selection.source_rows] }
               : undefined,
             inputPath: input,
-            isXlsx: false,
+            format: "csv",
             contentType: "text/csv",
             outputDir: dir,
             config,
@@ -717,6 +995,7 @@ describe("result view", () => {
       executor: {
         ingest: (job) => executeIngest(job),
         query: (job) => executeQuery(job),
+        extractJson: (job) => executeJsonExtract(job),
       },
       download: (async () => ({
         bytes: SALES,

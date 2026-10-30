@@ -132,12 +132,17 @@ export function apiPath(path: string): string {
   return `${process.env.E2E_BASE_URL ? "" : "/api/eneo"}/api/v1${path}`;
 }
 
-/** A same-origin write returning the created resource's id; load an app page first. */
-export async function apiPost(page: Page, path: string, data: object): Promise<string> {
+/** JSON fixtures use the browser session owner; load an app page first. */
+export async function apiRequest<T>(
+  page: Page,
+  path: string,
+  options: { method?: "GET" | "POST" | "PATCH"; body?: object } = {}
+): Promise<T> {
   // Cookie-authenticated writes require the browser's same-origin fetch metadata.
   const response = await page.evaluate(
-    async ({ url, data, browserSession }) => {
-      const headers = new Headers({ "content-type": "application/json" });
+    async ({ url, options, browserSession }) => {
+      const headers = new Headers();
+      if (options.body !== undefined) headers.set("content-type", "application/json");
       if (browserSession) {
         const session = await fetch("/api/v1/auth/session/");
         const generation = session.headers.get("Eneo-Session-Generation");
@@ -146,16 +151,21 @@ export async function apiPost(page: Page, path: string, data: object): Promise<s
         headers.set("Eneo-Session-Generation", generation);
       }
       const response = await fetch(url, {
-        method: "POST",
+        method: options.method ?? "GET",
         headers,
-        body: JSON.stringify(data)
+        body: options.body === undefined ? undefined : JSON.stringify(options.body)
       });
       return { ok: response.ok, body: await response.text() };
     },
-    { url: apiPath(path), data, browserSession: Boolean(process.env.E2E_BASE_URL) }
+    { url: apiPath(path), options, browserSession: Boolean(process.env.E2E_BASE_URL) }
   );
   expect(response.ok, response.body).toBe(true);
-  return (JSON.parse(response.body) as { id: string }).id;
+  return JSON.parse(response.body);
+}
+
+/** A same-origin write returning the created resource's id. */
+export async function apiPost(page: Page, path: string, data: object): Promise<string> {
+  return (await apiRequest<{ id: string }>(page, path, { method: "POST", body: data })).id;
 }
 
 /**

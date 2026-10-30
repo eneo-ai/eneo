@@ -17,6 +17,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -57,12 +58,11 @@ def round_trip_db(test_settings):
     )
     conn.autocommit = True
 
-    command.upgrade(cfg, REVISION)
-
-    try:
-        yield {"conn": conn, "cfg": cfg}
-    finally:
-        conn.close()
+    with at_revision(cfg, REVISION):
+        try:
+            yield {"conn": conn, "cfg": cfg}
+        finally:
+            conn.close()
 
 
 def _table_exists(conn) -> bool:

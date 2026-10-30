@@ -1,6 +1,6 @@
 "use client";
 
-import { invalidateSpaces } from "@/features/spaces/space";
+import { invalidateSpacesList } from "@/features/spaces/space";
 
 import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
@@ -8,7 +8,7 @@ import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { revealProblems } from "@/components/composites/field-problem";
 import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
@@ -43,7 +43,7 @@ export function CreateSpaceDialog({
   const createSpace = useMutation({
     mutationFn: (body: { name: string }) => unwrap(browserApi.POST("/api/v1/spaces/", { body })),
     onSuccess: (space) => {
-      void invalidateSpaces(queryClient);
+      void invalidateSpacesList(queryClient);
       close();
       router.push(`/spaces/${space.id}/overview`);
     },

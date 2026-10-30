@@ -1,7 +1,8 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
-from unittest.mock import ANY, AsyncMock, MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -10,6 +11,8 @@ from fastapi.routing import APIRoute
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import SQLAlchemyError
 
+from eneo.authentication.principal_types import PrincipalType
+from eneo.authentication.signed_urls import verify_signed_token
 from eneo.database.database import get_session, get_session_with_transaction
 from eneo.files import file_router
 from eneo.files.file_models import (
@@ -21,6 +24,7 @@ from eneo.files.file_models import (
     FilePublic,
     FileType,
     OriginalSignedURLRequest,
+    SignedURLRequest,
 )
 from eneo.files.file_repo import FileContentReferenceRecord
 from eneo.files.file_service import FileDownload, FileService
@@ -32,6 +36,7 @@ from eneo.main.exceptions import (
 from eneo.object_content.content import (
     ContentAccessClass,
     ContentRead,
+    ContentState,
     ObjectContentUnavailableError,
     StorageKind,
 )
@@ -47,6 +52,38 @@ def _dependency_calls(route: APIRoute) -> set[object]:
         calls.add(dependency.call)
         dependencies.extend(dependency.dependencies)
     return calls
+
+
+async def test_generate_signed_url_scopes_token_to_the_current_tenant() -> None:
+    file_id = uuid4()
+    tenant_id = uuid4()
+    file_service = SimpleNamespace(
+        get_file_infos=AsyncMock(return_value=[SimpleNamespace(id=file_id)])
+    )
+    container = SimpleNamespace(
+        file_service=lambda: file_service,
+        user=lambda: SimpleNamespace(tenant_id=tenant_id),
+    )
+
+    response = await file_router.generate_signed_url(
+        id=file_id,
+        request=SimpleNamespace(base_url="https://app.example.com/"),
+        signed_url_req=SignedURLRequest(expires_in=120),
+        container=container,
+    )
+
+    file_service.get_file_infos.assert_awaited_once_with(file_ids=[file_id])
+    assert response.url.startswith(
+        f"https://app.example.com/api/v1/files/{file_id}/download/?token="
+    )
+    token = response.url.split("token=", 1)[1]
+    payload = verify_signed_token(
+        token,
+        expected_file_id=file_id,
+        expected_tenant_id=tenant_id,
+    )
+    assert payload is not None
+    assert payload["expires_at"] == response.expires_at
 
 
 def test_upload_route_reuses_one_non_transactional_authenticated_container() -> None:
@@ -81,7 +118,9 @@ def test_upload_request_resolves_shared_container_once_before_file_work(
         size=7,
         mimetype="text/plain",
         file_type=FileType.TEXT,
-        user_id=TEST_USER.id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=TEST_USER.id,
+        owner_service_id=None,
         tenant_id=TEST_USER.tenant_id,
     )
 
@@ -162,7 +201,9 @@ async def test_upload_enqueues_audit_only_after_file_success() -> None:
         size=7,
         mimetype="text/plain",
         file_type=FileType.TEXT,
-        user_id=user.id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user.id,
+        owner_service_id=None,
         tenant_id=user.tenant_id,
     )
     service = AsyncMock()
@@ -236,7 +277,9 @@ async def test_original_signed_url_audits_the_attributable_access_grant(
         name="source.pdf",
         file_type=FileType.TEXT,
         mimetype="application/pdf",
-        user_id=user_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user_id,
+        owner_service_id=None,
         tenant_id=tenant_id,
     )
     service = AsyncMock()
@@ -297,13 +340,22 @@ async def test_original_signed_url_audits_the_attributable_access_grant(
 
 async def test_download_file_signed_raises_not_found_for_missing_content(monkeypatch):
     file_id = uuid4()
+    tenant_id = uuid4()
     payload = {
         "file_id": str(file_id),
-        "tenant_id": str(uuid4()),
+        "tenant_id": str(tenant_id),
         "content_disposition": "inline",
     }
 
-    monkeypatch.setattr(file_router, "verify_signed_token", lambda _: payload)
+    def _verify(_token, **kwargs):
+        if (
+            kwargs.get("expected_file_id") is not None
+            and str(kwargs["expected_file_id"]) != payload["file_id"]
+        ):
+            return None
+        return payload
+
+    monkeypatch.setattr(file_router, "verify_signed_token", _verify)
 
     service = AsyncMock()
     service.get_download_no_auth.side_effect = NotFoundException(
@@ -324,15 +376,22 @@ async def test_download_file_signed_raises_not_found_for_missing_content(monkeyp
             container=Container(),
         )
 
+    service.get_download_no_auth.assert_awaited_once_with(
+        file_id,
+        tenant_id=tenant_id,
+        range_header=None,
+    )
+
 
 def test_processing_download_returns_and_documents_object_store_503(monkeypatch):
     file_id = uuid4()
+    tenant_id = uuid4()
     monkeypatch.setattr(
         file_router,
         "verify_signed_token",
-        lambda _: {
+        lambda _token, **_kwargs: {
             "file_id": str(file_id),
-            "tenant_id": str(uuid4()),
+            "tenant_id": str(tenant_id),
             "content_disposition": "inline",
         },
     )
@@ -385,7 +444,7 @@ async def test_original_download_rejects_processing_token(monkeypatch):
     monkeypatch.setattr(
         file_router,
         "verify_file_original_download_token",
-        lambda _: None,
+        lambda _token, **_kwargs: None,
     )
 
     with pytest.raises(AuthenticationException, match="Invalid or expired token"):
@@ -404,7 +463,7 @@ async def test_original_download_rejects_token_for_another_file(monkeypatch):
     monkeypatch.setattr(
         file_router,
         "verify_file_original_download_token",
-        lambda _: {
+        lambda _token, **_kwargs: {
             "file_id": str(uuid4()),
             "tenant_id": str(uuid4()),
             "content_disposition": "attachment",
@@ -426,12 +485,13 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
     monkeypatch,
 ):
     file_id = uuid4()
+    tenant_id = uuid4()
     monkeypatch.setattr(
         file_router,
         "verify_file_original_download_token",
-        lambda _: {
+        lambda _token, **_kwargs: {
             "file_id": str(file_id),
-            "tenant_id": str(uuid4()),
+            "tenant_id": str(tenant_id),
             "content_disposition": "attachment",
         },
     )
@@ -460,8 +520,8 @@ async def test_unsatisfiable_original_range_uses_known_size_without_reopening(
     assert b'"eneo_error_code":9007' in response.body
     service.get_original_download_no_auth.assert_awaited_once_with(
         file_id,
+        tenant_id=tenant_id,
         range_header="bytes=999-",
-        expected_tenant_id=ANY,
     )
 
 
@@ -473,7 +533,7 @@ async def test_original_download_audits_the_redemption(monkeypatch):
     monkeypatch.setattr(
         file_router,
         "verify_file_original_download_token",
-        lambda _: {
+        lambda _token, **_kwargs: {
             "file_id": str(file_id),
             "tenant_id": str(tenant_id),
             "content_disposition": "attachment",
@@ -547,9 +607,9 @@ async def test_original_download_is_served_when_audit_storage_fails(monkeypatch)
     monkeypatch.setattr(
         file_router,
         "verify_file_original_download_token",
-        lambda _: {
+        lambda _token, **_kwargs: {
             "file_id": str(file_id),
-            "tenant_id": str(uuid4()),
+            "tenant_id": str(tenant_id),
             "content_disposition": "inline",
         },
     )
@@ -604,12 +664,13 @@ async def test_original_download_is_served_when_audit_storage_fails(monkeypatch)
 
 async def test_legacy_unsatisfiable_range_preserves_empty_response(monkeypatch):
     file_id = uuid4()
+    tenant_id = uuid4()
     monkeypatch.setattr(
         file_router,
         "verify_signed_token",
-        lambda _: {
+        lambda _token, **_kwargs: {
             "file_id": str(file_id),
-            "tenant_id": str(uuid4()),
+            "tenant_id": str(tenant_id),
             "content_disposition": "attachment",
         },
     )
@@ -635,6 +696,11 @@ async def test_legacy_unsatisfiable_range_preserves_empty_response(monkeypatch):
     assert response.status_code == 416
     assert response.headers["content-range"] == "bytes */654"
     assert response.body == b""
+    service.get_download_no_auth.assert_awaited_once_with(
+        file_id,
+        tenant_id=tenant_id,
+        range_header="bytes=999-",
+    )
 
 
 def test_processing_download_route_uses_a_non_transactional_request_container() -> None:
@@ -673,7 +739,9 @@ async def test_interrupted_download_closes_content_context_once(
         name="report.pdf",
         file_type=FileType.TEXT,
         mimetype="application/pdf",
-        user_id=user_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user_id,
+        owner_service_id=None,
         tenant_id=tenant_id,
     )
     reference = FileContentReferenceRecord(
@@ -693,6 +761,7 @@ async def test_interrupted_download_closes_content_context_once(
         size_bytes=6,
         media_type="application/pdf",
         access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        state=ContentState.AVAILABLE,
         storage_kind=StorageKind.POSTGRES_INLINE,
     )
 
@@ -734,8 +803,9 @@ async def test_interrupted_download_closes_content_context_once(
     repo = MagicMock()
     repo.session = session
 
-    async def get_by_id(*, file_id):
+    async def get_by_id(*, file_id, tenant_id: object):
         assert session.in_transaction()
+        assert tenant_id == metadata.tenant_id
         return metadata
 
     async def get_content_references(_file_ids):
@@ -753,7 +823,7 @@ async def test_interrupted_download_closes_content_context_once(
         object_content=object_content,
     )
 
-    download = await getattr(service, method_name)(file_id)
+    download = await getattr(service, method_name)(file_id, tenant_id=tenant_id)
     assert await anext(download.chunks) == b"abc"
     await download.chunks.aclose()
     await download.aclose()

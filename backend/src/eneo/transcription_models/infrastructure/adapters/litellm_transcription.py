@@ -1,5 +1,9 @@
+import asyncio
+import hashlib
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
+from uuid import UUID
 
 from tenacity import (
     retry,
@@ -9,8 +13,31 @@ from tenacity import (
 )
 
 from eneo.files.audio import AudioFile
+from eneo.files.transcript import TranscriptSegment
+
+# The flow attempt's budget, when a flow step is what runs this adapter; the
+# scope is ambient (like the run-cancel probe) so no caller threads it.
+from eneo.flows.enums import FlowStepPhase
+from eneo.flows.runtime.step_deadline import (
+    budget_refusal,
+    current_step_deadline_scope,
+    mark_provider_request_in_flight,
+    record_step_phase,
+    require_step_budget,
+    settle_provider_request,
+)
+from eneo.main.exceptions import (
+    ProviderRejectedRequestException,
+    TypedIOValidationException,
+)
 from eneo.main.logging import get_logger
 from eneo.model_providers.domain.model_route import resolve_model_route
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallObserverError,
+    TranscriptionCallResultFacts,
+    build_transcription_call_request_facts,
+)
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
@@ -26,6 +53,30 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain import TranscriptionModel
 
 logger = get_logger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class EmptyTranscriptionInterval:
+    """Measured chunk with no provider text; file identity is attached by the flow."""
+
+    start: float
+    end: float
+    file_id: UUID | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class AdapterTranscription:
+    """A whole file's transcript and the chunk windows it was decoded in.
+
+    ``segments`` holds one entry per non-empty chunk, spanning the chunk's
+    measured duration. Those boundaries come from the audio Eneo itself split
+    and measured, so they are the only timestamps in the transcript that can be
+    trusted; the provider's own word and segment timings are never surfaced.
+    """
+
+    text: str
+    segments: tuple[TranscriptSegment, ...]
+    empty_intervals: tuple[EmptyTranscriptionInterval, ...] = ()
 
 
 class LiteLLMTranscriptionAdapter:
@@ -91,82 +142,211 @@ class LiteLLMTranscriptionAdapter:
 
         return kwargs
 
-    async def get_text_from_file(self, audio_file: AudioFile) -> str:
+    async def get_text_from_file(
+        self,
+        audio_file: AudioFile,
+        *,
+        language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
+    ) -> AdapterTranscription:
         """
         Transcribe an audio file, splitting into 5-minute chunks with timestamps.
+
+        Each chunk's measured length is accumulated so the returned segments
+        and the transcript's chunk headings place every chunk's text in its
+        absolute window of the whole file, including the shorter final chunk.
         """
-        text = ""
+        record_step_phase(FlowStepPhase.TRANSCRIPTION)
+        text_blocks: list[str] = []
         five_minutes = 60 * 5
-        chunk_index = 0
-        total_duration_seconds = int(audio_file.duration)
+        segments: list[TranscriptSegment] = []
+        empty_intervals: list[EmptyTranscriptionInterval] = []
+        offset_seconds = 0.0
 
         async with audio_file.asplit_file(seconds=five_minutes) as files:
-            total_chunks = len(files)
-
-            for i, path in enumerate(files):
-                block_text = await self._transcribe_chunk(path)
-                start_time = chunk_index * five_minutes
-
-                # For the last chunk, calculate the correct end time based on total duration
-                if i == total_chunks - 1:
-                    end_time = total_duration_seconds
-                else:
-                    end_time = (chunk_index + 1) * five_minutes
-
-                start_time_formatted = f"{start_time // 60}:{start_time % 60:02d}"
-                end_time_formatted = f"{end_time // 60}:{end_time % 60:02d}"
-
-                # Add markdown formatting with timestamp
-                if chunk_index > 0:
-                    text += "\n\n"
-                text += (
-                    f"### {start_time_formatted} - {end_time_formatted}\n\n{block_text}"
-                )
+            chunk_index = -1
+            async for path in files:
                 chunk_index += 1
+                require_step_budget(phase=f"transcription chunk {chunk_index + 1}")
+                measured_seconds = await asyncio.to_thread(_measure_seconds, path)
+                block_text = await self._transcribe_chunk(
+                    path,
+                    language=language,
+                    observer=observer,
+                    audio_seconds=measured_seconds,
+                )
+                chunk_start = offset_seconds
+                offset_seconds += measured_seconds
+                chunk_text = block_text.strip()
+                if not chunk_text:
+                    empty_intervals.append(
+                        EmptyTranscriptionInterval(chunk_start, offset_seconds)
+                    )
+                    continue
+                segments.append(
+                    TranscriptSegment(
+                        text=chunk_text,
+                        start=chunk_start,
+                        end=offset_seconds,
+                    )
+                )
+                text_blocks.append(
+                    f"### {_clock(chunk_start)} - {_clock(offset_seconds)}\n\n"
+                    f"{block_text}"
+                )
 
-        return text
+        return AdapterTranscription(
+            text="\n\n".join(text_blocks),
+            segments=tuple(segments),
+            empty_intervals=tuple(empty_intervals),
+        )
 
     @retry(
         wait=wait_random_exponential(min=1, max=20),
         stop=stop_after_attempt(3),
         retry=retry_if_not_exception_type(
+            # A failure to record what a request did must never send that request
+            # again: the provider already did the work and may already have
+            # charged for it. Neither may a cancelled attempt (the step's budget
+            # ran out) or a typed refusal: retrying would send a request the
+            # runtime has already decided not to send.
             litellm_transport.NON_RETRYABLE_PROVIDER_ERRORS
+            + (
+                ProviderCallObserverError,
+                asyncio.CancelledError,
+                TypedIOValidationException,
+            )
         ),
         reraise=True,
     )
-    async def _transcribe_chunk(self, file_path: Path) -> str:
+    async def _transcribe_chunk(
+        self,
+        file_path: Path,
+        *,
+        language: str | None = None,
+        observer: "ProviderCallObserver | None" = None,
+        audio_seconds: float,
+    ) -> str:
         """
         Transcribe a single audio chunk using LiteLLM.
+
+        Each network attempt is its own recorded request, so a retry after an
+        unknown outcome is visible rather than folded into the attempt it
+        replaced.
         """
         kwargs = self._prepare_kwargs()
 
-        # Set language for Swedish models (KB-Whisper)
-        if "kb-whisper" in self.model.model_name.lower():
+        if language is not None:
+            kwargs["language"] = language
+            logger.debug(
+                f"[LiteLLM] {self.litellm_model}: Setting language=%s from flow/app input",
+                language,
+            )
+        # Keep legacy default for KB-Whisper when no explicit language hint is provided.
+        elif "kb-whisper" in self.model.model_name.lower():
             kwargs["language"] = "sv"
             logger.debug(
-                f"[LiteLLM] {self.litellm_model}: Setting language=sv for KB-Whisper"
+                f"[LiteLLM] {self.litellm_model}: Setting language=sv fallback for KB-Whisper"
             )
 
         logger.info(
             f"[LiteLLM] {self.litellm_model}: Making transcription request for chunk"
         )
 
+        # Guards every retry: no receipt and no request once the step's
+        # budget ran out.
+        record_step_phase(FlowStepPhase.TRANSCRIPTION)
+        require_step_budget(phase="transcription request")
+        call_id: UUID | None = None
+        if observer is not None:
+            effective_language = kwargs.get("language")
+            call_id = await observer.started(
+                build_transcription_call_request_facts(
+                    requested_model=self.litellm_model,
+                    provider=self.provider_type,
+                    language=(
+                        effective_language
+                        if isinstance(effective_language, str)
+                        else None
+                    ),
+                    audio_digest=await asyncio.to_thread(_digest_file, file_path),
+                    audio_seconds=audio_seconds,
+                )
+            )
+
+        # Writing the receipt may itself have consumed the budget; the request
+        # is admitted only against the clock as it is now, and a receipt that
+        # then cannot be honoured is settled as the refusal it is.
+        refusal = budget_refusal(phase="transcription request (not sent)")
+        if refusal is not None:
+            if observer is not None and call_id is not None:
+                await observer.rejected(call_id, "budget_exhausted")
+            raise refusal
+        scope = current_step_deadline_scope()
+        if scope is not None:
+            kwargs["timeout"] = scope.deadline.remaining()
         try:
             with open(file_path, "rb") as audio_file:
+                mark_provider_request_in_flight(True)
                 response = await litellm_transport.atranscription(
                     model=self.litellm_model,
                     file=audio_file,
                     **kwargs,
                 )
-
-            logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")
-            return response.text  # type: ignore[return-value]
-
+        except asyncio.CancelledError:
+            settle_provider_request(known=False)
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "request_cancelled")
+            raise
         except Exception as e:
             logger.exception(f"[LiteLLM] {self.litellm_model}: Unknown exception:")
-            litellm_transport.raise_public_litellm_error(
-                e,
-                provider_type=self.provider_type,
-                is_unavailable=litellm_transport.is_provider_unavailable_error,
-                raise_unavailable=litellm_transport.raise_provider_unavailable,
+            try:
+                litellm_transport.raise_public_litellm_error(
+                    e,
+                    provider_type=self.provider_type,
+                    is_unavailable=litellm_transport.is_provider_unavailable_error,
+                    raise_unavailable=litellm_transport.raise_provider_unavailable,
+                )
+            except ProviderRejectedRequestException:
+                settle_provider_request(known=True)
+                # The provider answered and refused. That is a known outcome, so
+                # it must not leave the run's audio total marked incomplete.
+                if observer is not None and call_id is not None:
+                    await observer.rejected(call_id, "provider_rejected")
+                raise
+            except Exception:
+                settle_provider_request(known=False)
+                if observer is not None and call_id is not None:
+                    await observer.outcome_unknown(call_id, "provider_error")
+                raise
+            raise AssertionError("Provider error mapping unexpectedly returned.")
+
+        settle_provider_request(known=True)
+        logger.debug(f"[LiteLLM] {self.litellm_model}: Transcription successful")
+        if observer is not None and call_id is not None:
+            await observer.completed(
+                call_id,
+                TranscriptionCallResultFacts(
+                    response_model=getattr(response, "model", None),
+                    provider_response_id=getattr(response, "id", None),
+                ),
             )
+        return cast(str, response.text)  # type: ignore[reportUnknownMemberType]
+
+
+def _clock(seconds: float) -> str:
+    """M:SS from a measured offset, floored like the segment windows."""
+    whole = int(seconds)
+    return f"{whole // 60}:{whole % 60:02d}"
+
+
+def _measure_seconds(file_path: Path) -> float:
+    return AudioFile(str(file_path)).duration
+
+
+def _digest_file(file_path: Path) -> str:
+    digest = hashlib.sha256()
+    with open(file_path, "rb") as handle:
+        for block in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()

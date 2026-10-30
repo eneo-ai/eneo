@@ -60,10 +60,47 @@ cp frontend/apps/web/.env.example frontend/apps/web/.env
 # Initialize database
 cd backend && uv run python init_db.py
 
-# Start development servers (3 terminals)
-cd backend && uv run start              # Terminal 1
-cd frontend && bun run dev                 # Terminal 2
-cd backend && uv run worker             # Terminal 3
+# Start development services (6 terminals)
+cd backend && uv run start                    # Terminal 1: API
+cd frontend && bun run dev                    # Terminal 2: web app
+cd backend && uv run worker                   # Terminal 3: general jobs
+cd backend && uv run task-execution-worker    # Terminal 4: Flow execution
+cd backend && uv run task-maintenance-worker  # Terminal 5: Flow maintenance
+cd backend && uv run arq src.eneo.worker.arq.CrawlerWorkerSettings  # Terminal 6: website crawls
+```
+
+All four worker processes are required for a complete development environment.
+The general worker handles uploads, integrations, audit jobs, and crawl
+scheduling and repair; website crawls run on the crawler worker's own ARQ queue
+(`arq:crawler`), and Flow execution and Flow maintenance use separate queues and
+capacity. Without the crawler worker a started crawl stays queued.
+
+In the devcontainer, Compose also starts the Flow and crawler workers. On a fresh
+container they exit until `post-create.sh` has installed the backend environment
+and restart automatically (`restart: unless-stopped`), so a few early restarts
+are normal.
+
+For a Git worktree checkout, expose only its Git common directory to the
+container with a narrow local mount, or use a plain clone; never mount the
+checkout's whole parent directory.
+
+**Running another checkout concurrently**
+
+When another Eneo checkout already uses the default host ports, create
+`.devcontainer/.env` with unique ports, then point `frontend/apps/web/.env` at
+the API port:
+
+```dotenv
+# .devcontainer/.env
+ENEO_WEB_PORT=3100
+ENEO_API_PORT=8223
+```
+
+```dotenv
+# frontend/apps/web/.env
+ENEO_BACKEND_URL="http://localhost:8223"
+PUBLIC_ENEO_BACKEND_URL="http://localhost:8223"
+PUBLIC_ORIGIN="https://localhost:3100"
 ```
 
 **Browser calls from the dev server**
@@ -84,11 +121,6 @@ Eneo stores file bytes in PostgreSQL by default, which is all most work needs.
 To exercise the S3-compatible path instead, start the bundled SeaweedFS service
 from the `object-content` Compose profile. It is off by default because the
 image is built from upstream source, so the first start takes a few minutes.
-
-```bash
-docker compose -p eneo_devcontainer -f .devcontainer/docker-compose.yml \
-  --profile object-content up -d object-content
-```
 
 To have VS Code bring it up together with the rest of the devcontainer, create
 `.devcontainer/.env` (gitignored, so it stays a per-developer choice) with:

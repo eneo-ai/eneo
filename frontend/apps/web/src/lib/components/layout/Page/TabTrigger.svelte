@@ -22,11 +22,13 @@
     {#if asFragment}
       {@render children?.({ trigger: props })}
     {:else}
+      <!-- A segment of the Tabbar's strip; the outline replaces the button's ring so
+           focus keeps its contrast on the segmented background. -->
       <Button
         {...props}
         variant="ghost"
         aria-label={label}
-        class="data-[state=active]:bg-accent-dimmer data-[state=active]:text-accent-stronger tracking-[0.01rem] data-[state=active]:font-medium data-[state=active]:tracking-normal"
+        class="text-secondary hover:text-primary focus-visible:outline-ring data-[state=active]:bg-primary data-[state=active]:text-primary h-auto gap-1.5 rounded-md px-3 py-1 text-sm font-medium whitespace-nowrap transition-colors hover:bg-transparent focus-visible:border-transparent focus-visible:ring-0 focus-visible:outline-2 focus-visible:outline-offset-2 data-[state=active]:shadow-sm"
       >
         {@render children?.({ trigger: props })}
       </Button>

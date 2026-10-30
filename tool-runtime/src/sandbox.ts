@@ -82,6 +82,9 @@ export function jobPaths(job: SandboxJob["job"]): JobPaths {
         read: [job.csvPath, ...job.tables.map((table) => table.csvPath)],
         write: job.export ? [dirname(job.export.outputPath)] : [],
       };
+    case "json_extract":
+      // The JSON file was written into a directory made for this job; nothing is written back.
+      return { read: [job.inputPath] };
     case "render_document":
       // Sources and the template sit next to the output, in a directory made for this job.
       return { write: [dirname(job.outputPath)] };

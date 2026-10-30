@@ -186,7 +186,7 @@ describe("handleError", () => {
 
     await expect(report(error)).resolves.toEqual({
       status: 422,
-      message: "A validation error occured.",
+      message: "A validation error occurred.",
       code: 0,
       traceId: TRACE_ID
     });

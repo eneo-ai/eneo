@@ -11,8 +11,18 @@ import { env } from "@/lib/env";
  * Chat streaming does NOT go through here (Phase 5 has its own handler).
  */
 
-/** Request headers forwarded to the backend (cookie et al. stay behind). */
-const FORWARDED_REQUEST_HEADERS = ["accept", "accept-language", "content-type", "range"];
+/**
+ * Request headers forwarded to the backend (cookie et al. stay behind).
+ * `idempotency-key` makes a retried write return what the first one did; the
+ * flow run, retry and review endpoints require it.
+ */
+const FORWARDED_REQUEST_HEADERS = [
+  "accept",
+  "accept-language",
+  "content-type",
+  "idempotency-key",
+  "range"
+];
 
 /**
  * The only browser cookie forwarded to the backend. Audit-log access is gated
@@ -41,7 +51,9 @@ const FORWARDED_RESPONSE_HEADERS = [
   "accept-ranges",
   "content-range",
   "x-trace-id",
-  "x-correlation-id"
+  "x-correlation-id",
+  // What a flow package export left out (its MCP connections).
+  "eneo-package-omitted-mcp-assistant-count"
 ];
 
 async function proxyRequest(request: NextRequest): Promise<Response> {

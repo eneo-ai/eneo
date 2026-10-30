@@ -23,6 +23,7 @@ roles:
       - websites
       - integrations
       - shared_spaces
+      - flows_trace
       - assistant_debug
       - web_search
       - image_generation
@@ -48,6 +49,12 @@ roles:
       - integrations
       - shared_spaces
       - api_keys
+      - flows_view
+      - flows_run
+      - flows_manage
+      - flows_trace
+      - retention_manage
+      - retention_holds
       - assistant_debug
       - web_search
       - image_generation

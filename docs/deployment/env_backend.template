@@ -18,12 +18,15 @@ POSTGRES_DB=eneo
 # Redis cache
 REDIS_HOST=redis              # Docker service name
 REDIS_PORT=6379
+# Redis database slots (must be unique)
+REDIS_DB=0
 # Optional Redis authentication. With the bundled Compose stack, define
 # REDIS_PASSWORD in the deployment .env instead, so the Redis container and
 # the backend services receive the same value. Set it here only when Redis
 # runs outside this Compose file.
 # REDIS_PASSWORD=
 # REDIS_USERNAME=             # Only for a Redis ACL user; requires REDIS_PASSWORD
+# REDIS_POOL_WAIT_TIMEOUT=    # Seconds a command waits for a free connection when REDIS_MAX_CONNECTIONS is set; unset = REDIS_CONN_TIMEOUT
 
 # ----------------------------------------------------------------------------
 # Security (REQUIRED)
@@ -238,20 +241,21 @@ ENEO_SUPER_API_KEY=
 # step exits with a Settings validation error and the stack never comes up.
 # Images that include migration 202607251700 read them exactly once, to seed
 # the initial upload policy, and ignore them afterwards; administrators then
-# manage the limits in Admin > File storage. Values below match the seed defaults.
-UPLOAD_FILE_TO_SESSION_MAX_SIZE=10485760
+# manage the limits in Admin > File storage. Migration 202609202000 raises
+# unchanged historical seeds. Values below match the resulting upload defaults.
+UPLOAD_FILE_TO_SESSION_MAX_SIZE=268435456
 UPLOAD_IMAGE_TO_SESSION_MAX_SIZE=10485760
-UPLOAD_MAX_FILE_SIZE=10485760
-TRANSCRIPTION_MAX_FILE_SIZE=209715200
+UPLOAD_MAX_FILE_SIZE=268435456
+TRANSCRIPTION_MAX_FILE_SIZE=402653184
 
 # ----------------------------------------------------------------------------
 # Durable Object Content (PostgreSQL-inline defaults)
 # ----------------------------------------------------------------------------
 # These settings are active whether or not an external object store is enabled.
-# The inline ceiling is a deployment safety/admission bound, not a user-facing
-# upload policy. Reads of existing inline content remain possible if it is
-# lowered. Product upload limits remain admin-configurable in Eneo.
-OBJECT_CONTENT_INLINE_MAXIMUM_BYTES=10485760
+# Upload sizes for every Flow are managed in Admin > File storage, without
+# restart. Choose object storage for files above PostgreSQL inline capacity.
+# Inline payloads are bytea rows carried in WAL and backups; provision memory,
+# disk and backup capacity for the chosen upload sizes and concurrency.
 OBJECT_CONTENT_INLINE_IO_CHUNK_BYTES=262144
 
 # Bounded lifecycle and reference reconciliation. Increase only after measuring
@@ -262,6 +266,17 @@ OBJECT_CONTENT_RECONCILIATION_LEASE_SECONDS=300
 OBJECT_CONTENT_RECONCILIATION_RETRY_BASE_SECONDS=30
 OBJECT_CONTENT_RECONCILIATION_RETRY_MAX_SECONDS=3600
 OBJECT_CONTENT_PENDING_STALE_SECONDS=300
+
+# File/Icon legacy-content adoption. Campaigns above the automatic 5 GiB
+# threshold require an explicit capacity acknowledgement. See
+# docs/deployment/OBJECT_CONTENT.md before changing these values.
+FILE_ICON_BACKFILL_AUTO_INLINE_MAX_BYTES=5368709120
+FILE_ICON_BACKFILL_INLINE_CAPACITY_ACK=0
+FILE_ICON_BACKFILL_BATCH_ROWS=200
+FILE_ICON_BACKFILL_BATCH_BYTES=134217728
+FILE_ICON_BACKFILL_LEASE_SECONDS=300
+FILE_ICON_BACKFILL_MAX_ATTEMPTS=3
+FILE_ICON_BACKFILL_RESUME_REVISION=0
 
 # ----------------------------------------------------------------------------
 # Optional S3-compatible byte backend
@@ -303,8 +318,16 @@ OBJECT_CONTENT_PENDING_STALE_SECONDS=300
 # Database Connection Pool Configuration
 # ----------------------------------------------------------------------------
 # Controls PostgreSQL connection pooling. Every API and worker process owns an
-# independent pool. Size PostgreSQL max_connections for the sum of all process
-# pool maxima, plus headroom for migrations and administration.
+# independent pool; db-init uses one transient connection. These values apply to
+# EVERY role that reads this file - see the aggregate budget below before
+# changing them. Size PostgreSQL max_connections for the sum of all process pool
+# maxima, plus headroom for migrations and administration.
+#
+# RECOMMENDED TUNING:
+#   Small (8GB):   POOL_SIZE=10, OVERFLOW=5
+#   Medium (16GB): POOL_SIZE=20, OVERFLOW=10
+#   Large (32GB+): POOL_SIZE=30, OVERFLOW=20
+#
 # Symptoms of misconfiguration: API timeouts, "QueuePool limit reached" errors,
 # or PostgreSQL "too many connections" errors.
 # ----------------------------------------------------------------------------
@@ -346,6 +369,57 @@ FILE_EXTRACTION_MAX_PDF_PAGES=1000
 FILE_EXTRACTION_PDF_LAYOUT_MAX_PAGES=200
 
 # ----------------------------------------------------------------------------
+# ⚠️  AGGREGATE CONNECTION BUDGET (the whole stack, not one role)
+# ----------------------------------------------------------------------------
+# The values above size ONE role. Each backend and ARQ worker process owns an
+# independent pool, so the deployment's maximum demand is the SUM across those
+# processes. A per-role setting that looks safe can still exhaust the database.
+#
+#   role demand = processes x (DB_POOL_SIZE + DB_POOL_MAX_OVERFLOW)
+#
+#   backend             NUM_WORKERS (default 3) gunicorn workers
+#   worker (ARQ)        1 process (WORKER_MAX_JOBS jobs share its pool)
+#   task execution      1 ARQ process (TASK_EXECUTION_MAX_JOBS share its pool)
+#   task maintenance    1 ARQ process (TASK_MAINTENANCE_MAX_JOBS share its pool)
+#   crawler worker      1 ARQ process (WORKER_MAX_JOBS crawls share its pool)
+#   db-init             one transient connection at startup only
+#
+# MAXIMUM DEMAND by the tuning profile chosen above:
+#
+#   profile        per-proc  backend  general  execute  maintenance  crawler  total
+#   Small  (8GB)         15       45       15       15           15       15    105
+#   Medium (16GB)        30       90       30       30           30       30    210  <- default
+#   Large  (32GB+)       50      150       50       50           50       50    350
+#
+# max_connections=400 (set on the db service in docker-compose.yml) covers the
+# shipped profiles plus reserved superuser slots and headroom. Deployments with
+# more worker replicas should use per-service pool overrides and/or a pooler.
+# The ceiling bounds the worst case rather than preallocating it, but note that
+# a role which has handled load keeps up to DB_POOL_SIZE connections per
+# process until they are recycled - it does not return to near-zero when idle.
+#
+# If you need a smaller ceiling than your profile implies, give worker roles
+# their own smaller pools via per-service environment overrides in
+# docker-compose.yml. Never leave the ceiling below the configured maximum.
+#
+# WHY THE POOLS ARE LEFT AT THEIR DEFAULTS HERE: the numbers above are the
+# CONFIGURED MAXIMUM, not observed usage. A pool checks a connection out per
+# transaction and returns it at commit - a long-lived session does NOT hold a
+# connection for its lifetime (e.g. webhook delivery commits its preparation
+# transaction before the outbound HTTP call). Real peak checkout per role is
+# therefore unmeasured, and shrinking a pool without that measurement risks
+# stalling work on checkout. Right-sizing is deferred to the launch-load
+# measurement (L5), which records peak concurrent checkouts and pool timeouts;
+# until then the ceiling is set to cover the configured maximum.
+#
+# RULE: if you raise any pool, worker count, or worker concurrency, recompute
+# this sum and raise max_connections with it. The backend logs its own
+# per-process budget at startup; compare that against SHOW max_connections.
+# Beyond a few hundred connections, put a pooler in front of PostgreSQL
+# rather than raising this ceiling further.
+# ----------------------------------------------------------------------------
+
+# ----------------------------------------------------------------------------
 # Background Worker Configuration
 # ----------------------------------------------------------------------------
 # Controls each ARQ (Async Redis Queue) worker process.
@@ -369,6 +443,82 @@ WORKER_MAX_JOBS=15
 # Optional cluster-wide crawl admission limit. Defaults to WORKER_MAX_JOBS.
 # Set an aggregate value when the dedicated crawler worker has multiple replicas.
 # CRAWL_JOB_CONCURRENCY_LIMIT=15
+
+# Server capacity for concurrent Flow runs; admins lower it in Flow settings. Unset means TASK_EXECUTION_MAX_JOBS, which the API and the worker both read, so set it in the env they share. A higher value only queues runs (default: 4).
+# FLOW_MAX_CONCURRENT_RUNS_PER_TENANT=4
+
+# Flow PDF extraction: page count, extracted UTF-8 bytes, elapsed seconds.
+FLOW_PDF_MAX_PAGES=2000
+FLOW_PDF_MAX_EXTRACTED_BYTES=134217728
+FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS=900
+# Audio decode bounds. For longer recordings, raise duration and the invocation
+# budget together; provisional defaults pending measurement (eneo-hy7c).
+FLOW_AUDIO_MAX_DURATION_SECONDS=18000
+FLOW_AUDIO_MAX_DECODED_BYTES=2147483648
+# An audio upload is decoded to measure it before it is kept, a few at a time; past
+# this wait and decode the upload is refused as busy (503) to retry. Clients wait
+# max(this, FLOW_PDF_EXTRACTION_TIMEOUT_SECONDS) + 60 s for the upload's response.
+FLOW_AUDIO_MEASUREMENT_TIMEOUT_SECONDS=600
+# Live transcription preview. A recording keeps streaming audio (silence too),
+# so the idle timeout only ends a paused or stalled client. The final-text wait
+# covers what the model server has not decoded yet when recording stops; raise it
+# for a server that falls behind (CPU, busy GPU). A session accepts at most
+# FLOW_AUDIO_MAX_DURATION_SECONDS of audio.
+FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS=300
+FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS=60
+# Flow HTTP input, HTTP output (webhook) and the editor's connection test reach
+# public addresses only. true also allows private networks: 10.0.0.0/8,
+# 172.16.0.0/12, 192.168.0.0/16 and fc00::/7. Loopback, link-local (cloud
+# metadata), 100.64.0.0/10, 0.0.0.0/8, 240.0.0.0/4, 192.0.0.0/24, multicast,
+# unspecified, site-local, 168.63.129.16 and the IPv4-mapped (::ffff:0:0/96),
+# 6to4 (2002::/16), Teredo (2001::/32) and NAT64 well-known (64:ff9b::/96)
+# prefixes are refused either way; a network-specific NAT64 prefix is not
+# recognised. Only http(s) is used, redirects are not followed, and HTTP(S)_PROXY /
+# ALL_PROXY are ignored by these requests. Set on backend and worker.
+FLOW_HTTP_ALLOW_PRIVATE_NETWORKS=false
+# A flow step that takes its input from an MCP tool may call a server on a
+# private network (the ranges above). On by default, unlike the HTTP setting:
+# only an instance administrator registers an MCP server, and internal servers
+# are the normal case. false allows servers on public addresses only. Loopback,
+# link-local and metadata addresses are refused either way. The registered
+# address is vetted before the call, and every connection the call opens is
+# vetted again when it is opened; the call follows no redirect. Like flow HTTP
+# requests, the call ignores HTTP(S)_PROXY / ALL_PROXY. Set on worker.
+FLOW_TOOL_ALLOW_PRIVATE_NETWORKS=true
+# Deadline for an MCP tool call, in seconds. For a flow step that takes its
+# input from a tool it bounds resolving the server's name and, separately, the
+# exchange with the server (connecting, initializing, the call, closing); the
+# step's own timeout can leave less.
+MCP_CLIENT_CALL_TIMEOUT_SECONDS=60
+# Threads that resolve host names for flow HTTP, separate from every other lookup
+# in the process. A stalled lookup keeps its thread until the resolver answers;
+# a lookup with no free thread fails at once and is retried later.
+FLOW_HTTP_DNS_WORKERS=16
+# Platform task worker queue/runtime settings
+TASK_EXECUTION_QUEUE=tasks:execution
+TASK_MAINTENANCE_QUEUE=tasks:maintenance
+TASK_EXECUTION_MAX_JOBS=4
+TASK_MAINTENANCE_MAX_JOBS=2
+# Single worker invocation budget shared by every step.
+TASK_EXECUTION_TIMEOUT_SECONDS=28800
+TASK_MAINTENANCE_TIMEOUT_SECONDS=120
+# [OPTIONAL] Contract checks each process runs at once, each in its own process (default: 2, at most TASK_EXECUTION_MAX_JOBS). Each can take up to FLOW_CONTRACT_CHECK_CHILD_MEMORY_BYTES while it checks; raise it only with memory to spare.
+# FLOW_CONTRACT_CHECK_SLOTS=2
+# [OPTIONAL] Memory one contract check's process may take on Linux (default: 536870912, 512 MiB; at least 134217728, 128 MiB). It holds a value at the default FLOW_MAX_INLINE_TEXT_BYTES in its costliest decoded shape (about 440 MiB measured while checked, with anyOf, uniqueItems or a recursive $ref alike); anyOf and oneOf keep only a failing branch's first error. A check past it ends with typed_io_contract_not_checked, valid value or not. Raise it with FLOW_MAX_INLINE_TEXT_BYTES.
+# FLOW_CONTRACT_CHECK_CHILD_MEMORY_BYTES=536870912
+# Seconds between sweeps that cancel the unfinished runs of deleted flows (divides 60).
+# FLOW_RETIRED_RUN_DRAIN_INTERVAL_SECONDS=60
+# Minutes without a question or mode change after which turning on a flow chat's
+# edit mode starts a new conversation.
+# FLOW_AUTHORING_CHAT_IDLE_MINUTES=45
+
+# Inline text, structured JSON output, and retained rejected-output previews.
+FLOW_MAX_INLINE_TEXT_BYTES=8388608
+# Calls per mapped step; includes the native-JSON fallback reserve.
+FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT=1000
+# Persistent assistant attachments must also fit the selected model's context.
+ATTACHMENT_MAX_SIZE_BYTES=268435456
+ATTACHMENT_MAX_FILES=100
 
 # Per-tenant crawl ceiling (default: 4). Single-tenant deployments can set this
 # to the global crawl limit to use the full configured capacity.
@@ -406,8 +556,10 @@ CRAWL_REQUEST_DELAY_SECONDS=0
 CRAWL_PAGE_MAX_SIZE=10485760
 
 # The crawler never connects to loopback, link-local (cloud metadata),
-# unspecified or multicast addresses. Private (intranet) ranges are allowed
-# by default so intranet sites can be indexed; set to true to refuse them too.
+# unspecified or multicast addresses, to the Azure WireServer 168.63.129.16, or
+# to 192.0.0.0/24 (except its anycast 192.0.0.9 and 192.0.0.10). Private
+# (intranet) ranges are allowed by default so intranet sites can be indexed;
+# set to true to refuse them too.
 # Only http(s) is crawled, and the worker's HTTP(S)_PROXY is not used.
 CRAWLER_BLOCK_PRIVATE_NETWORKS=false
 
@@ -564,6 +716,16 @@ OTEL_SERVICE_VERSION=unknown
 # Deployment environment label. Use "development", "staging", "production", etc.
 # Mapped to resource.deployment.environment.name (OTel semconv >= 1.24).
 OTEL_DEPLOYMENT_ENVIRONMENT=production
+
+# Trace sampling (standard OpenTelemetry SDK variables). Unset = parentbased_always_on:
+# every new root trace is recorded. parentbased_* follows an incoming traceparent:
+# sampled (-01) is recorded, unsampled (-00) is dropped. Unsampled instrumented
+# requests keep X-Trace-Id and log trace_id (/api/healthz* is not instrumented).
+# These apply to every process that receives them, workers included, so set them
+# only on the API service if worker Flow spans should stay recorded.
+# See docs/OBSERVABILITY.md, "Trace sampling".
+# OTEL_TRACES_SAMPLER=parentbased_traceidratio
+# OTEL_TRACES_SAMPLER_ARG=0.1
 
 # ----------------------------------------------------------------------------
 # DEPRECATED: MobilityGuard and Zitadel variables are no longer used.

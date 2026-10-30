@@ -19,7 +19,7 @@ from eneo.completion_models.domain import CompletionModel
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_models import AcceptedFileType, Limit
 from eneo.files.image import ImageMimeTypes
-from eneo.files.text import TextMimeTypes
+from eneo.files.mime_support import supported_text_mimes
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.transcription_models.domain import TranscriptionModel
@@ -48,7 +48,7 @@ _UPLOAD_ADMISSION = UploadAdmissionSnapshot(
 def _text_uploads(limit: int = CUSTOM_TEXT_LIMIT):
     return [
         AcceptedFileType.for_mimetype(m, size_limit=limit)
-        for m in TextMimeTypes.values()
+        for m in supported_text_mimes()
     ]
 
 
@@ -70,7 +70,7 @@ def _audio_uploads(limit: int = CUSTOM_AUDIO_LIMIT):
 
 TEST_NAME = "Test name"
 TEST_COMPLETION_MODEL = CompletionModel(
-    user=TEST_USER,
+    tenant=TEST_USER.tenant,
     id=TEST_UUID,
     name=TEST_NAME,
     nickname=TEST_NAME,
@@ -94,7 +94,7 @@ TEST_COMPLETION_MODEL = CompletionModel(
     deployment_name=None,
 )
 TEST_TRANSCRIPTION_MODEL = TranscriptionModel(
-    user=TEST_USER,
+    tenant=TEST_USER.tenant,
     id=TEST_UUID,
     name=TEST_NAME,
     nickname=TEST_NAME,

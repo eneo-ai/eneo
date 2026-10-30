@@ -5,7 +5,7 @@ import pytest
 
 from eneo.assistants.references import ReferencesService
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore, InfoBlobInDB
-from tests.fixtures import TEST_UUID
+from tests.fixtures import TEST_EMBEDDING_MODEL, TEST_UUID
 
 
 def _create_chunk_with_score(score: float, info_blob_id: str = TEST_UUID):
@@ -95,6 +95,75 @@ def test_concatenate_session_is_null():
     assert concatenated_session == "next question"
 
 
+@pytest.mark.asyncio
+async def test_get_references_skips_info_blob_hydration_when_disabled():
+    info_blobs_repo = AsyncMock()
+    datastore = AsyncMock()
+    service = ReferencesService(info_blobs_repo=info_blobs_repo, datastore=datastore)
+    chunks = [
+        _create_chunk_with_score(0.9, uuid4()),
+        _create_chunk_with_score(0.7, uuid4()),
+    ]
+    datastore.semantic_search.return_value = chunks
+    collection = MagicMock()
+    # Retrieval now reports which embedding model it embedded the query with,
+    # so the double carries a real model rather than an untyped mock.
+    collection.embedding_model = TEST_EMBEDDING_MODEL
+
+    result = await service.get_references(
+        question="hello",
+        collections=[collection],
+        include_info_blobs=False,
+    )
+
+    assert result.chunks == chunks
+    assert result.no_duplicate_chunks == chunks
+    assert result.info_blobs == []
+    info_blobs_repo.get_by_ids.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_get_references_hydrates_info_blobs_by_default():
+    info_blobs_repo = AsyncMock()
+    datastore = AsyncMock()
+    service = ReferencesService(info_blobs_repo=info_blobs_repo, datastore=datastore)
+    chunk = _create_chunk_with_score(0.9, uuid4())
+    datastore.semantic_search.return_value = [chunk]
+    collection = MagicMock()
+    # Retrieval now reports which embedding model it embedded the query with,
+    # so the double carries a real model rather than an untyped mock.
+    collection.embedding_model = TEST_EMBEDDING_MODEL
+    info_blob = MagicMock()
+    info_blob.id = chunk.info_blob_id
+    info_blob.model_dump.return_value = {
+        "id": chunk.info_blob_id,
+        "tenant_id": chunk.tenant_id,
+        "created_at": None,
+        "updated_at": None,
+        "title": "title",
+        "size": 1,
+        "user_id": uuid4(),
+        "group_id": uuid4(),
+        "website_id": None,
+        "integration_knowledge_id": None,
+        "url": None,
+        "embedding_model_id": uuid4(),
+        "text": "body",
+        "sharepoint_item_id": None,
+        "source_id": chunk.info_blob_id,
+        "version_state": "active",
+    }
+    info_blobs_repo.get_by_ids.return_value = [info_blob]
+
+    result = await service.get_references(
+        question="hello",
+        collections=[collection],
+    )
+
+    assert len(result.info_blobs) == 1
+    info_blobs_repo.get_by_ids.assert_awaited_once_with([chunk.info_blob_id])
+
+
 def _service_with_datastore():
     datastore = MagicMock()
     datastore.semantic_search = AsyncMock(return_value=[])
@@ -102,7 +171,7 @@ def _service_with_datastore():
 
 
 def _embedding_model(max_input: int | None = 8191) -> MagicMock:
-    embedding_model = MagicMock(max_input=max_input)
+    embedding_model = MagicMock(max_input=max_input, id=uuid4())
     embedding_model.name = "model"
     return embedding_model
 
@@ -258,7 +327,7 @@ async def test_get_references_hands_the_rerank_spec_to_the_datastore():
     datastore.semantic_search = AsyncMock(return_value=[])
     service = ReferencesService(AsyncMock(), datastore)
     spec = object()
-    collection = MagicMock()
+    collection = MagicMock(embedding_model=_embedding_model())
 
     await service.get_references(
         question="q", collections=[collection], version=2, rerank=spec
@@ -272,6 +341,8 @@ async def test_get_references_passes_no_spec_by_default():
     datastore.semantic_search = AsyncMock(return_value=[])
     service = ReferencesService(AsyncMock(), datastore)
 
-    await service.get_references(question="q", collections=[MagicMock()])
+    await service.get_references(
+        question="q", collections=[MagicMock(embedding_model=_embedding_model())]
+    )
 
     assert datastore.semantic_search.await_args.kwargs["rerank"] is None

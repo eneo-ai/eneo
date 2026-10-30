@@ -34,6 +34,10 @@ Eneo provides dedicated health check endpoints for monitoring:
 # Backend API health (includes worker status)
 curl http://localhost:8123/api/healthz
 
+# Flow runtime diagnostics (operator-only Eneo super API key)
+curl --header "X-API-Key: ${ENEO_SUPER_API_KEY}" \
+  http://localhost:8123/api/healthz/flows
+
 # Frontend web health
 curl http://localhost:3000/web/healthz
 
@@ -96,6 +100,11 @@ curl -w "%{http_code}" -s -o /dev/null http://localhost:8123/api/healthz
 - `healthy`: ARQ worker is running and processing jobs
 - `unhealthy`: Worker health check key expired (worker down)
 - `unknown`: Redis connection error or worker status unclear
+
+Flow-specific queue-consumer, stuck queued/running, reconciliation, outbox, and
+terminalization-integrity incidents are covered in the
+[Flow Runtime Runbook](runbooks/flows.md). The Flow endpoint requires the Eneo
+super API key and must not be used as an unauthenticated platform liveness probe.
 
 ---
 
@@ -759,7 +768,7 @@ be reached rather than that the password was wrong.
      restarting backend or worker.
    - For PostgreSQL-inline session uploads, the effective limit is the smaller
      of the admin policy and the operator-owned
-     `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+     PostgreSQL inline storage capacity.
    - For object-store session uploads, the effective limit is the smaller of
      the admin policy and the configured portable multipart envelope. The
      constraining source is visible in **Admin > File storage**.
@@ -1122,7 +1131,7 @@ When reporting issues, include:
 5. **Trace ID (when reporting an API error)**:
    - From the browser: read the `X-Trace-Id` response header for the failing request (DevTools → Network → Response Headers). On error pages it is also available as `$page.error.traceId`.
    - From the backend: every log line emitted during the request shares the same `trace_id` top-level field; filter your log aggregator by `trace_id="<value>"`.
-   - For unhandled 500 errors, the response body also contains a short `error_id` that appears on the originating exception log line. Quoting either ID lets support locate the exact failure.
+   - For explicit or unhandled 500 errors, the `GeneralError` response body uses `code: "internal_error"` and contains a short `error_id` that appears on the originating exception log line. Quoting the trace ID, request ID, or error ID lets support locate the exact failure.
    - For the full ID contract and log schema, see [OBSERVABILITY.md](./OBSERVABILITY.md).
 
 ---

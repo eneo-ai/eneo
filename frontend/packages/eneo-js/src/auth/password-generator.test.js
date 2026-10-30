@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import test, { mock } from "node:test";
+import test from "node:test";
 import {
   GENERATED_PASSWORD_LENGTH,
   PASSWORD_CHARACTER_CLASSES,
@@ -109,15 +109,31 @@ test("every character of the alphabet is drawn, and nothing else", () => {
   for (const lookalike of "0Oo1lI\"'` \\") assert.ok(!alphabet.has(lookalike), lookalike);
 });
 
+/** Counts calls to a method; node:test's `mock` is missing under bun test. */
+function countCalls(object, name) {
+  const own = Object.getOwnPropertyDescriptor(object, name);
+  const original = object[name];
+  const spy = {
+    count: 0,
+    restore: () => (own ? Object.defineProperty(object, name, own) : delete object[name])
+  };
+  object[name] = function (...args) {
+    spy.count += 1;
+    return original.apply(this, args);
+  };
+  return spy;
+}
+
 test("randomness comes from the platform's cryptographic source only", () => {
-  const getRandomValues = mock.method(globalThis.crypto, "getRandomValues");
-  const random = mock.method(Math, "random");
+  const getRandomValues = countCalls(globalThis.crypto, "getRandomValues");
+  const random = countCalls(Math, "random");
   try {
     generatePassword(backendPolicy);
-    assert.ok(getRandomValues.mock.callCount() >= GENERATED_PASSWORD_LENGTH);
-    assert.equal(random.mock.callCount(), 0);
+    assert.ok(getRandomValues.count >= GENERATED_PASSWORD_LENGTH);
+    assert.equal(random.count, 0);
   } finally {
-    mock.restoreAll();
+    getRandomValues.restore();
+    random.restore();
   }
 });
 

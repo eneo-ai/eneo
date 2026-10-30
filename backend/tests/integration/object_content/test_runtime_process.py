@@ -13,7 +13,7 @@ import pytest
 from botocore.config import Config
 from botocore.session import get_session
 from sqlalchemy import select, text
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config as AlembicConfig
@@ -173,7 +173,8 @@ async def test_inline_runtime_rejects_stranded_object_store_content(
             mimetype="application/octet-stream",
             file_type="text",
             tenant_id=tenant_id,
-            user_id=user_id,
+            owner_type="user",
+            owner_user_id=user_id,
             parent_file_id=None,
         )
         content = ObjectContents(
@@ -344,7 +345,8 @@ async def test_reachable_unpaired_store_blocks_readiness_and_all_reconciliation(
                 mimetype="application/octet-stream",
                 file_type="text",
                 tenant_id=tenant_id,
-                user_id=user_id,
+                owner_type="user",
+                owner_user_id=user_id,
                 parent_file_id=None,
             )
             content = ObjectContents(
@@ -485,7 +487,8 @@ async def test_concurrent_processes_cannot_pair_one_database_with_two_stores(
                 mimetype="application/octet-stream",
                 file_type="text",
                 tenant_id=tenant_id,
-                user_id=user_id,
+                owner_type="user",
+                owner_user_id=user_id,
                 parent_file_id=None,
             )
             session.add(owner)

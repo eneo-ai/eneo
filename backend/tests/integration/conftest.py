@@ -126,14 +126,15 @@ from dependency_injector import providers
 from httpx import ASGITransport, AsyncClient
 from psycopg2.extensions import connection as PostgresConnection
 from sqlalchemy import text
-from testcontainers.postgres import PostgresContainer
-from testcontainers.redis import RedisContainer
+from testcontainers.community.postgres import PostgresContainer
+from testcontainers.community.redis import RedisContainer
 
 from alembic import command
 from alembic.config import Config
 from eneo.database.database import sessionmanager
 from eneo.main.config import Settings, reset_settings, set_settings
 from eneo.main.container.container import Container
+from eneo.redis.clients import redis_clients
 from eneo.server.main import get_application
 from init_db import add_tenant_user, create_salt_and_hashed_password
 from tests.database_reset import reset_populated_tables
@@ -143,7 +144,11 @@ from tests.integration import safe_method_tripwire
 # Detect if we're in a devcontainer environment
 # If POSTGRES_HOST is set to 'db', we're likely in the devcontainer
 _IN_DEVCONTAINER = os.getenv("POSTGRES_HOST") == "db"
-_TEST_NETWORK = "eneo" if _IN_DEVCONTAINER else None
+_TEST_NETWORK = os.getenv("ENEO_TEST_DOCKER_NETWORK") if _IN_DEVCONTAINER else None
+if _IN_DEVCONTAINER and not _TEST_NETWORK:
+    raise RuntimeError(
+        "ENEO_TEST_DOCKER_NETWORK is required; rebuild or reopen the devcontainer"
+    )
 
 
 def _host_resolves(host: str) -> bool:
@@ -321,9 +326,10 @@ async def _force_gc_before_loop_closes():
     This prevents "Event loop is closed" errors from Redis connections
     that get garbage collected after the event loop shuts down.
 
-    The Container creates singleton Redis clients via DI that outlive individual tests.
-    By forcing GC before the loop closes, we ensure __del__ methods run while
-    the loop can still process connection cleanup.
+    The app fixture never runs a full shutdown, so clients it starts (such as
+    the job manager's ARQ pool) outlive individual tests. By forcing GC before
+    the loop closes, we ensure __del__ methods run while the loop can still
+    process connection cleanup.
 
     This is a pragmatic solution that doesn't interfere with test behavior or DI lifecycle.
     """
@@ -337,6 +343,25 @@ async def _force_gc_before_loop_closes():
 
     # Force garbage collection while loop is alive
     gc.collect()
+
+
+@pytest.fixture(autouse=True)
+async def process_redis_clients(override_settings_for_session):
+    """Run every test inside the process's Redis client lifetime.
+
+    Production code builds containers only inside a lifespan that starts these
+    clients, and tests build containers directly too. The app fixture restarts
+    them through the production startup. Isolated migration modules, whose
+    settings override yields nothing, build no containers.
+    """
+    if override_settings_for_session is None:
+        yield
+        return
+    redis_clients.start()
+    try:
+        yield
+    finally:
+        await redis_clients.stop()
 
 
 @pytest.fixture(autouse=True)
@@ -399,11 +424,6 @@ def override_settings_for_session(test_settings: Settings):
 
     # Set test settings
     set_settings(test_settings)
-
-    from eneo.worker.redis import reset_redis_client
-
-    reset_redis_client()
-    Container.redis_client.reset()
 
     # CRITICAL: Mutate the existing API_KEY_HEADER object's internal model.name
     #
@@ -502,6 +522,16 @@ async def setup_database(
             'Global feature flag to enable/disable audit logging',
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
+    """)
+    # Flows are off in production until the integrated core is verified; the
+    # flow contract tests run with the flag on, and tests of the gate turn it
+    # off for their tenant.
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'flows_core',
+            'Flows: authoring, publishing and running flows, and their settings',
+            true, now(), now())
+        ON CONFLICT (name) DO UPDATE SET enabled = true
     """)
     cursor.execute("""
         SELECT new_write_storage_target, session_file_limit_bytes,
@@ -614,6 +644,16 @@ async def cleanup_database(
             true, now(), now())
         ON CONFLICT (name) DO NOTHING
     """)
+    # Flows are off in production until the integrated core is verified; the
+    # flow contract tests run with the flag on, and tests of the gate turn it
+    # off for their tenant.
+    cursor.execute("""
+        INSERT INTO global_feature_flags (id, name, description, enabled, created_at, updated_at)
+        VALUES (gen_random_uuid(), 'flows_core',
+            'Flows: authoring, publishing and running flows, and their settings',
+            true, now(), now())
+        ON CONFLICT (name) DO UPDATE SET enabled = true
+    """)
     cursor.execute(
         """
         INSERT INTO object_content_deployment_policy (
@@ -670,6 +710,9 @@ async def app(setup_database):
     from eneo.server.dependencies.lifespan import startup
 
     try:
+        # Startup starts the process's Redis clients itself; the ones every
+        # test runs inside make way, and process_redis_clients stops these.
+        await redis_clients.stop()
         await startup()
 
         # Verify app initialization
@@ -689,6 +732,26 @@ async def app(setup_database):
         await object_content_runtime.stop()
     if get_violations:
         pytest.fail("\n".join(get_violations), pytrace=False)
+
+
+@pytest.fixture
+async def object_content_runtime_ready(setup_database):
+    """Run the durable byte plane for direct-container integration tests."""
+    from eneo.object_content.runtime import object_content_runtime
+
+    started_here = not object_content_runtime.enabled
+    if started_here:
+        object_content_runtime.start()
+        try:
+            await object_content_runtime.validate_configuration()
+        except BaseException:
+            await object_content_runtime.stop()
+            raise
+    try:
+        yield object_content_runtime
+    finally:
+        if started_here:
+            await object_content_runtime.stop()
 
 
 @pytest.fixture

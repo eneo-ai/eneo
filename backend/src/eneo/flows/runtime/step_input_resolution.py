@@ -1,0 +1,2480 @@
+from __future__ import annotations
+
+import hashlib
+import json
+from collections.abc import Iterable, Iterator, Mapping
+from dataclasses import dataclass, replace
+from enum import Enum
+from functools import partial
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Awaitable,
+    Callable,
+    Final,
+    NoReturn,
+    Protocol,
+    Sequence,
+    cast,
+)
+from uuid import UUID
+
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.text import (
+    TextExtractionWarning,
+    TextExtractor,
+)
+from eneo.flows.domain.flow import FlowRun, FlowStepResult
+from eneo.flows.domain.runtime import (
+    InputFileAdmission,
+    InputFileSize,
+    ResolvedStepMaterial,
+    RunExecutionState,
+    RuntimeStep,
+    StepDiagnostic,
+    StepInputValue,
+)
+from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.domain.step_output import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
+    FileBackedStepText,
+    InlineTranscript,
+    StepMaterialIdentity,
+    StepOutputMetadataError,
+    inline_output_identity,
+    inline_output_reference,
+    interpret_step_text,
+    material_reference_identity,
+)
+from eneo.flows.domain.text_processing import text_processing_config
+from eneo.flows.domain.transcript_source import (
+    TranscriptSourceReference,
+)
+from eneo.flows.enums import FlowStepPhase
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_input_limits import (
+    FLOW_INPUT_MAX_FILES_COUNT,
+    FlowInputLimits,
+    flow_audio_decode_limits,
+)
+from eneo.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
+    read_admitted_audio_seconds,
+    read_semantic_flow_input_payload,
+)
+from eneo.flows.flow_run_provenance import (
+    FLOW_RESOLVED_INPUT_MAX_EDGES,
+    FlowResolvedInputEdge,
+    FlowResolvedInputFlowInputSource,
+    FlowResolvedInputJsonPath,
+    FlowResolvedInputRuntimeSource,
+    FlowResolvedInputStepResultSource,
+    build_resolved_input_edge,
+    build_runtime_file_resolved_input_edge,
+    merge_resolved_input_edges,
+)
+from eneo.flows.input_binding_contract_rules import (
+    InputBindingContractError,
+    effective_question_binding,
+    has_explicit_underlag,
+    item_template_field_names,
+    question_binding,
+    source_ref_bindings,
+    source_ref_step_order,
+    structured_projection_destination_path,
+)
+from eneo.flows.runtime.http_orchestration import FlowOutsideInputResolution
+from eneo.flows.runtime.input_files import (
+    describe_files_by_requested_ids,
+    ensure_input_file_budget,
+    load_files_by_requested_ids,
+    measure_input_files,
+)
+from eneo.flows.runtime.step_deadline import record_step_phase
+from eneo.flows.runtime.transcription_runtime import (
+    AudioRuntimeDeps,
+    AudioRuntimeRequest,
+    resolve_transcribe_and_attach_audio_input,
+)
+from eneo.flows.source_identity import RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD
+from eneo.flows.step_chain_rules import OUTSIDE_INPUT_SOURCES
+from eneo.flows.step_lineage import (
+    selected_source_step_order,
+    selects_run_transcript,
+)
+from eneo.flows.template_reference_analyzer import (
+    TemplateReference,
+    analyze_template,
+    consumes_runtime_input,
+)
+from eneo.main.exceptions import (
+    BadRequestException,
+    NotFoundException,
+    TypedIOValidationException,
+    UnauthorizedException,
+)
+
+if TYPE_CHECKING:
+    from eneo.files.file_models import File, FileInfo
+    from eneo.files.file_service import FileDownload, FileService
+    from eneo.flows.infrastructure.flow_repo import FlowRepository
+    from eneo.flows.runtime.step_execution_runtime import ApplyOutputCapFn
+    from eneo.flows.runtime.transcription import (
+        FlowTranscribers,
+        TranscriptSourcePreparation,
+    )
+    from eneo.flows.variable_resolver import FlowVariableContext
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+    )
+
+RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE: Final = "[SOURCE {source_number}]"
+RUNTIME_INPUT_SOURCE_FILE_NAME_KEY: Final = "file_name"
+RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER: Final = "[no readable text extracted]"
+RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE: Final = (
+    "runtime_input_source_text_unavailable"
+)
+
+
+class ResolveToolInputFn(Protocol):
+    def __call__(
+        self,
+        *,
+        step: RuntimeStep,
+        run: FlowRun,
+        context: FlowVariableContext,
+        counted_server_levels: Mapping[int, int | None],
+    ) -> Awaitable[FlowOutsideInputResolution]: ...
+
+
+@dataclass(frozen=True)
+class StepInputResolutionDeps:
+    apply_output_cap: ApplyOutputCapFn
+    commit: Callable[[], Awaitable[None]]
+    stage_transcript_source: Callable[
+        [TranscriptSourceReference, TranscriptSourcePreparation], None
+    ]
+    stage_run_transcript: Callable[
+        [TranscriptSourceReference, InlineTranscript | None], None
+    ]
+    variable_resolver: Any
+    resolve_http_input_source_text: Callable[..., Awaitable[FlowOutsideInputResolution]]
+    resolve_tool_input: ResolveToolInputFn
+    file_service: FileService
+    transcribers: "FlowTranscribers | None"
+    flow_repo: "FlowRepository"
+    space_repo: Any
+    flow_run_repo: Any
+    audit_service: Any | None
+    actor: Any
+    max_generic_files: int | None
+    max_audio_files: int
+    max_inline_text_bytes: int
+    logger: Any
+    # Ends the session's transaction when it has only read.
+    end_read_transaction: Callable[[], Awaitable[None]]
+    input_limits: FlowInputLimits | None = None
+    transcription_call_observer: "ProviderCallObserver | None" = None
+    transcript_source_preparation: TranscriptSourcePreparation | None = None
+
+
+@dataclass(frozen=True)
+class ResolvedSourceRefsInput:
+    text: str
+    reference_count: int
+    template_reference_count: int
+    edges: tuple[FlowResolvedInputEdge, ...]
+
+
+@dataclass(frozen=True)
+class ResolvedStructuredSourceRefsInput:
+    structured: dict[str, Any]
+    reference_count: int
+    edges: tuple[FlowResolvedInputEdge, ...]
+
+
+@dataclass(frozen=True)
+class ResolvedStepInputBinding:
+    text: str
+    edges: tuple[FlowResolvedInputEdge, ...]
+    diagnostic: StepDiagnostic
+    structured: dict[str, Any] | None = None
+
+
+async def _open_audio_download(
+    deps: StepInputResolutionDeps, file_id: UUID
+) -> FileDownload:
+    # The download reads its bytes through its own snapshot. End the
+    # transaction that opened it if it has only read, so the step's session
+    # holds none while the audio is spooled and transcribed.
+    download = await deps.file_service.get_audio_download(file_id)
+    try:
+        await deps.end_read_transaction()
+    except BaseException:
+        await download.aclose()
+        raise
+    return download
+
+
+async def resolve_step_input(
+    *,
+    step: RuntimeStep,
+    context: dict[str, Any],
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None = None,
+    version_metadata: dict[str, Any] | None = None,
+    requested_file_ids: Sequence[UUID] = (),
+    prompt_template: str = "",
+    step_input_override: StepInputValue | None = None,
+    attempt_no: int = 1,
+    deps: StepInputResolutionDeps,
+) -> StepInputValue:
+    if step.step_order == 1 and step.input_source in {
+        "previous_step",
+        "all_previous_steps",
+    }:
+        raise TypedIOValidationException(
+            "Step 1 cannot use previous_step/all_previous_steps input source. Use flow_input.",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_POSITION.value,
+        )
+    if (
+        step.input_type == "json"
+        and step.input_source == "all_previous_steps"
+        and not has_explicit_underlag(step.input_bindings)
+    ):
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: input_type 'json' is incompatible with input_source "
+            f"'all_previous_steps' (concatenated text is not valid JSON).",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        )
+    if step.input_type == "audio" and step.input_source != "flow_input":
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: input_type 'audio' is only supported with input_source 'flow_input'.",
+            code=FlowApiErrorCode.TYPED_IO_AUDIO_SOURCE_UNSUPPORTED.value,
+        )
+    runtime_input_config = build_runtime_input_config(step.input_config)
+    requested_ids = list(requested_file_ids) if runtime_input_config.enabled else []
+    runtime_admission = (
+        await admit_runtime_files(
+            run=run, requested_ids=requested_ids, state=state, deps=deps
+        )
+        if requested_ids
+        else None
+    )
+    materials = await _resolve_step_materials(
+        step=step,
+        run=run,
+        prior_results=prior_results,
+        state=state,
+        deps=deps,
+        prompt_template=prompt_template,
+        runtime_admission=runtime_admission,
+        runtime_file_ids=requested_ids,
+        step_input_override=step_input_override,
+    )
+    if state is not None:
+        merged_materials = {item.identity: item for item in state.resolved_materials}
+        merged_materials.update({item.identity: item for item in materials})
+        state.resolved_materials = tuple(merged_materials.values())
+    processing_ceiling_bytes = (
+        deps.input_limits.file_max_size_bytes
+        if materials and deps.input_limits is not None
+        else None
+    )
+    if step_input_override is not None:
+        return replace(
+            step_input_override,
+            materials=materials,
+            processing_ceiling_bytes=processing_ceiling_bytes,
+        )
+    structured: dict[str, Any] | list[Any] | None = None
+    outside_edges: tuple[FlowResolvedInputEdge, ...] = ()
+    if step.input_source in OUTSIDE_INPUT_SOURCES:
+        source_context = deps.variable_resolver.build_context_with_evidence(
+            run.input_payload_json,
+            prior_results,
+            current_step_order=step.step_order,
+            step_names_by_order=state.step_names_by_order if state else None,
+            step_ref_mapping=state.step_ref_mapping if state else None,
+        )
+        outside_input = await (
+            deps.resolve_tool_input(
+                step=step,
+                run=run,
+                context=source_context,
+                counted_server_levels=(
+                    state.counted_tool_server_levels if state is not None else {}
+                ),
+            )
+            if step.input_source == "tool"
+            else deps.resolve_http_input_source_text(
+                step=step, run=run, context=source_context
+            )
+        )
+        source_text = outside_input.text
+        structured = outside_input.structured
+        outside_edges = outside_input.resolved_input_edges
+    else:
+        # Resolved below, once explicit underlag has been examined: underlag
+        # is the whole step input, so the implicit source is read only for a
+        # step without it and an unread prior output can neither fail the
+        # step nor be copied into its evidence.
+        source_text = ""
+    input_text = source_text
+    raw_extracted_text = ""
+    used_question_binding = False
+    diagnostics: list[StepDiagnostic] = []
+    transcription_metadata: dict[str, Any] | None = None
+    runtime_input_metadata: dict[str, Any] | None = None
+    # Content-bearing inputs only. An audio step has none: its payloads are read
+    # one at a time during transcription and never reach a model as files.
+    files: list[File] | None = None
+    described_files: list[FileInfo] | None = None
+    runtime_input_text = ""
+    runtime_extraction_warnings: list[tuple[TextExtractionWarning, ...]] | None = None
+    runtime_file_edges: tuple[FlowResolvedInputEdge, ...] = ()
+    transcript_reference: FileBackedStepText | None = None
+    if requested_ids:
+        if runtime_input_config.input_format == "audio":
+            if deps.transcribers is None:
+                raise TypedIOValidationException(
+                    "Transcriber service is not available for audio input execution.",
+                    code=FlowApiErrorCode.TYPED_IO_TRANSCRIPTION_FAILED.value,
+                )
+            described_files = await _describe_runtime_files(
+                requested_ids=requested_ids,
+                deps=deps,
+            )
+            audio_request = AudioRuntimeRequest(
+                attempt_no=attempt_no,
+                run=run,
+                step=step,
+                context=context,
+                version_metadata=version_metadata,
+                files=described_files,
+                requested_ids=requested_ids,
+                max_audio_files=deps.max_audio_files,
+                max_inline_text_bytes=deps.max_inline_text_bytes,
+                source_preparation=deps.transcript_source_preparation,
+                decode_limits=(
+                    flow_audio_decode_limits(
+                        deps.input_limits,
+                        admitted_seconds=read_admitted_audio_seconds(
+                            run.input_payload_json
+                        ).get(step.step_id),
+                    )
+                    if deps.input_limits is not None
+                    else None
+                ),
+            )
+
+            audio_deps = AudioRuntimeDeps(
+                apply_output_cap=deps.apply_output_cap,
+                commit=deps.commit,
+                transcribers=deps.transcribers,
+                flow_repo=deps.flow_repo,
+                space_repo=deps.space_repo,
+                flow_run_repo=deps.flow_run_repo,
+                audit_service=deps.audit_service,
+                actor=deps.actor,
+                open_audio_download=partial(_open_audio_download, deps),
+                transcription_call_observer=deps.transcription_call_observer,
+                stage_transcript_source=deps.stage_transcript_source,
+                stage_run_transcript=deps.stage_run_transcript,
+            )
+            record_step_phase(FlowStepPhase.TRANSCRIPTION)
+            audio_resolution = await resolve_transcribe_and_attach_audio_input(
+                request=audio_request,
+                deps=audio_deps,
+            )
+            record_step_phase(FlowStepPhase.INPUT_RESOLUTION)
+            runtime_input_text = audio_resolution.text
+            transcription_metadata = audio_resolution.transcription_metadata
+            transcript_reference = audio_resolution.text_reference
+            if audio_resolution.material is not None:
+                materials = (*materials, audio_resolution.material)
+                if deps.input_limits is None:
+                    raise RuntimeError(
+                        "Resolved Flow input limits are required before loading material"
+                    )
+                processing_ceiling_bytes = deps.input_limits.file_max_size_bytes
+                if state is not None:
+                    state.resolved_materials = (
+                        *state.resolved_materials,
+                        audio_resolution.material,
+                    )
+            diagnostics.extend(audio_resolution.diagnostics)
+            if audio_resolution.near_inline_limit_message is not None:
+                diagnostics.append(
+                    StepDiagnostic(
+                        code="typed_io_transcript_near_limit",
+                        message=audio_resolution.near_inline_limit_message,
+                    )
+                )
+            if audio_resolution.diarization_skipped_message is not None:
+                diagnostics.append(
+                    StepDiagnostic(
+                        code="audio_diarization_skipped",
+                        message=audio_resolution.diarization_skipped_message,
+                    )
+                )
+            if audio_resolution.diarization_reduced_precision_message is not None:
+                diagnostics.append(
+                    StepDiagnostic(
+                        code="audio_diarization_reduced_precision",
+                        message=audio_resolution.diarization_reduced_precision_message,
+                    )
+                )
+        else:
+            files = await _load_runtime_files(
+                requested_ids=requested_ids,
+                state=state,
+                deps=deps,
+            )
+            (
+                runtime_input_text,
+                file_text_diagnostics,
+                runtime_extraction_warnings,
+            ) = _extract_text_from_files(
+                files,
+                step_order=step.step_order,
+                logger=deps.logger,
+            )
+            diagnostics.extend(file_text_diagnostics)
+            if runtime_input_text:
+                raw_extracted_text = runtime_input_text
+
+        resolved_files: list[File] | list[FileInfo] = files or described_files or []
+        runtime_input_metadata = _build_runtime_input_metadata(
+            text_reference=transcript_reference,
+            text=runtime_input_text,
+            requested_ids=requested_ids,
+            input_format=runtime_input_config.input_format,
+            files=resolved_files,
+            capture_mode="runtime_input",
+            extraction_warnings=runtime_extraction_warnings,
+        )
+        runtime_file_edges = _runtime_file_edges(resolved_files)
+
+    if materials:
+        prior_results, state = _substitute_step_text(
+            prior_results=prior_results,
+            state=state,
+            resolved_file_text={
+                material.identity: material.text for material in materials
+            },
+        )
+
+    explicit_binding_edges: tuple[FlowResolvedInputEdge, ...] = ()
+    binding = resolve_step_input_binding(
+        step=step,
+        run=run,
+        prior_results=prior_results,
+        state=state,
+        runtime_input_metadata=runtime_input_metadata,
+        variable_resolver=deps.variable_resolver,
+        resolved_file_text={material.identity: material.text for material in materials},
+    )
+    if binding is not None:
+        input_text = binding.text
+        # Existing execution metadata names all explicit Underlag paths as
+        # question bindings. Keep that compatibility signal until the
+        # broader attempt-input contract can rename it atomically.
+        used_question_binding = True
+        if binding.structured is not None:
+            structured = binding.structured
+        explicit_binding_edges = binding.edges
+        diagnostics.append(binding.diagnostic)
+
+    if not used_question_binding:
+        source_text, input_text = resolve_default_step_input_text(
+            step=step,
+            run=run,
+            prior_results=prior_results,
+            state=state,
+            source_text=source_text,
+            runtime_input_text=runtime_input_text
+            if runtime_input_metadata is not None
+            else None,
+            logger=deps.logger,
+        )
+
+    runtime_input_replaces_chain = (
+        runtime_input_metadata is not None
+        and runtime_input_config.input_format == "audio"
+        and step.output_mode == "transcribe_only"
+    )
+    if (
+        runtime_input_config.enabled
+        and runtime_input_metadata is not None
+        and not used_question_binding
+        and runtime_input_text
+    ):
+        raw_extracted_text = runtime_input_text
+
+    input_text, structured = finalize_step_input_question(
+        step=step,
+        text=input_text,
+        structured=structured,
+        binding=binding,
+        prior_results=prior_results,
+    )
+
+    implicit_edges = (
+        ()
+        if used_question_binding
+        else _implicit_input_source_edges(
+            step=step,
+            run=run,
+            prior_results=prior_results,
+            state=state,
+            source_text=source_text,
+            outside_edges=outside_edges,
+        )
+    )
+    if used_question_binding:
+        resolved_edges = merge_resolved_input_edges(
+            explicit_binding_edges,
+            runtime_file_edges,
+        )
+    elif runtime_input_metadata is not None:
+        runtime_input_edges = _runtime_input_edges(
+            runtime_input_text=runtime_input_text,
+            runtime_file_edges=runtime_file_edges,
+        )
+        resolved_edges = (
+            runtime_input_edges
+            if runtime_input_replaces_chain
+            else merge_resolved_input_edges(runtime_input_edges, implicit_edges)
+        )
+    else:
+        resolved_edges = implicit_edges
+
+    enforce_inline_input_cap(
+        text=input_text,
+        step_order=step.step_order,
+        input_source=step.input_source,
+        max_inline_text_bytes=processing_ceiling_bytes or deps.max_inline_text_bytes,
+    )
+
+    if not used_question_binding and step.input_source in (
+        "previous_step",
+        "all_previous_steps",
+    ):
+        has_substantive_input = False
+        source_description = ""
+        if step.input_source == "previous_step":
+            has_substantive_input = bool(source_text.strip()) or (
+                structured is not None and bool(input_text.strip())
+            )
+            source_description = f"step {step.step_order - 1} via previous_step"
+        else:
+            prior_source_count = 0
+            prior_source_results = (
+                state.completed_by_order.values() if state else prior_results
+            )
+            for pr in prior_source_results:
+                if pr.step_order < step.step_order and isinstance(
+                    pr.output_payload_json, dict
+                ):
+                    if str(pr.output_payload_json.get("text", "")).strip():
+                        prior_source_count += 1
+                        has_substantive_input = True
+            prior_step_label = "step" if prior_source_count == 1 else "steps"
+            source_description = (
+                f"{prior_source_count} prior {prior_step_label} via all_previous_steps"
+            )
+        if not has_substantive_input:
+            diagnostics.append(
+                StepDiagnostic(
+                    code="empty_prior_step_input",
+                    message=(
+                        f"Step {step.step_order}: input_source '{step.input_source}' resolved to "
+                        f"empty text. The LLM received no substantive input from prior steps."
+                    ),
+                )
+            )
+        else:
+            diagnostics.append(
+                StepDiagnostic(
+                    code="flow_underlag_summary",
+                    message=(
+                        f"Resolved implicit underlag from {source_description} "
+                        f"({len(input_text.encode('utf-8'))} bytes of resolved input text)."
+                    ),
+                    severity="info",
+                )
+            )
+
+    return StepInputValue(
+        text=input_text,
+        materials=materials,
+        processing_ceiling_bytes=processing_ceiling_bytes,
+        source_text=source_text,
+        files=files,
+        structured=structured,
+        raw_extracted_text=raw_extracted_text,
+        input_source=step.input_source,
+        used_question_binding=used_question_binding,
+        diagnostics=diagnostics,
+        transcription_metadata=transcription_metadata,
+        runtime_input_metadata=runtime_input_metadata,
+        edges=resolved_edges,
+    )
+
+
+def finalize_step_input_question(
+    *,
+    step: RuntimeStep,
+    text: str,
+    structured: dict[str, Any] | list[Any] | None,
+    binding: ResolvedStepInputBinding | None,
+    prior_results: list[FlowStepResult],
+) -> tuple[str, dict[str, Any] | list[Any] | None]:
+    if step.input_type != "json":
+        return text, structured
+    if (binding is not None and binding.structured is None) or text_processing_config(
+        step.input_config
+    ) is not None:
+        # Explicit underlag is the complete LLM input; JSON normalization
+        # may parse it for contracts, but must not replace it with source data.
+        try:
+            structured = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            structured = None
+    elif structured is not None:
+        text = json.dumps(structured, ensure_ascii=False)
+    elif step.input_source == "previous_step":
+        prev = next(
+            (r for r in prior_results if r.step_order == step.step_order - 1),
+            None,
+        )
+        if prev and isinstance(prev.output_payload_json, dict):
+            prev_structured = prev.output_payload_json.get("structured")
+            if prev_structured is not None:
+                structured = prev_structured
+                text = json.dumps(prev_structured, ensure_ascii=False)
+    if structured is None:
+        try:
+            structured = json.loads(text)
+        except (json.JSONDecodeError, ValueError):
+            pass
+    return text, structured
+
+
+def _implicit_input_source_edges(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    source_text: str,
+    outside_edges: tuple[FlowResolvedInputEdge, ...],
+) -> tuple[FlowResolvedInputEdge, ...]:
+    if step.input_source in OUTSIDE_INPUT_SOURCES:
+        return outside_edges
+    if step.input_source == "flow_input":
+        payload = run.input_payload_json or {}
+        text_value = payload.get("text")
+        if isinstance(text_value, str):
+            return (
+                _flow_input_edge(
+                    binding_ref="input_source",
+                    selector_path=("text",),
+                    selected_value=text_value,
+                ),
+            )
+        semantic_payload = read_semantic_flow_input_payload(run.input_payload_json)
+        return tuple(
+            _flow_input_edge(
+                binding_ref="input_source",
+                selector_path=(key,),
+                selected_value=value,
+            )
+            for key, value in sorted(semantic_payload.items())
+        )
+    if step.input_source == "previous_step":
+        previous = next(
+            (
+                result
+                for result in prior_results
+                if result.step_order == step.step_order - 1
+            ),
+            None,
+        )
+        if previous is None:
+            return ()
+        previous_payload = (
+            previous.output_payload_json
+            if isinstance(previous.output_payload_json, dict)
+            else {}
+        )
+        previous_structured = previous_payload.get("structured")
+        if step.input_type == "json" and isinstance(previous_structured, (dict, list)):
+            return (
+                _step_result_edge(
+                    binding_ref="input_source",
+                    result=previous,
+                    selector_path=("output", "structured"),
+                    selected_value=cast(
+                        dict[str, Any] | list[Any], previous_structured
+                    ),
+                ),
+            )
+        return (
+            _step_result_edge(
+                binding_ref="input_source",
+                result=previous,
+                selector_path=("output", "text"),
+                selected_value=source_text,
+            ),
+        )
+    if step.input_source == "all_previous_steps":
+        previous_results = (
+            state.completed_by_order.values() if state is not None else prior_results
+        )
+        return tuple(
+            _step_result_edge(
+                binding_ref="input_source",
+                result=result,
+                selector_path=("output", "text"),
+                selected_value=_read_complete_output_text(
+                    result,
+                    consuming_step_order=step.step_order,
+                    input_source=step.input_source,
+                ),
+            )
+            for result in sorted(previous_results, key=lambda item: item.step_order)
+            if result.step_order < step.step_order
+        )
+    return ()
+
+
+def _flow_input_edge(
+    *,
+    binding_ref: str,
+    selector_path: tuple[str | int, ...],
+    selected_value: object,
+) -> FlowResolvedInputEdge:
+    return build_resolved_input_edge(
+        binding_ref=binding_ref,
+        source=FlowResolvedInputFlowInputSource(
+            kind="flow_input",
+            selector=FlowResolvedInputJsonPath(kind="json_path", path=selector_path),
+        ),
+        selected_value=selected_value,
+    )
+
+
+def _step_result_edge(
+    *,
+    binding_ref: str,
+    result: FlowStepResult,
+    selector_path: tuple[str | int, ...],
+    selected_value: object,
+) -> FlowResolvedInputEdge:
+    if result.current_attempt_no is None:
+        raise TypedIOValidationException(
+            "Consumed prior step result is missing its current attempt identity.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    return build_resolved_input_edge(
+        binding_ref=binding_ref,
+        source=FlowResolvedInputStepResultSource(
+            kind="step_result",
+            source_step_id=result.step_id,
+            source_attempt_no=result.current_attempt_no,
+            selector=FlowResolvedInputJsonPath(kind="json_path", path=selector_path),
+        ),
+        selected_value=selected_value,
+    )
+
+
+def _runtime_input_edges(
+    *,
+    runtime_input_text: str,
+    runtime_file_edges: tuple[FlowResolvedInputEdge, ...],
+) -> tuple[FlowResolvedInputEdge, ...]:
+    text_edge = build_resolved_input_edge(
+        binding_ref="runtime_input",
+        source=FlowResolvedInputRuntimeSource(
+            kind="runtime_input",
+            selector=FlowResolvedInputJsonPath(kind="json_path", path=("text",)),
+        ),
+        selected_value=runtime_input_text,
+    )
+    return merge_resolved_input_edges((text_edge,), runtime_file_edges)
+
+
+def _runtime_file_edges(files: list[Any]) -> tuple[FlowResolvedInputEdge, ...]:
+    edges: list[FlowResolvedInputEdge] = []
+    for ordinal, file in enumerate(files):
+        file_id = getattr(file, "id", None)
+        checksum = getattr(file, "checksum", None)
+        byte_size = getattr(file, "size", None)
+        if (
+            not isinstance(file_id, UUID)
+            or not isinstance(checksum, str)
+            or not checksum
+            or not isinstance(byte_size, int)
+            or isinstance(byte_size, bool)
+            or byte_size < 0
+        ):
+            raise TypedIOValidationException(
+                "Runtime file is missing immutable evidence identity.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        edges.append(
+            build_runtime_file_resolved_input_edge(
+                binding_ref=f"runtime_files[{ordinal}]",
+                input_file_ordinal=ordinal,
+                file_id=file_id,
+                checksum=checksum,
+                byte_size=byte_size,
+            )
+        )
+    return tuple(edges)
+
+
+def resolve_step_input_binding(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    runtime_input_metadata: dict[str, Any] | None,
+    variable_resolver: Any,
+    resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
+) -> ResolvedStepInputBinding | None:
+    bindings = step.input_bindings if isinstance(step.input_bindings, dict) else None
+    if bindings is None:
+        return None
+    if resolved_file_text:
+        prior_results, state = _substitute_step_text(
+            prior_results=prior_results,
+            state=state,
+            resolved_file_text=resolved_file_text,
+        )
+    structured_source_refs_input = (
+        _resolve_structured_source_refs_input(
+            step=step,
+            bindings=bindings,
+            prior_results=prior_results,
+            state=state,
+        )
+        if step.input_type == "json"
+        else None
+    )
+    source_refs_input = (
+        _resolve_compose_source_refs_input(
+            step=step,
+            bindings=bindings,
+            run=run,
+            prior_results=prior_results,
+            state=state,
+            runtime_input_metadata=runtime_input_metadata,
+            variable_resolver=variable_resolver,
+        )
+        if step.output_mode == "compose_text"
+        else None
+    )
+    if structured_source_refs_input is not None:
+        text = json.dumps(structured_source_refs_input.structured, ensure_ascii=False)
+        return ResolvedStepInputBinding(
+            text=text,
+            structured=structured_source_refs_input.structured,
+            edges=structured_source_refs_input.edges,
+            diagnostic=StepDiagnostic(
+                code="flow_underlag_summary",
+                message=(
+                    "Resolved structured underlag from "
+                    f"{structured_source_refs_input.reference_count} source refs "
+                    f"({len(text.encode('utf-8'))} bytes)."
+                ),
+                severity="info",
+            ),
+        )
+    if source_refs_input is not None:
+        return ResolvedStepInputBinding(
+            text=source_refs_input.text,
+            edges=source_refs_input.edges,
+            diagnostic=StepDiagnostic(
+                code="flow_underlag_summary",
+                message=(
+                    f"Resolved underlag from {source_refs_input.reference_count} "
+                    f"source refs ({len(source_refs_input.text.encode('utf-8'))} bytes)."
+                ),
+                severity="info",
+            ),
+        )
+    question_template = effective_question_binding(bindings)
+    if question_template is None:
+        return None
+    references = analyze_template(
+        question_template,
+        step_refs=state.step_ref_mapping if state is not None else {},
+        form_field_names=set(),
+    )
+    _raise_if_text_template_references_overflowed_output(
+        references=references,
+        prior_results=state.completed_by_order.values()
+        if state is not None
+        else prior_results,
+        consuming_step_order=step.step_order,
+        input_source="input_bindings.question",
+    )
+    interpolation_context = variable_resolver.build_context_with_evidence(
+        run.input_payload_json,
+        prior_results,
+        current_step_order=step.step_order,
+        step_names_by_order=state.step_names_by_order if state else None,
+        step_ref_mapping=state.step_ref_mapping if state else None,
+        current_step_input=runtime_input_metadata,
+        resolved_file_text=resolved_file_text,
+    )
+    interpolated_question = variable_resolver.interpolate_with_evidence(
+        question_template,
+        interpolation_context,
+        binding_ref="input_bindings.question",
+    )
+    if runtime_input_metadata is not None and not consumes_runtime_input(references):
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: explicit runtime-input bindings must reference step_input.*",
+            code=FlowApiErrorCode.RUNTIME_INPUT_NOT_CONSUMED.value,
+        )
+    return ResolvedStepInputBinding(
+        text=interpolated_question.text,
+        edges=interpolated_question.edges,
+        diagnostic=StepDiagnostic(
+            code="flow_underlag_summary",
+            message=(
+                f"Resolved underlag from {len(references)} template sources "
+                f"({len(interpolated_question.text.encode('utf-8'))} bytes)."
+            ),
+            severity="info",
+        ),
+    )
+
+
+def _resolve_compose_source_refs_input(
+    *,
+    step: RuntimeStep,
+    bindings: dict[str, Any],
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    runtime_input_metadata: dict[str, Any] | None,
+    variable_resolver: Any,
+) -> ResolvedSourceRefsInput | None:
+    try:
+        source_refs = source_ref_bindings(bindings)
+    except InputBindingContractError as exc:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: {exc}",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        ) from exc
+    if not source_refs:
+        return None
+
+    sections: list[str] = []
+    edges: list[FlowResolvedInputEdge] = []
+    template_reference_count = 0
+    question_template = question_binding(bindings)
+    if question_template is not None:
+        references = analyze_template(
+            question_template,
+            step_refs=state.step_ref_mapping if state is not None else {},
+            form_field_names=set(),
+        )
+        template_reference_count = len(references)
+        _raise_if_text_template_references_overflowed_output(
+            references=references,
+            prior_results=state.completed_by_order.values()
+            if state is not None
+            else prior_results,
+            consuming_step_order=step.step_order,
+            input_source="input_bindings.question",
+        )
+        interpolation_context = variable_resolver.build_context_with_evidence(
+            run.input_payload_json,
+            prior_results,
+            current_step_order=step.step_order,
+            step_names_by_order=state.step_names_by_order if state else None,
+            step_ref_mapping=state.step_ref_mapping if state else None,
+            current_step_input=runtime_input_metadata,
+        )
+        rendered_question = variable_resolver.interpolate_with_evidence(
+            question_template,
+            interpolation_context,
+            binding_ref="input_bindings.question",
+        )
+        edges.extend(rendered_question.edges)
+        if rendered_question.text.strip():
+            sections.append(rendered_question.text)
+
+    results_by_order = _prior_results_by_order(prior_results=prior_results, state=state)
+    for ref_index, ref in enumerate(source_refs):
+        referenced_order = _source_ref_step_order(ref.step_ref, state=state)
+        if referenced_order is None:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: source_ref references unknown step '{ref.step_ref}'.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        result = results_by_order.get(referenced_order)
+        if result is None:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: source_ref references unknown step '{ref.step_ref}'.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        value = _source_ref_runtime_value(
+            ref_output=ref.output,
+            field_path=ref.field_path,
+            result=result,
+            consuming_step_order=step.step_order,
+        )
+        selector_path = (
+            ("output", "text")
+            if ref.output == "text"
+            else ("output", "structured", *ref.field_path)
+        )
+        edges.append(
+            _step_result_edge(
+                binding_ref=f"input_bindings.source_refs[{ref_index}]",
+                result=result,
+                selector_path=selector_path,
+                selected_value=value,
+            )
+        )
+        rendered = _render_source_ref_value(
+            value=value,
+            item_template=ref.item_template,
+            step_order=step.step_order,
+        )
+        if ref.label is not None and rendered.strip():
+            rendered = f"{ref.label}:\n{rendered}"
+        if rendered.strip():
+            sections.append(rendered)
+
+    return ResolvedSourceRefsInput(
+        text="\n\n".join(sections),
+        reference_count=len(source_refs),
+        template_reference_count=template_reference_count,
+        edges=merge_resolved_input_edges(edges),
+    )
+
+
+def _resolve_structured_source_refs_input(
+    *,
+    step: RuntimeStep,
+    bindings: dict[str, Any],
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+) -> ResolvedStructuredSourceRefsInput | None:
+    if question_binding(bindings) is not None:
+        return None
+    try:
+        source_refs = source_ref_bindings(bindings)
+    except InputBindingContractError as exc:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: {exc}",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        ) from exc
+    if not source_refs or any(
+        ref.output != "structured" or ref.item_template is not None
+        for ref in source_refs
+    ):
+        return None
+    if step.input_contract is None:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: structured JSON source_refs require input_contract.",
+            code=FlowApiErrorCode.INPUT_CONTRACT_INAPPLICABLE.value,
+        )
+
+    projected: dict[str, Any] = {}
+    projection_containers: set[tuple[str, ...]] = set()
+    edges: list[FlowResolvedInputEdge] = []
+    results_by_order = _prior_results_by_order(prior_results=prior_results, state=state)
+    for ref_index, ref in enumerate(source_refs):
+        if not ref.field_path:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: structured JSON source_refs must select "
+                "explicit field_path values.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        referenced_order = _source_ref_step_order(ref.step_ref, state=state)
+        result = (
+            results_by_order.get(referenced_order)
+            if referenced_order is not None
+            else None
+        )
+        if result is None:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: source_ref references unknown step "
+                f"'{ref.step_ref}'.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        value: Any = []
+        for selected_path, selected_value in _structured_projection_selections(
+            field_path=ref.field_path,
+            result=result,
+            consuming_step_order=step.step_order,
+        ):
+            if len(edges) >= FLOW_RESOLVED_INPUT_MAX_EDGES:
+                raise TypedIOValidationException(
+                    "Resolved step input evidence exceeded its bounded runtime contract.",
+                    code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+                )
+            if "*" in ref.field_path:
+                value.extend(selected_value)
+            else:
+                value = selected_value
+            edges.append(
+                _step_result_edge(
+                    binding_ref=f"input_bindings.source_refs[{ref_index}]",
+                    result=result,
+                    selector_path=("output", "structured", *selected_path),
+                    selected_value=selected_value,
+                )
+            )
+        _insert_structured_projection_value(
+            projected=projected,
+            field_path=structured_projection_destination_path(ref.field_path),
+            value=value,
+            source_step_ref=ref.step_ref,
+            projection_containers=projection_containers,
+            consuming_step_order=step.step_order,
+        )
+
+    return ResolvedStructuredSourceRefsInput(
+        structured=projected,
+        reference_count=len(source_refs),
+        edges=merge_resolved_input_edges(edges),
+    )
+
+
+def _structured_projection_selections(
+    *,
+    field_path: tuple[str, ...],
+    result: FlowStepResult,
+    consuming_step_order: int,
+) -> Iterator[tuple[tuple[str | int, ...], Any]]:
+    if "*" not in field_path:
+        yield (
+            field_path,
+            _source_ref_runtime_value(
+                ref_output="structured",
+                field_path=field_path,
+                result=result,
+                consuming_step_order=consuming_step_order,
+            ),
+        )
+        return
+    prefix = field_path[: field_path.index("*")]
+    suffix = structured_projection_destination_path(field_path)
+    sections = _source_ref_runtime_value(
+        ref_output="structured",
+        field_path=prefix,
+        result=result,
+        consuming_step_order=consuming_step_order,
+    )
+    if not isinstance(sections, list):
+        raise TypedIOValidationException(
+            f"Step {consuming_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+            "wildcard resolved to a non-array value.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        )
+    for index, section in enumerate(cast(list[Any], sections)):
+        selected = _source_ref_value_at_path(
+            section, field_path=suffix, consuming_step_order=consuming_step_order
+        )
+        if not isinstance(selected, list):
+            raise TypedIOValidationException(
+                f"Step {consuming_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+                "suffix resolved to a non-array value.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        yield (*prefix, index, *suffix), selected
+
+
+def _insert_structured_projection_value(
+    *,
+    projected: dict[str, Any],
+    field_path: tuple[str, ...],
+    value: Any,
+    source_step_ref: str,
+    projection_containers: set[tuple[str, ...]],
+    consuming_step_order: int,
+) -> None:
+    current = projected
+    traversed: tuple[str, ...] = ()
+    for segment in field_path[:-1]:
+        traversed = (*traversed, segment)
+        existing = current.get(segment)
+        if existing is None:
+            existing = {}
+            current[segment] = existing
+            projection_containers.add(traversed)
+        elif traversed not in projection_containers:
+            raise _structured_projection_collision(
+                consuming_step_order=consuming_step_order,
+                field_path=traversed,
+                source_step_ref=source_step_ref,
+            )
+        current = cast(dict[str, Any], existing)
+    leaf = field_path[-1]
+    if leaf in current:
+        raise _structured_projection_collision(
+            consuming_step_order=consuming_step_order,
+            field_path=field_path,
+            source_step_ref=source_step_ref,
+        )
+    current[leaf] = value
+
+
+def _structured_projection_collision(
+    *,
+    consuming_step_order: int,
+    field_path: tuple[str, ...],
+    source_step_ref: str,
+) -> TypedIOValidationException:
+    return TypedIOValidationException(
+        f"Step {consuming_step_order}: source_ref path collision at "
+        f"'{'.'.join(field_path)}' while projecting '{source_step_ref}'.",
+        code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+    )
+
+
+def _prior_results_by_order(
+    *,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+) -> dict[int, FlowStepResult]:
+    if state is not None:
+        return dict(state.completed_by_order)
+    return {result.step_order: result for result in prior_results}
+
+
+def _source_ref_step_order(
+    step_ref: str,
+    *,
+    state: RunExecutionState | None,
+) -> int | None:
+    return source_ref_step_order(
+        step_ref, state.step_ref_mapping if state is not None else None
+    )
+
+
+def _source_ref_runtime_value(
+    *,
+    ref_output: str,
+    field_path: tuple[str, ...],
+    result: FlowStepResult,
+    consuming_step_order: int,
+) -> Any:
+    payload = (
+        result.output_payload_json
+        if isinstance(result.output_payload_json, dict)
+        else {}
+    )
+    if ref_output == "text":
+        return _read_complete_output_text(
+            result,
+            consuming_step_order=consuming_step_order,
+            input_source="input_bindings.source_refs",
+        )
+    return _source_ref_value_at_path(
+        payload.get("structured"),
+        field_path=field_path,
+        consuming_step_order=consuming_step_order,
+    )
+
+
+def _source_ref_value_at_path(
+    current: Any, *, field_path: tuple[str, ...], consuming_step_order: int
+) -> Any:
+    for segment in field_path:
+        if not isinstance(current, dict):
+            raise TypedIOValidationException(
+                f"Step {consuming_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+                "did not resolve through an object value.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        current_mapping = cast(dict[str, Any], current)
+        if segment not in current_mapping:
+            raise TypedIOValidationException(
+                f"Step {consuming_step_order}: source_ref field_path '{'.'.join(field_path)}' "
+                f"references missing field '{segment}'.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        current = current_mapping[segment]
+    return current
+
+
+def _render_source_ref_value(
+    *,
+    value: Any,
+    item_template: str | None,
+    step_order: int,
+) -> str:
+    if item_template is None:
+        return _source_ref_value_to_text(value)
+    if not isinstance(value, list):
+        raise TypedIOValidationException(
+            f"Step {step_order}: item_template source_ref resolved to a non-array value.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        )
+    rendered_items: list[str] = []
+    field_names = item_template_field_names(item_template)
+    for item_value in cast(list[object], value):
+        if not isinstance(item_value, dict):
+            raise TypedIOValidationException(
+                f"Step {step_order}: item_template source_ref array contains a non-object item.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            )
+        item = cast(dict[str, Any], item_value)
+        rendered_items.append(_render_item_template(item_template, item, field_names))
+    return "\n\n".join(item for item in rendered_items if item)
+
+
+def _render_item_template(
+    item_template: str,
+    item: Mapping[str, Any],
+    field_names: Sequence[str],
+) -> str:
+    """Substitute one record into the template, line by line.
+
+    A line exists to show its placeholders. When every placeholder on it
+    renders empty (a missing value, an empty string or an empty list), the
+    line is dropped together with the blank line that separated it, so a
+    label never dangles; lines without placeholders and every other line of
+    the template are kept exactly as written.
+    """
+
+    rendered_lines: list[str] = []
+    drop_next_blank = False
+    for line in item_template.split("\n"):
+        if drop_next_blank and not line.strip():
+            drop_next_blank = False
+            continue
+        drop_next_blank = False
+        names_on_line = [name for name in field_names if "{" + name + "}" in line]
+        rendered_line = line
+        any_present = False
+        for field_name in names_on_line:
+            value = item.get(field_name)
+            rendered_value = (
+                ""
+                if value is None or value == "" or value == []
+                else _source_ref_value_to_text(value)
+            )
+            any_present = any_present or bool(rendered_value)
+            rendered_line = rendered_line.replace(
+                "{" + field_name + "}", rendered_value
+            )
+        if names_on_line and not any_present:
+            drop_next_blank = True
+            continue
+        rendered_lines.append(rendered_line)
+    return "\n".join(rendered_lines).strip()
+
+
+def _source_ref_value_to_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+async def _resolve_step_materials(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    deps: StepInputResolutionDeps,
+    prompt_template: str = "",
+    runtime_admission: InputFileAdmission | None = None,
+    runtime_file_ids: Sequence[UUID] = (),
+    step_input_override: StepInputValue | None = None,
+) -> tuple[ResolvedStepMaterial, ...]:
+    results = _prior_results_by_order(prior_results=prior_results, state=state)
+    selected: list[FlowStepResult] = []
+    selected_transcript = False
+    processing = text_processing_config(step.input_config) is not None
+    template = (
+        effective_question_binding(step.input_bindings)
+        if step_input_override is None
+        else None
+    )
+    for selected_template in (template, prompt_template):
+        if not selected_template:
+            continue
+        references = analyze_template(
+            selected_template,
+            step_refs=state.step_ref_mapping if state else {},
+            form_field_names={FLOW_INPUT_TRANSCRIPTION_KEY},
+        )
+        selected_transcript |= selects_run_transcript(references)
+        for reference in references:
+            order = selected_source_step_order(
+                reference, step_order=step.step_order, section_processing=processing
+            )
+            if order is not None and order in results:
+                selected.append(results[order])
+    if (
+        step_input_override is None
+        and template is None
+        and step.input_source
+        in {
+            "previous_step",
+            "all_previous_steps",
+        }
+    ):
+        selected.extend(
+            [
+                result
+                for order, result in sorted(results.items())
+                if order < step.step_order
+                and (
+                    step.input_source == "all_previous_steps"
+                    or order == step.step_order - 1
+                )
+                and (
+                    text_processing_config(step.input_config) is not None
+                    or not _can_read_structured_output(
+                        result, input_type=step.input_type
+                    )
+                )
+            ]
+        )
+    if processing and step_input_override is None:
+        for ref in source_ref_bindings(step.input_bindings):
+            order = _source_ref_step_order(ref.step_ref, state=state)
+            if order is not None and order < step.step_order and order in results:
+                selected.append(results[order])
+    artifacts: list[tuple[FlowStepResult, FileBackedStepText]] = []
+    selected_material_ids: set[StepMaterialIdentity] = set()
+    inline_materials: dict[StepMaterialIdentity, ResolvedStepMaterial] = {}
+    for result in {result.step_id: result for result in selected}.values():
+        payload = result.output_payload_json
+        if (
+            text_processing_config(step.input_config) is not None
+            and isinstance(payload, dict)
+            and isinstance(payload.get("structured"), (dict, list))
+        ):
+            raise TypedIOValidationException(
+                "Section processing requires text; selected upstream output is structured.",
+                code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+            )
+        if not isinstance(payload, dict) or (
+            "text" not in payload and OUTPUT_TEXT_OVERFLOW_KEY not in payload
+        ):
+            continue
+        try:
+            text = interpret_step_text(payload)
+        except StepOutputMetadataError as exc:
+            raise TypedIOValidationException(
+                "Selected step text has malformed persisted metadata.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            ) from exc
+        if isinstance(text, FileBackedStepText):
+            artifacts.append((result, text))
+            selected_material_ids.add(text.file_id)
+        elif processing:
+            if result.current_attempt_no is None:
+                raise TypedIOValidationException(
+                    "Selected step text is missing its source attempt identity.",
+                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                )
+            try:
+                reference = inline_output_reference(
+                    payload,
+                    source_step_id=result.step_id,
+                    source_attempt_no=result.current_attempt_no,
+                )
+            except ValueError as exc:
+                raise TypedIOValidationException(
+                    "Selected step text has malformed persisted metadata.",
+                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                ) from exc
+            identity = material_reference_identity(reference)
+            selected_material_ids.add(identity)
+            inline_materials[identity] = ResolvedStepMaterial.from_inline(
+                reference=reference,
+                text=text.text,
+            )
+    transcript = (run.input_payload_json or {}).get(FLOW_INPUT_TRANSCRIPTION_KEY)
+    if processing and selected_transcript and isinstance(transcript, str):
+        raise TypedIOValidationException(
+            TRANSCRIPT_FORMAT_UNSUPPORTED_MESSAGE,
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        )
+    if (
+        selected_transcript
+        and isinstance(transcript, dict)
+        and cast(dict[str, object], transcript).get("kind") == "inline_transcript"
+    ):
+        try:
+            stored_transcript = InlineTranscript.model_validate(transcript)
+        except ValueError as exc:
+            raise TypedIOValidationException(
+                "Transcript has malformed persisted text metadata.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            ) from exc
+        reference = stored_transcript.reference
+        if processing and not any(
+            result.step_id == reference.source_step_id
+            and result.current_attempt_no == reference.source_attempt_no
+            and result.step_order < step.step_order
+            for result in results.values()
+        ):
+            raise TypedIOValidationException(
+                "Transcript is missing its source attempt identity.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        identity = material_reference_identity(reference)
+        selected_material_ids.add(identity)
+        if processing:
+            existing = inline_materials.get(identity)
+            if existing is not None and (
+                existing.checksum != reference.selection.sha256
+                or existing.byte_size != reference.selection.byte_size
+            ):
+                raise TypedIOValidationException(
+                    "Selected inline text has inconsistent content for its source identity.",
+                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                )
+            inline_materials[identity] = ResolvedStepMaterial.from_inline(
+                reference=reference,
+                text=stored_transcript.text,
+            )
+    elif selected_transcript and isinstance(transcript, dict):
+        try:
+            reference = FileBackedStepText.model_validate(transcript)
+        except ValueError as exc:
+            raise TypedIOValidationException(
+                "Transcript has malformed persisted text metadata.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            ) from exc
+        source = next(
+            (
+                result
+                for result in results.values()
+                if result.step_id == reference.source_step_id
+                and result.current_attempt_no == reference.source_attempt_no
+                and result.step_order < step.step_order
+            ),
+            None,
+        )
+        if source is None:
+            raise TypedIOValidationException(
+                "Transcript is missing its source attempt identity.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        selected_material_ids.add(reference.file_id)
+        artifacts.append((source, reference))
+    unique_artifacts: dict[UUID, tuple[FlowStepResult, FileBackedStepText]] = {}
+    for result, reference in artifacts:
+        existing = unique_artifacts.get(reference.file_id)
+        if existing is not None and (
+            existing[1].full_text_bytes != reference.full_text_bytes
+            or (
+                existing[1].checksum is not None
+                and reference.checksum is not None
+                and existing[1].checksum != reference.checksum
+            )
+        ):
+            raise TypedIOValidationException(
+                "Selected step text has inconsistent artifact identity or size.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        if existing is None or reference.checksum is not None:
+            unique_artifacts[reference.file_id] = (result, reference)
+    artifacts = list(unique_artifacts.values())
+    if text_processing_config(step.input_config) is not None and (
+        len(selected_material_ids | set(runtime_file_ids)) != 1
+        or not (artifacts or inline_materials or runtime_file_ids)
+    ):
+        raise TypedIOValidationException(
+            "Section processing requires exactly one material.",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        )
+    if not artifacts:
+        return tuple(inline_materials.values())
+    if deps.input_limits is None:
+        raise RuntimeError(
+            "Resolved Flow input limits are required before loading material"
+        )
+    empty_material: dict[StepMaterialIdentity, str] = {
+        reference.file_id: "" for _, reference in artifacts
+    }
+    runtime_metadata = (
+        _build_runtime_input_metadata(
+            text="",
+            requested_ids=list(runtime_file_ids),
+            input_format=build_runtime_input_config(step.input_config).input_format,
+            files=[runtime_admission.files[file_id] for file_id in runtime_file_ids],
+            capture_mode="runtime_input",
+        )
+        if runtime_admission is not None
+        else None
+    )
+    interpolation_context = deps.variable_resolver.build_context_with_evidence(
+        run.input_payload_json,
+        list(results.values()),
+        current_step_order=step.step_order,
+        step_names_by_order=state.step_names_by_order if state else None,
+        step_ref_mapping=state.step_ref_mapping if state else None,
+        resolved_file_text=empty_material,
+        input_config=step.input_config,
+        current_step_input=(
+            step_input_override.runtime_input_metadata
+            if step_input_override is not None
+            else runtime_metadata
+        ),
+    )
+    inline_text = deps.variable_resolver.interpolate(
+        prompt_template, interpolation_context
+    )
+    if step_input_override is not None:
+        inline_text += step_input_override.text
+    elif template is not None:
+        inline_text += deps.variable_resolver.interpolate(
+            template, interpolation_context
+        )
+    elif step.input_source not in OUTSIDE_INPUT_SOURCES:
+        inline_results, inline_state = _substitute_step_text(
+            prior_results=list(results.values()),
+            state=state,
+            resolved_file_text=empty_material,
+        )
+        inline_text += resolve_input_source_text(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            run=run,
+            step_order=step.step_order,
+            prior_results=inline_results,
+            state=inline_state,
+            logger=None,
+        )
+    enforce_inline_input_cap(
+        text=inline_text,
+        step_order=step.step_order,
+        input_source=step.input_source,
+        max_inline_text_bytes=deps.max_inline_text_bytes,
+    )
+    inline_bytes = len(inline_text.encode("utf-8"))
+    requested_ids = list(dict.fromkeys(text.file_id for _, text in artifacts))
+    if len(requested_ids) > FLOW_INPUT_MAX_FILES_COUNT:
+        raise TypedIOValidationException(
+            "Selected material exceeds the input file count ceiling.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        )
+    try:
+        described = await _describe_runtime_files(
+            requested_ids=requested_ids, deps=deps
+        )
+    except UnauthorizedException as exc:
+        raise TypedIOValidationException(
+            "Selected step text is not accessible.",
+            code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
+        ) from exc
+    references = await deps.file_service.repo.get_content_references(requested_ids)
+    sizes = measure_input_files(files=described, references=references)
+    generated = {
+        reference.file_id: reference
+        for reference in references
+        if reference.variant == FileContentVariant.GENERATED_ARTIFACT
+        and reference.ordinal == 0
+    }
+    files_by_id = {file.id: file for file in described}
+    for result, text in artifacts:
+        reference = generated.get(text.file_id)
+        if (
+            reference is None
+            or len(reference.sha256) != 32
+            or reference.size_bytes != text.full_text_bytes
+            or sizes[text.file_id].upload_bytes != text.full_text_bytes
+            or files_by_id[text.file_id].file_type != FileType.TEXT
+            or (text.checksum is not None and text.checksum != reference.sha256.hex())
+            or result.current_attempt_no is None
+        ):
+            raise TypedIOValidationException(
+                "Selected step text has inconsistent artifact identity or size.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+    # Full material is processing input, not inline storage. Admit its bytes
+    # against the same upload ceiling as binary files before reading content.
+    processing_sizes = {
+        file_id: InputFileSize(
+            inline_bytes=0,
+            binary_bytes=size.upload_bytes,
+            upload_bytes=size.upload_bytes,
+            audio=False,
+        )
+        for file_id, size in sizes.items()
+    }
+    if runtime_admission is not None:
+        for file_id in runtime_file_ids:
+            size = runtime_admission.sizes[file_id]
+            processing_sizes.setdefault(
+                file_id,
+                InputFileSize(
+                    inline_bytes=size.inline_bytes,
+                    binary_bytes=size.binary_bytes
+                    + (0 if size.audio else size.inline_bytes),
+                    upload_bytes=size.upload_bytes,
+                    audio=size.audio,
+                ),
+            )
+    try:
+        ensure_input_file_budget(
+            file_ids=[text.file_id for _, text in artifacts] + list(runtime_file_ids),
+            sizes=processing_sizes,
+            max_inline_text_bytes=deps.max_inline_text_bytes - inline_bytes,
+            file_max_size_bytes=deps.input_limits.file_max_size_bytes - inline_bytes,
+            audio_max_size_bytes=deps.input_limits.audio_max_size_bytes,
+        )
+    except FlowBadRequestException as exc:
+        raise TypedIOValidationException(
+            str(exc), code=exc.code.value, context=exc.context
+        ) from exc
+    cache = (
+        state.material_cache
+        if state is not None and state.material_cache is not None
+        else {}
+    )
+    materials: dict[UUID, ResolvedStepMaterial] = {}
+    for result, text in artifacts:
+        reference = generated[text.file_id]
+        checksum = reference.sha256.hex()
+        cache_key = (text.file_id, checksum)
+        if cache_key not in cache:
+            try:
+                file = await deps.file_service.get_file_content(text.file_id)
+            except (NotFoundException, UnauthorizedException) as exc:
+                raise TypedIOValidationException(
+                    "Selected step text is unavailable or not accessible.",
+                    code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
+                ) from exc
+            content = file.text
+            encoded = content.encode("utf-8") if content is not None else b""
+            if (
+                content is None
+                or file.id != text.file_id
+                or len(encoded) != reference.size_bytes
+                or hashlib.sha256(encoded).digest() != reference.sha256
+            ):
+                raise TypedIOValidationException(
+                    "Selected step text does not match its persisted size and checksum.",
+                    code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+                )
+            cache[cache_key] = content
+        assert result.current_attempt_no is not None
+        materials[text.file_id] = ResolvedStepMaterial(
+            source_step_id=result.step_id,
+            source_attempt_no=result.current_attempt_no,
+            file_id=text.file_id,
+            checksum=checksum,
+            byte_size=reference.size_bytes,
+            text=cache[cache_key],
+        )
+    return (*inline_materials.values(), *materials.values())
+
+
+async def admit_runtime_files(
+    *,
+    run: FlowRun,
+    requested_ids: list[UUID],
+    state: RunExecutionState | None,
+    deps: StepInputResolutionDeps,
+) -> InputFileAdmission:
+    if deps.input_limits is None:
+        raise RuntimeError(
+            "Resolved Flow input limits are required before loading files"
+        )
+    if state is not None and state.input_file_admission is not None:
+        _require_every_requested_file(
+            [
+                state.input_file_admission.files[file_id]
+                for file_id in requested_ids
+                if file_id in state.input_file_admission.files
+            ],
+            requested_ids=requested_ids,
+        )
+        return state.input_file_admission
+    retained_ids = await deps.flow_run_repo.list_retained_input_file_ids(
+        run_id=run.id, tenant_id=run.tenant_id
+    )
+    retained_set = set(retained_ids)
+    for file_id in requested_ids:
+        if file_id not in retained_set:
+            retained_ids.append(file_id)
+            retained_set.add(file_id)
+    if state is not None:
+        for files in state.file_cache.values():
+            for file in files:
+                if file.id not in retained_set:
+                    retained_ids.append(file.id)
+                    retained_set.add(file.id)
+    if len(retained_ids) > FLOW_INPUT_MAX_FILES_COUNT:
+        raise TypedIOValidationException(
+            f"Run input exceeds the ceiling of {FLOW_INPUT_MAX_FILES_COUNT} files.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        )
+    described = await _describe_runtime_files(
+        requested_ids=list(dict.fromkeys(retained_ids)), deps=deps
+    )
+    references = await deps.file_service.repo.get_content_references(
+        [file.id for file in described]
+    )
+    sizes = measure_input_files(files=described, references=references)
+    try:
+        ensure_input_file_budget(
+            file_ids=retained_ids,
+            sizes=sizes,
+            max_inline_text_bytes=deps.max_inline_text_bytes,
+            file_max_size_bytes=deps.input_limits.file_max_size_bytes,
+            audio_max_size_bytes=deps.input_limits.audio_max_size_bytes,
+            inline_payload=read_semantic_flow_input_payload(run.input_payload_json),
+        )
+    except FlowBadRequestException as exc:
+        raise TypedIOValidationException(
+            str(exc), code=exc.code.value, context=exc.context
+        ) from exc
+    admission = InputFileAdmission(
+        files={file.id: file for file in described}, sizes=sizes
+    )
+    if state is not None:
+        state.input_file_admission = admission
+    return admission
+
+
+async def _load_runtime_files(
+    *,
+    requested_ids: list[UUID],
+    state: RunExecutionState | None,
+    deps: StepInputResolutionDeps,
+) -> list[File]:
+    file_cache = state.file_cache if state else None
+    try:
+        files = await load_files_by_requested_ids(
+            file_service=deps.file_service,
+            requested_ids=requested_ids,
+            file_cache=file_cache,
+        )
+    except NotFoundException as exc:
+        _raise_runtime_files_unavailable(
+            requested_ids=requested_ids, deps=deps, exc=exc
+        )
+    _require_every_requested_file(files, requested_ids=requested_ids)
+    return files
+
+
+async def _describe_runtime_files(
+    *,
+    requested_ids: list[UUID],
+    deps: StepInputResolutionDeps,
+) -> list[FileInfo]:
+    try:
+        described = await describe_files_by_requested_ids(
+            file_service=deps.file_service,
+            requested_ids=requested_ids,
+        )
+    except NotFoundException as exc:
+        _raise_runtime_files_unavailable(
+            requested_ids=requested_ids, deps=deps, exc=exc
+        )
+    _require_every_requested_file(described, requested_ids=requested_ids)
+    return described
+
+
+def _raise_runtime_files_unavailable(
+    *,
+    requested_ids: list[UUID],
+    deps: StepInputResolutionDeps,
+    exc: NotFoundException,
+) -> NoReturn:
+    deps.logger.warning(
+        "flow_executor.runtime_input_file_content_unavailable requested_file_ids=%s",
+        requested_ids,
+        exc_info=exc,
+    )
+    raise TypedIOValidationException(
+        f"File content is unavailable for: {requested_ids}",
+        code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
+    ) from exc
+
+
+def _require_every_requested_file(
+    files: Sequence[Any],
+    *,
+    requested_ids: list[UUID],
+) -> None:
+    returned_ids = {file.id for file in files}
+    missing = [file_id for file_id in requested_ids if file_id not in returned_ids]
+    if missing:
+        raise TypedIOValidationException(
+            f"File(s) not found or not accessible: {missing}",
+            code=FlowApiErrorCode.TYPED_IO_FILE_NOT_FOUND.value,
+        )
+
+
+def _extract_text_from_files(
+    files: list[Any],
+    *,
+    step_order: int,
+    logger: Any,
+) -> tuple[
+    str,
+    list[StepDiagnostic],
+    list[tuple[TextExtractionWarning, ...]],
+]:
+    extracted: list[str] = []
+    diagnostics: list[StepDiagnostic] = []
+    extraction_warnings_by_file: list[tuple[TextExtractionWarning, ...]] = []
+    for source_number, file in enumerate(files, start=1):
+        text_value = getattr(file, "text", None)
+        if not isinstance(text_value, str) or not text_value.strip():
+            extracted.append(
+                _format_runtime_source_text(
+                    file=file,
+                    source_number=source_number,
+                    text=RUNTIME_INPUT_SOURCE_EMPTY_TEXT_PLACEHOLDER,
+                    extraction_warnings=(),
+                )
+            )
+            extraction_warnings_by_file.append(())
+            diagnostics.append(
+                _runtime_source_empty_text_diagnostic(
+                    step_order=step_order,
+                    source_number=source_number,
+                    file=file,
+                )
+            )
+            if logger is not None:
+                logger.warning(
+                    "flow_executor.runtime_input_source_text_unavailable "
+                    "step_order=%d source_number=%d file_id=%s file_name=%s",
+                    step_order,
+                    source_number,
+                    getattr(file, "id", None),
+                    _runtime_source_file_name(file),
+                )
+            continue
+        extraction_warnings = _runtime_source_extraction_warnings(
+            file=file,
+            text=text_value,
+        )
+        extraction_warnings_by_file.append(extraction_warnings)
+        extracted.append(
+            _format_runtime_source_text(
+                file=file,
+                source_number=source_number,
+                text=text_value.strip(),
+                extraction_warnings=extraction_warnings,
+            )
+        )
+        for warning in extraction_warnings:
+            diagnostics.append(
+                _runtime_source_extraction_warning_diagnostic(
+                    step_order=step_order,
+                    source_number=source_number,
+                    file=file,
+                    warning=warning,
+                )
+            )
+            if logger is not None:
+                logger.warning(
+                    "flow_executor.runtime_input_source_extraction_warning "
+                    "step_order=%d source_number=%d file_id=%s file_name=%s warning=%s",
+                    step_order,
+                    source_number,
+                    getattr(file, "id", None),
+                    _runtime_source_file_name(file),
+                    warning,
+                )
+    return "\n\n".join(extracted), diagnostics, extraction_warnings_by_file
+
+
+def _runtime_source_extraction_warnings(
+    *, file: Any, text: str
+) -> tuple[TextExtractionWarning, ...]:
+    if getattr(file, "mimetype", None) != "application/pdf":
+        return ()
+    return TextExtractor.pdf_text_quality_warnings(text)
+
+
+def _runtime_source_extraction_warning_diagnostic(
+    *,
+    step_order: int,
+    source_number: int,
+    file: Any,
+    warning: TextExtractionWarning,
+) -> StepDiagnostic:
+    source_label = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(
+        source_number=source_number
+    )
+    file_name = _runtime_source_file_name(file)
+    source_description = (
+        f"{source_label} ({file_name})" if file_name is not None else source_label
+    )
+    return StepDiagnostic(
+        code=warning,
+        message=(
+            f"Step {step_order}: extracted PDF text looks reversed or garbled "
+            f"for {source_description}."
+        ),
+    )
+
+
+def _runtime_source_empty_text_diagnostic(
+    *,
+    step_order: int,
+    source_number: int,
+    file: Any,
+) -> StepDiagnostic:
+    source_label = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(
+        source_number=source_number
+    )
+    file_name = _runtime_source_file_name(file)
+    source_description = (
+        f"{source_label} ({file_name})" if file_name is not None else source_label
+    )
+    return StepDiagnostic(
+        code=RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
+        message=(
+            f"Step {step_order}: no readable text could be extracted from "
+            f"{source_description}."
+        ),
+    )
+
+
+def _format_runtime_source_text(
+    *,
+    file: Any,
+    source_number: int,
+    text: str,
+    extraction_warnings: Sequence[TextExtractionWarning],
+) -> str:
+    header_lines = [
+        RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(source_number=source_number)
+    ]
+    file_name = _runtime_source_file_name(file)
+    if file_name is not None:
+        header_lines.append(f"{RUNTIME_INPUT_SOURCE_FILE_NAME_KEY}: {file_name}")
+    if extraction_warnings:
+        header_lines.append(
+            f"{RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD}: "
+            f"{json.dumps(list(extraction_warnings))}"
+        )
+    header = "\n".join(header_lines)
+    return f"{header}\n\n{text}"
+
+
+def _runtime_source_file_name(file: Any) -> str | None:
+    raw_name = getattr(file, "name", None)
+    if not isinstance(raw_name, str):
+        return None
+    file_name = " ".join(raw_name.split())
+    return file_name or None
+
+
+def _build_runtime_input_metadata(
+    *,
+    text: str,
+    requested_ids: list[UUID],
+    input_format: str,
+    files: list[Any],
+    capture_mode: str,
+    extraction_warnings: Sequence[Sequence[TextExtractionWarning]] | None = None,
+    text_reference: FileBackedStepText | None = None,
+) -> dict[str, Any]:
+    warnings_by_file = (
+        [() for _ in files] if extraction_warnings is None else extraction_warnings
+    )
+    file_metadata = [
+        _build_runtime_file_metadata(file, extraction_warnings=warnings)
+        for file, warnings in zip(files, warnings_by_file, strict=True)
+    ]
+    return {
+        "text": text_reference.model_dump(mode="json")
+        if text_reference is not None
+        else text,
+        "file_ids": [str(file_id) for file_id in requested_ids],
+        "files_count": len(file_metadata),
+        "files": file_metadata,
+        "source_headers": [
+            _build_runtime_source_header_metadata(
+                file=file,
+                source_number=source_number,
+                extraction_warnings=warnings,
+            )
+            for source_number, (file, warnings) in enumerate(
+                zip(files, warnings_by_file, strict=True),
+                start=1,
+            )
+        ],
+        "total_file_size": sum(
+            metadata["size"]
+            for metadata in file_metadata
+            if isinstance(metadata.get("size"), int)
+        ),
+        "extracted_text_length": len(text),
+        "input_format": input_format,
+        "capture_mode": capture_mode,
+    }
+
+
+def _build_runtime_source_header_metadata(
+    *,
+    file: Any,
+    source_number: int,
+    extraction_warnings: Sequence[TextExtractionWarning],
+) -> dict[str, Any]:
+    file_name = _runtime_source_file_name(file)
+    source_marker = RUNTIME_INPUT_SOURCE_HEADER_TEMPLATE.format(
+        source_number=source_number
+    )
+    text_value = getattr(file, "text", None)
+    return {
+        "source_number": source_number,
+        "source_label": file_name or source_marker,
+        "source_marker": source_marker,
+        "file_id": str(getattr(file, "id")),
+        "file_name": file_name,
+        "has_file_name": file_name is not None,
+        "has_text": isinstance(text_value, str) and text_value.strip() != "",
+        "text_length": len(text_value) if isinstance(text_value, str) else None,
+        RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD: list(extraction_warnings),
+    }
+
+
+def _build_runtime_file_metadata(
+    file: Any,
+    *,
+    extraction_warnings: Sequence[TextExtractionWarning],
+) -> dict[str, Any]:
+    raw_file_type = getattr(file, "file_type", None)
+    if isinstance(raw_file_type, Enum):
+        file_type = raw_file_type.value
+    elif isinstance(raw_file_type, str):
+        file_type = raw_file_type
+    else:
+        file_type = None
+    text_value = getattr(file, "text", None)
+    transcription_value = getattr(file, "transcription", None)
+    return {
+        "id": str(getattr(file, "id")),
+        "name": getattr(file, "name", None),
+        "checksum": getattr(file, "checksum", None),
+        "size": getattr(file, "size", None),
+        "mimetype": getattr(file, "mimetype", None),
+        "file_type": file_type,
+        "text_length": len(text_value) if isinstance(text_value, str) else None,
+        "has_text": isinstance(text_value, str) and text_value.strip() != "",
+        "has_transcription": (
+            isinstance(transcription_value, str) and transcription_value.strip() != ""
+        ),
+        RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD: list(extraction_warnings),
+    }
+
+
+def _compose_runtime_and_chained_input(
+    *,
+    runtime_text: str,
+    chained_text: str,
+    replace_chain: bool,
+) -> str:
+    if replace_chain:
+        return runtime_text
+    segments = [
+        segment.strip()
+        for segment in (runtime_text, chained_text)
+        if segment and segment.strip()
+    ]
+    return "\n\n".join(segments)
+
+
+def enforce_inline_input_cap(
+    *,
+    text: str,
+    step_order: int,
+    input_source: str,
+    max_inline_text_bytes: int,
+) -> None:
+    if len(text.encode("utf-8")) <= max_inline_text_bytes:
+        return
+    raise TypedIOValidationException(
+        f"Step {step_order}: resolved input for '{input_source}' exceeded max inline text bytes.",
+        code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+    )
+
+
+def _substitute_step_text(
+    *,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    resolved_file_text: Mapping[StepMaterialIdentity, str],
+) -> tuple[list[FlowStepResult], RunExecutionState | None]:
+    def resolved_result(result: FlowStepResult) -> FlowStepResult:
+        payload = dict(result.output_payload_json or {})
+        if "text" not in payload:
+            return result
+        try:
+            text = interpret_step_text(payload)
+        except StepOutputMetadataError:
+            return result
+        identity: StepMaterialIdentity
+        if isinstance(text, FileBackedStepText):
+            identity = text.file_id
+        elif result.current_attempt_no is not None:
+            identity = inline_output_identity(
+                payload,
+                source_step_id=result.step_id,
+                source_attempt_no=result.current_attempt_no,
+            )
+        else:
+            return result
+        if identity not in resolved_file_text:
+            return result
+        payload.pop(OUTPUT_TEXT_OVERFLOW_KEY, None)
+        payload.pop("text_source_selector", None)
+        payload["text"] = resolved_file_text[identity]
+        return result.model_copy(update={"output_payload_json": payload})
+
+    prior_results = [resolved_result(result) for result in prior_results]
+    if state is not None:
+        state = replace(
+            state,
+            completed_by_order={
+                order: resolved_result(result)
+                for order, result in state.completed_by_order.items()
+            },
+        )
+    return prior_results, state
+
+
+def resolve_default_step_input_text(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None,
+    source_text: str,
+    runtime_input_text: str | None,
+    logger: Any,
+    resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
+) -> tuple[str, str]:
+    if resolved_file_text:
+        prior_results, state = _substitute_step_text(
+            prior_results=prior_results,
+            state=state,
+            resolved_file_text=resolved_file_text,
+        )
+    # Text from outside the run is already resolved; other implicit sources
+    # are read only after explicit underlag has been ruled out.
+    if step.input_source not in OUTSIDE_INPUT_SOURCES:
+        source_text = resolve_input_source_text(
+            input_source=step.input_source,
+            input_type=step.input_type,
+            run=run,
+            step_order=step.step_order,
+            prior_results=prior_results,
+            state=state,
+            logger=logger,
+        )
+    input_text = source_text
+    runtime_config = build_runtime_input_config(step.input_config)
+    if runtime_config.enabled and runtime_input_text is not None:
+        input_text = _compose_runtime_and_chained_input(
+            runtime_text=runtime_input_text,
+            chained_text=source_text,
+            replace_chain=runtime_config.input_format == "audio"
+            and step.output_mode == "transcribe_only",
+        )
+    return source_text, input_text
+
+
+def resolve_input_source_text(
+    *,
+    input_source: str,
+    input_type: str = "text",
+    run: FlowRun,
+    step_order: int,
+    prior_results: list[FlowStepResult],
+    state: RunExecutionState | None = None,
+    logger: Any,
+) -> str:
+    if input_source == "flow_input":
+        payload = run.input_payload_json or {}
+        if isinstance(payload.get("text"), str):
+            return payload["text"]
+        semantic_payload = read_semantic_flow_input_payload(run.input_payload_json)
+        if not semantic_payload:
+            return ""
+        return json.dumps(semantic_payload, ensure_ascii=False)
+    if input_source == "previous_step":
+        previous = next(
+            (item for item in prior_results if item.step_order == step_order - 1), None
+        )
+        if previous and isinstance(previous.output_payload_json, dict):
+            if not _can_read_structured_output(previous, input_type=input_type):
+                text = _read_complete_output_text(
+                    previous,
+                    consuming_step_order=step_order,
+                    input_source=input_source,
+                )
+            else:
+                text = str(previous.output_payload_json.get("text", ""))
+            if not text.strip() and logger is not None:
+                logger.warning(
+                    "flow_executor.empty_previous_step_input run_id=%s step_order=%d "
+                    "previous_step_order=%d reason=previous_output_text_empty",
+                    run.id,
+                    step_order,
+                    step_order - 1,
+                )
+            return text
+        if logger is not None:
+            logger.warning(
+                "flow_executor.empty_previous_step_input run_id=%s step_order=%d "
+                "previous_step_order=%d reason=%s",
+                run.id,
+                step_order,
+                step_order - 1,
+                "no_previous_result" if previous is None else "output_not_dict",
+            )
+        return ""
+    if input_source == "all_previous_steps":
+        if state:
+            _raise_if_any_prior_output_text_overflowed(
+                prior_results=state.completed_by_order.values(),
+                consuming_step_order=step_order,
+                input_source=input_source,
+            )
+            return state.all_previous_text_before(step_order)
+        _raise_if_any_prior_output_text_overflowed(
+            prior_results=prior_results,
+            consuming_step_order=step_order,
+            input_source=input_source,
+        )
+        parts: list[str] = []
+        for previous in sorted(prior_results, key=lambda item: item.step_order):
+            if previous.step_order >= step_order:
+                continue
+            text = _read_complete_output_text(
+                previous,
+                consuming_step_order=step_order,
+                input_source=input_source,
+            )
+            parts.append(
+                f"<step_{previous.step_order}_output>\n{text}\n</step_{previous.step_order}_output>"
+            )
+        return "\n".join(parts)
+    if input_source == "http_get":
+        raise BadRequestException(
+            f"Input source '{input_source}' is not yet supported in runtime execution."
+        )
+    raise BadRequestException(f"Unsupported input source '{input_source}'.")
+
+
+def _raise_if_text_template_references_overflowed_output(
+    *,
+    references: Sequence[TemplateReference],
+    prior_results: Iterable[FlowStepResult],
+    consuming_step_order: int,
+    input_source: str,
+) -> None:
+    results_by_order = {
+        result.step_order: result
+        for result in prior_results
+        if result.step_order < consuming_step_order
+    }
+    for reference in references:
+        if reference.tail not in {"output", "output.text"}:
+            continue
+        referenced_step_order = reference.step_order
+        if referenced_step_order is None:
+            continue
+        result = results_by_order.get(referenced_step_order)
+        if result is None:
+            continue
+        _raise_if_output_text_overflowed(
+            result,
+            consuming_step_order=consuming_step_order,
+            input_source=input_source,
+        )
+
+
+def _raise_if_any_prior_output_text_overflowed(
+    *,
+    prior_results: Iterable[FlowStepResult],
+    consuming_step_order: int,
+    input_source: str,
+) -> None:
+    for result in prior_results:
+        if result.step_order >= consuming_step_order:
+            continue
+        _raise_if_output_text_overflowed(
+            result,
+            consuming_step_order=consuming_step_order,
+            input_source=input_source,
+        )
+
+
+def _can_read_structured_output(result: FlowStepResult, *, input_type: str) -> bool:
+    if input_type != "json":
+        return False
+    payload = result.output_payload_json
+    if not isinstance(payload, dict):
+        return False
+    return isinstance(payload.get("structured"), (dict, list))
+
+
+def _raise_if_output_text_overflowed(
+    result: FlowStepResult,
+    *,
+    consuming_step_order: int,
+    input_source: str,
+) -> None:
+    _read_complete_output_text(
+        result,
+        consuming_step_order=consuming_step_order,
+        input_source=input_source,
+    )
+
+
+def _read_complete_output_text(
+    result: FlowStepResult,
+    *,
+    consuming_step_order: int,
+    input_source: str,
+) -> str:
+    payload = result.output_payload_json
+    if not isinstance(payload, dict) or (
+        "text" not in payload and OUTPUT_TEXT_OVERFLOW_KEY not in payload
+    ):
+        return ""
+    try:
+        text = interpret_step_text(payload)
+    except StepOutputMetadataError as exc:
+        raise TypedIOValidationException(
+            f"Step {consuming_step_order}: input_source '{input_source}' cannot "
+            f"consume malformed persisted text from step {result.step_order}.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        ) from exc
+    if isinstance(text, FileBackedStepText):
+        raise TypedIOValidationException(
+            f"Step {consuming_step_order}: input_source '{input_source}' cannot "
+            f"consume step {result.step_order} text because that output exceeded "
+            "inline storage and was stored as a generated output file.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        )
+    return text.text

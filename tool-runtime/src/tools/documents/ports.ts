@@ -24,6 +24,8 @@ export type DocumentSpec =
       kind: "markdown";
       title: string;
       content: string;
+      /** Keep a caller-authored body unchanged while retaining document title metadata. */
+      includeTitle?: boolean;
       language: "sv" | "en";
       images?: DocumentImage[];
       /** A downloaded Word document the content is rendered into (DOCX output only). */
@@ -69,8 +71,15 @@ export type TemplateReport = {
     label?: string;
     hint?: string;
     location: "body" | "header" | "footer";
+    section_heading?: string;
+    /** The level of the nearest heading above a control (0 when there is none). */
+    heading_level?: number;
+    container?: "part" | "paragraph" | "other";
+    in_table?: boolean;
+    multiline?: boolean;
     supported: boolean;
     reason?: string;
+    reason_code?: "untagged" | "nested" | "unsupported_kind" | "data_bound" | "placement";
   }[];
   checks: Record<string, { ok: boolean; detail: string }>;
   language?: string;

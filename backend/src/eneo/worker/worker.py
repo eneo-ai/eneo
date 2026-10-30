@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import inspect
 import os
 from functools import wraps
-from typing import Any, Callable, cast
+from typing import Any, Awaitable, Callable, cast
 from uuid import UUID
 
 import sqlalchemy as sa
@@ -20,7 +21,7 @@ from eneo.main.config import Settings, get_settings
 from eneo.main.container.container import Container, SessionProxy
 from eneo.main.container.container_overrides import override_user
 from eneo.main.logging import get_logger
-from eneo.main.models import ChannelType
+from eneo.main.models import ChannelType, Status
 from eneo.observability.error_text import user_visible_error
 from eneo.redis.connection import build_arq_redis_settings
 from eneo.server.dependencies import lifespan
@@ -46,7 +47,7 @@ def _job_id_from_ctx(ctx: ARQContext) -> UUID | None:
 _tracer = trace.get_tracer("eneo.worker")
 
 
-def _traced_job(kind: str, wrapper_fn: Callable[..., Any]) -> Callable[..., Any]:
+def traced_job(kind: str, wrapper_fn: Callable[..., Any]) -> Callable[..., Any]:
     """Wrap an ARQ job coroutine in a root span.
 
     All log lines and auto-instrumented child spans produced while the job runs
@@ -260,7 +261,13 @@ class Worker:
         del ctx
         await lifespan.shutdown()
 
-    def function(self, with_user: bool = True, *, keep_result: int | None = None):
+    def function(
+        self,
+        with_user: bool = True,
+        *,
+        keep_result: int | None = None,
+        name: str | None = None,
+    ):
         def decorator(func: Callable[..., Any]) -> Callable[..., Any]:
             @wraps(func)
             async def wrapper(ctx: ARQContext, params: object) -> Any:
@@ -279,10 +286,10 @@ class Worker:
                     assert job_id is not None
                     return await func(job_id, params, container=container)
 
-            traced = _traced_job("job", wrapper)
+            traced = traced_job("job", wrapper)
             self.functions.append(
-                arq_func(traced, keep_result=keep_result)
-                if keep_result is not None
+                arq_func(traced, name=name, keep_result=keep_result)
+                if keep_result is not None or name is not None
                 else traced
             )
             return wrapper
@@ -290,7 +297,11 @@ class Worker:
         return decorator
 
     def long_running_function(
-        self, with_user: bool = True, *, keep_result: int | None = None
+        self,
+        with_user: bool = True,
+        *,
+        keep_result: int | None = None,
+        name: str | None = None,
     ):
         """Decorator for long-running tasks (crawls, batch jobs).
 
@@ -385,12 +396,135 @@ class Worker:
                 assert job_id is not None
                 return await func(job_id, params, container=container)
 
-            traced = _traced_job("job", wrapper)
+            traced = traced_job("job", wrapper)
             self.functions.append(
-                arq_func(traced, keep_result=keep_result)
-                if keep_result is not None
+                arq_func(traced, name=name, keep_result=keep_result)
+                if keep_result is not None or name is not None
                 else traced
             )
+            return wrapper
+
+        return decorator
+
+    async def _build_sessionless_container(
+        self,
+        params: ResourceTaskParams,
+        with_user: bool,
+    ) -> Container:
+        """Create a container backed by SessionProxy for long-running execution.
+
+        Why:
+        - Avoids holding a DB session during long LLM/network calls.
+        - Keeps user context by eagerly materializing UserInDB in a short-lived session.
+        """
+        user = None
+        if with_user and hasattr(params, "user_id") and params.user_id:
+            async with sessionmanager.session() as session:
+                async with session.begin():
+                    from sqlalchemy.orm import selectinload
+
+                    from eneo.database.tables.tenant_table import Tenants
+                    from eneo.database.tables.users_table import Users
+                    from eneo.users.user import UserInDB
+
+                    stmt = (
+                        sa.select(Users)
+                        .where(Users.id == params.user_id)
+                        .where(Users.deleted_at.is_(None))
+                        .options(
+                            selectinload(Users.roles),
+                            selectinload(Users.tenant).selectinload(Tenants.modules),
+                            selectinload(Users.user_groups),
+                        )
+                    )
+                    result = await session.execute(stmt)
+                    user_row = result.scalar_one_or_none()
+                    if user_row:
+                        user = UserInDB.model_validate(user_row)
+
+        container = Container(session=providers.Object(SessionProxy()))
+        if user is not None:
+            override_user(container=container, user=user)
+
+        return container
+
+    def long_running_task(
+        self,
+        with_user: bool = True,
+        channel_type: ChannelType | None = None,
+    ) -> Callable[
+        [Callable[..., Awaitable[Any]]],
+        Callable[[ARQContext, ResourceTaskParams], Awaitable[bool | None]],
+    ]:
+        """Task decorator for long-running operations without long-lived DB sessions.
+
+        Contract:
+        - Build a sessionless container (SessionProxy + ContextVar session_scope()).
+        - Only open DB sessions for status transitions and explicit repository operations.
+        - Never keep one transaction open across provider/network calls.
+        """
+
+        def decorator(
+            func: Callable[..., Awaitable[Any]],
+        ) -> Callable[[ARQContext, ResourceTaskParams], Awaitable[bool | None]]:
+            @wraps(func)
+            async def wrapper(
+                ctx: ARQContext, params: ResourceTaskParams
+            ) -> bool | None:
+                logger.debug(
+                    f"Executing long-running task {func.__name__} with context {ctx} and params {params}"
+                )
+
+                container = await self._build_sessionless_container(
+                    params=params,
+                    with_user=with_user,
+                )
+                job_id = _job_id_from_ctx(ctx)
+                assert job_id is not None
+                task_manager = container.task_manager(
+                    job_id=job_id,
+                    resource_id=params.id,
+                    channel_type=channel_type,
+                )
+                optional_kwargs = self._get_kwargs(func, task_manager=task_manager)
+
+                async def _tm_call(
+                    callable_: Callable[..., Awaitable[Any]],
+                    *call_args: Any,
+                ) -> Any:
+                    # Job status persistence needs a DB session because job_service uses repositories.
+                    async with container.session_scope():
+                        return await callable_(*call_args)
+
+                await _tm_call(task_manager.set_status, Status.IN_PROGRESS)
+                try:
+                    task_manager.result_location = await func(
+                        params,
+                        container=container,
+                        **optional_kwargs,
+                    )
+                except asyncio.CancelledError:
+                    await _tm_call(task_manager.fail_job, "Job cancelled")
+                    task_manager.success = False
+                    raise
+                except Exception as exc:
+                    logger.exception("Error on long-running worker:")
+                    message = str(exc).strip()
+                    await _tm_call(
+                        task_manager.fail_job,
+                        message[:512] if message else None,
+                    )
+                    task_manager.success = False
+                else:
+                    await _tm_call(task_manager.complete_job)
+                    task_manager.success = True
+                finally:
+                    if task_manager.cleanup_func is not None:
+                        task_manager.cleanup_func()
+
+                return task_manager.successful()
+
+            self.functions.append(wrapper)
             return wrapper
 
         return decorator
@@ -441,7 +575,7 @@ class Worker:
 
                 return success
 
-            self.functions.append(_traced_job("job", wrapper))
+            self.functions.append(traced_job("job", wrapper))
             return wrapper
 
         return decorator
@@ -493,9 +627,7 @@ class Worker:
                         container = await self._create_container(session)
                         return await func(container=container)
 
-            self.cron_jobs.append(
-                cron(_traced_job("cron", wrapper), **decorator_kwargs)
-            )
+            self.cron_jobs.append(cron(traced_job("cron", wrapper), **decorator_kwargs))
             return wrapper
 
         return decorator

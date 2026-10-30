@@ -4,9 +4,16 @@ import sqlalchemy as sa
 from sqlalchemy.exc import IntegrityError
 
 from eneo.ai_models.completion_models.completion_model import (
+    COMPLETION_MODEL_ROUTE_FIELDS,
+    COMPLETION_MODEL_TOKEN_LIMITS,
     CompletionModel,
     CompletionModelCreate,
     CompletionModelUpdate,
+    moves_completion_model_route,
+    require_token_limits,
+)
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    persist_explicit_model_kwargs_capabilities,
 )
 from eneo.database.database import AsyncSession
 from eneo.database.repositories.base import BaseRepositoryDelegate
@@ -67,7 +74,18 @@ class CompletionModelsRepository:
         return await self.delegate.get_by(conditions={CompletionModels.name: name})
 
     async def create_model(self, model: CompletionModelCreate) -> CompletionModel:
-        return await self.delegate.add(model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE)
+        if model.model_kwargs_capabilities is None:
+            return await self.delegate.add(
+                model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
+            )
+
+        return await self.delegate.add(
+            model,
+            exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE | {"model_kwargs_capabilities"},
+            model_kwargs_capabilities=persist_explicit_model_kwargs_capabilities(
+                model.model_kwargs_capabilities
+            ),
+        )
 
     async def enable_completion_model(
         self,
@@ -93,9 +111,107 @@ class CompletionModelsRepository:
     async def update_model(
         self, model: CompletionModelUpdate
     ) -> CompletionModel | None:
+        await self._require_resulting_token_limits(model)
+        model = await self._withdraw_declarations_on_route_change(model)
+        if "model_kwargs_capabilities" in model.model_fields_set:
+            persisted_capabilities = (
+                persist_explicit_model_kwargs_capabilities(
+                    model.model_kwargs_capabilities
+                )
+                if model.model_kwargs_capabilities is not None
+                else None
+            )
+            return await self.delegate.update(
+                model,
+                exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
+                | {"model_kwargs_capabilities"},
+                model_kwargs_capabilities=persisted_capabilities,
+            )
+
         return await self.delegate.update(
             model, exclude=COMPLETION_MODEL_DB_WRITE_EXCLUDE
         )
+
+    async def _require_resulting_token_limits(
+        self, model: CompletionModelUpdate
+    ) -> None:
+        """Refuse a save that leaves the model without a token limit.
+
+        A partial save keeps the stored limits it omits, and a model damaged by
+        an earlier release can hold an empty one; the save must enter it."""
+        written = model.model_fields_set
+        if set(COMPLETION_MODEL_TOKEN_LIMITS) <= written:
+            return  # Both stated; the request schema refuses null.
+        stored = (
+            await self.session.execute(
+                sa.select(
+                    CompletionModels.max_input_tokens,
+                    CompletionModels.max_output_tokens,
+                ).where(CompletionModels.id == model.id)
+            )
+        ).one_or_none()
+        if stored is None:
+            return  # No such model; the update answers not found.
+        stored_input, stored_output = stored
+        require_token_limits(
+            max_input_tokens=(
+                model.max_input_tokens
+                if "max_input_tokens" in written
+                else stored_input
+            ),
+            max_output_tokens=(
+                model.max_output_tokens
+                if "max_output_tokens" in written
+                else stored_output
+            ),
+        )
+
+    async def _withdraw_declarations_on_route_change(
+        self, model: CompletionModelUpdate
+    ) -> CompletionModelUpdate:
+        """Drop the strict tool-schema declaration this write invalidates.
+
+        The declaration belongs to one provider route, so moving the route
+        withdraws it. The same request may declare the new route explicitly.
+        Token limits are not route declarations and stay as stored.
+        """
+        written = model.model_fields_set
+        provided = {
+            field: getattr(model, field)
+            for field in COMPLETION_MODEL_ROUTE_FIELDS
+            if field in written
+        }
+        if not provided or "supports_strict_tool_schema" in written:
+            return model
+
+        current = (
+            await self.session.execute(
+                sa.select(
+                    *(
+                        getattr(CompletionModels, field)
+                        for field in COMPLETION_MODEL_ROUTE_FIELDS
+                    ),
+                    ModelProviders.provider_type,
+                )
+                .outerjoin(
+                    ModelProviders, CompletionModels.provider_id == ModelProviders.id
+                )
+                .where(CompletionModels.id == model.id)
+            )
+        ).one_or_none()
+        if current is None:
+            return model
+
+        *route_values, provider_type = current
+        if not moves_completion_model_route(
+            current=dict(zip(COMPLETION_MODEL_ROUTE_FIELDS, route_values)),
+            provided=provided,
+            provider_type=provider_type,
+        ):
+            return model
+        # The token limits are kept: a model without them cannot serve any
+        # request, so only an explicit new value replaces them.
+        return model.model_copy(update={"supports_strict_tool_schema": False})
 
     async def delete_model(self, id: UUID) -> None:
         # Spaces are containers — a model "enabled" on a space without any

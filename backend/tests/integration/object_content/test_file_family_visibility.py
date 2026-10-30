@@ -8,6 +8,7 @@ from uuid import UUID, uuid4
 import pytest
 import sqlalchemy as sa
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.database import AsyncSession, DatabaseSessionManager
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.object_content_table import (
@@ -16,7 +17,7 @@ from eneo.database.tables.object_content_table import (
     ObjectStoreObjects,
 )
 from eneo.database.tables.users_table import Users
-from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_models import FileContentVariant, FileOwner, FileType
 from eneo.files.file_repo import FileRepository
 from eneo.files.file_service import FileService
 from eneo.main.exceptions import NotFoundException
@@ -27,6 +28,14 @@ from eneo.users.user import UserInDB
 async def _owner_ids(session: AsyncSession) -> tuple[UUID, UUID]:
     row = (await session.execute(sa.select(Users.tenant_id, Users.id))).one()
     return row.tenant_id, row.id
+
+
+def _file_owner(tenant_id: UUID, user_id: UUID) -> FileOwner:
+    return FileOwner(
+        tenant_id=tenant_id,
+        owner_type=PrincipalType.USER,
+        owner_user_id=user_id,
+    )
 
 
 async def _add_file(
@@ -42,7 +51,9 @@ async def _add_file(
         mimetype="application/pdf",
         file_type=FileType.TEXT.value,
         tenant_id=tenant_id,
-        user_id=user_id,
+        owner_type=PrincipalType.USER.value,
+        owner_user_id=user_id,
+        owner_service_id=None,
         parent_file_id=parent_file_id,
     )
     session.add(file)
@@ -125,19 +136,21 @@ async def _assert_family_hidden(
     *,
     root_id: UUID,
     derivative_id: UUID,
+    tenant_id: UUID,
     user_id: UUID,
 ) -> None:
     repository = FileRepository(session)
+    owner = _file_owner(tenant_id, user_id)
     assert (
-        await repository.get_list_by_id_and_user(
+        await repository.get_list_by_id_and_owner(
             [root_id, derivative_id],
-            user_id,
+            owner,
         )
         == []
     )
     assert await repository.get_by_ids([root_id, derivative_id]) == []
-    assert await repository.get_by_parent_ids([root_id], user_id) == []
-    assert await repository.get_list_by_user(user_id) == []
+    assert await repository.get_by_parent_ids([root_id], owner) == []
+    assert await repository.get_list_by_owner(owner) == []
     assert await repository.get_infos_by_ids([root_id, derivative_id]) == []
     with pytest.raises(NotFoundException):
         await repository.get_by_id(root_id)
@@ -197,6 +210,7 @@ async def test_file_family_appears_only_after_its_final_content_promotion(
             session,
             root_id=root_id,
             derivative_id=derivative_id,
+            tenant_id=tenant_id,
             user_id=user_id,
         )
         references = await FileRepository(session).get_content_references(
@@ -209,8 +223,7 @@ async def test_file_family_appears_only_after_its_final_content_promotion(
         assert (
             await FileRepository(session).get_by_id_and_owner_for_lifecycle(
                 file_id=root_id,
-                user_id=user_id,
-                tenant_id=tenant_id,
+                owner=_file_owner(tenant_id, user_id),
             )
         ) is not None
 
@@ -222,6 +235,7 @@ async def test_file_family_appears_only_after_its_final_content_promotion(
                 session,
                 root_id=root_id,
                 derivative_id=derivative_id,
+                tenant_id=tenant_id,
                 user_id=user_id,
             )
 
@@ -234,14 +248,15 @@ async def test_file_family_appears_only_after_its_final_content_promotion(
 
     async with object_content_database.session() as session, session.begin():
         repository = FileRepository(session)
-        assert [file.id for file in await repository.get_list_by_user(user_id)] == [
+        owner = _file_owner(tenant_id, user_id)
+        assert [file.id for file in await repository.get_list_by_owner(owner)] == [
             root_id
         ]
         assert {
             file.id for file in await repository.get_by_ids([root_id, derivative_id])
         } == {root_id, derivative_id}
         assert [
-            file.id for file in await repository.get_by_parent_ids([root_id], user_id)
+            file.id for file in await repository.get_by_parent_ids([root_id], owner)
         ] == [derivative_id]
         assert (await repository.get_by_id(root_id)).id == root_id
         assert (await repository.get_by_id(derivative_id)).id == derivative_id
@@ -298,7 +313,8 @@ async def test_failed_family_disappears_but_lifecycle_and_references_remain(
 
     async with object_content_database.session() as session, session.begin():
         repository = FileRepository(session)
-        assert {file.id for file in await repository.get_list_by_user(user_id)} == {
+        owner = _file_owner(tenant_id, user_id)
+        assert {file.id for file in await repository.get_list_by_owner(owner)} == {
             healthy_id,
             failed_id,
         }
@@ -310,15 +326,15 @@ async def test_failed_family_disappears_but_lifecycle_and_references_remain(
 
     async with object_content_database.session() as session, session.begin():
         repository = FileRepository(session)
-        assert [file.id for file in await repository.get_list_by_user(user_id)] == [
+        owner = _file_owner(tenant_id, user_id)
+        assert [file.id for file in await repository.get_list_by_owner(owner)] == [
             healthy_id
         ]
         with pytest.raises(NotFoundException):
             await repository.get_by_id(failed_id)
         lifecycle = await repository.get_by_id_and_owner_for_lifecycle(
             file_id=failed_id,
-            user_id=user_id,
-            tenant_id=tenant_id,
+            owner=owner,
         )
         assert lifecycle is not None
         assert [

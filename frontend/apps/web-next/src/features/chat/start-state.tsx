@@ -194,16 +194,24 @@ function QuickAssistants() {
  * personal assistant "Prova att fråga" and "Dina assistenter" (decision 8),
  * side by side where the column is wide enough.
  */
+export type StartHeadingLevel = 1 | 2 | 3;
+
+const START_HEADINGS = { 1: "h1", 2: "h2", 3: "h3" } as const;
+
 export function StartState({
   partner,
   composer,
-  onPickStarter
+  onPickStarter,
+  headingLevel = 1
 }: {
   partner: ChatPartner;
   /** The centred composer; absent on phones, where the view docks it. */
   composer?: ReactNode;
   onPickStarter: (prompt: string) => void;
+  /** 1 on a chat page; lower inside a page that has its own h1. */
+  headingLevel?: StartHeadingLevel;
 }) {
+  const StartHeading = START_HEADINGS[headingLevel];
   const t = useTranslations();
   const { user } = useAppContext();
   const now = useNow();
@@ -242,13 +250,13 @@ export function StartState({
               size="xl"
             />
           )}
-          <h1 className="text-[1.625rem] leading-tight font-semibold tracking-[-0.015em] text-balance sm:mt-1 sm:text-[1.9375rem]">
+          <StartHeading className="text-[1.625rem] leading-tight font-semibold tracking-[-0.015em] text-balance sm:mt-1 sm:text-[1.9375rem]">
             {personal
               ? (greeting ?? (
                   <span className="invisible">{t("hi_firstname", { firstName: name })}</span>
                 ))
               : displayPartnerName(partner, t)}
-          </h1>
+          </StartHeading>
           <p className="text-ax-text-secondary max-w-xl text-base">
             {personal
               ? t("chat_start_subtitle")

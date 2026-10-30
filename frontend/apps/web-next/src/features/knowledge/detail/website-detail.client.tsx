@@ -43,12 +43,13 @@ import {
   websiteQueryOptions,
   type CrawlRun
 } from "@/features/knowledge/knowledge";
+import {
+  ACTIVE_CRAWL_REFRESH_MS,
+  IDLE_CRAWL_REFRESH_MS
+} from "@/features/knowledge/crawl-progress";
 import { CrawlLimitationsBanner } from "@/features/knowledge/notices";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
-
-const ACTIVE_CRAWL_REFRESH_MS = 2_000;
-const IDLE_RUNS_REFRESH_MS = 30_000;
 
 type WebsiteTab = "crawls" | "blobs";
 
@@ -176,6 +177,7 @@ function ContentIssuesBanner({
   const missingOnly = isCompletedWithMissingResources(run);
   return (
     <Banner
+      role={missingOnly ? "status" : "alert"}
       status={missingOnly ? "info" : "warning"}
       title={missingOnly ? t("crawl_content_has_missing") : t("crawl_content_has_failures")}
       description={t("crawl_content_failure_description", { date: date ?? "" })}
@@ -214,7 +216,7 @@ export function WebsiteDetail({
     refetchInterval: pollWhile<CrawlRun | null>(
       (run) => !!run && isActiveCrawlRun(run),
       ACTIVE_CRAWL_REFRESH_MS,
-      IDLE_RUNS_REFRESH_MS
+      IDLE_CRAWL_REFRESH_MS
     )
   });
   const runPages = useSuspenseInfiniteQuery(websiteCrawlRunsQueryOptions(browserApi, websiteId));

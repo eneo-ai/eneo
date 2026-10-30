@@ -10,6 +10,7 @@ import {
   type ProfilerOnRenderCallback,
   type ReactNode
 } from "react";
+import { makeFlow } from "@/features/flows/flow-fixtures";
 import type { ChatPage } from "@/features/chat/chat-page";
 import type { Schema } from "@/lib/api/models";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -126,6 +127,19 @@ beforeEach(async () => {
   }));
   vi.doMock("@/features/group-chats/group-chat-editor", () => ({
     GroupChatEditor: ({ groupChatId }: { groupChatId: string }) => <EditorDraft id={groupChatId} />
+  }));
+  vi.doMock("@/features/flows/flow-page", () => ({
+    FlowPage: ({ flowId }: { flowId: string }) => <EditorDraft id={flowId} />
+  }));
+  vi.doMock("@/features/flows/flows-page", () => ({
+    FlowsPage: () => <h1>Flows list</h1>
+  }));
+  vi.doMock("@/features/flows/runs/run-page", () => ({
+    FlowRunPage: ({ flowId, runId }: { flowId: string; runId: string }) => (
+      <h1>
+        Run {flowId}/{runId}
+      </h1>
+    )
   }));
   // Chat streaming has its own feature and browser tests; keep its state observable here.
   vi.doMock("@/features/chat/chat-page", async () => {
@@ -1467,4 +1481,89 @@ it("returns a signed-out account visit to login with its destination preserved",
   await renderRoute("/account");
   await waitFor(() => expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Faccount"));
   expect(document.getElementById("main-content")).toBeNull();
+});
+
+function enableFlows() {
+  const enabled = testAppContext({
+    permissions: ["flows_view"],
+    settings: { flows_enabled: true }
+  });
+  replies.set("/api/v1/users/me/", enabled.user);
+  replies.set("/api/v1/settings/", enabled.settings);
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set("/api/v1/flows/flow-1/", makeFlow());
+}
+
+it("opens Flows history and steps without remounting the draft, and resets it for another flow", async () => {
+  enableFlows();
+  replies.set("/api/v1/flows/flow-2/", makeFlow({ id: "flow-2", name: "Andra flödet" }));
+  const { router } = await renderRoute("/spaces/space-1/flows/flow-1?step=step-1");
+  const editor = await screen.findByRole("textbox", { name: "Editor flow-1" });
+  fireEvent.change(editor, { target: { value: "Unsaved draft" } });
+  expect(document.title).toBe("Medborgarbrev · Upphandling · Eneo");
+  await act(() => router.navigate({ href: "/spaces/space-1/flows/flow-1?tab=runs" }));
+  expect(screen.getByRole("textbox", { name: "Editor flow-1" })).toBe(editor);
+  expect(editor).toHaveProperty("value", "Unsaved draft");
+  expect(router.state.location.search).toEqual({ tab: "runs" });
+  await act(() =>
+    router.navigate({ href: "/spaces/space-1/flows/flow-1?step=step-2&tab=invalid" })
+  );
+  expect(router.state.matches.at(-1)?.search).toEqual({ step: "step-2" });
+  expect(screen.getByRole("textbox", { name: "Editor flow-1" })).toBe(editor);
+  await act(() => router.navigate({ href: "/spaces/space-1/flows/flow-2" }));
+  expect(await screen.findByRole("textbox", { name: "Editor flow-2" })).toHaveProperty("value", "");
+});
+
+it("opens a Flows run with the parent flow's ownership and title", async () => {
+  enableFlows();
+  await renderRoute("/spaces/space-1/flows/flow-1/runs/run-1");
+  await screen.findByRole("heading", { name: "Run flow-1/run-1" });
+  expect(document.title).toBe("Medborgarbrev · Upphandling · Eneo");
+});
+
+it.each(["", "/runs/run-1"])(
+  "rejects Flows ownership outside the requested space at %s",
+  async (suffix) => {
+    enableFlows();
+    replies.set("/api/v1/flows/flow-1/", makeFlow({ space_id: "space-2" }));
+    await renderRoute(`/spaces/space-1/flows/flow-1${suffix}`);
+    await screen.findByRole("heading", { name: messages.page_not_found });
+    expect(screen.queryByRole("textbox", { name: "Editor flow-1" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Run flow-1/run-1" })).toBeNull();
+  }
+);
+
+it.each(["flag", "permission"])("hides Flows when its %s is missing", async (missing) => {
+  enableFlows();
+  if (missing === "flag")
+    replies.set("/api/v1/settings/", { ...context.settings, flows_enabled: false });
+  else replies.set("/api/v1/users/me/", testAppContext({ permissions: [] }).user);
+  await renderRoute("/spaces/space-1/flows/flow-1");
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(requestedPaths()).not.toContain("/api/v1/flows/flow-1/");
+});
+
+it("redirects organization Flows to the existing organization knowledge page", async () => {
+  enableFlows();
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin", "flows_view"] }).user);
+  replies.set(
+    "/api/v1/spaces/type/organization/",
+    makeSpace({ overrides: { organization: true } })
+  );
+  const { router } = await renderRoute("/spaces/organization/flows");
+  expect(router.state.location.pathname).toBe("/spaces/organization/knowledge");
+});
+
+it("loads the Flows list using the personal space's real id", async () => {
+  enableFlows();
+  replies.set("/api/v1/flows/", { items: [], has_more: false });
+  await renderRoute("/spaces/personal/flows");
+  await screen.findByRole("heading", { name: "Flows list" });
+  const request = fetcher.mock.calls
+    .map(
+      ([input]) =>
+        new URL(input instanceof Request ? input.url : String(input), window.location.href)
+    )
+    .find((url) => url.pathname === "/api/v1/flows/");
+  expect(request?.searchParams.get("space_id")).toBe("space-1");
 });

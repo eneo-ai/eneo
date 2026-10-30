@@ -1,0 +1,719 @@
+from __future__ import annotations
+
+import logging
+import time
+from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import dataclass, replace
+from typing import Any, cast
+from uuid import UUID
+
+from eneo.files.text import TextExtractionWarning, parse_text_extraction_warning
+from eneo.flows.domain.flow import FlowRun
+from eneo.flows.domain.mapped_execution_policy import (
+    FlowMappedExecutionPolicy,
+    effective_mapped_cardinality,
+)
+from eneo.flows.domain.rag_evidence_policy import FlowRagEvidencePolicy
+from eneo.flows.domain.runtime import (
+    RunExecutionState,
+    RuntimeStep,
+    StepDiagnostic,
+    StepExecutionOutput,
+)
+from eneo.flows.domain.runtime_input import build_runtime_input_config
+from eneo.flows.enums import FlowStepPhase
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import (
+    MappedProviderCallProvenance,
+    sum_complete_token_counts,
+)
+from eneo.flows.runtime.step_deadline import (
+    record_step_phase,
+    record_step_progress,
+    require_step_budget,
+)
+from eneo.flows.runtime.step_execution_result import StepExecutionResult
+from eneo.flows.runtime.step_execution_runtime import (
+    StepExecutionRuntimeDeps,
+    attach_typed_failure_context,
+    complete_step_execution,
+    preview_step_execution_context,
+    resolve_json_response_format_plan,
+)
+from eneo.flows.runtime.step_failure_evidence import (
+    attach_failure_evidence,
+    failure_evidence,
+)
+from eneo.flows.runtime.step_handlers.base import (
+    ActivatePreparedAssistantStepsFn,
+    ListStepInputFileIdsFn,
+    PreparedAssistantStep,
+    PreviewAssistantStepFn,
+)
+from eneo.flows.runtime.step_handlers.mapped_outputs import (
+    MappedCallEvidence,
+    carry_call_evidence,
+    mapped_admission_payload,
+    mapped_output_diagnostics,
+)
+from eneo.flows.runtime.structured_output_budget import (
+    StructuredOutputBudget,
+    ensure_structured_output_allowed,
+    structured_output_json,
+)
+from eneo.flows.source_identity import (
+    RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD,
+    has_required_runtime_managed_source_fields,
+    without_runtime_managed_source_json_fields,
+)
+from eneo.main.exceptions import TypedIOValidationException
+
+logger = logging.getLogger(__name__)
+
+# ponytail: this executor owns one AsyncSession; raise only after per-source
+# calls get isolated session ownership.
+PER_SOURCE_READER_CONCURRENCY = 1
+PER_SOURCE_METADATA_PREVIEW_CHARS = 2000
+PER_SOURCE_SOURCE_LABEL_MAX_CHARS = 120
+PER_SOURCE_PROVIDER_DOCUMENTS_DESCRIPTION = (
+    "Exactly one document object for the current uploaded source. Runtime combines "
+    "one object from each uploaded source."
+)
+
+
+@dataclass(frozen=True)
+class PerSourceReaderCall:
+    source_number: int
+    file_id: UUID
+    source_label: str
+    document: dict[str, Any]
+    output: StepExecutionOutput
+    deps: StepExecutionRuntimeDeps
+    elapsed_ms: int
+
+
+async def execute_per_source_reader(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    version_metadata: dict[str, object] | None,
+    attempt_no: int,
+    preview_assistant_step: PreviewAssistantStepFn,
+    activate_prepared_assistant_steps: ActivatePreparedAssistantStepsFn,
+    list_step_input_file_ids: ListStepInputFileIdsFn,
+    mapped_execution_policy: FlowMappedExecutionPolicy,
+    rag_evidence_policy: FlowRagEvidencePolicy,
+) -> StepExecutionResult:
+    runtime_input = build_runtime_input_config(step.input_config)
+    file_ids = await list_step_input_file_ids(
+        step=step,
+        run=run,
+        attempt_no=attempt_no,
+    )
+    if runtime_input.max_files is None:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-source reader requires a published max_files ceiling.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    effective_max_files = effective_mapped_cardinality(
+        published_max=runtime_input.max_files,
+        mapped_policy=mapped_execution_policy,
+    )
+    if len(file_ids) > effective_max_files:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-source reader received {len(file_ids)} files, "
+            f"exceeding the effective max_files ceiling of {effective_max_files}.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_TOO_LARGE.value,
+        )
+    if _documents_item_schema(step.output_contract) is None:
+        raise TypedIOValidationException(
+            "Per-source document readers require a JSON output contract shaped "
+            "as exactly one top-level documents[] array.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    if not has_required_runtime_managed_source_fields(
+        step.output_contract,
+        "documents",
+    ):
+        raise TypedIOValidationException(
+            "Per-source document readers require output_contract documents[] "
+            "items to declare source_label and source_file_id as required string "
+            "properties and extraction_warnings as a required array of strings.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    if not file_ids:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: per-source reader received no source files.",
+            code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
+        )
+    per_call_output_contract = _source_local_output_contract(step.output_contract)
+    per_call_step = replace(step, output_contract=per_call_output_contract)
+    provider_prompt_step = replace(
+        per_call_step,
+        output_contract=_provider_prompt_output_contract(per_call_output_contract),
+    )
+    record_step_progress(
+        f"0 of {len(file_ids)} sources completed",
+        completed_items=0,
+        total_items=len(file_ids),
+    )
+    estimates: list[int] = []
+    native_json_fallback_possible = False
+    prepared_sources: list[tuple[UUID, PreparedAssistantStep]] = []
+    for file_id in file_ids:
+        preview_step = await preview_assistant_step(
+            step=provider_prompt_step,
+            run=run,
+            state=state,
+            version_metadata=version_metadata,
+            attempt_no=attempt_no,
+            requested_file_ids_override=(file_id,),
+        )
+        prepared_sources.append((file_id, preview_step))
+        estimates.append(
+            await preview_step_execution_context(
+                step=provider_prompt_step,
+                state=state,
+                prepared=preview_step.prepared,
+                deps=preview_step.deps,
+            )
+        )
+        if len(estimates) == 1:
+            # The response-format plan is loop-invariant for this step.
+            native_json_fallback_possible = resolve_json_response_format_plan(
+                step=provider_prompt_step,
+                assistant=preview_step.prepared.assistant,
+                state=state,
+            ).fallback_call_possible
+    state.mapped_admission_by_step[step.step_id] = mapped_admission_payload(
+        execution_mode="per_source_reader",
+        estimates=estimates,
+        native_json_fallback_possible=native_json_fallback_possible,
+        policy=mapped_execution_policy,
+    )
+    activated_steps = await activate_prepared_assistant_steps(
+        run,
+        step,
+        state,
+        attempt_no,
+        tuple(prepared for _, prepared in prepared_sources),
+    )
+    prepared_sources = [
+        (file_id, activated_step)
+        for (file_id, _), activated_step in zip(
+            prepared_sources,
+            activated_steps,
+            strict=True,
+        )
+    ]
+    mapped_evidence = MappedCallEvidence(
+        policy=rag_evidence_policy,
+        execution_mode="per_source",
+        collection_key="sources",
+    )
+    per_source_calls: list[PerSourceReaderCall] = []
+    source_label_counts: dict[str, int] = {}
+    output_budget = StructuredOutputBudget(
+        array_key="documents",
+        ceiling_bytes=prepared_sources[0][1].deps.max_inline_text_bytes,
+        total_items=len(prepared_sources),
+    )
+    try:
+        for source_number, (file_id, prepared_step) in enumerate(
+            prepared_sources, start=1
+        ):
+            record_step_phase(FlowStepPhase.MAPPED_ITEM)
+            require_step_budget(
+                prepared_step.deps.deadline,
+                step_order=step.step_order,
+                phase=f"source {source_number} of {len(prepared_sources)}",
+                completed=(
+                    f"{len(per_source_calls)} of {len(prepared_sources)} sources completed"
+                ),
+            )
+            source_call = await _execute_one_source(
+                source_number=source_number,
+                file_id=file_id,
+                step=step,
+                per_call_step=per_call_step,
+                run=run,
+                state=state,
+                prepared_step=prepared_step,
+            )
+            # Bound this call before the next one runs, so the step never holds
+            # more passage text than its budget allows.
+            mapped_evidence.admit(source_call.output.rag_metadata)
+            label_count = source_label_counts.get(source_call.source_label, 0) + 1
+            source_label_counts[source_call.source_label] = label_count
+            if label_count > 1:
+                source_call = replace(
+                    source_call,
+                    source_label=f"{source_call.source_label} ({label_count})",
+                )
+            output_budget.admit(
+                [_source_document_items(source_call)], completed_items=source_number
+            )
+            per_source_calls.append(source_call)
+            record_step_progress(
+                f"{len(per_source_calls)} of {len(prepared_sources)} sources completed",
+                completed_items=len(per_source_calls),
+                total_items=len(prepared_sources),
+            )
+        record_step_phase(FlowStepPhase.FINALIZATION)
+        return StepExecutionResult(
+            output=await _assemble_per_source_output(
+                step=step,
+                run=run,
+                per_source_calls=per_source_calls,
+                mapped_rag_metadata=mapped_evidence.payload(),
+            )
+        )
+    except BaseException as exc:
+        output_budget.set_failure_progress(
+            exc, completed_items=len(per_source_calls) + 1
+        )
+        # The calls that completed really did retrieve; publish them as a
+        # partial envelope so the failed attempt records what it read, also
+        # under the executor's backstop cancellation.
+        mapped_evidence.admit(failure_evidence(exc).rag_metadata)
+        partial = mapped_evidence.partial_payload()
+        if partial is not None:
+            attach_failure_evidence(exc, rag_metadata=partial)
+        raise
+
+
+async def _execute_one_source(
+    *,
+    source_number: int,
+    file_id: UUID,
+    step: RuntimeStep,
+    per_call_step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    prepared_step: PreparedAssistantStep,
+) -> PerSourceReaderCall:
+    started = time.perf_counter()
+    output = await complete_step_execution(
+        step=per_call_step,
+        run=run,
+        state=state,
+        prepared=prepared_step.prepared,
+        deps=replace(
+            prepared_step.deps,
+            mapped_call_context=MappedProviderCallProvenance(
+                execution_mode="per_source_reader",
+                source_index=source_number,
+                source_id=str(file_id),
+            ),
+        ),
+    )
+    elapsed_ms = int((time.perf_counter() - started) * 1000)
+    source_label = _raw_source_label(source_number, output.runtime_input_metadata)
+    try:
+        document = _extract_per_source_document(
+            output=output,
+            step_order=step.step_order,
+            source_number=source_number,
+            source_label=source_label,
+        )
+    except Exception as exc:
+        # This call retrieved before it failed validation, so its evidence
+        # travels with the error rather than dying with the local output.
+        carry_call_evidence(exc, output.rag_metadata)
+        raise
+    return PerSourceReaderCall(
+        source_number=source_number,
+        file_id=file_id,
+        source_label=source_label,
+        document=document,
+        output=output,
+        deps=prepared_step.deps,
+        elapsed_ms=elapsed_ms,
+    )
+
+
+async def _assemble_per_source_output(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    per_source_calls: list[PerSourceReaderCall],
+    mapped_rag_metadata: dict[str, Any] | None,
+) -> StepExecutionOutput:
+    first_output = per_source_calls[0].output
+    documents = [
+        _source_document_items(call)
+        for call in sorted(per_source_calls, key=lambda item: item.source_number)
+    ]
+    assembled_structured = {"documents": documents}
+    full_text = structured_output_json(assembled_structured)
+    runtime_metadata = _per_source_runtime_metadata(per_source_calls)
+    input_text = _per_source_input_text_summary(per_source_calls)
+    first_deps = per_source_calls[0].deps
+    input_payload_for_result: dict[str, Any] = {
+        "text": input_text,
+        "source_text": "",
+        "input_source": first_output.input_source,
+        "used_question_binding": first_output.used_question_binding,
+        "runtime_input": runtime_metadata,
+    }
+    try:
+        typed_output = await first_deps.process_typed_output(
+            full_text=full_text,
+            step=step,
+            run=run,
+        )
+        ensure_structured_output_allowed(
+            typed_output.structured_output,
+            ceiling_bytes=first_deps.max_inline_text_bytes,
+            completed_items=len(per_source_calls),
+            total_items=len(per_source_calls),
+        )
+    except TypedIOValidationException as exc:
+        raise attach_typed_failure_context(
+            exc,
+            input_payload_for_result=input_payload_for_result,
+            effective_prompt=first_output.effective_prompt,
+        ) from exc
+    persisted_text, generated_file_ids = await first_deps.apply_output_cap(
+        text=full_text,
+        run=run,
+        step=step,
+    )
+    diagnostics = [
+        StepDiagnostic(
+            code="runtime_input_per_source_reader",
+            message=(
+                f"Step {step.step_order}: executed document reader once per "
+                f"source ({len(per_source_calls)} source calls)."
+            ),
+            severity="info",
+        ),
+        *mapped_output_diagnostics(call.output for call in per_source_calls),
+        *typed_output.diagnostics,
+    ]
+    final_structured_output: dict[str, Any] | list[Any] | None = (
+        typed_output.structured_output
+    )
+    if final_structured_output is None:
+        final_structured_output = assembled_structured
+    return StepExecutionOutput(
+        input_text=input_text,
+        source_text="",
+        input_source=first_output.input_source,
+        used_question_binding=first_output.used_question_binding,
+        full_text=full_text,
+        persisted_text=persisted_text,
+        generated_file_ids=generated_file_ids,
+        tool_calls_metadata=_per_source_tool_metadata(per_source_calls),
+        num_tokens_input=sum_complete_token_counts(
+            call.output.num_tokens_input for call in per_source_calls
+        ),
+        num_tokens_output=sum_complete_token_counts(
+            call.output.num_tokens_output for call in per_source_calls
+        ),
+        effective_prompt=first_output.effective_prompt,
+        model_parameters_json={
+            **first_output.model_parameters_json,
+            "runtime_input_execution_mode": "per_source",
+            "per_source_call_count": len(per_source_calls),
+        },
+        requested_model=first_output.requested_model,
+        response_model=first_output.response_model,
+        provider=first_output.provider,
+        finish_reason=first_output.finish_reason,
+        provider_response_id=None,
+        contract_validation=first_output.contract_validation,
+        structured_output=final_structured_output,
+        diagnostics=diagnostics,
+        artifacts=typed_output.artifacts,
+        rag_metadata=mapped_rag_metadata,
+        transcription_metadata=None,
+        runtime_input_metadata=runtime_metadata,
+        raw_completion_text=None,
+    )
+
+
+def _documents_item_schema(
+    output_contract: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(output_contract, Mapping):
+        return None
+    properties = output_contract.get("properties")
+    if not isinstance(properties, Mapping):
+        return None
+    typed_properties = cast(Mapping[str, object], properties)
+    if tuple(typed_properties.keys()) != ("documents",):
+        return None
+    documents_schema = typed_properties["documents"]
+    if not isinstance(documents_schema, Mapping):
+        return None
+    typed_documents_schema = cast(Mapping[str, object], documents_schema)
+    if typed_documents_schema.get("type") != "array":
+        return None
+    item_schema = typed_documents_schema.get("items")
+    if not isinstance(item_schema, Mapping):
+        return None
+    typed_item_schema = cast(Mapping[str, object], item_schema)
+    if typed_item_schema.get("type") != "object":
+        return None
+    return dict(typed_item_schema)
+
+
+def _source_local_output_contract(
+    published_contract: dict[str, Any] | None,
+) -> dict[str, Any]:
+    projected = without_runtime_managed_source_json_fields(published_contract)
+    assert projected is not None
+    properties = projected.get("properties")
+    assert isinstance(properties, Mapping)
+    typed_properties = dict(cast(Mapping[str, Any], properties))
+    documents = typed_properties["documents"]
+    assert isinstance(documents, Mapping)
+    typed_documents = dict(cast(Mapping[str, Any], documents))
+    typed_documents.pop("minItems", None)
+    typed_documents.pop("maxItems", None)
+    typed_properties["documents"] = typed_documents
+    projected["properties"] = typed_properties
+    return projected
+
+
+def _provider_prompt_output_contract(
+    source_local_contract: dict[str, Any],
+) -> dict[str, Any]:
+    projected = deepcopy(source_local_contract)
+    properties = projected.get("properties")
+    assert isinstance(properties, Mapping)
+    typed_properties = dict(cast(Mapping[str, Any], properties))
+    documents = typed_properties["documents"]
+    assert isinstance(documents, Mapping)
+    typed_documents = dict(cast(Mapping[str, Any], documents))
+    typed_documents["description"] = PER_SOURCE_PROVIDER_DOCUMENTS_DESCRIPTION
+    typed_documents["minItems"] = 1
+    typed_documents["maxItems"] = 1
+    typed_properties["documents"] = typed_documents
+    projected["properties"] = typed_properties
+    return projected
+
+
+def _extract_per_source_document(
+    *,
+    output: StepExecutionOutput,
+    step_order: int,
+    source_number: int,
+    source_label: str,
+) -> dict[str, Any]:
+    structured_output = output.structured_output
+    if not isinstance(structured_output, dict):
+        raise TypedIOValidationException(
+            f"Step {step_order}: per-source reader source {source_number} returned "
+            "non-object JSON.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    documents = structured_output.get("documents")
+    if not isinstance(documents, list):
+        raise TypedIOValidationException(
+            f"Step output for source {source_number} must contain documents[].",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    typed_documents = cast(list[object], documents)
+    document_count = len(typed_documents)
+    if document_count != 1:
+        raise TypedIOValidationException(
+            f"Step {step_order}: per-source reader source {source_number} "
+            f"({source_label}) returned {document_count} documents; "
+            "expected exactly one.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    raw_document = typed_documents[0]
+    if not isinstance(raw_document, dict):
+        raise TypedIOValidationException(
+            f"Step output for source {source_number} documents[1] must be an object.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    return dict(cast(dict[str, Any], raw_document))
+
+
+def _source_document_items(call: PerSourceReaderCall) -> dict[str, Any]:
+    item = dict(call.document)
+    item["source_label"] = call.source_label
+    item["source_file_id"] = str(call.file_id)
+    item[RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD] = _source_extraction_warnings(call)
+    return item
+
+
+def _source_extraction_warnings(
+    call: PerSourceReaderCall,
+) -> list[TextExtractionWarning]:
+    file_metadata = _first_runtime_file_metadata(call.output.runtime_input_metadata)
+    raw_warnings = (
+        file_metadata.get(RUNTIME_SOURCE_EXTRACTION_WARNINGS_FIELD)
+        if file_metadata is not None
+        else None
+    )
+    if not isinstance(raw_warnings, list):
+        raise TypedIOValidationException(
+            f"Step output for source {call.source_number} has invalid extraction warnings.",
+            code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+        )
+    warnings: list[TextExtractionWarning] = []
+    for warning in cast(list[object], raw_warnings):
+        parsed_warning = parse_text_extraction_warning(warning)
+        if parsed_warning is None:
+            raise TypedIOValidationException(
+                f"Step output for source {call.source_number} has invalid extraction warnings.",
+                code=FlowApiErrorCode.TYPED_IO_CONTRACT_VIOLATION.value,
+            )
+        warnings.append(parsed_warning)
+    return warnings
+
+
+def _raw_source_label(
+    source_number: int,
+    runtime_input_metadata: dict[str, Any] | None,
+) -> str:
+    file_metadata = _first_runtime_file_metadata(runtime_input_metadata)
+    if file_metadata is not None:
+        raw_name = file_metadata.get("name")
+        if isinstance(raw_name, str):
+            printable_name = "".join(
+                char if char.isprintable() else " " for char in raw_name
+            )
+            file_name = " ".join(printable_name.split())
+            if file_name:
+                return _cap_source_label(file_name, source_number=source_number)
+    return f"Källa {source_number}"
+
+
+def _cap_source_label(label: str, *, source_number: int) -> str:
+    if len(label) <= PER_SOURCE_SOURCE_LABEL_MAX_CHARS:
+        return label
+    logger.info(
+        "flow_per_source_reader_source_label_truncated",
+        extra={
+            "source_number": source_number,
+            "source_label_chars": len(label),
+            "display_char_cap": PER_SOURCE_SOURCE_LABEL_MAX_CHARS,
+        },
+    )
+    return f"{label[: PER_SOURCE_SOURCE_LABEL_MAX_CHARS - 3].rstrip()}..."
+
+
+def _first_runtime_file_metadata(
+    runtime_input_metadata: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if not isinstance(runtime_input_metadata, dict):
+        return None
+    files = runtime_input_metadata.get("files")
+    if not isinstance(files, list) or not files:
+        return None
+    first_file = cast(list[object], files)[0]
+    return cast(dict[str, Any], first_file) if isinstance(first_file, dict) else None
+
+
+def _per_source_runtime_metadata(
+    per_source_calls: list[PerSourceReaderCall],
+) -> dict[str, Any]:
+    files = [
+        metadata
+        for call in per_source_calls
+        if (
+            metadata := _first_runtime_file_metadata(call.output.runtime_input_metadata)
+        )
+        is not None
+    ]
+    return {
+        "text": _per_source_input_text_summary(per_source_calls),
+        "file_ids": [str(call.file_id) for call in per_source_calls],
+        "files_count": len(per_source_calls),
+        "files": files,
+        "total_file_size": sum(
+            metadata["size"]
+            for metadata in files
+            if isinstance(metadata.get("size"), int)
+        ),
+        "extracted_text_length": sum(
+            _runtime_text_length(call.output.runtime_input_metadata)
+            for call in per_source_calls
+        ),
+        "input_format": _per_source_input_format(per_source_calls),
+        "capture_mode": "runtime_input_per_source",
+        "execution_mode": "per_source",
+        "concurrency": PER_SOURCE_READER_CONCURRENCY,
+        "per_source_calls": [
+            _per_source_call_metadata(call) for call in per_source_calls
+        ],
+    }
+
+
+def _runtime_text_length(runtime_input_metadata: dict[str, Any] | None) -> int:
+    if not isinstance(runtime_input_metadata, dict):
+        return 0
+    value = runtime_input_metadata.get("extracted_text_length")
+    return value if isinstance(value, int) else 0
+
+
+def _per_source_input_format(per_source_calls: list[PerSourceReaderCall]) -> str:
+    for call in per_source_calls:
+        metadata = call.output.runtime_input_metadata
+        if not isinstance(metadata, dict):
+            continue
+        input_format = metadata.get("input_format")
+        if isinstance(input_format, str) and input_format:
+            return input_format
+    return "document"
+
+
+def _per_source_call_metadata(call: PerSourceReaderCall) -> dict[str, Any]:
+    runtime_input_metadata = call.output.runtime_input_metadata
+    input_text = (
+        runtime_input_metadata.get("text")
+        if runtime_input_metadata is not None
+        else None
+    )
+    input_text_value = (
+        input_text if isinstance(input_text, str) else call.output.input_text
+    )
+    return {
+        "source_number": call.source_number,
+        "file_id": str(call.file_id),
+        "source_label": call.source_label,
+        "elapsed_ms": call.elapsed_ms,
+        "input_text_length": len(input_text_value),
+        "input_text_preview": input_text_value[:PER_SOURCE_METADATA_PREVIEW_CHARS],
+        "num_tokens_input": call.output.num_tokens_input,
+        "num_tokens_output": call.output.num_tokens_output,
+        "diagnostics": [
+            {
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+                "severity": diagnostic.severity,
+            }
+            for diagnostic in call.output.diagnostics
+        ],
+    }
+
+
+def _per_source_input_text_summary(per_source_calls: list[PerSourceReaderCall]) -> str:
+    return (
+        f"[per-source runtime input: {len(per_source_calls)} source calls; "
+        "see runtime_input.per_source_calls for model input previews]"
+    )
+
+
+def _per_source_tool_metadata(
+    per_source_calls: list[PerSourceReaderCall],
+) -> dict[str, Any]:
+    return {
+        "execution_mode": "per_source",
+        "sources": [
+            {
+                "source_number": call.source_number,
+                "file_id": str(call.file_id),
+                "source_label": call.source_label,
+                "tool_calls": call.output.tool_calls_metadata,
+            }
+            for call in per_source_calls
+        ],
+    }

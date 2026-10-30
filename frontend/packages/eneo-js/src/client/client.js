@@ -1,6 +1,7 @@
 /**
  * @typedef {Object} Client
  * @property {import('../types/fetch').EneoFetchFunction} fetch Typed fetch function for the Eneo backend.
+ * @property {import('../types/fetch').EneoBinaryFetchFunction} binaryFetch Typed fetch function for authenticated binary downloads.
  * @property {import('../types/fetch').EneoStreamFunction} stream Fetch function specifically for streaming answers from an assistant.
  * @property {import('../types/fetch').EneoXhrFunction} xhr
  * @property {import('../types/fetch').EneoDownloadFunction} download Typed request whose answer is a file, returned as a Blob.
@@ -10,6 +11,41 @@
 
 import { readEvents } from "./stream.js";
 import { xhr } from "./xhr.js";
+
+/** @typedef {string | number | boolean | null | undefined} QueryParameterValue */
+
+/**
+ * @param {unknown} value
+ * @returns {value is { message: string }}
+ */
+function hasReadableErrorMessage(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    "message" in value &&
+    typeof value.message === "string" &&
+    value.message.length > 0
+  );
+}
+
+/**
+ * @param {unknown} value
+ * @returns {boolean}
+ */
+function isRequestValidationResponse(value) {
+  return (
+    value !== null &&
+    typeof value === "object" &&
+    !Array.isArray(value) &&
+    "code" in value &&
+    value.code === "request_validation_error" &&
+    "eneo_error_code" in value &&
+    typeof value.eneo_error_code === "number" &&
+    "message" in value &&
+    typeof value.message === "string" &&
+    value.message.length > 0
+  );
+}
 
 /**
  * Creates a client to request eneo resources over a typesafe interface.
@@ -25,7 +61,19 @@ import { xhr } from "./xhr.js";
  */
 
 export function createClient(args) {
-  const version = "DEV"; // # Client version auto-updates when running the updater, do not edit this line.
+  if (
+    args.apiKey !== undefined &&
+    (typeof args.apiKey !== "string" || args.apiKey.trim().length === 0)
+  ) {
+    throw new TypeError("apiKey must be a non-empty string.");
+  }
+  if (
+    args.token !== undefined &&
+    (typeof args.token !== "string" || args.token.trim().length === 0)
+  ) {
+    throw new TypeError("token must be a non-empty string.");
+  }
+  const version = "DEV-20261011T175357Z"; // # Client version auto-updates when running the updater, do not edit this line.
   const baseUrl = args.baseUrl;
   const _fetch = args.fetch ?? fetch;
   const apiKeyHeaderName = args.apiKeyHeaderName?.trim() || "X-API-Key";
@@ -40,32 +88,65 @@ export function createClient(args) {
   }
 
   return {
-    fetch: async (endpoint, { method, params, requestBody }) => {
-      const url = parseUrl(baseUrl, endpoint, params);
+    fetch: async (endpoint, { method, params, requestBody, signal, headers }) => {
       const payload = parsePayload(requestBody);
       const httpMethod = String(method).toUpperCase();
+      let requestEndpoint = `${httpMethod}@${baseUrl}${endpoint}`;
 
       try {
+        const url = parseUrl(baseUrl, endpoint, params);
+        requestEndpoint = `${httpMethod}@${url}`;
         const response = await _fetch(url, {
           method: httpMethod,
           headers: {
             ...auth,
-            ...payload.header
+            ...payload.header,
+            ...parseHeaderParams(params),
+            ...headers
           },
           body: payload.body,
+          signal,
           credentials: "include" // Required for cookies (audit sessions, etc.)
         });
-        /** @type {any} We need to cast this through any – we just got to hope for the correctness of the schema... */
+        /** @type {any} The generated fetch type owns the response shape; runtime validation belongs at the API boundary. */
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` }, args.onError);
+        EneoError.throw(error, { endpoint: requestEndpoint }, args.onError);
+        throw error;
+      }
+    },
+
+    binaryFetch: async (endpoint, { method, params, requestBody, signal, headers }) => {
+      const payload = parsePayload(requestBody);
+      const httpMethod = String(method).toUpperCase();
+      let requestEndpoint = `${httpMethod}@${baseUrl}${endpoint}`;
+
+      try {
+        const url = parseUrl(baseUrl, endpoint, params);
+        requestEndpoint = `${httpMethod}@${url}`;
+        const response = await _fetch(url, {
+          method: httpMethod,
+          headers: {
+            ...auth,
+            ...payload.header,
+            ...parseHeaderParams(params),
+            ...headers
+          },
+          body: payload.body,
+          signal,
+          credentials: "include"
+        });
+        return await parseBinaryResponse(response);
+      } catch (error) {
+        EneoError.throw(error, { endpoint: requestEndpoint }, args.onError);
+        throw error;
       }
     },
 
     stream: async (endpoint, { params, requestBody }, callbacks, abortController) => {
-      const url = parseUrl(baseUrl, endpoint, params);
       const payload = parsePayload(requestBody);
+      let requestEndpoint = `STREAM@${baseUrl}${endpoint}`;
       const headers = { ...auth, ...payload.header, accept: "text/event-stream" };
       const body = payload.body;
 
@@ -76,6 +157,8 @@ export function createClient(args) {
       };
 
       try {
+        const url = parseUrl(baseUrl, endpoint, params);
+        requestEndpoint = `STREAM@${url}`;
         const response = await _fetch(url, {
           body,
           headers,
@@ -90,16 +173,18 @@ export function createClient(args) {
           onMessage
         });
       } catch (error) {
-        EneoError.throw(error, { endpoint: `STREAM@${url}` }, args.onError);
+        EneoError.throw(error, { endpoint: requestEndpoint }, args.onError);
       }
     },
 
     xhr: async (endpoint, { method, params, requestBody }, callbacks, abortController) => {
-      const url = parseUrl(baseUrl, endpoint, params);
       const payload = parsePayload(requestBody);
       const httpMethod = String(method).toUpperCase();
+      let requestEndpoint = `${httpMethod}@${baseUrl}${endpoint}`;
 
       try {
+        const url = parseUrl(baseUrl, endpoint, params);
+        requestEndpoint = `${httpMethod}@${url}`;
         const response = await xhr(
           url,
           {
@@ -113,11 +198,11 @@ export function createClient(args) {
           callbacks,
           abortController
         );
-        /** @type {any} We need to cast this through any – we just got to hope for the correctness of the schema... */
+        /** @type {any} The generated fetch type owns the response shape; runtime validation belongs at the API boundary. */
         const parsed = await parseResponse(response);
         return parsed;
       } catch (error) {
-        EneoError.throw(error, { endpoint: `${httpMethod}@${url}` }, args.onError);
+        EneoError.throw(error, { endpoint: requestEndpoint }, args.onError);
       }
     },
 
@@ -155,7 +240,7 @@ export function createClient(args) {
  * Expand parameters and endpoint into a full url
  * @param baseUrl {string} Base Url of the eneo instance
  * @param endpoint {string} An endpoint with {param} placeholdes
- * @param params {{query?: Record<string, string>, path?: Record<string, string>} | undefined} A dictionary of {params} to replace with their respective values
+ * @param params {{query?: Record<string, QueryParameterValue | readonly QueryParameterValue[]>, path?: Record<string, string>} | undefined} A dictionary of {params} to replace with their respective values
  * @returns {string} Returns the fully expanded url
  */
 function parseUrl(baseUrl, endpoint, params) {
@@ -163,12 +248,10 @@ function parseUrl(baseUrl, endpoint, params) {
 
   if (params?.path) {
     Object.entries(params.path).forEach(([param, value]) => {
-      if (value === undefined || value === null || value === "undefined" || value === "null") {
-        throw new Error(
-          `Missing path parameter "${param}" for endpoint "${endpoint}" (got ${value === undefined ? "undefined" : JSON.stringify(value)}).`
-        );
+      if (value === undefined || value === null || value === "" || value === "undefined") {
+        throw new Error(`Cannot build API request: path parameter "${param}" is missing.`);
       }
-      endpoint = endpoint.replace(`{${param}}`, value);
+      endpoint = endpoint.replace(`{${param}}`, String(value));
     });
   }
 
@@ -176,9 +259,12 @@ function parseUrl(baseUrl, endpoint, params) {
 
   if (params?.query) {
     Object.entries(params.query).forEach(([param, value]) => {
-      if (value !== undefined && value !== null) {
-        url.searchParams.append(param, value);
-      }
+      const values = Array.isArray(value) ? value : [value];
+      values.forEach((queryValue) => {
+        if (queryValue !== undefined && queryValue !== null) {
+          url.searchParams.append(param, String(queryValue));
+        }
+      });
     });
   }
 
@@ -186,7 +272,24 @@ function parseUrl(baseUrl, endpoint, params) {
 }
 
 /**
- * Parse a requestbody into a payload
+ * @param {{header?: Record<string, string | number | boolean | null | undefined>} | undefined} params
+ * @returns {Record<string, string> | undefined}
+ */
+function parseHeaderParams(params = undefined) {
+  if (!params?.header) {
+    return undefined;
+  }
+
+  return Object.entries(params.header).reduce((headers, [name, value]) => {
+    if (value !== undefined && value !== null) {
+      headers[name] = String(value);
+    }
+    return headers;
+  }, /** @type {Record<string, string>} */ ({}));
+}
+
+/**
+ * Parse a request body into a payload.
  * @param requestBody {Record<string, any> | undefined} Object of Content-Type and payload, e.g. {"application/json": {...}}
  * @returns Returns appropriate header and serialized payload
  */
@@ -215,7 +318,7 @@ function parsePayload(requestBody = undefined) {
 }
 
 /**
- * Parse the Resposes body
+ * Parse the response body.
  *  - will return parsed json if body is present
  *  - will return undefined if body is empty
  * Throws error if body is returned but cannot be parsed or reponse is not ok
@@ -229,7 +332,7 @@ async function parseResponse(response) {
   try {
     text = await response.text(); // Parse it as text
     if (text !== "") {
-      parsed = JSON.parse(text); //
+      parsed = JSON.parse(text);
     }
   } catch (err) {
     throw new PartialError(
@@ -248,6 +351,43 @@ async function parseResponse(response) {
   }
 
   throw new PartialError("RESPONSE", response.status, parsed, response.headers);
+}
+
+/**
+ * Parse a successful binary response without losing the authenticated error
+ * handling path used by JSON endpoints.
+ * @param response {Response} `Response` from fetch
+ * @returns {Promise<import('../types/fetch').EneoBinaryResponse>}
+ * @throws {PartialError}
+ */
+async function parseBinaryResponse(response) {
+  if (!response.ok) {
+    await parseResponse(response);
+  }
+
+  const contentDisposition = response.headers.get("Content-Disposition") ?? undefined;
+  return {
+    blob: await response.blob(),
+    contentType: response.headers.get("Content-Type") ?? "application/octet-stream",
+    filename: getContentDispositionFilename(contentDisposition),
+    headers: response.headers
+  };
+}
+
+/**
+ * @param {string | undefined} contentDisposition
+ * @returns {string | undefined}
+ */
+function getContentDispositionFilename(contentDisposition) {
+  if (!contentDisposition) {
+    return undefined;
+  }
+  const utf8Match = /filename\*=UTF-8''([^;]+)/i.exec(contentDisposition);
+  if (utf8Match?.[1]) {
+    return decodeURIComponent(utf8Match[1].replaceAll("+", "%20"));
+  }
+  const asciiMatch = /filename="?([^";]+)"?/i.exec(contentDisposition);
+  return asciiMatch?.[1];
 }
 
 /**
@@ -377,14 +517,23 @@ export class EneoError extends Error {
    * Get a message that can be presented to users, ie. in an alert
    */
   getReadableMessage() {
-    if (this.status === 422) {
-      // A 422 does not guarantee FastAPI's `detail` array: an unparseable body
-      // or a gateway-generated response leaves it missing, and reading through
-      // it would throw inside whatever is already reporting this error.
-      const first = Array.isArray(this.response?.detail) ? this.response.detail[0] : undefined;
-      return first?.ctx?.reason ?? first?.msg ?? "A validation error occured.";
+    if (this.status !== 422) {
+      return this.message;
     }
-    return this.message;
+
+    const response = this.response;
+    if (!isRequestValidationResponse(response)) {
+      return "A validation error occurred.";
+    }
+
+    const generalErrorMessage = Array.isArray(response?.details?.errors)
+      ? response.details.errors.find(hasReadableErrorMessage)?.message
+      : undefined;
+    if (generalErrorMessage) {
+      return generalErrorMessage;
+    }
+
+    return response.message;
   }
 
   /**

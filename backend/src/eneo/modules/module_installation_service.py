@@ -1,7 +1,14 @@
+from uuid import UUID
+
 from eneo.audit.application.audit_service import AuditService
 from eneo.audit.domain.action_types import ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.entity_types import EntityType
+from eneo.authentication.auth_models import (
+    ApiKeyListCursor,
+    ApiKeyListResponse,
+    ApiKeyV2,
+)
 from eneo.main.exceptions import NotFoundException
 from eneo.modules.module import (
     ModuleCreate,
@@ -40,6 +47,26 @@ class ModuleInstallationService:
 
     async def list_installations(self) -> list[ModuleInstallation]:
         return await self.module_repo.get_installations(self.user.tenant_id)
+
+    async def list_service_keys(
+        self,
+        *,
+        limit: int,
+        cursor: ApiKeyListCursor | None,
+        search: str | None,
+    ) -> ApiKeyListResponse:
+        return await self.module_auth_broker.list_client_config_service_keys(
+            tenant_id=self.user.tenant_id,
+            limit=limit,
+            cursor=cursor,
+            search=search,
+        )
+
+    async def get_service_key(self, *, service_key_id: UUID) -> ApiKeyV2 | None:
+        return await self.module_auth_broker.get_client_config_service_key(
+            tenant_id=self.user.tenant_id,
+            service_key_id=service_key_id,
+        )
 
     async def install(
         self, *, module_key: str, config: ModuleInstallationConfig

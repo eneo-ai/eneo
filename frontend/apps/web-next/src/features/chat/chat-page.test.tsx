@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { composerValue, typeIntoComposer } from "@/test/composer";
 import { renderInApp } from "@/test/render";
 import { setRoute } from "@/test/navigation";
 import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
@@ -553,7 +554,7 @@ describe("ChatPage while an answer streams", () => {
     expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
     // One h1 (the start state's), the question back in the composer, focus with it.
     expect(h1Texts()).toEqual(["Upphandlingsassistenten"]);
-    expect(composer().value).toBe("Vilken gräns gäller?");
+    expect(composerValue(composer())).toBe("Vilken gräns gäller?");
     await waitFor(() => expect(document.activeElement).toBe(composer()));
   });
 });

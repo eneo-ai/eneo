@@ -1,0 +1,508 @@
+from __future__ import annotations
+
+from copy import deepcopy
+
+import pytest
+
+from eneo.flows.flow_metadata import (
+    FlowMetadata,
+    FlowMetadataParseMode,
+    parse_flow_metadata,
+)
+from eneo.flows.flow_run_input_payload import normalize_and_validate_flow_run_payload
+from eneo.main.exceptions import BadRequestException
+
+
+def _metadata(fields: list[dict[str, object]]) -> FlowMetadata:
+    return parse_flow_metadata(
+        {"form_schema": {"fields": fields}},
+        mode=FlowMetadataParseMode.PERSISTED_READ,
+    )
+
+
+def _empty_metadata() -> FlowMetadata:
+    return parse_flow_metadata(None, mode=FlowMetadataParseMode.PERSISTED_READ)
+
+
+@pytest.mark.parametrize(
+    "metadata",
+    [
+        None,
+        _empty_metadata(),
+        _metadata([]),
+    ],
+)
+def test_payload_passthrough_when_form_schema_missing_or_empty(
+    metadata: FlowMetadata | None,
+) -> None:
+    payload = {"note": "raw payload value", "file_ids": ["abc"]}
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata,
+        payload=payload,
+    )
+
+    assert normalized == payload
+
+
+def test_missing_required_field_emits_machine_readable_error_contract() -> None:
+    metadata = _metadata(
+        [{"name": "case_id", "type": "text", "required": True, "order": 1}]
+    )
+
+    with pytest.raises(
+        BadRequestException, match=r"Missing required input field 'case_id'\."
+    ) as exc_info:
+        normalize_and_validate_flow_run_payload(metadata=metadata, payload={})
+
+    assert exc_info.value.code == "flow_input_required_field_missing"
+    assert type(exc_info.value.code) is str
+    assert exc_info.value.context == {
+        "field_name": "case_id",
+        "field_type": "text",
+    }
+
+
+@pytest.mark.parametrize(
+    ("field_type", "value", "message", "code"),
+    [
+        (
+            "text",
+            None,
+            r"Missing required input field 'field'\.",
+            "flow_input_required_field_missing",
+        ),
+        (
+            "text",
+            "   ",
+            r"Field 'field' cannot be empty\.",
+            "flow_input_required_field_empty",
+        ),
+        (
+            "number",
+            None,
+            r"Missing required input field 'field'\.",
+            "flow_input_required_field_missing",
+        ),
+        (
+            "number",
+            "   ",
+            r"Field 'field' cannot be empty\.",
+            "flow_input_required_field_empty",
+        ),
+        (
+            "date",
+            None,
+            r"Missing required input field 'field'\.",
+            "flow_input_required_field_missing",
+        ),
+        (
+            "date",
+            "   ",
+            r"Field 'field' cannot be empty\.",
+            "flow_input_required_field_empty",
+        ),
+        (
+            "select",
+            None,
+            r"Missing required input field 'field'\.",
+            "flow_input_required_field_missing",
+        ),
+        (
+            "select",
+            "   ",
+            r"Field 'field' cannot be empty\.",
+            "flow_input_required_field_empty",
+        ),
+        (
+            "multiselect",
+            None,
+            r"Missing required input field 'field'\.",
+            "flow_input_required_field_missing",
+        ),
+        (
+            "multiselect",
+            [],
+            r"Field 'field' must contain at least one value\.",
+            "flow_input_required_field_empty",
+        ),
+        (
+            "multiselect",
+            " , ",
+            r"Field 'field' must contain at least one value\.",
+            "flow_input_required_field_empty",
+        ),
+    ],
+)
+def test_required_field_rejects_none_and_blank(
+    field_type: str,
+    value: object,
+    message: str,
+    code: str,
+) -> None:
+    field: dict[str, object] = {
+        "name": "field",
+        "type": field_type,
+        "required": True,
+        "order": 1,
+    }
+    if field_type in {"select", "multiselect"}:
+        field["options"] = ["a", "b"]
+    metadata = _metadata([field])
+
+    with pytest.raises(BadRequestException, match=message) as exc_info:
+        normalize_and_validate_flow_run_payload(
+            metadata=metadata,
+            payload={"field": value},
+        )
+
+    assert exc_info.value.code == code
+    assert exc_info.value.context == {
+        "field_name": "field",
+        "field_type": field_type,
+    }
+
+
+@pytest.mark.parametrize("legacy_type", ["string", "email", "textarea"])
+def test_legacy_text_types_are_normalized_to_text(legacy_type: str) -> None:
+    metadata = _metadata(
+        [{"name": "note", "type": legacy_type, "required": True, "order": 1}]
+    )
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata,
+        payload={"note": 123},
+    )
+
+    assert normalized == {"note": "123"}
+
+
+def test_unknown_fields_are_preserved_and_payload_is_not_mutated() -> None:
+    metadata = _metadata(
+        [{"name": "patient", "type": "text", "required": True, "order": 1}]
+    )
+    payload = {"patient": 123, "trace_id": "abc-123"}
+    original_payload = deepcopy(payload)
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata,
+        payload=payload,
+    )
+
+    assert normalized == {"patient": "123", "trace_id": "abc-123"}
+    assert payload == original_payload
+
+
+@pytest.mark.parametrize(
+    ("raw_value", "expected"),
+    [
+        ("1e3", 1000.0),
+        ("2E-2", 0.02),
+    ],
+)
+def test_number_field_accepts_scientific_notation(
+    raw_value: str, expected: float
+) -> None:
+    metadata = _metadata(
+        [{"name": "attempts", "type": "number", "required": True, "order": 1}]
+    )
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata,
+        payload={"attempts": raw_value},
+    )
+
+    assert normalized == {"attempts": expected}
+
+
+@pytest.mark.parametrize(
+    "raw_value",
+    [
+        "1e309",
+        float("inf"),
+        float("-inf"),
+        float("nan"),
+    ],
+)
+def test_number_field_rejects_non_finite_values(raw_value: object) -> None:
+    metadata = _metadata(
+        [{"name": "attempts", "type": "number", "required": True, "order": 1}]
+    )
+
+    with pytest.raises(
+        BadRequestException, match=r"Field 'attempts' must be a finite number\."
+    ) as exc_info:
+        normalize_and_validate_flow_run_payload(
+            metadata=metadata,
+            payload={"attempts": raw_value},
+        )
+
+    assert exc_info.value.code == "flow_input_invalid_number"
+    assert exc_info.value.context == {
+        "field_name": "attempts",
+        "field_type": "number",
+    }
+
+
+_OPTIONAL_FIELDS: list[dict[str, object]] = [
+    {"name": "note", "type": "text"},
+    {"name": "attempts", "type": "number"},
+    {"name": "visit_date", "type": "date"},
+    {"name": "priority", "type": "select", "options": ["low", "high"]},
+    {"name": "tags", "type": "multiselect", "options": ["care", "legal"]},
+    {"name": "names", "type": "list"},
+]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {},
+        {str(field["name"]): None for field in _OPTIONAL_FIELDS},
+        {
+            "note": "",
+            "attempts": "",
+            "visit_date": "",
+            "priority": "",
+            "tags": [],
+            "names": [],
+        },
+    ],
+    ids=["omitted", "null", "sent_empty"],
+)
+def test_optional_fields_left_out_or_null_read_as_their_empty_input(
+    payload: dict[str, object],
+) -> None:
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=_metadata(_OPTIONAL_FIELDS), payload=payload
+    )
+
+    assert normalized == {
+        "note": "",
+        "attempts": None,
+        "visit_date": None,
+        "priority": None,
+        "tags": [],
+        "names": [],
+    }
+
+
+def test_optional_select_empty_string_normalizes_to_none() -> None:
+    metadata = _metadata(
+        [
+            {
+                "name": "priority",
+                "type": "select",
+                "required": False,
+                "order": 1,
+                "options": ["low", "medium", "high"],
+            }
+        ]
+    )
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata,
+        payload={"priority": "   "},
+    )
+
+    assert normalized == {"priority": None}
+
+
+def test_multiselect_string_payload_is_split_and_trimmed() -> None:
+    metadata = _metadata(
+        [
+            {
+                "name": "tags",
+                "type": "multiselect",
+                "required": True,
+                "order": 1,
+                "options": ["care", "follow-up", "legal"],
+            }
+        ]
+    )
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata,
+        payload={"tags": " care, follow-up "},
+    )
+
+    assert normalized == {"tags": ["care", "follow-up"]}
+
+
+def test_optional_number_empty_string_normalizes_to_none() -> None:
+    metadata = _metadata(
+        [{"name": "attempts", "type": "number", "required": False, "order": 1}]
+    )
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata,
+        payload={"attempts": "   "},
+    )
+
+    assert normalized == {"attempts": None}
+
+
+def test_optional_date_allows_empty_string_and_normalizes_to_none() -> None:
+    metadata = _metadata(
+        [{"name": "visit_date", "type": "date", "required": False, "order": 1}]
+    )
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata,
+        payload={"visit_date": "   "},
+    )
+
+    assert normalized == {"visit_date": None}
+
+
+@pytest.mark.parametrize(
+    ("field", "payload", "expected_code", "expected_context", "message"),
+    [
+        (
+            {
+                "name": "priority",
+                "type": "select",
+                "required": True,
+                "order": 1,
+                "options": ["low", "medium", "high"],
+            },
+            {"priority": 5},
+            "flow_input_type_mismatch",
+            {"field_name": "priority", "field_type": "select"},
+            "must be a string",
+        ),
+        (
+            {
+                "name": "priority",
+                "type": "select",
+                "required": True,
+                "order": 1,
+                "options": ["low", "medium", "high"],
+            },
+            {"priority": "urgent"},
+            "flow_input_invalid_option",
+            {"field_name": "priority", "field_type": "select"},
+            "must be one of the configured options",
+        ),
+        (
+            {
+                "name": "tags",
+                "type": "multiselect",
+                "required": True,
+                "order": 1,
+                "options": ["care", "follow-up", "legal"],
+            },
+            {"tags": 42},
+            "flow_input_invalid_multiselect_type",
+            {"field_name": "tags", "field_type": "multiselect"},
+            "must be an array of strings",
+        ),
+        (
+            {
+                "name": "tags",
+                "type": "multiselect",
+                "required": True,
+                "order": 1,
+                "options": ["care", "follow-up", "legal"],
+            },
+            {"tags": ["care", 42]},
+            "flow_input_invalid_multiselect_value",
+            {"field_name": "tags", "field_type": "multiselect"},
+            "must contain only string options",
+        ),
+        (
+            {
+                "name": "tags",
+                "type": "multiselect",
+                "required": True,
+                "order": 1,
+                "options": ["care", "follow-up", "legal"],
+            },
+            {"tags": ["care", "unknown"]},
+            "flow_input_invalid_option",
+            {"field_name": "tags", "field_type": "multiselect"},
+            "contains invalid option values",
+        ),
+        (
+            {"name": "attempts", "type": "number", "required": True, "order": 1},
+            {"attempts": True},
+            "flow_input_invalid_number",
+            {"field_name": "attempts", "field_type": "number"},
+            "must be a valid number",
+        ),
+        (
+            {"name": "attempts", "type": "number", "required": True, "order": 1},
+            {"attempts": "two"},
+            "flow_input_invalid_number",
+            {"field_name": "attempts", "field_type": "number"},
+            "must be a valid number",
+        ),
+        (
+            {"name": "visit_date", "type": "date", "required": True, "order": 1},
+            {"visit_date": "2026/03/05"},
+            "flow_input_invalid_date",
+            {"field_name": "visit_date", "field_type": "date"},
+            "must be a valid ISO date",
+        ),
+    ],
+)
+def test_field_validation_errors_emit_machine_readable_code_and_context(
+    field: dict[str, object],
+    payload: dict[str, object],
+    expected_code: str,
+    expected_context: dict[str, str],
+    message: str,
+) -> None:
+    metadata = _metadata([field])
+
+    with pytest.raises(BadRequestException, match=message) as exc_info:
+        normalize_and_validate_flow_run_payload(
+            metadata=metadata,
+            payload=payload,
+        )
+
+    assert exc_info.value.code == expected_code
+    assert exc_info.value.context == expected_context
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        ["Anna", " Bo ", "Anna", "", "Cid"],
+        "Anna, Bo; Anna\nCid",
+    ],
+)
+def test_list_field_accepts_array_or_delimited_string(raw: object) -> None:
+    metadata = _metadata([{"name": "names", "type": "list", "required": True}])
+
+    normalized = normalize_and_validate_flow_run_payload(
+        metadata=metadata, payload={"names": raw}
+    )
+
+    assert normalized == {"names": ["Anna", "Bo", "Cid"]}
+
+
+def test_list_field_rejects_non_string_items_and_non_list_values() -> None:
+    metadata = _metadata([{"name": "names", "type": "list"}])
+
+    with pytest.raises(BadRequestException) as value_error:
+        normalize_and_validate_flow_run_payload(
+            metadata=metadata, payload={"names": ["Anna", 1]}
+        )
+    assert value_error.value.code == "flow_input_invalid_list_value"
+
+    with pytest.raises(BadRequestException) as type_error:
+        normalize_and_validate_flow_run_payload(
+            metadata=metadata, payload={"names": {"a": 1}}
+        )
+    assert type_error.value.code == "flow_input_invalid_list_type"
+
+
+def test_required_list_field_rejects_empty_values() -> None:
+    metadata = _metadata([{"name": "names", "type": "list", "required": True}])
+
+    with pytest.raises(BadRequestException) as error:
+        normalize_and_validate_flow_run_payload(
+            metadata=metadata, payload={"names": " , ;"}
+        )
+    assert error.value.code == "flow_input_required_field_empty"

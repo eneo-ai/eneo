@@ -804,7 +804,7 @@ async def test_live_redis_outage_and_queue_loss_preserve_accepted_crawls(
     from arq.connections import RedisSettings
     from arq.jobs import JobStatus
     from redis.exceptions import ConnectionError as RedisConnectionError
-    from testcontainers.redis import RedisContainer
+    from testcontainers.community.redis import RedisContainer
 
     from eneo.jobs.job_manager import CRAWLER_QUEUE_NAME, JobManager
     from eneo.jobs.job_serialization import deserialize_job, serialize_job

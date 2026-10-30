@@ -1,20 +1,41 @@
 """Tests for FileProtocol limits from the immutable upload-admission snapshot."""
 
+import asyncio
+import os
+import shutil
+import subprocess
+import threading
+import time
 from dataclasses import replace
 from io import BytesIO
 from pathlib import Path
+from tempfile import SpooledTemporaryFile
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import UploadFile
 
+from eneo.files import audio
 from eneo.files import file_protocol as file_protocol_module
-from eneo.files.file_models import FileContentVariant
-from eneo.files.file_protocol import FileProtocol
+from eneo.files import file_size_service as file_size_module
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_protocol import FileProtocol, upload_limit
+from eneo.files.file_size_service import FileSizeService
+from eneo.files.text import (
+    PdfExtractionLimitExceeded,
+    PdfExtractionLimits,
+    TextExtractor,
+)
+from eneo.main.config import get_settings
 from eneo.main.exceptions import FileTooLargeException
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
+from tests.unittests.files.test_pdf_extraction_limits import (
+    _hanging_child,
+    _write_pdf,
+    record_spawned_pids,
+)
 
 # ── Fake settings ────────────────────────────────────────────────────────
 
@@ -63,10 +84,12 @@ def patch_settings(monkeypatch):
 def protocol(tmp_path):
     file_size_service = MagicMock()
 
-    # save_file_to_disk returns a real temp file path
     async def fake_save(file):
         dest = tmp_path / "uploaded"
-        dest.write_bytes(b"x")
+        position = file.tell()
+        file.seek(0)
+        dest.write_bytes(file.read())
+        file.seek(position)
         return str(dest)
 
     file_size_service.save_file_to_disk = fake_save
@@ -85,7 +108,7 @@ def protocol(tmp_path):
     )
 
 
-def _make_upload(content_type: str, size: int) -> UploadFile:
+def _make_upload(content_type: str, size: int) -> tuple[UploadFile, int]:
     """Create an UploadFile with a file object that reports the given size."""
     data = BytesIO(b"x" * min(size, 1024))  # don't allocate huge buffers
     upload = UploadFile(
@@ -98,12 +121,148 @@ async def _content_bytes(content) -> bytes:
     return b"".join([chunk async for chunk in content.chunks])
 
 
-async def _prepare(protocol: FileProtocol, upload: UploadFile):
+@pytest.mark.asyncio
+@pytest.mark.parametrize("rolled_to_disk", [False, True])
+@pytest.mark.parametrize("position", [17, None])
+async def test_document_preparation_preserves_all_bytes_after_prior_read(
+    tmp_path, monkeypatch, rolled_to_disk, position
+):
+    monkeypatch.setattr(
+        file_size_module,
+        "get_settings",
+        lambda: SimpleNamespace(upload_tmp_dir=tmp_path),
+    )
+    payload = b"PK\x03\x04" + b"document bytes" * 100
+    stream = SpooledTemporaryFile(max_size=1 if rolled_to_disk else len(payload) * 2)
+    stream.write(payload)
+    stream.seek(len(payload) if position is None else position)
+    upload = UploadFile(file=stream, filename="eneo-word-template(1).docx")
+    real_protocol = FileProtocol(FileSizeService(), MagicMock(), MagicMock())
+
+    async with real_protocol.prepare_document_upload(
+        upload, upload_admission_snapshot=_UPLOAD_ADMISSION
+    ) as prepared:
+        assert await _content_bytes(prepared.contents[0]) == payload
+    assert list(tmp_path.iterdir()) == []
+
+
+async def _prepare(protocol: FileProtocol, upload: UploadFile, *, pdf_limits=None):
     async with protocol.prepare_upload(
         upload,
         upload_admission_snapshot=_UPLOAD_ADMISSION,
+        pdf_limits=pdf_limits,
     ) as prepared:
         return prepared
+
+
+@pytest.mark.asyncio
+async def test_non_flow_pdf_upload_ignores_flow_ceilings(
+    protocol, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(get_settings(), "flow_pdf_max_pages", 1)
+    monkeypatch.setattr(get_settings(), "flow_pdf_max_extracted_bytes", 1)
+    protocol.text_extractor = TextExtractor()
+    payload = _write_pdf(tmp_path / "source.pdf", 2).read_bytes()
+    upload = UploadFile(
+        file=BytesIO(payload),
+        filename="source.pdf",
+        headers={"content-type": "application/pdf"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(payload)
+
+    prepared = await _prepare(protocol, upload)
+
+    assert (
+        await _content_bytes(prepared.contents[1])
+        == "[PAGE 1]\nå\n\n[PAGE 2]\nå".encode()
+    )
+
+
+@pytest.mark.asyncio
+async def test_pdf_wait_keeps_request_loop_responsive(protocol, tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        TextExtractor, "_extract_pdf_in_child", staticmethod(_hanging_child)
+    )
+    protocol.text_extractor = TextExtractor()
+    pdf = _write_pdf(tmp_path / "source.pdf", 1)
+    payload = pdf.read_bytes()
+    upload = UploadFile(
+        file=BytesIO(payload),
+        filename="source.pdf",
+        headers={"content-type": "application/pdf"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(payload)
+    spawned_pids = record_spawned_pids(monkeypatch)
+    ticks = 0
+    finished = asyncio.Event()
+
+    async def heartbeat():
+        nonlocal ticks
+        while not finished.is_set():
+            ticks += 1
+            await asyncio.sleep(0.02)
+
+    pulse = asyncio.create_task(heartbeat())
+    await asyncio.sleep(0)
+    started = time.monotonic()
+    try:
+        with pytest.raises(PdfExtractionLimitExceeded) as caught:
+            await _prepare(
+                protocol, upload, pdf_limits=PdfExtractionLimits(10, 1024, 2)
+            )
+    finally:
+        finished.set()
+        await pulse
+
+    assert caught.value.limit == "seconds"
+    assert caught.value.ceiling == 2
+    assert 2 <= time.monotonic() - started < 3.5
+    assert ticks >= 20
+    assert not (tmp_path / "uploaded").exists()
+    # The pid comes from the parent: under load the parser may not reach a
+    # page before the 2 s deadline, so it never writes one itself.
+    [pid] = spawned_pids
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+@pytest.mark.asyncio
+async def test_cancelled_pdf_upload_kills_child_and_cleans_up(
+    protocol, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        TextExtractor, "_extract_pdf_in_child", staticmethod(_hanging_child)
+    )
+    protocol.text_extractor = TextExtractor()
+    payload = _write_pdf(tmp_path / "source.pdf", 1).read_bytes()
+    upload = UploadFile(
+        file=BytesIO(payload),
+        filename="source.pdf",
+        headers={"content-type": "application/pdf"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(payload)
+    spawned_pids = record_spawned_pids(monkeypatch)
+    # Cancel once the parser is started, well before its deadline: a spawned
+    # parser needs seconds to start under load and may never reach a page.
+    task = asyncio.create_task(
+        _prepare(protocol, upload, pdf_limits=PdfExtractionLimits(10, 1024, 60))
+    )
+    try:
+        async with asyncio.timeout(30):
+            while not spawned_pids:
+                await asyncio.sleep(0.01)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+    assert not (tmp_path / "uploaded").exists()
+    [pid] = spawned_pids
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
 
 
 @pytest.mark.asyncio
@@ -177,6 +336,54 @@ async def test_prepare_image_keeps_original_separate_from_model_input(
 
 
 @pytest.mark.asyncio
+async def test_prepare_image_reads_and_downscales_off_the_event_loop(
+    protocol, tmp_path, monkeypatch
+):
+    """Decoding a photo takes about 0.1 s of CPU; on the loop it stalls every
+    request and stream the worker serves."""
+    original = b"exact uploaded image"
+    upload = UploadFile(
+        file=BytesIO(original),
+        filename="photo.png",
+        headers={"content-type": "image/png"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(original)
+
+    async def save_original(_file):
+        path = tmp_path / "photo.png"
+        path.write_bytes(original)
+        return str(path)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+    loop_thread = threading.get_ident()
+    threads: dict[str, int] = {}
+
+    def extract(*_args):
+        threads["extract"] = threading.get_ident()
+        return b"image-bytes"
+
+    def downscale(blob, mimetype):
+        threads["downscale"] = threading.get_ident()
+        return SimpleNamespace(blob=blob, mimetype=mimetype)
+
+    protocol.image_extractor.extract.side_effect = extract
+    monkeypatch.setattr(file_protocol_module, "downscale_image", downscale)
+
+    async with protocol.prepare_upload(
+        upload,
+        upload_admission_snapshot=_UPLOAD_ADMISSION,
+    ) as prepared:
+        by_variant = {content.variant: content for content in prepared.contents}
+        assert (
+            await _content_bytes(by_variant[FileContentVariant.MODEL_INPUT])
+            == b"image-bytes"
+        )
+
+    assert threads.keys() == {"extract", "downscale"}
+    assert loop_thread not in threads.values()
+
+
+@pytest.mark.asyncio
 async def test_prepare_audio_preserves_exact_original(protocol, tmp_path):
     original = b"exact audio bytes"
     upload = UploadFile(
@@ -203,6 +410,149 @@ async def test_prepare_audio_preserves_exact_original(protocol, tmp_path):
         assert await _content_bytes(content) == original
 
 
+async def _prepare_measured_audio(protocol, tmp_path, monkeypatch, *, decoded):
+    upload = UploadFile(
+        file=BytesIO(b"audio"),
+        filename="meeting.webm",
+        headers={"content-type": "audio/webm"},
+    )
+    protocol.file_size_service.get_file_size.return_value = 5
+    path = tmp_path / "meeting.webm"
+
+    async def save_original(_file):
+        path.write_bytes(b"audio")
+        return str(path)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+    decodes: list[audio.AudioDecodeLimits] = []
+
+    async def measure_duration(filepath, *, limits):
+        decodes.append(limits)
+        if isinstance(decoded, BaseException):
+            raise decoded
+        if callable(decoded):
+            return await decoded()
+        return decoded
+
+    monkeypatch.setattr(audio, "measure_duration", measure_duration)
+    limits = audio.AudioDecodeLimits(max_duration_seconds=300, max_decoded_bytes=10**12)
+    async with protocol.prepare_upload(
+        upload, upload_admission_snapshot=_UPLOAD_ADMISSION, audio_limits=limits
+    ) as prepared:
+        return prepared.audio_seconds, decodes
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_keeps_its_decoded_length(protocol, tmp_path, monkeypatch):
+    # Up to the limit itself: the length the run's transcription decodes.
+    seconds, decodes = await _prepare_measured_audio(
+        protocol, tmp_path, monkeypatch, decoded=300.0
+    )
+
+    assert seconds == 300.0
+    assert [limits.max_duration_seconds for limits in decodes] == [300]
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_past_the_limit_is_refused_before_it_is_kept(
+    protocol, tmp_path, monkeypatch
+):
+    over = audio.AudioDecodeLimitExceeded(
+        limit="duration_seconds", measured=300.02, ceiling=300
+    )
+
+    with pytest.raises(audio.AudioDecodeLimitExceeded):
+        await _prepare_measured_audio(protocol, tmp_path, monkeypatch, decoded=over)
+
+
+@pytest.mark.asyncio
+async def test_audio_upload_that_does_not_decode_is_refused_as_unreadable(
+    protocol, tmp_path, monkeypatch
+):
+    with pytest.raises(audio.AudioUnreadableError):
+        await _prepare_measured_audio(
+            protocol,
+            tmp_path,
+            monkeypatch,
+            decoded=ValueError("Audio decoder exited with status 1"),
+        )
+
+
+@pytest.mark.asyncio
+async def test_audio_measurement_past_its_deadline_is_refused_as_busy(
+    protocol, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(
+        audio, "_measurement_deadline_seconds", lambda: 0.01, raising=False
+    )
+
+    async def stall():
+        await asyncio.sleep(10)
+
+    with pytest.raises(audio.AudioMeasurementBusy):
+        await _prepare_measured_audio(protocol, tmp_path, monkeypatch, decoded=stall)
+
+
+@pytest.mark.asyncio
+async def test_audio_measurements_wait_for_capacity_within_the_deadline(monkeypatch):
+    running = 0
+    peak = 0
+
+    async def work():
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep(0.01)
+        running -= 1
+        return 1.0
+
+    monkeypatch.setattr(audio, "_MEASUREMENT_CAPACITY", asyncio.Semaphore(2))
+    results = await asyncio.gather(*(audio.bounded_measurement(work) for _ in range(5)))
+
+    assert results == [1.0] * 5
+    assert peak == 2
+
+
+@pytest.mark.asyncio
+async def test_audio_whose_timestamps_run_short_is_held_to_its_decoded_length(
+    protocol, tmp_path
+):
+    if shutil.which("ffmpeg") is None:
+        pytest.skip("FFmpeg is not installed")
+    # 4 s of Opus whose container timestamps say 2 s.
+    source, squashed = tmp_path / "source.webm", tmp_path / "squashed.webm"
+    for args in (
+        ["-f", "lavfi", "-t", "4", "-i", "sine=frequency=300", "-c:a", "libopus"],
+        ["-i", str(source), "-c", "copy", "-bsf:a", "setts=ts=TS/2"],
+    ):
+        target = source if "-f" in args else squashed
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-loglevel", "error", *args, str(target)], check=True
+        )
+    payload = squashed.read_bytes()
+    upload = UploadFile(
+        file=BytesIO(payload),
+        filename="squashed.webm",
+        headers={"content-type": "audio/webm"},
+    )
+    protocol.file_size_service.get_file_size.return_value = len(payload)
+
+    async def save_original(_file):
+        return str(squashed)
+
+    protocol.file_size_service.save_file_to_disk = save_original
+
+    with pytest.raises(audio.AudioDecodeLimitExceeded):
+        async with protocol.prepare_upload(
+            upload,
+            upload_admission_snapshot=_UPLOAD_ADMISSION,
+            audio_limits=audio.AudioDecodeLimits(
+                max_duration_seconds=3, max_decoded_bytes=10**12
+            ),
+        ):
+            pytest.fail("audio decoding past the limit is not prepared")
+
+
 # ── Tests: text files use TEXT_MAX ───────────────────────────────────────
 
 
@@ -226,6 +576,67 @@ async def test_text_over_limit_rejected(protocol):
 
     assert exc_info.value.max_size == TEXT_MAX
     assert exc_info.value.limit_name == "session_file"
+
+
+@pytest.mark.asyncio
+async def test_domain_limit_can_make_upload_admission_stricter(protocol):
+    domain_maximum = 5_000_000
+    upload, size = _make_upload("text/plain", domain_maximum + 1)
+    protocol.file_size_service.get_file_size.return_value = size
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        async with protocol.prepare_upload(
+            upload,
+            upload_admission_snapshot=_UPLOAD_ADMISSION,
+            max_size=domain_maximum,
+            limit_name="flow_runtime_input",
+        ):
+            pass
+
+    assert exc_info.value.max_size == domain_maximum
+    assert exc_info.value.limit_name == "flow_runtime_input"
+
+
+@pytest.mark.asyncio
+async def test_domain_limit_cannot_relax_upload_admission(protocol):
+    upload, size = _make_upload("text/plain", TEXT_MAX + 1)
+    protocol.file_size_service.get_file_size.return_value = size
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        async with protocol.prepare_upload(
+            upload,
+            upload_admission_snapshot=_UPLOAD_ADMISSION,
+            max_size=TEXT_MAX * 2,
+            limit_name="flow_runtime_input",
+        ):
+            pass
+
+    assert exc_info.value.max_size == TEXT_MAX
+    assert exc_info.value.limit_name == "flow_runtime_input"
+
+
+@pytest.mark.asyncio
+async def test_a_caller_limit_needs_no_upload_admission(protocol):
+    """Kills the mutant that requires an admission snapshot although the
+    caller brings its own limit, as a tool-generated document does (it passes
+    mcp_tool_file_max_bytes and no limit name), and the mutant that names the
+    admission use case when the caller's limit applies."""
+    upload, size = _make_upload("text/plain", 2_000)
+    protocol.file_size_service.get_file_size.return_value = size
+
+    with pytest.raises(FileTooLargeException) as exc_info:
+        async with protocol.prepare_upload(upload, max_size=size - 1):
+            pass
+
+    assert exc_info.value.max_size == size - 1
+    assert exc_info.value.limit_name is None
+
+
+def test_an_upload_without_any_limit_is_refused():
+    """Kills the mutant that lets an upload with neither a caller limit nor an
+    admission snapshot through unbounded."""
+    with pytest.raises(RuntimeError, match="snapshot is required"):
+        upload_limit(FileType.TEXT, snapshot=None, max_size=None)
 
 
 @pytest.mark.asyncio

@@ -296,12 +296,12 @@ class AuditConfigService:
 
     async def get_action_config(self, tenant_id: UUID) -> ActionConfigResponse:
         """
-        Get all 65 actions with their enabled status for the modal UI.
+        Get every ActionType with its enabled status for the modal UI.
 
         Returns actions grouped by category with metadata.
 
         OPTIMIZATION: Uses batch query to fetch all category configs in a single DB call,
-        then determines action status locally. Avoids 65 individual is_action_enabled calls.
+        then determines action status locally. Avoids per-action is_action_enabled calls.
 
         Args:
             tenant_id: Tenant identifier

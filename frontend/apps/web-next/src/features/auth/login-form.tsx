@@ -1,9 +1,9 @@
 import { Button } from "@astryxdesign/core/Button";
 import { useActionState, useEffect, useId, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { PasswordInput } from "@/components/astryx/password-input";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { submitPasswordLogin, type LoginFormState } from "./password-login";
 
 const ERROR_KEYS: Record<NonNullable<LoginFormState["error"]>, string> = {
@@ -44,7 +44,7 @@ export function LoginForm({ next }: { next?: string }) {
     >
       {state.error ? (
         <div id={errorId} ref={errorRef} tabIndex={-1}>
-          <QuietBanner
+          <Banner
             status="error"
             title={
               blocked

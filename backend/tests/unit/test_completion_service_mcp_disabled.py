@@ -231,3 +231,46 @@ async def test_skill_reference_uses_prepared_tools_without_enabling_its_server(e
             f"MCP {server.id}, tool today; unavailable for this turn" in context.prompt
         )
         factory.create.assert_not_called()
+
+
+@pytest.mark.parametrize("phase", ["preparation", "iteration"])
+async def test_capacity_refusal_closes_the_mcp_proxy(phase):
+    from eneo.ai_models.completion_models.completion_model import (
+        Completion,
+        ResponseType,
+    )
+    from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+
+    service, factory = _service_with_mocked_proxy()
+    adapter = service._get_adapter.return_value
+    if phase == "preparation":
+        adapter.prepare_streaming = AsyncMock(
+            side_effect=UnknownModelCapacityError(("max_output_tokens",))
+        )
+    else:
+
+        async def refused(**kwargs):
+            yield Completion(
+                response_type=ResponseType.ERROR,
+                error="Unknown model capacity: max_output_tokens",
+                error_code=422,
+                stop=True,
+            )
+
+        adapter.iterate_stream = refused
+    call = service.get_response(
+        model=_make_completion_model(),
+        text_input="hi",
+        stream=True,
+        mcp_servers=[_mcp_server(name="Enabled", is_enabled=True)],
+        session=_session(),
+    )
+    if phase == "preparation":
+        with pytest.raises(UnknownModelCapacityError):
+            await call
+    else:
+        response = await call
+        chunks = [chunk async for chunk in response.completion]
+        assert chunks[-1].error_code == 422
+        assert chunks[-1].stop is True
+    factory.create.return_value.close.assert_awaited_once()

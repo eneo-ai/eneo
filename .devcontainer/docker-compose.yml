@@ -1,6 +1,5 @@
 # Copyright (c) 2026 Sundsvalls Kommun
 #
-version: "3.8"
 services:
   eneo:
     build:
@@ -24,6 +23,11 @@ services:
       - OBJECT_CONTENT_ACCESS_KEY_ID
       - OBJECT_CONTENT_SECRET_ACCESS_KEY
       - OBJECT_CONTENT_DEPLOYMENT_ID
+      # Integration testcontainers join this checkout's Compose network rather
+      # than a global network shared by every devcontainer.
+      - ENEO_TEST_DOCKER_NETWORK=${COMPOSE_PROJECT_NAME}_eneo
+      - ENEO_WEB_PORT=${ENEO_WEB_PORT:-3000}
+      - ENEO_API_PORT=${ENEO_API_PORT:-8123}
       # Plain HTTP is fine for local development; production keeps the
       # HTTPS-only default. Container env wins over backend/.env, so override
       # this from the host environment if you need to test the refusal.
@@ -33,6 +37,9 @@ services:
       # Admin > Tools offers "Add bundled compute" at this URL.
       - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://localhost:3010}
       - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-local-development-only-tool-runtime-token}
+    ports:
+      - "${ENEO_WEB_PORT:-3000}:3000"
+      - "${ENEO_API_PORT:-8123}:8123"
     volumes:
       - ../:/workspace
       # Isolate .venv from host to prevent host-side uv/python from corrupting it
@@ -86,8 +93,6 @@ services:
     image: pgvector/pgvector:pg13
     networks:
       - eneo
-    ports:
-      - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
@@ -100,6 +105,73 @@ services:
     volumes:
       - redis_data:/data
 
+  task-execution-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: bash -lc "cd /workspace/backend && .venv/bin/task-execution-worker"
+    restart: unless-stopped
+    networks:
+      - eneo
+    environment:
+      - POSTGRES_HOST=db
+      - REDIS_HOST=redis
+      # The workers read the same object store as the backend; plain HTTP is
+      # fine for local development (see the eneo service above).
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
+    volumes:
+      - ../:/workspace
+      - backend_venv:/workspace/backend/.venv
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  task-maintenance-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: bash -lc "cd /workspace/backend && .venv/bin/task-maintenance-worker"
+    restart: unless-stopped
+    networks:
+      - eneo
+    environment:
+      - POSTGRES_HOST=db
+      - REDIS_HOST=redis
+      # The workers read the same object store as the backend; plain HTTP is
+      # fine for local development (see the eneo service above).
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
+    volumes:
+      - ../:/workspace
+      - backend_venv:/workspace/backend/.venv
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  # Website crawls are delivered to their own ARQ queue (arq:crawler) and only
+  # this role consumes it. Mirrors the crawler-worker service in
+  # docs/deployment/docker-compose.yml: run.sh selects the crawler settings.
+  # All three worker services restart until post-create.sh has finished
+  # installing the shared .venv.
+  crawler-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: bash -lc "cd /workspace/backend && exec ./run.sh"
+    restart: unless-stopped
+    networks:
+      - eneo
+    environment:
+      - POSTGRES_HOST=db
+      - REDIS_HOST=redis
+      - RUN_AS_WORKER=true
+      - WORKER_ROLE=crawler
+      - OBJECT_CONTENT_ENDPOINT_URL
+      - OBJECT_CONTENT_REGION
+      - OBJECT_CONTENT_BUCKET
+      - OBJECT_CONTENT_ACCESS_KEY_ID
+      - OBJECT_CONTENT_SECRET_ACCESS_KEY
+      - OBJECT_CONTENT_DEPLOYMENT_ID
+      - OBJECT_CONTENT_ALLOW_INSECURE_HTTP=${OBJECT_CONTENT_ALLOW_INSECURE_HTTP:-true}
+    volumes:
+      - ../:/workspace
+      - backend_venv:/workspace/backend/.venv
+
 volumes:
   postgres_data:
   redis_data:
@@ -109,5 +181,6 @@ volumes:
   object_content_data:
 
 networks:
+  # Keep service DNS project-scoped so concurrent checkouts cannot resolve one
+  # another's db or redis containers.
   eneo:
-    name: eneo

@@ -12,6 +12,7 @@ from eneo.ai_models.completion_models.completion_model import (
 )
 from eneo.completion_models.infrastructure.context_builder import (
     ContextBuilder,
+    ContextWindowExceededError,
     count_tokens,
 )
 from eneo.completion_models.infrastructure.static_prompts import (
@@ -20,6 +21,7 @@ from eneo.completion_models.infrastructure.static_prompts import (
     SHOW_REFERENCES_PROMPT,
     TOOL_NAMING_INSTRUCTION,
 )
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files.file_models import File, FileType
 from eneo.questions.question import ToolCallInfo
 
@@ -119,8 +121,9 @@ def test_context_with_messages(context_builder: ContextBuilder):
         name="test_file.pdf",
         checksum="",
         size=0,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
-        user_id=uuid4(),
         file_type=FileType.TEXT,
     )
 
@@ -166,8 +169,9 @@ def test_context_with_images(context_builder: ContextBuilder):
         name="test_file.png",
         checksum="",
         size=0,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
-        user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 
@@ -185,8 +189,9 @@ def test_context_with_messages_and_images(context_builder: ContextBuilder):
         blob="data",
         checksum="",
         size=0,
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
-        user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 
@@ -226,6 +231,22 @@ def test_too_long_question_is_forwarded_to_provider(context_builder: ContextBuil
 
     assert context.input == input_str
     assert context.token_count > 5
+
+
+def test_too_long_question_can_be_rejected_by_strict_callers(
+    context_builder: ContextBuilder,
+):
+    input_str = "This is a loooooong query, longer than 5 tokens"
+
+    with pytest.raises(ContextWindowExceededError) as exc_info:
+        context_builder.build_context(
+            input_str=input_str,
+            max_tokens=5,
+            reject_over_limit=True,
+        )
+
+    assert exc_info.value.estimated_tokens > 5
+    assert exc_info.value.max_tokens == 5
 
 
 def test_too_long_required_context_skips_knowledge(
@@ -490,8 +511,9 @@ def _image_file(blob: bytes = _PNG_1PX) -> File:
         mimetype="image/png",
         checksum="",
         size=len(blob),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
-        user_id=uuid4(),
         file_type=FileType.IMAGE,
     )
 
@@ -807,3 +829,165 @@ def test_skill_activation_call_is_not_replayed(context_builder: ContextBuilder):
     )
 
     assert context.messages[0].tool_calls == []
+
+
+def _text_file(text: str = "Text from the file", name: str = "notes.txt") -> File:
+    return File(
+        id=uuid4(),
+        text=text,
+        name=name,
+        mimetype="text/plain",
+        checksum="",
+        size=len(text),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
+        tenant_id=uuid4(),
+        file_type=FileType.TEXT,
+    )
+
+
+_LOOKUP_FUNCTION = FunctionDefinition(
+    name="lookup_record",
+    description="Look up a record in the registry by id.",
+    schema={
+        "type": "object",
+        "properties": {"record_id": {"type": "string"}},
+        "required": ["record_id"],
+    },
+)
+
+
+def _preflight_shapes() -> dict[str, dict]:
+    url_only_attachment = _text_file("Opened with a tool", name="guide.txt")
+    current_file = _text_file()
+    return {
+        "text_only": {},
+        "images": {
+            "files": [_image_file()],
+            "prompt_files": [_image_file()],
+        },
+        "inline_files_and_attachments": {
+            "files": [_text_file()],
+            "prompt_files": [_text_file("Attachment text", name="policy.txt")],
+            "transcription_inputs": ["A transcribed recording"],
+        },
+        "url_only_files": {
+            "files": [current_file],
+            "prompt_files": [url_only_attachment],
+            "file_reference_urls": {
+                current_file.id: "https://files.example/current",
+                url_only_attachment.id: "https://files.example/guide",
+            },
+            "url_only_prompt_file_ids": {url_only_attachment.id},
+            "inline_file_text": False,
+        },
+        "tools": {
+            "mcp_tools": [_LOOKUP_FUNCTION],
+            "extra_tool_dicts": [
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "mcp__lookup",
+                        "description": "Look up a record.",
+                        "parameters": {"type": "object", "properties": {}},
+                    },
+                }
+            ],
+        },
+        "knowledge_catalog": {"knowledge_catalog": "- Handbook: staff rules"},
+        "long_prompt": {"prompt": "Follow the house style. " * 2000},
+    }
+
+
+@pytest.mark.parametrize("shape", list(_preflight_shapes()))
+def test_skipped_accounting_builds_the_same_request(
+    context_builder: ContextBuilder, shape: str
+):
+    # Without history or knowledge the count sizes no budget, so skipping it
+    # must leave every part of the request as it is.
+    request = {"input_str": QUESTION, "max_tokens": 10000, "version": 2}
+    request |= _preflight_shapes()[shape]
+
+    counted = context_builder.build_context(**request)
+    skipped = context_builder.build_context(**request, account_tokens=False)
+
+    assert skipped.input == counted.input
+    assert skipped.prompt == counted.prompt
+    assert skipped.messages == counted.messages
+    assert skipped.images == counted.images
+    assert skipped.function_definitions == counted.function_definitions
+    assert skipped.knowledge_trace == counted.knowledge_trace
+    assert counted.token_count > 0
+    assert skipped.token_count == 0
+
+
+def test_skipped_accounting_calls_no_token_counter(
+    context_builder: ContextBuilder, monkeypatch: pytest.MonkeyPatch
+):
+    module = "eneo.completion_models.infrastructure.context_builder"
+    calls: list[str] = []
+    for name in (
+        "count_message_tokens",
+        "count_tool_tokens",
+        "count_image_tokens_from_blob",
+        "count_tokens",
+    ):
+
+        def spy(*args, _name=name, **kwargs):
+            calls.append(_name)
+            return 1
+
+        monkeypatch.setattr(f"{module}.{name}", spy)
+    request = {
+        "input_str": QUESTION,
+        "max_tokens": 10000,
+        "prompt": "Be concise.",
+        "files": [_image_file()],
+        "prompt_files": [_text_file()],
+        "mcp_tools": [_LOOKUP_FUNCTION],
+    }
+
+    context_builder.build_context(**request, account_tokens=False)
+    assert calls == []
+
+    context_builder.build_context(**request)
+    assert {
+        "count_message_tokens",
+        "count_tool_tokens",
+        "count_image_tokens_from_blob",
+    } <= set(calls)
+
+
+@pytest.mark.parametrize(
+    "budgeted",
+    [
+        {"session": MagicMock(questions=[])},
+        {"info_blob_chunks": [MagicMock(text="knowledge", chunk_no=1)]},
+        {"reject_over_limit": True},
+    ],
+    ids=["session", "knowledge", "reject_over_limit"],
+)
+def test_accounting_cannot_be_skipped_when_it_sizes_a_budget(
+    context_builder: ContextBuilder, budgeted: dict
+):
+    with pytest.raises(ValueError):
+        context_builder.build_context(
+            input_str=QUESTION, max_tokens=10000, account_tokens=False, **budgeted
+        )
+
+
+def test_skipped_accounting_logs_no_over_limit_estimate(
+    context_builder: ContextBuilder, caplog: pytest.LogCaptureFixture
+):
+    input_str = "This is a loooooong query, longer than 5 tokens"
+    with caplog.at_level("WARNING"):
+        context_builder.build_context(input_str=input_str, max_tokens=5)
+    assert "Estimated context exceeds configured model limit" in caplog.text
+
+    caplog.clear()
+    with caplog.at_level("WARNING"):
+        context = context_builder.build_context(
+            input_str=input_str, max_tokens=5, account_tokens=False
+        )
+    assert context.input == input_str
+    assert "Estimated context exceeds" not in caplog.text

@@ -41,9 +41,9 @@ describe("BlobPreview", () => {
 
   it("shows original download separately and opens its signed URL", async () => {
     const initialUrl = window.location.href;
-    generateOriginalSignedUrl.mockResolvedValue({
-      url: `${window.location.origin}${window.location.pathname}#blob-1-original-download`
-    });
+    const downloadUrl = new URL(initialUrl);
+    downloadUrl.hash = "blob-1-original-download";
+    generateOriginalSignedUrl.mockResolvedValue({ url: downloadUrl.href });
 
     try {
       render(BlobPreview, { blob: blob(true) });

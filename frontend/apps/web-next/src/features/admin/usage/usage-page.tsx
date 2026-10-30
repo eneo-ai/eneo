@@ -17,7 +17,7 @@ import { ExternalLink, Search } from "lucide-react";
 import Link from "@/lib/link";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { Table } from "@/components/astryx/table";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { PageHeader } from "@/components/composites/page-header";

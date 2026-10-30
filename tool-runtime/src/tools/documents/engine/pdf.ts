@@ -82,7 +82,8 @@ export async function preparePdf(
         typeof part === "string" ? part.replaceAll(markers.title, document.title) : part,
       );
   const blocks = parseMarkdown(document.content);
-  const lead = !(blocks[0]?.type === "heading" && blocks[0].level === 1);
+  const lead =
+    document.includeTitle !== false && !(blocks[0]?.type === "heading" && blocks[0].level === 1);
   const zip = await openWordTemplate(docx);
   const body = await templateBodyHtml(zip, (await inspectTemplate(zip)).styles, markers, {
     title: document.title,

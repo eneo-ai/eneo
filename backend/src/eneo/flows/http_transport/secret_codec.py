@@ -1,0 +1,447 @@
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from typing import Protocol
+
+from eneo.flows.enums import FlowInputSource, FlowOutputMode
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.http_transport.authored_config import (
+    SECRET_SENTINEL,
+    CustomHeader,
+    HttpAuthApiKey,
+    HttpAuthBasicAuth,
+    HttpAuthBearer,
+    HttpAuthNone,
+    HttpAuthoredConfig,
+    SecretValue,
+    is_secret_sentinel,
+)
+from eneo.flows.http_transport.effective_url import (
+    InvalidHttpUrl,
+    parse_effective_http_url,
+)
+from eneo.flows.http_transport.errors import AuthoredSecretEncryptionUnavailableError
+from eneo.flows.http_transport.normalizer import is_authored_config
+from eneo.flows.http_transport.step_configs import sent_step_http_configs
+from eneo.flows.variable_resolver import iter_template_expressions
+from eneo.main.exceptions import TypedIOValidationException
+
+
+class SupportsDecryption(Protocol):
+    def is_encrypted(self, value: str) -> bool: ...
+    def decrypt(self, ciphertext: str) -> str: ...
+
+
+class SupportsEncryption(Protocol):
+    def is_active(self) -> bool: ...
+    def is_encrypted(self, value: str) -> bool: ...
+    def can_decrypt(self, value: str) -> bool: ...
+    def encrypt(self, plaintext: str) -> str: ...
+    def decrypt(self, ciphertext: str) -> str: ...
+
+
+def _secret_bearing_fields(
+    config: HttpAuthoredConfig,
+) -> list[tuple[str, SecretValue, bool]]:
+    """Every field that can hold a credential, as (path, value, is_declared_secret).
+
+    Custom headers appear whatever their ``secret`` flag says, because a
+    sentinel is invalid in a non-secret header too. Callers that only care
+    about declared secrets filter on the flag.
+    """
+    fields: list[tuple[str, SecretValue, bool]] = []
+    match config.auth:
+        case HttpAuthBearer(token=token):
+            fields.append(("auth.token", token, True))
+        case HttpAuthApiKey(key=key):
+            fields.append(("auth.key", key, True))
+        case HttpAuthBasicAuth(password=password):
+            fields.append(("auth.password", password, True))
+        case HttpAuthNone():
+            pass
+
+    fields.extend(
+        (f"custom_headers[{index}].value", header.value, header.secret)
+        for index, header in enumerate(config.custom_headers)
+    )
+    return fields
+
+
+def authored_secret_fields(config: HttpAuthoredConfig) -> tuple[str, ...]:
+    """Name the declared secret fields holding a newly authored value.
+
+    A stored-secret sentinel is a reference to an existing row, not a value, so
+    it does not count. Everything else that is a non-empty string is new authored
+    input.
+
+    The encryption prefix is deliberately not consulted: it is authored syntax,
+    not proof of provenance. An author can type ``enc:fernet:v1:...`` into a
+    token field, and treating that as ciphertext would let an unprotected
+    credential through. Only the caller knows whether a value came from an
+    author or from storage.
+    """
+    return tuple(
+        path
+        for path, value, declared_secret in _secret_bearing_fields(config)
+        if declared_secret and isinstance(value, str) and value
+    )
+
+
+def secret_fields_holding_templates(config: HttpAuthoredConfig) -> tuple[str, ...]:
+    """Name the declared secret fields whose value is a template.
+
+    A credential is a literal. Interpolating one would let a step's output, the
+    run input or a form field reach a header the destination reads, and once the
+    credential is stored encrypted no check of the stored config could see it.
+    A stored-secret sentinel is a reference, not text, so it holds no template.
+    """
+    return tuple(
+        path
+        for path, value, declared_secret in _secret_bearing_fields(config)
+        if declared_secret
+        and isinstance(value, str)
+        and iter_template_expressions(value)
+    )
+
+
+class _ReadableCiphertext:
+    """The encryption service, opened only where its key can open the value.
+
+    A credential the key cannot open (no key configured, another key) is opaque
+    to a check that reads what the runtime would send; it is left as stored.
+    """
+
+    def __init__(self, service: SupportsEncryption) -> None:
+        self._service = service
+
+    def is_encrypted(self, value: str) -> bool:
+        return self._service.is_encrypted(value) and self._service.can_decrypt(value)
+
+    def decrypt(self, ciphertext: str) -> str:
+        return self._service.decrypt(ciphertext)
+
+
+def templated_secret_fields(
+    config: HttpAuthoredConfig,
+    encryption_service: SupportsEncryption | None,
+) -> tuple[str, ...]:
+    """Name the secret fields of a stored config whose decrypted value is a template.
+
+    Reads what the runtime would interpolate: stored credentials are ciphertext,
+    so they are decrypted first, where the key can open them.
+    """
+    return secret_fields_holding_templates(
+        decrypt_authored_config(
+            config,
+            (
+                _ReadableCiphertext(encryption_service)
+                if encryption_service is not None
+                else None
+            ),
+        )
+    )
+
+
+def templated_step_credentials(
+    *,
+    step_order: int,
+    input_source: FlowInputSource | str,
+    output_mode: FlowOutputMode | str,
+    input_config: Mapping[str, object] | None,
+    output_config: Mapping[str, object] | None,
+    encryption_service: SupportsEncryption | None,
+) -> tuple[tuple[str, tuple[str, ...]], ...]:
+    """The (config label, credential fields) of a step whose credentials hold templates.
+
+    Each config is parsed as the runtime parses it (``sent_step_http_configs``);
+    a config the runtime would reject raises there, before its credentials are
+    read.
+    """
+    found = (
+        (label, templated_secret_fields(config, encryption_service))
+        for label, config in sent_step_http_configs(
+            step_order=step_order,
+            input_source=input_source,
+            output_mode=output_mode,
+            input_config=input_config,
+            output_config=output_config,
+        )
+    )
+    return tuple((label, fields) for label, fields in found if fields)
+
+
+def credential_template_message(
+    *, step_order: int, label: str, fields: Sequence[str]
+) -> str:
+    named = ", ".join(f"{label}.{field}" for field in fields)
+    return (
+        f"Step {step_order}: {named} is a credential and must hold the literal "
+        "secret, not a {{ ... }} reference. Put references in the URL, a header "
+        "that is not secret, or the body."
+    )
+
+
+def unresolved_secret_sentinel_fields(config: HttpAuthoredConfig) -> tuple[str, ...]:
+    """Name the fields still holding a sentinel.
+
+    After stored secrets have been merged, a remaining sentinel resolved to
+    nothing: it references a stored value that does not exist. Persisting it
+    would store the sentinel itself as the credential.
+    """
+    return tuple(
+        path
+        for path, value, _declared_secret in _secret_bearing_fields(config)
+        if is_secret_sentinel(value)
+    )
+
+
+def unprotected_stored_secret_fields(
+    config: HttpAuthoredConfig,
+    encryption_service: SupportsEncryption | None,
+) -> tuple[str, ...]:
+    """Name the declared secret fields whose STORED value is not protected.
+
+    Protection has to be proved, not recognised. The encryption prefix is
+    authored syntax here too: a row written before authored secrets were
+    encrypted can hold a plaintext literal that merely starts with the prefix,
+    and those are exactly the rows this check exists to find. A stored value
+    counts as protected only when the active key actually decrypts it.
+
+    Without an active key nothing can be proved, so every stored secret counts
+    as unprotected — silence would otherwise read as an all-clear.
+
+    A sentinel is reported too: it is not a credential, and a definition built
+    from one would carry the sentinel where the secret belongs.
+    """
+
+    def _is_unprotected(value: SecretValue) -> bool:
+        if is_secret_sentinel(value):
+            return True
+        if not isinstance(value, str) or not value:
+            return False
+        if encryption_service is None or not encryption_service.is_active():
+            return True
+        # Prefixed but unauthenticated means a typed literal, a corrupted token,
+        # or a token from a different key. None can be proved protected.
+        return not encryption_service.can_decrypt(value)
+
+    return tuple(
+        path
+        for path, value, declared_secret in _secret_bearing_fields(config)
+        if declared_secret and _is_unprotected(value)
+    )
+
+
+def unprotected_persisted_secret_fields(
+    config: Mapping[str, object] | None,
+    encryption_service: SupportsEncryption | None,
+) -> tuple[str, ...]:
+    """Name the unprotected declared secret fields in a persisted config payload.
+
+    The persisted form is what every stored-config caller actually holds: a raw
+    JSON object that may not be an authored HTTP config at all. A payload of
+    another shape carries no HTTP credential and reports nothing.
+
+    Raises:
+        pydantic.ValidationError: the payload declares the authored HTTP shape
+            but does not parse. Callers scanning historical rows should treat
+            that as its own finding rather than as an absence of secrets.
+    """
+    if config is None or not is_authored_config(config):
+        return ()
+    return unprotected_stored_secret_fields(
+        HttpAuthoredConfig.model_validate(config),
+        encryption_service,
+    )
+
+
+def protect_authored_secrets(
+    config: HttpAuthoredConfig,
+    encryption_service: SupportsEncryption | None,
+) -> HttpAuthoredConfig:
+    """Encrypt newly authored secrets, or refuse when they cannot be protected.
+
+    Call this with author-supplied config, before stored-secret sentinels are
+    merged. Provenance only exists here: afterwards a secret may legitimately be
+    ciphertext loaded from the existing row, and syntax cannot tell the two
+    apart.
+
+    Sentinels pass through for the caller to resolve. Every other non-empty
+    declared secret is new authored input and is encrypted unconditionally — an
+    author can type ``enc:fernet:v1:`` into a token field, so the prefix is never
+    accepted as evidence that a value is already ciphertext.
+
+    Raises:
+        AuthoredSecretEncryptionUnavailableError: encryption is unavailable and
+            the config carries at least one newly authored secret.
+        TypedIOValidationException: a credential is rejected by encryption.
+    """
+    if encryption_service is None or not encryption_service.is_active():
+        unprotectable = authored_secret_fields(config)
+        if unprotectable:
+            raise AuthoredSecretEncryptionUnavailableError(unprotectable)
+        return config
+
+    def _encrypt(value: SecretValue) -> SecretValue:
+        if not isinstance(value, str) or not value:
+            return value
+        try:
+            return encryption_service.encrypt(value)
+        except ValueError:
+            raise TypedIOValidationException(
+                "HTTP credential has an invalid value or length.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+            ) from None
+
+    auth = config.auth
+    match auth:
+        case HttpAuthBearer(token=token):
+            auth = auth.model_copy(update={"token": _encrypt(token)})
+        case HttpAuthApiKey(key=key):
+            auth = auth.model_copy(update={"key": _encrypt(key)})
+        case HttpAuthBasicAuth(password=pwd):
+            auth = auth.model_copy(update={"password": _encrypt(pwd)})
+        case HttpAuthNone():
+            pass
+
+    custom_headers = [
+        h.model_copy(update={"value": _encrypt(h.value)}) if h.secret else h
+        for h in config.custom_headers
+    ]
+
+    return config.model_copy(update={"auth": auth, "custom_headers": custom_headers})
+
+
+def decrypt_authored_config(
+    config: HttpAuthoredConfig,
+    encryption_service: SupportsDecryption | None,
+) -> HttpAuthoredConfig:
+    """Decrypt sensitive fields for runtime execution."""
+    if encryption_service is None:
+        return config
+
+    def _decrypt(value: SecretValue) -> SecretValue:
+        if not isinstance(value, str):
+            return value
+        if not value:
+            return value
+        if encryption_service.is_encrypted(value):
+            return encryption_service.decrypt(value)
+        return value
+
+    auth = config.auth
+    match auth:
+        case HttpAuthBearer(token=token):
+            auth = auth.model_copy(update={"token": _decrypt(token)})
+        case HttpAuthApiKey(key=key):
+            auth = auth.model_copy(update={"key": _decrypt(key)})
+        case HttpAuthBasicAuth(password=pwd):
+            auth = auth.model_copy(update={"password": _decrypt(pwd)})
+        case HttpAuthNone():
+            pass
+
+    custom_headers = [
+        h.model_copy(update={"value": _decrypt(h.value)}) if h.secret else h
+        for h in config.custom_headers
+    ]
+
+    return config.model_copy(update={"auth": auth, "custom_headers": custom_headers})
+
+
+def redact_authored_config(config: HttpAuthoredConfig) -> HttpAuthoredConfig:
+    """Replace sensitive fields with sentinel for API responses."""
+    auth = config.auth
+    match auth:
+        case HttpAuthBearer():
+            auth = auth.model_copy(update={"token": SECRET_SENTINEL})
+        case HttpAuthApiKey():
+            auth = auth.model_copy(update={"key": SECRET_SENTINEL})
+        case HttpAuthBasicAuth():
+            auth = auth.model_copy(update={"password": SECRET_SENTINEL})
+        case HttpAuthNone():
+            pass
+
+    custom_headers = [
+        h.model_copy(update={"value": SECRET_SENTINEL}) if h.secret else h
+        for h in config.custom_headers
+    ]
+
+    return config.model_copy(update={"auth": auth, "custom_headers": custom_headers})
+
+
+def redact_persisted_config(
+    config: Mapping[str, object] | None,
+) -> dict[str, object] | None:
+    """Replace stored secrets with sentinels in a persisted config payload.
+
+    Use this wherever a persisted config is projected back out — to an API
+    response, or into an authoring spec that will be resubmitted. Handing a
+    stored credential back to a caller that will send it again makes the value
+    indistinguishable from newly authored input; a sentinel keeps it a
+    reference to the row it came from.
+    """
+    if config is None or not is_authored_config(config):
+        return dict(config) if config is not None else None
+    authored = HttpAuthoredConfig.model_validate(config)
+    return redact_authored_config(authored).model_dump(mode="json")
+
+
+def merge_secrets_on_update(
+    incoming: HttpAuthoredConfig,
+    stored: HttpAuthoredConfig,
+) -> HttpAuthoredConfig:
+    """Restore stored credentials only within the same concrete HTTP origin."""
+    try:
+        destination = parse_effective_http_url(incoming.url)
+        source = parse_effective_http_url(stored.url)
+    except InvalidHttpUrl:
+        # A template in the authority cannot prove where the credential goes.
+        return incoming
+    if (destination.scheme, destination.host, destination.port) != (
+        source.scheme,
+        source.host,
+        source.port,
+    ):
+        return incoming
+
+    def _merge_field(
+        incoming_value: SecretValue,
+        stored_value: SecretValue,
+    ) -> SecretValue:
+        if is_secret_sentinel(incoming_value):
+            return stored_value
+        return incoming_value
+
+    auth = incoming.auth
+    match incoming.auth, stored.auth:
+        case HttpAuthBearer() as inc, HttpAuthBearer() as sto:
+            auth = inc.model_copy(update={"token": _merge_field(inc.token, sto.token)})
+        case HttpAuthApiKey() as inc, HttpAuthApiKey() as sto:
+            auth = inc.model_copy(update={"key": _merge_field(inc.key, sto.key)})
+        case HttpAuthBasicAuth() as inc, HttpAuthBasicAuth() as sto:
+            auth = inc.model_copy(
+                update={"password": _merge_field(inc.password, sto.password)}
+            )
+        case _:
+            pass
+
+    # Only a stored header that was itself secret can back a secret sentinel.
+    # Resolving from a non-secret stored header would promote a value that was
+    # never protected into a field the caller believes holds a stored secret.
+    stored_headers_by_name = {
+        h.name: h
+        for h in stored.custom_headers
+        if h.secret and isinstance(h.value, str)
+    }
+    merged_headers: list[CustomHeader] = []
+    for h in incoming.custom_headers:
+        if h.secret and is_secret_sentinel(h.value):
+            stored_h = stored_headers_by_name.get(h.name)
+            if stored_h is not None:
+                merged_headers.append(h.model_copy(update={"value": stored_h.value}))
+            else:
+                merged_headers.append(h)
+        else:
+            merged_headers.append(h)
+
+    return incoming.model_copy(update={"auth": auth, "custom_headers": merged_headers})

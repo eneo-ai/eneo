@@ -1,0 +1,316 @@
+import { Callout } from "nextra/components";
+
+# Building flows that are efficient and robust
+
+A flow is a chain of steps, and every step is a request to a model. The flows
+that run cheaply and rarely fail share a few habits: each step does one job,
+steps hand each other fixed-format answers, expensive steps wait for a human,
+and the author reads the run evidence before scaling up. This page collects
+those habits from the author's point of view.
+
+## One job per step
+
+Give each step one verb: transcribe, register, group, check, write. A step that
+both extracts facts and writes the final text tends to do neither well, and when
+it fails you cannot tell which half failed. Splitting it costs one more request
+and saves every rerun after that.
+
+A good test: can you name the step in three words? "Register facts", "Group by
+area", "Write plan". If the name needs "and", split the step.
+
+## Short instructions that say what, not how
+
+Tell the model what to extract or write, in what format, and what to leave out.
+Do not tell it how to think. Compare:
+
+- Weak: "Read carefully and consider all aspects before deciding which
+  statements might be relevant to the plan."
+- Strong: "Register every statement about the person's needs, goals, or
+  agreements. One item per statement. Quote the source sentence."
+
+A short instruction is also cheaper. It is sent with every request the step
+makes, so in a step that reads long material it is sent many times.
+
+## Fixed-format answers between steps, text at the end
+
+Set **Svar i fast format** (JSON) on every step whose answer another step reads.
+A fixed format gives the next step named fields instead of prose to parse, keeps
+the answer compact, and lets the flow refuse a malformed answer instead of
+passing it on. Use free text only for the step that writes the document the
+reader sees.
+
+The named fields of a JSON step's **Output contract** (under **Contracts and
+integrations** in **Advanced**) are the variables later steps can pick. Instead
+of writing the JSON Schema by hand, choose **Create from an example** and paste
+an example of the answer, such as what a tool returns. The action is not offered
+on a speaker-naming step, whose contract is fixed. The editor lists the fields
+it will create and writes a contract in which each key of the example is a
+required field typed by its value: text, number (any number, also a whole one),
+yes/no, an object, or a list typed by its first element. Values are read four
+levels deep, the top level being the first; a deeper object or list keeps only
+its type. The dialog notes an empty list (any content), a `null` (text or
+empty) and a list whose elements differ in kind or fields (typed by the first
+element), so you can adjust the type. A top-level field whose name has a dot or
+a brace, or whitespace at its start or end, is marked: later steps cannot use it
+as a variable and the variable picker does not offer it, but it stays in the
+contract. An example over 200,000 characters or 500 fields is refused. The
+example is only read in the editor; no tool is called. If the step already has a
+contract, the editor asks before replacing it.
+
+Keep the schema small. Every optional field is a field the model may fill with
+guesses; every long free-text field is output that counts against the model's
+output limit.
+
+## Choose the underlag deliberately
+
+Each step reads what its **Underlag** says: the previous step, the flow's input,
+an uploaded file, or a named set of earlier steps. The default, the previous
+step, is right most of the time. Avoid "all previous steps" when one step is
+enough: it sends every earlier answer again, and the model has to find the
+relevant part in a pile of text it has already processed.
+
+When a step needs two earlier results, name them. A named underlag is cheaper
+than everything, and it documents the flow's data path for the next author.
+
+## Choose what the person running the flow can provide
+
+In the step's **Underlag**, turn on **Ta emot filer** to let the person running
+the flow supply attachments. For text and JSON steps, choose whether those
+attachments are documents, audio or files. Document, audio and file steps use
+their corresponding upload format. Set whether uploads are required and how
+many files the step accepts.
+
+Under **Tillåtna filtyper**, choose the file formats the step needs. Additional
+MIME types can be entered as a comma-separated list. **Använd standardtyper**
+removes the custom list and restores the supported defaults. Save the step and
+publish the flow to apply these choices to new runs. The run dialog uses the
+published input settings.
+
+## Read from an MCP tool
+
+A step can take its material from one MCP tool instead of from the flow. In the
+step editor, switch to **Advanced**, open the step's **Source** and choose
+**Fetch from a tool**. **Simple** lists the source too, but it can be chosen
+only in **Advanced**. The tool and its arguments follow right under the
+source; choose the tool and give its arguments.
+
+- The flow calls the tool once each time the step runs. When the step runs
+  again, the tool is called again, and a tool that changes something changes
+  it again.
+- Each argument is a fixed value or exactly one variable from the flow, such as
+  an earlier step's result. One argument cannot combine text with a variable.
+- Each argument the tool's schema names has a row of its own, which shows the
+  argument's type when the schema names one type. Required arguments come
+  first, in the order the schema lists them. A text, number, yes/no or choice
+  argument has a field of its own; any other argument, also
+  one that may be null, is entered as JSON. When the schema also takes
+  arguments of other names, **Other arguments the tool takes** opens one JSON
+  field for those. A tool whose arguments the editor cannot show as rows, or
+  whose schema names none and takes arguments of any name, gets one JSON field
+  for all of them, with **Show the tool's input schema** above it, which shows
+  the approved schema as JSON. **Insert variable** under a JSON field puts the
+  chosen variable in as one JSON string where the cursor is, when the field
+  then still holds a JSON object, such as after `"name": `; otherwise the text
+  stays as it was and the field says where to put the cursor. A whole number
+  beyond 9,007,199,254,740,991 cannot be stored exactly and is refused; enter
+  it as text if the tool accepts text.
+- While an argument's field or a JSON field holds text the step cannot store,
+  such as invalid JSON, a decimal for a whole number or a variable inside a
+  text, the step keeps the values it had and the text stays in the field,
+  also after you open another step and come back. The validation banner lists
+  it as an issue of the step with **Go to step**, and the flow cannot be
+  published until the text is corrected. The text is kept only while the flow
+  is open in the editor. Once another tool or other values for those
+  arguments are stored, the text is dropped. An emptied number or JSON field
+  leaves the argument without a value.
+- The tool search reads the tool's name, its server's name and its approved
+  description.
+- **Show what the AI gets** on a tool step whose tool is in the editor's tool
+  list starts with the tool call: the server, the tool, where each argument's
+  value comes from (a fixed value or a variable) and whether the answer is
+  received as text or JSON.
+- The tool's answer must be text or JSON. An answer with anything else in it,
+  such as an image, is refused and the step fails. The step's **Material type**
+  says how the step takes the answer: **Text** takes the answer's text, or its
+  structured content as JSON text when it has no text; **JSON** needs a JSON
+  object or array as the answer. Structured content must be a JSON object or
+  array with either type; otherwise the step fails.
+- The tool must be allowed for flows in the flow's space. An instance
+  administrator adds the MCP server under **Admin → Tools**, switches servers
+  and tools on and reviews new or changed tools; a space administrator
+  switches the server on in the space settings. While the space has no tool
+  to choose, the step editor lists these steps where the tool is chosen. A
+  tool the editor lists as refused shows the reason and cannot be chosen. A
+  flow in a personal space cannot use tools.
+- The tool's MCP server must have at least the security class of the space,
+  so the run's own input (a form field, the run's text) and fixed values can be
+  sent to it. An earlier step's result can be sent only when that step's class
+  is not higher than the server's. The answer counts at the server's security
+  class, for this step and for every later step that reads it.
+
+## Keep knowledge out of transforming steps
+
+Knowledge sources and websites are for steps that answer questions or write
+with background. A step that only transforms material (registers, groups,
+checks, reformats) should not have knowledge attached. Retrieval adds tokens to
+every request and gives the model a second source to confuse with the material.
+Give background once, to the step that writes.
+
+## Review checkpoints before expensive steps
+
+Add a review checkpoint (**Granskning**) after the step that establishes the
+facts and before the steps that build on them. A wrong register corrected by a
+person costs one pause; a wrong register carried through eight writing steps
+costs eight reruns. Place the checkpoint where a human can judge the answer at a
+glance: a list, not a finished document.
+
+## Test with a small real input first
+
+Run the flow on a short, real input before a long one: five minutes of
+recording, two pages of document. Every step's answer is then small enough to
+read in full, and a bad instruction shows in seconds instead of after an hour.
+Only when every step's answer looks right on the short input, run the long one.
+
+## Read the run evidence
+
+Every run keeps evidence per step: tokens in and out, requests made, sections
+read, refusals, and the answer each step produced. When a run is slow, expensive,
+or wrong, the evidence names the step. Look for:
+
+- One step that uses most of the tokens. Usually an underlag that is larger than
+  it needs to be, or an instruction that asks for long output per item.
+- A step with many requests. Expected for a step that reads section by section;
+  otherwise a sign of retries.
+- A refusal or a cut-off answer. The step's error names the cause.
+
+## Let the suggestions point out waste
+
+The flow editor checks the draft for data that moves more than it needs to,
+and says so on the step it is about. A step card with suggestions ends in a
+line such as **2 suggestions · 1 can be fixed** (**2 förslag · 1 kan
+åtgärdas**); open it to see them, the most important first, each marked
+**High**, **Medium** or **Low** (**Hög**, **Medel**, **Låg**). A step you open
+for editing shows its suggestions at the top. Suggestions never block
+publishing, and nothing changes until you choose it.
+
+From the draft alone, the suggestions find:
+
+- **The same answer sent twice.** A step gets an earlier step's answer as its
+  input and reads it again in its instruction, so the model reads it twice on
+  every run.
+- **More than the step needs.** A step takes every earlier step's answer, or
+  a whole fixed-format answer when it uses a few of its fields.
+- **Data nobody reads.** Fields of a fixed-format answer that no later step
+  reads, a step whose answer nothing reads, or a form field no step uses.
+- **A step that only passes data on.** A copy or template step whose readers
+  could read its source directly.
+- **Repetition per section.** A step that reads its material section by
+  section and puts a whole earlier answer in its instruction: that answer is
+  sent once for every section.
+- **The same long material read twice.** Two steps that each read the same
+  long material section by section.
+
+What you can do with a suggestion:
+
+- **Fix** (**Åtgärda**) appears when Eneo can make the change itself, such as
+  removing the line that reads an answer a second time. **Fix all**
+  (**Åtgärda alla**), at the top of the step list, makes every such change
+  after a confirmation that lists them step by step. A fix is an ordinary
+  change to the draft, saved and recorded in the audit log like one made in
+  the editor; a fix that an earlier one made unnecessary is skipped. While
+  the step you are editing has unsaved changes, **Fix** waits until you save
+  or undo them.
+- **Ask the assistant** (**Fråga assistenten**) puts a prepared question
+  about the suggestion in the flow chat, without sending it. Use it for a
+  change that needs judgment, such as which fields a step really uses.
+- **Remove the step** (**Ta bort steget**) is offered for a step whose answer
+  nothing reads.
+- **Ignore** (**Ignorera**) hides a suggestion you have decided to keep as it
+  is. It is hidden for everyone who edits the flow, and recorded in the audit
+  log. **Show ignored** (**Visa ignorerade**) at the top of the step list lists
+  the hidden ones, with who hid them and when, and **Show again**
+  (**Visa igen**) puts one back with its step. When a change to the draft
+  alters what a hidden suggestion is about, it counts as a new finding and
+  shows again. Flow packages do not carry hidden suggestions.
+
+**Before publishing** (**Före publicering**) says how many suggestions the
+draft has, with **Show the suggestions** (**Visa förslagen**) to go to them.
+Hidden suggestions do not count, and none of them stops you from publishing.
+
+With the permission to view flow traces, **Include the latest runs**
+(**Räkna med de senaste körningarna**) measures the suggestions over the
+flow's ten latest finished runs. A measured suggestion then says what it
+costs, such as "Costs about 1,800 tokens per run, measured in 8 runs of
+version 3", and notes when the step has changed since those runs. The most
+expensive come first. The summary says how many runs were counted
+(**Based on 8 runs**), and how many were left out because you may not see
+them. Runs also show what the draft alone cannot:
+
+- **The same text through two steps.** Two inputs of a step carried
+  identical text, although they come from different steps.
+- **Close to the model's limit.** A step's input came near the most text its
+  model can take in, or was too large for it.
+- **Two calls instead of one.** The model often failed to answer in the
+  step's fixed format, so the step had to ask again.
+- **Copying forward.** A step's model wrote out an earlier step's answer word
+  for word, and later steps read the copy instead of the original.
+- **Inputs that overlap.** Two inputs of a step shared much of their text, so
+  the model read that part twice.
+- **A step that only assembles text.** Nearly all of a step's answer was its
+  input copied word for word; a step that puts text together without AI does
+  the same at no cost.
+
+Only numbers are read from the runs (sizes, token counts and how often
+something happened), never their content, and each measurement is recorded
+in the audit log. Nothing is measured until you press the button, and
+**Show without the runs** (**Visa utan körningarna**) goes back to the draft
+alone.
+
+The flow chat uses the same checks. Ask it to make the flow simpler or
+cheaper and it starts from the suggestions; when it adds or changes a step,
+it checks that step and fixes what its own change introduced.
+
+## Failure modes to watch for
+
+**The answer is cut off by the model's output limit.** The model may write only
+so many tokens in one reply. A step that asks for a long list, long free text
+per item, or a big document in one go stops mid-answer and fails. Ask for
+less per request: fewer fields, shorter text, or section-by-section reading.
+
+**Invented ids and references.** A model asked to give ids will invent ones that
+look right, and a later step will trust them. Give ids a fixed pattern in the
+instruction, and when a step reads section by section, prefix them with the
+section number so two sections cannot mint the same id.
+
+**Lists that must merge.** When several steps or sections each produce a list,
+decide where the lists become one. Section-by-section reading returns one entry
+per section, in order, and a later step can read the items of every entry at
+once; several parallel steps do not, and a later step must combine them
+explicitly.
+
+**Material silently dropped.** A step whose material is larger than the model
+can read in one request cannot silently read part of it: the flow refuses the
+step instead. That refusal is the signal to switch the step to reading section by
+section, which covers the complete material and fails loudly if any section
+cannot be processed.
+
+## Long material: read it section by section
+
+A step that pulls facts, tasks, or decisions out of a transcript or document of
+several hours or hundreds of pages should read the material **Del för del**.
+The material is split into sections that each fit the model, every section is
+read with the same instruction, and the answer is a list with one entry per
+section, in order. Short material is read in one request and returns the same
+shape with a single entry, so the setting is safe to leave on.
+
+It is the wrong choice for summaries, assessments, and anything that depends on
+the whole. It also cannot use knowledge (the run stops if knowledge is attached)
+and does not reason across sections.
+Setup, how ids stay apart across sections, and how to check the result are in
+[Process long material section by section](/docs/flows-long-material).
+
+<Callout type="info">
+  The pattern that scales: one early step reads the long material section by
+  section and produces a compact register; every later step reads that register
+  in one request.
+</Callout>

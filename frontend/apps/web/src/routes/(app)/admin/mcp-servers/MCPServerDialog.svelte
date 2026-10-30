@@ -4,13 +4,20 @@
 
 <script lang="ts">
   import { Button, buttonVariants } from "$lib/components/ui/button/index.js";
+  import * as Alert from "$lib/components/ui/alert/index.js";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
   import * as Field from "$lib/components/ui/field/index.js";
   import { dialogLayout } from "$lib/components/dialogLayout.js";
   import { m } from "$lib/paraglide/messages";
   import { getEneo } from "$lib/core/Eneo";
-  import type { ImageModel, SecurityClassification, UserGroup, components } from "@eneo/eneo-js";
+  import {
+    EneoError,
+    type ImageModel,
+    type SecurityClassification,
+    type UserGroup,
+    type components
+  } from "@eneo/eneo-js";
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
   import { getSecurityContext } from "$lib/features/security-classifications/SecurityContext.js";
   import { CAPABILITIES, getCapability, hasBuiltinProvider } from "$lib/features/mcp/capabilities";
@@ -18,6 +25,7 @@
   import { imageQualityLabel, imageSizeLabel } from "$lib/features/ai-models/imageModelOptions";
   import { resolve } from "$app/paths";
   import { untrack, tick } from "svelte";
+  import { CircleAlert } from "@lucide/svelte";
   import AddWizard from "../models/AddWizard/AddWizard.svelte";
   import { writable } from "svelte/store";
   import { readinessMessage } from "$lib/features/mcp/readiness";
@@ -161,7 +169,7 @@
       modelWizardMounted = true;
       modelWizardOpen.set(true);
     } catch (error) {
-      errorMessage = error instanceof Error ? error.message : m.tools_readiness_unknown();
+      errorMessage = backendMessage(error, m.tools_readiness_unknown());
       configurationSuspended.set(false);
     }
   }
@@ -270,6 +278,14 @@
 
   let submitting = $state(false);
   let errorMessage = $state("");
+  // The backend's own sentence names the MCP server; the shared code translations
+  // (9017 says "model") do not fit this form.
+  function backendMessage(error: unknown, fallback: string): string {
+    return (error instanceof EneoError && error.getReadableMessage()) || fallback;
+  }
+  let errorAlert = $state<HTMLElement | null>(null);
+  // The alert mounts when a submit fails; a screen reader user is moved to it.
+  $effect(() => errorAlert?.focus());
 
   // Reset/populate form when dialog opens or mcpServer changes
   $effect(() => {
@@ -419,11 +435,10 @@
 
       $openController = false;
     } catch (error: unknown) {
-      const err = error as { message?: string; body?: { message?: string } };
-      errorMessage =
-        err?.message ||
-        err?.body?.message ||
-        (isEditMode ? m.failed_update_mcp_server() : m.failed_create_mcp_server());
+      errorMessage = backendMessage(
+        error,
+        isEditMode ? m.failed_update_mcp_server() : m.failed_create_mcp_server()
+      );
     } finally {
       submitting = false;
     }
@@ -503,26 +518,10 @@
             class="space-y-5 px-4 pt-2 pb-6"
           >
             {#if errorMessage}
-              <div
-                class="border-negative-default/30 bg-negative-dimmer flex items-start gap-3 rounded-lg border px-4 py-3"
-                role="alert"
-              >
-                <svg
-                  class="text-negative-default mt-0.5 h-5 w-5 shrink-0"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  aria-hidden="true"
-                >
-                  <path
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    d="M12 9v3.75m9-.75a9 9 0 11-18 0 9 9 0 0118 0zm-9 3.75h.008v.008H12v-.008z"
-                  />
-                </svg>
-                <div class="text-negative-stronger text-sm">{errorMessage}</div>
-              </div>
+              <Alert.Root bind:ref={errorAlert} tabindex={-1} variant="destructive">
+                <CircleAlert />
+                <Alert.Description class="wrap-anywhere">{errorMessage}</Alert.Description>
+              </Alert.Root>
             {/if}
 
             {#if builtinAvailable}

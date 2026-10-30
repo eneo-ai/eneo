@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { describe, it, mock } from "node:test";
+import { describe, it } from "node:test";
 import { createClient, EneoError } from "../client/client.js";
 
 describe("client error privacy", () => {
@@ -95,9 +95,15 @@ describe("client-wide error notification", () => {
   const body = { message: "Choose a new password", eneo_error_code: 9070 };
   const endpoint = "/api/v1/users/tenant/";
 
+  /** Records reported errors; node:test's `mock` is missing under bun test. */
+  function recordErrors() {
+    const reported = [];
+    return { reported, onError: (error) => reported.push(error) };
+  }
+
   for (const transport of ["fetch", "stream", "download", "xhr"]) {
     it(`reports ${transport} refusals and preserves the error for the caller`, async (t) => {
-      const onError = mock.fn();
+      const { reported, onError } = recordErrors();
       if (transport === "xhr") {
         const original = Object.getOwnPropertyDescriptor(globalThis, "XMLHttpRequest");
         t.after(() => {
@@ -130,15 +136,15 @@ describe("client-wide error notification", () => {
         assert.ok(error instanceof EneoError);
         assert.equal(error.status, 403);
         assert.equal(error.code, 9070);
-        assert.equal(onError.mock.callCount(), 1);
-        assert.equal(onError.mock.calls[0].arguments[0], error);
+        assert.equal(reported.length, 1);
+        assert.equal(reported[0], error);
         return true;
       });
     });
   }
 
   it("leaves successful API-key requests untouched", async () => {
-    const onError = mock.fn();
+    const { reported, onError } = recordErrors();
     const client = createClient({
       baseUrl: "https://eneo.example",
       apiKey: "sk_test",
@@ -149,6 +155,6 @@ describe("client-wide error notification", () => {
       onError
     });
     assert.deepEqual(await client.fetch(endpoint, { method: "get" }), { name: "Tenant" });
-    assert.equal(onError.mock.callCount(), 0);
+    assert.equal(reported.length, 0);
   });
 });

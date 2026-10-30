@@ -13,7 +13,7 @@
   import FingerprintPattern from "@lucide/svelte/icons/fingerprint-pattern";
   import Globe from "@lucide/svelte/icons/globe";
   import HardDrive from "@lucide/svelte/icons/hard-drive";
-  import History from "@lucide/svelte/icons/history";
+  import RotateCcwClock from "@lucide/svelte/icons/rotate-ccw-clock";
   import KeyRound from "@lucide/svelte/icons/key-round";
   import Landmark from "@lucide/svelte/icons/landmark";
   import LayoutTemplate from "@lucide/svelte/icons/layout-template";
@@ -89,7 +89,7 @@
         navItem("/admin/usage", ChartPie, m.usage()),
         navItem("/admin/insights", Lightbulb, m.insights()),
         navItem("/admin/crawler", Globe, m.admin_crawler_title()),
-        navItem("/admin/audit-logs", History, m.audit_logs())
+        navItem("/admin/audit-logs", RotateCcwClock, m.audit_logs())
       ]
     },
     {

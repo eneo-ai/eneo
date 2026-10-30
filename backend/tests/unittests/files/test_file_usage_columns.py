@@ -31,6 +31,12 @@ def test_every_declared_usage_column_is_derived_in_kind_order() -> None:
         (FileUsageKind.ASSISTANT_ATTACHMENT, "assistants_files.file_id"),
         (FileUsageKind.APP_ATTACHMENT, "apps_files.file_id"),
         (FileUsageKind.APP_RUN_INPUT, "app_runs_files.file_id"),
+        (FileUsageKind.FLOW_VERSION, "flow_version_file_references.file_id"),
+        (FileUsageKind.FLOW_TEMPLATE_ASSET, "flow_template_assets.file_id"),
+        (FileUsageKind.FLOW_RUNTIME, "flow_live_transcripts.bound_file_id"),
+        (FileUsageKind.FLOW_RUNTIME, "flow_run_step_input_files.file_id"),
+        (FileUsageKind.FLOW_RUNTIME, "flow_run_step_result_files.file_id"),
+        (FileUsageKind.FLOW_RUNTIME, "flow_runtime_uploaded_files.file_id"),
     ]
 
 
@@ -95,3 +101,31 @@ def test_only_foreign_keys_to_files_are_considered() -> None:
         ),
     )
     assert collect_file_usage_columns(metadata, files) == ()
+
+
+def test_composite_file_reference_counts_only_file_id() -> None:
+    metadata = sa.MetaData()
+    files = sa.Table(
+        "files",
+        metadata,
+        sa.Column("id", PostgreSQLUUID(as_uuid=True), primary_key=True),
+        sa.Column("tenant_id", PostgreSQLUUID(as_uuid=True)),
+        sa.UniqueConstraint("id", "tenant_id"),
+    )
+    links = sa.Table(
+        "links",
+        metadata,
+        sa.Column(
+            "file_id",
+            PostgreSQLUUID(as_uuid=True),
+            info=file_usage(FileUsageKind.FLOW_RUNTIME),
+        ),
+        sa.Column("tenant_id", PostgreSQLUUID(as_uuid=True)),
+        sa.ForeignKeyConstraint(
+            ["file_id", "tenant_id"], ["files.id", "files.tenant_id"]
+        ),
+    )
+
+    assert collect_file_usage_columns(metadata, files) == (
+        (FileUsageKind.FLOW_RUNTIME, links.c.file_id),
+    )

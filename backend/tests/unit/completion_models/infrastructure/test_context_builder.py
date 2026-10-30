@@ -14,6 +14,7 @@ from uuid import UUID, uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.completion_models.infrastructure import context_builder
 from eneo.completion_models.infrastructure.context_builder import (
     ContextBuilder,
@@ -35,6 +36,7 @@ def _image(name: str) -> File:
         size=1,
         mimetype="image/png",
         file_type=FileType.IMAGE,
+        owner_type=PrincipalType.USER,
         blob=b"",
         user_id=uuid4(),
         tenant_id=uuid4(),
@@ -258,7 +260,8 @@ def _document(name: str, *, revises: UUID | None = None, seconds: int = 0) -> Fi
         mimetype="text/markdown",
         file_type=FileType.TEXT,
         text="# Plan",
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
         revises_file_id=revises,
     )

@@ -1,10 +1,11 @@
 from collections.abc import Iterator
+from inspect import getsource
 from typing import cast
 
 import pytest
 from fastapi.dependencies.models import Dependant
 
-from eneo.database.database import get_session_with_transaction
+from eneo.database.database import get_session, get_session_with_transaction
 from tests.unit.api_key_test_utils import runtime_router_routes
 
 DIRECT_API_KEY_MUTATION_ROUTES = [
@@ -66,11 +67,22 @@ def test_api_key_mutations_commit_before_response(method: str, path: str) -> Non
     ]
     assert len(container_dependencies) == 1
 
-    transaction_dependencies = [
+    function_transaction_dependencies = [
         dependency
         for dependency in _walk_dependencies(container_dependencies[0])
         if dependency.call is get_session_with_transaction
     ]
+    if function_transaction_dependencies:
+        assert len(function_transaction_dependencies) == 1
+        assert function_transaction_dependencies[0].scope == "function"
+        return
 
-    assert len(transaction_dependencies) == 1
-    assert transaction_dependencies[0].scope == "function"
+    explicit_session_dependencies = [
+        dependency
+        for dependency in _walk_dependencies(container_dependencies[0])
+        if dependency.call is get_session
+    ]
+    assert len(explicit_session_dependencies) == 1
+    assert "async with cast(AsyncSession, container.session()).begin():" in getsource(
+        matches[0].endpoint
+    )

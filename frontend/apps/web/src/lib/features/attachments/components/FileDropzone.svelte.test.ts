@@ -1,6 +1,7 @@
 import { page, userEvent } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { describe, expect, it, vi } from "vitest";
+import { formatBytes } from "$lib/core/formatting/formatBytes";
 import { m } from "$lib/paraglide/messages";
 import type { AcceptedFormat } from "../AttachmentManager";
 import FileDropzoneTestHost from "./FileDropzoneTestHost.svelte";
@@ -31,8 +32,12 @@ describe("FileDropzone", () => {
     await expect.element(toggle).toHaveAttribute("aria-expanded", "true");
     await expect.element(details.getByText(m.file_format_group_documents())).toBeVisible();
     await expect.element(details.getByText(m.file_format_group_audio())).toBeVisible();
-    await expect.element(page.getByText(m.max_size_per_file({ size: "10 MB" }))).toBeVisible();
-    await expect.element(page.getByText(m.max_size_per_file({ size: "200 MB" }))).toBeVisible();
+    await expect
+      .element(page.getByText(m.max_size_per_file({ size: formatBytes(10 * 1024 * 1024) })))
+      .toBeVisible();
+    await expect
+      .element(page.getByText(m.max_size_per_file({ size: formatBytes(200 * 1024 * 1024) })))
+      .toBeVisible();
     for (const extension of [".pdf", ".txt", ".text", ".mp3"]) {
       await expect.element(page.getByText(extension, { exact: true })).toBeVisible();
     }

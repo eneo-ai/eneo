@@ -6,7 +6,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { revealProblems } from "@/components/composites/field-problem";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { History } from "lucide-react";
 import { useTranslations } from "use-intl";

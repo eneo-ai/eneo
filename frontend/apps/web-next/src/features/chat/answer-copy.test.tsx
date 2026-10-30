@@ -78,7 +78,7 @@ describe("copying an answer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Kopiera svaret" }));
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierat"));
     expect(clipboard.writeText).toHaveBeenCalledWith("Gränsen är **700 000 kr**.");
   });
 
@@ -103,7 +103,7 @@ describe("copying an answer", () => {
 
     copyAsRichText();
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierat"));
     const [item] = clipboard.write.mock.calls[0]![0] as TestClipboardItem[];
     expect(Object.keys(item!.items)).toEqual(["text/plain", "text/html"]);
     expect(await readBlob(await item!.items["text/html"]!)).toContain(
@@ -119,7 +119,7 @@ describe("copying an answer", () => {
 
     copyAsRichText();
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierat"));
     const [item] = clipboard.write.mock.calls[0]![0] as TestClipboardItem[];
     expect(await readBlob(await item!.items["text/html"]!)).toContain("<math");
     expect(await readBlob(await item!.items["text/plain"]!)).toBe("Arean är \\pi r^2.");
@@ -148,7 +148,7 @@ describe("copying an answer", () => {
 
     copyAsRichText();
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierat"));
     expect(clipboard.writeText).toHaveBeenCalledWith("Gränsen är 700 000 kr.");
   });
 });

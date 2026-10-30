@@ -99,7 +99,7 @@ function ModelSummary({
 
   return (
     <div className="flex flex-wrap gap-1.5">
-      {model.max_input_tokens > 0 && (
+      {model.max_input_tokens != null && model.max_input_tokens > 0 && (
         <Badge variant="secondary" className="font-normal tabular-nums">
           {formatTokens(model.max_input_tokens)} {t("context_window")}
         </Badge>

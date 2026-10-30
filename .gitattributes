@@ -1,0 +1,20 @@
+# Generated files: GitHub collapses them in diffs and leaves them out of the
+# language statistics. Each is written by a tool; never edit them by hand.
+
+# OpenAPI types (regenerated from the backend's OpenAPI document)
+frontend/packages/eneo-js/src/types/schema.d.ts linguist-generated=true
+frontend/apps/web-next/src/lib/api/schema.d.ts linguist-generated=true
+
+# Flow API error codes (backend/scripts/generate_flow_api_error_codes_ts.py)
+frontend/packages/eneo-js/src/flows/flow-api-error-codes.js linguist-generated=true
+frontend/packages/eneo-js/src/flows/flow-api-error-codes.d.ts linguist-generated=true
+
+# web-next message catalogs (bun run i18n:convert) and theme (bun run theme:build)
+frontend/apps/web-next/src/lib/i18n/messages/*.json linguist-generated=true
+frontend/apps/web-next/src/theme/eneo.css linguist-generated=true
+frontend/apps/web-next/src/theme/eneo.js linguist-generated=true
+frontend/apps/web-next/src/theme/eneo.d.ts linguist-generated=true
+
+# Lockfiles
+bun.lock linguist-generated=true
+uv.lock linguist-generated=true

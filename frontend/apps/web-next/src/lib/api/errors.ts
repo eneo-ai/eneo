@@ -25,6 +25,11 @@ export class EneoApiError extends Error {
   readonly errorId?: string;
   /** Structured error payload (`details` on GeneralError), when present. */
   readonly details?: unknown;
+  /**
+   * Why the request was refused (`context` on GeneralError), when present:
+   * the facts a refusal names, such as the step a change would break.
+   */
+  readonly context?: Record<string, unknown>;
 
   constructor(
     message: string,
@@ -35,6 +40,7 @@ export class EneoApiError extends Error {
       traceId?: string;
       errorId?: string;
       details?: unknown;
+      context?: Record<string, unknown>;
     }
   ) {
     super(message);
@@ -45,6 +51,7 @@ export class EneoApiError extends Error {
     this.traceId = options.traceId;
     this.errorId = options.errorId;
     this.details = options.details;
+    this.context = options.context;
   }
 }
 
@@ -92,6 +99,7 @@ function parseErrorBody(body: unknown): {
   reason?: string;
   errorId?: string;
   details?: unknown;
+  context?: Record<string, unknown>;
 } {
   if (!isRecord(body)) return {};
 
@@ -101,7 +109,8 @@ function parseErrorBody(body: unknown): {
       code: typeof body.eneo_error_code === "number" ? body.eneo_error_code : undefined,
       reason: typeof body.code === "string" ? body.code : undefined,
       errorId: typeof body.error_id === "string" ? body.error_id : undefined,
-      details: body.details ?? undefined
+      details: body.details ?? undefined,
+      context: isRecord(body.context) ? body.context : undefined
     };
   }
 
@@ -136,14 +145,15 @@ export async function errorCodeFromResponse(response: Response): Promise<number 
 }
 
 export function apiErrorFromResponse(response: Response, body: unknown): EneoApiError {
-  const { message, code, reason, errorId, details } = parseErrorBody(body);
+  const { message, code, reason, errorId, details, context } = parseErrorBody(body);
   return new EneoApiError(message ?? `Request failed with status ${response.status}`, {
     status: response.status,
     code,
     reason,
     traceId: extractTraceId(response.headers),
     errorId,
-    details
+    details,
+    context
   });
 }
 
@@ -184,10 +194,10 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9005: "eneo_error_9005", // AUTHENTICATION_ERROR
   9019: "eneo_error_9019", // USER_INACTIVE
   9025: "eneo_error_9025", // TENANT_SUSPENDED
-  9058: "eneo_error_9058", // PASSWORD_REUSE
-  9059: "eneo_error_9059", // PASSWORD_POLICY_VIOLATION
-  9060: "eneo_error_9060", // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
-  9061: "eneo_error_9061", // CURRENT_PASSWORD_INCORRECT
+  9061: "eneo_error_9061", // PASSWORD_REUSE
+  9062: "eneo_error_9062", // PASSWORD_POLICY_VIOLATION
+  9063: "eneo_error_9063", // LOCAL_PASSWORD_CHANGE_UNAVAILABLE
+  9064: "eneo_error_9064", // CURRENT_PASSWORD_INCORRECT
   9070: "eneo_error_9070", // PASSWORD_CHANGE_REQUIRED
   // Model & provider issues
   9002: "eneo_error_9002", // UNSUPPORTED_MODEL
@@ -196,6 +206,7 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9031: "eneo_error_9031", // PROVIDER_INACTIVE
   9033: "eneo_error_9033", // MODEL_NOT_AVAILABLE
   9034: "eneo_error_9034", // KNOWLEDGE_MODEL_UNAVAILABLE
+  9060: "eneo_error_9060", // UNKNOWN_MODEL_CAPACITY
   9035: "eneo_error_9035", // SECURITY_CLASSIFICATION_MISMATCH
   9036: "eneo_error_9036", // MCP_UPSTREAM_ERROR
   9037: "eneo_error_9037", // MCP_UPSTREAM_AUTH_ERROR
@@ -209,10 +220,10 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9024: "eneo_error_9024", // INTERNAL_SERVER_ERROR
   9038: "eneo_error_9038", // RESOURCE_NOT_READY
   // Files and website crawl lifecycle
-  9056: "eneo_error_9056", // INVALID_FILENAME
-  9057: "eneo_error_9057", // INFO_BLOB_ORIGINAL_UNAVAILABLE
-  9063: "eneo_error_9063", // WEBSITE_CRAWL_ACTIVE
-  9064: "eneo_error_9064", // WEBSITE_CRAWL_CLEANUP_PENDING
+  9058: "eneo_error_9058", // INVALID_FILENAME
+  9059: "eneo_error_9059", // INFO_BLOB_ORIGINAL_UNAVAILABLE
+  9066: "eneo_error_9066", // WEBSITE_CRAWL_ACTIVE
+  9067: "eneo_error_9067", // WEBSITE_CRAWL_CLEANUP_PENDING
   // Model lifecycle
   9039: "eneo_error_9039", // MODEL_IN_USE
   // Icons
@@ -226,7 +237,7 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9053: "eneo_error_9053", // SKILL_NOT_PUBLISHED_FOR_BINDING
   9054: "eneo_error_9054", // SKILL_BLOCKED_FOR_BINDING
   9055: "eneo_error_9055", // SKILL_RUNTIME_POLICY_CHANGED
-  9062: "eneo_error_9062", // SKILL_REMOVAL_BUSY
+  9065: "eneo_error_9065", // SKILL_REMOVAL_BUSY
   9048: "eneo_error_9048", // SKILL_SLUG_CONFLICT
   9049: "eneo_error_9049", // SKILL_PUBLISHED_DELETE_FORBIDDEN
   9050: "eneo_error_9050", // SKILL_USED_BY_APP_RUN

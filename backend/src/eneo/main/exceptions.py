@@ -1,5 +1,5 @@
 from enum import Enum, unique
-from typing import Any
+from typing import Any, Literal
 
 from eneo.files.text import (
     CorruptFileError,
@@ -55,10 +55,12 @@ class ErrorCodes(int, Enum):
     MCP_UPSTREAM_AUTH_ERROR = 9037
     # Resource readiness
     RESOURCE_NOT_READY = 9038
+    RESOURCE_GONE = 9056
     # Model lifecycle — soft-delete blocked because the model is still
     # referenced by an active resource (assistants, apps, services,
     # assistant/app templates). Space membership alone does not block.
     MODEL_IN_USE = 9039
+    CONFLICT = 9057
     # System user protection
     SYSTEM_USER_PROTECTED = 9040
     # AI provider deterministically rejected the request (4xx upstream)
@@ -83,15 +85,16 @@ class ErrorCodes(int, Enum):
     SKILL_NOT_PUBLISHED_FOR_BINDING = 9053
     SKILL_BLOCKED_FOR_BINDING = 9054
     SKILL_RUNTIME_POLICY_CHANGED = 9055
-    INVALID_FILENAME = 9056
-    INFO_BLOB_ORIGINAL_UNAVAILABLE = 9057
-    PASSWORD_REUSE = 9058
-    PASSWORD_POLICY_VIOLATION = 9059
-    LOCAL_PASSWORD_CHANGE_UNAVAILABLE = 9060
-    CURRENT_PASSWORD_INCORRECT = 9061
-    SKILL_REMOVAL_BUSY = 9062
-    WEBSITE_CRAWL_ACTIVE = 9063
-    WEBSITE_CRAWL_CLEANUP_PENDING = 9064
+    INVALID_FILENAME = 9058
+    INFO_BLOB_ORIGINAL_UNAVAILABLE = 9059
+    UNKNOWN_MODEL_CAPACITY = 9060
+    PASSWORD_REUSE = 9061
+    PASSWORD_POLICY_VIOLATION = 9062
+    LOCAL_PASSWORD_CHANGE_UNAVAILABLE = 9063
+    CURRENT_PASSWORD_INCORRECT = 9064
+    SKILL_REMOVAL_BUSY = 9065
+    WEBSITE_CRAWL_ACTIVE = 9066
+    WEBSITE_CRAWL_CLEANUP_PENDING = 9067
     # A prompt library entry the personal assistant governance policy uses
     # cannot be deleted until the policy stops using it.
     PROMPT_IN_USE_BY_GOVERNANCE = 9069
@@ -112,7 +115,16 @@ class ErrorCodes(int, Enum):
 
 
 class NotFoundException(Exception):
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
 
 
 class UnauthorizedException(Exception):
@@ -183,7 +195,60 @@ class FederatedLoginDenied(AuthenticationException):
 
 
 class BadRequestException(Exception):
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+
+
+class ResourceGoneException(Exception):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+
+
+class ConflictException(Exception):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+
+
+class UserDeletionBlocked(ConflictException):
+    """Raised when retained Flow runtime history references a user."""
+
+
+class TypedIOValidationException(BadRequestException):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message, code=code, context=context)
+        self.input_payload_json: dict[str, Any] | None = None
+        self.effective_prompt: str | None = None
+        self.contract_validation: dict[str, Any] | None = None
 
 
 class ModelInUseException(Exception):
@@ -247,6 +312,29 @@ class ProviderRejectedRequestException(OpenAIException):
     pass
 
 
+class ProviderCapabilityRejectedException(ProviderRejectedRequestException):
+    """The provider rejected a request parameter it does not support."""
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        capability: Literal["response_format"],
+        retry_without_capability_safe: bool,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+        details: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            code=code,
+            context=context,
+            details=details,
+        )
+        self.capability = capability
+        self.retry_without_capability_safe = retry_without_capability_safe
+
+
 class ClaudeException(Exception):
     pass
 
@@ -264,7 +352,16 @@ class NotReadyException(Exception):
 
 
 class FileNotSupportedException(Exception):
-    pass
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
 
 
 class FileTooLargeException(Exception):
@@ -277,11 +374,15 @@ class FileTooLargeException(Exception):
         self,
         message: str | None = None,
         *,
+        code: str = "file_too_large",
+        context: dict[str, object] | None = None,
         file_size: int | None = None,
         max_size: int | None = None,
         limit_name: str | None = None,
         docs_hint: str | None = None,
     ):
+        self.code = code
+        self.context = context
         self.file_size = file_size
         self.max_size = max_size
         self.limit_name = limit_name
@@ -445,6 +546,19 @@ class InternalServerException(Exception):
     pass
 
 
+class AuditLoggingUnavailableException(Exception):
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.context = context
+
+
 class TenantSuspendedException(Exception):
     pass
 
@@ -511,6 +625,18 @@ class MCPAuthenticationError(MCPClientError):
     pass
 
 
+class MCPToolCallTimedOut(MCPClientError):
+    """Raised when a tool call did not finish within its time."""
+
+
+class MCPToolAnswerTooLarge(MCPClientError):
+    """Raised when a server sends more for a tool call than the caller accepts.
+
+    The response was stopped while it arrived: nothing of it was decoded, so
+    what it carried, the answer or something else, is not known.
+    """
+
+
 # Map exceptions to response codes
 # Set message to None to use the internal message
 # Set error codes in the range 9000 - 9999
@@ -527,6 +653,8 @@ EXCEPTION_MAP = {
         ErrorCodes.USER_NOT_CREATED,
     ),
     BadRequestException: (400, None, ErrorCodes.BAD_REQUEST),
+    ResourceGoneException: (410, None, ErrorCodes.RESOURCE_GONE),
+    ConflictException: (409, None, ErrorCodes.CONFLICT),
     ModelInUseException: (
         400,
         "Model is currently in use and cannot be deleted.",
@@ -575,6 +703,7 @@ EXCEPTION_MAP = {
         "Something went wrong.",
         ErrorCodes.INTERNAL_SERVER_ERROR,
     ),
+    AuditLoggingUnavailableException: (503, None, ErrorCodes.INTERNAL_SERVER_ERROR),
     TenantSuspendedException: (403, "Tenant is suspended", ErrorCodes.TENANT_SUSPENDED),
     APIKeyNotConfiguredException: (503, None, ErrorCodes.API_KEY_NOT_CONFIGURED),
     EncryptionNotConfiguredException: (

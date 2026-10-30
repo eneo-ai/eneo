@@ -39,6 +39,10 @@ export function SpaceFrame({ children }: { children: React.ReactNode }) {
     return <div className="flex min-w-0 flex-1 flex-col">{children}</div>;
   }
 
+  if (route.kind === "workspace") {
+    return <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">{children}</div>;
+  }
+
   return (
     <div className="flex min-w-0 flex-1 flex-col">
       {phone !== false ? <SpacePhoneHeader route={route} segments={segments} /> : null}

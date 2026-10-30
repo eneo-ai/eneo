@@ -4,14 +4,6 @@ import type { components } from "@eneo/eneo-js";
 type ActionType = components["schemas"]["ActionType"];
 type MessageFn = () => string;
 
-/**
- * Exhaustive action → message map. The `satisfies Record<ActionType, …>` makes the
- * compiler (`bun run check`) reject a new ActionType (added to the union via schema
- * regeneration) until it is registered here with both messages — and referencing
- * a missing `m.*` key fails the same check. en/sv parity is guarded by the
- * audit-i18n unit test. This is the single source of truth for display text.
- */
-
 const ACTION_MESSAGES = {
   user_created: {
     name: m.audit_action_user_created,
@@ -473,6 +465,22 @@ const ACTION_MESSAGES = {
     name: m.audit_action_transcription_model_migrated,
     description: m.audit_action_transcription_model_migrated_description
   },
+  transcription_service_created: {
+    name: m.audit_action_transcription_service_created,
+    description: m.audit_action_transcription_service_created_description
+  },
+  transcription_service_updated: {
+    name: m.audit_action_transcription_service_updated,
+    description: m.audit_action_transcription_service_updated_description
+  },
+  transcription_service_deleted: {
+    name: m.audit_action_transcription_service_deleted,
+    description: m.audit_action_transcription_service_deleted_description
+  },
+  transcription_service_checked: {
+    name: m.audit_action_transcription_service_checked,
+    description: m.audit_action_transcription_service_checked_description
+  },
   image_model_created: {
     name: m.audit_action_image_model_created,
     description: m.audit_action_image_model_created_description
@@ -508,6 +516,206 @@ const ACTION_MESSAGES = {
   template_deleted: {
     name: m.audit_action_template_deleted,
     description: m.audit_action_template_deleted_description
+  },
+  flow_created: {
+    name: m.audit_action_flow_created,
+    description: m.audit_action_flow_created_description
+  },
+  flow_updated: {
+    name: m.audit_action_flow_updated,
+    description: m.audit_action_flow_updated_description
+  },
+  flow_authoring_chat_created: {
+    name: m.audit_action_flow_authoring_chat_created,
+    description: m.audit_action_flow_authoring_chat_created_description
+  },
+  flow_authoring_mode_changed: {
+    name: m.audit_action_flow_authoring_mode_changed,
+    description: m.audit_action_flow_authoring_mode_changed_description
+  },
+  flow_authoring_chat_model_changed: {
+    name: m.audit_action_flow_authoring_chat_model_changed,
+    description: m.audit_action_flow_authoring_chat_model_changed_description
+  },
+  flow_authoring_conversation_started: {
+    name: m.audit_action_flow_authoring_conversation_started,
+    description: m.audit_action_flow_authoring_conversation_started_description
+  },
+  flow_deleted: {
+    name: m.audit_action_flow_deleted,
+    description: m.audit_action_flow_deleted_description
+  },
+  flow_published: {
+    name: m.audit_action_flow_published,
+    description: m.audit_action_flow_published_description
+  },
+  flow_unpublished: {
+    name: m.audit_action_flow_unpublished,
+    description: m.audit_action_flow_unpublished_description
+  },
+  flow_run_retention_policy_changed: {
+    name: m.audit_action_flow_run_retention_policy_changed,
+    description: m.audit_action_flow_run_retention_policy_changed_description
+  },
+  flow_run_history_purged: {
+    name: m.audit_action_flow_run_history_purged,
+    description: m.audit_action_flow_run_history_purged_description
+  },
+  flow_retention_hold_placed: {
+    name: m.audit_action_flow_retention_hold_placed,
+    description: m.audit_action_flow_retention_hold_placed_description
+  },
+  flow_retention_hold_released: {
+    name: m.audit_action_flow_retention_hold_released,
+    description: m.audit_action_flow_retention_hold_released_description
+  },
+  flow_retention_hold_review_extended: {
+    name: m.audit_action_flow_retention_hold_review_extended,
+    description: m.audit_action_flow_retention_hold_review_extended_description
+  },
+  flow_run_created: {
+    name: m.audit_action_flow_run_created,
+    description: m.audit_action_flow_run_created_description
+  },
+  flow_run_completed: {
+    name: m.audit_action_flow_run_completed,
+    description: m.audit_action_flow_run_completed_description
+  },
+  flow_run_failed: {
+    name: m.audit_action_flow_run_failed,
+    description: m.audit_action_flow_run_failed_description
+  },
+  flow_run_redispatched: {
+    name: m.audit_action_flow_run_redispatched,
+    description: m.audit_action_flow_run_redispatched_description
+  },
+  flow_run_cancelled: {
+    name: m.audit_action_flow_run_cancelled,
+    description: m.audit_action_flow_run_cancelled_description
+  },
+  flow_run_audit_delivery_redriven: {
+    name: m.audit_action_flow_run_audit_delivery_redriven,
+    description: m.audit_action_flow_run_audit_delivery_redriven_description
+  },
+  flow_classification_override: {
+    name: m.audit_action_flow_classification_override,
+    description: m.audit_action_flow_classification_override_description
+  },
+  flow_run_document_generated: {
+    name: m.audit_action_flow_run_document_generated,
+    description: m.audit_action_flow_run_document_generated_description
+  },
+  flow_run_contract_rejected: {
+    name: m.audit_action_flow_run_contract_rejected,
+    description: m.audit_action_flow_run_contract_rejected_description
+  },
+  flow_run_audio_transcribed: {
+    name: m.audit_action_flow_run_audio_transcribed,
+    description: m.audit_action_flow_run_audio_transcribed_description
+  },
+  flow_live_transcription_started: {
+    name: m.audit_action_flow_live_transcription_started,
+    description: m.audit_action_flow_live_transcription_started_description
+  },
+  flow_http_outbound_call: {
+    name: m.audit_action_flow_http_outbound_call,
+    description: m.audit_action_flow_http_outbound_call_description
+  },
+  flow_evidence_viewed: {
+    name: m.audit_action_flow_evidence_viewed,
+    description: m.audit_action_flow_evidence_viewed_description
+  },
+  flow_evidence_exported_json: {
+    name: m.audit_action_flow_evidence_exported_json,
+    description: m.audit_action_flow_evidence_exported_json_description
+  },
+  flow_package_exported: {
+    name: m.audit_action_flow_package_exported,
+    description: m.audit_action_flow_package_exported_description
+  },
+  flow_package_draft_installed: {
+    name: m.audit_action_flow_package_draft_installed,
+    description: m.audit_action_flow_package_draft_installed_description
+  },
+  flow_package_import_failed: {
+    name: m.audit_action_flow_package_import_failed,
+    description: m.audit_action_flow_package_import_failed_description
+  },
+  flow_run_review_checkpoint_opened: {
+    name: m.audit_action_flow_run_review_checkpoint_opened,
+    description: m.audit_action_flow_run_review_checkpoint_opened_description
+  },
+  flow_run_review_checkpoint_edited: {
+    name: m.audit_action_flow_run_review_checkpoint_edited,
+    description: m.audit_action_flow_run_review_checkpoint_edited_description
+  },
+  flow_run_transcript_corrections_edited: {
+    name: m.audit_action_flow_run_transcript_corrections_edited,
+    description: m.audit_action_flow_run_transcript_corrections_edited_description
+  },
+  flow_run_transcript_corrections_applied: {
+    name: m.audit_action_flow_run_transcript_corrections_applied,
+    description: m.audit_action_flow_run_transcript_corrections_applied_description
+  },
+  flow_run_review_checkpoint_approved: {
+    name: m.audit_action_flow_run_review_checkpoint_approved,
+    description: m.audit_action_flow_run_review_checkpoint_approved_description
+  },
+  flow_run_review_checkpoint_rejected: {
+    name: m.audit_action_flow_run_review_checkpoint_rejected,
+    description: m.audit_action_flow_run_review_checkpoint_rejected_description
+  },
+  flow_run_review_checkpoint_resumed: {
+    name: m.audit_action_flow_run_review_checkpoint_resumed,
+    description: m.audit_action_flow_run_review_checkpoint_resumed_description
+  },
+  flow_run_review_checkpoint_cancelled: {
+    name: m.audit_action_flow_run_review_checkpoint_cancelled,
+    description: m.audit_action_flow_run_review_checkpoint_cancelled_description
+  },
+  flow_run_review_checkpoint_expired: {
+    name: m.audit_action_flow_run_review_checkpoint_expired,
+    description: m.audit_action_flow_run_review_checkpoint_expired_description
+  },
+  flow_suggestion_dismissed: {
+    name: m.audit_action_flow_suggestion_dismissed,
+    description: m.audit_action_flow_suggestion_dismissed_description
+  },
+  flow_suggestion_restored: {
+    name: m.audit_action_flow_suggestion_restored,
+    description: m.audit_action_flow_suggestion_restored_description
+  },
+  ai_builder_client_error_reported: {
+    name: m.audit_action_ai_builder_client_error_reported,
+    description: m.audit_action_ai_builder_client_error_reported_description
+  },
+  ai_builder_client_error_outcome_recorded: {
+    name: m.audit_action_ai_builder_client_error_outcome_recorded,
+    description: m.audit_action_ai_builder_client_error_outcome_recorded_description
+  },
+  ai_builder_session_created: {
+    name: m.audit_action_ai_builder_session_created,
+    description: m.audit_action_ai_builder_session_created_description
+  },
+  ai_builder_plan_approved: {
+    name: m.audit_action_ai_builder_plan_approved,
+    description: m.audit_action_ai_builder_plan_approved_description
+  },
+  ai_builder_plan_revised: {
+    name: m.audit_action_ai_builder_plan_revised,
+    description: m.audit_action_ai_builder_plan_revised_description
+  },
+  ai_builder_flow_applied: {
+    name: m.audit_action_ai_builder_flow_applied,
+    description: m.audit_action_ai_builder_flow_applied_description
+  },
+  ai_builder_attachment_detached: {
+    name: m.audit_action_ai_builder_attachment_detached,
+    description: m.audit_action_ai_builder_attachment_detached_description
+  },
+  ai_builder_session_cancelled: {
+    name: m.audit_action_ai_builder_session_cancelled,
+    description: m.audit_action_ai_builder_session_cancelled_description
   },
   security_classification_created: {
     name: m.audit_action_security_classification_created,

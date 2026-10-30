@@ -31,17 +31,26 @@
   import { IconKnowledge } from "@eneo/icons/knowledge";
   import { IconOverview } from "@eneo/icons/overview";
   import { IconSpeechBubble } from "@eneo/icons/speech-bubble";
+  import { IconWorkflow } from "@eneo/icons/workflow";
   import { page } from "$app/stores";
   import { Navigation } from "$lib/components/layout";
+  import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
   import BookOpenCheck from "@lucide/svelte/icons/book-open-check";
 
   export let space: SpaceMenuContext;
 
+  const { user, environment } = getAppContext();
+
   $: section = $page.url.pathname.split("/")[3];
   $: chatPartnerIsDefined = $page.url.searchParams.get("type") !== null;
   $: isOrgSpace = space.organization === true;
+  // Flows are worked with in the new app, so the menu links there when the
+  // deployment has one (NEW_APP_URL) and leaves the entry out otherwise.
+  $: newAppFlowsHref = environment.newAppUrl
+    ? `${environment.newAppUrl.replace(/\/+$/, "")}/spaces/${space.routeId}/flows`
+    : null;
 </script>
 
 <Navigation.Menu>
@@ -82,6 +91,14 @@
       isActive={section === "apps"}
       icon={IconApp}
       label={m.apps()}
+    />
+  {/if}
+  {#if !isOrgSpace && newAppFlowsHref && space.hasPermission("read", "app") && user.hasPermission("flows_view")}
+    <Navigation.Link
+      href={newAppFlowsHref}
+      isActive={false}
+      icon={IconWorkflow}
+      label={m.flows()}
     />
   {/if}
   {#if space.hasPermission("read", "website") || space.hasPermission("read", "collection")}

@@ -8,9 +8,6 @@ import psycopg2
 from psycopg2 import sql
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from eneo.server.dependencies.predefined_roles import (
-    load_predefined_roles_from_config,
-)
 from eneo.users.password import (
     PasswordPolicyViolationError,
     validate_new_local_password,
@@ -40,6 +37,25 @@ class Settings(BaseSettings):
 
 
 settings = Settings()
+
+
+def _predefined_role_permissions(role_name: str) -> list[str]:
+    """Load bootstrap permissions from the canonical predefined-role template."""
+    from eneo.server.dependencies.predefined_role_config import (
+        load_predefined_roles_from_config,
+    )
+
+    role = next(
+        (
+            template
+            for template in load_predefined_roles_from_config()
+            if template["name"] == role_name
+        ),
+        None,
+    )
+    if role is None:
+        raise RuntimeError(f"Missing predefined role template: {role_name}")
+    return list(role["permissions"])
 
 
 # Alembic command
@@ -159,12 +175,7 @@ def add_tenant_user(
         role = cur.fetchone()
 
         if role is None:
-            owner_template = next(
-                role
-                for role in load_predefined_roles_from_config()
-                if role["name"] == "Owner"
-            )
-            owner_permissions = owner_template["permissions"]
+            owner_permissions = _predefined_role_permissions("Owner")
             add_role_query = sql.SQL(
                 "INSERT INTO roles (name, permissions, tenant_id, predefined_source) "
                 "VALUES (%s, %s, %s, %s) RETURNING id"

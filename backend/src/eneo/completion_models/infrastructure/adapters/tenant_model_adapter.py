@@ -1,10 +1,13 @@
 """Minimal adapter for tenant models using LiteLLM."""
 
+import asyncio
 import base64
 import binascii
+import hashlib
 import json
 import re
 import uuid
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import (
     TYPE_CHECKING,
@@ -14,10 +17,12 @@ from typing import (
     NoReturn,
     Optional,
     Protocol,
+    TypeAlias,
     TypedDict,
     cast,
 )
 from urllib.parse import urlsplit, urlunsplit
+from uuid import UUID
 
 from opentelemetry import trace
 from opentelemetry.trace import Status, StatusCode
@@ -34,6 +39,16 @@ from eneo.ai_models.completion_models.completion_model import (
     function_definition_to_tool,
 )
 from eneo.authentication.signed_urls import redact_reference_tokens_in_json
+from eneo.completion_models.domain.model_capacity import (
+    ModelCapacity,
+    ModelCapacityNoFit,
+    UnknownModelCapacityError,
+)
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionOutputCapacityError,
+    CompletionRequestPackage,
+)
 from eneo.completion_models.domain.skill_activation import (
     SKILL_ACTIVATION_TOOL_NAME,
     InvalidSkillToolCallError,
@@ -48,20 +63,55 @@ from eneo.completion_models.infrastructure.adapters.base_adapter import (
 )
 from eneo.completion_models.infrastructure.context_builder import (
     MIN_PERCENTAGE_KNOWLEDGE,
+    ContextWindowExceededError,
 )
 from eneo.completion_models.infrastructure.message_payload import (
     build_content,
     build_turn_messages,
 )
+from eneo.completion_models.infrastructure.provider_response_ids import (
+    extract_provider_response_id,
+)
 from eneo.completion_models.infrastructure.static_prompts import (
     MCP_TOOL_REFERENCES_INSTRUCTION,
 )
+from eneo.completion_models.infrastructure.stream_collector import (
+    ProviderJsonWhitespaceAbort,
+    ProviderStreamCollector,
+    ProviderStreamError,
+    native_json_request,
+)
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    StructuredOutputCapabilityDecision,
+    normalize_reasoning_effort,
+    resolve_structured_output_capability,
+)
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    get_supported_openai_params as get_model_supported_openai_params,
+)
 from eneo.files.model_file_references import file_handle
+from eneo.flows.runtime.step_deadline import (
+    StepDeadlineExceeded,
+    settle_provider_request,
+)
 from eneo.logging.logging import LoggingDetails
 from eneo.main.config import get_settings
-from eneo.main.exceptions import APIKeyNotConfiguredException, OpenAIException
+from eneo.main.exceptions import (
+    APIKeyNotConfiguredException,
+    OpenAIException,
+    ProviderCapabilityRejectedException,
+    ProviderRejectedRequestException,
+    TypedIOValidationException,
+)
 from eneo.main.logging import get_logger
 from eneo.main.stream_lifecycle import close_provider_stream
+from eneo.model_providers.domain.provider_call_observer import (
+    CompletionCallResultFacts,
+    ProviderCallObserver,
+    ProviderCallObserverError,
+    ProviderCallReason,
+    build_provider_call_request_facts,
+)
 from eneo.model_providers.infrastructure import litellm_transport
 from eneo.model_providers.infrastructure.litellm_provider import (
     build_litellm_provider_kwargs,
@@ -74,7 +124,11 @@ from eneo.model_providers.infrastructure.outbound_headers_runtime import (
 from eneo.model_providers.infrastructure.tenant_model_credential_resolver import (
     TenantModelCredentialResolver,
 )
-from eneo.tokens.token_utils import count_tokens, measure_provider_input_tokens
+from eneo.tokens.token_utils import (
+    count_tokens,
+    measure_provider_input_reserve,
+    measure_provider_input_tokens,
+)
 
 logger = get_logger(__name__)
 
@@ -383,6 +437,10 @@ class _ArgumentDeltas:
 async def _has_app_view(mcp_proxy: Any, prefixed_tool_name: str) -> bool:
     """Whether the tool has an approved MCP App view.
 
+    A call's `structuredContent` is kept for such a tool (its view renders
+    from it) and for a tool of one of Eneo's own servers (a flow run's id,
+    which the flow chat shows as a run card); it is dropped for other tools.
+
     Stub proxies without ``approved_app_view`` and every lookup failure read
     as no view.
     """
@@ -491,12 +549,26 @@ class PreparedModelStream:
 
 
 def _get_supported_openai_params(model: str) -> list[str] | None:
-    return litellm_transport.get_supported_openai_params(model)
+    supported = get_model_supported_openai_params(model=model)
+    return list(supported) if supported is not None else None
 
 
 async def _acompletion_call(**kwargs: Any) -> Any:
     kwargs.setdefault("timeout", get_settings().completion_request_timeout_seconds)
     return await litellm_transport.acompletion(**kwargs)
+
+
+async def _settled_provider_stream(
+    stream: AsyncIterator[_LiteLLMStreamChunk],
+) -> AsyncIterator[_LiteLLMStreamChunk]:
+    try:
+        async for chunk in stream:
+            yield chunk
+    except (asyncio.CancelledError, GeneratorExit, Exception):
+        settle_provider_request(known=False)
+        raise
+    else:
+        settle_provider_request(known=True)
 
 
 def _is_provider_unavailable_error(exc: BaseException) -> bool:
@@ -579,11 +651,18 @@ class _RoundJoiner:
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import (
-        CompletionModel,
+        CompletionModel as APICompletionModel,
+    )
+    from eneo.ai_models.completion_models.completion_model import (
         Context,
+    )
+    from eneo.completion_models.domain.completion_model import (
+        CompletionModel as DomainCompletionModel,
     )
     from eneo.mcp_servers.infrastructure.proxy import MCPProxySession
     from eneo.mcp_servers.infrastructure.tool_approval import ToolApprovalManager
+
+    TenantCompletionModel: TypeAlias = APICompletionModel | DomainCompletionModel
 
 
 class TenantModelAdapter(CompletionModelAdapter):
@@ -619,7 +698,7 @@ class TenantModelAdapter(CompletionModelAdapter):
 
     def __init__(
         self,
-        model: "CompletionModel",
+        model: "TenantCompletionModel",
         credential_resolver: TenantModelCredentialResolver,
         provider_type: str,
         outbound_headers: ProviderOutboundHeaders | None = None,
@@ -641,12 +720,25 @@ class TenantModelAdapter(CompletionModelAdapter):
                 "TenantModelAdapter requires a tenant model with provider_id"
             )
 
-        super().__init__(model)
+        self.model = model
         self.credential_resolver = credential_resolver
 
         self.litellm_model = model.get_model_route(provider_type=provider_type)
         self.provider_type = provider_type
         self.outbound_headers = outbound_headers
+
+    def resolve_litellm_params(self) -> tuple[str, dict[str, object]]:
+        return self.litellm_model, build_litellm_provider_kwargs(
+            self.credential_resolver
+        )
+
+    def resolve_structured_output_capability(
+        self,
+    ) -> StructuredOutputCapabilityDecision:
+        return resolve_structured_output_capability(
+            litellm_model=self.litellm_model,
+            provider_type=self.provider_type,
+        )
 
     def _record_provider_unavailable(
         self,
@@ -893,25 +985,32 @@ class TenantModelAdapter(CompletionModelAdapter):
             context_completion_tokens=getattr(usage, "completion_tokens", None),
         )
 
-    def _accumulate_usage(
-        self, existing: TokenUsage | None, response: _LiteLLMHasUsage
-    ) -> TokenUsage:
-        """Accumulate token usage from a follow-up LiteLLM response."""
-        new = self._extract_usage(response)
-        if not existing:
-            return new or TokenUsage()
-        if not new:
-            return existing.model_copy(
-                update={
-                    "context_prompt_tokens": None,
-                    "context_completion_tokens": None,
-                }
+    @staticmethod
+    def _combine_usage(
+        existing: TokenUsage | None, new: TokenUsage | None
+    ) -> TokenUsage | None:
+        """Combine provider calls without presenting partial totals as complete.
+
+        A dimension is summed only when both calls report it. Two calls that
+        both omit usage remain ``None``; an all-``None`` usage object means one
+        call reported usage while another omitted it.
+        """
+        if existing is None and new is None:
+            return None
+        if existing is None or new is None:
+            return TokenUsage(
+                context_prompt_tokens=(
+                    new.context_prompt_tokens if new is not None else None
+                ),
+                context_completion_tokens=(
+                    new.context_completion_tokens if new is not None else None
+                ),
             )
 
         def _add(a: int | None, b: int | None) -> int | None:
-            if a is None and b is None:
+            if a is None or b is None:
                 return None
-            return (a or 0) + (b or 0)
+            return a + b
 
         return TokenUsage(
             prompt_tokens=_add(existing.prompt_tokens, new.prompt_tokens),
@@ -1283,47 +1382,6 @@ class TenantModelAdapter(CompletionModelAdapter):
                         f"Scaled temperature for Anthropic: {temp} -> {temp / 2}"
                     )
 
-            # Only pass reasoning_effort if the model actually supports it
-            # (per LiteLLM's supported_openai_params) and the value is meaningful
-            if "reasoning_effort" in model_kwargs_dict:
-                supported_params = (
-                    _get_supported_openai_params(self.litellm_model) or []
-                )
-                reasoning_effort = model_kwargs_dict["reasoning_effort"]
-                remove_reasoning_effort = (
-                    "reasoning_effort" not in supported_params
-                    or reasoning_effort in (None, "")
-                )
-                if reasoning_effort == "none" and not remove_reasoning_effort:
-                    try:
-                        remove_reasoning_effort = (
-                            litellm_transport.get_model_info(self.litellm_model).get(
-                                "supports_none_reasoning_effort"
-                            )
-                            is not True
-                        )
-                    except Exception:
-                        # Old snapshots advertised `none` for every reasoning
-                        # route. Treat unavailable metadata conservatively so
-                        # those values retain their provider-default behavior.
-                        remove_reasoning_effort = True
-                        logger.debug(
-                            "Could not confirm literal none reasoning support",
-                            extra={"model_route": self.litellm_model},
-                            exc_info=True,
-                        )
-                if remove_reasoning_effort:
-                    del model_kwargs_dict["reasoning_effort"]
-
-            # Ensure max_tokens is set - some APIs (e.g., vLLM, OpenAI-compatible)
-            # require it explicitly or return empty responses
-            if (
-                "max_tokens" not in model_kwargs_dict
-                and "max_completion_tokens" not in model_kwargs_dict
-            ):
-                model_kwargs_dict["max_tokens"] = self.model.max_output_tokens
-                logger.debug(f"Added default max_tokens={self.model.max_output_tokens}")
-
             kwargs.update(model_kwargs_dict)
 
         # Remove non-serializable params that must not reach litellm
@@ -1332,6 +1390,13 @@ class TenantModelAdapter(CompletionModelAdapter):
 
         # Merge with additional kwargs
         kwargs.update(additional_kwargs)
+        if model_kwargs or kwargs.get("reasoning_effort") not in (None, ""):
+            kwargs = normalize_reasoning_effort(
+                litellm_model=self.litellm_model,
+                provider_type=self.provider_type,
+                model_kwargs=kwargs,
+                openai_absent_effort="low",
+            )
 
         # Last, so the destination check sees the final api_base. Every
         # _acompletion_call site spreads these kwargs, tool rounds included.
@@ -1340,12 +1405,146 @@ class TenantModelAdapter(CompletionModelAdapter):
         return kwargs
 
     @override
+    def package_request(
+        self,
+        provider_input: ProviderInput,
+        *,
+        model_kwargs: ModelKwargs | dict[str, Any] | None = None,
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    ) -> CompletionRequestPackage:
+        kwargs = self._prepare_kwargs(model_kwargs=model_kwargs)
+        kwargs["useful_output_reserve_tokens"] = useful_output_reserve_tokens
+        if provider_input.tools:
+            kwargs["tools"] = provider_input.tools
+        package, _ = self._package_request(provider_input.messages, kwargs)
+        return package
+
+    def _package_request(
+        self, messages: list[dict[str, Any]], kwargs: dict[str, Any]
+    ) -> tuple[CompletionRequestPackage, dict[str, Any]]:
+        capacity = ModelCapacity(self.model.token_limit, self.model.max_output_tokens)
+        prepared = dict(kwargs)
+        useful_output_reserve_tokens = prepared.pop(
+            "useful_output_reserve_tokens", DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+        )
+        if (
+            type(useful_output_reserve_tokens) is not int
+            or useful_output_reserve_tokens < 1
+        ):
+            raise ValueError("The useful output reserve must be a positive integer.")
+        caller_caps: list[int] = []
+        for name in ("max_tokens", "max_completion_tokens"):
+            value = prepared.pop(name, None)
+            if value is not None:
+                if type(value) is not int or value < 1:
+                    raise ProviderRejectedRequestException(
+                        "The output token cap must be a positive integer.",
+                        code="provider_rejected_request",
+                        details={"reason": "invalid_output_cap", "retryable": False},
+                    )
+                caller_caps.append(value)
+        reserve = measure_provider_input_reserve(
+            messages,
+            prepared.get("tools") or [],
+            self.litellm_model,
+            response_format=prepared.get("response_format"),
+        )
+        cap = capacity.resolve_output_cap(
+            input_tokens=reserve.tokens,
+            safety_tokens=0,
+            caller_cap=min(caller_caps) if caller_caps else None,
+        )
+        return CompletionRequestPackage(
+            messages=messages,
+            tools=prepared.get("tools") or [],
+            response_format=prepared.get("response_format"),
+            input_reserve=reserve,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
+            output_cap_tokens=None if isinstance(cap, ModelCapacityNoFit) else cap,
+        ), prepared
+
+    def _prepare_dispatch_kwargs(
+        self, messages: list[dict[str, Any]], kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
+        package, prepared = self._package_request(messages, kwargs)
+        if not package.fits:
+            capacity = ModelCapacity(
+                self.model.token_limit, self.model.max_output_tokens
+            )
+            input_fits = capacity.admits_input(
+                package.input_reserve.tokens + package.useful_output_reserve_tokens,
+                safety_tokens=0,
+            )
+            if input_fits or not capacity.output_reserve_fits(
+                package.useful_output_reserve_tokens
+            ):
+                raise CompletionOutputCapacityError(
+                    input_reserve_tokens=package.input_reserve.tokens,
+                    useful_output_reserve_tokens=package.useful_output_reserve_tokens,
+                    max_input_tokens=capacity.require_input_tokens(),
+                    max_output_tokens=(
+                        package.output_cap_tokens
+                        if input_fits and package.output_cap_tokens is not None
+                        else capacity.require_output_tokens()
+                    ),
+                )
+            raise ContextWindowExceededError(
+                estimated_tokens=package.input_reserve.tokens,
+                max_tokens=capacity.input_allowance(
+                    output_reserve_tokens=package.useful_output_reserve_tokens,
+                    safety_tokens=0,
+                ),
+            )
+        supported = _get_supported_openai_params(self.litellm_model) or []
+        cap_parameter = next(
+            (
+                name
+                for name in ("max_tokens", "max_completion_tokens")
+                if name in supported
+            ),
+            None,
+        )
+        if cap_parameter is None:
+            raise ProviderRejectedRequestException(
+                "The selected model route cannot enforce an output token cap.",
+                code="provider_rejected_request",
+                details={"reason": "output_cap_unsupported", "retryable": False},
+            )
+        prepared[cap_parameter] = package.output_cap_tokens
+        return prepared
+
+    def _use_prepared_request(
+        self,
+        provider_input: ProviderInput,
+        kwargs: dict[str, Any],
+        prepared_request: CompletionRequestPackage | None,
+    ) -> ProviderInput:
+        if prepared_request is not None:
+            # Tool rounds may append messages and replace the tool catalogue.
+            provider_input = ProviderInput(
+                messages=deepcopy(prepared_request.messages),
+                tools=deepcopy(prepared_request.tools),
+                built_in_tools=provider_input.built_in_tools,
+            )
+            kwargs.pop("response_format", None)
+            if prepared_request.response_format is not None:
+                kwargs["response_format"] = deepcopy(prepared_request.response_format)
+            kwargs.pop("tools", None)
+        if provider_input.tools:
+            kwargs["tools"] = provider_input.tools
+        return provider_input
+
+    @override
     async def get_response(
         self,
         context: "Context",
         model_kwargs: ModelKwargs | dict[str, Any] | None,
         mcp_proxy: "MCPProxySession | None" = None,
         skill_runtime: SkillActivationRuntime | None = None,
+        provider_call_observer: ProviderCallObserver | None = None,
+        provider_call_reason: ProviderCallReason = "initial",
+        useful_output_reserve_tokens: int | None = None,
+        prepared_request: CompletionRequestPackage | None = None,
         **kwargs: Any,
     ) -> Completion:
         """
@@ -1364,6 +1563,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             APIKeyNotConfiguredException: If credentials are invalid
             OpenAIException: For API errors, rate limits, network issues
         """
+        self.get_token_limit_of_model()
         # Prepare LiteLLM kwargs with credentials and provider-specific handling
         litellm_kwargs = self._prepare_kwargs(model_kwargs=model_kwargs, **kwargs)
 
@@ -1372,9 +1572,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             mcp_proxy=mcp_proxy,
             skill_runtime=skill_runtime,
         )
+        provider_input = self._use_prepared_request(
+            provider_input, litellm_kwargs, prepared_request
+        )
         messages = provider_input.messages
-        if provider_input.tools:
-            litellm_kwargs["tools"] = provider_input.tools
 
         # Check which params will be dropped and log effective params
         dropped = self._get_dropped_params(litellm_kwargs)
@@ -1384,6 +1585,19 @@ class TenantModelAdapter(CompletionModelAdapter):
             f"with {len(messages)} messages, params: {self._get_effective_params(litellm_kwargs, dropped)}"
         )
 
+        if useful_output_reserve_tokens is None:
+            useful_output_reserve_tokens = (
+                prepared_request.useful_output_reserve_tokens
+                if prepared_request is not None
+                else DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+            )
+        elif prepared_request is not None:
+            useful_output_reserve_tokens = max(
+                useful_output_reserve_tokens,
+                prepared_request.useful_output_reserve_tokens,
+            )
+        litellm_kwargs["useful_output_reserve_tokens"] = useful_output_reserve_tokens
+        completed_provider_calls = 0
         try:
             cumulative_input_tokens = 0
             used_input_estimate = False
@@ -1391,17 +1605,14 @@ class TenantModelAdapter(CompletionModelAdapter):
             cumulative_output_tokens = 0
             used_output_estimate = False
             context_output_token_estimate: int | None = None
-            # Call LiteLLM with drop_params=True to handle unsupported params gracefully
-            response = cast(
-                _LiteLLMResponse,
-                await _acompletion_call(
-                    model=self.litellm_model,
-                    messages=messages,
-                    stream=False,
-                    drop_params=True,
-                    **litellm_kwargs,
-                ),
+            response = await self._observed_provider_call(
+                messages=messages,
+                litellm_kwargs=litellm_kwargs,
+                observer=provider_call_observer,
+                reason=provider_call_reason,
+                retry_without_capability_safe=True,
             )
+            completed_provider_calls += 1
             request_input_tokens, request_was_estimated = (
                 self._resolve_request_input_tokens(
                     response=response,
@@ -1428,7 +1639,6 @@ class TenantModelAdapter(CompletionModelAdapter):
 
             # Extract token usage from provider response
             usage = self._extract_usage(response)
-
             completion = Completion()
             if response.choices:
                 choice = response.choices[0]
@@ -1447,7 +1657,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self._always_active_skill_metadata(skill_runtime)
                 )
                 result_budget = _ToolResultBudget(
-                    token_limit=self.model.token_limit,
+                    token_limit=self.get_token_limit_of_model(),
                     litellm_model=self.litellm_model,
                 )
                 activation_available = (
@@ -1480,20 +1690,19 @@ class TenantModelAdapter(CompletionModelAdapter):
                 async def _follow_up_completion() -> bool:
                     """Run the next completion and refresh msg; False when empty."""
                     nonlocal response, usage, choice, msg
+                    nonlocal completed_provider_calls
                     nonlocal cumulative_input_tokens, used_input_estimate
                     nonlocal context_input_token_estimate
                     nonlocal cumulative_output_tokens, used_output_estimate
                     nonlocal context_output_token_estimate
-                    response = cast(
-                        _LiteLLMResponse,
-                        await _acompletion_call(
-                            model=self.litellm_model,
-                            messages=messages,
-                            stream=False,
-                            drop_params=True,
-                            **litellm_kwargs,
-                        ),
+                    response = await self._observed_provider_call(
+                        messages=messages,
+                        litellm_kwargs=litellm_kwargs,
+                        observer=provider_call_observer,
+                        reason="tool_round",
+                        retry_without_capability_safe=False,
                     )
+                    completed_provider_calls += 1
                     request_input_tokens, request_was_estimated = (
                         self._resolve_request_input_tokens(
                             response=response,
@@ -1519,7 +1728,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                     context_output_token_estimate = (
                         request_output_tokens if request_output_was_estimated else None
                     )
-                    usage = self._accumulate_usage(usage, response)
+                    usage = self._combine_usage(usage, self._extract_usage(response))
                     if not response.choices:
                         return False
                     choice = response.choices[0]
@@ -1527,16 +1736,22 @@ class TenantModelAdapter(CompletionModelAdapter):
                     _keep_round(msg)
                     return True
 
-                while msg.tool_calls and (mcp_proxy or activation_available):
+                while (
+                    msg.tool_calls
+                    and choice.finish_reason != "length"
+                    and (mcp_proxy or activation_available)
+                ):
                     if tool_round >= max_rounds:
                         if forced_final:
-                            # The provider ignored tool_choice="none" and asked
-                            # for tools again; end with what we have.
                             logger.warning(
                                 "[MCP] Model attempted tool calls after tools "
-                                "were disabled; ending the turn"
+                                "were disabled; failing the turn"
                             )
-                            break
+                            raise OpenAIException(
+                                "The model could not finish after reaching the "
+                                "tool round limit.",
+                                code="tool_round_limit",
+                            )
                         forced_final = True
                         logger.warning(
                             f"[MCP] Reached max tool rounds "
@@ -1653,9 +1868,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                             mcp_tool_name=call.name,
                             existing_prefixes=seen_prefixes,
                         )
-                        has_app_view = not result.get(
-                            "is_error"
-                        ) and await _has_app_view(mcp_proxy, call.name)
+                        assert mcp_proxy is not None
+                        keeps_structured = not result.get("is_error") and (
+                            mcp_proxy.is_internal_tool(call.name)
+                            or await _has_app_view(mcp_proxy, call.name)
+                        )
                         captured_refs.extend(refs_for_call)
                         captured_images.extend(images_for_call)
                         result_status = "succeeded"
@@ -1700,7 +1917,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 meta=result.get("meta") or None,
                                 structured_content=(
                                     result.get("structured_content")
-                                    if has_app_view
+                                    if keeps_structured
                                     else None
                                 ),
                             )
@@ -1727,9 +1944,17 @@ class TenantModelAdapter(CompletionModelAdapter):
                     completion.generated_images = captured_images
                 if collected_tool_metadata:
                     completion.tool_calls_metadata = collected_tool_metadata
+                if msg.content is not None:
+                    raw_bytes = msg.content.encode("utf-8")
+                    completion.raw_text_bytes = len(raw_bytes)
+                    completion.raw_text_sha256 = hashlib.sha256(raw_bytes).hexdigest()
+                    if choice.finish_reason == "length":
+                        completion.raw_text = msg.content
                 completion.text = answer_text
                 completion.reasoning_content = reasoning_text
+                completion.provider_response_id = extract_provider_response_id(response)
                 completion.stop = choice.finish_reason == "stop"
+                completion.finish_reason = choice.finish_reason
 
             if used_input_estimate:
                 completion.input_token_estimate = cumulative_input_tokens
@@ -1747,13 +1972,24 @@ class TenantModelAdapter(CompletionModelAdapter):
             )
             return completion
 
+        except (
+            ProviderCallObserverError,
+            TypedIOValidationException,
+            ProviderStreamError,
+        ):
+            raise
         except Exception as exc:
             logger.exception(
                 f"[TenantModelAdapter] Unexpected error for {self.litellm_model}"
             )
             if isinstance(
                 exc,
-                (OpenAIException, APIKeyNotConfiguredException),
+                (
+                    OpenAIException,
+                    APIKeyNotConfiguredException,
+                    UnknownModelCapacityError,
+                    ContextWindowExceededError,
+                ),
             ):
                 raise
             litellm_transport.raise_public_litellm_error(
@@ -1763,7 +1999,156 @@ class TenantModelAdapter(CompletionModelAdapter):
                 raise_unavailable=lambda error: self._raise_provider_unavailable(
                     phase="completion", exc=error
                 ),
+                retry_without_capability_safe=completed_provider_calls == 0,
             )
+
+    async def _request_completion(
+        self,
+        *,
+        phase: str,
+        retry_without_capability_safe: bool = False,
+        **kwargs: Any,
+    ) -> Any:
+        try:
+            response = await _acompletion_call(**kwargs)
+        except TypedIOValidationException:
+            raise
+        except asyncio.CancelledError:
+            settle_provider_request(known=False)
+            raise
+        except Exception as exc:
+            if litellm_transport.classify_stream_failure(exc) is None:
+                # Not raised by the provider call, so not the provider's
+                # failure: a stream reports it as Eneo's own, and a plain
+                # request maps it where it is caught.
+                settle_provider_request(known=False)
+                raise
+            try:
+                litellm_transport.raise_public_litellm_error(
+                    exc,
+                    provider_type=self.provider_type,
+                    is_unavailable=_is_provider_unavailable_error,
+                    raise_unavailable=lambda error: self._raise_provider_unavailable(
+                        phase=phase, exc=error
+                    ),
+                    retry_without_capability_safe=retry_without_capability_safe,
+                )
+            except ProviderRejectedRequestException:
+                settle_provider_request(known=True)
+                raise
+            except Exception:
+                settle_provider_request(known=False)
+                raise
+        if not kwargs.get("stream"):
+            settle_provider_request(known=True)
+        return response
+
+    async def _observed_provider_call(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        litellm_kwargs: dict[str, Any],
+        observer: ProviderCallObserver | None,
+        reason: ProviderCallReason,
+        retry_without_capability_safe: bool,
+    ) -> _LiteLLMResponse:
+        litellm_kwargs = self._prepare_dispatch_kwargs(messages, litellm_kwargs)
+        stream = native_json_request(litellm_kwargs) and "stream" in (
+            _get_supported_openai_params(self.litellm_model) or ()
+        )
+        if stream:
+            litellm_kwargs = {
+                **litellm_kwargs,
+                "stream_options": {"include_usage": True},
+            }
+        call_id: UUID | None = None
+        if observer is not None:
+            request = build_provider_call_request_facts(
+                requested_model=self.litellm_model,
+                provider=self.provider_type,
+                messages=cast("list[dict[str, object]]", messages),
+                request_kwargs=cast(
+                    "dict[str, object]", {**litellm_kwargs, "stream": stream}
+                ),
+                reason=reason,
+            )
+            call_id = await observer.started(request)
+
+        try:
+            async with ProviderStreamCollector() as collector:
+                received = await self._request_completion(
+                    phase="completion",
+                    retry_without_capability_safe=retry_without_capability_safe,
+                    model=self.litellm_model,
+                    messages=messages,
+                    stream=stream,
+                    drop_params=True,
+                    **litellm_kwargs,
+                )
+                response = cast(
+                    _LiteLLMResponse,
+                    await collector.collect(received, request=litellm_kwargs)
+                    if stream
+                    else received,
+                )
+            if stream:
+                settle_provider_request(known=True)
+        except ProviderJsonWhitespaceAbort:
+            settle_provider_request(known=False)
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "request_cancelled")
+            raise
+        except asyncio.CancelledError:
+            settle_provider_request(known=False)
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "request_cancelled")
+            raise
+        except StepDeadlineExceeded:
+            if observer is not None and call_id is not None:
+                await observer.rejected(call_id, "budget_exhausted")
+            raise
+        except TypedIOValidationException:
+            raise
+        except ProviderCapabilityRejectedException:
+            if observer is not None and call_id is not None:
+                await observer.rejected(call_id, "response_format_rejected")
+            raise
+        except ProviderRejectedRequestException:
+            if observer is not None and call_id is not None:
+                await observer.rejected(call_id, "provider_rejected")
+            raise
+        except Exception:
+            settle_provider_request(known=False)
+            if observer is not None and call_id is not None:
+                await observer.outcome_unknown(call_id, "provider_error")
+            raise
+
+        if observer is not None and call_id is not None:
+            usage = self._extract_usage(response)
+            try:
+                await observer.completed(
+                    call_id,
+                    CompletionCallResultFacts(
+                        response_model=getattr(response, "model", None),
+                        provider_response_id=extract_provider_response_id(response),
+                        num_tokens_input=(
+                            usage.prompt_tokens if usage is not None else None
+                        ),
+                        num_tokens_output=(
+                            usage.completion_tokens if usage is not None else None
+                        ),
+                    ),
+                )
+            except ProviderCallObserverError as exc:
+                # The plain base error is reserved for failures before provider I/O.
+                # Keep typed persistence subclasses intact, but contain a custom or
+                # test observer that violates the phase contract after work completed.
+                if type(exc) is ProviderCallObserverError:
+                    raise RuntimeError(
+                        "Provider-call observation failed after provider I/O."
+                    ) from exc
+                raise
+        return response
 
     @override
     async def prepare_streaming(
@@ -1772,6 +2157,8 @@ class TenantModelAdapter(CompletionModelAdapter):
         model_kwargs: ModelKwargs | dict[str, Any] | None = None,
         mcp_proxy: "MCPProxySession | None" = None,
         skill_runtime: SkillActivationRuntime | None = None,
+        useful_output_reserve_tokens: int | None = None,
+        prepared_request: CompletionRequestPackage | None = None,
         **kwargs: Any,
     ) -> PreparedModelStream:
         """
@@ -1791,6 +2178,7 @@ class TenantModelAdapter(CompletionModelAdapter):
             APIKeyNotConfiguredException: If credentials are invalid
             OpenAIException: For API errors, rate limits, network issues
         """
+        self.get_token_limit_of_model()
         # Prepare LiteLLM kwargs with credentials and provider-specific handling
         litellm_kwargs = self._prepare_kwargs(model_kwargs=model_kwargs, **kwargs)
 
@@ -1799,9 +2187,10 @@ class TenantModelAdapter(CompletionModelAdapter):
             mcp_proxy=mcp_proxy,
             skill_runtime=skill_runtime,
         )
+        provider_input = self._use_prepared_request(
+            provider_input, litellm_kwargs, prepared_request
+        )
         messages = provider_input.messages
-        if provider_input.tools:
-            litellm_kwargs["tools"] = provider_input.tools
 
         # Check which params will be dropped and log effective params
         dropped = self._get_dropped_params(litellm_kwargs)
@@ -1811,19 +2200,30 @@ class TenantModelAdapter(CompletionModelAdapter):
             f"with {len(messages)} messages, params: {self._get_effective_params(litellm_kwargs, dropped)}"
         )
 
+        if useful_output_reserve_tokens is None:
+            useful_output_reserve_tokens = (
+                prepared_request.useful_output_reserve_tokens
+                if prepared_request is not None
+                else DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+            )
+        elif prepared_request is not None:
+            useful_output_reserve_tokens = max(
+                useful_output_reserve_tokens,
+                prepared_request.useful_output_reserve_tokens,
+            )
+        litellm_kwargs["useful_output_reserve_tokens"] = useful_output_reserve_tokens
         try:
-            # Create stream with drop_params=True to handle unsupported params gracefully
-            # Request usage info on the final chunk (providers that don't support it
-            # will silently ignore this thanks to drop_params=True)
+            # Request usage info on the final chunk when the provider returns it.
             stream = cast(
                 AsyncIterator[_LiteLLMStreamChunk],
-                await _acompletion_call(
+                await self._request_completion(
+                    phase="stream_preparation",
                     model=self.litellm_model,
                     messages=messages,
                     stream=True,
                     drop_params=True,
                     stream_options={"include_usage": True},
-                    **litellm_kwargs,
+                    **self._prepare_dispatch_kwargs(messages, litellm_kwargs),
                 ),
             )
 
@@ -1840,13 +2240,20 @@ class TenantModelAdapter(CompletionModelAdapter):
                 eneo_tools=provider_input.built_in_tools,
             )
 
+        except TypedIOValidationException:
+            raise
         except Exception as exc:
             logger.exception(
                 f"[TenantModelAdapter] Unexpected error creating stream for {self.litellm_model}"
             )
             if isinstance(
                 exc,
-                (OpenAIException, APIKeyNotConfiguredException),
+                (
+                    OpenAIException,
+                    APIKeyNotConfiguredException,
+                    UnknownModelCapacityError,
+                    ContextWindowExceededError,
+                ),
             ):
                 raise
             litellm_transport.raise_public_litellm_error(
@@ -1945,7 +2352,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                     self.has_tool_calls: bool = False
                     self.tool_calls_acc: dict[int, _AccumulatedToolCall] = {}
                     self.assistant_content: list[str] = []
+                    self.raw_text_bytes: int | None = None
+                    self.raw_text_hasher = hashlib.sha256()
+                    self.finish_reason: str | None = None
                     self.usage: TokenUsage | None = None
+                    self.drained_a_stream: bool = False
                     self.cumulative_input_tokens = 0
                     self.used_input_estimate = False
                     self.context_input_token_estimate: int | None = None
@@ -1979,13 +2390,13 @@ class TenantModelAdapter(CompletionModelAdapter):
                 thinking_stripped = False
                 pending_emitted: set[int] = set()
                 argument_deltas = _ArgumentDeltas()
-                request_prompt_tokens = 0
-                provider_reported_prompt_tokens = False
-                request_completion_tokens = 0
-                provider_reported_completion_tokens = False
+                stream_usage: TokenUsage | None = None
                 res.has_tool_calls = False
                 res.tool_calls_acc = {}
                 res.assistant_content = []
+                res.raw_text_bytes = None
+                res.raw_text_hasher = hashlib.sha256()
+                res.finish_reason = None
                 res.reasoning_content = []
                 res.answer_rounds.start_round()
                 res.reasoning_rounds.start_round()
@@ -1997,31 +2408,21 @@ class TenantModelAdapter(CompletionModelAdapter):
                         }
                     )
 
-                async for chunk in s:
+                async for chunk in _settled_provider_stream(s):
                     # Capture usage from final chunk (when stream_options include_usage is set)
                     chunk_usage_obj = getattr(chunk, "usage", None)
                     if chunk_usage_obj:
-                        chunk_usage = self._extract_usage(chunk)
-                        if chunk_usage:
-                            if chunk_usage.prompt_tokens is not None:
-                                request_prompt_tokens += chunk_usage.prompt_tokens
-                                provider_reported_prompt_tokens = True
-                            if chunk_usage.completion_tokens is not None:
-                                request_completion_tokens += (
-                                    chunk_usage.completion_tokens
-                                )
-                                provider_reported_completion_tokens = True
-                            res.usage = (
-                                self._accumulate_usage(res.usage, chunk)
-                                if res.usage
-                                else chunk_usage
-                            )
+                        # LiteLLM usage chunks are cumulative snapshots. Retain
+                        # the latest snapshot, then fold once when the stream ends.
+                        stream_usage = self._extract_usage(chunk)
 
                     if not chunk.choices:
                         continue
 
                     delta = chunk.choices[0].delta
                     finish_reason = chunk.choices[0].finish_reason
+                    if finish_reason is not None:
+                        res.finish_reason = finish_reason
 
                     # Forward provider reasoning/thinking deltas (e.g. Anthropic
                     # extended thinking surfaced by LiteLLM as reasoning_content)
@@ -2117,8 +2518,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 )
 
                     # Handle text content with thinking-block stripping
-                    content = delta.content or ""
+                    content = delta.content
 
+                    if content is not None:
+                        raw_bytes = content.encode("utf-8")
+                        res.raw_text_bytes = (res.raw_text_bytes or 0) + len(raw_bytes)
+                        res.raw_text_hasher.update(raw_bytes)
                     if content:
                         res.assistant_content.append(content)
                         buffer += content
@@ -2166,8 +2571,15 @@ class TenantModelAdapter(CompletionModelAdapter):
                             arguments_delta=piece,
                         )
 
-                if provider_reported_prompt_tokens:
-                    res.cumulative_input_tokens += request_prompt_tokens
+                res.usage = (
+                    self._combine_usage(res.usage, stream_usage)
+                    if res.drained_a_stream
+                    else stream_usage
+                )
+                res.drained_a_stream = True
+
+                if stream_usage is not None and stream_usage.prompt_tokens is not None:
+                    res.cumulative_input_tokens += stream_usage.prompt_tokens
                     res.context_input_token_estimate = None
                 elif request_messages is not None:
                     measurement = measure_provider_input_tokens(
@@ -2179,8 +2591,11 @@ class TenantModelAdapter(CompletionModelAdapter):
                     res.used_input_estimate = True
                     res.context_input_token_estimate = measurement.tokens
 
-                if provider_reported_completion_tokens:
-                    res.cumulative_output_tokens += request_completion_tokens
+                if (
+                    stream_usage is not None
+                    and stream_usage.completion_tokens is not None
+                ):
+                    res.cumulative_output_tokens += stream_usage.completion_tokens
                     res.context_output_token_estimate = None
                 else:
                     tool_call_payload = (
@@ -2216,6 +2631,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 yield comp
 
             # --- Built-in activation and MCP tool call loop ---
+            max_rounds = get_settings().max_tool_rounds
+            tool_round = 0
             if (
                 result.has_tool_calls
                 and prepared
@@ -2226,10 +2643,8 @@ class TenantModelAdapter(CompletionModelAdapter):
                 litellm_kwargs = prepared.kwargs
                 eneo_tools: list[dict[str, Any]] = prepared.eneo_tools
 
-                max_rounds = get_settings().max_tool_rounds
-                tool_round = 0
                 result_budget = _ToolResultBudget(
-                    token_limit=self.model.token_limit,
+                    token_limit=self.get_token_limit_of_model(),
                     litellm_model=self.litellm_model,
                 )
 
@@ -2322,13 +2737,16 @@ class TenantModelAdapter(CompletionModelAdapter):
                             )
                         follow_up = cast(
                             AsyncIterator[_LiteLLMStreamChunk],
-                            await _acompletion_call(
+                            await self._request_completion(
+                                phase="stream_iteration",
                                 model=self.litellm_model,
                                 messages=messages,
                                 stream=True,
                                 drop_params=True,
                                 stream_options={"include_usage": True},
-                                **litellm_kwargs,
+                                **self._prepare_dispatch_kwargs(
+                                    messages, litellm_kwargs
+                                ),
                             ),
                         )
                         active_provider_stream = follow_up
@@ -2593,9 +3011,12 @@ class TenantModelAdapter(CompletionModelAdapter):
                                 mcp_tool_name=tc["function"]["name"],
                                 existing_prefixes=seen_prefixes,
                             )
-                            has_app_view = not result_data.get(
-                                "is_error"
-                            ) and await _has_app_view(mcp_proxy, tc["function"]["name"])
+                            keeps_structured = not result_data.get("is_error") and (
+                                mcp_proxy.is_internal_tool(tc["function"]["name"])
+                                or await _has_app_view(
+                                    mcp_proxy, tc["function"]["name"]
+                                )
+                            )
                             captured_refs.extend(refs_for_call)
                             # Generated files ride their own chunks so the
                             # ask path can persist each as a file before the
@@ -2661,7 +3082,7 @@ class TenantModelAdapter(CompletionModelAdapter):
                                     meta=result_data.get("meta") or None,
                                     structured_content=(
                                         result_data.get("structured_content")
-                                        if has_app_view
+                                        if keeps_structured
                                         else None
                                     ),
                                 )
@@ -2756,13 +3177,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                     # Follow-up streaming request (keep tools for next round)
                     follow_up = cast(
                         AsyncIterator[_LiteLLMStreamChunk],
-                        await _acompletion_call(
+                        await self._request_completion(
+                            phase="stream_iteration",
                             model=self.litellm_model,
                             messages=messages,
                             stream=True,
                             drop_params=True,
                             stream_options={"include_usage": True},
-                            **litellm_kwargs,
+                            **self._prepare_dispatch_kwargs(messages, litellm_kwargs),
                         ),
                     )
 
@@ -2839,13 +3261,14 @@ class TenantModelAdapter(CompletionModelAdapter):
                     litellm_kwargs = {**litellm_kwargs, "tool_choice": "none"}
                     follow_up = cast(
                         AsyncIterator[_LiteLLMStreamChunk],
-                        await _acompletion_call(
+                        await self._request_completion(
+                            phase="stream_iteration",
                             model=self.litellm_model,
                             messages=messages,
                             stream=True,
                             drop_params=True,
                             stream_options={"include_usage": True},
-                            **litellm_kwargs,
+                            **self._prepare_dispatch_kwargs(messages, litellm_kwargs),
                         ),
                     )
                     active_provider_stream = follow_up
@@ -2861,11 +3284,9 @@ class TenantModelAdapter(CompletionModelAdapter):
                     ):
                         yield comp
                     if result.has_tool_calls:
-                        # The provider ignored tool_choice="none"; drop the
-                        # calls and end with whatever text streamed.
                         logger.warning(
                             "[MCP] Model attempted tool calls after tools were "
-                            "disabled; ending the turn"
+                            "disabled; failing the turn"
                         )
 
             # Final stop — attach accumulated usage. If any request lacked
@@ -2876,9 +3297,47 @@ class TenantModelAdapter(CompletionModelAdapter):
                 final_usage = final_usage.model_copy(update={"prompt_tokens": None})
             if result.used_output_estimate and final_usage is not None:
                 final_usage = final_usage.model_copy(update={"completion_tokens": None})
+            if result.has_tool_calls and tool_round >= max_rounds:
+                yield Completion(
+                    text="",
+                    stop=True,
+                    error=(
+                        "The model could not finish after reaching the tool "
+                        "round limit."
+                    ),
+                    error_code=500,
+                    response_type=ResponseType.ERROR,
+                    usage=final_usage,
+                    input_token_estimate=(
+                        result.cumulative_input_tokens
+                        if result.used_input_estimate
+                        else None
+                    ),
+                    context_input_token_estimate=result.context_input_token_estimate,
+                    output_token_estimate=(
+                        result.cumulative_output_tokens
+                        if result.used_output_estimate
+                        else None
+                    ),
+                    context_output_token_estimate=result.context_output_token_estimate,
+                )
+                return
             yield Completion(
                 text="",
                 stop=True,
+                finish_reason=result.finish_reason,
+                raw_text_bytes=result.raw_text_bytes,
+                raw_text_sha256=(
+                    result.raw_text_hasher.hexdigest()
+                    if result.raw_text_bytes is not None
+                    else None
+                ),
+                raw_text=(
+                    "".join(result.assistant_content)
+                    if result.finish_reason == "length"
+                    and result.raw_text_bytes is not None
+                    else None
+                ),
                 usage=final_usage,
                 input_token_estimate=(
                     result.cumulative_input_tokens
@@ -2898,32 +3357,47 @@ class TenantModelAdapter(CompletionModelAdapter):
                 f"[TenantModelAdapter] {self.litellm_model}: Stream iteration completed"
             )
 
+        except TypedIOValidationException:
+            raise
         except Exception as exc:
             # Mid-stream errors: yield error event instead of raising
-            failure = litellm_transport.classify_stream_failure(exc)
-            if failure is not None and failure.unavailable:
-                self._record_provider_unavailable(
-                    phase="stream_iteration", exc=exc, failure=failure
-                )
+            error_reason: str | None
+            if isinstance(exc, ContextWindowExceededError):
+                error = str(exc)
+                error_code = 413
+                error_reason = None
+            elif isinstance(exc, UnknownModelCapacityError):
+                error = str(exc)
+                error_code = 422
+                error_reason = None
             else:
-                logger.error(
-                    f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
-                    exc_info=True,
+                failure = litellm_transport.classify_stream_failure(exc)
+                if failure is not None and failure.unavailable:
+                    self._record_provider_unavailable(
+                        phase="stream_iteration", exc=exc, failure=failure
+                    )
+                else:
+                    logger.error(
+                        f"[TenantModelAdapter] {self.litellm_model}: Error during stream iteration: {exc}",
+                        exc_info=True,
+                    )
+                error = (
+                    failure.message
+                    if failure is not None
+                    else litellm_transport.STREAM_ERROR_MESSAGE
+                )
+                error_code = failure.status if failure is not None else 500
+                error_reason = (
+                    failure.code
+                    if failure is not None
+                    else litellm_transport.STREAM_ERROR_CODE
                 )
 
             yield Completion(
                 text="",
-                error=(
-                    failure.message
-                    if failure is not None
-                    else litellm_transport.STREAM_ERROR_MESSAGE
-                ),
-                error_code=failure.status if failure is not None else 500,
-                error_reason=(
-                    failure.code
-                    if failure is not None
-                    else litellm_transport.STREAM_ERROR_CODE
-                ),
+                error=error,
+                error_code=error_code,
+                error_reason=error_reason,
                 response_type=ResponseType.ERROR,
                 stop=True,
             )
@@ -2938,22 +3412,18 @@ class TenantModelAdapter(CompletionModelAdapter):
 
     @override
     def get_token_limit_of_model(self) -> int:
-        """
-        Get token limit for tenant model.
-
-        Returns max_input_tokens directly, as admins configure this value
-        to represent the actual input budget at model setup time.
-
-        Returns:
-            int: Maximum tokens available for input context
-        """
-        return self.model.max_input_tokens
+        """Reserve at least one output token when packing runtime input."""
+        return ModelCapacity(self.model.token_limit, None).input_allowance(
+            output_reserve_tokens=1, safety_tokens=0
+        )
 
     @override
     def get_logging_details(
         self,
         context: "Context",
         model_kwargs: ModelKwargs | dict[str, Any] | None,
+        *,
+        prepared_request: CompletionRequestPackage | None = None,
     ) -> LoggingDetails:
         """
         Build logging details for extended logging.
@@ -2967,11 +3437,15 @@ class TenantModelAdapter(CompletionModelAdapter):
         """
         import json
 
-        messages = self._create_messages_from_context(context)
+        messages = (
+            prepared_request.messages
+            if prepared_request is not None
+            else self._create_messages_from_context(context)
+        )
 
         # Convert model_kwargs to a plain dict
         if isinstance(model_kwargs, dict):
-            kwargs_dict = model_kwargs
+            kwargs_dict = dict(model_kwargs)
         else:
             kwargs_dict = (
                 model_kwargs.model_dump(exclude_none=True)
@@ -2979,6 +3453,10 @@ class TenantModelAdapter(CompletionModelAdapter):
                 else {}
             )
 
+        if prepared_request is not None:
+            kwargs_dict.pop("response_format", None)
+            if prepared_request.response_format is not None:
+                kwargs_dict["response_format"] = prepared_request.response_format
         return LoggingDetails(
             model_kwargs=kwargs_dict,
             json_body=json.dumps(messages),

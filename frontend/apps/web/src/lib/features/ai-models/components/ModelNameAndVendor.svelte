@@ -30,24 +30,19 @@
 </script>
 
 <script lang="ts">
-  import type {
-    CompletionModel,
-    EmbeddingModel,
-    ImageModel,
-    RerankModel,
-    TranscriptionModel
-  } from "@eneo/eneo-js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { IconInfo } from "@eneo/icons/info";
   import { m } from "$lib/paraglide/messages";
 
-  export let model:
-    | CompletionModel
-    | EmbeddingModel
-    | TranscriptionModel
-    | ImageModel
-    | RerankModel
-    | { org: string; nickname: string; name: string; description: string };
+  type DisplayModel = {
+    name: string;
+    nickname?: string | null;
+    description?: string | null;
+    token_limit?: number | null;
+    org?: string | null;
+  };
+
+  export let model: DisplayModel;
   export let size: "card" | "table" = "table";
   /** Controls the description info-button next to the model name.
    *
@@ -64,7 +59,8 @@
   $: showDescriptionButton = descriptionMode !== "hidden";
   $: descriptionTabbable = descriptionMode === "interactive";
 
-  $: displayName = "nickname" in model ? model.nickname : model.name;
+  // A missing or blank nickname falls back to the model's name.
+  $: displayName = model.nickname?.trim() || model.name;
   // Description is only worth surfacing when it adds something the visible
   // name doesn't already say.
   $: descriptionText =

@@ -55,6 +55,10 @@ class MCPProxySessionFactory:
                     decrypted[key] = self.encryption_service.decrypt(decrypted[key])
         return decrypted
 
+    def auth_credentials(self, server: "MCPServer") -> dict[str, str]:
+        """The server's stored credentials, decrypted for one connection."""
+        return self._decrypt_auth_config(server.http_auth_config_schema) or {}
+
     def create(
         self,
         mcp_servers: list["MCPServer"],
@@ -80,13 +84,12 @@ class MCPProxySessionFactory:
         auth_map: dict[UUID, dict[str, str]] = {}
 
         for server in mcp_servers:
-            if server.http_auth_config_schema:
-                decrypted = self._decrypt_auth_config(server.http_auth_config_schema)
-                if decrypted:
-                    auth_map[server.id] = decrypted
-                    logger.debug(
-                        f"[MCPProxyFactory] Loaded credentials for server {server.name}"
-                    )
+            credentials = self.auth_credentials(server)
+            if credentials:
+                auth_map[server.id] = credentials
+                logger.debug(
+                    f"[MCPProxyFactory] Loaded credentials for server {server.name}"
+                )
 
         logger.info(
             f"[MCPProxyFactory] Creating proxy session with {len(mcp_servers)} servers"

@@ -110,6 +110,7 @@ class TestBuildFilesMcpServer:
         server = await build_files_mcp_server(token="tok", tenant_id=uuid4())
 
         assert server.name == FILES_SERVER_NAME
+        assert server.is_internal is True
         assert server.http_auth_type == "bearer"
         assert server.http_auth_config_schema == {"token": "tok"}
         assert server.http_url.endswith("/internal-mcp/files/mcp")
@@ -296,6 +297,47 @@ class TestReadFileAuthorization:
         # Asked for the text itself, the file is read as any other.
         content = await read_file(url, ctx=None, raw=True)
         assert content[0].text.endswith("Sheet: Utfall | Förvaltning: Barn | Budget: 1")
+
+    @pytest.mark.asyncio
+    async def test_a_json_document_is_pointed_at_query_json(self, monkeypatch):
+        tenant_id = uuid4()
+        file = _file(
+            tenant_id=tenant_id,
+            name="export.json",
+            mimetype="application/json",
+            text='{"items": [{"id": 1}]}',
+        )
+        url = _signed_url(file.id, tenant_id=tenant_id)
+        _patch_tool_context(monkeypatch, file=file, user_tenant_id=tenant_id)
+        monkeypatch.setattr(
+            "eneo.internal_mcp.files._table_tools_offered", lambda ctx: True
+        )
+
+        content = await read_file(url, ctx=None)
+        assert "query_json" in content[0].text
+        assert "inspect_table" not in content[0].text
+        assert "items" not in content[0].text
+
+        content = await read_file(url, ctx=None, raw=True)
+        assert content[0].text.endswith('{"items": [{"id": 1}]}')
+
+    async def test_json_lines_are_pointed_at_the_table_tools(self, monkeypatch):
+        tenant_id = uuid4()
+        file = _file(
+            tenant_id=tenant_id,
+            name="events.jsonl",
+            mimetype="application/x-ndjson",
+            text='{"id": 1}\n{"id": 2}\n',
+        )
+        url = _signed_url(file.id, tenant_id=tenant_id)
+        _patch_tool_context(monkeypatch, file=file, user_tenant_id=tenant_id)
+        monkeypatch.setattr(
+            "eneo.internal_mcp.files._table_tools_offered", lambda ctx: True
+        )
+
+        content = await read_file(url, ctx=None)
+        assert "inspect_table" in content[0].text
+        assert "query_json" not in content[0].text
 
     @pytest.mark.asyncio
     async def test_a_table_is_read_when_no_table_tools_are_attached(self, monkeypatch):

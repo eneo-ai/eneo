@@ -4,8 +4,20 @@ import { getAddedItems, getRemovedItems } from "./getChangedItems";
 import { getDiff, type CompareOptions, type Diff } from "./getDiff";
 import { applyDefaults, type AppliedDefaults, type Defaults } from "./applyDefaults";
 import { toastError } from "$lib/core/errors";
+import { toast } from "$lib/components/toast";
 
 type Resource = Record<string, unknown> & { id: string };
+
+/**
+ * Per-invocation outcome of saveChanges. `handled` is true when onSaveError
+ * owned the failure (e.g. routed it into a validation banner), so the caller
+ * can classify this exact request without shared mutable state.
+ */
+export type ResourceSaveResult =
+  | { saved: true }
+  | { saved: false; error: unknown; handled: boolean }
+  /** `canSave` refused the state when the queued save ran; nothing was sent. */
+  | { saved: false; deferred: true };
 
 /**
  * Create a resource editor for the specified resource. It will create stores for the original data,
@@ -31,6 +43,37 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
   manageAttachements: Extract<keyof T, string> | false;
   /** Delete a staged `icon_id` upload when that change is discarded; saving lets the server release the replaced icon */
   manageIcon?: boolean;
+  /**
+   * Owns a failed save before the default toast fires. Return true when the
+   * error was surfaced elsewhere (e.g. a validation banner) to suppress the
+   * raw-message toast; the save still resolves unsaved, carrying the error
+   * and this handled flag in its result.
+   */
+  onSaveError?: (error: unknown) => boolean;
+  /**
+   * The sentence for a failed save that `onSaveError` did not surface. Defaults
+   * to the shared error mapping; a feature with its own error vocabulary
+   * supplies it so the toast stays in the reader's language.
+   */
+  saveErrorMessage?: (error: unknown) => string;
+  /**
+   * Decides, when a queued save actually runs, whether the current state may
+   * be persisted. Validation done when the save was queued can be stale by
+   * the time an earlier save lets it run; a false answer defers the save and
+   * keeps the state dirty instead of sending what the endpoint would reject.
+   */
+  canSave?: (update: AppliedDefaults<T, Defs>) => boolean;
+  /**
+   * Called for a field the user edited WHILE a save of it was in flight. The
+   * local value wins (it is newer than the response), but the server may have
+   * assigned identities the local copy lacks (e.g. ids for created items);
+   * return the local value with those folded in. Default: the local value as is.
+   */
+  mergeUnsavedField?: (
+    field: keyof AppliedDefaults<T, Defs>,
+    local: unknown,
+    saved: unknown
+  ) => unknown;
   eneo: Eneo;
 }) {
   const { eneo, updateResource } = data;
@@ -51,16 +94,48 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
   });
   const isSaving = writable(false);
 
+  // Saves run one at a time. A save requested while another is in flight
+  // waits for it and then sends whatever is still unsaved. Two overlapping
+  // requests would carry overlapping state, and the later one would be
+  // fenced on a revision the earlier one already advanced: the user then
+  // sees a "changed elsewhere" conflict caused by their own click.
+  let saveChain: Promise<unknown> = Promise.resolve();
+  let savesPending = 0;
+
+  /** Resolves once every save queued so far has settled (saved, failed or
+   *  deferred). The dirty state is only meaningful after that. */
+  function settled(): Promise<void> {
+    return saveChain.then(() => undefined);
+  }
+
   /** Will save the current changes to this resource and delete removed files */
-  async function saveChanges(field: keyof T | undefined = undefined): Promise<boolean> {
+  function saveChanges(field: keyof T | undefined = undefined): Promise<ResourceSaveResult> {
+    savesPending += 1;
     isSaving.set(true);
+    const run = saveChain.then(() => runSave(field));
+    saveChain = run.catch(() => undefined);
+    return run;
+  }
+
+  async function runSave(field: keyof T | undefined): Promise<ResourceSaveResult> {
     try {
       // Get changes to this resource
       const $resource = get(resource);
       const $update = get(update);
+      if (data.canSave && !data.canSave($update)) {
+        return { saved: false, deferred: true };
+      }
+      // Bound inputs edit the store's object in place, so the comparison
+      // after the response needs a copy of what was sent, not a reference.
+      const snapshot: typeof $update = JSON.parse(JSON.stringify($update));
       const changes = field
         ? ({ [field]: $update[field] } as unknown as { [key in keyof T]: T[key] })
         : get(currentChanges).diff;
+      // A queued save whose changes an earlier save already carried has
+      // nothing to send.
+      if (field === undefined && Object.keys(changes).length === 0) {
+        return { saved: true };
+      }
       // Check if some files have been removed
       // We could also directly remove files from the backend when the remove file button in the ui is clicked,
       // however this would be an irreversible change. If we delay the deletion until we save the resource,
@@ -73,9 +148,19 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       const updated = applyDefaults(await updateResource($resource, changes), data.defaults);
       resource.set(updated);
 
-      // Now we need to apply the changes to the update (which could have been partial changes)
-      // So we cant just use the actual updated resource, as we want to even keep unsaved changes
-      update.set(applyUpdates<AppliedDefaults<T, Defs>>($update, updated, field));
+      // The response describes the state as of the snapshot that was sent.
+      // Anything the user changed since then is newer than the response and
+      // stays local (it goes in the next save); everything else takes the
+      // server's copy, which may carry normalised values and assigned ids.
+      update.set(
+        mergeSavedState<AppliedDefaults<T, Defs>>({
+          snapshot,
+          current: get(update),
+          saved: updated,
+          field,
+          mergeUnsavedField: data.mergeUnsavedField
+        })
+      );
 
       // Service has been updated successfully, now we can safely delete files if we need to
       // which is the case if either everything was saved, or the files field was saved
@@ -88,12 +173,20 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
           }
         });
       }
-      return true;
+      return { saved: true };
     } catch (e) {
-      toastError(e);
-      return false;
+      const handled = data.onSaveError?.(e) === true;
+      if (!handled) {
+        if (data.saveErrorMessage) {
+          toast.error(data.saveErrorMessage(e));
+        } else {
+          toastError(e);
+        }
+      }
+      return { saved: false, error: e, handled };
     } finally {
-      isSaving.set(false);
+      savesPending -= 1;
+      if (savesPending === 0) isSaving.set(false);
     }
   }
 
@@ -130,6 +223,46 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
     });
   }
 
+  /**
+   * Runs a write to a related resource in the save queue, after the saves
+   * queued before it, with the persisted state they left. `persisted` holds
+   * the fields of this resource the server changed along with it (e.g. a
+   * revision); they are adopted and an unsaved edit of one stays as it is.
+   * The resource's own save status is not involved. A failure rejects to the
+   * caller and adopts nothing.
+   */
+  function queueWrite<R>(
+    write: (
+      resource: AppliedDefaults<T, Defs>
+    ) => Promise<{ persisted: Partial<AppliedDefaults<T, Defs>>; result: R }>
+  ): Promise<R> {
+    const run = saveChain.then(async () => {
+      const { persisted, result } = await write(get(resource));
+      const $resource = get(resource);
+      const next = { ...get(update) };
+      // The editable state gets its own copy: bound inputs edit it in place,
+      // and a shared object would edit the persisted state along with it.
+      const adopted: typeof persisted = JSON.parse(JSON.stringify(persisted));
+      for (const key of Object.keys(persisted) as (keyof AppliedDefaults<T, Defs>)[]) {
+        const unsaved =
+          JSON.stringify(next[key] ?? null) !== JSON.stringify($resource[key] ?? null);
+        if (!unsaved) next[key] = adopted[key] as AppliedDefaults<T, Defs>[typeof key];
+      }
+      resource.set({ ...$resource, ...persisted });
+      update.set(next);
+      return result;
+    });
+    saveChain = run.catch(() => undefined);
+    return run;
+  }
+
+  /** Replace both persisted and editable state (e.g. after publish/unpublish) */
+  function setResource(value: T) {
+    const applied = applyDefaults(value, data.defaults);
+    resource.set(applied);
+    update.set(JSON.parse(JSON.stringify(applied)));
+  }
+
   return Object.freeze({
     state: {
       /** Read-only, current persisted state of the resource */
@@ -142,7 +275,10 @@ export function createResourceEditor<T extends Resource, Defs extends Defaults<T
       isSaving: readonly(isSaving)
     },
     saveChanges,
-    discardChanges
+    queueWrite,
+    settled,
+    discardChanges,
+    setResource
   });
 }
 
@@ -181,20 +317,26 @@ function hasAttachments(
   return typeof value === "object" && value !== null && key in value && Array.isArray(value[key]);
 }
 
-function applyUpdates<T extends Record<string, unknown>>(
-  input: T,
-  update: T,
-  field: keyof T | undefined
-) {
-  const updateCopy = JSON.parse(JSON.stringify(update));
-
-  if (field === undefined) {
-    // If everything was saved we return everything
-    return updateCopy;
+function mergeSavedState<T extends Record<string, unknown>>(args: {
+  /** The editable state at the moment the save was sent. */
+  snapshot: T;
+  /** The editable state now, after the response arrived. */
+  current: T;
+  /** The resource as the server returned it. */
+  saved: T;
+  field: keyof T | undefined;
+  mergeUnsavedField?: (field: keyof T, local: unknown, saved: unknown) => unknown;
+}): T {
+  const { snapshot, current, saved, field, mergeUnsavedField } = args;
+  const savedCopy: T = JSON.parse(JSON.stringify(saved));
+  const result: T = JSON.parse(JSON.stringify(current));
+  const keys = (field === undefined ? Object.keys(savedCopy) : [field]) as (keyof T)[];
+  for (const key of keys) {
+    const editedDuringSave =
+      JSON.stringify(current[key] ?? null) !== JSON.stringify(snapshot[key] ?? null);
+    result[key] = editedDuringSave
+      ? ((mergeUnsavedField?.(key, current[key], savedCopy[key]) ?? current[key]) as T[keyof T])
+      : savedCopy[key];
   }
-
-  const base = JSON.parse(JSON.stringify(input));
-  base[field] = updateCopy[field];
-
-  return base as T;
+  return result;
 }

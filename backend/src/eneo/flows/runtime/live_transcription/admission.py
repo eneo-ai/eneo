@@ -1,0 +1,79 @@
+"""Whether a published flow can show a live transcript preview, and with which model.
+
+One owner for two readers: the run contract advertises availability and the
+live-session route admits a session, so both ask this module and cannot
+disagree. The preview uses exactly the flow's own transcription model, the
+model that writes the final transcript; a speaker service only adds labels.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Literal
+
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.runtime.transcription import select_transcription_model
+from eneo.flows.transcription_config import (
+    FlowTranscriptionConfigError,
+    parse_transcription_config,
+)
+from eneo.main.exceptions import TypedIOValidationException
+from eneo.transcription_models.domain.realtime import speaks_realtime_dialect
+
+if TYPE_CHECKING:
+    from eneo.flows.domain.runtime import RuntimeStep
+    from eneo.spaces.space import Space
+    from eneo.transcription_models.domain.transcription_model import (
+        TranscriptionModel,
+    )
+
+LiveTranscriptionUnavailableReason = Literal[
+    "transcription_disabled",
+    "model_unavailable",
+    "model_not_realtime",
+]
+
+
+@dataclass(frozen=True)
+class LiveTranscriptionAvailability:
+    model: TranscriptionModel | None
+    reason: LiveTranscriptionUnavailableReason | None
+
+    @property
+    def available(self) -> bool:
+        return self.model is not None
+
+
+def _unavailable(
+    reason: LiveTranscriptionUnavailableReason,
+) -> LiveTranscriptionAvailability:
+    return LiveTranscriptionAvailability(model=None, reason=reason)
+
+
+def resolve_live_transcription(
+    *,
+    wizard_metadata: FlowPersistedJsonObject | None,
+    space: Space,
+    step: RuntimeStep,
+) -> LiveTranscriptionAvailability:
+    """Resolve the model a live session on ``step`` would stream to.
+
+    ``space`` is the flow's space the caller was authorized in, which is also
+    the step's space; the model is picked from it exactly as the run's
+    transcription picks it, without loading the space's applications again.
+    """
+    try:
+        config = parse_transcription_config({"wizard": wizard_metadata})
+    except FlowTranscriptionConfigError:
+        return _unavailable("transcription_disabled")
+    if not config.enabled:
+        return _unavailable("transcription_disabled")
+    try:
+        model = select_transcription_model(
+            space, config=config, step_order=step.step_order
+        )
+    except TypedIOValidationException:
+        return _unavailable("model_unavailable")
+    if not (model.supports_realtime and speaks_realtime_dialect(model.provider_type)):
+        return _unavailable("model_not_realtime")
+    return LiveTranscriptionAvailability(model=model, reason=None)

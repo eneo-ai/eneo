@@ -268,7 +268,8 @@ async def test_single_upload_renews_before_head_and_cannot_be_reconciled(
                     mimetype=captured.verified_media_type,
                     file_type="text",
                     tenant_id=tenant_id,
-                    user_id=user_id,
+                    owner_type="user",
+                    owner_user_id=user_id,
                     parent_file_id=None,
                 )
                 session.add(owner)
@@ -387,7 +388,8 @@ async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
                     mimetype=captured.verified_media_type,
                     file_type="text",
                     tenant_id=tenant_id,
-                    user_id=user_id,
+                    owner_type="user",
+                    owner_user_id=user_id,
                     parent_file_id=None,
                 )
                 session.add(owner)
@@ -447,9 +449,11 @@ async def test_slow_multipart_part_keeps_its_lease_until_the_sdk_call_finishes(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("require_local_path", [False, True])
 async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
     object_content_database: DatabaseSessionManager,
     real_object_store: RealObjectStore,
+    require_local_path: bool,
 ) -> None:
     settings = real_object_store.settings
     service = _service(
@@ -481,7 +485,8 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
                 mimetype=captured.verified_media_type,
                 file_type="text",
                 tenant_id=tenant_id,
-                user_id=user_id,
+                owner_type="user",
+                owner_user_id=user_id,
                 parent_file_id=None,
             )
             session.add(owner)
@@ -527,10 +532,18 @@ async def test_service_owns_real_upload_read_and_final_delete_lifecycle(
             tenant_id=tenant_id,
             access_class=ContentAccessClass.PRIVATE_RESOURCE,
         )
-        async with service.open_content(grant) as opened:
+        async with service.open_content(
+            grant, require_local_path=require_local_path
+        ) as opened:
+            verified_path = opened.verified_path
+            assert (verified_path is not None) is require_local_path
+            if verified_path is not None:
+                assert verified_path.stat().st_size == size_bytes
             async for chunk in opened.chunks:
                 received_digest.update(chunk)
                 received_size += len(chunk)
+        if verified_path is not None:
+            assert not verified_path.exists()
         assert received_size == size_bytes
         assert received_digest.digest() == captured.sha256
 
@@ -624,7 +637,8 @@ async def test_batch_object_store_reads_use_one_source_query(
                     mimetype=captured.verified_media_type,
                     file_type="text",
                     tenant_id=tenant_id,
-                    user_id=user_id,
+                    owner_type="user",
+                    owner_user_id=user_id,
                     parent_file_id=None,
                 )
                 session.add(owner)
@@ -722,7 +736,8 @@ async def test_service_rejects_replaced_bytes_before_response_and_marks_them_cor
                 mimetype="application/octet-stream",
                 file_type="text",
                 tenant_id=tenant_id,
-                user_id=user_id,
+                owner_type="user",
+                owner_user_id=user_id,
                 parent_file_id=None,
             )
             session.add(owner)

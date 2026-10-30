@@ -2,9 +2,10 @@ import copy
 import re
 from collections import defaultdict
 from collections.abc import AsyncGenerator, Callable, Collection, Sequence
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass, replace
 from datetime import datetime
-from typing import TYPE_CHECKING, Optional, TypeVar, Union, cast
+from typing import TYPE_CHECKING, Optional, TypeVar, cast
 from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import (
@@ -17,19 +18,30 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
     function_definition_to_tool,
 )
-from eneo.assistants.api.assistant_models import AssistantResponse, KnowledgeMode
-from eneo.assistants.assistant import Assistant
+from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.assistants.assistant_factory import AssistantFactory
 from eneo.assistants.assistant_repo import (
     AssistantRepository,
     PersonalDefaultValidationInput,
 )
-from eneo.assistants.assistant_update import AssistantUpdate
+from eneo.assistants.assistant_update import (
+    AssistantUpdate,
+    AssistantUpdateCaller,
+    AssistantUpdateCommand,
+)
+from eneo.assistants.reference_tags import (
+    InlineReferenceScanner,
+    extract_inline_reference_ids,
+)
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
 from eneo.authentication.auth_service import AuthService
 from eneo.completion_models.infrastructure.context_builder import (
     count_tokens,
+)
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    validate_model_kwargs_update,
 )
 from eneo.files.attachment_budget import (
     assert_prompt_and_files_fit_context,
@@ -97,7 +109,6 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_bundled_server,
     is_capability_purpose,
 )
-from eneo.prompts.api.prompt_models import PromptCreate
 from eneo.prompts.prompt import Prompt
 from eneo.prompts.prompt_service import PromptService
 from eneo.questions.question import ToolAssistant, ToolCallInfo, UseTools
@@ -125,7 +136,6 @@ from eneo.skills.domain.skill import (
     SkillActivationRejectionReason,
     SkillActivationUnavailableException,
     SkillAttachmentLimitError,
-    SkillBindingIntent,
     SkillBindingProjection,
     SkillBindingRevisionConflictError,
     SkillBindingSource,
@@ -146,7 +156,10 @@ from eneo.spaces.space_service import SpaceService
 from eneo.templates.assistant_template.assistant_template_service import (
     AssistantTemplateService,
 )
-from eneo.tokens.token_utils import log_token_count_drift, measure_provider_input_tokens
+from eneo.tokens.token_utils import (
+    log_token_count_drift,
+    measure_provider_input_reserve,
+)
 from eneo.users.user import UserInDB
 from eneo.workflows.step_repo import StepRepository
 
@@ -247,7 +260,6 @@ if TYPE_CHECKING:
     from eneo.completion_models.infrastructure.completion_service import (
         CompletionService,
     )
-    from eneo.document_templates.domain import DocumentTemplateChoice
     from eneo.files.file_models import File
     from eneo.governance_policy.application.effective_config_service import (
         EffectiveConfigService,
@@ -300,6 +312,8 @@ class _PreparedAssistantTurn:
     model_route: str
     initial_skill_context_tokens: int
     is_personal_default: bool
+    # The flow a hidden assistant's chat edits; its turns get the flows tools.
+    authoring_flow_id: UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -317,12 +331,40 @@ class AssistantPreflightBaseline:
     attachments: list[File]
 
 
+@dataclass(frozen=True)
+class HelpAssistantTurn:
+    """A help assistant and the general MCP servers its space lets it call now."""
+
+    assistant: Assistant
+    mcp_servers: list["MCPServer"]
+
+
 AT_TAG_PATTERN = r"<eneo-at-tag: @[^>]+>"
-REFERENCE_PATTERN = r'<inref id="([0-9a-f]{8})"/>'  # noqa
 
 
 def clean_eneo_tag(input_string: str) -> str:
     return re.sub(AT_TAG_PATTERN, "", input_string)
+
+
+def _reject_direct_flow_managed_assistant_mutation(
+    assistant: Assistant, *, action: str
+) -> None:
+    if assistant.origin != AssistantOrigin.FLOW_MANAGED:
+        return
+
+    raise BadRequestException(
+        "Flow-managed assistants must be modified through flow endpoints.",
+        code="flow_managed_assistant",
+        context={
+            "assistant_id": str(assistant.id),
+            "flow_id": (
+                str(assistant.managing_flow_id)
+                if assistant.managing_flow_id is not None
+                else None
+            ),
+            "action": action,
+        },
+    )
 
 
 TReference = TypeVar("TReference")
@@ -338,7 +380,7 @@ def get_references(
         return list(info_blobs)
 
     # Preserve order, remove duplicates
-    info_blob_ids = list(dict.fromkeys(re.findall(REFERENCE_PATTERN, response_string)))
+    info_blob_ids = extract_inline_reference_ids(response_string)
 
     if get_id_func is None:
 
@@ -438,7 +480,7 @@ class AssistantService:
         help_assistant_assignment_history_repo: HelpAssistantAssignmentHistoryRepo,
         auth_service: AuthService,
         skill_service: "SkillService",
-        api_key_scope_revoker: ApiKeyScopeRevoker | None = None,
+        api_key_scope_revoker: ApiKeyScopeRevoker,
         effective_config_service: "EffectiveConfigService | None" = None,
         rerank_service: "RerankService | None" = None,
     ):
@@ -527,8 +569,9 @@ class AssistantService:
     ) -> "tuple[Assistant, list[MCPServer]]":
         """The assistant and the servers one of its turns would be given now.
 
-        Its own servers within the space's security classification, and the
-        provider serving this user for each capability the assistant has.
+        Its own servers that the space still has and that meet the space's
+        security classification, and the provider serving this user for each
+        capability the assistant has.
         """
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
         assistant = space.get_assistant(assistant_id=assistant_id)
@@ -540,7 +583,10 @@ class AssistantService:
             if effective_config is not None and effective_config.mcp_enforced
             else assistant.mcp_servers
         )
-        servers = general_servers_for_space(attached, space.security_classification)
+        in_space = self._space_membership(space, effective_config)
+        servers = general_servers_for_space(
+            attached, space.security_classification, in_space=in_space
+        )
         requested_capabilities = self._requested_capabilities(
             assistant=assistant, space=space, effective_config=effective_config
         )
@@ -555,6 +601,7 @@ class AssistantService:
                 user_group_ids=self.user.user_groups_ids,
                 allowed_purposes=allowed_capability_purposes(self.user.permissions),
                 space_security_classification=space.security_classification,
+                in_space=in_space,
             )
             servers = [*resolution.capability_servers, *resolution.general_servers]
         return assistant, [server for server in servers if server.is_enabled]
@@ -653,6 +700,19 @@ class AssistantService:
                 integration_knowledge_id=integration_knowledge.id
             ):
                 raise BadRequestException("Invalid integration knowledge")
+
+    @staticmethod
+    def _space_membership(
+        space: "Space", effective_config: "EffectiveConfig | None"
+    ) -> Callable[[UUID], bool]:
+        """Which servers the space lets an assistant call, as at save.
+
+        The policy grants its servers to the personal assistant directly;
+        for every other assistant the space's own list decides.
+        """
+        if effective_config is not None and effective_config.mcp_enforced:
+            return lambda _server_id: True
+        return space.is_mcp_server_in_space
 
     async def _resolve_effective_config(
         self, *, space: "Space", assistant: Assistant
@@ -869,6 +929,9 @@ class AssistantService:
         name: str,
         space_id: UUID,
         template_data: Optional["TemplateCreate"] = None,
+        hidden: bool = False,
+        origin: AssistantOrigin = AssistantOrigin.USER,
+        managing_flow_id: UUID | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> tuple[Assistant, list[ResourcePermission]]:
         space = await self.space_service.get_space(space_id)
@@ -903,11 +966,18 @@ class AssistantService:
                 user=self.user,
                 space_id=space.id,
                 completion_model=completion_model,
+                hidden=hidden,
+                origin=origin,
+                managing_flow_id=managing_flow_id,
             )
 
             assistant.enabled_capabilities = sorted(set(enabled_capabilities or []))
             await self._add_assistant_to_space(space, assistant)
-            refreshed_space = await self.space_service.get_space(space.id)
+            # A flow-managed assistant is hidden, and a space load builds a
+            # hidden assistant only when it names it.
+            refreshed_space = await self.space_repo.one(
+                id=space.id, hidden_assistant_ids={assistant.id}
+            )
             assistant = refreshed_space.get_assistant(assistant.id)
 
         else:
@@ -925,6 +995,67 @@ class AssistantService:
         )
 
         return assistant, permissions  # type: ignore[return-value]
+
+    async def copy_flow_managed_assistant(
+        self, *, assistant_id: UUID
+    ) -> tuple[Assistant, list[ResourcePermission]]:
+        """A new assistant of the same flow with the settings ``assistant_id``
+        has now: prompt, model and its settings, knowledge, attachments and
+        their modes, retention and logging. A copy changes no setting, so it
+        takes none of their own permissions, only the right to create
+        assistants in the space."""
+
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        source = space.get_assistant(assistant_id=assistant_id)
+        if source.origin != AssistantOrigin.FLOW_MANAGED:
+            raise NotFoundException("Assistant is not flow-managed.")
+        actor = self.actor_manager.get_space_actor_from_space(space)
+        if not actor.can_create_assistants():
+            raise UnauthorizedException(
+                "User does not have permission to create assistants in this space"
+            )
+        assert space.id is not None
+        prompt = None
+        if source.prompt is not None:
+            prompt = await self.prompt_service.create_prompt(
+                source.prompt.text,
+                source.prompt.description,
+                owner_user_id=(
+                    source.user.id if source.user is not None else self.user.id
+                ),
+            )
+        copy = self.factory.create_assistant(
+            name=source.name,
+            user=self.user,
+            space_id=space.id,
+            prompt=prompt,
+            completion_model=source.completion_model,
+            completion_model_kwargs=source.completion_model_kwargs,
+            logging_enabled=source.logging_enabled,
+            attachments=list(source.attachments),
+            attachment_inline_text=dict(source.attachment_inline_text),
+            collections=list(source.collections),
+            integration_knowledge_list=list(source.integration_knowledge_list),
+            insight_enabled=source.insight_enabled,
+            data_retention_days=source.data_retention_days,
+            metadata_json=source.metadata_json,
+            description=source.description,
+            hidden=True,
+            origin=AssistantOrigin.FLOW_MANAGED,
+            managing_flow_id=source.managing_flow_id,
+        )
+        copy.websites = list(source.websites)
+        copy.inline_file_text = source.inline_file_text
+        copy.knowledge_mode = source.knowledge_mode
+        copy.rerank_model_id = source.rerank_model_id
+        copy.icon_id = source.icon_id
+        copy.enabled_capabilities = list(source.enabled_capabilities)
+        await self._add_assistant_to_space(space, copy)
+        refreshed_space = await self.space_repo.one(
+            id=space.id, hidden_assistant_ids={copy.id}
+        )
+        copy = refreshed_space.get_assistant(copy.id)
+        return copy, actor.get_assistant_permissions(assistant=copy)
 
     async def _add_assistant_to_space(
         self, space: "Space", assistant: Assistant
@@ -1119,7 +1250,7 @@ class AssistantService:
             )
         )
         provider_input_token_limit = attachment_token_ceiling(model.max_input_tokens)
-        baseline_measurement = measure_provider_input_tokens(
+        baseline_measurement = measure_provider_input_reserve(
             provider_input.messages,
             provider_input.tools,
             model.get_model_route(),
@@ -1160,6 +1291,7 @@ class AssistantService:
         assistant: Assistant,
         *,
         space: "Space",
+        effective_config: "EffectiveConfig | None | NotProvided" = NOT_PROVIDED,
         on_demand_skill_ids_requiring_validation: frozenset[UUID] = frozenset(),
         validate_all_on_demand_candidates: bool = False,
         mcp_servers_override: list["MCPServer"] | None = None,
@@ -1185,9 +1317,10 @@ class AssistantService:
         await self._acquire_personal_default_fit_lock(shared=True)
         # Mirror ask()'s governance resolution so the fit check uses the model
         # and prompt the request will really send, not the assistant's own.
-        effective_config = await self._resolve_effective_config(
-            space=space, assistant=assistant
-        )
+        if isinstance(effective_config, NotProvided):
+            effective_config = await self._resolve_effective_config(
+                space=space, assistant=assistant
+            )
         model = self._context_model(assistant, effective_config=effective_config)
         completion_prompt_files = (
             await self._persistent_prompt_files(assistant, model)
@@ -1256,6 +1389,7 @@ class AssistantService:
                 user_group_ids=self.user.user_groups_ids,
                 allowed_purposes=allowed_capability_purposes(self.user.permissions),
                 space_security_classification=space.security_classification,
+                in_space=self._space_membership(space, effective_config),
             )
             effective_mcp_servers = [
                 *resolution.general_servers,
@@ -1720,30 +1854,35 @@ class AssistantService:
 
     async def update_assistant(
         self,
+        *,
         assistant_id: UUID,
-        name: str | None = None,
-        prompt: PromptCreate | None = None,
-        completion_model_id: UUID | None = None,
-        completion_model_kwargs: ModelKwargs | None = None,
-        logging_enabled: bool | None = None,
-        groups: list[UUID] | None = None,
-        websites: list[UUID] | None = None,
-        integration_knowledge_ids: list[UUID] | None = None,
-        mcp_server_ids: list[UUID] | None = None,
-        enabled_capabilities: list[CapabilityPurpose] | None = None,
-        mcp_tools: list[tuple[UUID, bool]] | None = None,
-        attachments: list[tuple[UUID, bool]] | None = None,
-        description: Union[str, None, NotProvided] = NOT_PROVIDED,
-        insight_enabled: Optional[bool] = None,
-        inline_file_text: Optional[bool] = None,
-        knowledge_mode: Optional[KnowledgeMode] = None,
-        data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
-        metadata_json: Union[dict[str, object], None, NotProvided] = NOT_PROVIDED,
-        icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
-        skill_binding_intents: list[SkillBindingIntent] | None = None,
-        document_template: "DocumentTemplateChoice | None" = None,
-        rerank_model_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
+        update: AssistantUpdateCommand,
+        caller: AssistantUpdateCaller = AssistantUpdateCaller.STANDALONE,
+        include_hidden: bool = False,
     ) -> tuple[Assistant, list[ResourcePermission]]:
+        name = update.name
+        prompt = update.prompt
+        completion_model_id = update.completion_model_id
+        completion_model_kwargs = update.completion_model_kwargs
+        logging_enabled = update.logging_enabled
+        enabled_capabilities = update.enabled_capabilities
+        groups = update.groups
+        websites = update.websites
+        integration_knowledge_ids = update.integration_knowledge_ids
+        mcp_server_ids = update.mcp_server_ids
+        mcp_tools = update.mcp_tools
+        attachments = update.attachments
+        description = update.description
+        insight_enabled = update.insight_enabled
+        inline_file_text = update.inline_file_text
+        knowledge_mode = update.knowledge_mode
+        data_retention_days = update.data_retention_days
+        metadata_json = update.metadata_json
+        icon_id = update.icon_id
+        rerank_model_id = update.rerank_model_id
+        skill_binding_intents = update.skill_binding_intents
+        document_template = update.document_template
+
         if logging_enabled:
             validate_permission(self.user, Permission.ADMIN)
 
@@ -1775,6 +1914,20 @@ class AssistantService:
 
         assistant = space.get_assistant(assistant_id=assistant_id)
         previous_icon_id = assistant.icon_id
+        if caller is AssistantUpdateCaller.STANDALONE:
+            _reject_direct_flow_managed_assistant_mutation(assistant, action="update")
+        elif (
+            caller is AssistantUpdateCaller.FLOW_MANAGED
+            and assistant.origin != AssistantOrigin.FLOW_MANAGED
+        ):
+            raise BadRequestException(
+                "Flow-managed update caller requires a flow-managed assistant.",
+                code="flow_managed_assistant",
+                context={
+                    "assistant_id": str(assistant.id),
+                    "action": "update",
+                },
+            )
 
         # Access to the personal default assistant requires PERSONAL_CHAT.
         # That permission permits model selection and, when policy allows it,
@@ -1827,6 +1980,7 @@ class AssistantService:
                 inline_file_text,
                 knowledge_mode,
                 None if is_personal_default else skill_binding_intents,
+                document_template,
             )
         ) or any(
             is_provided(value)
@@ -1934,13 +2088,18 @@ class AssistantService:
                 owner_user_id=prompt_owner_id,
             )
 
-        completion_model = None
-        if completion_model_id is not None:
-            if not space.is_completion_model_available(completion_model_id):
-                raise BadRequestException(
-                    "The completion model is not enabled in the space."
-                )
-            completion_model = space.get_completion_model(completion_model_id)
+        completion_model = NOT_PROVIDED
+        requested_completion_model_id: UUID | None = None
+        if is_provided(completion_model_id):
+            requested_completion_model_id = completion_model_id
+            if completion_model_id is not None:
+                if not space.is_completion_model_available(completion_model_id):
+                    raise BadRequestException(
+                        "The completion model is not enabled in the space."
+                    )
+                completion_model = space.get_completion_model(completion_model_id)
+            else:
+                completion_model = None
 
         if is_provided(rerank_model_id) and rerank_model_id is not None:
             if self.rerank_service is None or not await self.rerank_service.selectable(
@@ -1951,6 +2110,10 @@ class AssistantService:
                 )
 
         if completion_model_kwargs is not None:
+            if completion_model is None:
+                raise BadRequestException(
+                    "Select a completion model before configuring model settings"
+                )
             kwargs_model = completion_model
             if (
                 is_personal_default
@@ -1960,25 +2123,22 @@ class AssistantService:
                 kwargs_model = self._context_model(
                     assistant,
                     effective_config=update_effective_config,
-                    current_model=(
-                        completion_model
-                        if completion_model is not None
-                        else assistant.completion_model
-                    ),
+                    current_model=completion_model,
                 )
-            if kwargs_model is None:
+            if isinstance(kwargs_model, NotProvided):
                 kwargs_model = assistant.completion_model
             if kwargs_model is None:
                 raise BadRequestException(
                     "Select a completion model before configuring model settings"
                 )
-            filtered_kwargs = completion_model_kwargs.filter_unsupported(
-                kwargs_model.get_supported_model_kwargs()
+            stored_model = assistant.completion_model
+            validate_model_kwargs_update(
+                completion_model_kwargs,
+                kwargs_model.get_supported_model_kwargs(),
+                stored=assistant.completion_model_kwargs
+                if stored_model is not None and kwargs_model.id == stored_model.id
+                else None,
             )
-            if filtered_kwargs != completion_model_kwargs:
-                raise BadRequestException(
-                    "Model settings contain a value unsupported by the selected model"
-                )
             if is_personal_default and reasoning_effort_only_update:
                 completion_model_kwargs = assistant.completion_model_kwargs.model_copy(
                     update={
@@ -2083,10 +2243,10 @@ class AssistantService:
                 # same source the editor/UI uses to offer servers. For a personal
                 # space that is every tenant-enabled server (space_factory exposes
                 # them all); for a shared space it is the spaces_mcp_servers
-                # mapping. Do NOT query spaces_mcp_servers directly: that table is
-                # seeded once at space creation and never back-filled, so for a
-                # personal space it goes stale and wrongly rejects servers enabled
-                # after the space was created (#500).
+                # mapping. Do NOT query spaces_mcp_servers directly: that table
+                # holds what a shared space's admin activated, and a personal
+                # space has no say there, so the table wrongly rejects servers
+                # for a personal space (#500).
                 missing_space_ids = [
                     str(server_id)
                     for server_id in mcp_server_ids
@@ -2098,10 +2258,17 @@ class AssistantService:
                         + ", ".join(missing_space_ids)
                     )
 
+        if is_provided(completion_model) and isinstance(
+            mcp_effective_config, NotProvided
+        ):
+            mcp_effective_config = await self._resolve_effective_config(
+                space=space, assistant=assistant
+            )
+
         await self._ensure_governance_policy_allows_update(
             space=space,
             assistant=assistant,
-            completion_model_id=completion_model_id,
+            completion_model_id=requested_completion_model_id,
             mcp_server_ids=mcp_server_ids,
             prompt_changing=False,
             effective_config=mcp_effective_config,
@@ -2197,7 +2364,7 @@ class AssistantService:
         self.validate_space_assistant(
             space=space,
             assistant=assistant,
-            completion_model_changing=completion_model is not None,
+            completion_model_changing=is_provided(completion_model),
             knowledge_changing=knowledge_changing,
         )
 
@@ -2223,7 +2390,7 @@ class AssistantService:
         # committing an invalid row.
         if (
             attachments is not None
-            or completion_model is not None
+            or is_provided(completion_model)
             or prompt_obj is not None
             or skill_binding_intents is not None
             or mcp_server_ids is not None
@@ -2232,12 +2399,13 @@ class AssistantService:
             await self._validate_attachments_fit(
                 assistant,
                 space=space,
+                effective_config=mcp_effective_config,
                 on_demand_skill_ids_requiring_validation=(
                     on_demand_skill_ids_requiring_validation
                 ),
                 validate_all_on_demand_candidates=(
                     attachments is not None
-                    or completion_model is not None
+                    or is_provided(completion_model)
                     or prompt_obj is not None
                     or skill_binding_intents is not None
                     or mcp_server_ids is not None
@@ -2255,14 +2423,14 @@ class AssistantService:
                 ),
             )
 
+        # Persist only what this request changed on this assistant: a whole
+        # assistant or space write would undo concurrent edits to the rest.
         await self.repo.apply_update(
             assistant_id,
             assistant.space_id,
             AssistantUpdate(
                 name=name if name is not None else NOT_PROVIDED,
-                completion_model_id=completion_model_id
-                if completion_model_id is not None
-                else NOT_PROVIDED,
+                completion_model_id=completion_model_id,
                 completion_model_kwargs=completion_model_kwargs
                 if completion_model_kwargs is not None
                 else NOT_PROVIDED,
@@ -2295,7 +2463,10 @@ class AssistantService:
             ),
         )
         await self.icon_repo.release_replaced(previous_icon_id, icon_id)
-        refreshed_space = await self.space_service.get_space(assistant.space_id)
+        refreshed_space = await self.space_repo.one(
+            id=assistant.space_id,
+            hidden_assistant_ids={assistant_id} if include_hidden else frozenset(),
+        )
         assistant = refreshed_space.get_assistant(assistant_id=assistant_id)
 
         # TODO: Review how we get the permissions to the presentation layer
@@ -2418,7 +2589,7 @@ class AssistantService:
                 if runtime.tool_definition is not None
                 else []
             )
-            prompt_tokens = measure_provider_input_tokens(
+            prompt_tokens = measure_provider_input_reserve(
                 messages,
                 tools,
                 model.get_model_route(),
@@ -2530,13 +2701,43 @@ class AssistantService:
         :class:`NotFoundException`, so this can neither be used as a generic
         permission-skipping read nor to probe org-space assistants.
 
-        Callers are :class:`HelperRunService` (``run`` / ``continue_turn``) and
-        the availability endpoint, always with an id resolved server-side from
+        Callers are the availability endpoint and, through
+        :meth:`get_help_assistant_for_turn`, :class:`HelperRunService`
+        (``run`` / ``continue_turn``), always with an id resolved server-side from
         an active ``OrgSpaceAssistantRole`` or an existing ``HelperRun`` — never
         a client-supplied assistant id. ``continue_turn`` may legitimately load
         a *former* helper (the role was reassigned mid-conversation), which is
         why the assignment-history branch counts.
         """
+        space = await self._help_assistant_space(assistant_id)
+        return space.get_assistant(assistant_id=assistant_id)
+
+    async def get_help_assistant_for_turn(
+        self, assistant_id: UUID
+    ) -> HelpAssistantTurn:
+        """:meth:`get_help_assistant` plus the servers a turn may call.
+
+        A help assistant's servers pass the same space rule as a chat turn's
+        (:func:`general_servers_for_space` with :meth:`_space_membership`), so a
+        server a space admin switched off stops at the next helper turn. The
+        loaded assistant holds no capability-purpose server (AssistantFactory
+        keeps general ones only), so no capability a helper had changes.
+        """
+        space = await self._help_assistant_space(assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
+        effective_config = await self._resolve_effective_config(
+            space=space, assistant=assistant
+        )
+        return HelpAssistantTurn(
+            assistant=assistant,
+            mcp_servers=general_servers_for_space(
+                assistant.mcp_servers,
+                space.security_classification,
+                in_space=self._space_membership(space, effective_config),
+            ),
+        )
+
+    async def _help_assistant_space(self, assistant_id: UUID) -> "Space":
         is_active_helper = (
             await self.org_space_assistant_role_repo.exists_active_for_assistant(
                 assistant_id
@@ -2551,9 +2752,7 @@ class AssistantService:
             raise NotFoundException(
                 "Assistant is not a help assistant; refusing privileged read."
             )
-
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
-        return space.get_assistant(assistant_id=assistant_id)
+        return await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
 
     async def get_assistants(
         self,
@@ -2608,24 +2807,67 @@ class AssistantService:
         if assistant.is_default:
             raise BadRequestException("The default assistant cannot be deleted")
 
-        if self.api_key_scope_revoker is not None:
-            try:
-                await self.api_key_scope_revoker.revoke_scope(
-                    scope_type=ApiKeyScopeType.ASSISTANT,
-                    scope_id=assistant_id,
-                    reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
-                    reason_text="Assistant deleted",
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to revoke API keys for deleted assistant",
-                    extra={"assistant_id": str(assistant_id)},
-                )
+        try:
+            await self._revoke_assistant_api_keys(assistant_id)
+        except Exception:
+            logger.exception(
+                "Failed to revoke API keys for deleted assistant",
+                extra={"assistant_id": str(assistant_id)},
+            )
 
         icon_id = await self.repo.delete(assistant_id, space.id)
 
         if icon_id:
             await self.icon_repo.delete_if_unreferenced(icon_id)
+
+    async def delete_flow_managed_assistants(
+        self,
+        *,
+        flow_id: UUID,
+        assistant_ids: AbstractSet[UUID],
+    ) -> None:
+        """Delete assistants ``flow_id`` manages, with every deletion effect.
+
+        Flow edit access authorizes this, so there is no assistant permission
+        check. It is all or nothing: the delete statement itself decides which
+        assistants go, so one the flow does not manage, or one a step uses by
+        the time the statement runs, refuses the whole call; so does a failed
+        key revocation. Either way the savepoint undoes every change. The space
+        aggregate never deletes flow-managed rows, so they go in one statement.
+        """
+        if not assistant_ids:
+            return
+        async with self.repo.session.begin_nested():
+            icon_ids = await self.repo.delete_removable_flow_managed(
+                flow_id=flow_id,
+                assistant_ids=assistant_ids,
+            )
+            refused = assistant_ids - icon_ids.keys()
+            if refused:
+                raise BadRequestException(
+                    "Only assistants the flow manages and no step uses can be "
+                    "deleted with it.",
+                    code="flow_managed_assistant",
+                    context={
+                        "flow_id": str(flow_id),
+                        "assistant_ids": sorted(str(id) for id in refused),
+                    },
+                )
+            for assistant_id in sorted(icon_ids):
+                await self._revoke_assistant_api_keys(assistant_id)
+            for icon_id in icon_ids.values():
+                if icon_id is not None:
+                    await self.icon_repo.delete_if_unreferenced(
+                        icon_id, tenant_id=self.user.tenant_id
+                    )
+
+    async def _revoke_assistant_api_keys(self, assistant_id: UUID) -> None:
+        await self.api_key_scope_revoker.revoke_scope(
+            scope_type=ApiKeyScopeType.ASSISTANT,
+            scope_id=assistant_id,
+            reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
+            reason_text="Assistant deleted",
+        )
 
     async def get_prompts_by_assistant(self, assistant_id: UUID) -> list[Prompt]:
         space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
@@ -2701,6 +2943,13 @@ class AssistantService:
                 stream_output_token_estimate: int | None = None
                 stream_context_output_token_estimate: int | None = None
                 completed = False
+                # Version 1 lists every retrieved blob; later versions cite
+                # blobs inline, and each text chunk carries those cited so far.
+                reference_scanner = (
+                    None
+                    if version == 1
+                    else InlineReferenceScanner(datastore_result.info_blobs)
+                )
 
                 try:
                     completion = response.completion
@@ -2726,10 +2975,10 @@ class AssistantService:
 
                         if chunk.response_type == ResponseType.TEXT:
                             response_string = f"{response_string}{chunk.text}"
-                            chunk.reference_chunks = get_references(
-                                response_string=response_string,
-                                info_blobs=datastore_result.info_blobs,
-                                version=version,
+                            chunk.reference_chunks = (
+                                list(datastore_result.info_blobs)
+                                if reference_scanner is None
+                                else reference_scanner.references(response_string)
                             )
                             yield chunk
 
@@ -3390,6 +3639,7 @@ class AssistantService:
         tool_assistant_id: UUID | None = None,
         disabled_mcp_server_ids: list[UUID] | None = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
+        session_id: UUID | None = None,
     ) -> _PreparedAssistantTurn:
         """Resolve the ordinary ask policy without creating conversation rows."""
         # PRD §6 "Critical tests #2": defense-in-depth — never run a Help
@@ -3409,8 +3659,23 @@ class AssistantService:
                 history_repo=self.help_assistant_assignment_history_repo,
             )
 
-        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        space = await self.space_repo.get_space_by_assistant(
+            assistant_id=assistant_id,
+            hidden_assistant_ids={
+                assistant_id,
+                *({tool_assistant_id} if tool_assistant_id is not None else set()),
+            },
+        )
         active_assistant = space.get_assistant(assistant_id=assistant_id)
+        authoring_flow_id: UUID | None = None
+        if active_assistant.hidden:
+            # A hidden assistant answers only in the flow authoring chat it was
+            # made for, continued by the person the chat belongs to.
+            if session_id is None or tool_assistant_id is not None:
+                raise NotFoundException("Assistant not found.")
+            authoring_flow_id = await self._authoring_chat_flow_id(
+                session_id=session_id, assistant_id=assistant_id
+            )
         actor = self.actor_manager.get_space_actor_from_space(space=space)
 
         # The personal chat is the personal space's default assistant — gated by
@@ -3515,10 +3780,11 @@ class AssistantService:
                         ),
                         effective_config=effective_config,
                     )
-                    model_kwargs_override = (
-                        assistant_to_ask.completion_model_kwargs.model_copy(
-                            update={"reasoning_effort": effective_reasoning_effort}
-                        )
+                    # The stored settings as sent to the selected model, with
+                    # the policy's effort.
+                    model_kwargs_override = assistant_to_ask.request_model_kwargs(
+                        selected_model,
+                        reasoning_effort=effective_reasoning_effort,
                     )
 
         # Space checks run after policy resolution so a personal default
@@ -3593,10 +3859,12 @@ class AssistantService:
             else list(assistant_to_ask.mcp_servers)
         )
         # Provider IDs never grant a capability, including old attachments
-        # after a purpose edit. A general server whose classification has
-        # dropped below the space's is skipped this turn rather than called.
+        # after a purpose edit. A general server that the space no longer has,
+        # or whose classification has dropped below the space's, is skipped
+        # this turn rather than called.
+        in_space = self._space_membership(space, effective_config)
         mcp_servers_override = general_servers_for_space(
-            capability_base, space.security_classification
+            capability_base, space.security_classification, in_space=in_space
         )
         capability_mcp_servers: list["MCPServer"] = []
         requested_capabilities = self._requested_capabilities(
@@ -3613,6 +3881,7 @@ class AssistantService:
                 user_group_ids=self.user.user_groups_ids,
                 allowed_purposes=allowed_capability_purposes(self.user.permissions),
                 space_security_classification=space.security_classification,
+                in_space=in_space,
             )
             mcp_servers_override = resolution.general_servers
             capability_mcp_servers = [
@@ -3658,7 +3927,25 @@ class AssistantService:
             model_route=model_route,
             initial_skill_context_tokens=initial_skill_snapshot.measurement.tokens,
             is_personal_default=is_personal_default,
+            authoring_flow_id=authoring_flow_id,
         )
+
+    async def _authoring_chat_flow_id(
+        self, *, session_id: UUID, assistant_id: UUID
+    ) -> UUID:
+        """The flow the chat edits, after the binding's own access checks."""
+        from dependency_injector import providers
+
+        from eneo.flows.application.flow_authoring_chat import load_authoring_chat
+        from eneo.main.container.container_overrides import override_user
+        from eneo.main.container.request_container import request_container
+
+        container = request_container(session=providers.Object(self.repo.session))
+        override_user(container=container, user=self.user)
+        chat = await load_authoring_chat(
+            container, session_id=session_id, assistant_id=assistant_id
+        )
+        return chat.flow_id
 
     async def _execute_turn(
         self,
@@ -3690,6 +3977,10 @@ class AssistantService:
                 scoped_token = self.auth_service.create_scoped_mcp_token(
                     self.user,
                     assistant_id=prepared.assistant_to_ask.id,
+                    # The flows tools find their flow through the chat.
+                    session_id=(
+                        session.id if prepared.authoring_flow_id is not None else None
+                    ),
                     table_tools=table_tools_attached,
                 )
             return scoped_token
@@ -3726,6 +4017,19 @@ class AssistantService:
                 token=mint_scoped_token(),
                 tenant_id=self.user.tenant_id,
                 source_labels=prepared.assistant_to_ask.knowledge_source_labels(),
+            )
+
+        # A flow authoring chat edits its flow through the loopback flows
+        # tools; a model without tool calling only talks about it.
+        flows_mcp_server = None
+        if (
+            prepared.authoring_flow_id is not None
+            and prepared.effective_completion_model.supports_tool_calling
+        ):
+            from eneo.internal_mcp.flows import build_flows_mcp_server
+
+            flows_mcp_server = await build_flows_mcp_server(
+                token=mint_scoped_token(), tenant_id=self.user.tenant_id
             )
 
         # Referenced attachments: whenever signed reference URLs render in the
@@ -3836,9 +4140,11 @@ class AssistantService:
             completion_prompt_files=completion_file_inputs.completion_prompt_files,
             skill_runtime=prepared.skill_runtime,
             knowledge_mcp_server=knowledge_mcp_server,
-            internal_mcp_servers=(
-                [files_mcp_server] if files_mcp_server is not None else []
-            ),
+            internal_mcp_servers=[
+                server
+                for server in (files_mcp_server, flows_mcp_server)
+                if server is not None
+            ],
         )
 
         return response, datastore_result
@@ -3865,6 +4171,7 @@ class AssistantService:
             tool_assistant_id=tool_assistant_id,
             disabled_mcp_server_ids=disabled_mcp_server_ids,
             disabled_capabilities=disabled_capabilities,
+            session_id=session_id,
         )
         active_assistant = prepared.active_assistant
         assistant_to_ask = prepared.assistant_to_ask
@@ -4071,14 +4378,20 @@ class AssistantService:
                 },
             )
 
+        _reject_direct_flow_managed_assistant_mutation(assistant, action="publish")
+
+        # Validate and return what is stored now, not the copy loaded for the
+        # permission check: an edit may have been committed in between.
+        authorized_space_id = space.id
+        space = await self.space_repo.get_space_by_assistant(assistant_id=assistant_id)
+        assistant = space.get_assistant(assistant_id=assistant_id)
         if publish:
             await self._validate_attachments_fit(assistant, space=space)
 
-        assistant.update(published=publish)
-
         await self.repo.apply_update(
-            assistant_id, space.id, AssistantUpdate(published=publish)
+            assistant_id, authorized_space_id, AssistantUpdate(published=publish)
         )
+        assistant.update(published=publish)
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions: list[ResourcePermission] = actor.get_assistant_permissions(
@@ -4134,6 +4447,10 @@ class AssistantService:
                 },
             )
 
+        _reject_direct_flow_managed_assistant_mutation(
+            assistant, action="add_mcp_server"
+        )
+
         # Get existing associations from the database
         import sqlalchemy as sa
 
@@ -4162,10 +4479,10 @@ class AssistantService:
         )
         mcp_governed = effective_config is not None and effective_config.mcp_enforced
         if not mcp_governed and not space.is_mcp_server_in_space(mcp_server_id):
-            # Validate against the space read model, not the stale
-            # spaces_mcp_servers table (seeded once at space creation, never
-            # back-filled), so a server enabled after a personal space was
-            # created is assignable. See update_assistant (#500).
+            # Validate against the space read model, not the spaces_mcp_servers
+            # table (what a shared space's admin activated), so every enabled
+            # server is assignable in a personal space. See update_assistant
+            # (#500).
             raise BadRequestException(
                 "MCP server is not assigned to this assistant's space"
             )
@@ -4251,6 +4568,10 @@ class AssistantService:
                 },
             )
 
+        _reject_direct_flow_managed_assistant_mutation(
+            assistant, action="remove_mcp_server"
+        )
+
         await self.repo.remove_mcp_server(assistant_id, space.id, mcp_server_id)
 
         # Refresh and return
@@ -4288,6 +4609,10 @@ class AssistantService:
                     "auth_layer": "domain_policy",
                 },
             )
+
+        _reject_direct_flow_managed_assistant_mutation(
+            assistant, action="update_mcp_server_config"
+        )
 
         # Get existing associations from the database
         import sqlalchemy as sa

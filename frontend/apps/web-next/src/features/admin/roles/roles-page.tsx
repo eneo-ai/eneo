@@ -90,7 +90,13 @@ const PERMISSION_KEYS: Partial<Record<Permission, string>> = {
   storage: "permission_storage",
   assistant_debug: "permission_assistant_debug",
   web_search: "permission_web_search",
-  image_generation: "permission_image_generation"
+  image_generation: "permission_image_generation",
+  flows_view: "flow_admin_permission_flows_view",
+  flows_run: "flow_admin_permission_flows_run",
+  flows_manage: "flow_admin_permission_flows_manage",
+  flows_trace: "flow_admin_permission_flows_trace",
+  retention_manage: "permission_retention_manage",
+  retention_holds: "permission_retention_holds"
 };
 
 type Editor = { kind: "create" } | { kind: "update"; role: Role };

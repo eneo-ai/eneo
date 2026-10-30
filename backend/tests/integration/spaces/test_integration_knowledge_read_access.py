@@ -337,7 +337,7 @@ async def test_every_caller_gets_what_the_space_aggregate_gave(
 
     outcomes: dict[str, set[int]] = {}
     for caller_name, caller in callers.items():
-        async with db_container(user=caller) as container:
+        async with db_container(user=caller, tenant=caller.tenant) as container:
             for space_name, space_id in space_ids.items():
                 facts = space = None
                 try:

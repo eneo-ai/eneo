@@ -2,6 +2,7 @@ import type { Group, InfoBlob } from "@eneo/eneo-js";
 import { page } from "@vitest/browser/context";
 import { render } from "vitest-browser-svelte";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { formatBytes } from "$lib/core/formatting/formatBytes";
 import { m } from "$lib/paraglide/messages";
 import BlobUpload from "./BlobUpload.svelte";
 
@@ -139,7 +140,11 @@ describe("BlobUpload", () => {
     await expect
       .element(
         dialog.getByText(
-          m.file_too_large_detail({ fileName: "big.txt", currentSize: "2 KB", maxSize: "1 KB" })
+          m.file_too_large_detail({
+            fileName: "big.txt",
+            currentSize: formatBytes(2048),
+            maxSize: formatBytes(1024)
+          })
         )
       )
       .toBeVisible();

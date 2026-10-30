@@ -52,6 +52,9 @@ from eneo.database.tables.spaces_table import (
     SpacesUserGroups,
     SpacesUsers,
 )
+from eneo.database.tables.transcription_services_table import (
+    SpacesTranscriptionServiceConnections,
+)
 from eneo.database.tables.websites_spaces_table import WebsitesSpaces
 from eneo.database.tables.websites_table import Websites
 from eneo.document_templates.domain import DocumentTemplateChoice
@@ -59,7 +62,7 @@ from eneo.group_chat.infrastructure.group_chat_repo import GroupChatRepository
 from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.spaces.api.space_models import SpaceRoleValue
 from eneo.spaces.space_repo import SpaceRepository
-from eneo.spaces.space_update import SpaceUpdate
+from eneo.spaces.space_update import LinkEdit, SpaceUpdate
 from eneo.sysadmin.stored_model_configuration import (
     ConfigurationRepair,
     StoredModelConfigurationRepository,
@@ -77,6 +80,7 @@ def persisted():
         SpacesCompletionModels,
         SpacesEmbeddingModels,
         SpacesTranscriptionModels,
+        SpacesTranscriptionServiceConnections,
         SpacesMCPServers,
         SpacesMCPServerTools,
         SpaceCapabilities,
@@ -171,6 +175,7 @@ def persisted():
             )
         space_repo = SpaceRepository(
             session=session,
+            tenant=SimpleNamespace(id=tenant_id),
             user=SimpleNamespace(tenant_id=tenant_id),
             factory=MagicMock(),
             file_content_loader=MagicMock(),
@@ -181,7 +186,6 @@ def persisted():
         )
         assistant_repo = AssistantRepository(
             session=session,
-            user=SimpleNamespace(tenant_id=tenant_id),
             factory=MagicMock(),
             file_repo=MagicMock(),
             file_content_loader=MagicMock(),
@@ -404,6 +408,38 @@ async def test_membership_edit_does_not_remove_hidden_members(persisted):
     assert set(after) == {*before, (persisted.user_id, "admin")}
 
 
+@pytest.mark.parametrize(
+    ("mapping", "target", "field"),
+    [
+        (SpacesCompletionModels, "completion_model_id", "completion_models"),
+        (SpacesEmbeddingModels, "embedding_model_id", "embedding_models"),
+        (SpacesTranscriptionModels, "transcription_model_id", "transcription_models"),
+        (SpacesMCPServers, "mcp_server_id", "mcp_servers"),
+    ],
+)
+async def test_a_link_list_edit_keeps_the_links_the_space_hides(
+    persisted, mapping, target, field
+):
+    """Kills, per list: update_settings passes ``within=None`` and so replaces
+    every stored link, also those outside ``shown``."""
+    add_hidden_mappings(persisted)
+    column = getattr(mapping, target)
+    (hidden,) = persisted.connection.scalars(sa.select(column))
+    kept, removed = uuid4(), uuid4()
+    for link_id in (kept, removed):
+        persisted.connection.execute(
+            sa.insert(persisted.tables[mapping]).values(
+                space_id=persisted.space_id, **{target: link_id}
+            )
+        )
+
+    await persisted.space_repo.update_settings(
+        persisted.space_id,
+        SpaceUpdate(**{field: LinkEdit((kept,), frozenset({kept, removed}))}),
+    )
+    assert set(persisted.connection.scalars(sa.select(column))) == {hidden, kept}
+
+
 async def test_unchanged_selection_emits_no_delete_or_insert_and_empty_clears(
     persisted,
 ):
@@ -413,13 +449,15 @@ async def test_unchanged_selection_emits_no_delete_or_insert_and_empty_clears(
             sa.select(SpacesCompletionModels.completion_model_id)
         )
     )
+    shown = frozenset(ids)
     persisted.statements.clear()
     await persisted.space_repo.update_settings(
-        persisted.space_id, SpaceUpdate(completion_model_ids=ids)
+        persisted.space_id,
+        SpaceUpdate(completion_models=LinkEdit(tuple(ids), shown)),
     )
     assert not any(sql.startswith(("DELETE", "INSERT")) for sql in persisted.statements)
     await persisted.space_repo.update_settings(
-        persisted.space_id, SpaceUpdate(completion_model_ids=[])
+        persisted.space_id, SpaceUpdate(completion_models=LinkEdit((), shown))
     )
     assert (
         list(
@@ -561,6 +599,9 @@ async def test_classification_change_checks_stored_models_but_preserves_function
     from eneo.database.tables.security_classifications_table import (
         SecurityClassification,
     )
+    from eneo.database.tables.transcription_services_table import (
+        TranscriptionServiceConnections,
+    )
 
     # These projections need only classification fields, independent of model
     # availability/deprecation and independent of domain hydration.
@@ -573,7 +614,13 @@ async def test_classification_change_checks_stored_models_but_preserves_function
         sa.Column("security_level", sa.Integer()),
     )
     catalogs = {}
-    for model in (CompletionModels, EmbeddingModels, TranscriptionModels, MCPServers):
+    for model in (
+        CompletionModels,
+        EmbeddingModels,
+        TranscriptionModels,
+        TranscriptionServiceConnections,
+        MCPServers,
+    ):
         catalogs[model] = sa.Table(
             model.__tablename__,
             metadata,
@@ -595,6 +642,11 @@ async def test_classification_change_checks_stored_models_but_preserves_function
         (CompletionModels, SpacesCompletionModels, "completion_model_id"),
         (EmbeddingModels, SpacesEmbeddingModels, "embedding_model_id"),
         (TranscriptionModels, SpacesTranscriptionModels, "transcription_model_id"),
+        (
+            TranscriptionServiceConnections,
+            SpacesTranscriptionServiceConnections,
+            "connection_id",
+        ),
         (MCPServers, SpacesMCPServers, "mcp_server_id"),
     ):
         safe_id = uuid4()
@@ -842,25 +894,27 @@ async def test_space_tool_overrides_validate_ownership_preserve_noops_and_clear(
             )
         )
     await persisted.space_repo.update_settings(
-        persisted.space_id, SpaceUpdate(mcp_server_ids=[server_id])
+        persisted.space_id, SpaceUpdate(mcp_servers=LinkEdit((server_id,), frozenset()))
     )
+    shown = frozenset({tool_id})
     with pytest.raises(BadRequestException, match="not assigned"):
         await persisted.space_repo.update_settings(
-            persisted.space_id, SpaceUpdate(mcp_tools=[(foreign_tool_id, True)])
+            persisted.space_id,
+            SpaceUpdate(mcp_tools=LinkEdit(((foreign_tool_id, True),), shown)),
         )
     await persisted.space_repo.update_settings(
-        persisted.space_id, SpaceUpdate(mcp_tools=[(tool_id, False)])
+        persisted.space_id, SpaceUpdate(mcp_tools=LinkEdit(((tool_id, False),), shown))
     )
     assert (
         persisted.connection.scalar(sa.select(SpacesMCPServerTools.is_enabled)) is False
     )
     persisted.statements.clear()
     await persisted.space_repo.update_settings(
-        persisted.space_id, SpaceUpdate(mcp_tools=[(tool_id, False)])
+        persisted.space_id, SpaceUpdate(mcp_tools=LinkEdit(((tool_id, False),), shown))
     )
     assert not any(sql.startswith(("DELETE", "INSERT")) for sql in persisted.statements)
     await persisted.space_repo.update_settings(
-        persisted.space_id, SpaceUpdate(mcp_tools=[])
+        persisted.space_id, SpaceUpdate(mcp_tools=LinkEdit((), shown))
     )
     assert (
         list(

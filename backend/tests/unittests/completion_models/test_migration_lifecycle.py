@@ -17,17 +17,15 @@ from eneo.completion_models.constants import (
     MIGRATABLE_ENTITY_TYPES,
 )
 from eneo.completion_models.domain.completion_model import CompletionModel
+from eneo.tenants.tenant import TenantInDB
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-class _MockUser:
-    def __init__(self):
-        self.id = uuid4()
-        self.tenant_id = uuid4()
-        self.tenant = None
+def _tenant() -> TenantInDB:
+    return TenantInDB.model_construct(id=uuid4(), name="Test Tenant")
 
 
 def _make_model(
@@ -37,9 +35,8 @@ def _make_model(
     migrated_to_model_id=None,
     deleted_at=None,
 ) -> CompletionModel:
-    user = _MockUser()
     return CompletionModel(
-        user=user,
+        tenant=_tenant(),
         id=uuid4(),
         created_at=datetime.now(),
         updated_at=datetime.now(),

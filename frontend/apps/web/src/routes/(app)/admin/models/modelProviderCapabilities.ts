@@ -85,6 +85,18 @@ export function formatProviderLabel(type: string): string {
 }
 
 /**
+ * Whether a provider serves vLLM's realtime API, which live transcription
+ * speaks. The server owns the rule (transcription_models/domain/realtime.py)
+ * and refuses the flag for any other provider; this mirrors it so the form
+ * can say so first. A provider keeps the type it was created with, so the
+ * alias "vllm" and any casing count as hosted_vllm, exactly as on the server.
+ */
+export function speaksRealtimeDialect(providerType: string | null | undefined): boolean {
+  const type = providerType?.toLowerCase();
+  return type === "hosted_vllm" || type === "vllm";
+}
+
+/**
  * Localised label for a credential/config field. Unknown field names are
  * humanised so a backend-only addition doesn't break the UI.
  */

@@ -155,6 +155,138 @@ describe("SpacesManager.updateDefaultAssistantSkills", () => {
   });
 });
 
+describe("SpacesManager.updateSpace", () => {
+  const links = (ids: string[]) => ids.map((id) => ({ id, name: id, available: true }));
+  function linkedSpace(completion: string[], embedding: string[]) {
+    return {
+      ...(space({ id: "assistant-1", completion_model: modelA }) as Record<string, unknown>),
+      completion_models: completion.map((id) => ({ id })),
+      embedding_models: embedding.map((id) => ({ id })),
+      linked_models: {
+        completion_models: links(completion),
+        embedding_models: links(embedding),
+        transcription_models: []
+      }
+    } as never;
+  }
+  function spacesManager(spaces: Record<string, unknown>) {
+    return SpacesManager({
+      spaces: [],
+      currentSpace: linkedSpace([], []),
+      eneo: { assistants: {}, spaces } as never
+    });
+  }
+  // What a model section sends: its own list, built from the space as it
+  // stands when the update starts.
+  const adding =
+    (field: "completion_models" | "embedding_models", id: string) =>
+    (current: { linked_models?: Record<string, { id: string }[]> }) => ({
+      [field]: [...(current.linked_models?.[field] ?? []).map((l) => l.id), id].map((i) => ({
+        id: i
+      }))
+    });
+
+  it("keeps both sections' links when their saves overlap", async () => {
+    const first = deferred<unknown>();
+    const second = deferred<unknown>();
+    const update = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise);
+    const m = spacesManager({ update });
+
+    const completionSave = m.updateSpace(adding("completion_models", "c1"));
+    const embeddingSave = m.updateSpace(adding("embedding_models", "e1"));
+    await Promise.resolve();
+    // The second update waits for the first to settle.
+    expect(update).toHaveBeenCalledTimes(1);
+
+    first.resolve(linkedSpace(["c1"], []));
+    await completionSave;
+    await vi.waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    expect(update.mock.calls[1][0]).toEqual({
+      space: { id: "space-1" },
+      update: { embedding_models: [{ id: "e1" }] }
+    });
+    second.resolve(linkedSpace(["c1"], ["e1"]));
+    await embeddingSave;
+
+    const shown = get(m.state.currentSpace);
+    expect(shown.completion_models.map((model) => model.id)).toEqual(["c1"]);
+    expect(shown.embedding_models.map((model) => model.id)).toEqual(["e1"]);
+  });
+
+  function otherSpace() {
+    return { ...(linkedSpace([], []) as Record<string, unknown>), id: "space-2" } as never;
+  }
+
+  it("keeps a response away from the space the user moved to", async () => {
+    const saving = deferred<unknown>();
+    const m = spacesManager({ update: () => saving.promise });
+
+    const save = m.updateSpace({ completion_models: [{ id: "c1" }] });
+    m.watchPageData({ currentSpace: otherSpace() });
+    saving.resolve(linkedSpace(["c1"], []));
+
+    expect((await save)?.id).toBe("space-1");
+    expect(get(m.state.currentSpace).id).toBe("space-2");
+  });
+
+  it("builds a queued edit from its own space after the user moved on", async () => {
+    const first = deferred<unknown>();
+    const update = vi
+      .fn()
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(async () => linkedSpace(["c1"], ["e1"]));
+    const fetched = vi.fn(async ({ id }: { id: string }) => ({
+      ...(linkedSpace(["c1"], []) as Record<string, unknown>),
+      id
+    }));
+    const m = spacesManager({ update, get: fetched });
+
+    m.updateSpace(adding("completion_models", "c1"));
+    const queued = m.updateSpace(adding("embedding_models", "e1"));
+    m.watchPageData({ currentSpace: otherSpace() });
+    first.resolve(linkedSpace(["c1"], []));
+    await queued;
+
+    // The queued edit went to space-1, built from space-1 as the server has it.
+    expect(fetched).toHaveBeenCalledWith({ id: "space-1" });
+    expect(update.mock.calls[1][0]).toEqual({
+      space: { id: "space-1" },
+      update: { embedding_models: [{ id: "e1" }] }
+    });
+    expect(get(m.state.currentSpace).id).toBe("space-2");
+  });
+
+  it("drops a read of a space the user has left", async () => {
+    const read = deferred<unknown>();
+    const m = spacesManager({ get: () => read.promise });
+
+    const refresh = m.refreshCurrentSpace();
+    m.watchPageData({ currentSpace: otherSpace() });
+    read.resolve(linkedSpace(["c1"], []));
+    await refresh;
+
+    expect(get(m.state.currentSpace).id).toBe("space-2");
+  });
+
+  it("drops a read that started before an update it would overwrite", async () => {
+    const read = deferred<unknown>();
+    const m = spacesManager({
+      get: () => read.promise,
+      update: async () => linkedSpace(["c1"], [])
+    });
+
+    const refresh = m.refreshCurrentSpace();
+    await m.updateSpace({ completion_models: [{ id: "c1" }] });
+    read.resolve(linkedSpace([], []));
+    await refresh;
+
+    expect(get(m.state.currentSpace).completion_models.map((model) => model.id)).toEqual(["c1"]);
+  });
+});
+
 describe("SpacesManager.organizationSpaceId", () => {
   it("uses the current-space contract without needing organization membership and follows navigation", () => {
     const currentSpace = {
@@ -167,6 +299,7 @@ describe("SpacesManager.organizationSpaceId", () => {
       embedding_models: [],
       completion_models: [],
       transcription_models: [],
+      linked_models: { completion_models: [], embedding_models: [], transcription_models: [] },
       knowledge: {
         groups: { items: [], count: 0 },
         websites: { items: [], count: 0 },
@@ -203,6 +336,7 @@ describe("SpacesManager.refreshCurrentSpace", () => {
     embedding_models: [],
     completion_models: [],
     transcription_models: [],
+    linked_models: { completion_models: [], embedding_models: [], transcription_models: [] },
     knowledge: {
       groups: { items: [], count: 0 },
       websites: { items: [], count: 0 },

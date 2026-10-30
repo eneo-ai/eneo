@@ -50,7 +50,8 @@ function show(canEdit = true) {
         target: "object_store",
         configured: true,
         selectable: true,
-        readiness_code: "ready"
+        readiness_code: "ready",
+        maximum_bytes: null
       }}
       canEdit={canEdit}
       onConnectionChanged={onConnectionChanged}

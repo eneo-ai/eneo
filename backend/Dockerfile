@@ -1,7 +1,10 @@
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
+# Build dependencies for packages that may compile from source on some
+# architectures, for example psutil on the current builder image.
+RUN apt-get update && apt-get install -y \
+    gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 # Set uv optimizations
 ENV UV_LINK_MODE=copy \
@@ -54,8 +57,13 @@ RUN npm run build:vite
 # Production stage
 FROM python:3.11-slim-bookworm
 
-# Install runtime dependencies
-RUN apt-get update && apt-get install -y ffmpeg libmagic1 && rm -rf /var/lib/apt/lists/*
+# Runtime dependencies: ffmpeg/libsndfile1 support audio; libmagic1 supports
+# file type detection. Documents are rendered by the tool runtime image.
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    libmagic1 \
+    libsndfile1 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy venv and tiktoken from builder
 COPY --from=builder /app/.venv /app/.venv
@@ -84,7 +92,9 @@ WORKDIR /app
 # Run as unprivileged user
 USER 1000
 
-CMD ["sh", "-c", "./run.sh"]
+# Exec form: init's SIGTERM reaches run.sh, which execs arq or gunicorn, so
+# they drain. Under `sh -c` the shell forks run.sh and the signal stops there.
+CMD ["./run.sh"]
 ARG APP_VERSION=0.0.0-dev
 ARG APP_REVISION=unknown
 ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}

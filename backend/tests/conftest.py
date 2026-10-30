@@ -91,6 +91,7 @@ pytest_plugins = [
     "tests.integration.fixtures.spaces",  # Space fixtures
     "tests.integration.fixtures.organization_knowledge",  # Organization knowledge fixtures
     "tests.integration.fixtures.integrations",  # Integration fixtures (SharePoint, etc.)
+    "tests.document_runtime_support",  # The shared document runtime (tool-runtime)
 ]
 
 
@@ -123,6 +124,13 @@ def pytest_sessionfinish(
     with the process and this is a no-op — zero impact on normal runs. Set
     PYTEST_SHUTDOWN_WATCHDOG_SECONDS=0 to disable.
     """
+    # An xdist worker remains connected to its controller through execnet after
+    # its local session finishes. That receiver thread is intentionally
+    # non-daemon and may outlive this hook while another worker is still busy;
+    # only the controller owns the lifetime of the complete test run.
+    if hasattr(session.config, "workerinput"):
+        return
+
     try:
         budget = float(os.getenv("PYTEST_SHUTDOWN_WATCHDOG_SECONDS", "60"))
     except ValueError:
@@ -328,3 +336,21 @@ def event_loop():
     loop = policy.new_event_loop()
     yield loop
     loop.close()
+
+
+@pytest.fixture(autouse=True)
+async def process_redis_clients():
+    """Run every test inside the process's Redis client lifetime.
+
+    Every process that builds containers starts these clients first
+    (eneo.redis.clients), and tests build containers directly. Starting them
+    connects nothing. tests/integration overrides this fixture to start them on
+    the integration settings.
+    """
+    from eneo.redis.clients import redis_clients
+
+    redis_clients.start()
+    try:
+        yield
+    finally:
+        await redis_clients.stop()

@@ -97,7 +97,7 @@ export const headerFilterHandle: Handle = async ({ event, resolve }) => {
     // failed responses (see ENEO_RESPONSE_HEADERS); without this, every API
     // failure during SSR turns into a "Failed to get response header" error
     // that hides the real one.
-    filterSerializedResponseHeaders: (name) => ENEO_RESPONSE_HEADERS.includes(name)
+    filterSerializedResponseHeaders: (name) => ENEO_RESPONSE_HEADERS.includes(name.toLowerCase())
   });
   response.headers.delete("link");
   return response;

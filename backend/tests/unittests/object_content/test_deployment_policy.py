@@ -786,16 +786,16 @@ def test_limit_projection_applies_inline_ceiling_to_all_new_content() -> None:
         UploadLimitUseCase.KNOWLEDGE_AUDIO,
     ]
     assert projections[0].effective_bytes == 100
-    assert projections[0].constraining_source is ConstrainingSource.OPERATOR_CEILING
+    assert projections[0].constraining_source is ConstrainingSource.STORAGE_CAPACITY
     assert projections[1].effective_bytes == 100
     assert projections[1].constraining_source is ConstrainingSource.ADMIN_POLICY
     assert projections[2].effective_bytes == 100
-    assert projections[2].operator_ceiling_bytes == 100
+    assert projections[2].storage_capacity_bytes == 100
     assert projections[3].effective_bytes == 100
-    assert projections[3].operator_ceiling_bytes == 100
+    assert projections[3].storage_capacity_bytes == 100
     assert projections[3].storage_target is StorageKind.POSTGRES_INLINE
     assert projections[4].effective_bytes == 100
-    assert projections[4].operator_ceiling_bytes == 100
+    assert projections[4].storage_capacity_bytes == 100
 
 
 def test_limit_projection_applies_portable_ceiling_to_all_object_store_uploads() -> (
@@ -814,9 +814,9 @@ def test_limit_projection_applies_portable_ceiling_to_all_object_store_uploads()
     )
 
     assert [projection.effective_bytes for projection in projections] == [100] * 5
-    assert all(projection.operator_ceiling_bytes == 100 for projection in projections)
+    assert all(projection.storage_capacity_bytes == 100 for projection in projections)
     assert all(
-        projection.constraining_source is ConstrainingSource.OPERATOR_CEILING
+        projection.constraining_source is ConstrainingSource.STORAGE_CAPACITY
         for projection in projections
     )
     assert all(
@@ -849,7 +849,7 @@ def test_object_store_projection_without_capability_keeps_admin_policy_limits() 
         projection.storage_target is StorageKind.OBJECT_STORE
         for projection in projections
     )
-    assert all(projection.operator_ceiling_bytes is None for projection in projections)
+    assert all(projection.storage_capacity_bytes is None for projection in projections)
     assert all(
         projection.constraining_source is ConstrainingSource.ADMIN_POLICY
         for projection in projections
@@ -957,3 +957,21 @@ def _policy(
         created_at=now,
         updated_at=now,
     )
+
+
+def test_object_storage_policy_accepts_ten_gibibytes() -> None:
+    from eneo.object_content.configuration import ObjectStoreOperatorSettings
+
+    size = 10 * 1024**3
+    replacement = DeploymentPolicyUpdate(
+        expected_revision=1,
+        new_write_storage_target=StorageKind.OBJECT_STORE,
+        session_file_limit_bytes=size,
+        session_image_limit_bytes=size,
+        knowledge_file_limit_bytes=size,
+        transcription_audio_limit_bytes=size,
+    )
+    replacement.validate_storage_capacity(
+        ObjectStoreOperatorSettings().maximum_multipart_bytes
+    )
+    assert replacement.transcription_audio_limit_bytes == size

@@ -34,6 +34,22 @@ describe("apiErrorFromResponse", () => {
     expect(error.details).toEqual({ quota: 100 });
   });
 
+  it("keeps the context a refusal names", () => {
+    const error = apiErrorFromResponse(errorResponse(400), {
+      message: "Write (step 3) reads a step this change removes: step 2 in its prompt.",
+      eneo_error_code: 9007,
+      code: "flow_step_read_lost_producer",
+      context: { step_order: 3, site: "prompt", reads_step: 2 }
+    });
+
+    expect(error.reason).toBe("flow_step_read_lost_producer");
+    expect(error.context).toEqual({ step_order: 3, site: "prompt", reads_step: 2 });
+    expect(
+      apiErrorFromResponse(errorResponse(400), { message: "x", context: ["not", "a", "record"] })
+        .context
+    ).toBeUndefined();
+  });
+
   it("keeps the backend error id on unexpected failures", () => {
     const error = apiErrorFromResponse(errorResponse(500, { "x-trace-id": "trace-123" }), {
       error: "Internal server error",
@@ -135,22 +151,21 @@ describe("getErrorMessage", () => {
     expect(getErrorMessage(error, t)).toBe("t(eneo_error_9008)");
   });
 
-  it.each([9042, 9043, 9053, 9054, 9055, 9056, 9057, 9062, 9063, 9064])(
-    "localizes backend refusal %i in both supported languages",
-    (code) => {
-      const error = apiErrorFromResponse(errorResponse(409), {
-        message: "Backend English refusal",
-        eneo_error_code: code
-      });
-      for (const [locale, messages] of [
-        ["sv", sv],
-        ["en", en]
-      ] as const) {
-        const t = translator(locale, messages);
-        expect(getErrorMessage(error, t)).toBe(t(`eneo_error_${code}`));
-      }
+  it.each([
+    9042, 9043, 9053, 9054, 9055, 9058, 9059, 9060, 9061, 9062, 9063, 9064, 9065, 9066, 9067
+  ])("localizes backend refusal %i in both supported languages", (code) => {
+    const error = apiErrorFromResponse(errorResponse(409), {
+      message: "Backend English refusal",
+      eneo_error_code: code
+    });
+    for (const [locale, messages] of [
+      ["sv", sv],
+      ["en", en]
+    ] as const) {
+      const t = translator(locale, messages);
+      expect(getErrorMessage(error, t)).toBe(t(`eneo_error_${code}`));
     }
-  );
+  });
 
   it.each([
     ["provider_unavailable", "provider_failure_unavailable"],
@@ -182,6 +197,11 @@ describe("getErrorMessage", () => {
   it("falls back to the backend message for unmapped codes", () => {
     const error = new EneoApiError("Crawl already running", { status: 400, code: 9021 });
     expect(getErrorMessage(error, t)).toBe("Crawl already running");
+  });
+
+  it.each([9056, 9057])("keeps resource refusals (%i) distinct from file errors", (code) => {
+    const error = new EneoApiError("Resource refusal", { status: 409, code });
+    expect(getErrorMessage(error, t)).toBe("Resource refusal");
   });
 
   it("names an integration refusal in the viewer's language, keeping Microsoft's code", () => {
@@ -236,12 +256,12 @@ describe("getErrorMessage", () => {
     const refused = (code: number) =>
       getErrorMessage(new EneoApiError("Refused", { status: 400, code }), translator("sv", sv));
 
-    expect(refused(9058)).toBe(
+    expect(refused(9061)).toBe(
       "Det nya lösenordet måste skilja sig från det nuvarande lösenordet."
     );
-    expect(refused(9059)).toBe("Det nya lösenordet uppfyller inte lösenordspolicyn.");
-    expect(refused(9060)).toBe("Lösenordsbyte är inte tillgängligt för det här kontot.");
-    expect(refused(9061)).toBe("Det nuvarande lösenordet är felaktigt.");
+    expect(refused(9062)).toBe("Det nya lösenordet uppfyller inte lösenordspolicyn.");
+    expect(refused(9063)).toBe("Lösenordsbyte är inte tillgängligt för det här kontot.");
+    expect(refused(9064)).toBe("Det nuvarande lösenordet är felaktigt.");
   });
 
   it("words an unexpected failure in the user's language instead of the backend's English", () => {

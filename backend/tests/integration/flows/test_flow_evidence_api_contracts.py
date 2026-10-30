@@ -1,0 +1,2652 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+from collections.abc import AsyncGenerator
+from datetime import datetime, timedelta, timezone
+from typing import Any, cast
+from uuid import UUID, uuid4
+
+import pytest
+import sqlalchemy as sa
+from dependency_injector import providers
+from sqlalchemy.orm import SessionTransaction
+from starlette.types import Message, Scope
+
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.audit_log import AuditLog
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
+from eneo.authentication.principal_types import PrincipalType
+from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
+from eneo.database.tables.flow_tables import (
+    FlowOutboxDeliveryStatus,
+    FlowRunReviewCheckpoints,
+    FlowRuns,
+    FlowRunStepInputFiles,
+    FlowRuntimeUploadedFiles,
+    FlowRunWebhookDeliveries,
+    FlowStepAttempts,
+    FlowStepResults,
+    FlowVersions,
+)
+from eneo.database.tables.info_blobs_table import InfoBlobs
+from eneo.database.tables.roles_table import Roles
+from eneo.database.tables.security_classifications_table import (
+    SecurityClassification,
+)
+from eneo.database.tables.spaces_table import Spaces
+from eneo.database.tables.users_table import users_roles_table
+from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_protocol import PendingFileContent, PreparedFileUpload
+from eneo.files.file_service import FileService
+from eneo.flows import FlowRepository, FlowVersionRepository
+from eneo.flows.api import flow_run_lifecycle_router
+from eneo.flows.application.flow_run_evidence_export_manifest import (
+    EVIDENCE_EXPORT_SCHEMA_VERSION,
+)
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.flow_step_attempt_input import (
+    FlowStepAttemptCompletionConfiguration,
+    FlowStepAttemptExecutionInput,
+    FlowStepAttemptInput,
+)
+from eneo.flows.domain.provider_call import (
+    CompletionProviderCallRequest,
+    ProviderCallCompletion,
+    TranscriptionCallCompletion,
+    TranscriptionProviderCallRequest,
+)
+from eneo.flows.enums import (
+    FlowOutputType,
+    FlowRunReviewCheckpointState,
+)
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_run_provenance import (
+    FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION,
+    FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+    FlowResolvedInputEdges,
+    MappedProviderCallProvenance,
+)
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
+)
+from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+from eneo.flows.infrastructure.flow_transcript_words_repo import (
+    FlowTranscriptWordsRepository,
+)
+from eneo.flows.published_definition import (
+    build_published_definition_json,
+    published_definition_checksum,
+)
+from eneo.main.container.container import Container
+from eneo.roles.permissions import Permission
+from eneo.server.main import app
+from eneo.spaces.api.space_models import SpaceRoleValue
+from eneo.users.user import UserAdd, UserInDB, UserState
+from tests.flow_snapshot_fixtures import assistant_snapshot
+
+_RUNTIME_INPUT_ORIGINAL = b"%PDF evidence".ljust(256, b"\x00")
+_RUNTIME_INPUT_EXTRACTED_TEXT = b"case file text"
+_RUNTIME_INPUT_CHECKSUM = hashlib.sha256(_RUNTIME_INPUT_ORIGINAL).hexdigest()
+
+
+async def _bytes_source(payload: bytes) -> AsyncGenerator[bytes]:
+    yield payload
+
+
+async def _save_runtime_input_file(*, file_service: FileService) -> UUID:
+    file = await file_service.save_prepared_file(
+        PreparedFileUpload(
+            name="underlag.pdf",
+            file_type=FileType.DOCUMENT,
+            display_media_type="application/pdf",
+            contents=(
+                PendingFileContent(
+                    variant=FileContentVariant.ORIGINAL,
+                    chunks=_bytes_source(_RUNTIME_INPUT_ORIGINAL),
+                    declared_media_type="application/pdf",
+                    verified_media_type="application/pdf",
+                ),
+                PendingFileContent(
+                    variant=FileContentVariant.EXTRACTED_TEXT,
+                    chunks=_bytes_source(_RUNTIME_INPUT_EXTRACTED_TEXT),
+                    declared_media_type="text/plain",
+                    verified_media_type="text/plain",
+                ),
+            ),
+        )
+    )
+    return file.id
+
+
+def test_evidence_export_413_context_has_typed_section_and_limit_unions() -> None:
+    schema = app.openapi()
+    export_operation = next(
+        operation
+        for path_item in schema["paths"].values()
+        for operation in path_item.values()
+        if isinstance(operation, dict)
+        and operation.get("operationId") == "export_flow_run_evidence"
+    )
+    error_schema = export_operation["responses"]["413"]["content"]["application/json"][
+        "schema"
+    ]
+    assert error_schema["$ref"].endswith("/FlowEvidenceExportTooLargeError")
+    context = schema["components"]["schemas"]["FlowEvidenceExportTooLargeContext"]
+    assert context["properties"]["limit"]["enum"] == [
+        "corrupt_passage_evidence",
+        "recorded_passage_bytes",
+        "stored_provenance_bytes",
+        "section_rows",
+        "aggregate_stored_json_bytes",
+        "aggregate_logical_json_bytes",
+        "provider_call_events",
+    ]
+    assert "whole_bundle" in context["properties"]["section"]["enum"]
+
+
+def _build_flow(
+    *,
+    tenant_id: UUID,
+    space_id: UUID,
+    user_id: UUID,
+    assistant_id: UUID,
+) -> Flow:
+    return Flow(
+        id=None,
+        tenant_id=tenant_id,
+        space_id=space_id,
+        name="Evidence Contract Flow",
+        description="Flow for evidence API integration coverage.",
+        created_by_user_id=user_id,
+        owner_user_id=user_id,
+        published_version=None,
+        metadata_json={
+            "form_schema": {"fields": [{"name": "question", "type": "string"}]},
+            # The flow row decides: the published snapshot these tests store
+            # carries no evidence policy of its own.
+            "evidence_policy": {"allow_export": True},
+        },
+        data_retention_days=30,
+        created_at=None,
+        updated_at=None,
+        steps=[
+            FlowStep(
+                id=None,
+                flow_id=uuid4(),
+                tenant_id=tenant_id,
+                assistant_id=assistant_id,
+                step_order=1,
+                user_description="Summarize the case",
+                input_source="flow_input",
+                input_type="text",
+                input_contract=None,
+                output_mode="pass_through",
+                output_type="json",
+                output_contract={"type": "object"},
+                input_bindings={"question": "{{flow.input.question}}"},
+                output_classification_override=None,
+                input_config=None,
+                output_config={
+                    "url": "https://example.org/hook?token=top-secret",
+                    "headers": {
+                        "Authorization": "Bearer super-secret",
+                        "X-Api-Key": "super-secret",
+                    },
+                },
+            )
+        ],
+    )
+
+
+async def _create_user_with_flow_permissions_and_token(
+    *,
+    db_container,
+    tenant_id: UUID,
+    role_name_prefix: str,
+    permissions: list[Permission],
+):
+    async with db_container() as container:
+        session = container.session()
+        user_repo = container.user_repo()
+        auth_service = container.auth_service()
+
+        user = await user_repo.add(
+            UserAdd(
+                email=f"flow-viewer-{uuid4().hex[:8]}@example.com",
+                username=f"flow_viewer_{uuid4().hex[:8]}",
+                state=UserState.ACTIVE,
+                tenant_id=tenant_id,
+            )
+        )
+
+        role = Roles(
+            name=f"{role_name_prefix} {uuid4().hex[:8]}",
+            permissions=[permission.value for permission in permissions],
+            tenant_id=tenant_id,
+        )
+        session.add(role)
+        await session.flush()
+        await session.execute(
+            sa.insert(users_roles_table).values(user_id=user.id, role_id=role.id)
+        )
+        await session.flush()
+
+        refreshed = await user_repo.get_user_by_email(user.email)
+        token = auth_service.create_access_token_for_user(refreshed)
+        return refreshed, token
+
+
+async def _create_view_only_user_and_token(
+    *, db_container, patch_auth_service_jwt, tenant_id: UUID
+):
+    _ = patch_auth_service_jwt
+    return await _create_user_with_flow_permissions_and_token(
+        db_container=db_container,
+        tenant_id=tenant_id,
+        role_name_prefix="Flow Viewer",
+        permissions=[Permission.FLOWS_VIEW],
+    )
+
+
+async def _create_trace_view_user_and_token(
+    *, db_container, patch_auth_service_jwt, tenant_id: UUID
+):
+    _ = patch_auth_service_jwt
+    return await _create_user_with_flow_permissions_and_token(
+        db_container=db_container,
+        tenant_id=tenant_id,
+        role_name_prefix="Flow Trace Viewer",
+        permissions=[Permission.FLOWS_VIEW, Permission.FLOWS_TRACE],
+    )
+
+
+async def _add_space_membership(*, db_container, space_id: UUID, user_id: UUID) -> None:
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO spaces_users (space_id, user_id, role)
+                VALUES (:space_id, :user_id, :role)
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {
+                "space_id": str(space_id),
+                "user_id": str(user_id),
+                "role": SpaceRoleValue.VIEWER.value,
+            },
+        )
+
+
+async def _seed_flow_run_contract_data(
+    *,
+    db_container,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    attempt_provenance_json: dict[str, Any] | None = None,
+    include_review_checkpoint_lineage: bool = False,
+    recorded_step_fields: dict[str, Any] | None = None,
+) -> dict[str, str]:
+    async with db_container() as container:
+        session = container.session()
+        model = await completion_model_factory(session, "gpt-4o-mini")
+        space = await space_factory(session, "Evidence API Space", [model.id])
+        await session.execute(
+            sa.text(
+                """
+                INSERT INTO spaces_users (space_id, user_id, role)
+                VALUES (:space_id, :user_id, :role)
+                ON CONFLICT DO NOTHING
+                """
+            ),
+            {
+                "space_id": str(space.id),
+                "user_id": str(admin_user.id),
+                "role": SpaceRoleValue.VIEWER.value,
+            },
+        )
+        assistant = await assistant_factory(
+            session,
+            "Evidence API Assistant",
+            model.id,
+            space_id=space.id,
+        )
+
+        flow_repo = FlowRepository(session=session)
+        version_repo = FlowVersionRepository(session=session)
+        flow = await flow_repo.create(
+            flow=_build_flow(
+                tenant_id=admin_user.tenant_id,
+                space_id=space.id,
+                user_id=admin_user.id,
+                assistant_id=assistant.id,
+            ),
+            tenant_id=admin_user.tenant_id,
+        )
+        step = flow.steps[0]
+        await version_repo.create(
+            flow_id=flow.id,
+            version=1,
+            definition_json={
+                "metadata_json": {
+                    "ai_builder": {
+                        "origin": {
+                            "builder_session_id": "builder-session-123",
+                        }
+                    }
+                },
+                "steps": [
+                    {
+                        "step_id": str(step.id),
+                        "assistant_id": str(step.assistant_id),
+                        "assistant_snapshot": assistant_snapshot(step.assistant_id),
+                        "step_order": 1,
+                        **(recorded_step_fields or {}),
+                        "output_config": {
+                            "url": "https://example.org/hook?token=top-secret",
+                            "headers": {
+                                "Authorization": "Bearer super-secret",
+                                "X-Api-Key": "super-secret",
+                            },
+                            "auth": {
+                                "mode": "api_key",
+                                "header_name": "X-Key",
+                                "key": "stored-api-key",
+                            },
+                            "custom_headers": [
+                                {
+                                    "name": "X-Signing",
+                                    "value": "stored-header",
+                                    "secret": True,
+                                }
+                            ],
+                        },
+                    }
+                ],
+            },
+            tenant_id=admin_user.tenant_id,
+        )
+        flow = flow.model_copy(update={"published_version": 1})
+        flow = await flow_repo.update(flow=flow, tenant_id=admin_user.tenant_id)
+
+        runtime_input_file_id = await _save_runtime_input_file(
+            file_service=container.file_service(user=admin_user)
+        )
+
+        session.add(
+            FlowRuntimeUploadedFiles(
+                file_id=runtime_input_file_id,
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                uploaded_for_step_id=step.id,
+                owner_type="user",
+                owner_user_id=admin_user.id,
+                owner_service_id=None,
+            )
+        )
+        await session.flush()
+
+        started_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+        finished_at = datetime.now(timezone.utc)
+        run = FlowRuns(
+            flow_id=flow.id,
+            flow_version=1,
+            principal_type="user",
+            principal_user_id=admin_user.id,
+            tenant_id=admin_user.tenant_id,
+            trace_id=uuid4(),
+            status="completed",
+            input_payload_json={
+                "question": "What happened?",
+                "api_key": "super-secret",
+                "webhook_url": "https://example.org/hook?token=top-secret",
+            },
+            output_payload_json={"structured": {"summary": "Completed"}},
+            # What the executor records before a run's first step.
+            evidence_classification_level=0,
+        )
+        session.add(run)
+        await session.flush()
+
+        step_result = FlowStepResults(
+            flow_run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=step.id,
+            step_order=1,
+            assistant_id=assistant.id,
+            current_attempt_no=1,
+            input_payload_json={
+                "question": "What happened?",
+                "token": "super-secret",
+                "diagnostics": [{"code": "ok"}],
+                "runtime_input": {
+                    "file_ids": [str(runtime_input_file_id)],
+                    "files_count": 1,
+                    "files": [
+                        {
+                            "id": str(runtime_input_file_id),
+                            "name": "json-stale.pdf",
+                            "checksum": "json-stale-checksum",
+                            "size": 999,
+                            "mimetype": "application/pdf",
+                            "file_type": "document",
+                            "text_length": 999,
+                            "has_text": True,
+                            "has_transcription": False,
+                        }
+                    ],
+                    "total_file_size": 256,
+                    "extracted_text_length": 42,
+                    "input_format": "document",
+                    "capture_mode": "flow_input_files",
+                },
+            },
+            effective_prompt="Authorization: Bearer super-secret",
+            output_payload_json={
+                "summary": "Looks good",
+                "url": "https://example.org/hook?token=top-secret",
+            },
+            model_parameters_json={"temperature": 0.2},
+            num_tokens_input=11,
+            num_tokens_output=7,
+            status="completed",
+            error_message=None,
+            flow_step_execution_hash="hash-1",
+        )
+        session.add(step_result)
+        initial_attempt = FlowStepAttempts(
+            flow_run_id=run.id,
+            flow_id=flow.id,
+            tenant_id=admin_user.tenant_id,
+            step_id=step.id,
+            step_order=1,
+            attempt_no=1,
+            dispatch_task_id="celery-1",
+            status="completed",
+            error_code=None,
+            error_message="Bearer super-secret",
+            requested_model="gpt-4o-mini",
+            response_model="gpt-4o-mini",
+            provider="openai",
+            finish_reason="stop",
+            provider_response_id="resp_123",
+            num_tokens_input=11,
+            num_tokens_output=7,
+            input_payload_json=FlowStepAttemptInput(
+                completion_configuration=FlowStepAttemptCompletionConfiguration(
+                    preferred_model_parameters={
+                        "temperature": 0.2,
+                        "reasoning_effort": None,
+                        "parameter_semantics": {
+                            "temperature": {"mode": "configured"},
+                            "reasoning_effort": {"mode": "model_default"},
+                        },
+                    }
+                ),
+                execution_inputs=(
+                    FlowStepAttemptExecutionInput(
+                        question="What changed?",
+                        effective_prompt="Authorization: Bearer super-secret",
+                        assistant_context_version=1,
+                    ),
+                ),
+                resolved_input={"question": "What changed?"},
+            ).to_payload(),
+            provenance_json=attempt_provenance_json
+            or {
+                "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+                "llm": {
+                    "raw_completion_text": "Completed evidence response",
+                },
+                "rag": {
+                    "attempted": True,
+                    "status": "success",
+                    "tracking": {
+                        "retrieval_tracked": True,
+                        "prompt_context_inclusion_tracked": True,
+                        "citation_tracked": False,
+                        "material_influence_tracked": False,
+                        "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+                    },
+                    "prompt_context": {
+                        "tracked": True,
+                        "version": 2,
+                        "selection_basis": "semantic_search_ranked_chunks_grouped_by_source",
+                        "raw_source_count": 1,
+                        "raw_chunk_count": 1,
+                        "included_source_count": 1,
+                        "not_included_source_count": 0,
+                        "included_chunk_count": 1,
+                        "knowledge_tokens": 64,
+                        "truncated_by_token_budget": False,
+                        "included_source_ids": ["source-1"],
+                        "not_included_source_ids": [],
+                        "included_source_titles": [
+                            "https://kunskap.example.se/beslut/underlag"
+                        ],
+                        "included_groups": [
+                            {
+                                "source_id": "source-1",
+                                "source_id_short": "source-1",
+                                "source_title": "https://kunskap.example.se/beslut/underlag",
+                                "start_chunk": 1,
+                                "end_chunk": 1,
+                                "chunk_count": 1,
+                                "relevance_score": 0.82,
+                            }
+                        ],
+                    },
+                    "unique_sources": 1,
+                    "sources_with_recorded_passages": 1,
+                    "passages_recorded": 1,
+                    "passages_truncated": 0,
+                    "embedding_model": {
+                        "id": "embedding-1",
+                        "name": "text-embedding-3",
+                    },
+                    "embedding_model_status": "recorded",
+                    "reference_metadata_status": "success",
+                    "source_names": ["https://kunskap.example.se/beslut/underlag"],
+                    "source_display_names": ["kunskap.example.se/beslut/underlag"],
+                    "references": [
+                        {
+                            "id": "source-1",
+                            "id_short": "source-1",
+                            "title": "https://kunskap.example.se/beslut/underlag",
+                            "usage_state": "inserted_into_prompt",
+                            "best_score": 0.82,
+                            "matched_chunk_count": 1,
+                            "recorded_passage_count": 1,
+                            "passages": [
+                                {
+                                    "chunk_no": 1,
+                                    "score": 0.82,
+                                    "text": "Beslutet grundas pa 4 kap. 1 SoL.",
+                                    "recording": "complete",
+                                    "passage_bytes": 33,
+                                    "recorded_bytes": 33,
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+            started_at=started_at,
+            finished_at=finished_at,
+        )
+        session.add(initial_attempt)
+        await session.flush()
+
+        session.add(
+            FlowRunWebhookDeliveries(
+                flow_id=flow.id,
+                flow_run_id=run.id,
+                tenant_id=admin_user.tenant_id,
+                step_id=step.id,
+                step_order=1,
+                attempt_no=1,
+                idempotency_key="evidence-contract-delivery",
+                payload_ref="flow_run_step_results.output_payload_json",
+                delivery_status=FlowOutboxDeliveryStatus.DELIVERED.value,
+                delivery_attempts=2,
+                next_delivery_at=None,
+                claimed_at=None,
+                claim_expires_at=None,
+                claim_token=None,
+                delivered_at=finished_at,
+                dead_lettered_at=None,
+                delivery_last_error="Authorization: Bearer webhook-secret",
+                created_at=started_at,
+                updated_at=finished_at,
+            )
+        )
+        await session.flush()
+
+        session.add(
+            FlowRunStepInputFiles(
+                flow_run_id=run.id,
+                flow_id=flow.id,
+                tenant_id=admin_user.tenant_id,
+                step_id=step.id,
+                step_order=step.step_order,
+                attempt_no=1,
+                file_id=runtime_input_file_id,
+                ordinal=0,
+            )
+        )
+        await session.flush()
+
+        review_checkpoint_id: str | None = None
+        if include_review_checkpoint_lineage:
+            reviewed_payload = {
+                "summary": "Reviewed by human",
+                "api_key": "super-secret",
+            }
+            checkpoint = FlowRunReviewCheckpoints(
+                tenant_id=admin_user.tenant_id,
+                flow_id=flow.id,
+                flow_run_id=run.id,
+                step_id=step.id,
+                step_order=1,
+                attempt_no=1,
+                step_label=step.user_description,
+                review_mode=FlowStepReviewMode.EDIT.value,
+                output_type=FlowOutputType.JSON.value,
+                output_contract_json=step.output_contract,
+                state=FlowRunReviewCheckpointState.RESUMED.value,
+                revision=4,
+                schema_version=1,
+                original_payload_json=step_result.output_payload_json,
+                current_payload_json=reviewed_payload,
+                requester_user_id=admin_user.id,
+                requester_principal_type=PrincipalType.USER.value,
+                decided_by_user_id=admin_user.id,
+                decided_by_principal_type=PrincipalType.USER.value,
+                next_step_ids_json=[],
+                resume_idempotency_key="review-resume-key",
+                edited_at=finished_at,
+                approved_at=finished_at,
+                resumed_at=finished_at,
+            )
+            step_result.output_payload_json = reviewed_payload
+            session.add(checkpoint)
+            await session.flush()
+            review_checkpoint_id = str(checkpoint.id)
+        seeded: dict[str, str] = {
+            "flow_id": str(flow.id),
+            "run_id": str(run.id),
+            "step_id": str(step.id),
+            "initial_attempt_id": str(initial_attempt.id),
+            "space_id": str(space.id),
+            "trace_id": str(run.trace_id),
+        }
+        if review_checkpoint_id is not None:
+            seeded["review_checkpoint_id"] = review_checkpoint_id
+        return seeded
+
+
+async def _seed_trace_view_flow_run_contract_data(
+    *,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user: UserInDB,
+    attempt_provenance_json: dict[str, Any] | None = None,
+    include_review_checkpoint_lineage: bool = False,
+    recorded_step_fields: dict[str, Any] | None = None,
+) -> tuple[dict[str, str], UserInDB, str]:
+    trace_user, trace_token = await _create_trace_view_user_and_token(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        tenant_id=admin_user.tenant_id,
+    )
+    seeded = await _seed_flow_run_contract_data(
+        db_container=db_container,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=trace_user,
+        attempt_provenance_json=attempt_provenance_json,
+        include_review_checkpoint_lineage=include_review_checkpoint_lineage,
+        recorded_step_fields=recorded_step_fields,
+    )
+    return seeded, trace_user, trace_token
+
+
+async def _seed_transcript_words_for_audit_read(
+    *, db_container, seeded: dict[str, str], tenant_id: UUID
+) -> None:
+    async with db_container() as container:
+        await FlowTranscriptWordsRepository(session=container.session()).upsert(
+            tenant_id=tenant_id,
+            flow_id=UUID(seeded["flow_id"]),
+            run_id=UUID(seeded["run_id"]),
+            step_id=UUID(seeded["step_id"]),
+            segments_hash="0" * 64,
+            alignment="provider_words",
+            words_json=[
+                {
+                    "segment_index": 0,
+                    "words": [
+                        {"word": "Protected transcript", "start": 0.0, "end": 1.0}
+                    ],
+                }
+            ],
+        )
+
+
+async def _replace_flow_definition_with_outbound_http_snapshot(
+    *,
+    db_container,
+    seeded: dict[str, str],
+) -> None:
+    async with db_container() as container:
+        session = container.session()
+        step_result = await session.scalar(
+            sa.select(FlowStepResults).where(
+                FlowStepResults.flow_run_id == UUID(seeded["run_id"])
+            )
+        )
+        assert step_result is not None
+        definition_json = build_published_definition_json(
+            flow_id=UUID(seeded["flow_id"]),
+            name="Webhook evidence flow",
+            description=None,
+            metadata_json=None,
+            steps=[
+                {
+                    "step_id": str(step_result.step_id),
+                    "step_order": step_result.step_order,
+                    "assistant_id": str(step_result.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step_result.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "http_post",
+                    "output_type": "json",
+                    "output_contract": {"type": "object"},
+                    "output_config": {
+                        "url": "https://example.org/hook?token=top-secret",
+                        "headers": {
+                            "Authorization": "Bearer super-secret",
+                            "X-Api-Key": "super-secret",
+                        },
+                    },
+                }
+            ],
+        )
+        await session.execute(
+            sa.update(FlowVersions)
+            .where(FlowVersions.flow_id == UUID(seeded["flow_id"]))
+            .where(FlowVersions.version == 1)
+            .values(
+                definition_json=definition_json,
+                definition_checksum=published_definition_checksum(definition_json),
+            )
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_steps_endpoint_rejects_view_only_access_to_other_users_run(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, _ = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    viewer, viewer_token = await _create_view_only_user_and_token(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        tenant_id=admin_user.tenant_id,
+    )
+    await _add_space_membership(
+        db_container=db_container,
+        space_id=UUID(seeded["space_id"]),
+        user_id=viewer.id,
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/steps/",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+
+    assert response.status_code == 403, response.text
+    payload = response.json()
+    assert payload["code"] == "flow_run_access_denied"
+
+
+async def test_step_outputs_name_the_input_files_next_to_their_ids(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _owner, owner_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    run_path = f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}"
+    headers = {"Authorization": f"Bearer {owner_token}"}
+
+    response = await client.get(f"{run_path}/steps/", headers=headers)
+
+    assert response.status_code == 200, response.text
+    (step,) = [item for item in response.json() if item["step_id"] == seeded["step_id"]]
+    (file_id,) = step["runtime_input_file_ids"]
+    assert step["runtime_input_files"] == [
+        {"file_id": file_id, "name": "underlag.pdf", "mimetype": "application/pdf"}
+    ]
+    evidence = await client.get(f"{run_path}/evidence/", headers=headers)
+    assert evidence.status_code == 200, evidence.text
+    (evidence_step,) = [
+        item
+        for item in evidence.json()["step_results"]
+        if item["step_id"] == seeded["step_id"]
+    ]
+    assert evidence_step["runtime_input_file_ids"] == [file_id]
+    assert evidence_step["runtime_input_files"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_endpoint_requires_trace_permission(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, _ = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    viewer, viewer_token = await _create_view_only_user_and_token(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        tenant_id=admin_user.tenant_id,
+    )
+    await _add_space_membership(
+        db_container=db_container,
+        space_id=UUID(seeded["space_id"]),
+        user_id=viewer.id,
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {viewer_token}"},
+    )
+
+    assert response.status_code == 403, response.text
+    assert response.json()["code"] == "flow_run_access_denied"
+    assert response.json()["context"]["auth_layer"] == "flow_run_owner"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_marks_retired_provider_call_jsonb_corrupt(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        attempt_provenance_json={
+            "schema_version": FLOW_ATTEMPT_PROVENANCE_SCHEMA_VERSION,
+            "token_usage": {
+                "num_tokens_input": None,
+                "num_tokens_output": 0,
+                "input_source": "not_reported",
+                "output_source": "provider",
+                "completed_provider_calls": [
+                    {
+                        "call_index": 1,
+                        "num_tokens_input": None,
+                        "num_tokens_output": 0,
+                        "input_source": "not_reported",
+                        "output_source": "provider",
+                    }
+                ],
+            },
+        },
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    provenance = payload["step_attempts"][0]["provenance_json"]
+    assert provenance["status"] == "corrupt"
+    assert provenance["error_code"] == (
+        "flow_attempt_provenance_unknown_top_level_keys"
+    )
+    assert provenance["unknown_keys"] == ["token_usage"]
+    assert payload["provider_calls"] == {
+        "items": [],
+        "count": 0,
+        "total_count": 0,
+        "total_count_truncated": False,
+        "has_more": False,
+        "next_after_event_id": None,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_provider_call_evidence_endpoint_pages_relational_lifecycle_events(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    attempt_id = UUID(seeded["initial_attempt_id"])
+    async with db_container() as container:
+        session = container.session()
+        attempt = await session.get(FlowStepAttempts, attempt_id)
+        assert attempt is not None
+        attempt.status = "started"
+        await session.flush()
+        activated = await FlowRunRepository(session).activate_step_attempt(
+            run_id=attempt.flow_run_id,
+            step_id=attempt.step_id,
+            attempt_no=attempt.attempt_no,
+            tenant_id=admin_user.tenant_id,
+            resolved_input_edges=FlowResolvedInputEdges(schema_version=1, edges=()),
+            attempt_input=None,
+        )
+        assert activated is not None
+        provider_call_repo = FlowProviderCallRepository(session=session)
+        rejected = await provider_call_repo.start_call_for_execution(
+            run_id=attempt.flow_run_id,
+            step_id=attempt.step_id,
+            attempt_no=attempt.attempt_no,
+            tenant_id=admin_user.tenant_id,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="a" * 64,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                response_format="json_schema",
+                requested_capabilities=("structured_output",),
+                call_reason="initial",
+            ),
+            resolved_input_edge_indexes=(),
+        )
+        await provider_call_repo.reject_call(
+            call_id=rejected.id,
+            reason="response_format_rejected",
+        )
+        completed = await provider_call_repo.start_call_for_execution(
+            run_id=attempt.flow_run_id,
+            step_id=attempt.step_id,
+            attempt_no=attempt.attempt_no,
+            tenant_id=admin_user.tenant_id,
+            request=CompletionProviderCallRequest(
+                provider_request_hash="b" * 64,
+                requested_model="openai/gpt-4o-mini",
+                provider="openai",
+                response_format="json_object",
+                requested_capabilities=("structured_output",),
+                call_reason="response_format_fallback",
+                mapped_call=MappedProviderCallProvenance(
+                    execution_mode="per_source_reader",
+                    source_index=1,
+                    source_id="source-file-1",
+                ),
+            ),
+            resolved_input_edge_indexes=(),
+        )
+        await provider_call_repo.complete_call(
+            call_id=completed.id,
+            receipt=ProviderCallCompletion(
+                response_model="gpt-4o-mini-2026-07-01",
+                provider_response_id="response-fallback-1",
+                num_tokens_input=14,
+                num_tokens_output=None,
+                input_source="provider",
+                output_source="not_reported",
+            ),
+        )
+        attempt.status = "completed"
+        await session.flush()
+
+    endpoint = (
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/provider-calls/"
+    )
+    headers = {"Authorization": f"Bearer {trace_token}"}
+    first_response = await client.get(endpoint, params={"limit": 1}, headers=headers)
+
+    assert first_response.status_code == 200, first_response.text
+    first_page = first_response.json()
+    assert first_page["count"] == 1
+    assert first_page["total_count"] == 2
+    assert first_page["has_more"] is True
+    assert first_page["next_after_event_id"] == str(rejected.id)
+    assert first_page["items"][0]["status"] == "rejected"
+    assert first_page["items"][0]["outcome_reason"] == ("response_format_rejected")
+    assert first_page["items"][0]["provider_request_hash"] == "a" * 64
+    assert first_page["items"][0]["request_schema_version"] == 2
+    assert first_page["items"][0]["requested_capabilities"] == ["structured_output"]
+    assert "evidence_source" not in first_page["items"][0]
+
+    second_response = await client.get(
+        endpoint,
+        params={
+            "limit": 1,
+            "after_event_id": first_page["next_after_event_id"],
+            "attempt_id": str(attempt_id),
+        },
+        headers=headers,
+    )
+
+    assert second_response.status_code == 200, second_response.text
+    second_page = second_response.json()
+    assert second_page["count"] == 1
+    assert second_page["total_count"] == 2
+    assert second_page["has_more"] is False
+    assert second_page["next_after_event_id"] is None
+    assert second_page["items"][0]["event_id"] == str(completed.id)
+    assert second_page["items"][0]["status"] == "completed"
+    assert second_page["items"][0]["call_reason"] == "response_format_fallback"
+    assert second_page["items"][0]["requested_capabilities"] == ["structured_output"]
+    assert second_page["items"][0]["num_tokens_input"] == 14
+    assert second_page["items"][0]["num_tokens_output"] is None
+    assert second_page["items"][0]["output_source"] == "not_reported"
+    assert second_page["items"][0]["mapped_execution_mode"] == "per_source"
+    assert second_page["items"][0]["mapped_source_index"] == 1
+    assert second_page["items"][0]["mapped_source_id"] == "source-file-1"
+
+    unknown_cursor_response = await client.get(
+        endpoint,
+        params={"after_event_id": str(uuid4())},
+        headers=headers,
+    )
+    assert unknown_cursor_response.status_code == 404
+    assert unknown_cursor_response.json()["code"] == "not_found"
+
+    evidence_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers=headers,
+    )
+    assert evidence_response.status_code == 200, evidence_response.text
+    embedded = evidence_response.json()["provider_calls"]
+    assert embedded["count"] == 2
+    assert embedded["total_count"] == 2
+    assert [item["event_id"] for item in embedded["items"]] == [
+        str(rejected.id),
+        str(completed.id),
+    ]
+    assert [item["requested_capabilities"] for item in embedded["items"]] == [
+        ["structured_output"],
+        ["structured_output"],
+    ]
+    attempt_lineage = next(
+        item["resolved_input_lineage"]
+        for item in evidence_response.json()["step_attempts"]
+        if item["id"] == str(attempt_id)
+    )
+    assert attempt_lineage == {
+        "status": "tracked",
+        "schema_version": 1,
+        "edges": [],
+    }
+
+    export_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export",
+        headers=headers,
+    )
+    assert export_response.status_code == 200, export_response.text
+    evidence_export = export_response.json()
+    assert evidence_export["schema_version"] == "flow-evidence-export.v18"
+    assert (
+        evidence_export["manifest"]["schema_version"]
+        == evidence_export["schema_version"]
+    )
+    assert [
+        item["requested_capabilities"]
+        for item in evidence_export["bundle"]["provider_calls"]["items"]
+    ] == [["structured_output"], ["structured_output"]]
+    assert (
+        next(
+            item["resolved_input_lineage"]
+            for item in evidence_export["bundle"]["step_attempts"]
+            if item["id"] == str(attempt_id)
+        )
+        == attempt_lineage
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_evidence_lists_every_model_that_answered_not_only_the_calls_it_embeds(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    async with db_container() as container:
+        session = container.session()
+        attempt = await session.get(
+            FlowStepAttempts, UUID(seeded["initial_attempt_id"])
+        )
+        assert attempt is not None
+        attempt.status = "started"
+        await session.flush()
+        activated = await FlowRunRepository(session).activate_step_attempt(
+            run_id=attempt.flow_run_id,
+            step_id=attempt.step_id,
+            attempt_no=attempt.attempt_no,
+            tenant_id=admin_user.tenant_id,
+            resolved_input_edges=FlowResolvedInputEdges(schema_version=1, edges=()),
+            attempt_input=None,
+        )
+        assert activated is not None
+        calls = FlowProviderCallRepository(session=session)
+
+        async def start(request):
+            return await calls.start_call_for_execution(
+                run_id=attempt.flow_run_id,
+                step_id=attempt.step_id,
+                attempt_no=attempt.attempt_no,
+                tenant_id=admin_user.tenant_id,
+                request=request,
+                resolved_input_edge_indexes=(),
+            )
+
+        # The evidence view embeds the first hundred calls of a run.
+        for index in range(100):
+            completion = await start(
+                CompletionProviderCallRequest(
+                    provider_request_hash=f"{index:064x}",
+                    requested_model="openai/gpt-4o-mini",
+                    requested_capabilities=(),
+                )
+            )
+            await calls.complete_call(
+                call_id=completion.id,
+                receipt=ProviderCallCompletion(
+                    response_model="gpt-4o-mini-2026-07-01",
+                    num_tokens_input=1,
+                    num_tokens_output=1,
+                    input_source="provider",
+                    output_source="provider",
+                ),
+            )
+        transcription = await start(
+            TranscriptionProviderCallRequest(
+                provider_request_hash="f" * 64,
+                requested_model="openai/whisper-1",
+                provider="openai",
+                audio_seconds=12.0,
+            )
+        )
+        await calls.complete_call(
+            call_id=transcription.id,
+            receipt=TranscriptionCallCompletion(response_model="whisper-1"),
+        )
+        refused = await start(
+            CompletionProviderCallRequest(
+                provider_request_hash="e" * 64,
+                requested_model="openai/refused-before-an-answer",
+                requested_capabilities=(),
+            )
+        )
+        await calls.reject_call(call_id=refused.id, reason="response_format_rejected")
+        attempt.status = "completed"
+        await session.flush()
+
+    headers = {"Authorization": f"Bearer {trace_token}"}
+    run_url = f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}"
+    evidence_response = await client.get(f"{run_url}/evidence/", headers=headers)
+    export_response = await client.get(
+        f"{run_url}/evidence/export?format=json", headers=headers
+    )
+
+    assert evidence_response.status_code == 200, evidence_response.text
+    evidence = evidence_response.json()
+    assert evidence["provider_calls"]["count"] == 100
+    assert evidence["provider_calls"]["has_more"] is True
+    answered = ["gpt-4o-mini-2026-07-01", "whisper-1"]
+    assert evidence["debug_export"]["run"]["summary"]["models_used"] == answered
+    assert [step["models_used"] for step in evidence["debug_export"]["steps"]] == [
+        answered
+    ]
+    assert export_response.status_code == 200, export_response.text
+    summary = export_response.json()["summary"]
+    assert summary["models_used"] == answered
+    assert [step["models_used"] for step in summary["step_overview"]] == [answered]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_completed_verified_evidence_projects_redacted_structured_result(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    output_contract = {
+        "type": "object",
+        "title": "Evidence result",
+        "description": "Bearer schema-secret",
+        "properties": {
+            "summary": {"type": "string"},
+            "api_key": {"type": "string", "title": "Credential-shaped field"},
+        },
+        "required": ["summary", "api_key"],
+    }
+    structured_value = {
+        "summary": "Completed",
+        "api_key": "result-secret",
+        "nested": {
+            "authorization": "Bearer nested-secret",
+            "safe": "preserved",
+        },
+    }
+
+    async with db_container() as container:
+        session = container.session()
+        step_result = await session.scalar(
+            sa.select(FlowStepResults).where(
+                FlowStepResults.flow_run_id == UUID(seeded["run_id"])
+            )
+        )
+        assert step_result is not None
+        definition_json = build_published_definition_json(
+            flow_id=UUID(seeded["flow_id"]),
+            name="Verified evidence flow",
+            description=None,
+            metadata_json=None,
+            steps=[
+                {
+                    "step_id": str(step_result.step_id),
+                    "step_order": step_result.step_order,
+                    "assistant_id": str(step_result.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step_result.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "output_contract": output_contract,
+                }
+            ],
+        )
+        await session.execute(
+            sa.update(FlowVersions)
+            .where(FlowVersions.flow_id == UUID(seeded["flow_id"]))
+            .where(FlowVersions.version == 1)
+            .values(
+                definition_json=definition_json,
+                definition_checksum=published_definition_checksum(definition_json),
+            )
+        )
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == UUID(seeded["run_id"]))
+            .values(output_payload_json={"structured": structured_value})
+        )
+
+    run_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+    evidence_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert run_response.status_code == 200, run_response.text
+    assert evidence_response.status_code == 200, evidence_response.text
+    assert run_response.json()["result"] == {
+        "kind": "structured",
+        "value": structured_value,
+        "output_contract": output_contract,
+    }
+    evidence = evidence_response.json()
+    assert evidence["definition_integrity"]["status"] == "verified"
+    assert evidence["run"]["result"] == {
+        "kind": "structured",
+        "value": {
+            "summary": "Completed",
+            "api_key": "[REDACTED]",
+            "nested": {
+                "authorization": "[REDACTED]",
+                "safe": "preserved",
+            },
+        },
+        "output_contract": {
+            "type": "object",
+            "title": "Evidence result",
+            "description": "Bearer [REDACTED]",
+            "properties": {
+                "summary": {"type": "string"},
+                "api_key": {
+                    "type": "string",
+                    "title": "Credential-shaped field",
+                },
+            },
+            "required": ["summary", "api_key"],
+        },
+    }
+    assert evidence["run"]["input_payload_json"] == {
+        "question": "What happened?",
+        "api_key": "[REDACTED]",
+        "webhook_url": "https://example.org/hook?token=%5BREDACTED%5D",
+    }
+    assert evidence["run"]["result_files"] == []
+    assert evidence["run"]["token_usage"] is None
+    raw_step_payload = evidence["step_results"][0]["output_payload_json"]
+    assert raw_step_payload == {
+        "summary": "Looks good",
+        "url": "https://example.org/hook?token=%5BREDACTED%5D",
+    }
+    assert raw_step_payload != evidence["run"]["result"]["value"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_completed_invalid_snapshot_remains_inspectable_with_null_result(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["definition_integrity"]["status"] == "invalid"
+    assert payload["definition_snapshot"]["steps"]
+    assert "stored-api-key" not in response.text
+    assert "stored-header" not in response.text
+    assert payload["run"]["status"] == "completed"
+    assert payload["run"]["result"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_evidence_response_accepts_redacted_service_key_credential_id(
+    client,
+    monkeypatch,
+    flow_process_auth_headers,
+    create_published_compose_text_flow,
+):
+    async def _noop_dispatch(
+        *, run_id: UUID, tenant_id: UUID, expected_revision: int
+    ) -> None:
+        _ = (run_id, tenant_id, expected_revision)
+
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch,
+    )
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+        # The export below is refused unless the flow itself allows it.
+        metadata_json={"evidence_policy": {"allow_export": True}},
+    )
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"evidence-result-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "tenant",
+            "ownership": "service",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            "resource_permissions": {
+                "flows": "write",
+                "flow_evidence": "write",
+            },
+        },
+        headers=flow_process_auth_headers,
+    )
+    assert key_response.status_code == 201, key_response.text
+    created_key = cast(dict[str, Any], cast(Any, key_response).json())
+    service_key = cast(str, created_key["secret"])
+    created_api_key = cast(dict[str, Any], created_key["api_key"])
+    service_key_id = cast(str, created_api_key["id"])
+    create_response = await client.post(
+        f"/api/v1/flows/{flow.flow_id}/runs/",
+        json={
+            "expected_flow_version": flow.published_version,
+            "input_payload_json": {"text": "Service-owned evidence"},
+        },
+        headers={
+            "X-API-Key": service_key,
+            "Idempotency-Key": f"service-evidence-result:{uuid4().hex}",
+        },
+    )
+    assert create_response.status_code == 201, create_response.text
+    run_id = create_response.json()["id"]
+    evidence_path = f"/api/v1/flows/{flow.flow_id}/runs/{run_id}/evidence/"
+
+    export_response = await client.get(
+        f"{evidence_path}export?format=json",
+        headers={"X-API-Key": service_key},
+    )
+    evidence_response = await client.get(
+        evidence_path,
+        headers={"X-API-Key": service_key},
+    )
+
+    assert export_response.status_code == 200, export_response.text
+    export_payload = cast(dict[str, Any], cast(Any, export_response).json())
+    assert export_payload["manifest"]["actor"] == {
+        "type": "service_key",
+        "key_id": service_key_id,
+    }
+    assert "user_id" not in export_payload["manifest"]["actor"]
+    assert "exported_by_user_id" not in export_payload["manifest"]
+    assert export_payload["bundle"]["run"]["created_by_api_key_id"] == "[REDACTED]"
+    assert evidence_response.status_code == 200, evidence_response.text
+    evidence_run = evidence_response.json()["run"]
+    assert evidence_run["id"] == run_id
+    assert evidence_run["status"] == "queued"
+    assert evidence_run["result"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_endpoint_includes_review_checkpoint_lineage(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        include_review_checkpoint_lineage=True,
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    checkpoint = payload["review_checkpoints"][0]
+    assert checkpoint["id"] == seeded["review_checkpoint_id"]
+    assert checkpoint["state"] == "resumed"
+    assert checkpoint["decision"] == "approved"
+    assert checkpoint["revision"] == 4
+    assert checkpoint["resume_key_present"] is True
+    assert "resume_idempotency_key" not in checkpoint
+    assert checkpoint["step_label"] == "Summarize the case"
+    assert checkpoint["review_mode"] == "edit"
+    assert checkpoint["output_type"] == "json"
+    assert "step_snapshot_available" not in checkpoint
+    assert checkpoint["output_contract"] == {"type": "object"}
+    assert "output_contract_json" not in checkpoint
+    assert checkpoint["original_payload_json"]["summary"] == "Looks good"
+    assert checkpoint["current_payload_json"]["summary"] == "Reviewed by human"
+    assert checkpoint["current_payload_json"]["api_key"] == "[REDACTED]"
+    assert (
+        payload["step_results"][0]["output_payload_json"]
+        == (checkpoint["current_payload_json"])
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("delivery_status", "delivery_attempts"),
+    [
+        (FlowOutboxDeliveryStatus.PENDING, 2),
+        (FlowOutboxDeliveryStatus.DELIVERED, 1),
+        (FlowOutboxDeliveryStatus.DEAD_LETTERED, 5),
+    ],
+)
+async def test_outbound_http_delivery_lifecycle_is_identical_across_public_views(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    delivery_status: FlowOutboxDeliveryStatus,
+    delivery_attempts: int,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    await _replace_flow_definition_with_outbound_http_snapshot(
+        db_container=db_container,
+        seeded=seeded,
+    )
+
+    now = datetime.now(timezone.utc)
+    async with db_container() as container:
+        session = container.session()
+        await session.execute(
+            sa.update(FlowRunWebhookDeliveries)
+            .where(FlowRunWebhookDeliveries.flow_run_id == UUID(seeded["run_id"]))
+            .values(
+                delivery_status=delivery_status.value,
+                delivery_attempts=delivery_attempts,
+                next_delivery_at=(
+                    now + timedelta(seconds=30)
+                    if delivery_status is FlowOutboxDeliveryStatus.PENDING
+                    else None
+                ),
+                delivered_at=(
+                    now
+                    if delivery_status is FlowOutboxDeliveryStatus.DELIVERED
+                    else None
+                ),
+                dead_lettered_at=(
+                    now
+                    if delivery_status is FlowOutboxDeliveryStatus.DEAD_LETTERED
+                    else None
+                ),
+            )
+        )
+
+    headers = {"Authorization": f"Bearer {trace_token}"}
+    run_detail_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/",
+        headers=headers,
+    )
+    evidence_response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers=headers,
+    )
+    export_path = (
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export"
+    )
+    redacted_response = await client.get(f"{export_path}?format=json", headers=headers)
+    raw_response = await client.get(
+        f"{export_path}?format=json&detail=raw&reason=delivery-lifecycle-audit",
+        headers=headers,
+    )
+
+    assert run_detail_response.status_code == 200, run_detail_response.text
+    assert evidence_response.status_code == 200, evidence_response.text
+    assert redacted_response.status_code == 200, redacted_response.text
+    assert raw_response.status_code == 200, raw_response.text
+    expected = run_detail_response.json()["webhook_deliveries"]
+    assert len(expected) == 1
+    assert expected[0]["delivery_status"] == delivery_status.value
+    assert expected[0]["delivery_attempts"] == delivery_attempts
+    assert evidence_response.json()["webhook_deliveries"] == expected
+    normalized_expected = {
+        key: (
+            value.replace("Z", "+00:00")
+            if key.endswith("_at") and isinstance(value, str)
+            else value
+        )
+        for key, value in expected[0].items()
+    }
+    for export_response in (redacted_response, raw_response):
+        export_deliveries = export_response.json()["bundle"]["webhook_deliveries"]
+        assert len(export_deliveries) == 1
+        normalized_export = {
+            key: (
+                value.replace("Z", "+00:00")
+                if key.endswith("_at") and isinstance(value, str)
+                else value
+            )
+            for key, value in export_deliveries[0].items()
+        }
+        assert normalized_export == normalized_expected
+    assert "top-secret" not in json.dumps(expected)
+    assert "super-secret" not in json.dumps(expected)
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_export_preserves_review_checkpoint_lineage(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        include_review_checkpoint_lineage=True,
+    )
+
+    export_path = (
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export"
+    )
+    redacted_response = await client.get(
+        f"{export_path}?format=json",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+    raw_response = await client.get(
+        f"{export_path}?format=json&detail=raw&reason=review-lineage-audit",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert redacted_response.status_code == 200, redacted_response.text
+    assert raw_response.status_code == 200, raw_response.text
+    redacted_payload = redacted_response.json()
+    raw_payload = raw_response.json()
+    redacted_checkpoint = redacted_payload["bundle"]["review_checkpoints"][0]
+    raw_checkpoint = raw_payload["bundle"]["review_checkpoints"][0]
+
+    assert raw_payload["schema_version"] == EVIDENCE_EXPORT_SCHEMA_VERSION
+    assert redacted_payload["schema_version"] == EVIDENCE_EXPORT_SCHEMA_VERSION
+    assert raw_checkpoint["id"] == seeded["review_checkpoint_id"]
+    assert raw_checkpoint["original_payload_json"]["summary"] == "Looks good"
+    assert raw_checkpoint["current_payload_json"]["summary"] == "Reviewed by human"
+    assert raw_checkpoint["current_payload_json"]["api_key"] == "super-secret"
+    assert redacted_checkpoint["current_payload_json"]["api_key"] == "[REDACTED]"
+    assert raw_checkpoint["step_label"] == "Summarize the case"
+    assert raw_checkpoint["review_mode"] == "edit"
+    assert raw_checkpoint["output_type"] == "json"
+    assert "step_snapshot_available" not in raw_checkpoint
+    assert raw_checkpoint["output_contract"] == {"type": "object"}
+    assert "output_contract_json" not in raw_checkpoint
+    assert raw_checkpoint["resume_key_present"] is True
+    assert "resume_idempotency_key" not in raw_checkpoint
+    assert "review-resume-key" not in json.dumps(raw_payload, sort_keys=True)
+    assert (
+        raw_payload["summary"]["review_checkpoints"]
+        == (raw_payload["manifest"]["review_checkpoint_summary"])
+    )
+    assert "summary_typed" not in raw_payload
+    assert "summary_typed" not in redacted_payload
+    assert raw_payload["manifest"]["review_checkpoint_summary"] == {
+        "count": 1,
+        "by_state": {
+            "awaiting_review": 0,
+            "edited": 0,
+            "approved": 0,
+            "rejected": 0,
+            "resumed": 1,
+            "cancelled": 0,
+            "expired": 0,
+        },
+        "any_edited": True,
+        "any_corrections_edited": False,
+        "any_resumed": True,
+        "active_checkpoint_id": None,
+        "active_checkpoint_conflict": False,
+    }
+    raw_review_impact = raw_payload["summary"]["step_overview"][0]["review_impact"]
+    raw_review_event = raw_review_impact["events"][0]
+    assert raw_review_impact["checkpoint_count"] == 1
+    assert raw_review_impact["any_edited"] is True
+    assert raw_review_impact["any_resumed"] is True
+    assert raw_review_impact["any_output_changed"] is True
+    assert raw_review_impact["last_event"] == raw_review_event
+    assert raw_review_event["checkpoint_id"] == seeded["review_checkpoint_id"]
+    assert raw_review_event["state"] == "resumed"
+    assert raw_review_event["decision"] == "approved"
+    assert raw_review_event["attempt_no"] == 1
+    assert raw_review_event["revision"] == 4
+    assert raw_review_event["output_changed"] is True
+    redacted_review_event = redacted_payload["summary"]["step_overview"][0][
+        "review_impact"
+    ]["events"][0]
+    assert redacted_review_event["output_changed"] is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("recorded_level", "evidence_produced", "raw_export_status"),
+    [
+        # Kills the mutant that reads only the space's level now.
+        pytest.param(3, True, 403, id="recorded_3_in_a_space_now_at_1"),
+        # Kills the mutant that reads an unknown level as 0.
+        pytest.param(None, True, 403, id="unknown_level_with_evidence"),
+        # Kills the mutant that reads every unknown level as classification 3.
+        pytest.param(None, False, 200, id="unknown_level_without_evidence"),
+    ],
+)
+async def test_raw_export_and_passages_are_held_to_the_runs_recorded_evidence_level(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    recorded_level: int | None,
+    evidence_produced: bool,
+    raw_export_status: int,
+):
+    seeded, trace_user, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    run_id = UUID(seeded["run_id"])
+    async with db_container() as container:
+        session = container.session()
+        classification = SecurityClassification(
+            name=f"Level one {uuid4().hex[:8]}",
+            description=None,
+            security_level=1,
+            tenant_id=admin_user.tenant_id,
+        )
+        session.add(classification)
+        await session.flush()
+        await session.execute(
+            sa.update(Spaces)
+            .where(Spaces.id == UUID(seeded["space_id"]))
+            .values(security_classification_id=classification.id)
+        )
+        if not evidence_produced:
+            run = FlowRuns(
+                flow_id=UUID(seeded["flow_id"]),
+                flow_version=1,
+                principal_type="user",
+                principal_user_id=trace_user.id,
+                tenant_id=admin_user.tenant_id,
+                trace_id=uuid4(),
+                status="failed",
+            )
+            session.add(run)
+            await session.flush()
+            run_id = run.id
+        await session.execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == run_id)
+            .values(evidence_classification_level=recorded_level)
+        )
+    headers = {"Authorization": f"Bearer {trace_token}"}
+    run_url = f"/api/v1/flows/{seeded['flow_id']}/runs/{run_id}"
+
+    raw = await client.get(
+        f"{run_url}/evidence/export?format=json&detail=raw&reason=level-audit",
+        headers=headers,
+    )
+    view = await client.get(f"{run_url}/evidence/", headers=headers)
+
+    assert raw.status_code == raw_export_status, raw.text
+    assert view.status_code == 200, view.text
+    if raw_export_status == 403:
+        assert raw.json()["code"] == "flow_run_evidence_raw_export_forbidden"
+    if evidence_produced:
+        passage = view.json()["knowledge_traces"][0]["rag"]["references"][0][
+            "passages"
+        ][0]
+        assert (passage["text"], passage["disclosure"]) == (
+            None,
+            "text_withheld_classified_space",
+        )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_export_returns_redacted_json_attachment(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, trace_user, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.headers["content-type"].startswith("application/json")
+    assert "attachment;" in response.headers["content-disposition"]
+    payload = response.json()
+    assert payload["schema_version"] == EVIDENCE_EXPORT_SCHEMA_VERSION
+    assert payload["manifest"]["schema_version"] == payload["schema_version"]
+    assert payload["manifest"]["run_id"] == seeded["run_id"]
+    assert payload["manifest"]["tenant_id"] == str(trace_user.tenant_id)
+    assert payload["manifest"]["trace_id"] == seeded["trace_id"]
+    assert payload["manifest"]["content_hash"] == payload["content_hash"]
+    assert payload["manifest"]["content_hash_input"] == "redacted"
+    assert payload["manifest"]["exported_at"] == payload["generated_at"]
+    assert payload["manifest"]["detail_mode"] == "redacted"
+    assert payload["manifest"]["export_reason"] == "support_debug"
+    assert payload["manifest"]["actor"] == {
+        "type": "user",
+        "user_id": str(trace_user.id),
+    }
+    assert "key_id" not in payload["manifest"]["actor"]
+    assert "exported_by_user_id" not in payload["manifest"]
+    assert payload["manifest"]["redaction_applied"] is True
+    assert payload["manifest"]["provenance_persisted_version_status"] == "tracked"
+    assert payload["manifest"]["retention_state_summary"]["tracking_state"] == (
+        "not_tracked"
+    )
+    assert payload["manifest"]["artifact_availability_summary"]["tracking_state"] == (
+        "tracked"
+    )
+    assert payload["manifest"]["artifact_availability_summary"]["artifact_count"] == 0
+    assert payload["bundle"]["result_files"] == []
+    serialized_bundle = json.dumps(
+        payload["bundle"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert payload["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
+    assert payload["summary"]["status"] == "completed"
+    assert payload["summary"]["steps_count"] == 1
+    # The seeded attempt names gpt-4o-mini, the model it was configured to
+    # ask, and the run has no provider-call receipt, so no model is confirmed.
+    assert payload["summary"]["models_used"] == []
+    assert payload["summary"]["rag_source_names"] == [
+        "https://kunskap.example.se/beslut/underlag"
+    ]
+    assert payload["summary"]["rag_source_display_names"] == [
+        "kunskap.example.se/beslut/underlag"
+    ]
+    assert payload["summary"]["rag_usage_tracking"]["retrieval_tracked"] is True
+    assert (
+        payload["summary"]["rag_usage_tracking"]["tracking_state"]
+        == "tracked_with_sources"
+    )
+    assert (
+        payload["summary"]["rag_usage_tracking"]["prompt_context_inclusion_tracked"]
+        is True
+    )
+    assert payload["summary"]["rag_usage_tracking"]["citation_tracked"] is False
+    assert payload["summary"]["rag_sources"][0]["usage_state"] == "inserted_into_prompt"
+    assert (
+        payload["summary"]["rag_sources"][0]["source_container_display_name"]
+        == "kunskap.example.se"
+    )
+    assert (
+        payload["summary"]["rag_sources"][0]["source_container_label"]
+        == "kunskap.example.se"
+    )
+    # The recorded passage is evidence in its own right: it survives deletion of
+    # the document it came from, because nothing re-reads the source to render it.
+    async with db_container() as container:
+        source_session = container.session()
+        await source_session.execute(
+            sa.delete(InfoBlobs).where(InfoBlobs.tenant_id == trace_user.tenant_id)
+        )
+        await source_session.commit()
+    reread = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+    assert reread.status_code == 200, reread.text
+    reread_step = reread.json()["knowledge_traces"][0]
+    assert reread_step["rag"]["references"][0]["passages"][0]["text"] == (
+        "Beslutet grundas pa 4 kap. 1 SoL."
+    )
+    assert reread_step["rag"]["references"][0]["id"] == "source-1"
+    debug_export = reread.json()["debug_export"]
+    assert debug_export["security"]["content_included"] is False
+    assert "source-1" not in json.dumps(debug_export)
+    assert "Beslutet grundas" not in json.dumps(debug_export)
+
+    assert payload["summary"]["citations"]["tracking_mode"] == "passive_inline_scan"
+    assert payload["summary"]["citations"]["citation_expected"] is False
+    assert payload["summary"]["citations"]["citation_observed"] is False
+    assert payload["summary"]["citations"]["citation_compliance"] == "not_requested"
+    assert payload["summary"]["citations"]["cited_source_ids"] == []
+    assert payload["summary"]["citations"]["steps_with_citations_expected"] == 0
+    assert payload["summary"]["final_output"]["kind"] == "structured"
+    assert payload["summary"]["step_overview"][0]["step_order"] == 1
+    assert (
+        payload["summary"]["step_overview"][0]["knowledge_retrieval"]["status"]
+        == "success"
+    )
+    assert (
+        payload["summary"]["step_overview"][0]["knowledge_retrieval"]["unique_sources"]
+        == 1
+    )
+    assert payload["summary"]["step_overview"][0]["knowledge_retrieval"][
+        "prompt_context"
+    ]["included_source_ids"] == ["source-1"]
+    assert (
+        payload["summary"]["step_overview"][0]["knowledge_retrieval"]["prompt_context"][
+            "summary"
+        ]["total_sources"]
+        == 1
+    )
+    assert payload["summary"]["step_overview"][0]["input_lineage"][
+        "runtime_file_names"
+    ] == ["underlag.pdf"]
+    assert payload["summary"]["step_overview"][0]["input_lineage"][
+        "runtime_file_checksums"
+    ] == [_RUNTIME_INPUT_CHECKSUM]
+    runtime_input = payload["bundle"]["step_results"][0]["input_payload_json"][
+        "runtime_input"
+    ]
+    assert runtime_input["files_count"] == 1
+    assert runtime_input["total_file_size"] == 256
+    assert runtime_input["files"] == [
+        {
+            "id": str(runtime_input["file_ids"][0]),
+            "name": "underlag.pdf",
+            "checksum": _RUNTIME_INPUT_CHECKSUM,
+            "size": 256,
+            "mimetype": "application/pdf",
+            "file_type": "document",
+            "text_size_bytes": len(_RUNTIME_INPUT_EXTRACTED_TEXT),
+            "has_text": True,
+            "has_transcription": False,
+        }
+    ]
+    assert payload["summary"]["step_overview"][0]["output_summary"] is None
+    assert payload["redaction"]["applied"] is True
+    assert payload["redaction"]["policy_version"] == "flow-evidence-redaction.v4"
+    assert payload["redaction"]["masked_fields_count"] >= 1
+    assert (
+        "bundle.run.input_payload_json.api_key" in payload["redaction"]["masked_paths"]
+    )
+    assert any(
+        item["path"] == "bundle.run.input_payload_json.api_key"
+        and item["reason"] == "sensitive_key"
+        for item in payload["redaction"]["masked_fields"]
+    )
+    assert (
+        "bundle.definition_snapshot.metadata_json.ai_builder.origin.builder_session_id"
+        not in payload["redaction"]["masked_paths"]
+    )
+    assert payload["bundle"]["run"]["trace_id"] == seeded["trace_id"]
+    assert payload["bundle"]["run"]["input_payload_json"]["api_key"] == "[REDACTED]"
+    assert (
+        payload["bundle"]["definition_snapshot"]["metadata_json"]["ai_builder"][
+            "origin"
+        ]["builder_session_id"]
+        == "builder-session-123"
+    )
+    assert (
+        payload["bundle"]["step_results"][0]["effective_prompt"]
+        == "Authorization: Bearer [REDACTED]"
+    )
+    assert (
+        payload["bundle"]["step_attempts"][0]["input_payload_json"]["execution_inputs"][
+            0
+        ]["effective_prompt"]
+        == "Authorization: Bearer [REDACTED]"
+    )
+    assert (
+        payload["bundle"]["definition_snapshot"]["steps"][0]["output_config"][
+            "headers"
+        ]["Authorization"]
+        == "[REDACTED]"
+    )
+    stored_output_config = payload["bundle"]["definition_snapshot"]["steps"][0][
+        "output_config"
+    ]
+    assert stored_output_config["auth"]["key"] == "[REDACTED]"
+    assert stored_output_config["custom_headers"][0]["value"] == "[REDACTED]"
+    assert "stored-api-key" not in response.text
+    assert "stored-header" not in response.text
+    assert (
+        payload["bundle"]["step_attempts"][0]["input_payload_json"][
+            "completion_configuration"
+        ]["preferred_model_parameters"]["parameter_semantics"]["reasoning_effort"][
+            "mode"
+        ]
+        == "model_default"
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("recorded_step_fields", "upstream_step_orders"),
+    [
+        pytest.param({"input_source": "bogus"}, None, id="unrecognised-unknown"),
+        pytest.param({}, [], id="absent-runs-as-flow_input"),
+    ],
+)
+@pytest.mark.parametrize(
+    "query", ["format=json", "format=json&detail=raw&reason=lineage-review"]
+)
+async def test_flow_run_evidence_export_reports_unrecognised_input_source_lineage_as_unknown(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    recorded_step_fields,
+    upstream_step_orders,
+    query,
+):
+    # The export keeps a snapshot whose definition no longer verifies, so a
+    # recorded input_source may be one this version does not know: the export
+    # still answers, echoes the raw value and reports the lineage as unknown.
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        recorded_step_fields=recorded_step_fields,
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?{query}",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    lineage = response.json()["summary"]["step_overview"][0]["input_lineage"]
+    assert lineage["input_source"] == recorded_step_fields.get("input_source")
+    assert lineage["upstream_step_orders"] == upstream_step_orders
+    assert lineage["upstream_step_labels"] == upstream_step_orders
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_export_marks_corrupt_attempt_provenance(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+        attempt_provenance_json={"llm": {"prompt": "missing version"}},
+    )
+
+    response = await client.get(
+        f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
+        headers={"Authorization": f"Bearer {trace_token}"},
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    serialized_bundle = json.dumps(
+        payload["bundle"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    assert payload["content_hash"] == hashlib.sha256(serialized_bundle).hexdigest()
+    assert payload["manifest"]["provenance_persisted_version_status"] == "corrupt"
+    assert (
+        payload["summary"]["rag_usage_tracking"]["tracking_state"] == "unknown_corrupt"
+    )
+    assert payload["summary"]["rag_usage_tracking"]["retrieval_tracked"] is False
+    marker = payload["bundle"]["step_attempts"][0]["provenance_json"]
+    assert marker["schema_version"] == FLOW_ATTEMPT_PROVENANCE_MARKER_SCHEMA_VERSION
+    assert marker["status"] == "corrupt"
+    assert marker["error_code"] == "flow_attempt_provenance_schema_version_missing"
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("path_suffix", "query_string", "action"),
+    [
+        ("evidence/", b"", ActionType.FLOW_EVIDENCE_VIEWED),
+        (
+            "evidence/export",
+            b"format=json",
+            ActionType.FLOW_EVIDENCE_EXPORTED_JSON,
+        ),
+        ("transcript-corrections/", b"", ActionType.FLOW_EVIDENCE_VIEWED),
+        ("steps/{step_id}/transcript-words/", b"", ActionType.FLOW_EVIDENCE_VIEWED),
+    ],
+    ids=["view", "export", "transcript-corrections", "transcript-words"],
+)
+async def test_flow_run_evidence_audit_is_committed_before_response_start(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    path_suffix: str,
+    query_string: bytes,
+    action: ActionType,
+):
+    _ = client  # Keep the shared application lifespan active for the direct ASGI call.
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    if "transcript-words" in path_suffix:
+        await _seed_transcript_words_for_audit_read(
+            db_container=db_container, seeded=seeded, tenant_id=admin_user.tenant_id
+        )
+    path_suffix = path_suffix.format(step_id=seeded["step_id"])
+    path = f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/{path_suffix}"
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": query_string,
+        "root_path": "",
+        "headers": [
+            (b"host", b"test.local"),
+            (b"authorization", f"Bearer {trace_token}".encode()),
+        ],
+        "client": ("127.0.0.1", 123),
+        "server": ("test.local", 80),
+    }
+    request_received = False
+    response_status: int | None = None
+    response_body = bytearray()
+    audit_count_at_response_start: int | None = None
+
+    async def receive() -> Message:
+        nonlocal request_received
+        if not request_received:
+            request_received = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.sleep(0)
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        nonlocal audit_count_at_response_start, response_status
+        if message["type"] == "http.response.start":
+            response_status = cast(int, message["status"])
+            async with db_container() as container:
+                audit_count_at_response_start = await container.session().scalar(
+                    sa.select(sa.func.count(AuditLogTable.id)).where(
+                        AuditLogTable.action == action.value,
+                        AuditLogTable.entity_type == EntityType.FLOW_RUN.value,
+                        AuditLogTable.entity_id == UUID(seeded["run_id"]),
+                    )
+                )
+            return
+        if message["type"] == "http.response.body":
+            response_body.extend(cast(bytes, message.get("body", b"")))
+
+    await app(scope, receive, send)
+
+    assert response_status == 200, response_body.decode(errors="replace")
+    assert audit_count_at_response_start == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    ("path_suffix", "query_string"),
+    [
+        ("evidence/", b""),
+        ("evidence/export", b"format=json"),
+        ("transcript-corrections/", b""),
+        ("steps/{step_id}/transcript-words/", b""),
+    ],
+    ids=["view", "export", "transcript-corrections", "transcript-words"],
+)
+async def test_flow_run_evidence_commit_failure_precedes_typed_error_response(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    monkeypatch,
+    path_suffix: str,
+    query_string: bytes,
+):
+    _ = client  # Keep the shared application lifespan active for the direct ASGI call.
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    if "transcript-words" in path_suffix:
+        await _seed_transcript_words_for_audit_read(
+            db_container=db_container, seeded=seeded, tenant_id=admin_user.tenant_id
+        )
+    path_suffix = path_suffix.format(step_id=seeded["step_id"])
+    events: list[str] = []
+    original_commit = SessionTransaction.commit
+    original_create_audit = AuditLogRepositoryImpl.create
+
+    async def mark_required_audit_transaction(
+        repository: AuditLogRepositoryImpl, audit_log: AuditLog
+    ) -> AuditLog:
+        result = await original_create_audit(repository, audit_log)
+        repository.session.sync_session.info["fail_required_audit_commit"] = True
+        return result
+
+    def fail_audit_commit(
+        transaction: SessionTransaction, *, _to_root: bool = False
+    ) -> None:
+        if transaction.session.info.pop("fail_required_audit_commit", False):
+            events.append("commit_failed")
+            raise RuntimeError("audit commit unavailable")
+        original_commit(transaction, _to_root=_to_root)
+
+    monkeypatch.setattr(
+        AuditLogRepositoryImpl, "create", mark_required_audit_transaction
+    )
+    monkeypatch.setattr(SessionTransaction, "commit", fail_audit_commit)
+    path = f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/{path_suffix}"
+    scope: Scope = {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.3"},
+        "http_version": "1.1",
+        "method": "GET",
+        "scheme": "http",
+        "path": path,
+        "raw_path": path.encode(),
+        "query_string": query_string,
+        "root_path": "",
+        "headers": [
+            (b"host", b"test.local"),
+            (b"authorization", f"Bearer {trace_token}".encode()),
+        ],
+        "client": ("127.0.0.1", 123),
+        "server": ("test.local", 80),
+    }
+    request_received = False
+    response_status: int | None = None
+    response_body = bytearray()
+
+    async def receive() -> Message:
+        nonlocal request_received
+        if not request_received:
+            request_received = True
+            return {"type": "http.request", "body": b"", "more_body": False}
+        await asyncio.sleep(0)
+        return {"type": "http.disconnect"}
+
+    async def send(message: Message) -> None:
+        nonlocal response_status
+        if message["type"] == "http.response.start":
+            events.append("response_start")
+            response_status = cast(int, message["status"])
+            return
+        if message["type"] == "http.response.body":
+            response_body.extend(cast(bytes, message.get("body", b"")))
+
+    await app(scope, receive, send)
+
+    assert response_status == 503
+    assert events == ["commit_failed", "response_start"]
+    payload = json.loads(response_body)
+    assert payload["code"] == "flow_evidence_audit_logging_failed"
+    assert payload["context"]["audit_required"] is True
+    assert seeded["run_id"].encode() not in response_body
+    assert b'"manifest"' not in response_body
+    assert b"Protected transcript" not in response_body
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+@pytest.mark.parametrize(
+    "path_suffix",
+    ["evidence/", "transcript-corrections/", "steps/{step_id}/transcript-words/"],
+    ids=["evidence", "transcript-corrections", "transcript-words"],
+)
+async def test_flow_run_evidence_fails_closed_when_audit_logging_is_unavailable(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+    path_suffix: str,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+    if "transcript-words" in path_suffix:
+        await _seed_transcript_words_for_audit_read(
+            db_container=db_container, seeded=seeded, tenant_id=admin_user.tenant_id
+        )
+    path_suffix = path_suffix.format(step_id=seeded["step_id"])
+
+    class FailingAuditService:
+        async def log(self, **_kwargs: object) -> None:
+            raise RuntimeError("audit down")
+
+    audit_service = FailingAuditService()
+
+    Container.audit_service.override(providers.Object(audit_service))
+    try:
+        response = await client.get(
+            f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/{path_suffix}",
+            headers={"Authorization": f"Bearer {trace_token}"},
+        )
+    finally:
+        Container.audit_service.reset_last_overriding()
+
+    assert response.status_code == 503, response.text
+    payload = response.json()
+    assert payload["code"] == "flow_evidence_audit_logging_failed"
+    assert payload["context"]["audit_required"] is True
+    assert "Protected transcript" not in response.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.integration
+async def test_flow_run_evidence_export_fails_closed_when_audit_logging_is_unavailable(
+    client,
+    db_container,
+    patch_auth_service_jwt,
+    completion_model_factory,
+    space_factory,
+    assistant_factory,
+    admin_user,
+):
+    seeded, _, trace_token = await _seed_trace_view_flow_run_contract_data(
+        db_container=db_container,
+        patch_auth_service_jwt=patch_auth_service_jwt,
+        completion_model_factory=completion_model_factory,
+        space_factory=space_factory,
+        assistant_factory=assistant_factory,
+        admin_user=admin_user,
+    )
+
+    class FailingAuditService:
+        async def log(self, **_kwargs: object) -> None:
+            raise RuntimeError("audit down")
+
+    audit_service = FailingAuditService()
+
+    Container.audit_service.override(providers.Object(audit_service))
+    try:
+        response = await client.get(
+            f"/api/v1/flows/{seeded['flow_id']}/runs/{seeded['run_id']}/evidence/export?format=json",
+            headers={"Authorization": f"Bearer {trace_token}"},
+        )
+    finally:
+        Container.audit_service.reset_last_overriding()
+
+    assert response.status_code == 503, response.text
+    payload = response.json()
+    assert payload["code"] == "flow_evidence_audit_logging_failed"
+    assert payload["context"]["audit_required"] is True
+
+
+async def _join_space(
+    *, db_container, space_id: UUID, user_id: UUID, role: SpaceRoleValue
+) -> None:
+    async with db_container() as container:
+        await container.session().execute(
+            sa.text(
+                "INSERT INTO spaces_users (space_id, user_id, role) "
+                "VALUES (:space_id, :user_id, :role)"
+            ),
+            {"space_id": str(space_id), "user_id": str(user_id), "role": role.value},
+        )
+
+
+async def _evidence_answers(
+    client, *, run_url: str, headers: dict[str, str]
+) -> list[str | None]:
+    """The refusal code each evidence route answers with, None when it answers."""
+    answers: list[str | None] = []
+    for path in (
+        "evidence/",
+        "evidence/export?format=json",
+        "evidence/export?format=json&detail=raw&reason=access-check",
+    ):
+        response = await client.get(f"{run_url}/{path}", headers=headers)
+        assert response.status_code in {200, 403}, response.text
+        answers.append(None if response.status_code == 200 else response.json()["code"])
+    return answers
+
+
+async def test_a_runs_evidence_access_is_what_the_evidence_routes_answer(
+    client,
+    db_container,
+    monkeypatch,
+    patch_auth_service_jwt,
+    admin_user,
+    flow_process_auth_headers,
+    create_published_compose_text_flow,
+):
+    async def _noop_dispatch(
+        *, run_id: UUID, tenant_id: UUID, expected_revision: int
+    ) -> None:
+        _ = (run_id, tenant_id, expected_revision)
+
+    monkeypatch.setattr(
+        flow_run_lifecycle_router,
+        "dispatch_flow_run_recoverably_after_commit",
+        _noop_dispatch,
+    )
+    _ = patch_auth_service_jwt
+    flow = await create_published_compose_text_flow(
+        client,
+        flow_process_auth_headers,
+        metadata_json={"evidence_policy": {"allow_export": True}},
+    )
+    admin_headers = {"Authorization": f"Bearer {flow_process_auth_headers.token}"}
+    flow_response = await client.get(
+        f"/api/v1/flows/{flow.flow_id}/", headers=admin_headers
+    )
+    assert flow_response.status_code == 200, flow_response.text
+    space_id = UUID(flow_response.json()["space_id"])
+
+    async def member(
+        permissions: list[Permission], role: SpaceRoleValue
+    ) -> dict[str, str]:
+        user, token = await _create_user_with_flow_permissions_and_token(
+            db_container=db_container,
+            tenant_id=admin_user.tenant_id,
+            role_name_prefix="Evidence access",
+            permissions=permissions,
+        )
+        await _join_space(
+            db_container=db_container, space_id=space_id, user_id=user.id, role=role
+        )
+        return {"Authorization": f"Bearer {token}"}
+
+    run_and_trace = [
+        Permission.FLOWS_VIEW,
+        Permission.FLOWS_RUN,
+        Permission.FLOWS_TRACE,
+    ]
+    space_admin = await member(
+        [Permission.FLOWS_VIEW, Permission.FLOWS_RUN], SpaceRoleValue.ADMIN
+    )
+    tracer = await member(run_and_trace, SpaceRoleValue.EDITOR)
+    runner = await member(
+        [Permission.FLOWS_VIEW, Permission.FLOWS_RUN], SpaceRoleValue.EDITOR
+    )
+    other_member = await member(run_and_trace, SpaceRoleValue.EDITOR)
+    key_response = await client.post(
+        "/api/v1/api-keys",
+        json={
+            "name": f"evidence-access-{uuid4().hex[:8]}",
+            "key_type": "sk_",
+            "permission": "write",
+            "scope_type": "tenant",
+            "ownership": "service",
+            "expires_at": (datetime.now(timezone.utc) + timedelta(days=1)).isoformat(),
+            "resource_permissions": {"flows": "write", "flow_evidence": "write"},
+        },
+        headers=flow_process_auth_headers,
+    )
+    assert key_response.status_code == 201, key_response.text
+    service_key = {"X-API-Key": key_response.json()["secret"]}
+
+    async def start(headers: dict[str, str]) -> str:
+        response = await client.post(
+            f"/api/v1/flows/{flow.flow_id}/runs/",
+            json={
+                "expected_flow_version": flow.published_version,
+                "input_payload_json": {"text": "Evidence access"},
+            },
+            headers=headers,
+        )
+        assert response.status_code == 201, response.text
+        return response.json()["id"]
+
+    classified_run = await start(tracer)
+    tracer_run = await start(tracer)
+    runner_run = await start(runner)
+    service_run = await start(service_key)
+    async with db_container() as container:
+        await container.session().execute(
+            sa.update(FlowRuns)
+            .where(FlowRuns.id == UUID(classified_run))
+            .values(evidence_classification_level=3)
+        )
+
+    no_trace = "insufficient_tenant_permission"
+    raw_forbidden = "flow_run_evidence_raw_export_forbidden"
+    expected: list[tuple[dict[str, str], str, list[str | None]]] = [
+        (admin_headers, classified_run, [None, None, None]),
+        (space_admin, classified_run, [None, None, raw_forbidden]),
+        (space_admin, runner_run, [None, None, None]),
+        (tracer, classified_run, [None, None, raw_forbidden]),
+        (tracer, tracer_run, [None, None, None]),
+        (runner, runner_run, [no_trace, no_trace, no_trace]),
+        (service_key, service_run, [None, None, "flow_run_evidence_forbidden"]),
+    ]
+    for headers, run_id, refusals in expected:
+        run_url = f"/api/v1/flows/{flow.flow_id}/runs/{run_id}"
+        detail = await client.get(f"{run_url}/", headers=headers)
+        assert detail.status_code == 200, detail.text
+        access = detail.json()["evidence_access"]
+        assert [
+            access["read_refusal_code"],
+            access["redacted_export_refusal_code"],
+            access["raw_export_refusal_code"],
+        ] == refusals
+        assert [
+            access["can_read_evidence"],
+            access["can_export_redacted"],
+            access["can_export_raw"],
+        ] == [refusal is None for refusal in refusals]
+        assert await _evidence_answers(client, run_url=run_url, headers=headers) == (
+            refusals
+        )
+
+    # Another member reads neither the run nor its evidence.
+    run_url = f"/api/v1/flows/{flow.flow_id}/runs/{tracer_run}"
+    detail = await client.get(f"{run_url}/", headers=other_member)
+    assert detail.status_code == 403, detail.text
+    assert (
+        await _evidence_answers(client, run_url=run_url, headers=other_member)
+        == ["flow_run_access_denied"] * 3
+    )

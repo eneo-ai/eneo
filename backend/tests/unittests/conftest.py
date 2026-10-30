@@ -1,8 +1,10 @@
+import os
 import uuid
 from copy import deepcopy
 from typing import cast
 
 import pytest
+from hypothesis import settings
 
 from eneo.actors.actors.space_actor import (
     SpaceAccessFacts,
@@ -13,7 +15,7 @@ from eneo.actors.actors.space_actor import (
 from eneo.ai_models.embedding_models.embedding_model import (
     EmbeddingModelLegacy,
 )
-from eneo.main.config import Settings, reset_settings
+from eneo.main.config import Settings, get_settings, reset_settings, set_settings
 from eneo.tenants.tenant import TenantInDB
 from eneo.users.user import UserInDB
 from tests.fixtures import TEST_USER
@@ -38,6 +40,16 @@ def retention_actor(request: pytest.FixtureRequest) -> SpaceActor:
             app_ids=frozenset(),
         ),
     )
+
+
+settings.register_profile(
+    "unit",
+    deadline=None,
+    print_blob=True,
+    max_examples=100,
+    derandomize=bool(os.getenv("CI")),
+)
+settings.load_profile("unit")
 
 
 @pytest.fixture(scope="session")
@@ -79,9 +91,13 @@ def test_settings() -> Settings:
 
 @pytest.fixture(autouse=True)
 def reset_settings_after_test():
-    """Reset settings after each test to prevent state leakage."""
-    yield
+    """Isolate unit settings and preserve an enclosing session's singleton."""
+    original = get_settings()
     reset_settings()
+    try:
+        yield
+    finally:
+        set_settings(original)
 
 
 @pytest.fixture

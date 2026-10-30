@@ -5,9 +5,10 @@ from types import MappingProxyType
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 from uuid import UUID
 
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.authentication.auth_models import is_service_api_key
 from eneo.main.models import ResourcePermission
-from eneo.roles.permissions import Permission
+from eneo.roles.permissions import Permission, has_permission
 
 if TYPE_CHECKING:
     from eneo.spaces.space import Space
@@ -78,7 +79,13 @@ class SpaceAccessFacts:
                 if space.default_assistant is not None
                 else None
             ),
-            assistant_ids=frozenset(assistant.id for assistant in space.assistants),
+            # A flow-managed assistant is never an API key scope.
+            assistant_ids=frozenset(
+                assistant.id
+                for assistant in space.assistants
+                if assistant.origin != AssistantOrigin.FLOW_MANAGED
+            )
+            | space.unloaded_hidden_assistant_ids,
             app_ids=frozenset(app.id for app in space.apps if app.id is not None),
         )
 
@@ -113,6 +120,7 @@ class SpaceResourceType(str, Enum):
     MEMBER = "member"
     GROUP_MEMBER = "group_member"
     DEFAULT_ASSISTANT = "default assistant"
+    FLOW = "flow"
 
 
 class SpaceRole(str, Enum):
@@ -128,6 +136,7 @@ SHARED_SPACE_PERMISSIONS = {
         SpaceResourceType.SKILL: {SpaceAction.READ},
         SpaceResourceType.GROUP_CHAT: {SpaceAction.READ},
         SpaceResourceType.APP: {SpaceAction.READ},
+        SpaceResourceType.FLOW: {SpaceAction.READ},
         # Only published resources are readable -- enforced in code
         SpaceResourceType.INFO_BLOB: {SpaceAction.READ},
         SpaceResourceType.SPACE: {
@@ -158,6 +167,13 @@ SHARED_SPACE_PERMISSIONS = {
             SpaceAction.INSIGHT_VIEW,
         },
         SpaceResourceType.APP: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+        },
+        SpaceResourceType.FLOW: {
             SpaceAction.READ,
             SpaceAction.CREATE,
             SpaceAction.EDIT,
@@ -231,6 +247,13 @@ SHARED_SPACE_PERMISSIONS = {
             SpaceAction.INSIGHT_VIEW,
         },
         SpaceResourceType.APP: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+        },
+        SpaceResourceType.FLOW: {
             SpaceAction.READ,
             SpaceAction.CREATE,
             SpaceAction.EDIT,
@@ -324,6 +347,13 @@ PERSONAL_SPACE_PERMISSIONS = {
             SpaceAction.DELETE,
             # Note: No publish
         },
+        SpaceResourceType.FLOW: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,  # Flows require publishing before they can be run
+        },
         SpaceResourceType.SKILL: {
             SpaceAction.READ,
             SpaceAction.CREATE,
@@ -407,6 +437,13 @@ ORG_SPACE_PERMISSIONS = {
             SpaceAction.DELETE,
             SpaceAction.PUBLISH,
         },
+        SpaceResourceType.FLOW: {
+            SpaceAction.READ,
+            SpaceAction.CREATE,
+            SpaceAction.EDIT,
+            SpaceAction.DELETE,
+            SpaceAction.PUBLISH,
+        },
         SpaceResourceType.SKILL: {
             SpaceAction.READ,
             SpaceAction.CREATE,
@@ -479,11 +516,13 @@ PERMISSION_RESOURCES = {
     SpaceResourceType.COLLECTION,
     SpaceResourceType.WEBSITE,
     SpaceResourceType.INTEGRATION_KNOWLEDGE,
+    SpaceResourceType.FLOW,
 }
 PUBLISHABLE_RESOURCES = {
     SpaceResourceType.ASSISTANT,
     SpaceResourceType.GROUP_CHAT,
     SpaceResourceType.APP,
+    SpaceResourceType.FLOW,
 }
 INSIGHT_RESOURCES = {
     SpaceResourceType.ASSISTANT,
@@ -493,6 +532,15 @@ AccessControlList = dict[SpaceRole, dict[SpaceResourceType, set[SpaceAction]]]
 
 
 # TODO: Let the services use can_perform_action()
+def organization_space_role(user: "UserInDB") -> SpaceRole | None:
+    """The role the user holds in their tenant's organization space now.
+
+    The organization space belongs to the tenant's admins: its role follows
+    the admin permission held now, never a membership row, which outlives the
+    admin role that added it."""
+    return SpaceRole.ADMIN if Permission.ADMIN in user.permissions else None
+
+
 class SpaceActor:
     def __init__(
         self,
@@ -509,7 +557,23 @@ class SpaceActor:
         self._personal_space_permissions = personal_space_permissions
         self._org_space_permissions = org_space_permissions
 
-    def _to_permisson(self, resource_type: SpaceResourceType):
+    def _to_permisson(
+        self,
+        resource_type: SpaceResourceType,
+        action: SpaceAction | None = None,
+    ):
+        if resource_type == SpaceResourceType.FLOW:
+            if action == SpaceAction.READ:
+                return Permission.FLOWS_VIEW
+            if action in {
+                SpaceAction.CREATE,
+                SpaceAction.EDIT,
+                SpaceAction.DELETE,
+                SpaceAction.PUBLISH,
+            }:
+                return Permission.FLOWS_MANAGE
+            return Permission.FLOWS_VIEW
+
         permission_map = {
             SpaceResourceType.ASSISTANT: Permission.ASSISTANTS,
             SpaceResourceType.SKILL: Permission.SKILLS,
@@ -542,18 +606,13 @@ class SpaceActor:
                 return SpaceRole.OWNER
             return None
 
-        # The organization space belongs to the tenant's admins: its role
-        # follows the admin permission held now, never a membership row, which
-        # outlives the admin role that added it.
         if self.space.is_organization():
             if (
                 self.space.tenant_id is None
                 or self.space.tenant_id != self.user.tenant_id
             ):
                 return None
-            return (
-                SpaceRole.ADMIN if Permission.ADMIN in self.user.permissions else None
-            )
+            return organization_space_role(self.user)
 
         direct_role = self._get_direct_role()
         group_role = self._get_highest_group_role()
@@ -739,7 +798,7 @@ class SpaceActor:
         if resource_type not in PERMISSION_RESOURCES or self._is_service_api_key():
             return True
         permission = self._to_permisson(resource_type=resource_type)
-        if permission is not None and permission in self.user.permissions:
+        if permission is not None and has_permission(self.user.permissions, permission):
             return True
         if self._personal_skills_permit(resource_type):
             return True
@@ -991,6 +1050,46 @@ class SpaceActor:
             action=SpaceAction.PUBLISH,
             resource_type=SpaceResourceType.APP,
         )
+
+    def can_read_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.READ,
+            resource_type=SpaceResourceType.FLOW,
+        )
+
+    def can_read_flow(self, flow: PublishableResource):
+        return self.can_perform_action(
+            action=SpaceAction.READ,
+            resource_type=SpaceResourceType.FLOW,
+            resource=flow,
+        )
+
+    def can_create_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.CREATE,
+            resource_type=SpaceResourceType.FLOW,
+        )
+
+    def can_edit_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.EDIT,
+            resource_type=SpaceResourceType.FLOW,
+        )
+
+    def can_delete_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.DELETE,
+            resource_type=SpaceResourceType.FLOW,
+        )
+
+    def can_publish_flows(self):
+        return self.can_perform_action(
+            action=SpaceAction.PUBLISH,
+            resource_type=SpaceResourceType.FLOW,
+        )
+
+    def get_current_role(self) -> SpaceRole | None:
+        return self._get_role()
 
     def can_read_skills(self):
         return self.can_perform_action(

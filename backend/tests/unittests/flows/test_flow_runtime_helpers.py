@@ -1,0 +1,268 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from unittest.mock import MagicMock, create_autospec
+from uuid import uuid4
+
+import pytest
+
+from eneo.files.file_service import FileService
+from eneo.flows.domain.runtime import RunExecutionState
+from eneo.flows.flow_run_input_envelope import FLOW_INPUT_TRANSCRIPTION_KEY
+from eneo.flows.runtime.input_files import (
+    describe_files_by_requested_ids,
+    load_files_by_requested_ids,
+)
+from eneo.flows.runtime.step_input_resolution import (
+    enforce_inline_input_cap,
+    resolve_input_source_text,
+)
+from eneo.main.exceptions import TypedIOValidationException
+
+
+def test_enforce_inline_input_cap_counts_utf8_bytes_not_characters():
+    with pytest.raises(TypedIOValidationException) as exc:
+        enforce_inline_input_cap(
+            text="ååå",
+            step_order=2,
+            input_source="flow_input",
+            max_inline_text_bytes=5,
+        )
+
+    assert exc.value.code == "typed_io_input_too_large"
+
+
+def test_resolve_input_source_text_serializes_non_text_flow_payload():
+    run = SimpleNamespace(id=uuid4(), input_payload_json={"number": 7, "enabled": True})
+
+    resolved = resolve_input_source_text(
+        input_source="flow_input",
+        run=run,
+        step_order=1,
+        prior_results=[],
+        state=None,
+        logger=MagicMock(),
+    )
+
+    assert resolved == '{"number": 7, "enabled": true}'
+
+
+def test_resolve_input_source_text_prefers_top_level_text_field():
+    run = SimpleNamespace(
+        id=uuid4(),
+        input_payload_json={
+            "text": "explicit flow text",
+            "number": 7,
+            FLOW_INPUT_TRANSCRIPTION_KEY: "cached transcript",
+        },
+    )
+
+    resolved = resolve_input_source_text(
+        input_source="flow_input",
+        run=run,
+        step_order=1,
+        prior_results=[],
+        state=None,
+        logger=MagicMock(),
+    )
+
+    assert resolved == "explicit flow text"
+
+
+def test_resolve_input_source_text_skips_runtime_orchestration_metadata_only_payload():
+    run = SimpleNamespace(
+        id=uuid4(),
+        input_payload_json={
+            "expected_flow_version": 9,
+            "step_inputs": {str(uuid4()): {"file_ids": [str(uuid4())]}},
+            "file_ids": [str(uuid4())],
+        },
+    )
+
+    resolved = resolve_input_source_text(
+        input_source="flow_input",
+        run=run,
+        step_order=1,
+        prior_results=[],
+        state=None,
+        logger=MagicMock(),
+    )
+
+    assert resolved == ""
+
+
+def test_resolve_input_source_text_strips_runtime_orchestration_metadata_from_semantic_payload():
+    run = SimpleNamespace(
+        id=uuid4(),
+        input_payload_json={
+            "request_id": "abc-123",
+            "category": "runtime step upload test",
+            "expected_flow_version": 9,
+            "step_inputs": {str(uuid4()): {"file_ids": [str(uuid4())]}},
+            "file_ids": [str(uuid4())],
+        },
+    )
+
+    resolved = resolve_input_source_text(
+        input_source="flow_input",
+        run=run,
+        step_order=1,
+        prior_results=[],
+        state=None,
+        logger=MagicMock(),
+    )
+
+    assert resolved == (
+        '{"request_id": "abc-123", "category": "runtime step upload test"}'
+    )
+
+
+@pytest.mark.asyncio
+async def test_load_files_by_requested_ids_returns_requested_order() -> None:
+    first_file = SimpleNamespace(id=uuid4())
+    second_file = SimpleNamespace(id=uuid4())
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_files_by_ids.return_value = [second_file, first_file]
+
+    files = await load_files_by_requested_ids(
+        file_service=file_service,
+        requested_ids=[first_file.id, second_file.id],
+    )
+
+    assert files == [first_file, second_file]
+    file_service.get_files_by_ids.assert_awaited_once_with(
+        file_ids=[first_file.id, second_file.id],
+        include_transcription=True,
+    )
+
+
+@pytest.mark.asyncio
+async def test_load_files_by_requested_ids_cache_hit_reorders_per_request() -> None:
+    first_file = SimpleNamespace(id=uuid4())
+    second_file = SimpleNamespace(id=uuid4())
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_files_by_ids.return_value = [second_file, first_file]
+    file_cache = {}
+
+    first_result = await load_files_by_requested_ids(
+        file_service=file_service,
+        requested_ids=[first_file.id, second_file.id],
+        file_cache=file_cache,
+    )
+    second_result = await load_files_by_requested_ids(
+        file_service=file_service,
+        requested_ids=[second_file.id, first_file.id],
+        file_cache=file_cache,
+    )
+
+    assert first_result == [first_file, second_file]
+    assert second_result == [second_file, first_file]
+    assert file_service.get_files_by_ids.await_count == 1
+
+
+@pytest.mark.asyncio
+async def test_describing_files_never_reads_their_bytes() -> None:
+    """Audio steps identify files without paying for their payloads."""
+
+    first = SimpleNamespace(id=uuid4())
+    second = SimpleNamespace(id=uuid4())
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_owned_file_infos.return_value = [second, first]
+
+    described = await describe_files_by_requested_ids(
+        file_service=file_service,
+        requested_ids=[first.id, second.id],
+    )
+
+    assert described == [first, second]
+    file_service.get_files_by_ids.assert_not_awaited()
+    file_service.get_owned_file_infos.assert_awaited_once_with(
+        file_ids=[first.id, second.id]
+    )
+
+
+@pytest.mark.asyncio
+async def test_load_files_by_requested_ids_collapses_duplicate_requested_ids() -> None:
+    first_file = SimpleNamespace(id=uuid4())
+    second_file = SimpleNamespace(id=uuid4())
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_files_by_ids.return_value = [second_file, first_file]
+
+    files = await load_files_by_requested_ids(
+        file_service=file_service,
+        requested_ids=[first_file.id, second_file.id, first_file.id],
+    )
+
+    assert files == [first_file, second_file]
+
+
+@pytest.mark.asyncio
+async def test_load_files_by_requested_ids_drops_unreturned_ids() -> None:
+    returned_file = SimpleNamespace(id=uuid4())
+    missing_file_id = uuid4()
+    file_service = create_autospec(FileService, instance=True)
+    file_service.get_files_by_ids.return_value = [returned_file]
+
+    files = await load_files_by_requested_ids(
+        file_service=file_service,
+        requested_ids=[missing_file_id, returned_file.id],
+    )
+
+    assert files == [returned_file]
+
+
+def test_resolve_input_source_text_all_previous_steps_prefers_state_accumulator():
+    run = SimpleNamespace(id=uuid4(), input_payload_json=None)
+    cached_result = SimpleNamespace(
+        step_order=1, output_payload_json={"text": "from-state"}
+    )
+    prior_results = [
+        SimpleNamespace(step_order=1, output_payload_json={"text": "older"}),
+        SimpleNamespace(step_order=2, output_payload_json={"text": "newer"}),
+    ]
+    state = RunExecutionState(
+        completed_by_order={1: cached_result},
+        prior_results=[cached_result],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+
+    resolved = resolve_input_source_text(
+        input_source="all_previous_steps",
+        run=run,
+        step_order=3,
+        prior_results=prior_results,
+        state=state,
+        logger=MagicMock(),
+    )
+
+    assert resolved == "<step_1_output>\nfrom-state\n</step_1_output>\n"
+
+
+def test_resolve_input_source_text_all_previous_state_excludes_current_and_future():
+    run = SimpleNamespace(id=uuid4(), input_payload_json=None)
+    state = RunExecutionState(
+        completed_by_order={
+            1: SimpleNamespace(step_order=1, output_payload_json={"text": "ONE"}),
+            3: SimpleNamespace(step_order=3, output_payload_json={"text": "CURRENT"}),
+            4: SimpleNamespace(step_order=4, output_payload_json={"text": "FUTURE"}),
+        },
+        prior_results=[],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+    )
+
+    resolved = resolve_input_source_text(
+        input_source="all_previous_steps",
+        run=run,
+        step_order=3,
+        prior_results=[],
+        state=state,
+        logger=MagicMock(),
+    )
+
+    assert "<step_1_output>\nONE\n</step_1_output>" in resolved
+    assert "CURRENT" not in resolved
+    assert "FUTURE" not in resolved

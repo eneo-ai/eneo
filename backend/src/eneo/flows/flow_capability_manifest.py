@@ -1,0 +1,1143 @@
+"""Flow Capability Manifest (FCM) — engine truth about what is possible.
+
+Declares the `FlowCapability` shape, seeds one entry per key in
+`INPUT_TYPE_POLICIES`, absorbs chain-compatibility / citation /
+transcription-wizard rules, and exposes the public API
+(`resolve_capability_for_tuple`, `coverage_report`, `projection_cells`,
+`projection_values`).
+
+The manifest is the one owner of capability membership. Two projections
+read it: the tuple shapes its rules admit as persisted step shapes
+(inspectable; this includes image shapes the runtime still rejects as
+unsupported input) and the cells an authoring spec can carry
+(editable_existing). No projection promises that a flow using a cell is
+accepted: whole-flow acceptance belongs to the platform validators.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Mapping
+from dataclasses import dataclass
+from enum import Enum, StrEnum
+from functools import cache
+from itertools import product
+from types import MappingProxyType
+from typing import Literal, TypeVar
+
+from eneo.flows.citation_sidecar import (
+    CITATION_MODE_INLINE_INREF_SIDECAR,
+    resolve_citation_mode,
+)
+from eneo.flows.domain.tool_input import TOOL_INPUT_TYPES
+from eneo.flows.enums import (
+    FlowAuthoringInputSource,
+    FlowAuthoringInputType,
+    FlowAuthoringOutputMode,
+    FlowInputSource,
+    FlowInputType,
+    FlowOutputMode,
+    FlowOutputType,
+    flow_output_mode_uses_completion_model,
+)
+from eneo.flows.output_modes import (
+    outside_input_mode_violation,
+    speaker_mapping_violation,
+)
+from eneo.flows.type_policies import INPUT_TYPE_POLICIES, InputTypePolicy
+
+FCM_VERSION: int = 14
+
+CapabilityId = str
+TupleSpec = tuple[FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode]
+Exposure = Literal["builder", "engine_only", "not_exposed"]
+Channel = Literal["text_only", "files_only"]
+RuntimeInputMode = Literal["documents", "audio", "text"]
+OutputArtifact = Literal[
+    "structured_text", "structured_json", "pdf_document", "docx_document"
+]
+DocumentGenerationMode = Literal["generated", "template_fill"]
+
+
+@dataclass(frozen=True)
+class ConfigRequirement:
+    """Named config key this capability requires at runtime."""
+
+    key: str
+
+
+@dataclass(frozen=True)
+class InvariantSpec:
+    """Capability-semantic invariant — must hold whenever the capability is
+    in use.
+    """
+
+    id: str
+    description: str
+
+
+@dataclass(frozen=True)
+class FlowCapability:
+    """Engine-truth capability entry.
+
+    `applies_to_tuples`, `required_config`, and `invariants` declare the
+    tuple legality, required config keys, and capability-semantic invariants
+    that this capability carries.
+    """
+
+    id: CapabilityId
+    label: str
+    description: str
+    applies_to_tuples: tuple[TupleSpec, ...]
+    required_config: tuple[ConfigRequirement, ...]
+    invariants: tuple[InvariantSpec, ...]
+    exposure: Exposure
+    not_exposed_reason: str | None
+    channel: Channel | None = None
+    runtime_input_mode: RuntimeInputMode | None = None
+
+    def __post_init__(self) -> None:
+        has_reason = bool(self.not_exposed_reason and self.not_exposed_reason.strip())
+        if self.exposure != "builder" and not has_reason:
+            raise ValueError(
+                f"Capability '{self.id}' with exposure='{self.exposure}' "
+                "requires a non-empty `not_exposed_reason`."
+            )
+        if self.exposure == "builder" and has_reason:
+            raise ValueError(
+                f"Capability '{self.id}' has exposure='builder' but also a "
+                "`not_exposed_reason`; engine-truth rejects the contradictory "
+                "state — leave `not_exposed_reason=None` for builder exposure."
+            )
+        if self.id.startswith("input_") and self.channel is None:
+            raise ValueError(
+                f"Capability '{self.id}' is an input capability but has "
+                "`channel=None`; every input capability must declare its channel."
+            )
+
+
+_UNSUPPORTED_REASONS: dict[str, str] = {
+    "image": (
+        "Image input is declared unsupported by `INPUT_TYPE_POLICIES['image']` — "
+        "no runtime backend accepts raw image bytes for a flow step."
+    ),
+}
+
+
+# Engine-truth mapping from input type to the runtime input mode used by
+# published flow execution. `IMAGE` and `ANY` are intentionally absent because
+# the runtime has no input_mode for those input types.
+RUNTIME_INPUT_MODE_BY_TYPE: Mapping[FlowInputType, RuntimeInputMode] = MappingProxyType(
+    {
+        FlowInputType.DOCUMENT: "documents",
+        FlowInputType.FILE: "documents",
+        FlowInputType.AUDIO: "audio",
+        FlowInputType.TEXT: "text",
+        FlowInputType.JSON: "text",
+    }
+)
+
+
+def _narrow_channel(key: str, raw: str) -> Channel:
+    """Narrow `InputTypePolicy.channel` (`str`) into the FCM `Channel` literal.
+
+    Fail-loud on drift so a new channel value in `type_policies.py` can't
+    silently pass through the FCM seeder without a matching update here.
+    """
+    if raw == "text_only":
+        return "text_only"
+    if raw == "files_only":
+        return "files_only"
+    raise ValueError(
+        f"INPUT_TYPE_POLICIES['{key}'].channel has unknown value {raw!r}; "
+        "FCM expects 'text_only' or 'files_only'."
+    )
+
+
+def _absorbed_invariants(
+    key: str, policy: InputTypePolicy
+) -> tuple[InvariantSpec, ...]:
+    """Mirror the three runtime rules on `InputTypePolicy` as FCM invariants.
+
+    Rules are the ones enforced by `flow_validators.validate_steps` and
+    `runtime.step_input_validation.validate_runtime_input_policy`. The
+    `supported` flag is handled upstream via `exposure`; the `channel`
+    field is a capability attribute, not a runtime rule, and is mirrored
+    separately on `FlowCapability.channel`.
+    """
+    invariants: list[InvariantSpec] = []
+    if not policy.contract_allowed:
+        invariants.append(
+            InvariantSpec(
+                id="input_contract_forbidden",
+                description=(
+                    f"Steps using the `{key}` input capability must not set "
+                    "`input_contract`; the runtime rejects contract on "
+                    "non-contract-allowed capabilities."
+                ),
+            )
+        )
+    if policy.requires_extraction:
+        invariants.append(
+            InvariantSpec(
+                id="requires_non_empty_extraction",
+                description=(
+                    f"Steps using the `{key}` input capability must produce "
+                    "non-empty extracted text at runtime; empty extraction "
+                    "is rejected by `validate_runtime_input_policy`."
+                ),
+            )
+        )
+    if policy.requires_files:
+        invariants.append(
+            InvariantSpec(
+                id="requires_at_least_one_file",
+                description=(
+                    f"Steps using the `{key}` input capability must present "
+                    "at least one compatible file at runtime."
+                ),
+            )
+        )
+    if key == "audio":
+        invariants.append(
+            InvariantSpec(
+                id="requires_enabled_flow_transcription_config",
+                description=(
+                    "Flows containing any `AUDIO`-input step require "
+                    "`metadata_json.wizard.transcription_enabled=True` and "
+                    "a non-null `transcription_model.id`; "
+                    "`_validate_audio_transcription_settings` rejects "
+                    "missing config for every audio step regardless of "
+                    "`output_mode`."
+                ),
+            )
+        )
+    return tuple(invariants)
+
+
+_INPUT_CAPABILITY_DESCRIPTIONS: Mapping[str, str] = MappingProxyType(
+    {
+        "text": "Plain text typed into a run form or produced by an earlier step.",
+        "json": "A JSON value from a run form or an earlier step's structured output.",
+        "document": "Uploaded documents whose text is extracted before the step runs.",
+        "file": "Uploaded files whose text is extracted before the step runs.",
+        "audio": "An uploaded audio recording, transcribed by the flow's transcription model.",
+        "image": "An uploaded image; no runtime backend reads raw image bytes.",
+        "any": "Whatever the source delivers, passed on without a type check.",
+    }
+)
+
+
+def _seed_input_type_capability(key: str, policy: InputTypePolicy) -> FlowCapability:
+    if policy.supported:
+        exposure: Exposure = "builder"
+        reason: str | None = None
+    else:
+        exposure = "not_exposed"
+        reason = _UNSUPPORTED_REASONS[key]
+    return FlowCapability(
+        id=f"input_{key}",
+        label=f"{key.title()} input",
+        description=_INPUT_CAPABILITY_DESCRIPTIONS[key],
+        applies_to_tuples=tuple(
+            cell for cell in _LEGAL_CELLS if cell[1] is FlowInputType(key)
+        ),
+        required_config=(),
+        invariants=_absorbed_invariants(key, policy),
+        exposure=exposure,
+        not_exposed_reason=reason,
+        channel=_narrow_channel(key, policy.channel),
+        runtime_input_mode=RUNTIME_INPUT_MODE_BY_TYPE.get(FlowInputType(key)),
+    )
+
+
+_OUTPUT_MODE_CAPABILITY_SEED: Mapping[
+    FlowOutputMode, tuple[str, str, tuple[InvariantSpec, ...]]
+] = MappingProxyType(
+    {
+        FlowOutputMode.PASS_THROUGH: (
+            "Pass-through output",
+            (
+                "Default output pathway; the step's raw LLM output is forwarded "
+                "to the next step or persisted as the flow's final artefact. "
+                "Text input rendered directly to PDF or DOCX must use "
+                "`render_verbatim` instead."
+            ),
+            (
+                InvariantSpec(
+                    id="forbids_text_document_render_path",
+                    description=(
+                        "Steps with `input_type=TEXT` and `output_type=PDF` or "
+                        "`DOCX` cannot use `pass_through`; direct text-to-document "
+                        "rendering is owned by `render_verbatim`."
+                    ),
+                ),
+            ),
+        ),
+        FlowOutputMode.HTTP_POST: (
+            "HTTP POST output",
+            (
+                "Final output is delivered by POSTing to a configured URL. "
+                "`output_config` must pass `validate_http_output_config`, "
+                "which accepts the authored HTTP transport config. Concrete "
+                "shape rules (URL, body, auth, timeout) live in the transport validators — this "
+                "capability only asserts that a valid config exists."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_http_output_config",
+                    description=(
+                        "Steps using `http_post` output mode must declare an "
+                        "`output_config` object that passes "
+                        "`validate_http_output_config`; the authored HTTP "
+                        "transport config is the only accepted shape. The "
+                        "capability does not pin per-field rules — see the "
+                        "transport validators for URL scheme, body-mode, auth, "
+                        "and timeout constraints."
+                    ),
+                ),
+            ),
+        ),
+        FlowOutputMode.COPY_INPUT: (
+            "Deterministic JSON copy",
+            "Preserves the resolved JSON object or array, validates its output contract directly, and applies the inline output byte ceiling without a completion model or model-output field normalization.",
+            (
+                InvariantSpec(
+                    id="requires_json_input_json_output",
+                    description="Steps using `copy_input` must have `input_type=JSON` and `output_type=JSON`.",
+                ),
+            ),
+        ),
+        FlowOutputMode.COMPOSE_TEXT: (
+            "Deterministic text compose",
+            (
+                "Non-LLM composition pathway: resolved text input is persisted "
+                "as text output without calling a completion model. Use this "
+                "when prior structured references have already been lowered "
+                "into the final body text."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_text_input_text_output",
+                    description=(
+                        "Steps using `compose_text` must have `input_type=TEXT` "
+                        "and `output_type=TEXT`; any other IO pair is rejected "
+                        "by `supports_step_io_tuple`."
+                    ),
+                ),
+            ),
+        ),
+        FlowOutputMode.TRANSCRIBE_ONLY: (
+            "Audio transcription (transcribe-only)",
+            (
+                "Non-LLM transcription pathway: audio input is transcribed to "
+                "text by the flow's transcription backend. The step must be "
+                "`AUDIO` input → `TEXT` output and, when runtime input is "
+                "enabled, must declare `input_format='audio'`. The "
+                "flow-level transcription-config rule is owned by the "
+                "`input_audio` capability since it fires for every audio "
+                "step, not only transcribe-only."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_audio_input_text_output",
+                    description=(
+                        "Steps using `transcribe_only` must have `input_type="
+                        "AUDIO` and `output_type=TEXT`; any other IO pair is "
+                        "rejected by `supports_step_io_tuple`."
+                    ),
+                ),
+                InvariantSpec(
+                    id="requires_audio_runtime_input_format",
+                    description=(
+                        "Steps using `transcribe_only` with runtime_input "
+                        "enabled must declare `input_format='audio'`; "
+                        "`_validate_runtime_input_publish_rules` rejects "
+                        "other formats."
+                    ),
+                ),
+            ),
+        ),
+        FlowOutputMode.TEMPLATE_FILL: (
+            "DOCX template fill",
+            (
+                "Final output is rendered by filling a DOCX template with "
+                "step-scoped values. Constrained to DOCX output, incompatible "
+                "with `output_contract`, and requires a concrete "
+                "`template_fill` config block at publish time."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_docx_output_type",
+                    description=(
+                        "Steps using `template_fill` must have "
+                        "`output_type=DOCX`; `supports_step_io_tuple` rejects "
+                        "other output types."
+                    ),
+                ),
+                InvariantSpec(
+                    id="forbids_output_contract",
+                    description=(
+                        "Steps using `template_fill` must not declare an "
+                        "`output_contract`; "
+                        "`_validate_output_contract_compatibility` raises when "
+                        "the mode and contract coexist."
+                    ),
+                ),
+                InvariantSpec(
+                    id="requires_template_fill_output_config",
+                    description=(
+                        "Publishable flows with a `template_fill` step require "
+                        "a complete `output_config` template block; "
+                        "`validate_template_fill_output_config` enforces this "
+                        "when `require_complete_template_fill_config=True`."
+                    ),
+                ),
+            ),
+        ),
+        FlowOutputMode.SPEAKER_MAPPING: (
+            "Speaker-to-person mapping",
+            (
+                "A completion model proposes which participant each diarized "
+                "speaker label (`SPEAKER_NN`) in the previous step's transcript "
+                "is, using a participant list from a run-time form field. With "
+                "`output_config.speaker_mapping.infer_names` true the model also "
+                "reads the opening of the conversation and may propose names or "
+                "roles it finds there, so the participant field becomes "
+                "optional. The step output is the mapping (structured) plus the transcript "
+                "with names applied (text), and the run always pauses for an "
+                "edit review so a person confirms the mapping, corrects the "
+                "text and re-attributes speakers."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_previous_step_text_json",
+                    description=(
+                        "Steps using `speaker_mapping` must have "
+                        "`input_source=previous_step`, `input_type=TEXT` and "
+                        "`output_type=JSON`; `supports_step_io_tuple` and "
+                        "`speaker_mapping_violation` reject other combinations."
+                    ),
+                ),
+                InvariantSpec(
+                    id="requires_edit_review_policy",
+                    description=(
+                        "Steps using `speaker_mapping` must declare "
+                        "`review_policy.mode='edit'`; "
+                        "`parse_flow_step_review_policy` rejects any other policy."
+                    ),
+                ),
+                InvariantSpec(
+                    id="fixed_output_contract",
+                    description=(
+                        "Steps using `speaker_mapping` must not declare an "
+                        "`output_contract`; the runtime pins "
+                        "`SPEAKER_MAPPING_OUTPUT_CONTRACT`."
+                    ),
+                ),
+            ),
+        ),
+        FlowOutputMode.RENDER_VERBATIM: (
+            "Verbatim document render",
+            (
+                "Non-LLM document rendering pathway: text input is rendered "
+                "directly into a PDF or DOCX artifact. The step must be "
+                "`TEXT` input -> `PDF` or `DOCX` output and must not declare "
+                "an output contract."
+            ),
+            (
+                InvariantSpec(
+                    id="requires_text_input_document_output",
+                    description=(
+                        "Steps using `render_verbatim` must have `input_type=TEXT` "
+                        "and `output_type=PDF` or `DOCX`; any other IO pair is "
+                        "rejected by `supports_step_io_tuple`."
+                    ),
+                ),
+                InvariantSpec(
+                    id="forbids_output_contract",
+                    description=(
+                        "Steps using `render_verbatim` render resolved text "
+                        "directly and must not declare an `output_contract`."
+                    ),
+                ),
+            ),
+        ),
+    }
+)
+
+
+# Output modes and input sources that are not exposed: an author configures
+# them by hand; the engine runs them and the platform preserves saved steps
+# that use them.
+_NOT_EXPOSED_OUTPUT_MODES: Mapping[FlowOutputMode, str] = MappingProxyType(
+    {
+        FlowOutputMode.COPY_INPUT: (
+            "JSON copying is configured by hand in the editor or a flow package."
+        ),
+        FlowOutputMode.HTTP_POST: (
+            "HTTP delivery is configured by hand in the editor: its config holds "
+            "credentials that an authoring spec never carries."
+        ),
+        FlowOutputMode.SPEAKER_MAPPING: (
+            "Speaker naming is added by hand after a transcription step, when "
+            "the speakers of the transcript are to be named."
+        ),
+    }
+)
+
+_NOT_EXPOSED_INPUT_SOURCES: Mapping[FlowInputSource, str] = MappingProxyType(
+    {
+        FlowInputSource.HTTP_GET: (
+            "HTTP input is configured by hand in the editor: its config holds "
+            "credentials that an authoring spec never carries."
+        ),
+        FlowInputSource.TOOL: (
+            "A tool input names one governed MCP tool by its id, which an author "
+            "picks from the tools the flow's space offers."
+        ),
+    }
+)
+
+
+def _seed_output_mode_capability(mode: FlowOutputMode) -> FlowCapability:
+    label, description, invariants = _OUTPUT_MODE_CAPABILITY_SEED[mode]
+    not_exposed_reason = _NOT_EXPOSED_OUTPUT_MODES.get(mode)
+    return FlowCapability(
+        id=f"output_mode_{mode.value}",
+        label=label,
+        description=description,
+        applies_to_tuples=tuple(cell for cell in _LEGAL_CELLS if cell[3] is mode),
+        required_config=(),
+        invariants=invariants,
+        exposure="not_exposed" if not_exposed_reason is not None else "builder",
+        not_exposed_reason=not_exposed_reason,
+    )
+
+
+def _seed_citation_sidecar_capability() -> FlowCapability:
+    return FlowCapability(
+        id="citation_sidecar",
+        label="Inline-inref citation sidecar",
+        description=(
+            "Attaches an engine-managed citation sidecar to the step's TEXT "
+            "output, tracking which context sources were cited via inline "
+            "`[[inref:...]]` tags. Activated by `output_config.citation_mode="
+            "'inline_inref_sidecar'`; compatible only with TEXT-output LLM "
+            "steps that are not running in compose-text, template-fill, "
+            "transcribe-only, or render-verbatim mode."
+        ),
+        applies_to_tuples=(),
+        required_config=(),
+        invariants=(
+            InvariantSpec(
+                id="requires_text_output_type",
+                description=(
+                    "Citation capability holds only when `output_type=TEXT`; "
+                    "`is_citation_capable_step` returns `False` for JSON/PDF/"
+                    "DOCX outputs regardless of citation_mode."
+                ),
+            ),
+            InvariantSpec(
+                id="forbids_template_fill_or_transcribe_only",
+                description=(
+                    "Citation capability is disabled when `output_mode` is "
+                    "`compose_text`, `copy_input`, `template_fill`, `transcribe_only`, or "
+                    "`render_verbatim` (non-LLM pathways). Any other "
+                    "output_mode preserves capability when the rest holds."
+                ),
+            ),
+            InvariantSpec(
+                id="requires_citation_capable_output_config",
+                description=(
+                    "Citation capability requires "
+                    "`resolve_citation_mode(output_config) == "
+                    "'inline_inref_sidecar'`; any other resolved mode "
+                    "(including `off`, missing keys, non-dict payloads) "
+                    "collapses capability to `False`."
+                ),
+            ),
+        ),
+        exposure="builder",
+        not_exposed_reason=None,
+    )
+
+
+def _seed_per_source_reader_execution_capability() -> FlowCapability:
+    return FlowCapability(
+        id="per_source_reader_execution",
+        label="Per-source reader execution",
+        description=(
+            "Runs a multi-source document/file reader once per uploaded source, "
+            "then assembles the reader's documents[] output in source order."
+        ),
+        applies_to_tuples=(),
+        required_config=(
+            ConfigRequirement(key="input_config.runtime_input.execution_mode"),
+        ),
+        invariants=(
+            InvariantSpec(
+                id="requires_documents_array_contract",
+                description=(
+                    "Per-source reader execution requires a JSON output contract "
+                    "shaped as exactly one top-level `documents[]` array; "
+                    "corpus-level synthesis belongs to a downstream writer step."
+                ),
+            ),
+            InvariantSpec(
+                id="runtime_sets_source_identity",
+                description=(
+                    "Every documents[] item schema declares `source_label` and "
+                    "`source_file_id` as required strings; `parse_runtime_steps` "
+                    "rejects invalid per-source contracts before provider work. "
+                    "The runtime, not the model, writes their values from uploaded "
+                    "file metadata."
+                ),
+            ),
+            InvariantSpec(
+                id="bounded_concurrent_source_calls",
+                description=(
+                    "Source calls are mapped with a named runtime concurrency "
+                    "bound and fail-fast at step-attempt granularity."
+                ),
+            ),
+        ),
+        exposure="builder",
+        not_exposed_reason=None,
+    )
+
+
+# Chain-composition truth: which `(previous_step_output_type, next_step_input_type)`
+# pairs are legal when a step is fed by `input_source='previous_step'`. Only
+# `previous_step` consults this table; `all_previous_steps` has its own rule
+# path in `step_chain_rules.py` and does not participate in type coercion.
+# Runtime validators consume this typed FCM truth through `is_chain_compatible`.
+CHAIN_COMPATIBILITY: frozenset[tuple[FlowOutputType, FlowInputType]] = frozenset(
+    {
+        (FlowOutputType.TEXT, FlowInputType.TEXT),
+        (FlowOutputType.TEXT, FlowInputType.JSON),
+        (FlowOutputType.TEXT, FlowInputType.ANY),
+        (FlowOutputType.JSON, FlowInputType.TEXT),
+        (FlowOutputType.JSON, FlowInputType.JSON),
+        (FlowOutputType.JSON, FlowInputType.ANY),
+        (FlowOutputType.PDF, FlowInputType.TEXT),
+        (FlowOutputType.PDF, FlowInputType.ANY),
+        (FlowOutputType.DOCX, FlowInputType.TEXT),
+        (FlowOutputType.DOCX, FlowInputType.ANY),
+    }
+)
+
+
+_Member = TypeVar("_Member", bound=Enum)
+
+
+def _require_member(value: object, kind: type[_Member], name: str) -> None:
+    """Refuse a raw string where a member is expected.
+
+    A string enum's member equals its text, so `"text"` would pass every table
+    lookup below as if it were `FlowInputType.TEXT`. A caller that holds
+    unparsed JSON has to convert first; this is where that is noticed.
+    """
+
+    if not isinstance(value, kind):
+        raise TypeError(f"{name} must be {kind.__name__}, got {type(value).__name__}")
+
+
+def is_chain_compatible(
+    *,
+    output_type: FlowOutputType,
+    input_type: FlowInputType,
+) -> bool:
+    """Engine-truth: can one step's output feed the next step's input?"""
+
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(input_type, FlowInputType, "input_type")
+    return (output_type, input_type) in CHAIN_COMPATIBILITY
+
+
+# Engine-truth mapping from output type to the artifact the runtime produces.
+# Covers every `FlowOutputType` — there is no runtime output type without an
+# artifact.
+FINAL_OUTPUT_ARTIFACT_BY_TYPE: Mapping[FlowOutputType, OutputArtifact] = (
+    MappingProxyType(
+        {
+            FlowOutputType.TEXT: "structured_text",
+            FlowOutputType.JSON: "structured_json",
+            FlowOutputType.PDF: "pdf_document",
+            FlowOutputType.DOCX: "docx_document",
+        }
+    )
+)
+
+
+def supports_step_io_tuple(
+    *,
+    input_type: FlowInputType | None,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> bool:
+    """Engine-truth: is `(input_type, output_type, output_mode)` a legal
+    combination at step level?
+
+    Strict enum-only contract: non-enum inputs raise `TypeError` rather
+    than silently falling through the identity checks and returning the
+    wrong answer. Callers that hold stringly-typed data must coerce at
+    their boundary (typically `FlowOutputType(raw_string)`).
+
+    Rules:
+
+    - `COPY_INPUT` is legal only for `JSON` input → `JSON` output.
+    - `COMPOSE_TEXT` is legal only for `TEXT` input → `TEXT` output.
+    - `TEMPLATE_FILL` is legal only when `output_type` is `DOCX`.
+    - `TRANSCRIBE_ONLY` is legal only for `AUDIO` input → `TEXT` output.
+    - `PASS_THROUGH` is not legal for `TEXT` input → `PDF`/`DOCX` output;
+      direct text document rendering must use `RENDER_VERBATIM`.
+    - Every other combination is legal (the runtime pass-through default).
+
+    `input_type` is optional because `TEMPLATE_FILL` and the pass-through
+    default do not depend on it, so callers can answer output-mode legality
+    before `input_type` has been decided. A `TRANSCRIBE_ONLY` query with
+    `input_type=None` still returns `False` — transcription requires
+    `AUDIO` input, never an unknown one.
+    """
+    if input_type is not None:
+        _require_member(input_type, FlowInputType, "input_type")
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(output_mode, FlowOutputMode, "output_mode")
+    if output_mode is FlowOutputMode.TEMPLATE_FILL:
+        return output_type is FlowOutputType.DOCX
+    if output_mode is FlowOutputMode.TRANSCRIBE_ONLY:
+        return input_type is FlowInputType.AUDIO and output_type is FlowOutputType.TEXT
+    if output_mode is FlowOutputMode.COPY_INPUT:
+        return input_type is FlowInputType.JSON and output_type is FlowOutputType.JSON
+    if output_mode is FlowOutputMode.COMPOSE_TEXT:
+        return input_type is FlowInputType.TEXT and output_type is FlowOutputType.TEXT
+    if output_mode is FlowOutputMode.RENDER_VERBATIM:
+        return input_type is FlowInputType.TEXT and output_type in {
+            FlowOutputType.PDF,
+            FlowOutputType.DOCX,
+        }
+    if output_mode is FlowOutputMode.SPEAKER_MAPPING:
+        return input_type is FlowInputType.TEXT and output_type is FlowOutputType.JSON
+    if (
+        output_mode is FlowOutputMode.PASS_THROUGH
+        and input_type is FlowInputType.TEXT
+        and output_type in {FlowOutputType.PDF, FlowOutputType.DOCX}
+    ):
+        return False
+    return True
+
+
+def requires_completion_model(output_mode: FlowOutputMode) -> bool:
+    """True when this output mode runs a completion model at runtime.
+
+    Other modes route through dedicated runtime handlers instead of an
+    assistant completion model. The canonical mode classification lives with
+    ``FlowOutputMode``.
+    """
+    return flow_output_mode_uses_completion_model(output_mode)
+
+
+def resolve_document_generation_mode(
+    *,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> DocumentGenerationMode | None:
+    """Engine-truth: which document-generation pathway a `(output_type,
+    output_mode)` pair triggers at runtime, if any.
+
+    Strict enum-only contract: non-enum inputs raise `TypeError` rather
+    than silently returning `None` via failed identity checks.
+    """
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(output_mode, FlowOutputMode, "output_mode")
+    if output_type is FlowOutputType.DOCX:
+        return (
+            "template_fill"
+            if output_mode is FlowOutputMode.TEMPLATE_FILL
+            else "generated"
+        )
+    if output_type is FlowOutputType.PDF:
+        return "generated"
+    return None
+
+
+def is_citation_capable_step(
+    *,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+    output_config: object,
+) -> bool:
+    """Engine-truth: can this step emit an inline-inref citation sidecar?
+
+    Strict enum-only contract for `output_type` and `output_mode`:
+    non-enum inputs raise `TypeError` rather than silently returning
+    `False` via a failed identity check.
+
+    Capability holds iff:
+    - `output_config` is a dict that requests the
+      `inline_inref_sidecar` citation mode, AND
+    - `output_type` is `TEXT` (the only artefact the citation sidecar
+      attaches to today), AND
+    - `output_mode` is neither `COMPOSE_TEXT`, `TEMPLATE_FILL`,
+      `TRANSCRIBE_ONLY`, nor `RENDER_VERBATIM` (compose-text is deterministic,
+      template-fill and render-verbatim are document rendering pathways, and
+      transcribe-only has no source documents to cite).
+
+    `output_config` stays typed as `object` because `resolve_citation_mode`
+    itself already tolerates any shape — a non-dict payload collapses to
+    `off` and returns `False`. Keeping the wide type covers malformed
+    persisted payloads without the caller having to pre-validate.
+    """
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(output_mode, FlowOutputMode, "output_mode")
+    if resolve_citation_mode(output_config) != CITATION_MODE_INLINE_INREF_SIDECAR:
+        return False
+    if output_type is not FlowOutputType.TEXT:
+        return False
+    return output_mode not in {
+        FlowOutputMode.COMPOSE_TEXT,
+        FlowOutputMode.COPY_INPUT,
+        FlowOutputMode.TEMPLATE_FILL,
+        FlowOutputMode.TRANSCRIBE_ONLY,
+        FlowOutputMode.RENDER_VERBATIM,
+    }
+
+
+# ---------------------------------------------------------------------
+# Public API — capability resolution, invariant render, coverage report.
+# ---------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CoverageReport:
+    """Summary of :func:`coverage_report`'s cartesian-product walk.
+
+    Captures the four classification counts plus any cells whose owning
+    `not_exposed_reason` contains the literal "temporary". The manifest
+    forbids temporary exclusions — `has_drift=True` fails CI.
+    """
+
+    total_cells: int
+    by_classification: Mapping[str, int]
+    temporary_reasons: tuple[tuple[TupleSpec, str], ...]
+
+    @property
+    def has_drift(self) -> bool:
+        return bool(self.temporary_reasons)
+
+
+# Marker used by coverage_report to flag `not_exposed_reason` strings that
+# advertise themselves as temporary. The manifest forbids such entries — they
+# hide real coverage gaps behind a "we'll get back to it" escape hatch.
+_TEMPORARY_REASON_MARKER = "temporary"
+
+
+# Source-type legality rules mirrored from `step_chain_rules.py` and
+# `flow_validators_http.py`. Single-cell in scope — step-order-dependent
+# rules (e.g. step 1 cannot use `previous_step`) belong to
+# `step_chain_rules.find_first_step_chain_violation`. `previous_step`
+# chain compatibility is owned by `CHAIN_COMPATIBILITY`.
+_HTTP_INPUT_SOURCES: frozenset[FlowInputSource] = frozenset({FlowInputSource.HTTP_GET})
+_FILE_INPUT_TYPES_BANNED_OVER_HTTP: frozenset[FlowInputType] = frozenset(
+    {
+        FlowInputType.DOCUMENT,
+        FlowInputType.FILE,
+        FlowInputType.IMAGE,
+        FlowInputType.AUDIO,
+    }
+)
+_FLOW_INPUT_ONLY_TYPES: frozenset[FlowInputType] = frozenset(
+    {FlowInputType.DOCUMENT, FlowInputType.AUDIO, FlowInputType.FILE}
+)
+
+
+def _source_type_illegality(
+    input_source: FlowInputSource, input_type: FlowInputType
+) -> str | None:
+    """Return a diagnostic string when `(input_source, input_type)` is
+    illegal at the single-cell level, else `None`.
+
+    Mirrors the single-cell rules from `step_chain_rules.py`,
+    `flow_validators_http.py` and `domain/tool_input_validation.py`; the full
+    set of chain-level rules lives in
+    `step_chain_rules.find_first_step_chain_violation`.
+    """
+    if (
+        input_source in _HTTP_INPUT_SOURCES
+        and input_type in _FILE_INPUT_TYPES_BANNED_OVER_HTTP
+    ):
+        return (
+            f"input_type {input_type.value!r} is not supported with "
+            f"input_source {input_source.value!r} "
+            "(flow_validators_http.validate_http_input_config)."
+        )
+    if input_source is FlowInputSource.TOOL and input_type not in TOOL_INPUT_TYPES:
+        return (
+            f"input_type {input_type.value!r} is not supported with "
+            "input_source 'tool' "
+            "(domain.tool_input_validation.validate_tool_input_config)."
+        )
+    if (
+        input_type in _FLOW_INPUT_ONLY_TYPES
+        and input_source is not FlowInputSource.FLOW_INPUT
+    ):
+        return (
+            f"input_type {input_type.value!r} only accepts input_source "
+            "'flow_input' (step_chain_rules.find_first_step_chain_violation)."
+        )
+    if (
+        input_type is FlowInputType.JSON
+        and input_source is FlowInputSource.ALL_PREVIOUS_STEPS
+    ):
+        return (
+            "input_type 'json' is incompatible with input_source "
+            "'all_previous_steps' — concatenated text is not valid JSON."
+        )
+    return None
+
+
+def _cell_illegality(cell: TupleSpec) -> tuple[str, str | None] | None:
+    """Why a cell is illegal for a step on its own, as ``(bucket, reason)``.
+
+    The one walk both ``_LEGAL_CELLS`` and ``_classify_cell`` read. The IO rule,
+    the single-cell source/type rules and the speaker-mapping source rule each
+    keep their one platform owner; none is restated here.
+    """
+    source, input_type, output_type, output_mode = cell
+    if not supports_step_io_tuple(
+        input_type=input_type, output_type=output_type, output_mode=output_mode
+    ):
+        return "illegal_io_triple", None
+    source_type_issue = _source_type_illegality(source, input_type)
+    if source_type_issue is not None:
+        return "illegal_source_type_pair", source_type_issue
+    mode_violation = outside_input_mode_violation(
+        input_source=source, output_mode=output_mode
+    )
+    if mode_violation is not None:
+        return "illegal_source_type_pair", (
+            f"{mode_violation} (output_modes.outside_input_mode_violation)."
+        )
+    if (
+        speaker_mapping_violation(
+            step_order=1,
+            input_source=source,
+            input_type=input_type,
+            output_type=output_type,
+            output_mode=output_mode,
+        )
+        is not None
+    ):
+        return "illegal_source_type_pair", (
+            f"output_mode {output_mode.value!r} does not accept input_source "
+            f"{source.value!r} (output_modes.speaker_mapping_violation)."
+        )
+    return None
+
+
+# Every tuple shape the listed manifest rules admit as a persisted step shape,
+# independent of what any surface exposes. This is a shape list, not an
+# acceptance rule: input bindings can make a platform-legal flow out of a cell
+# listed illegal here (a JSON input read from all previous steps), and a listed
+# cell can still be refused (image input fails graph validation as
+# unsupported_input_type), so the whole-flow validators decide acceptance. The
+# capability entries and the projections both read this one walk.
+_LEGAL_CELLS: tuple[TupleSpec, ...] = tuple(
+    cell
+    for cell in product(FlowInputSource, FlowInputType, FlowOutputType, FlowOutputMode)
+    if _cell_illegality(cell) is None
+)
+
+CAPABILITY_REGISTRY: Mapping[CapabilityId, FlowCapability] = MappingProxyType(
+    {
+        **{
+            f"input_{key}": _seed_input_type_capability(key, policy)
+            for key, policy in INPUT_TYPE_POLICIES.items()
+        },
+        **{
+            f"output_mode_{mode.value}": _seed_output_mode_capability(mode)
+            for mode in FlowOutputMode
+        },
+        "citation_sidecar": _seed_citation_sidecar_capability(),
+        "per_source_reader_execution": _seed_per_source_reader_execution_capability(),
+    }
+)
+
+
+def _classify_cell(
+    input_source: FlowInputSource,
+    input_type: FlowInputType,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> tuple[str, str | None]:
+    """Classify an FCM surface cell into one of four buckets.
+
+    Returns ``(classification, diagnostic_or_reason)``. Classification is
+    one of ``"illegal_io_triple"``, ``"illegal_source_type_pair"``,
+    ``"not_exposed"``, ``"exposed"`` — every legal path terminates in one
+    of those four.
+    """
+    illegality = _cell_illegality((input_source, input_type, output_type, output_mode))
+    if illegality is not None:
+        return illegality
+    source_reason = _NOT_EXPOSED_INPUT_SOURCES.get(input_source)
+    if source_reason is not None:
+        return "not_exposed", source_reason
+    input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
+    if input_cap.exposure == "not_exposed":
+        return "not_exposed", input_cap.not_exposed_reason
+    mode_cap = CAPABILITY_REGISTRY[f"output_mode_{output_mode.value}"]
+    if mode_cap.exposure == "not_exposed":
+        return "not_exposed", mode_cap.not_exposed_reason
+    return "exposed", None
+
+
+def resolve_capability_for_tuple(
+    *,
+    input_source: FlowInputSource,
+    input_type: FlowInputType,
+    output_type: FlowOutputType,
+    output_mode: FlowOutputMode,
+) -> tuple[FlowCapability, FlowCapability] | None:
+    """Resolve owning capabilities for a legal step tuple, or None.
+
+    Returns ``(input_capability, output_mode_capability)`` in that order
+    for cells classified as ``"exposed"``. Returns ``None`` for
+    illegal-IO-triple, illegal-source-type-pair, and not-exposed cells.
+
+    Strict enum-only contract on all four axes — non-enum inputs raise
+    `TypeError` at this public-API boundary so downstream helpers
+    (`_classify_cell`, `_source_type_illegality`) can assume enums and
+    their identity/membership checks cannot silently miss on stringly
+    typed arguments. Callers that hold stringly-typed data must coerce
+    at their own boundary (typically `FlowInputSource(raw_string)`).
+
+    `citation_sidecar` is intentionally not included because it is not
+    conditioned on the 4-tuple alone.
+    """
+    _require_member(input_source, FlowInputSource, "input_source")
+    _require_member(input_type, FlowInputType, "input_type")
+    _require_member(output_type, FlowOutputType, "output_type")
+    _require_member(output_mode, FlowOutputMode, "output_mode")
+    classification, _reason = _classify_cell(
+        input_source, input_type, output_type, output_mode
+    )
+    if classification != "exposed":
+        return None
+    input_cap = CAPABILITY_REGISTRY[f"input_{input_type.value}"]
+    mode_cap = CAPABILITY_REGISTRY[f"output_mode_{output_mode.value}"]
+    return (input_cap, mode_cap)
+
+
+class CapabilityProjection(StrEnum):
+    """Which readers of the manifest a cell set serves.
+
+    ``INSPECTABLE``: the tuple shapes the manifest rules admit as persisted
+    step shapes, HTTP and image included. Image shapes are persisted shapes the
+    runtime still rejects as unsupported input; whole-flow acceptance belongs to
+    the platform validators. ``EDITABLE_EXISTING``: the inspectable cells an
+    authoring spec can carry.
+    """
+
+    INSPECTABLE = "inspectable"
+    EDITABLE_EXISTING = "editable_existing"
+
+
+CapabilityAxis = Literal["input_source", "input_type", "output_type", "output_mode"]
+
+# Axis order of `TupleSpec`; the member order is the declaration order every
+# projection vocabulary follows.
+_AXES: tuple[CapabilityAxis, ...] = (
+    "input_source",
+    "input_type",
+    "output_type",
+    "output_mode",
+)
+_AXIS_MEMBERS: Mapping[CapabilityAxis, tuple[Enum, ...]] = MappingProxyType(
+    {
+        "input_source": tuple(FlowInputSource),
+        "input_type": tuple(FlowInputType),
+        "output_type": tuple(FlowOutputType),
+        "output_mode": tuple(FlowOutputMode),
+    }
+)
+
+# What an authoring spec can carry per axis. Output types are authored whole.
+_AUTHORING_VALUES: Mapping[CapabilityAxis, frozenset[str]] = MappingProxyType(
+    {
+        "input_source": frozenset(item.value for item in FlowAuthoringInputSource),
+        "input_type": frozenset(item.value for item in FlowAuthoringInputType),
+        "output_type": frozenset(item.value for item in FlowOutputType),
+        "output_mode": frozenset(item.value for item in FlowAuthoringOutputMode),
+    }
+)
+
+
+@cache
+def projection_cells(projection: CapabilityProjection) -> frozenset[TupleSpec]:
+    """The cells one projection admits; derived, never listed by hand."""
+
+    if projection is CapabilityProjection.INSPECTABLE:
+        return frozenset(_LEGAL_CELLS)
+    return frozenset(
+        cell
+        for cell in _LEGAL_CELLS
+        if all(
+            member.value in _AUTHORING_VALUES[axis]
+            for axis, member in zip(_AXES, cell, strict=True)
+        )
+    )
+
+
+def projection_values(
+    projection: CapabilityProjection, axis: CapabilityAxis
+) -> tuple[str, ...]:
+    """The values of one axis that some cell of the projection uses, in enum
+    declaration order."""
+
+    index = _AXES.index(axis)
+    used = {cell[index] for cell in projection_cells(projection)}
+    return tuple(member.value for member in _AXIS_MEMBERS[axis] if member in used)
+
+
+def coverage_report() -> CoverageReport:
+    """Walk the cartesian product of the four enums and summarize coverage.
+
+    Used by the cell-classification test and by dev-time diagnostics. Every
+    cell lands in exactly one of four buckets; a cell whose owning
+    `not_exposed_reason` contains the literal ``"temporary"`` surfaces in
+    ``temporary_reasons`` and flips ``has_drift`` to ``True``.
+    """
+    counts: dict[str, int] = {
+        "exposed": 0,
+        "illegal_io_triple": 0,
+        "illegal_source_type_pair": 0,
+        "not_exposed": 0,
+    }
+    temporary: list[tuple[TupleSpec, str]] = []
+    total = 0
+    for input_source in FlowInputSource:
+        for input_type in FlowInputType:
+            for output_type in FlowOutputType:
+                for output_mode in FlowOutputMode:
+                    total += 1
+                    classification, reason = _classify_cell(
+                        input_source, input_type, output_type, output_mode
+                    )
+                    counts[classification] += 1
+                    if (
+                        classification == "not_exposed"
+                        and reason is not None
+                        and _TEMPORARY_REASON_MARKER in reason
+                    ):
+                        temporary.append(
+                            (
+                                (input_source, input_type, output_type, output_mode),
+                                reason,
+                            )
+                        )
+    return CoverageReport(
+        total_cells=total,
+        by_classification=MappingProxyType(counts),
+        temporary_reasons=tuple(temporary),
+    )

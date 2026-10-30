@@ -1,24 +1,25 @@
 "use client";
 
-import { LoadingState } from "@/components/composites/loading-state";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Database, FileText, Globe, Plus, X } from "lucide-react";
-import { useLocale, useTranslations } from "use-intl";
-import { useState } from "react";
-import { BlobPreviewDialog } from "@/features/knowledge/blobs";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Badge } from "@astryxdesign/core/Badge";
+import { Button } from "@astryxdesign/core/Button";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { List, ListItem } from "@astryxdesign/core/List";
 import {
-  Command,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList
-} from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+  Selector,
+  type SelectorOptionData,
+  type SelectorOptionType
+} from "@astryxdesign/core/Selector";
+import { Text } from "@astryxdesign/core/Text";
+import { useQuery } from "@tanstack/react-query";
+import { Database, FileText, Globe, Plus, X } from "lucide-react";
+import { useLocale, useTranslations } from "use-intl";
+import { useState, type ReactNode } from "react";
+import { LoadingState } from "@/components/composites/loading-state";
+import { BlobPreviewDialog } from "@/features/knowledge/blobs";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
+import { cn } from "@/lib/utils";
 import { spacesListQueryOptions } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { VendorIcon } from "../integrations/vendor";
@@ -50,84 +51,93 @@ function useOrgSpaceId(): string | undefined {
   return spaces?.find((space) => space.organization)?.id;
 }
 
+/** The bordered box of one selected source; a failed crawl marks its start edge. */
+function rowFrameClass(failed: boolean) {
+  return cn(
+    "border-ax-border rounded-ax-element flex w-full border",
+    failed && "border-s-ax-error border-s-4"
+  );
+}
+
+/** Icon, name (with the disabled-model note) and what it holds, on one line. */
+function RowSummary({
+  icon,
+  name,
+  modelEnabled,
+  meta
+}: {
+  icon: ReactNode;
+  name: string;
+  modelEnabled: boolean;
+  meta?: ReactNode;
+}) {
+  const t = useTranslations();
+  return (
+    <span className="flex min-h-12 min-w-0 flex-1 items-center gap-2 text-sm">
+      {icon}
+      <span className="min-w-0 flex-1 truncate font-medium" title={name}>
+        {name}
+        {!modelEnabled && <span className="text-ax-error"> ({t("model_disabled")})</span>}
+      </span>
+      {meta}
+    </span>
+  );
+}
+
+function RemoveButton({ disabled, onRemove }: { disabled?: boolean; onRemove: () => void }) {
+  const t = useTranslations();
+  return (
+    <IconButton
+      variant="ghost"
+      size="sm"
+      label={t("delete")}
+      icon={<X aria-hidden="true" />}
+      isDisabled={disabled}
+      onClick={onRemove}
+    />
+  );
+}
+
+function SupportingText({ children }: { children: ReactNode }) {
+  return (
+    <Text type="supporting" size="sm" className="shrink-0">
+      {children}
+    </Text>
+  );
+}
+
 function SelectedRow({
   icon,
   name,
   modelEnabled,
-  badges,
+  meta,
   onRemove,
   disabled
 }: {
-  icon: React.ReactNode;
+  icon: ReactNode;
   name: string;
   modelEnabled: boolean;
-  badges?: React.ReactNode;
+  meta?: ReactNode;
   onRemove: () => void;
   disabled?: boolean;
 }) {
-  const t = useTranslations();
   return (
-    <div className="flex h-12 w-full items-center gap-2 rounded-xl border px-3">
-      {icon}
-      <span className="min-w-0 flex-1 truncate text-sm" title={name}>
-        {name}
-        {!modelEnabled && <span className="text-destructive"> ({t("model_disabled")})</span>}
-      </span>
-      {badges}
-      <Button
-        variant="ghost"
-        size="icon"
-        aria-label={t("delete")}
-        disabled={disabled}
-        onClick={onRemove}
-      >
-        <X className="size-4" />
-      </Button>
+    <div className={cn(rowFrameClass(false), "items-center gap-2 px-3")}>
+      <RowSummary icon={icon} name={name} modelEnabled={modelEnabled} meta={meta} />
+      <RemoveButton disabled={disabled} onRemove={onRemove} />
     </div>
   );
 }
 
-function IntegrationBadges({ entry }: { entry: IntegrationEntry }) {
+function integrationMeta(entry: IntegrationEntry): ReactNode {
   if (entry.type === "single") return null;
-  return (
-    <Badge variant="outline" className="text-muted-foreground shrink-0 font-normal">
-      {entry.wrapper.items.length}
-    </Badge>
-  );
+  return <SupportingText>{entry.wrapper.items.length}</SupportingText>;
 }
 
 const BLOBS_PAGE_SIZE = 10;
 
 function blobTitle(blob: InfoBlob): string {
   return blob.metadata.title ?? blob.metadata.url ?? blob.id;
-}
-
-function SelectedKnowledgeBlobRow({ blob }: { blob: InfoBlob }) {
-  const locale = useLocale();
-  const [showPreview, setShowPreview] = useState(false);
-
-  return (
-    <li>
-      <button
-        type="button"
-        className="hover:bg-muted/60 focus-visible:ring-ring flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors focus-visible:ring-2 focus-visible:outline-none"
-        onClick={() => setShowPreview(true)}
-      >
-        <span className="flex min-w-0 items-center gap-2">
-          <FileText className="text-muted-foreground size-4 shrink-0" />
-          <span className="truncate">{blobTitle(blob)}</span>
-        </span>
-        {blob.metadata.size ? (
-          <span className="text-muted-foreground shrink-0 text-xs">
-            {formatBytes(blob.metadata.size, locale)}
-          </span>
-        ) : null}
-      </button>
-      {showPreview ? (
-        <BlobPreviewDialog blob={blob} open={showPreview} onOpenChange={setShowPreview} />
-      ) : null}
-    </li>
-  );
 }
 
 function SelectedKnowledgeBlobList({
@@ -142,20 +152,24 @@ function SelectedKnowledgeBlobList({
   emptyMessage: string;
 }) {
   const t = useTranslations();
+  const locale = useLocale();
   const [page, setPage] = useState(0);
+  const [preview, setPreview] = useState<InfoBlob | null>(null);
 
   if (loading) {
     return <LoadingState variant="text" rows={2} />;
   }
   if (error) {
     return (
-      <div className="text-destructive px-3 py-3 text-sm">
-        {t("attachment_error_loading_content")}
-      </div>
+      <p className="text-ax-error m-0 px-3 py-3 text-sm">{t("attachment_error_loading_content")}</p>
     );
   }
   if (!blobs || blobs.length === 0) {
-    return <div className="text-muted-foreground px-3 py-3 text-sm">{emptyMessage}</div>;
+    return (
+      <Text type="supporting" as="p" display="block" className="m-0 px-3 py-3">
+        {emptyMessage}
+      </Text>
+    );
   }
 
   const pageCount = Math.max(1, Math.ceil(blobs.length / BLOBS_PAGE_SIZE));
@@ -163,36 +177,49 @@ function SelectedKnowledgeBlobList({
   const visible = blobs.slice(currentPage * BLOBS_PAGE_SIZE, (currentPage + 1) * BLOBS_PAGE_SIZE);
 
   return (
-    <div className="border-t px-2 py-2">
-      <ul className="flex flex-col gap-0.5">
+    <div className="border-ax-border border-t px-1 py-1">
+      <List density="compact">
         {visible.map((blob) => (
-          <SelectedKnowledgeBlobRow key={blob.id} blob={blob} />
+          <ListItem
+            key={blob.id}
+            label={blobTitle(blob)}
+            startContent={<FileText aria-hidden="true" className="text-ax-text-secondary size-4" />}
+            endContent={
+              blob.metadata.size ? (
+                <SupportingText>{formatBytes(blob.metadata.size, locale)}</SupportingText>
+              ) : undefined
+            }
+            onClick={() => setPreview(blob)}
+          />
         ))}
-      </ul>
+      </List>
       {pageCount > 1 ? (
-        <div className="mt-2 flex items-center justify-end gap-2 border-t pt-2 text-sm">
-          <span className="text-muted-foreground">
+        <div className="border-ax-border mt-1 flex items-center justify-end gap-2 border-t px-2 pt-2 pb-1">
+          <SupportingText>
             {currentPage + 1} / {pageCount}
-          </span>
+          </SupportingText>
           <Button
-            type="button"
-            variant="outline"
             size="sm"
-            disabled={currentPage === 0}
+            label={t("previous")}
+            isDisabled={currentPage === 0}
             onClick={() => setPage(currentPage - 1)}
-          >
-            {t("previous")}
-          </Button>
+          />
           <Button
-            type="button"
-            variant="outline"
             size="sm"
-            disabled={currentPage >= pageCount - 1}
+            label={t("next")}
+            isDisabled={currentPage >= pageCount - 1}
             onClick={() => setPage(currentPage + 1)}
-          >
-            {t("next")}
-          </Button>
+          />
         </div>
+      ) : null}
+      {preview ? (
+        <BlobPreviewDialog
+          blob={preview}
+          open
+          onOpenChange={(open) => {
+            if (!open) setPreview(null);
+          }}
+        />
       ) : null}
     </div>
   );
@@ -228,9 +255,7 @@ function SelectedKnowledgeRow({
     ? collectionInfoBlobCount(item)
     : websiteIndexedResultCount(item);
   const pagesFailed = isCollection ? 0 : websiteFailedPageCount(item);
-  const expandable = isCollection
-    ? collectionInfoBlobCount(item) > 0
-    : websiteIndexedResultCount(item) > 0;
+  const expandable = indexedCount > 0;
   const blobsQuery = useQuery({
     ...(isCollection
       ? collectionBlobsQueryOptions(browserApi, item.id)
@@ -238,85 +263,74 @@ function SelectedKnowledgeRow({
     enabled: expanded && expandable
   });
 
+  const summary = (
+    <RowSummary
+      icon={
+        isCollection ? (
+          <Database aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
+        ) : (
+          <Globe aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
+        )
+      }
+      name={title}
+      modelEnabled={modelEnabled}
+      meta={
+        <>
+          {pagesFailed > 0 ? (
+            <Badge
+              variant="error"
+              label={t("space_crawl_failed", {
+                items: t("space_pages_count", { count: pagesFailed })
+              })}
+            />
+          ) : null}
+          {!isCollection && pagesCrawled > 0 ? (
+            <SupportingText>{t("space_pages_count", { count: pagesCrawled })}</SupportingText>
+          ) : null}
+          {isCollection ? (
+            <SupportingText>
+              {indexedCount > 0 ? t("space_files_count", { count: indexedCount }) : t("empty")}
+            </SupportingText>
+          ) : null}
+        </>
+      }
+    />
+  );
+
   return (
-    <Collapsible open={expanded} onOpenChange={setExpanded} className="rounded-xl border">
-      <div
-        className={`flex min-h-12 w-full items-center gap-2 px-3 ${
-          pagesFailed > 0 ? "border-destructive bg-destructive/5 border-l-4" : ""
-        }`}
-      >
-        {expandable ? (
-          <CollapsibleTrigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              aria-label={expanded ? t("aria_collapse") : t("aria_expand")}
-              className="size-7 shrink-0"
-            >
-              {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
-            </Button>
-          </CollapsibleTrigger>
-        ) : (
-          <span className="size-7 shrink-0" />
-        )}
-        {isCollection ? (
-          <Database className="text-muted-foreground size-4 shrink-0" />
-        ) : (
-          <Globe className="text-muted-foreground size-4 shrink-0" />
-        )}
-        <CollapsibleTrigger
-          type="button"
-          disabled={!expandable}
-          className="min-w-0 flex-1 rounded-md text-left text-sm font-medium hover:underline disabled:hover:no-underline"
+    <div className={cn(rowFrameClass(pagesFailed > 0), "items-start gap-2 pe-3")}>
+      {expandable ? (
+        // The whole summary is the disclosure button; Remove follows it, beside
+        // the summary line, so the row reads summary, files, then Remove.
+        <Collapsible
+          isOpen={expanded}
+          onOpenChange={setExpanded}
+          className="min-w-0 flex-1 [&>.astryx-collapsible-trigger]:ps-3 [&>.astryx-collapsible-trigger]:text-sm [&>.astryx-collapsible-trigger]:font-normal"
+          trigger={summary}
         >
-          <span className="truncate" title={title}>
-            {title}
-            {!modelEnabled ? (
-              <span className="text-destructive"> ({t("model_disabled")})</span>
-            ) : null}
-          </span>
-        </CollapsibleTrigger>
-        {!isCollection && pagesFailed > 0 ? (
-          <Badge variant="outline" className="text-destructive shrink-0 font-normal">
-            {t("space_crawl_failed", { items: t("space_pages_count", { count: pagesFailed }) })}
-          </Badge>
-        ) : null}
-        {!isCollection && pagesCrawled > 0 ? (
-          <Badge variant="outline" className="text-muted-foreground shrink-0 font-normal">
-            {t("space_pages_count", { count: pagesCrawled })}
-          </Badge>
-        ) : null}
-        {isCollection ? (
-          <Badge variant="outline" className="text-muted-foreground shrink-0 font-normal">
-            {indexedCount > 0 ? t("space_files_count", { count: indexedCount }) : t("empty")}
-          </Badge>
-        ) : null}
-        <Button
-          variant="ghost"
-          size="icon"
-          aria-label={t("delete")}
-          disabled={disabled}
-          onClick={onRemove}
-        >
-          <X className="size-4" />
-        </Button>
+          {expanded ? (
+            <SelectedKnowledgeBlobList
+              blobs={blobsQuery.data}
+              loading={blobsQuery.isPending}
+              error={blobsQuery.isError}
+              emptyMessage={isCollection ? t("knowledge_no_files_found") : t("noPagesFound")}
+            />
+          ) : null}
+        </Collapsible>
+      ) : (
+        <div className="flex min-w-0 flex-1 ps-3">{summary}</div>
+      )}
+      <div className="flex min-h-12 items-center">
+        <RemoveButton disabled={disabled} onRemove={onRemove} />
       </div>
-      <CollapsibleContent>
-        <SelectedKnowledgeBlobList
-          blobs={blobsQuery.data}
-          loading={blobsQuery.isPending && expanded}
-          error={blobsQuery.isError}
-          emptyMessage={isCollection ? t("knowledge_no_files_found") : t("noPagesFound")}
-        />
-      </CollapsibleContent>
-    </Collapsible>
+    </div>
   );
 }
 
 /**
- * Selected knowledge for the current space or organization plus an
- * add-combobox sectioned per embedding model. Ported from SelectKnowledge +
+ * Selected knowledge for the current space or organization plus a searchable
+ * add-selector sectioned per embedding model (an Astryx Selector that holds no
+ * value: picking an option adds it). Ported from SelectKnowledge +
  * KnowledgeCombobox.
  */
 export function KnowledgePicker({
@@ -335,8 +349,6 @@ export function KnowledgePicker({
   const t = useTranslations();
   const { space } = useSpace();
   const orgSpaceId = useOrgSpaceId();
-  const [open, setOpen] = useState(false);
-  const [filter, setFilter] = useState("");
   const addLabel =
     origin === "organization"
       ? t("add_knowledge_organization")
@@ -377,13 +389,13 @@ export function KnowledgePicker({
       )
     : [];
 
+  // The Selector's search filters the options by name.
   const available = availableKnowledge(
     { knowledge: spaceKnowledge, embeddingModelIds: [...enabledModels] },
-    selections,
-    filter
+    selections
   );
   // Incompatible sections come back empty and drop out here; disabled-model
-  // sections keep their items and render the "not enabled" message instead.
+  // sections keep their items and show the "not enabled" note instead.
   const sections = available.sections
     .map((section) => ({
       ...section,
@@ -421,11 +433,83 @@ export function KnowledgePicker({
     });
   }
 
-  function selectAndClose(action: () => void) {
-    action();
-    setOpen(false);
-    setFilter("");
-  }
+  // Each option's value maps to what picking it adds.
+  const additions = new Map<string, () => void>();
+  const sectionOptions = sections.flatMap((section): SelectorOptionType[] => {
+    let items: SelectorOptionData[];
+    if (!section.isEnabled || !section.isCompatible) {
+      // A note in the list, read out with the section; it cannot be picked.
+      items = [
+        {
+          value: `note:${section.modelId}`,
+          label: section.isEnabled
+            ? t("sources_not_compatible")
+            : t("section_not_enabled", { section: section.name }),
+          disabled: true
+        }
+      ];
+    } else {
+      items = [
+        ...section.collections.map((collection) => {
+          const value = `group:${collection.id}`;
+          additions.set(value, () =>
+            update({ collections: [...selections.collections, collection] })
+          );
+          return {
+            value,
+            label: collection.name,
+            icon: <Database aria-hidden="true" />,
+            description:
+              collection.metadata.num_info_blobs > 0
+                ? t("space_files_count", { count: collection.metadata.num_info_blobs })
+                : t("empty")
+          };
+        }),
+        ...section.websites.map((website) => {
+          const value = `website:${website.id}`;
+          const pagesFailed = website.latest_crawl?.pages_failed ?? 0;
+          additions.set(value, () => update({ websites: [...selections.websites, website] }));
+          return {
+            value,
+            label: formatWebsiteName(website),
+            icon: <Globe aria-hidden="true" />,
+            description:
+              pagesFailed > 0
+                ? t("space_crawl_failed", {
+                    items: t("space_pages_count", { count: pagesFailed })
+                  })
+                : undefined
+          };
+        }),
+        ...section.integration.map((entry) => {
+          additions.set(entry.key, () => addIntegration(entry));
+          return {
+            value: entry.key,
+            label: entry.type === "wrapper" ? entry.wrapper.name : entry.knowledge.name,
+            icon: (
+              <VendorIcon
+                type={
+                  entry.type === "wrapper"
+                    ? entry.wrapper.integration_type
+                    : entry.knowledge.integration_type
+                }
+              />
+            ),
+            description: entry.type === "wrapper" ? String(entry.wrapper.items.length) : undefined
+          };
+        })
+      ];
+    }
+    return available.showHeaders
+      ? [{ type: "section" as const, title: section.name, options: items }]
+      : items;
+  });
+  // Nothing to add says so as a note in the list: an empty listbox has no
+  // options, which assistive tech cannot make sense of.
+  const options: SelectorOptionType[] =
+    sectionOptions.length > 0
+      ? sectionOptions
+      : [{ value: "note:empty", label: emptyLabel, disabled: true }];
 
   const hasSelection =
     selectedCollections.length + selectedWebsites.length + selectedIntegration.length > 0;
@@ -478,7 +562,7 @@ export function KnowledgePicker({
                   ? entry.wrapper.items.every((item) => enabledModels.has(item.embedding_model.id))
                   : enabledModels.has(entry.knowledge.embedding_model.id)
               }
-              badges={<IntegrationBadges entry={entry} />}
+              meta={integrationMeta(entry)}
               disabled={disabled}
               onRemove={() => removeIntegration(entry)}
             />
@@ -486,118 +570,20 @@ export function KnowledgePicker({
         </div>
       )}
 
-      <Popover open={open} onOpenChange={setOpen}>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            disabled={disabled}
-            className="text-muted-foreground hover:text-foreground hover:bg-muted/50 flex h-12 w-full items-center justify-center gap-2 rounded-xl border border-dashed text-sm font-medium transition-colors disabled:opacity-50"
-          >
-            <Plus className="size-4" />
-            {addLabel}
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="start" className="w-(--radix-popover-trigger-width) min-w-80 p-0">
-          <Command shouldFilter={false}>
-            <CommandInput
-              value={filter}
-              onValueChange={setFilter}
-              placeholder={t("knowledge_filter_label")}
-            />
-            <CommandList>
-              {sections.length === 0 ? (
-                <div className="text-muted-foreground flex min-h-16 items-center justify-center px-4 py-6 text-center text-sm">
-                  {emptyLabel}
-                </div>
-              ) : (
-                sections.map((section) => (
-                  <CommandGroup
-                    key={section.modelId}
-                    heading={available.showHeaders ? section.name : undefined}
-                  >
-                    {!section.isEnabled ? (
-                      <p className="text-muted-foreground px-4 py-3 text-sm">
-                        {t("section_not_enabled", { section: section.name })}
-                      </p>
-                    ) : !section.isCompatible ? (
-                      <p className="text-muted-foreground px-4 py-3 text-sm">
-                        {t("sources_not_compatible")}
-                      </p>
-                    ) : (
-                      <>
-                        {section.collections.map((collection) => (
-                          <CommandItem
-                            key={`group:${collection.id}`}
-                            value={`group:${collection.id}`}
-                            onSelect={() =>
-                              selectAndClose(() =>
-                                update({ collections: [...selections.collections, collection] })
-                              )
-                            }
-                          >
-                            <Database className="size-4 shrink-0" />
-                            <span className="flex-1 truncate">{collection.name}</span>
-                            <Badge variant="outline" className="text-muted-foreground font-normal">
-                              {collection.metadata.num_info_blobs > 0
-                                ? t("space_files_count", {
-                                    count: collection.metadata.num_info_blobs
-                                  })
-                                : t("empty")}
-                            </Badge>
-                          </CommandItem>
-                        ))}
-                        {section.websites.map((website) => {
-                          const pagesFailed = website.latest_crawl?.pages_failed ?? 0;
-                          return (
-                            <CommandItem
-                              key={`website:${website.id}`}
-                              value={`website:${website.id}`}
-                              onSelect={() =>
-                                selectAndClose(() =>
-                                  update({ websites: [...selections.websites, website] })
-                                )
-                              }
-                            >
-                              <Globe className="size-4 shrink-0" />
-                              <span className="flex-1 truncate">{formatWebsiteName(website)}</span>
-                              {pagesFailed > 0 && (
-                                <Badge variant="outline" className="text-destructive font-normal">
-                                  {t("space_crawl_failed", {
-                                    items: t("space_pages_count", { count: pagesFailed })
-                                  })}
-                                </Badge>
-                              )}
-                            </CommandItem>
-                          );
-                        })}
-                        {section.integration.map((entry) => (
-                          <CommandItem
-                            key={entry.key}
-                            value={entry.key}
-                            onSelect={() => selectAndClose(() => addIntegration(entry))}
-                          >
-                            <VendorIcon
-                              type={
-                                entry.type === "wrapper"
-                                  ? entry.wrapper.integration_type
-                                  : entry.knowledge.integration_type
-                              }
-                            />
-                            <span className="flex-1 truncate">
-                              {entry.type === "wrapper" ? entry.wrapper.name : entry.knowledge.name}
-                            </span>
-                            <IntegrationBadges entry={entry} />
-                          </CommandItem>
-                        ))}
-                      </>
-                    )}
-                  </CommandGroup>
-                ))
-              )}
-            </CommandList>
-          </Command>
-        </PopoverContent>
-      </Popover>
+      <Selector
+        label={addLabel}
+        isLabelHidden
+        placeholder={addLabel}
+        startIcon={<Plus aria-hidden="true" />}
+        options={options}
+        // Holds no value: a pick adds that source and the trigger reads "add" again.
+        value={undefined}
+        onChange={(value) => additions.get(value)?.()}
+        hasSearch
+        searchPlaceholder={t("knowledge_filter_label")}
+        isDisabled={disabled}
+        width="100%"
+      />
     </div>
   );
 }

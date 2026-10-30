@@ -1,0 +1,402 @@
+from __future__ import annotations
+
+import logging
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
+from hashlib import sha256
+from typing import TYPE_CHECKING, Any
+from uuid import UUID
+
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
+from eneo.flows.domain.runtime import RuntimeStep, StepDiagnostic
+from eneo.flows.domain.step_output import (
+    FileBackedStepText,
+    InlineTranscript,
+    ResolvedStepMaterial,
+    build_step_material_aliases,
+    inline_transcript,
+)
+from eneo.flows.domain.transcript_source import (
+    TranscriptSourceReference,
+)
+from eneo.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    FlowRunInputEnvelopePatch,
+    read_live_transcript_ids,
+    read_max_speakers,
+    read_single_recording_steps,
+    read_speaker_labels_choice,
+)
+from eneo.flows.runtime.flow_run_actor import FlowRunActor
+from eneo.flows.runtime.live_transcription.repository import (
+    LiveTranscriptRepository,
+    LiveTranscriptScope,
+)
+from eneo.flows.transcription_config import parse_transcription_config
+
+from .audio_spool import OpenAudioDownload
+from .transcription import (
+    REDUCED_PRECISION_ALIGNMENTS,
+    FlowTranscribers,
+    TranscriptSourcePreparation,
+    resolve_and_transcribe_audio_for_step,
+)
+
+if TYPE_CHECKING:
+    from eneo.audit.application.audit_service import AuditService
+    from eneo.files.audio import AudioDecodeLimits
+    from eneo.files.file_models import FileInfo
+    from eneo.flows.domain.flow import FlowRun
+    from eneo.flows.infrastructure.flow_repo import FlowRepository
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunRepository
+    from eneo.flows.infrastructure.flow_transcript_words_repo import (
+        FlowTranscriptWordsRepository,
+    )
+    from eneo.flows.runtime.step_execution_runtime import ApplyOutputCapFn
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+    )
+    from eneo.spaces.space_repo import SpaceRepository
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class AudioRuntimeResolution:
+    text: str
+    transcription_metadata: dict[str, Any]
+    near_inline_limit_message: str | None
+    diarization_skipped_message: str | None = None
+    diarization_reduced_precision_message: str | None = None
+    material: ResolvedStepMaterial | None = None
+    text_reference: FileBackedStepText | None = None
+    diagnostics: tuple[StepDiagnostic, ...] = ()
+
+
+@dataclass(frozen=True)
+class AudioRuntimeRequest:
+    run: "FlowRun"
+    step: RuntimeStep
+    context: dict[str, Any]
+    version_metadata: dict[str, Any] | None
+    files: list["FileInfo"]
+    requested_ids: list[UUID]
+    max_audio_files: int
+    max_inline_text_bytes: int
+    attempt_no: int = 1
+    source_preparation: TranscriptSourcePreparation | None = None
+    # The tenant's longest recording; None decodes under the deployment's.
+    decode_limits: "AudioDecodeLimits | None" = None
+
+
+@dataclass(frozen=True)
+class AudioRuntimeDeps:
+    transcribers: FlowTranscribers
+    flow_repo: "FlowRepository"
+    space_repo: "SpaceRepository"
+    flow_run_repo: "FlowRunRepository"
+    audit_service: "AuditService | None"
+    actor: FlowRunActor
+    open_audio_download: OpenAudioDownload
+    apply_output_cap: ApplyOutputCapFn
+    commit: Callable[[], Awaitable[None]]
+    stage_transcript_source: Callable[
+        [TranscriptSourceReference, TranscriptSourcePreparation], None
+    ]
+    # Holds the attempt's inline transcript until its activation writes it on
+    # the run row; None drops one that a later file-backed transcript replaced.
+    stage_run_transcript: Callable[
+        [TranscriptSourceReference, InlineTranscript | None], None
+    ]
+    transcription_call_observer: "ProviderCallObserver | None" = None
+
+
+def apply_transcription_to_context(
+    *, context: dict[str, Any], transcript: FileBackedStepText | InlineTranscript
+) -> None:
+    value = (
+        transcript.text
+        if isinstance(transcript, InlineTranscript)
+        else transcript.model_dump(mode="json")
+    )
+    context[FLOW_INPUT_TRANSCRIPTION_KEY] = value
+    flow_input_context = context.get("flow_input")
+    if isinstance(flow_input_context, dict):
+        flow_input_context[FLOW_INPUT_TRANSCRIPTION_KEY] = value
+
+
+async def persist_transcription_on_run_input(
+    *,
+    flow_run_repo: "FlowRunRepository",
+    run: "FlowRun",
+    transcript: FileBackedStepText | InlineTranscript,
+) -> None:
+    updated_payload = await flow_run_repo.update_input_payload(
+        run_id=run.id,
+        tenant_id=run.tenant_id,
+        input_payload_patch=FlowRunInputEnvelopePatch.transcription(
+            transcript=transcript
+        ),
+    )
+    run.input_payload_json = updated_payload
+
+
+async def persist_transcript_words(
+    *,
+    transcript_words_repo: "FlowTranscriptWordsRepository | None",
+    run_id: UUID,
+    tenant_id: UUID,
+    flow_id: UUID,
+    step_id: UUID,
+    preparation: TranscriptSourcePreparation,
+) -> None:
+    """Store the step's word timings beside its segments, or clear them.
+
+    Words anchor to the stored segment array by index and carry its content
+    hash. A retry that produced no words removes any earlier row so a reader
+    never pairs stale words with a new transcript.
+    """
+    if transcript_words_repo is None:
+        return
+    words = preparation.words
+    source_hash = preparation.source_hash
+    if words is None or source_hash is None:
+        await transcript_words_repo.delete_for_step(
+            run_id=run_id, step_id=step_id, tenant_id=tenant_id
+        )
+        return
+    await transcript_words_repo.upsert(
+        tenant_id=tenant_id,
+        flow_id=flow_id,
+        run_id=run_id,
+        step_id=step_id,
+        segments_hash=source_hash,
+        alignment=preparation.alignment,
+        words_json=words,
+    )
+
+
+def build_near_limit_message(
+    *,
+    step_order: int,
+    transcript_bytes: int,
+    max_inline_text_bytes: int,
+) -> str:
+    return (
+        f"Step {step_order}: transcript is near inline input limit "
+        f"({transcript_bytes}/{max_inline_text_bytes} bytes)."
+    )
+
+
+async def log_audio_transcribed_audit(
+    *,
+    audit_service: "AuditService | None",
+    actor: FlowRunActor,
+    run: "FlowRun",
+    step_order: int,
+    step_id: UUID,
+    metadata: dict[str, Any],
+    text_length: int,
+) -> None:
+    if audit_service is None:
+        return
+    try:
+        actor_fields = actor.audit_actor_fields()
+        await audit_service.log_async(
+            tenant_id=run.tenant_id,
+            actor_id=actor_fields["actor_id"],
+            actor_type=actor_fields["actor_type"],
+            actor_api_key_id=actor_fields["actor_api_key_id"],
+            action=ActionType.FLOW_RUN_AUDIO_TRANSCRIBED,
+            entity_type=EntityType.FLOW_RUN,
+            entity_id=run.id,
+            description=f"Flow step {step_order} transcribed audio input.",
+            metadata=actor.audit_metadata(
+                target=run,
+                extra={
+                    "flow_id": str(run.flow_id),
+                    "step_order": step_order,
+                    "step_id": str(step_id),
+                    "file_ids": metadata.get("file_ids"),
+                    "model": metadata.get("model"),
+                    "language": metadata.get("language"),
+                    "text_length": text_length,
+                    "elapsed_ms": metadata.get("elapsed_ms"),
+                    "files_count": metadata.get("files_count"),
+                },
+            ),
+            outcome=Outcome.SUCCESS,
+        )
+    except Exception:
+        logger.warning(
+            "flow_executor.audit_audio_transcribed_failed run_id=%s step_order=%d",
+            run.id,
+            step_order,
+            exc_info=True,
+        )
+
+
+async def resolve_transcribe_and_attach_audio_input(
+    *,
+    request: AudioRuntimeRequest,
+    deps: AudioRuntimeDeps,
+) -> AudioRuntimeResolution:
+    live_id = read_live_transcript_ids(request.run.input_payload_json).get(
+        request.step.step_id
+    )
+    live_transcript = None
+    if live_id is not None:
+        live_transcript = await LiveTranscriptRepository(
+            deps.flow_run_repo.session
+        ).get(live_id, tenant_id=request.run.tenant_id)
+        scope = LiveTranscriptScope(
+            tenant_id=request.run.tenant_id,
+            user_id=request.run.principal_user_id,
+            flow_id=request.run.flow_id,
+            flow_version=request.run.flow_version,
+            step_id=request.step.step_id,
+            model_id=parse_transcription_config(request.version_metadata).model_id,
+        )
+        if live_transcript is not None and not scope.matches(live_transcript):
+            live_transcript = None
+    transcription_result = await resolve_and_transcribe_audio_for_step(
+        version_metadata=request.version_metadata,
+        flow_repo=deps.flow_repo,
+        space_repo=deps.space_repo,
+        flow_id=request.run.flow_id,
+        tenant_id=request.run.tenant_id,
+        step_order=request.step.step_order,
+        files=request.files,
+        requested_ids=request.requested_ids,
+        transcribers=deps.transcribers,
+        max_files=request.max_audio_files,
+        max_inline_text_bytes=request.max_inline_text_bytes,
+        open_audio_download=deps.open_audio_download,
+        transcription_call_observer=deps.transcription_call_observer,
+        max_speakers=read_max_speakers(request.run.input_payload_json),
+        speaker_labels=read_speaker_labels_choice(request.run.input_payload_json),
+        source_preparation=request.source_preparation,
+        live_transcript=live_transcript,
+        live_transcript_requested=live_id is not None,
+        single_recording=request.step.step_id
+        in read_single_recording_steps(request.run.input_payload_json),
+        decode_limits=request.decode_limits,
+    )
+    metadata = transcription_result.to_metadata()
+    reference = TranscriptSourceReference(
+        run_id=request.run.id,
+        step_id=request.step.step_id,
+        attempt_no=request.attempt_no,
+        source_hash=transcription_result.source_preparation.source_hash,
+        bounds=transcription_result.source_preparation.bounds,
+    )
+    deps.stage_transcript_source(reference, transcription_result.source_preparation)
+    metadata["source"] = reference.model_dump(mode="json")
+    _, file_ids = await deps.apply_output_cap(
+        text=transcription_result.text, run=request.run, step=request.step
+    )
+    material = None
+    text_reference = None
+    if file_ids:
+        if len(file_ids) != 1:
+            raise ValueError("Transcript overflow must reference exactly one file.")
+        material = ResolvedStepMaterial(
+            source_step_id=request.step.step_id,
+            source_attempt_no=request.attempt_no,
+            file_id=file_ids[0],
+            checksum=sha256(transcription_result.text.encode("utf-8")).hexdigest(),
+            byte_size=transcription_result.transcript_bytes,
+            text=transcription_result.text,
+        )
+        text_reference = build_step_material_aliases(
+            materials=(material,), max_inline_bytes=request.max_inline_text_bytes
+        )[0]
+        assert isinstance(text_reference, FileBackedStepText)
+
+    transcript_value: FileBackedStepText | InlineTranscript
+    if text_reference is None:
+        transcript_value = inline_transcript(
+            text=transcription_result.text,
+            source_step_id=request.step.step_id,
+            source_attempt_no=request.attempt_no,
+        )
+        # Written on the run row when the attempt is activated: no row lock is
+        # held while a later source is downloaded and transcribed, and a
+        # failure before activation leaves nothing. This step's readers see it.
+        request.run.input_payload_json = FlowRunInputEnvelopePatch.transcription(
+            transcript=transcript_value
+        ).apply_to(request.run.input_payload_json)
+        deps.stage_run_transcript(reference, transcript_value)
+    else:
+        transcript_value = text_reference
+        # Committed now; it replaces an inline one an earlier source staged.
+        deps.stage_run_transcript(reference, None)
+        await persist_transcription_on_run_input(
+            flow_run_repo=deps.flow_run_repo,
+            run=request.run,
+            transcript=transcript_value,
+        )
+        # Later input validation may roll back before attempt activation.
+        await deps.commit()
+    apply_transcription_to_context(context=request.context, transcript=transcript_value)
+    await log_audio_transcribed_audit(
+        audit_service=deps.audit_service,
+        actor=deps.actor,
+        run=request.run,
+        step_order=request.step.step_order,
+        step_id=request.step.step_id,
+        metadata=metadata,
+        text_length=len(transcription_result.text),
+    )
+
+    near_limit_message = None
+    if transcription_result.near_inline_limit:
+        near_limit_message = build_near_limit_message(
+            step_order=request.step.step_order,
+            transcript_bytes=transcription_result.transcript_bytes,
+            max_inline_text_bytes=request.max_inline_text_bytes,
+        )
+
+    diarization_message = None
+    if transcription_result.diarization and transcription_result.diarization.startswith(
+        "skipped"
+    ):
+        diarization_message = (
+            f"Step {request.step.step_order}: speaker identification was requested "
+            "but skipped; the transcription produced no text to label."
+        )
+
+    reduced_precision_message = None
+    if (
+        transcription_result.diarization == "external"
+        and transcription_result.alignment in REDUCED_PRECISION_ALIGNMENTS
+    ):
+        reduced_precision_message = (
+            f"Step {request.step.step_order}: speakers were labelled per transcript "
+            f"segment ({transcription_result.alignment}) because the service could "
+            "not align the words to the audio; a speaker change inside a segment "
+            "may be misattributed."
+        )
+
+    return AudioRuntimeResolution(
+        text=transcription_result.text,
+        transcription_metadata=metadata,
+        near_inline_limit_message=near_limit_message,
+        diarization_skipped_message=diarization_message,
+        diarization_reduced_precision_message=reduced_precision_message,
+        material=material,
+        text_reference=text_reference,
+        diagnostics=tuple(
+            StepDiagnostic(
+                code="audio_transcription_empty_interval",
+                message=(
+                    f"Step {request.step.step_order}: no transcription text returned "
+                    f"from {interval.start} to {interval.end} seconds "
+                    f"in file '{interval.file_id}'."
+                ),
+            )
+            for interval in transcription_result.empty_intervals
+        ),
+    )

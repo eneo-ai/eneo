@@ -14,6 +14,30 @@ export function initModules(client) {
     },
 
     /**
+     * List one bounded page of service keys eligible for module binding.
+     * @param {{limit?: number, cursor?: string, search?: string}} [params]
+     * @returns {Promise<import('../types/resources').ApiKeyListResponse>}
+     */
+    listServiceKeys: async (params) => {
+      return await client.fetch("/api/v1/admin/modules/service-keys/", {
+        method: "get",
+        params: { query: params }
+      });
+    },
+
+    /**
+     * Resolve one service key only when it remains eligible for module binding.
+     * @param {{serviceKeyId: string}} params
+     * @returns {Promise<import('../types/resources').ApiKeyV2>}
+     */
+    getServiceKey: async ({ serviceKeyId }) => {
+      return await client.fetch("/api/v1/admin/modules/service-keys/{service_key_id}/", {
+        method: "get",
+        params: { path: { service_key_id: serviceKeyId } }
+      });
+    },
+
+    /**
      * Register, enable and fully configure a module in one idempotent command.
      * @param {{moduleKey: string, config: import('../types/resources').ModuleInstallationConfig}} params
      * @returns {Promise<import('../types/resources').ModuleInstallation>}

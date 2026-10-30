@@ -36,7 +36,12 @@ def space_factory(admin_user):
     """
 
     async def _create_space(
-        session, name: str, model_ids: List[UUID] = None, **extra
+        session,
+        name: str,
+        model_ids: List[UUID] = None,
+        *,
+        tenant_id: UUID | None = None,
+        **extra,
     ) -> Spaces:
         """Create a space with access to the specified models.
 
@@ -47,6 +52,7 @@ def space_factory(admin_user):
 
         if model_ids is None:
             model_ids = []
+        resolved_tenant_id = tenant_id or admin_user.tenant_id
 
         # Get or create org space for this tenant
         from eneo.database.tables.spaces_table import Spaces as SpacesTable
@@ -54,7 +60,7 @@ def space_factory(admin_user):
         org_space = (
             await session.execute(
                 select(SpacesTable).where(
-                    (SpacesTable.tenant_id == admin_user.tenant_id)
+                    (SpacesTable.tenant_id == resolved_tenant_id)
                     & (SpacesTable.user_id.is_(None))
                     & (SpacesTable.tenant_space_id.is_(None))
                 )
@@ -64,8 +70,8 @@ def space_factory(admin_user):
         if org_space is None:
             # Create org space if it doesn't exist
             org_space = Spaces(
-                name=f"Org Space for {admin_user.tenant_id}",
-                tenant_id=admin_user.tenant_id,
+                name=f"Org Space for {resolved_tenant_id}",
+                tenant_id=resolved_tenant_id,
                 user_id=None,
                 tenant_space_id=None,
             )
@@ -75,7 +81,7 @@ def space_factory(admin_user):
         # Create child space under org space
         space = Spaces(
             name=name,
-            tenant_id=admin_user.tenant_id,
+            tenant_id=resolved_tenant_id,
             tenant_space_id=org_space.id,  # Make it a child space
             **extra,
         )

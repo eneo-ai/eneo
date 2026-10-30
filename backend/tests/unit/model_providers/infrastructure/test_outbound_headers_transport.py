@@ -296,7 +296,7 @@ def _completion_adapter(
     adapter.model = SimpleNamespace(
         name="spike-model",
         token_limit=8000,
-        max_output_tokens=64,
+        max_output_tokens=1024,
         supports_tool_calling=True,
     )
     adapter._create_messages_from_context = Mock(  # type: ignore[method-assign]
@@ -613,7 +613,7 @@ class TestTranscription:
         adapter = _transcription_adapter(loopback.base_url, _headers())
 
         with pytest.raises(ProviderRejectedRequestException) as exc_info:
-            await adapter._transcribe_chunk(_audio(tmp_path))
+            await adapter._transcribe_chunk(_audio(tmp_path), audio_seconds=1.0)
 
         assert exc_info.value.details is not None
         assert exc_info.value.details["reason"] == "transcription_unsupported"
@@ -624,7 +624,10 @@ class TestTranscription:
     ):
         adapter = _transcription_adapter(loopback.base_url, None)
 
-        assert await adapter._transcribe_chunk(_audio(tmp_path)) == "hej"
+        assert (
+            await adapter._transcribe_chunk(_audio(tmp_path), audio_seconds=1.0)
+            == "hej"
+        )
         [request] = loopback.captured
         # This route goes through the OpenAI SDK (x-stainless-* headers), so its
         # baseline differs from completion's; only assert nothing was added.

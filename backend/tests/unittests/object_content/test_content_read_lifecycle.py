@@ -116,9 +116,15 @@ async def test_detached_content_read_finishes_exit_after_closer_is_cancelled() -
     await context.exit_started.wait()
 
     first_close.cancel()
-    with pytest.raises(asyncio.CancelledError):
-        await first_close
-    context.allow_exit.set()
+    try:
+        await asyncio.sleep(0)
+        first_close.cancel()
+        await asyncio.sleep(0)
+        assert not first_close.done()
+    finally:
+        context.allow_exit.set()
+        with pytest.raises(asyncio.CancelledError):
+            await first_close
     await opened.aclose()
 
     assert context.exit_completed

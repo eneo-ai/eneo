@@ -19,9 +19,16 @@ download policy or an engine's limits.
   the code, input and logs behind a disclosure and fields to run the same code
   again over edited input. `display: "auto"` shows a table of several rows,
   `"result"` shows any value, `"none"` hides the view.
-- `POST /mcp/file-analysis` exposes `inspect_table`, `query_table` and
-  `assert_table` over signed Eneo attachment URLs. It fetches only from the
-  origin Eneo sends in `X-Eneo-File-Origin`. `query_table` brings a table view
+- `POST /mcp/file-analysis` exposes `inspect_table`, `query_table`,
+  `assert_table` and `query_json` over signed Eneo attachment URLs. It fetches
+  only from the origin Eneo sends in `X-Eneo-File-Origin`. CSV, TSV and XLSX
+  files are sheets, and so is a JSON Lines file (`src/tools/tabular/engine/json.ts`):
+  one record per line, nested objects as dotted columns, arrays as JSON text,
+  read as text by DuckDB's JSON reader with no type inference and memory
+  bounded by 32 times the file size. A JSON document is never turned into
+  sheets: `query_json` returns its structure (types in place of values)
+  without a path and the value at a JSONPath (bounded to 16,000 characters)
+  with one. `query_table` brings a table view
   (an MCP App, `src/tools/tabular/view/`) that hosts showing tool views render
   with its result. Set `display: "none"` for intermediate queries used by charts
   or other tools; the default `display: "table"` preserves in-chat browsing.

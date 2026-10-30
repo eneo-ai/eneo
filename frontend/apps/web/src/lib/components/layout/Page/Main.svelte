@@ -1,7 +1,7 @@
 <script lang="ts">
   import { getContentTabs } from "./ctx";
 
-  let div: HTMLDivElement;
+  let div: HTMLDivElement | undefined;
 
   const { value } = getContentTabs();
 

@@ -86,7 +86,8 @@ export function analysisStep(
   args?: Record<string, unknown>
 ): AnalysisStep | null {
   if (!call.is_bundled || call.purpose !== "file_analysis") return null;
-  if (call.tool_name === "inspect_table") return { kind: "inspect", groups: [] };
+  if (call.tool_name === "inspect_table" || call.tool_name === "query_json")
+    return { kind: "inspect", groups: [] };
   if (call.tool_name === "assert_table") return { kind: "check", groups: [] };
   if (call.tool_name !== "query_table") return null;
   const tokens = outerTokens(typeof args?.sql === "string" ? args.sql : "");

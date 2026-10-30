@@ -61,7 +61,7 @@ def _sample_response(input_tokens: int = 42, file_tokens: int = 7) -> PreflightR
         input_tokens=input_tokens,
         file_tokens=file_tokens,
         model_name="gpt-4o",
-        context_window=128000,
+        max_input_tokens=128000,
     )
 
 

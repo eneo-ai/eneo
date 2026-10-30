@@ -77,6 +77,73 @@ async def test_policy_put_returns_the_committed_projection(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+async def test_saved_upload_policy_sets_flow_limits_on_independent_requests(
+    client,
+    db_container,
+    admin_user,
+    patch_auth_service_jwt,
+) -> None:
+    await _seed_policy()
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    from eneo.database.tables.tenant_table import Tenants
+
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(
+            sa.update(Tenants)
+            .where(Tenants.id == admin_user.tenant_id)
+            .values(
+                flow_settings={
+                    "input_limits": {
+                        "file_max_size_bytes": 10,
+                        "audio_max_size_bytes": 10,
+                    }
+                },
+            )
+        )
+    headers = {"Authorization": f"Bearer {token}"}
+    limit = 400 * 1024**2
+    response = await client.put(
+        "/api/v1/admin/object-content-policy",
+        headers=headers,
+        json={
+            "expected_revision": 1,
+            "new_write_storage_target": "postgres_inline",
+            "session_file_limit_bytes": limit,
+            "session_image_limit_bytes": limit,
+            "knowledge_file_limit_bytes": limit,
+            "transcription_audio_limit_bytes": limit,
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert all(item["effective_bytes"] == limit for item in response.json()["limits"])
+
+    flow_response = await client.get(
+        "/api/v1/settings/flow-input-limits", headers=headers
+    )
+    assert flow_response.status_code == 200, flow_response.text
+    flow_limits = flow_response.json()
+    for name in (
+        "file_max_size_bytes",
+        "audio_max_size_bytes",
+    ):
+        assert flow_limits[name] == limit
+
+    async with db_container() as fresh_container:
+        snapshot = await load_container_upload_admission(fresh_container)
+        assert snapshot.session_file_maximum_bytes == limit
+        assert snapshot.session_audio_maximum_bytes == limit
+
+    rejected = await client.patch(
+        "/api/v1/settings/flow-input-limits",
+        headers=headers,
+        json={"audio_max_size_bytes": 10 * 1024**2},
+    )
+    assert rejected.status_code == 422, rejected.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_policy_compare_and_swap_has_one_winner_and_atomic_read(
     admin_user,
 ) -> None:
@@ -156,13 +223,14 @@ async def test_admin_projection_is_bounded_and_sanitized(db_container) -> None:
             "configured_bytes",
             "effective_bytes",
             "storage_target",
-            "operator_ceiling_bytes",
+            "storage_capacity_bytes",
             "constraining_source",
         }
         for limit in payload["limits"]
     )
     assert all(
-        set(capability) == {"target", "configured", "selectable", "readiness_code"}
+        set(capability)
+        == {"target", "configured", "selectable", "readiness_code", "maximum_bytes"}
         for capability in payload["capabilities"]
     )
 
@@ -306,3 +374,37 @@ async def test_independent_api_and_worker_containers_observe_committed_revision(
     assert api_snapshot.session_file_maximum_bytes == 10
     assert worker_snapshot.policy_revision == 2
     assert worker_snapshot.session_file_maximum_bytes == 101
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_oversized_inline_policy_is_rejected_without_changing_revision(
+    client,
+    db_container,
+    admin_user,
+    patch_auth_service_jwt,
+) -> None:
+    from eneo.object_content.configuration import INLINE_PAYLOAD_CAPACITY_BYTES
+
+    await _seed_policy()
+    async with db_container() as container:
+        token = container.auth_service().create_access_token_for_user(admin_user)
+    headers = {"Authorization": f"Bearer {token}"}
+    response = await client.put(
+        "/api/v1/admin/object-content-policy",
+        headers=headers,
+        json={
+            "expected_revision": 1,
+            "new_write_storage_target": "postgres_inline",
+            "session_file_limit_bytes": INLINE_PAYLOAD_CAPACITY_BYTES + 1,
+            "session_image_limit_bytes": 20,
+            "knowledge_file_limit_bytes": 30,
+            "transcription_audio_limit_bytes": 40,
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert "object_content_policy_capacity_exceeded" in response.text
+    assert "session_file_limit_bytes" in response.text
+    reread = await client.get("/api/v1/admin/object-content-policy", headers=headers)
+    assert reread.json()["policy"]["revision"] == 1
+    assert reread.json()["policy"]["session_file_limit_bytes"] == 10

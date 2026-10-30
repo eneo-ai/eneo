@@ -1,5 +1,6 @@
 """SpaceRepository: the SQL and loader options it uses, without a database."""
 
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -85,9 +86,12 @@ def session():
 
 @pytest.fixture
 def repo(session):
+    user = MagicMock()
+    user.tenant_id = uuid4()
     return SpaceRepository(
         session=session,
-        user=MagicMock(),
+        tenant=SimpleNamespace(id=user.tenant_id),
+        user=user,
         factory=MagicMock(),
         file_content_loader=MagicMock(),
         completion_model_repo=AsyncMock(),
@@ -103,6 +107,7 @@ def _repo(session: MagicMock) -> SpaceRepository:
     user.tenant_id = uuid4()
     return SpaceRepository(
         session=session,
+        tenant=SimpleNamespace(id=user.tenant_id),
         user=user,
         factory=MagicMock(),
         file_content_loader=MagicMock(),

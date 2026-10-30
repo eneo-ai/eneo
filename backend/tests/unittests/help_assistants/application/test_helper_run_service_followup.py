@@ -31,6 +31,7 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModelResponse,
     ResponseType,
 )
+from eneo.assistants.assistant_service import HelpAssistantTurn
 from eneo.help_assistants.application.helper_run_service import HelperRunService
 from eneo.help_assistants.domain.factory import HelperAssistantsFactory
 from eneo.help_assistants.domain.helper_kind import HelperKind
@@ -233,11 +234,13 @@ async def test_continue_turn_reuses_session_and_persists_question():
     role_service.get_active.return_value = role
 
     assistant_service = AsyncMock()
-    # continue_turn loads the helper via the privileged get_help_assistant
-    # (step 099): the helper lives in the org-space, so a non-admin actor
-    # would 403 through the permission-enforcing get_assistant. It returns the
-    # assistant directly, not the (assistant, permissions) tuple.
-    assistant_service.get_help_assistant.return_value = helper_assistant
+    # continue_turn loads the helper via the privileged
+    # get_help_assistant_for_turn (step 099): the helper lives in the
+    # org-space, so a non-admin actor would 403 through the
+    # permission-enforcing get_assistant.
+    assistant_service.get_help_assistant_for_turn.return_value = HelpAssistantTurn(
+        assistant=helper_assistant, mcp_servers=[]
+    )
 
     session_repo = AsyncMock()
     session_repo.get_for_helper_run.return_value = session

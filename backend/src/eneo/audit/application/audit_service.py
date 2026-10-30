@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Optional, cast
 from uuid import UUID, uuid4
 
 from eneo.audit.application.audit_config_service import AuditConfigService
+from eneo.audit.application.audit_metadata import actor_snapshot, system_actor_snapshot
 from eneo.audit.domain.action_types import ALWAYS_AUDITED_ACTIONS, ActionType
 from eneo.audit.domain.actor_types import ActorType
 from eneo.audit.domain.audit_log import AuditLog
@@ -52,6 +53,23 @@ def _fill_request_context(
     if request_id is None:
         request_id = ctx.get("request_id")
     return ip_address, user_agent, request_id
+
+
+def _with_actor_snapshot(
+    metadata: dict[str, Any],
+    *,
+    user: Optional["UserInDB"],
+    actor_type: ActorType,
+    action: ActionType,
+) -> dict[str, Any]:
+    """Record who acted when the event happens; a caller's actor block wins."""
+    if "actor" in metadata:
+        return metadata
+    if user is not None:
+        return {**metadata, "actor": actor_snapshot(user)}
+    if actor_type == ActorType.SYSTEM:
+        return {**metadata, "actor": system_actor_snapshot(action.value)}
+    return metadata
 
 
 class AuditService:
@@ -122,13 +140,14 @@ class AuditService:
         entity_id: UUID,
         description: str,
         metadata: dict[str, Any],
-        # Pass `user` to derive actor_id/actor_type via audit_actor_for so
-        # service-key callers don't FK-violate audit_log.actor_id (their
-        # synthetic UUID has no users row). Sysadmin paths that act without
-        # a user keep using the explicit form with actor_type=SYSTEM.
+        required: bool = False,
+        # Pass `user` to derive actor fields via audit_actor_for. Service-key
+        # callers write actor_api_key_id instead of FK-invalid audit_log.actor_id.
+        # Sysadmin paths without a user keep using actor_type=SYSTEM explicitly.
         user: Optional["UserInDB"] = None,
         actor_id: Optional[UUID] = None,
         actor_type: ActorType = ActorType.USER,
+        actor_api_key_id: Optional[UUID] = None,
         outcome: Outcome = Outcome.SUCCESS,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
@@ -159,18 +178,27 @@ class AuditService:
         Raises:
             ValueError: If outcome is failure but no error_message provided
         """
-        # Check if action should be logged based on configuration
-        should_log = await self._should_log_action(tenant_id, action)
-        if not should_log:
-            return None
+        if not required:
+            should_log = await self._should_log_action(tenant_id, action)
+            if not should_log:
+                return None
 
         if user is not None:
             from eneo.authentication.auth_models import audit_actor_for
 
             actor_id, actor_type = audit_actor_for(user)
+            active_api_key = getattr(user, "active_api_key", None)
+            if actor_type == ActorType.API_KEY and active_api_key is not None:
+                actor_api_key_id = active_api_key.id
 
-        if actor_type != ActorType.SYSTEM and actor_id is None:
+        if actor_type == ActorType.API_KEY:
+            if actor_api_key_id is None:
+                raise ValueError("actor_api_key_id required for api_key actions")
+        elif actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
+        metadata = _with_actor_snapshot(
+            metadata, user=user, actor_type=actor_type, action=action
+        )
 
         ip_address, user_agent, request_id = _fill_request_context(
             ip_address, user_agent, request_id
@@ -180,6 +208,7 @@ class AuditService:
             id=uuid4(),
             tenant_id=tenant_id,
             actor_id=actor_id,
+            actor_api_key_id=actor_api_key_id,
             actor_type=actor_type,
             action=action,
             entity_type=entity_type,
@@ -278,11 +307,11 @@ class AuditService:
         entity_id: UUID,
         description: str,
         metadata: dict[str, Any],
-        # See `log()` for `user` semantics — derives actor_id/actor_type via
-        # audit_actor_for so service-key callers don't FK-violate.
+        # See `log()` for `user` semantics.
         user: Optional["UserInDB"] = None,
         actor_id: Optional[UUID] = None,
         actor_type: ActorType = ActorType.USER,
+        actor_api_key_id: Optional[UUID] = None,
         outcome: Outcome = Outcome.SUCCESS,
         ip_address: Optional[str] = None,
         user_agent: Optional[str] = None,
@@ -329,9 +358,18 @@ class AuditService:
             from eneo.authentication.auth_models import audit_actor_for
 
             actor_id, actor_type = audit_actor_for(user)
+            active_api_key = getattr(user, "active_api_key", None)
+            if actor_type == ActorType.API_KEY and active_api_key is not None:
+                actor_api_key_id = active_api_key.id
 
-        if actor_type != ActorType.SYSTEM and actor_id is None:
+        if actor_type == ActorType.API_KEY:
+            if actor_api_key_id is None:
+                raise ValueError("actor_api_key_id required for api_key actions")
+        elif actor_type != ActorType.SYSTEM and actor_id is None:
             raise ValueError("actor_id required for non-system actions")
+        metadata = _with_actor_snapshot(
+            metadata, user=user, actor_type=actor_type, action=action
+        )
 
         # Validate
         if outcome == Outcome.FAILURE and not error_message:
@@ -348,6 +386,7 @@ class AuditService:
         params = {
             "tenant_id": str(tenant_id),
             "actor_id": str(actor_id) if actor_id else None,
+            "actor_api_key_id": (str(actor_api_key_id) if actor_api_key_id else None),
             "actor_type": actor_type.value,
             "action": action.value,
             "entity_type": entity_type.value,

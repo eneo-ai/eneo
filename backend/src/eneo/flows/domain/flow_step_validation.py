@@ -1,0 +1,178 @@
+from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from enum import StrEnum
+from typing import Literal
+
+from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowStep
+from eneo.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowOutputMode,
+    FlowOutputType,
+    flow_output_mode_uses_completion_model,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_review_policy import FlowStepReviewPolicy
+from eneo.main.exceptions import BadRequestException
+
+
+class FlowStepValidationError(BadRequestException):
+    def __init__(
+        self,
+        message: str,
+        *,
+        step_order: int,
+        code: str | None = None,
+        context: dict[str, object] | None = None,
+    ) -> None:
+        super().__init__(message, code=code, context=context)
+        self.step_order = step_order
+
+
+def provider_backed_model_required(step_order: int) -> FlowStepValidationError:
+    """The refusal of a step that lacks the provider-backed model it needs.
+    ``context`` carries ``issue_code`` and ``step_order`` so the editor can
+    name the step."""
+    code = FlowApiErrorCode.ASSISTANT_MODEL_PROVIDER_REQUIRED.value
+    return FlowStepValidationError(
+        f"Step {step_order}: Select a provider-backed model before publishing the flow.",
+        step_order=step_order,
+        code=code,
+        context={"issue_code": code, "step_order": step_order},
+    )
+
+
+def require_completion_model_for_step(
+    *, step_order: int, output_mode: str, has_completion_model: bool
+) -> None:
+    """Refuse a step whose output mode calls a completion model while its
+    assistant has none. A run uses only the model the published step binds,
+    so publishing and the run's preflight both ask this before any step runs."""
+    if has_completion_model or not flow_output_mode_uses_completion_model(output_mode):
+        return
+    raise provider_backed_model_required(step_order)
+
+
+class FlowGraphIssueCode(StrEnum):
+    AUDIO_DOCUMENT_TRANSCRIPT_CHAIN_INVALID = "audio_document_transcript_chain_invalid"
+    CITATION_MODE_UNSUPPORTED = "citation_mode_unsupported"
+    DUPLICATE_STEP_NAME = "duplicate_step_name"
+    DUPLICATE_STEP_ORDER = "duplicate_step_order"
+    FLOW_AUDIO_TRANSCRIPTION_INVALID = "flow_audio_transcription_invalid"
+    FLOW_AUDIO_TRANSCRIPTION_MODEL_REQUIRED = "flow_audio_transcription_model_required"
+    FLOW_AUDIO_TRANSCRIPTION_REQUIRED = "flow_audio_transcription_required"
+    FLOW_HAS_NO_STEPS = "flow_has_no_steps"
+    FLOW_SPEAKER_SERVICE_NOT_CHOSEN = "flow_speaker_service_not_chosen"
+    FLOW_SPEAKER_SERVICE_UNAVAILABLE = "flow_speaker_service_unavailable"
+    FLOW_HTTP_POST_OUTPUT_MUST_BE_TERMINAL = "flow_http_post_output_must_be_terminal"
+    FLOW_INPUT_ALIAS_NOT_RECEIVED = "flow_input_alias_not_received"
+    FLOW_INPUT_BINDING_FUTURE_STEP_REFERENCE = (
+        "flow_input_binding_future_step_reference"
+    )
+    FLOW_INPUT_BINDING_INVALID_STEP_REFERENCE = (
+        "flow_input_binding_invalid_step_reference"
+    )
+    FLOW_INPUT_BINDING_UNKNOWN_STEP_ORDER = "flow_input_binding_unknown_step_order"
+    FLOW_INPUT_BINDING_RUNTIME_INPUT_UNUSED = "flow_input_binding_runtime_input_unused"
+    FLOW_INPUT_BINDING_UNSUPPORTED_KEY = "flow_input_binding_unsupported_key"
+    FLOW_INPUT_CONTRACT_INAPPLICABLE = "flow_input_contract_inapplicable"
+    FLOW_REVIEW_POLICY_INVALID = "flow_review_policy_invalid"
+    FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED = (
+        "flow_review_policy_outbound_output_unsupported"
+    )
+    FLOW_STEP_INVALID = "flow_step_invalid"
+    FLOW_STEP_LIMIT_EXCEEDED = "flow_step_limit_exceeded"
+    INPUT_CONTRACT_SOURCE_MISMATCH = "input_contract_source_mismatch"
+    INPUT_CONTRACT_TYPE_MISMATCH = "input_contract_type_mismatch"
+    INVALID_INPUT_CONTRACT_SCHEMA = "invalid_input_contract_schema"
+    INVALID_OUTPUT_CONTRACT_SCHEMA = "invalid_output_contract_schema"
+    OUTPUT_CONTRACT_TEMPLATE_FILL_INCOMPATIBLE = (
+        "output_contract_template_fill_incompatible"
+    )
+    OUTPUT_CONTRACT_TYPE_MISMATCH = "output_contract_type_mismatch"
+    STEP_ORDER_NOT_CONTIGUOUS = "step_order_not_contiguous"
+    TEMPLATE_FILL_REQUIRES_DOCX = "template_fill_requires_docx"
+    TRANSCRIBE_ONLY_VIOLATION = "transcribe_only_violation"
+    TYPED_IO_AUDIO_SOURCE_UNSUPPORTED = "typed_io_audio_source_unsupported"
+    TYPED_IO_DOCUMENT_SOURCE_UNSUPPORTED = "typed_io_document_source_unsupported"
+    TYPED_IO_FILE_SOURCE_UNSUPPORTED = "typed_io_file_source_unsupported"
+    TYPED_IO_FLOW_INPUT_POSITION_INVALID = "typed_io_flow_input_position_invalid"
+    TYPED_IO_INCOMPATIBLE_TYPE_CHAIN = "typed_io_incompatible_type_chain"
+    TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION = (
+        "typed_io_invalid_input_source_combination"
+    )
+    TYPED_IO_INVALID_INPUT_SOURCE_POSITION = "typed_io_invalid_input_source_position"
+    TYPED_IO_MISSING_PREVIOUS_STEP = "typed_io_missing_previous_step"
+    TYPED_IO_MULTIPLE_FLOW_INPUT_STEPS = "typed_io_multiple_flow_input_steps"
+    UNSUPPORTED_INPUT_TYPE = "unsupported_input_type"
+
+
+@dataclass(frozen=True, slots=True)
+class FlowStepGraphIssue:
+    # `code` is the canonical diagnostic; `exception_code`
+    # preserves the legacy BadRequest/FlowStepValidationError `.code` surface.
+    step_order: int | None
+    code: FlowGraphIssueCode
+    message: str
+    exception_kind: Literal["bad_request", "flow_step"]
+    exception_code: str | None = None
+    context: dict[str, object] | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowStepValidationView:
+    step_order: int
+    timeout_seconds: int | None
+    user_description: str | None
+    input_source: FlowInputSource
+    input_type: FlowInputType
+    input_contract: FlowPersistedJsonObject | None
+    output_mode: FlowOutputMode
+    output_type: FlowOutputType
+    output_contract: FlowPersistedJsonObject | None
+    input_bindings: FlowPersistedJsonObject | None
+    input_config: FlowPersistedJsonObject | None
+    output_config: FlowPersistedJsonObject | None
+    review_policy: FlowStepReviewPolicy | None
+    # The step assistant's prompt, a second input channel. Only publish
+    # supplies it (a flow step holds its assistant by id).
+    prompt_template: str | None = None
+
+
+def flow_step_validation_view_from_flow_step(
+    step: FlowStep,
+    *,
+    prompt_template: str | None = None,
+) -> FlowStepValidationView:
+    return FlowStepValidationView(
+        step_order=step.step_order,
+        timeout_seconds=step.timeout_seconds,
+        user_description=step.user_description,
+        input_source=step.input_source,
+        input_type=step.input_type,
+        input_contract=step.input_contract,
+        output_mode=step.output_mode,
+        output_type=step.output_type,
+        output_contract=step.output_contract,
+        input_bindings=step.input_bindings,
+        input_config=step.input_config,
+        output_config=step.output_config,
+        review_policy=step.review_policy,
+        prompt_template=prompt_template,
+    )
+
+
+def flow_step_validation_views_from_flow_steps(
+    steps: Sequence[FlowStep],
+    *,
+    prompt_templates: Mapping[int, str] | None = None,
+) -> list[FlowStepValidationView]:
+    return [
+        flow_step_validation_view_from_flow_step(
+            step,
+            prompt_template=(prompt_templates or {}).get(step.step_order),
+        )
+        for step in steps
+    ]

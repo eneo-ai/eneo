@@ -27,6 +27,7 @@ from eneo.database.tables.object_content_table import (
 from eneo.database.tables.spaces_table import Spaces, SpacesTranscriptionModels
 from eneo.embedding_models.infrastructure.datastore import Datastore
 from eneo.files.chunk_embedding_list import ChunkEmbeddingList
+from eneo.files.transcriber import TranscribedAudio
 from eneo.info_blobs.info_blob_service import InfoBlobService
 from eneo.jobs.job_models import JobFailureCode, Task
 from eneo.jobs.job_staging import job_staging_path
@@ -300,7 +301,9 @@ async def test_transcription_admission_failure_skips_provider_work(
     )
     transcriber = AsyncMock()
     transcriber.prepare_transcription.return_value = object()
-    transcriber.transcribe_prepared_from_filepath.return_value = "never used"
+    transcriber.transcribe_prepared_from_filepath.return_value = TranscribedAudio(
+        text="never used", duration_seconds=1.0
+    )
     task_container.transcriber.override(providers.Object(transcriber))
 
     async with db_container():
@@ -800,8 +803,9 @@ async def test_transcription_failure_preserves_committed_prior_knowledge(
     task_container = _sessionless_container(user=user, tenant=tenant)
     transcriber = AsyncMock()
     transcriber.prepare_transcription.return_value = object()
-    transcriber.transcribe_prepared_from_filepath.return_value = (
-        " \n " if failure == "blank" else "replacement transcript"
+    transcriber.transcribe_prepared_from_filepath.return_value = TranscribedAudio(
+        text=" \n " if failure == "blank" else "replacement transcript",
+        duration_seconds=9.5,
     )
     task_container.transcriber.override(providers.Object(transcriber))
     embeddings = AsyncMock()
@@ -876,7 +880,9 @@ async def test_transcription_retains_original_and_repairs_retry_at_full_quota(
     task_container = _sessionless_container(user=user, tenant=tenant)
     transcriber = AsyncMock()
     transcriber.prepare_transcription.return_value = object()
-    transcriber.transcribe_prepared_from_filepath.return_value = transcript
+    transcriber.transcribe_prepared_from_filepath.return_value = TranscribedAudio(
+        text=transcript, duration_seconds=9.5
+    )
     task_container.transcriber.override(providers.Object(transcriber))
     embeddings = AsyncMock()
 
@@ -973,7 +979,9 @@ async def test_transcription_retains_original_and_repairs_retry_at_full_quota(
     retry_container = _sessionless_container(user=user, tenant=tenant)
     retry_transcriber = AsyncMock()
     retry_transcriber.prepare_transcription.return_value = object()
-    retry_transcriber.transcribe_prepared_from_filepath.return_value = transcript
+    retry_transcriber.transcribe_prepared_from_filepath.return_value = TranscribedAudio(
+        text=transcript, duration_seconds=9.5
+    )
     retry_container.transcriber.override(providers.Object(retry_transcriber))
     retry_embeddings = AsyncMock()
     retry_embeddings.get_embeddings.side_effect = embed

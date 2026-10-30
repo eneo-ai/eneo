@@ -53,7 +53,9 @@ class NoIntricGuardTests(unittest.TestCase):
         root = self.make_repo()
         target = root / "backend" / "alembic" / "versions" / "20260629_bad.py"
         target.parent.mkdir(parents=True)
-        target.write_text("from intric.jobs.task_models import UploadInfoBlob\n", encoding="utf-8")
+        target.write_text(
+            "from intric.jobs.task_models import UploadInfoBlob\n", encoding="utf-8"
+        )
         subprocess.run(
             ["git", "add", str(target.relative_to(root))],
             cwd=root,

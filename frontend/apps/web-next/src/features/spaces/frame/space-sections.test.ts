@@ -81,6 +81,35 @@ describe("spaceSections", () => {
     ]);
   });
 
+  it("counts the flows on their tab once their list is read", () => {
+    const space = makeSpace({});
+    const flowsTab = (flowCount?: number) =>
+      spaceSections(space, canFor(space), "space-1", { flows: true, flowCount }).find(
+        (section) => section.id === "flows"
+      );
+    expect(flowsTab()).not.toHaveProperty("count");
+    expect(flowsTab(4)?.count).toBe(4);
+  });
+  it("adds flows after the apps only when the tenant has them", () => {
+    const space = makeSpace({});
+    const ids = (flows: boolean) =>
+      spaceSections(space, canFor(space), "space-1", { flows }).map((section) => section.id);
+    expect(ids(false)).not.toContain("flows");
+    expect(ids(true).slice(2, 4)).toEqual(["apps", "flows"]);
+    expect(spaceSections(space, canFor(space), "space-1", { flows: true })[3]?.href).toBe(
+      "/spaces/space-1/flows"
+    );
+
+    const org = makeSpace({ overrides: { organization: true } });
+    expect(
+      spaceSections(org, canFor(org), "organization", { flows: true }).map((section) => section.id)
+    ).not.toContain("flows");
+    const noApps = makeSpace({ resourcePermissions: [], permissions: ["read"] });
+    expect(
+      spaceSections(noApps, canFor(noApps), "space-1", { flows: true }).map((s) => s.id)
+    ).not.toContain("flows");
+  });
+
   it("counts only the space's own knowledge", () => {
     const space = makeSpace({
       collections: [makeCollection(), makeCollection({ id: "x", space_id: "org" })],
@@ -125,6 +154,11 @@ describe("spaceRoute", () => {
     // Only the editor itself: an app's run page and results keep the frame.
     expect(spaceRoute(["apps", "p1", "results", "r1"])).toMatchObject({ kind: "page" });
     expect(spaceRoute(["skills", "s1", "edit"])).toMatchObject({ kind: "page", section: "skills" });
+  });
+
+  it("gives a flow's page the workspace and keeps the flow list a tab", () => {
+    expect(spaceRoute(["flows", "f1"])).toEqual({ kind: "workspace" });
+    expect(spaceRoute(["flows"])).toEqual({ kind: "page", section: "flows", isSectionRoot: true });
   });
 });
 

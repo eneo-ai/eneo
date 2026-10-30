@@ -21,6 +21,7 @@ from eneo.ai_models.completion_models.completion_model import (
     ToolCallMetadata,
 )
 from eneo.assistants.api.assistant_models import AssistantResponse
+from eneo.authentication.principal_types import PrincipalType
 from eneo.conversations.ui_message_stream import (
     UI_MESSAGE_STREAM_HEADERS,
     _tool_chunks,
@@ -67,6 +68,7 @@ def test_tool_chunks_preserve_display_metadata_for_capability_and_skill_calls():
         "app_view": None,
         "approved": None,
         "result_status": None,
+        "structured_content": None,
     }
     assert chunks[1]["providerMetadata"]["eneo"]["title"] == "Planning Skill"
 
@@ -108,7 +110,8 @@ def _generated_file() -> File:
         mimetype="image/png",
         file_type=FileType.IMAGE,
         blob=b"\x89PNG",
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
     )
 
@@ -228,6 +231,33 @@ async def test_golden_transcript():
         "prompt_tokens": 10,
         "completion_tokens": 5,
         "turn_tokens": 15,
+        "context_prompt_tokens": 10,
+        "context_completion_tokens": 5,
+    }
+
+
+async def test_token_usage_carries_final_request_counts_separately():
+    """Tool rounds re-send the conversation, so the cumulative prompt count
+    overstates the context window; the final request's counts travel too."""
+    completions = [
+        Completion(
+            response_type=ResponseType.TOKEN_USAGE,
+            usage=TokenUsage(
+                prompt_tokens=800,
+                completion_tokens=50,
+                context_prompt_tokens=120,
+                context_completion_tokens=10,
+            ),
+        ),
+    ]
+    chunks = await _collect(_response(completions))
+    usage = next(c for c in chunks if c["type"] == "data-token-usage")
+    assert usage["data"] == {
+        "prompt_tokens": 800,
+        "completion_tokens": 50,
+        "turn_tokens": 850,
+        "context_prompt_tokens": 120,
+        "context_completion_tokens": 10,
     }
 
 
@@ -582,6 +612,7 @@ async def test_tool_calls_and_approval_pause_resume():
         "app_view": None,
         "approved": True,
         "result_status": "approved",
+        "structured_content": None,
     }
 
     tool_output = next(c for c in chunks if c["type"] == "tool-output-available")
@@ -739,6 +770,7 @@ def test_tool_metadata_carries_bundling_view_and_status_on_every_chunk():
             "app_view",
             "approved",
             "result_status",
+            "structured_content",
         ]
         assert eneo["is_bundled"] is True
         assert eneo["app_view"] == app_view
@@ -888,3 +920,36 @@ async def test_sse_framing_and_headers():
     parsed = [json.loads(payload) for payload in payloads[:-1]]
     assert parsed[0]["type"] == "start"
     assert parsed[-1]["type"] == "finish"
+
+
+def test_tool_metadata_carries_structured_content_for_internal_calls_only():
+    # A flow run started from the flow chat: the client draws a run card
+    # from the run's id. An external tool's structured content, which an
+    # MCP App view renders, is read lazily and never streamed.
+    internal = ToolCallMetadata(
+        server_name="flows",
+        tool_name="run_flow",
+        tool_call_id="call-run",
+        approved=True,
+        result_status="succeeded",
+        is_internal=True,
+        structured_content={"flow_id": "flow-1", "run_id": "run-1"},
+    )
+    external = ToolCallMetadata(
+        server_name="weather",
+        tool_name="forecast",
+        tool_call_id="call-weather",
+        approved=True,
+        result_status="succeeded",
+        is_internal=False,
+        structured_content={"temperature": 12},
+    )
+
+    chunks = _tool_chunks([internal, external], {})
+
+    by_call = {c["toolCallId"]: c["providerMetadata"]["eneo"] for c in chunks}
+    assert by_call["call-run"]["structured_content"] == {
+        "flow_id": "flow-1",
+        "run_id": "run-1",
+    }
+    assert by_call["call-weather"]["structured_content"] is None

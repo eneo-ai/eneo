@@ -194,10 +194,6 @@ class AdminApiKeysQueryParams(BaseModel):
     expires_within_days: int | None = None
     ownership: ApiKeyOwnership | None = None
     min_permission: ApiKeyPermission | None = None
-    eligible_for_module_binding: bool = Field(
-        default=False,
-        description="Only return keys that can be bound to a module installation.",
-    )
 
 
 class AdminApiKeyUsageQueryParams(BaseModel):

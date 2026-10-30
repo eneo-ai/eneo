@@ -17,6 +17,7 @@ cd eneo/docs/deployment/
 
 # You'll find these files:
 # - docker-compose.yml
+# - .env.template
 # - env_backend.template
 # - env_frontend.template
 # - env_db.template
@@ -37,6 +38,7 @@ Before you begin, ensure you have the following:
 Review this checklist before you begin deployment. Ensure your setup meets these security requirements:
 
 - [ ] Domain and email are correctly set in `docker-compose.yml`
+- [ ] The three third-party image digest suffixes are set in `.env`, and the selected release's `release.env` is downloaded
 - [ ] A strong, unique password will be generated for `POSTGRES_PASSWORD`
 - [ ] Strong, unique secrets will be generated for `JWT_SECRET` and `URL_SIGNING_KEY`
 - [ ] You will change the default user password immediately after first login
@@ -52,7 +54,10 @@ The provided `docker-compose.yml` file defines all the services needed to run En
 - **`frontend`**: The web interface for Eneo
 - **`backend`**: The main API and application logic
 - **`tool-runtime`**: Isolated execution for bundled tools, enabled by administrators
-- **`worker`**: A background service for processing heavy tasks like document ingestion, crawling, and audit log exports
+- **`worker`**: The general ARQ worker for document ingestion, integrations, and audit jobs
+- **`crawler-worker`**: The dedicated ARQ worker for website crawls on the isolated crawler queue
+- **`task-execution-worker`**: The ARQ worker that executes Flow runs on the dedicated execution-capacity queue
+- **`task-maintenance-worker`**: The ARQ worker and scheduler for Flow recovery, review expiry, and audit/webhook outboxes
 - **`db`**: A PostgreSQL database with the pgvector extension for storing all application data
 - **`redis`**: An in-memory data store used for caching and managing background jobs
 
@@ -61,6 +66,8 @@ The provided `docker-compose.yml` file defines all the services needed to run En
 > This `docker-compose.yml` file with Traefik is a convenient, all-in-one solution, but it is **not mandatory**.
 >
 > The Eneo frontend and backend images are self-contained and can be run in any container environment. You can integrate them into your own custom `docker-compose.yml` file or deploy them using other tools like Nginx, Caddy, or cloud-based load balancers if you prefer.
+> Custom deployments must run all three worker roles. The general worker does
+> not consume jobs from the platform execution or maintenance queues.
 
 ## 🚀 Deployment in 4 Steps
 
@@ -75,6 +82,7 @@ cp env_backend.template env_backend.env
 cp env_frontend.template env_frontend.env
 cp env_db.template env_db.env
 cp .env.template .env
+chmod 600 .env env_backend.env env_frontend.env env_db.env
 python3 setup.py
 ```
 
@@ -84,7 +92,23 @@ Download the selected release's completed `release.env` and `release.json` along
 
 This is the most critical step. You will set the required variables for your specific setup.
 
-#### A. Domain & SSL in `docker-compose.yml`
+#### A. Immutable Images in `.env`
+
+Docker Compose rejects missing or empty third-party image digests. Set these
+three values in `.env`, using only the 64-character hexadecimal suffix after
+`sha256:`:
+
+```dotenv
+TRAEFIK_IMAGE_DIGEST=
+PGVECTOR_IMAGE_DIGEST=
+REDIS_IMAGE_DIGEST=
+```
+
+Use organization-approved Traefik, pgvector, and Redis release digests. The Eneo
+application images come from the release bundle's `release.env`, which pins them
+by digest. Keep both with each deployment backup.
+
+#### B. Domain & SSL in `docker-compose.yml`
 
 You need to tell Traefik (our reverse proxy) which domain to use and what email to use for SSL certificate registration.
 
@@ -105,7 +129,7 @@ sed -i 's/your-domain.com/eneo.your-company.com/g' docker-compose.yml
 
 </details>
 
-#### B. Database Password in `env_db.env`
+#### C. Database Password in `env_db.env`
 
 Generate a secure password for your PostgreSQL database.
 
@@ -114,7 +138,7 @@ Generate a secure password for your PostgreSQL database.
 echo "POSTGRES_PASSWORD=$(openssl rand -base64 32)" >> env_db.env
 ```
 
-#### C. Backend Secrets & API Keys in `env_backend.env`
+#### D. Backend Secrets & API Keys in `env_backend.env`
 
 Configure the backend with security secrets and your chosen AI provider's API key.
 
@@ -127,7 +151,7 @@ echo "JWT_SECRET=$(openssl rand -hex 32)" >> env_backend.env
 echo "URL_SIGNING_KEY=$(openssl rand -hex 32)" >> env_backend.env
 ```
 
-#### D. Frontend Configuration in `env_frontend.env`
+#### E. Frontend Configuration in `env_frontend.env`
 
 The frontend needs three URLs configured and must share the exact same `JWT_SECRET` as the backend.
 
@@ -233,7 +257,7 @@ Eneo uses several Docker volumes for persistent data storage:
 
 ## 🔄 Upgrading Your Eneo Instance
 
-### Production Best Practice: Version Pinning
+### Production Requirement: Pinned Images
 
 Frontend, backend, and tools runtime share one version and source revision. Use the
 completed bundle from [GitHub Releases](https://github.com/eneo-ai/eneo/releases):
@@ -251,6 +275,11 @@ rollback, subject to the release's database compatibility guidance.
 The runtime is included automatically. Administrators still activate capabilities
 in Admin → Tools. See [Tools runtime](deployment/TOOL_RUNTIME.md) for migration
 from the old overlay, diagnostics, and deployments that omit the runtime.
+
+Traefik, pgvector, and Redis are third-party images: set their three digest
+suffixes in `.env`. Compose builds each identity as
+`repository@sha256:<digest-suffix>` and rejects an unset value. Use approved
+release artifacts and keep the previous set with the matching backup.
 
 ### Before You Upgrade
 
@@ -374,7 +403,7 @@ Allow each tenant to use their own IdP (Entra ID, Auth0, Okta, etc.):
 
 ```bash
 # 1. Enable federation mode in env_backend.env
-FEDERATION_PER_TENANT_ENABLED=true
+FEDERATION_ENABLED=true
 ENCRYPTION_KEY=<same-key-as-above>
 
 # 2. Configure per-tenant IdP via API
@@ -489,7 +518,7 @@ If you see `middleware "redirect-to-https@docker" does not exist` in Traefik log
   restarting backend or worker.
 - For PostgreSQL-inline session uploads, the effective limit is the smaller of
   the admin policy and the operator-owned
-  `OBJECT_CONTENT_INLINE_MAXIMUM_BYTES` safety ceiling.
+  PostgreSQL inline storage capacity.
 - For object-store session uploads, the effective limit is the smaller of the
   admin policy and the portable multipart envelope derived from deployment
   transport settings.

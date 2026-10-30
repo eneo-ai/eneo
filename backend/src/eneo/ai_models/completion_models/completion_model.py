@@ -1,12 +1,22 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from collections.abc import Mapping
+from dataclasses import dataclass, field
 from decimal import Decimal
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Optional, Union, cast
+from typing import TYPE_CHECKING, Any, Optional, Protocol, Union, cast
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, computed_field, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    FiniteFloat,
+    computed_field,
+    field_validator,
+    model_validator,
+)
+from pydantic_core import PydanticCustomError
 
 from eneo.completion_models.domain.model_kwargs_capabilities import (
     SupportedModelKwargs,
@@ -15,6 +25,7 @@ from eneo.completion_models.domain.model_kwargs_capabilities import (
 )
 from eneo.files.file_models import File
 from eneo.logging.logging import LoggingDetails
+from eneo.main.exceptions import ValidationException
 from eneo.main.models import NOT_PROVIDED, InDB, ModelId, NotProvided, partial_model
 from eneo.model_providers.domain.model_route import resolve_model_route
 from eneo.security_classifications.presentation.security_classification_models import (
@@ -126,8 +137,9 @@ class ToolCallMetadata:
     # out-of-band facts about the call, e.g. OpenTelemetry GenAI usage
     # attributes (`gen_ai.usage.input_tokens`) from a model-backed tool.
     meta: Optional[dict[str, Any]] = None
-    # The tool result's MCP `structuredContent`, kept only for a call whose
-    # tool has an approved MCP App view: it is what the view renders from.
+    # The tool result's MCP `structuredContent`, kept for a call whose tool
+    # has an approved MCP App view (it is what the view renders from) and for
+    # a call on one of Eneo's own servers (a flow run's id, for its run card).
     structured_content: Optional[dict[str, Any]] = None
     # The approved MCP App view of the tool, as `{"view_id", "mcp_server_id",
     # "ui"}`: the stored view to show for this call, the server it belongs to
@@ -178,10 +190,15 @@ class GeneratedFile:
 class Completion:
     reasoning_token_count: Optional[int] = 0
     text: Optional[str] = None
+    raw_text_bytes: Optional[int] = None
+    raw_text_sha256: Optional[str] = None
+    # Retained only for truncated responses until rejection sampling consumes it.
+    raw_text: Optional[str] = field(default=None, repr=False)
     reasoning_content: Optional[str] = None  # For REASONING events (thinking text)
     reference_chunks: Optional[list[InfoBlobChunkInDBWithScore]] = None
     tool_call: Optional[FunctionCall] = None
     tool_calls_metadata: Optional[list[ToolCallMetadata]] = None  # For TOOL_CALL events
+    provider_response_id: Optional[str] = None
     # TOOL_CALL_DELTA events: the next piece of a pending call's argument JSON
     # as the model writes it, so a client can show the arguments (a document's
     # text) before the call runs. Never persisted.
@@ -198,6 +215,7 @@ class Completion:
     # same turn. Never persisted.
     reference_url: Optional[str] = None
     stop: bool = False
+    finish_reason: Optional[str] = None
     error: Optional[str] = None
     error_code: Optional[int] = None
     # Public reason for an ERROR event, e.g. ``provider_unreachable``.
@@ -219,12 +237,72 @@ class Completion:
     skill_context_tokens: Optional[int] = None
 
 
+# Writing any of these can give a completion model a different provider route.
+COMPLETION_MODEL_ROUTE_FIELDS = ("name", "litellm_model_name")
+
+
+class DeclaredToolCapabilities(Protocol):
+    supports_tool_calling: bool
+    supports_strict_tool_schema: bool
+
+
+def sends_strict_tool_schemas(model: DeclaredToolCapabilities) -> bool:
+    """Return the effective strict tool schema support of one model.
+
+    A strict tool schema is still a tool schema, so a model that cannot call
+    tools never gets one, whatever it declares.
+    """
+    return model.supports_strict_tool_schema and model.supports_tool_calling
+
+
+def moves_completion_model_route(
+    *,
+    current: Mapping[str, object],
+    provided: Mapping[str, object],
+    provider_type: str | None = None,
+) -> bool:
+    """Return whether a write gives the model a different provider route.
+
+    Compares the routes the canonical resolver produces, so a rename that the
+    model's explicit LiteLLM route overrides is not mistaken for a move. Every
+    write interface asks this before keeping a strict tool schema declaration.
+    """
+    proposed = {**current, **provided}
+    return _resolved_route(current, provider_type) != _resolved_route(
+        proposed, provider_type
+    )
+
+
+def _resolved_route(fields: Mapping[str, object], provider_type: str | None) -> str:
+    name = fields.get("name")
+    litellm_model_name = fields.get("litellm_model_name")
+    return resolve_model_route(
+        model_name=str(name) if name is not None else "",
+        provider_type=provider_type,
+        litellm_model_name=(
+            str(litellm_model_name) if litellm_model_name is not None else None
+        ),
+    )
+
+
 class CompletionModelBase(BaseModel):
     name: str
     nickname: Optional[str] = None
     family: Optional[str] = None
-    max_input_tokens: int
-    max_output_tokens: int
+    max_input_tokens: int | None = Field(
+        gt=0,
+        description=(
+            "Max input tokens. Null only on a stored model whose limit is "
+            "missing; it cannot serve requests until an admin enters it."
+        ),
+    )
+    max_output_tokens: int | None = Field(
+        gt=0,
+        description=(
+            "Max output tokens. Null only on a stored model whose limit is "
+            "missing; it cannot serve requests until an admin enters it."
+        ),
+    )
     is_deprecated: bool
     nr_billion_parameters: Optional[int] = None
     hf_link: Optional[str] = None
@@ -237,6 +315,16 @@ class CompletionModelBase(BaseModel):
     vision: bool
     reasoning: bool
     supports_tool_calling: bool = False
+    supports_strict_tool_schema: bool = Field(
+        default=False,
+        description=(
+            "Declared support for native strict tool schemas on this model's "
+            "provider route. Effective support also requires "
+            "supports_tool_calling, and the declaration is withdrawn when the "
+            "model resolves to a different provider route or its provider "
+            "endpoint moves."
+        ),
+    )
     base_url: Optional[str] = None
     litellm_model_name: Optional[str] = None
     model_kwargs_capabilities: Optional[SupportedModelKwargs] = None
@@ -254,24 +342,23 @@ class CompletionModelBase(BaseModel):
         if raw_capabilities is None:
             return data
 
-        capabilities = coerce_model_kwargs_capabilities(
-            raw_capabilities,
-            completion_model_id=getattr(data, "id", None),
-            tenant_id=getattr(data, "tenant_id", None),
-        )
-        if capabilities is not None:
-            return data
-
+        # The stored JSON is read once, by its owner: a legacy untagged
+        # snapshot is kept, and a malformed one fails closed instead of being
+        # validated here as if its tag did not matter.
         values: dict[str, object] = {}
         for field_name in cls.model_fields:
             if hasattr(data, field_name):
                 values[field_name] = getattr(data, field_name)
-        values["model_kwargs_capabilities"] = None
+        values["model_kwargs_capabilities"] = coerce_model_kwargs_capabilities(
+            raw_capabilities,
+            completion_model_id=getattr(data, "id", None),
+            tenant_id=getattr(data, "tenant_id", None),
+        )
         return values
 
     @computed_field  # type: ignore[prop-decorator]
     @property
-    def token_limit(self) -> int:
+    def token_limit(self) -> int | None:
         """Backward-compat: exposed in JSON responses for frontend."""
         return self.max_input_tokens
 
@@ -301,13 +388,108 @@ class CompletionModelBase(BaseModel):
         )
 
 
+TOKEN_LIMIT_REQUIRED = "token_limit_required"
+TOKEN_LIMIT_REQUIRED_MESSAGE = (
+    "A completion model needs both max_input_tokens and max_output_tokens, "
+    "so a token limit cannot be blank"
+)
+COMPLETION_MODEL_TOKEN_LIMITS = ("max_input_tokens", "max_output_tokens")
+
+
+def refuse_blank_token_limit(value: int | None) -> int | None:
+    """Refuse a write that states a token limit as blank.
+
+    A completion model needs both limits to serve any request, so a create or
+    update may set a limit to a positive number or leave it out (an update
+    then keeps the stored value), but never clear it.
+    """
+    if value is None:
+        raise PydanticCustomError(TOKEN_LIMIT_REQUIRED, TOKEN_LIMIT_REQUIRED_MESSAGE)
+    return value
+
+
+def require_token_limits(
+    *, max_input_tokens: int | None, max_output_tokens: int | None
+) -> None:
+    """Refuse to save a completion model whose resulting limits are missing.
+
+    A stored limit can be empty on a model an earlier release damaged; the
+    save that touches it must enter the limit, and the error says which.
+    """
+    missing = [
+        field
+        for field, value in (
+            ("max_input_tokens", max_input_tokens),
+            ("max_output_tokens", max_output_tokens),
+        )
+        if value is None
+    ]
+    if missing:
+        raise ValidationException(
+            f"{' and '.join(missing)} must be set before this model can be "
+            "saved: a completion model needs both token limits"
+        )
+
+
+def _token_limit_write_schema(description: str, *, required: bool):
+    """Publish the token limits of a write request as they are validated.
+
+    The fields are typed ``int | None`` because they are shared with the
+    stored-model projections, where a damaged row can hold null; a write never
+    accepts null, so its schema drops the null option.
+    """
+
+    def rewrite(schema: dict[str, Any]) -> None:
+        properties = cast(dict[str, dict[str, Any]], schema.get("properties", {}))
+        for field_name, label in zip(
+            COMPLETION_MODEL_TOKEN_LIMITS, ("Max input tokens", "Max output tokens")
+        ):
+            prop = properties.get(field_name)
+            if prop is None:
+                continue
+            options = cast(list[dict[str, Any]], prop.pop("anyOf", []))
+            for option in options:
+                if option.get("type") != "null":
+                    prop.update(option)
+            prop.pop("default", None)
+            prop["description"] = f"{label}. {description}"
+        if required:
+            schema["required"] = sorted(
+                {*schema.get("required", []), *COMPLETION_MODEL_TOKEN_LIMITS}
+            )
+
+    return rewrite
+
+
+TOKEN_LIMIT_UPDATE_SCHEMA = _token_limit_write_schema(
+    "A positive whole number. Omit to keep the stored value; null is refused.",
+    required=False,
+)
+
+
 class CompletionModelCreate(CompletionModelBase):
-    pass
+    model_config = ConfigDict(
+        json_schema_extra=_token_limit_write_schema(
+            "Required, a positive whole number; null is refused.", required=True
+        )
+    )
+
+    @field_validator("max_input_tokens", "max_output_tokens")
+    @classmethod
+    def _refuse_blank_token_limit(cls, value: int | None) -> int | None:
+        return refuse_blank_token_limit(value)
 
 
 @partial_model
 class CompletionModelUpdate(CompletionModelBase):
+    model_config = ConfigDict(json_schema_extra=TOKEN_LIMIT_UPDATE_SCHEMA)
+
     id: UUID
+
+    @field_validator("max_input_tokens", "max_output_tokens")
+    @classmethod
+    def _refuse_blank_token_limit(cls, value: int | None) -> int | None:
+        return refuse_blank_token_limit(value)
 
 
 class CompletionModelUpdateFlags(BaseModel):
@@ -364,6 +546,7 @@ class CompletionModelPublic(CompletionModel):
             vision=completion_model.vision,
             reasoning=completion_model.reasoning,
             supports_tool_calling=completion_model.supports_tool_calling,
+            supports_strict_tool_schema=completion_model.supports_strict_tool_schema,
             base_url=completion_model.base_url,
             litellm_model_name=completion_model.litellm_model_name,
             model_kwargs_capabilities=completion_model.model_kwargs_capabilities,
@@ -409,6 +592,7 @@ class CompletionModelResponse(BaseModel):
     model: CompletionModel
     extended_logging: Optional[LoggingDetails] = None
     total_token_count: int
+    knowledge_trace: Optional["KnowledgeTrace"] = None
     usage: Optional[TokenUsage] = None
 
 
@@ -439,6 +623,31 @@ class Message(BaseModel):
     tool_calls: list[MessageToolCall] = []
 
 
+class KnowledgeTraceGroup(BaseModel):
+    source_id: str
+    source_id_short: str
+    source_title: Optional[str] = None
+    start_chunk: int
+    end_chunk: int
+    chunk_count: int
+    relevance_score: Optional[float] = None
+
+
+class KnowledgeTrace(BaseModel):
+    version: int = 1
+    selection_basis: str
+    raw_source_count: int = 0
+    raw_chunk_count: int = 0
+    included_source_count: int = 0
+    not_included_source_count: int = 0
+    included_chunk_count: int = 0
+    knowledge_tokens: int = 0
+    truncated_by_token_budget: bool = False
+    included_source_ids: list[str] = []
+    not_included_source_ids: list[str] = []
+    included_groups: list[KnowledgeTraceGroup] = []
+
+
 class Context(BaseModel):
     input: str
     token_count: int = 0
@@ -446,16 +655,19 @@ class Context(BaseModel):
     messages: list[Message] = []
     images: list[File] = []
     function_definitions: list[FunctionDefinition] = []
+    knowledge_trace: Optional[KnowledgeTrace] = None
 
 
 class ModelKwargs(BaseModel):
-    temperature: Optional[float] = None
-    top_p: Optional[float] = None
+    # Finite numbers only: NaN and infinity compare false against every
+    # advertised range, so they are refused here, before edits or requests.
+    temperature: Optional[FiniteFloat] = None
+    top_p: Optional[FiniteFloat] = None
     reasoning_effort: Optional[str] = None
     verbosity: Optional[str] = None
     response_format: Optional[dict[str, object]] = None
-    presence_penalty: Optional[float] = None
-    frequency_penalty: Optional[float] = None
+    presence_penalty: Optional[FiniteFloat] = None
+    frequency_penalty: Optional[FiniteFloat] = None
     top_k: Optional[int] = None
 
     def filter_unsupported(self, supported: SupportedModelKwargs) -> "ModelKwargs":

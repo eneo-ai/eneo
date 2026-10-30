@@ -15,7 +15,7 @@ import {
 import { CircleAlert, RefreshCw } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useRef, useState, type RefObject } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { useAppContext } from "@/components/providers/app-context";
 import { queuePartnerUpdate } from "@/features/chat/partner-updates";
 import { useSpace } from "@/features/spaces/use-space";
@@ -402,7 +402,7 @@ export function PersonalChatVersionNotice({
   const latest = row.latest;
   return (
     <div className="flex flex-col gap-2">
-      <QuietBanner
+      <Banner
         status="info"
         title={t("personal_chat_skills_version_notice", { version: row.pinnedNumber })}
         endContent={

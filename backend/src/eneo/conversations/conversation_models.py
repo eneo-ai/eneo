@@ -98,7 +98,7 @@ class PreflightResponse(BaseModel):
     this local estimate, especially for multimodal inputs. The frontend pairs
     this delta with the persisted history tokens to project total context fill.
 
-    `model_name` and `context_window` are echoed so a client can compute the
+    `model_name` and `max_input_tokens` are echoed so a client can compute the
     percentage fill locally without a separate round-trip to fetch model
     metadata.
 
@@ -112,9 +112,9 @@ class PreflightResponse(BaseModel):
     file_tokens: int
     excluded_file_count: int = 0
     model_name: str
-    context_window: int
+    max_input_tokens: int | None
     # Tokens kept free for the live question; persistent content (prompt +
-    # attachments) must fit within context_window - context_reserve_tokens. Lets
+    # attachments) must fit within max_input_tokens - context_reserve_tokens. Lets
     # a client draw the "won't fit" line without hardcoding the policy.
     context_reserve_tokens: int = 0
     # Persistent baseline for an assistant target: the system prompt and the
@@ -127,17 +127,19 @@ class PreflightResponse(BaseModel):
     prompt_tokens: int = Field(
         default=0,
         description=(
-            "Model-aware estimate of the initial system message and Skill tool "
-            "definitions. Includes skill_context_tokens."
+            "Context reserved for the initial system message and Skill tool "
+            "definitions. This is the budget the server enforces, so it can sit "
+            "above what the provider ends up charging. Includes "
+            "skill_context_tokens."
         ),
     )
-    # LiteLLM-measured Skill-owned subset of prompt_tokens. Callers must not add
-    # it to the total a second time.
+    # The Skill-owned subset of prompt_tokens, reserved the same way. Callers
+    # must not add it to the total a second time.
     skill_context_tokens: int = Field(
         default=0,
         description=(
-            "Model-aware Skill-owned subset of prompt_tokens. Already included; "
-            "do not add it to the preflight total again."
+            "Skill-owned subset of the reserved prompt_tokens. Already "
+            "included; do not add it to the preflight total again."
         ),
     )
 

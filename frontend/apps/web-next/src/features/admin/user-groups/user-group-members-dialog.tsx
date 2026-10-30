@@ -12,7 +12,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import { Search, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { revealProblems } from "@/components/composites/field-problem";
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
@@ -155,7 +155,7 @@ function AddMembers({
                 density="compact"
                 hasDividers
                 // The options scroll in their own box; the problem below stays in view.
-                className="[&_[role=group]]:border-ax-border [&_[role=group]]:rounded-ax-element [&_[role=group]]:max-h-60 [&_[role=group]]:overflow-y-auto [&_[role=group]]:border [&_[role=group]]:px-3 [&_[role=group]]:py-1"
+                controlClassName="border-ax-border rounded-ax-element max-h-60 overflow-y-auto border px-3 py-1"
                 status={problem ? { type: "error", message: problem } : undefined}
               >
                 {users.map((user) => {

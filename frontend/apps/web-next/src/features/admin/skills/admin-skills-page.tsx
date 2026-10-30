@@ -325,14 +325,18 @@ function PolicyEditor({
                         )}
                       </td>
                       <td className="p-3 text-right tabular-nums">
-                        {t("skills_runtime_tokens", {
-                          count: model.max_input_tokens.toLocaleString(locale)
-                        })}
+                        {model.max_input_tokens == null
+                          ? t("context_window_unknown")
+                          : t("skills_runtime_tokens", {
+                              count: model.max_input_tokens.toLocaleString(locale)
+                            })}
                       </td>
                       <td className="p-3 text-right tabular-nums">
-                        {t("skills_runtime_tokens", {
-                          count: model.skill_context_token_allowance.toLocaleString(locale)
-                        })}
+                        {model.skill_context_token_allowance == null
+                          ? t("context_window_unknown")
+                          : t("skills_runtime_tokens", {
+                              count: model.skill_context_token_allowance.toLocaleString(locale)
+                            })}
                       </td>
                       <td className="p-3">
                         <Badge variant={model.supports_tool_calling ? "secondary" : "outline"}>

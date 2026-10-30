@@ -2,7 +2,7 @@
 
 Eneo exposes a REST API (FastAPI) that the web app itself runs on. This page describes the API contract: where the API lives, how to authenticate, how the chat endpoint streams, and the pagination, error, and rate-limit conventions that apply everywhere. The endpoint catalogue is the OpenAPI specification served by your own instance, not this page.
 
-import { Callout } from 'nextra/components'
+import { Callout } from "nextra/components";
 
 ---
 
@@ -12,17 +12,19 @@ All versioned endpoints are mounted under the backend's `API_PREFIX`, which is `
 
 The interactive documentation and the specification are served at the **root** of the backend, not under the prefix:
 
-| Resource | Production (behind the reference Traefik setup) | Local development |
-|----------|--------------------------------------------------|-------------------|
-| Swagger UI | `https://your-domain.com/docs` | `http://localhost:8123/docs` |
-| OpenAPI JSON | `https://your-domain.com/openapi.json` | `http://localhost:8123/openapi.json` |
-| ReDoc | not routed | `http://localhost:8123/redoc` |
-| Backend version | `https://your-domain.com/version` | `http://localhost:8123/version` |
+| Resource        | Production (behind the reference Traefik setup) | Local development                    |
+| --------------- | ----------------------------------------------- | ------------------------------------ |
+| Swagger UI      | `https://your-domain.com/docs`                  | `http://localhost:8123/docs`         |
+| OpenAPI JSON    | `https://your-domain.com/openapi.json`          | `http://localhost:8123/openapi.json` |
+| ReDoc           | not routed                                      | `http://localhost:8123/redoc`        |
+| Backend version | `https://your-domain.com/version`               | `http://localhost:8123/version`      |
 
 The reference `docker-compose.yml` routes only `/api`, `/scim`, `/docs`, `/openapi.json`, and `/version` to the backend, so `/redoc` is available in local development only. `GET /version` returns `{"version": "..."}` and the OpenAPI document carries the same version string, so the spec you download always matches the running backend.
 
 <Callout type="info">
-Paths are exact. Most routers use a trailing slash (`/api/v1/users/me/`, `/api/v1/conversations/`), while the API key endpoints do not (`/api/v1/api-keys`). Copy paths from the specification rather than guessing.
+  Paths are exact. Most routers use a trailing slash (`/api/v1/users/me/`,
+  `/api/v1/conversations/`), while the API key endpoints do not
+  (`/api/v1/api-keys`). Copy paths from the specification rather than guessing.
 </Callout>
 
 Health probes live outside the versioned prefix. `GET /api/healthz` requires no authentication and returns `200` or `503` with backend, worker, and object-store status. `/api/livez` and `/api/readyz` are also public and exist for orchestrators, but are hidden from the specification.
@@ -31,9 +33,13 @@ Health probes live outside the versioned prefix. `GET /api/healthz` requires no 
 
 The specification includes the Server-Sent Event payload models described below under `components.schemas`, and names its API key security scheme `APIKeyAuth`.
 
----
+Endpoints declare their applicable security scheme in OpenAPI. Do not infer a
+shared bearer-token format from an endpoint example: Eneo supports browser
+sessions and scoped API keys, and authorization depends on the route and the
+caller’s tenant and resource permissions.
 
-## Authentication
+For API-key creation, rotation, and scope guidance, see
+[API Key Management](/docs/api-key-management).
 
 Most protected endpoints under `/api/v1` accept either an API key or a session token. Each endpoint explicitly declares its accepted identity and access rule. Some operations require a session, a particular key type or a signed URL; login and other intentionally public entry points declare public access. See [Session-only and user-only operations](#session-only-and-user-only-operations).
 
@@ -114,7 +120,7 @@ Failed attempts are limited to 5 per login name within 10 minutes. Each `401` re
 
 The `429` response also carries a `Retry-After` header. The limit applies to password login only; API keys and OIDC sign-in are unaffected.
 
-Malformed login input returns `422` with the validation fields `loc`, `type` and a static `msg`; `loc` names the submitted form field, for example `["body", "username"]`. Submitted values, validation context and library URLs are omitted. A login refused after password verification because the user is inactive or the organisation is suspended returns `403`; the web app then tells the user the account cannot sign in, rather than that sign-in is unavailable. Unexpected login failures return `500` with `code: "login_unavailable"` and a generic message. The `X-Correlation-ID` response header carries the id found in the server logs for the request; use it for support. Login logs keep the exception type and traceback with the submitted password redacted.
+Malformed login input returns `422` with `code: "request_validation_error"` and, in `details.errors`, the fields `location`, `type` and a static `message`; `location` names the submitted form field, for example `["body", "username"]`. Submitted values, validation context and library URLs are omitted. A login refused after password verification because the user is inactive or the organisation is suspended returns `403`; the web app then tells the user the account cannot sign in, rather than that sign-in is unavailable. Unexpected login failures return `500` with `code: "internal_error"`, a generic message and an `error_id`. The `X-Correlation-ID` response header carries the id found in the server logs for the request; use it for support. Login logs keep the exception type and traceback with the submitted password redacted.
 
 Users of tenants that authenticate through OIDC federation obtain their token from the `/api/v1/auth/*` flow instead; see [Multi-Tenant OIDC Federation](/guides/oidc-federation/multi-tenant). Both this flow and `POST /api/v1/users/login/openid-connect/mobilityguard/` return `403` when a validated identity is not permitted to access or join the configured tenant. A missing account requires SCIM/admin provisioning or all [JIT admission requirements](/guides/oidc-federation/single-tenant#user-provisioning).
 
@@ -124,11 +130,11 @@ If a request carries both an `Authorization: Bearer` token and an API key header
 
 The backend applies three guards on top of ordinary authentication. Each returns `403` with a stable `code`:
 
-| Guard | Rejects | `code` | Applies to |
-|-------|---------|--------|------------|
-| Session required | every API key, including tenant-admin service keys | `session_auth_required` | All API key mutations (`POST /api/v1/api-keys`, update, delete, revoke, rotate, extend, purge, suspend, reactivate, notification preferences), chat-turn diagnostics, Skills, module administration and the module login handoff, object-store connection and deployment-policy administration, and the logging endpoints behind Admin Insights |
-| User identity required | service keys (`ownership: "service"`) | `user_identity_required` | Endpoints scoped to the caller as a person, such as `GET /api/v1/users/me/` |
-| User required for creation | service keys | `service_key_cannot_create_resources` | `POST` endpoints that create user-owned resources (assistants, apps, services, spaces, group chats, collections, websites, files, info blobs, roles, MCP servers, help-assistant runs, and API keys) |
+| Guard                      | Rejects                                            | `code`                                | Applies to                                                                                                                                                                                                                                                                                                                                      |
+| -------------------------- | -------------------------------------------------- | ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session required           | every API key, including tenant-admin service keys | `session_auth_required`               | All API key mutations (`POST /api/v1/api-keys`, update, delete, revoke, rotate, extend, purge, suspend, reactivate, notification preferences), chat-turn diagnostics, Skills, module administration and the module login handoff, object-store connection and deployment-policy administration, and the logging endpoints behind Admin Insights |
+| User identity required     | service keys (`ownership: "service"`)              | `user_identity_required`              | Endpoints scoped to the caller as a person, such as `GET /api/v1/users/me/`                                                                                                                                                                                                                                                                     |
+| User required for creation | service keys                                       | `service_key_cannot_create_resources` | `POST` endpoints that create user-owned resources (assistants, apps, services, spaces, group chats, collections, websites, files, info blobs, roles, MCP servers, help-assistant runs, and API keys)                                                                                                                                            |
 
 Session tokens pass all three guards; user-owned API keys pass the second and third. Scoped keys are additionally checked against the resource they target and receive `403` with `code: "insufficient_scope"` when it lies outside the key's scope.
 
@@ -144,18 +150,18 @@ POST /api/v1/conversations/
 
 ### Request body
 
-| Field | Type | Notes |
-|-------|------|-------|
-| `question` | string | Required. |
-| `session_id` | UUID | Continue an existing conversation. |
-| `assistant_id` | UUID | Start a new conversation with an assistant. |
-| `group_chat_id` | UUID | Start a new conversation with a group chat. |
-| `stream` | boolean | Default `false`. `true` returns Server-Sent Events. |
-| `files` | list of `{"id": UUID}` | Previously uploaded files to attach. |
-| `tools` | object | `{"assistants": [{"id": UUID, "handle": string}]}` targets a specific assistant (mentions in group chats, tool assistants otherwise). |
-| `require_tool_approval` | boolean | Default `false`. Requires `stream: true`; not supported for group chats. |
-| `disabled_mcp_server_ids` | list of UUID | MCP servers to switch off for this message. It can only narrow the active set. |
-| `disabled_capabilities` | list of string | Capabilities to switch off for this message: `web_search`, `image_generation`, `file_analysis`, `file_creation`, `charts`, `compute`. Like the list above, it can only narrow what the assistant is configured with. |
+| Field                     | Type                   | Notes                                                                                                                                                                                                                |
+| ------------------------- | ---------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `question`                | string                 | Required.                                                                                                                                                                                                            |
+| `session_id`              | UUID                   | Continue an existing conversation.                                                                                                                                                                                   |
+| `assistant_id`            | UUID                   | Start a new conversation with an assistant.                                                                                                                                                                          |
+| `group_chat_id`           | UUID                   | Start a new conversation with a group chat.                                                                                                                                                                          |
+| `stream`                  | boolean                | Default `false`. `true` returns Server-Sent Events.                                                                                                                                                                  |
+| `files`                   | list of `{"id": UUID}` | Previously uploaded files to attach.                                                                                                                                                                                 |
+| `tools`                   | object                 | `{"assistants": [{"id": UUID, "handle": string}]}` targets a specific assistant (mentions in group chats, tool assistants otherwise).                                                                                |
+| `require_tool_approval`   | boolean                | Default `false`. Requires `stream: true`; not supported for group chats.                                                                                                                                             |
+| `disabled_mcp_server_ids` | list of UUID           | MCP servers to switch off for this message. It can only narrow the active set.                                                                                                                                       |
+| `disabled_capabilities`   | list of string         | Capabilities to switch off for this message: `web_search`, `image_generation`, `file_analysis`, `file_creation`, `charts`, `compute`. Like the list above, it can only narrow what the assistant is configured with. |
 
 Exactly one of `session_id`, `assistant_id`, or `group_chat_id` must be present; anything else fails validation with `422`. The optional query parameter `version` (`1`, `2` or `3`, default `1`) selects the knowledge-retrieval behaviour; the web app sends `version=2`. `version=3` retrieves and generates exactly like `2` but, with `stream: true`, frames the stream as the [AI SDK UI Message Stream](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) (data-only events with a `type` field, ended by `data: [DONE]`) instead of the named events below; without `stream` it behaves like `2`.
 
@@ -178,18 +184,18 @@ With `stream: true` the **same POST request** responds with `Content-Type: text/
 
 Each event is a standard SSE frame whose `event` field names the payload type and whose `data` field is one JSON document. Every payload carries `session_id`.
 
-| `event` | Payload model | Content |
-|---------|---------------|---------|
-| `first_chunk` | `SSEFirstChunk` | Emitted first. Same shape as the non-streaming response with an empty `answer`; carries the `session_id` to continue the conversation. |
-| `text` | `SSEText` | `answer` (a text delta) and `references` (knowledge chunks used). Concatenate the deltas to form the full answer. |
-| `reasoning` | `SSEReasoning` | `reasoning`, a chunk of the model's thinking text. |
-| `image` | `SSEFiles` | `generated_files`, a file a tool produced, and `tool_call_id`, the call that made it. One event per file, whatever its type: the event keeps its historical name for images. Collect the events to list every file of the answer. |
-| `tool_call` | `SSEToolCall` | `tools` being executed (server, tool name, arguments, `tool_call_id`, status) and `mcp_tool_references`. Tool results are omitted from the stream; fetch them with `GET /api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/`. |
-| `tool_call_delta` | `SSEToolCallDelta` | `tool_call_id` and `arguments_delta`, the next piece of a pending call's arguments as raw JSON text, sent while the model writes the call. The complete arguments follow in that call's `tool_call` event. Clients that do not show calls in progress can ignore it. |
-| `tool_approval_required` | `SSEToolApprovalRequired` | `approval_id` and the pending `tools`. Only with `require_tool_approval: true`. |
-| `tool_approval_timeout` | `SSEToolApprovalTimeout` | `approval_id` and the `tools` whose approval expired. |
-| `token_usage` | `SSETokenUsage` | `usage` with prompt, completion, turn, and context token counts. |
-| `error` | `SSEError` | `error` (message), optional numeric `error_code`, and `code`, the reason the answer failed. Provider failures use the codes in [When a provider fails](/guides/ai-providers#when-a-provider-fails); `stream_error` means Eneo itself failed. The stream ends after this event. |
+| `event`                  | Payload model             | Content                                                                                                                                                                                                                                                                        |
+| ------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `first_chunk`            | `SSEFirstChunk`           | Emitted first. Same shape as the non-streaming response with an empty `answer`; carries the `session_id` to continue the conversation.                                                                                                                                         |
+| `text`                   | `SSEText`                 | `answer` (a text delta) and `references` (knowledge chunks used). Concatenate the deltas to form the full answer.                                                                                                                                                              |
+| `reasoning`              | `SSEReasoning`            | `reasoning`, a chunk of the model's thinking text.                                                                                                                                                                                                                             |
+| `image`                  | `SSEFiles`                | `generated_files`, a file a tool produced, and `tool_call_id`, the call that made it. One event per file, whatever its type: the event keeps its historical name for images. Collect the events to list every file of the answer.                                              |
+| `tool_call`              | `SSEToolCall`             | `tools` being executed (server, tool name, arguments, `tool_call_id`, status) and `mcp_tool_references`. Tool results are omitted from the stream; fetch them with `GET /api/v1/conversations/{session_id}/tool-calls/{tool_call_id}/result/`.                                 |
+| `tool_call_delta`        | `SSEToolCallDelta`        | `tool_call_id` and `arguments_delta`, the next piece of a pending call's arguments as raw JSON text, sent while the model writes the call. The complete arguments follow in that call's `tool_call` event. Clients that do not show calls in progress can ignore it.           |
+| `tool_approval_required` | `SSEToolApprovalRequired` | `approval_id` and the pending `tools`. Only with `require_tool_approval: true`.                                                                                                                                                                                                |
+| `tool_approval_timeout`  | `SSEToolApprovalTimeout`  | `approval_id` and the `tools` whose approval expired.                                                                                                                                                                                                                          |
+| `token_usage`            | `SSETokenUsage`           | `usage` with prompt, completion, turn, and context token counts.                                                                                                                                                                                                               |
+| `error`                  | `SSEError`                | `error` (message), optional numeric `error_code`, and `code`, the reason the answer failed. Provider failures use the codes in [When a provider fails](/guides/ai-providers#when-a-provider-fails); `stream_error` means Eneo itself failed. The stream ends after this event. |
 
 ```bash
 curl -N -X POST "https://your-domain.com/api/v1/conversations/" \
@@ -315,16 +321,16 @@ Handle errors by `code` or `eneo_error_code`, never by parsing the English `mess
 
 A failed call to the AI provider returns `eneo_error_code` `9010` (`503`) or `9041` (`400`) with `code` naming the cause, for example `provider_unreachable` or `provider_rate_limited`, and `details.retryable` saying whether retrying can succeed. See [When a provider fails](/guides/ai-providers#when-a-provider-fails) for the full list.
 
-| Status | Typical meaning |
-|--------|-----------------|
-| 400 | Invalid request, including bad target combinations and policy violations |
-| 401 | Missing, invalid, expired, revoked, or suspended credentials |
-| 403 | Authenticated but not permitted: scope, permission, ownership, or guard failures |
-| 404 | Resource not found or not visible to the caller |
-| 409 | Conflict, for example a file still referenced by a conversation |
-| 422 | Request body or query parameters failed validation |
-| 429 | Rate limit exceeded |
-| 503 | A dependency such as Redis or the worker is unavailable |
+| Status | Typical meaning                                                                  |
+| ------ | -------------------------------------------------------------------------------- |
+| 400    | Invalid request, including bad target combinations and policy violations         |
+| 401    | Missing, invalid, expired, revoked, or suspended credentials                     |
+| 403    | Authenticated but not permitted: scope, permission, ownership, or guard failures |
+| 404    | Resource not found or not visible to the caller                                  |
+| 409    | Conflict, for example a file still referenced by a conversation                  |
+| 422    | Request body or query parameters failed validation                               |
+| 429    | Rate limit exceeded                                                              |
+| 503    | A dependency such as Redis or the worker is unavailable                          |
 
 ---
 
@@ -334,12 +340,12 @@ Rate limiting applies to **API key** traffic only; session-token requests are no
 
 Each API key gets a fixed window of `API_KEY_RATE_LIMIT_WINDOW_SECONDS` (default 3600 seconds, one hour) with a default budget by scope:
 
-| Scope | Default requests per window | Setting |
-|-------|-----------------------------|---------|
-| Tenant | 10 000 | `API_KEY_RATE_LIMIT_TENANT_DEFAULT` |
-| Space | 5 000 | `API_KEY_RATE_LIMIT_SPACE_DEFAULT` |
-| Assistant | 1 000 | `API_KEY_RATE_LIMIT_ASSISTANT_DEFAULT` |
-| App | 1 000 | `API_KEY_RATE_LIMIT_APP_DEFAULT` |
+| Scope     | Default requests per window | Setting                                |
+| --------- | --------------------------- | -------------------------------------- |
+| Tenant    | 10 000                      | `API_KEY_RATE_LIMIT_TENANT_DEFAULT`    |
+| Space     | 5 000                       | `API_KEY_RATE_LIMIT_SPACE_DEFAULT`     |
+| Assistant | 1 000                       | `API_KEY_RATE_LIMIT_ASSISTANT_DEFAULT` |
+| App       | 1 000                       | `API_KEY_RATE_LIMIT_APP_DEFAULT`       |
 
 A key's own `rate_limit` field overrides the default; `-1` disables the limit for that key (tenant administrators only, and not when the tenant policy sets `max_rate_limit_override`). See [API Key Management](/docs/api-key-management#tenant-policies).
 

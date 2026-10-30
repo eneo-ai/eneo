@@ -1,0 +1,245 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from typing import TypeVar
+
+from pydantic import BaseModel, ValidationError
+
+from eneo.flow_packages.domain.flow_package_draft import FlowPackageFlowDraft
+from eneo.flow_packages.domain.flow_package_envelope import (
+    FLOW_DRAFT_PATH,
+    MANIFEST_PATH,
+    PROVENANCE_PATH,
+    REQUIRED_PACKAGE_FILES,
+    REQUIREMENTS_PATH,
+    FlowPackageEnvelope,
+    require_flow_package_manifest,
+)
+from eneo.flow_packages.domain.flow_package_errors import (
+    FlowPackageErrorCode,
+    FlowPackageValidationError,
+    FlowPackageZipUnsafeReason,
+)
+from eneo.flow_packages.domain.flow_package_limits import MAX_FLOW_PACKAGE_BYTES
+from eneo.flow_packages.domain.flow_package_manifest import FlowPackageManifest
+from eneo.flow_packages.domain.flow_package_provenance import FlowPackageProvenance
+from eneo.flow_packages.domain.flow_package_requirements import (
+    FlowPackageRequirementSet,
+    FlowPackageTemplateAssetRequirement,
+)
+from eneo.flows.flow_authoring_spec import (
+    MAX_FLOW_AUTHORING_STEPS,
+    AssistantSpecLocalRefNotPortableError,
+    has_flow_mcp_unsupported_error,
+)
+from eneo.flows.flow_metadata import UnsupportedFlowFormFieldTypeError
+from eneo.resource_packages.archive import (
+    ResourcePackageArchiveError,
+    ResourcePackageArchiveLimits,
+    read_bounded_archive,
+)
+from eneo.resource_packages.archive import (
+    decompression_ratio_too_high as _resource_package_ratio_too_high,
+)
+from eneo.resource_packages.archive import (
+    validate_archive_entry_path as _validate_resource_package_entry_path,
+)
+
+MAX_ZIP_ENTRIES = 4 + MAX_FLOW_AUTHORING_STEPS
+MAX_PACKAGE_UPLOAD_BYTES = MAX_FLOW_PACKAGE_BYTES
+MAX_PER_ENTRY_COMPRESSED_BYTES = MAX_FLOW_PACKAGE_BYTES
+MAX_PER_ENTRY_UNCOMPRESSED_BYTES = MAX_FLOW_PACKAGE_BYTES
+MAX_TOTAL_UNCOMPRESSED_BYTES = 8 * 1024 * 1024
+MAX_JSON_BYTES = 2 * 1024 * 1024
+MAX_DECOMPRESSION_RATIO = 50
+
+ModelT = TypeVar("ModelT", bound=BaseModel)
+
+
+def read_flow_package(package_bytes: bytes) -> FlowPackageEnvelope:
+    payloads = _read_bounded_json_payloads(package_bytes)
+    manifest = _parse_subdocument(
+        FlowPackageManifest,
+        payloads[MANIFEST_PATH],
+        invalid_code=FlowPackageErrorCode.MANIFEST_INVALID,
+    )
+    require_flow_package_manifest(manifest)
+    draft = _parse_subdocument(
+        FlowPackageFlowDraft,
+        payloads[FLOW_DRAFT_PATH],
+        invalid_code=FlowPackageErrorCode.FLOW_DRAFT_INVALID,
+    )
+    requirements = _parse_subdocument(
+        FlowPackageRequirementSet,
+        payloads[REQUIREMENTS_PATH],
+        invalid_code=FlowPackageErrorCode.REQUIREMENTS_INVALID,
+    )
+    template_paths = frozenset(
+        requirement.template.asset_path
+        for requirement in requirements.requirements
+        if isinstance(requirement, FlowPackageTemplateAssetRequirement)
+        and requirement.template is not None
+        and requirement.template.asset_path is not None
+    )
+    _validate_flow_profile_entries(payloads, template_paths=template_paths)
+    provenance = _parse_subdocument(
+        FlowPackageProvenance,
+        payloads[PROVENANCE_PATH],
+        invalid_code=FlowPackageErrorCode.PROVENANCE_INVALID,
+    )
+    envelope = FlowPackageEnvelope.verify_from_subdocuments(
+        manifest=manifest,
+        draft=draft,
+        requirements=requirements,
+        provenance=provenance,
+        template_payloads={path: payloads[path] for path in template_paths},
+    )
+
+    return envelope
+
+
+def _read_bounded_json_payloads(package_bytes: bytes) -> dict[str, bytes]:
+    try:
+        payloads = read_bounded_archive(
+            package_bytes,
+            limits=ResourcePackageArchiveLimits(
+                max_entries=MAX_ZIP_ENTRIES,
+                max_compressed_entry_bytes=MAX_PER_ENTRY_COMPRESSED_BYTES,
+                max_uncompressed_entry_bytes=MAX_PER_ENTRY_UNCOMPRESSED_BYTES,
+                max_total_uncompressed_bytes=MAX_TOTAL_UNCOMPRESSED_BYTES,
+                max_json_bytes=MAX_JSON_BYTES,
+                max_decompression_ratio=MAX_DECOMPRESSION_RATIO,
+            ),
+            json_paths=REQUIRED_PACKAGE_FILES,
+        )
+    except ResourcePackageArchiveError as exc:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason(exc.reason.value),
+            **exc.context,
+        ) from exc
+    if MANIFEST_PATH not in payloads:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
+            path=MANIFEST_PATH,
+        )
+    return payloads
+
+
+def _decompression_ratio_too_high(  # pyright: ignore[reportUnusedFunction]
+    *,
+    uncompressed_size: int,
+    compressed_size: int,
+) -> bool:
+    return _resource_package_ratio_too_high(
+        uncompressed_size=uncompressed_size,
+        compressed_size=compressed_size,
+        max_ratio=MAX_DECOMPRESSION_RATIO,
+    )
+
+
+def _validate_entry_path(  # pyright: ignore[reportUnusedFunction]
+    entry: object,
+) -> str:
+    try:
+        return _validate_resource_package_entry_path(entry)  # type: ignore[arg-type]
+    except ResourcePackageArchiveError as exc:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason(exc.reason.value),
+            **exc.context,
+        ) from exc
+
+
+def _validate_flow_profile_entries(
+    payloads: Mapping[str, bytes], *, template_paths: frozenset[str] = frozenset()
+) -> None:
+    required = REQUIRED_PACKAGE_FILES | template_paths
+    unexpected_files = payloads.keys() - required
+    if unexpected_files:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason.UNKNOWN_ENTRY,
+            path=sorted(unexpected_files)[0],
+        )
+    missing_files = required - payloads.keys()
+    if missing_files:
+        raise _zip_unsafe(
+            FlowPackageZipUnsafeReason.MISSING_REQUIRED_ENTRY,
+            path=sorted(missing_files)[0],
+        )
+
+
+def _parse_subdocument(
+    model: type[ModelT],
+    payload: bytes,
+    *,
+    invalid_code: FlowPackageErrorCode,
+) -> ModelT:
+    try:
+        return model.model_validate_json(
+            payload,
+            strict=True,
+            extra="forbid",
+        )
+    except ValidationError as exc:
+        if _has_unsupported_schema_version(exc):
+            raise FlowPackageValidationError(
+                code=FlowPackageErrorCode.SCHEMA_UNSUPPORTED,
+                message="Flow package schema version is unsupported.",
+            ) from exc
+        if _has_ctx_error(exc, AssistantSpecLocalRefNotPortableError):
+            raise FlowPackageValidationError(
+                code=FlowPackageErrorCode.LOCAL_RESOURCE_REFS_NOT_PORTABLE,
+                message="Flow package draft contains source-local resource refs.",
+            ) from exc
+        if _has_ctx_error(exc, UnsupportedFlowFormFieldTypeError):
+            raise FlowPackageValidationError(
+                code=invalid_code,
+                message="Flow package form field type is not supported.",
+                context={"reason": "form_field_type_unsupported"},
+            ) from exc
+        if _has_removed_flow_mcp_field(exc):
+            raise FlowPackageValidationError(
+                code=FlowPackageErrorCode.IMPORT_MCP_UNSUPPORTED,
+                message="Flow packages do not support MCP fields or resources.",
+            ) from exc
+        raise FlowPackageValidationError(
+            code=invalid_code,
+            message="Flow package subdocument is invalid.",
+        ) from exc
+
+
+def _has_unsupported_schema_version(exc: ValidationError) -> bool:
+    for error in exc.errors():
+        loc = error.get("loc")
+        error_type = error.get("type")
+        if loc == ("schema_version",) and error_type != "missing":
+            return True
+    return False
+
+
+def _has_ctx_error(exc: ValidationError, error_type: type[Exception]) -> bool:
+    for error in exc.errors():
+        ctx = error.get("ctx")
+        if isinstance(ctx, Mapping) and isinstance(ctx.get("error"), error_type):
+            return True
+    return False
+
+
+def _has_removed_flow_mcp_field(exc: ValidationError) -> bool:
+    if has_flow_mcp_unsupported_error(exc):
+        return True
+    for error in exc.errors():
+        ctx = error.get("ctx")
+        if isinstance(ctx, Mapping) and ctx.get("tag") == "mcp_tool":
+            return True
+    return False
+
+
+def _zip_unsafe(
+    reason: FlowPackageZipUnsafeReason,
+    **context: str | int,
+) -> FlowPackageValidationError:
+    return FlowPackageValidationError(
+        code=FlowPackageErrorCode.ZIP_UNSAFE,
+        message="Flow package zip is unsafe.",
+        context={"reason": reason.value, **context},
+    )

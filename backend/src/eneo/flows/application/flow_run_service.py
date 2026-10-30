@@ -1,0 +1,1264 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import unicodedata
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timezone
+from functools import partial
+from typing import Any, Sequence, cast
+from uuid import UUID
+
+from eneo.authentication.api_key_resolver import resolve_effective_resource_permission
+from eneo.authentication.auth_models import ApiKeyPermission
+from eneo.files.file_repo import FileRepository
+from eneo.flows.api.flow_run_contract_models import FlowFinalOutputContractPublic
+from eneo.flows.application.flow_run_access_policy import (
+    FlowRunAccessKind,
+    FlowRunAccessPolicy,
+    FlowRunEvidenceAccess,
+)
+from eneo.flows.application.flow_run_terminalization import FlowRunTerminalizer
+from eneo.flows.domain.flow import (
+    Flow,
+    FlowPersistedJsonObject,
+    FlowRun,
+    FlowRunStatus,
+    FlowRunStatusSnapshot,
+    FlowRunTokenUsage,
+    FlowRunTranscriptionUsage,
+    FlowStepResult,
+    FlowStepResultAnnotation,
+)
+from eneo.flows.domain.flow_run_exceptions import (
+    FlowRunConcurrencyLimitReachedError,
+    FlowRunNotFoundError,
+)
+from eneo.flows.domain.flow_run_listing import FlowRunListing
+from eneo.flows.domain.mapped_execution_policy import (
+    resolve_flow_mapped_execution_policy_from_source,
+)
+from eneo.flows.domain.one_line_text import ONE_LINE_TEXT_MAX_CHARS, breaks_one_line
+from eneo.flows.domain.run_step_input_exceptions import (
+    FlowRunRuntimeUploadBindingRaceError,
+)
+from eneo.flows.domain.runtime_invariant_exceptions import (
+    FlowPublishedDefinitionWithoutExecutableStepsError,
+)
+from eneo.flows.domain.step_output import inline_transcript
+from eneo.flows.domain.transcript_regeneration import FlowRunPrefixSeed
+from eneo.flows.enums import (
+    FlowRunLifecycleSource,
+    FlowRunPurpose,
+    is_terminal_flow_run_status,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import (
+    FlowBadRequestException,
+    FlowValidationException,
+)
+from eneo.flows.flow_input_limits import (
+    FlowInputLimits,
+    flow_audio_decode_limits,
+    resolve_flow_input_limits_from_source,
+)
+from eneo.flows.flow_run_contract_service import (
+    build_final_output_contract,
+    settle_max_speakers,
+    speaker_labels_option,
+    speaker_service_gap,
+)
+from eneo.flows.flow_run_error import FlowRunError
+from eneo.flows.flow_run_input_envelope import (
+    FLOW_INPUT_TRANSCRIPTION_KEY,
+    MAX_SPEAKERS_KEY,
+    SPEAKER_LABELS_KEY,
+    TRANSCRIPT_REGENERATION_KEY,
+    build_initial_run_input_envelope,
+    read_live_transcript_ids,
+    read_semantic_flow_input_payload,
+    read_single_recording_steps,
+    with_admitted_audio_seconds,
+)
+from eneo.flows.flow_run_input_payload import (
+    normalize_and_validate_flow_run_payload,
+    run_identity_from_form,
+)
+from eneo.flows.flow_run_payload_validation import (
+    ensure_inline_payload_size_allowed,
+    reject_reserved_input_payload_keys,
+)
+from eneo.flows.flow_run_step_input_file import FlowRunStepInputFileRef
+from eneo.flows.flow_run_step_inputs import (
+    FlowRunStepInputFileProjection,
+    FlowRunStepInputs,
+    build_runtime_step_input_specs,
+    normalize_step_inputs_payload,
+    runtime_file_not_bound_to_flow_error,
+    validate_audio_lengths,
+    validate_live_transcript_inputs,
+    validate_single_recording_inputs,
+    validate_submitted_step_inputs,
+)
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.flow_runtime_upload_repo import FlowRuntimeUploadRepository
+from eneo.flows.infrastructure.flow_provider_call_repo import (
+    FlowProviderCallRepository,
+    FlowRunUsage,
+)
+from eneo.flows.infrastructure.flow_repo import FlowRepository
+from eneo.flows.infrastructure.flow_run_repo import (
+    FlowRunRepository,
+    PreseedStep,
+)
+from eneo.flows.infrastructure.flow_run_review_checkpoint_repo import (
+    FlowRunReviewCheckpointRepository,
+)
+from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
+    FlowRunWebhookDeliveryRead,
+    FlowRunWebhookDeliveryRepository,
+)
+from eneo.flows.infrastructure.flow_version_repo import FlowVersionRepository
+from eneo.flows.principal import FlowPrincipal
+from eneo.flows.published_definition import (
+    PublishedFlowDefinition,
+    parse_verified_published_definition,
+)
+from eneo.flows.published_runtime import load_published_definition
+from eneo.flows.runtime.document_runtime_preflight import require_document_runtime
+from eneo.flows.runtime.live_transcription.repository import (
+    LiveTranscriptRepository,
+    LiveTranscriptScope,
+)
+from eneo.flows.transcription_config import (
+    SpeakerServiceGap,
+    parse_transcription_config,
+)
+from eneo.main.exceptions import NotFoundException
+from eneo.main.models import NOT_PROVIDED, NotProvided
+from eneo.settings.setting_service import SettingService
+from eneo.users.user import UserInDB
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunStepResultWithFiles:
+    step_result: FlowStepResult
+    runtime_input_file_ids: Sequence[UUID]
+    result_files: Sequence[FlowRunStepResultFile]
+    runtime_input_files: Sequence[FlowRunStepInputFileRef] = ()
+
+
+@dataclass(frozen=True)
+class CreateRunResult:
+    run: FlowRun
+    created: bool
+
+
+async def find_prefix_seed_replay(
+    *,
+    run_repo: FlowRunRepository,
+    tenant_id: UUID,
+    flow_id: UUID,
+    principal: FlowPrincipal,
+    idempotency_key: str,
+    request_hash: str,
+    lock_creation: bool = True,
+) -> CreateRunResult | None:
+    if not idempotency_key or len(idempotency_key) > 255:
+        raise FlowBadRequestException(
+            "Idempotency key must contain 1 to 255 characters.",
+            code=FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY,
+        )
+    # All creation paths acquire the tenant lock before the flow publication lock.
+    if lock_creation:
+        await run_repo.acquire_tenant_run_creation_lock(tenant_id=tenant_id)
+    existing = await run_repo.get_idempotent_run(
+        tenant_id=tenant_id,
+        flow_id=flow_id,
+        idempotency_key=idempotency_key,
+        principal=principal,
+    )
+    if existing is None:
+        return None
+    run, _fingerprint = existing
+    provenance = (run.input_payload_json or {}).get(TRANSCRIPT_REGENERATION_KEY)
+    if (
+        not isinstance(provenance, dict)
+        or cast(dict[str, Any], provenance).get("request_hash") != request_hash
+    ):
+        raise FlowBadRequestException(
+            "Idempotency key was already used with a different run request.",
+            code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
+        )
+    return CreateRunResult(run=run, created=False)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRuntimeCapacity:
+    tenant_id: UUID
+    active_runs: int
+    max_concurrent_runs: int
+
+    @property
+    def available_slots(self) -> int:
+        return max(0, self.max_concurrent_runs - self.active_runs)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunVersionedView:
+    published_definition: PublishedFlowDefinition
+    step_results: Sequence[FlowStepResultAnnotation]
+    speaker_labels: bool | None = None
+
+
+def _token_usage(usage: FlowRunUsage | None) -> FlowRunTokenUsage | None:
+    return usage.token_usage if usage is not None else None
+
+
+def _transcription_usage(
+    usage: FlowRunUsage | None,
+    recording_seconds: float | None = None,
+) -> FlowRunTranscriptionUsage | None:
+    provider_usage = usage.transcription_usage if usage is not None else None
+    if provider_usage is None:
+        if recording_seconds is None:
+            return None
+        # The step measured the recording even though no provider request was
+        # recorded (or all were rejected); the length is still worth showing.
+        provider_usage = FlowRunTranscriptionUsage.from_counts(
+            audio_seconds=0.0, completeness="complete"
+        )
+    return provider_usage.with_recording_seconds(recording_seconds)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunWithResultFilesAndUsage:
+    run: FlowRun
+    result_files: Sequence[FlowRunStepResultFile]
+    token_usage: FlowRunTokenUsage | None
+    transcription_usage: FlowRunTranscriptionUsage | None = None
+    final_output: FlowFinalOutputContractPublic | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class FlowRunDetailView(FlowRunWithResultFilesAndUsage):
+    webhook_deliveries: Sequence[FlowRunWebhookDeliveryRead] = ()
+
+
+@dataclass(frozen=True)
+class _PublishedRunDefinition:
+    flow: Flow
+    flow_version: int
+    definition: PublishedFlowDefinition
+
+
+@dataclass(frozen=True)
+class _PreparedRunCreation:
+    input_payload_json: FlowPersistedJsonObject | None
+    run_label: str | None
+    run_date: date | None
+    preseed_steps: list[PreseedStep]
+    step_input_files: list[FlowRunStepInputFileProjection]
+    request_fingerprint: str
+    # The limit each audio step the run decodes is admitted under, checked only
+    # for a new run (after the replay check): the tenant's limit may change
+    # between replays. A step whose result the run imports is not in it.
+    admit_audio: Callable[[], Awaitable[dict[UUID, int]]] | None = None
+
+
+def _normalize_step_input_files_for_fingerprint(
+    step_input_files: Sequence[FlowRunStepInputFileProjection] | None,
+) -> dict[str, dict[str, list[str]]]:
+    return {
+        str(projection["step_id"]): {
+            "file_ids": [str(file_id) for file_id in projection["file_ids"]]
+        }
+        for projection in step_input_files or ()
+    }
+
+
+def _result_files_by_run_id(
+    result_files: Sequence[FlowRunStepResultFile],
+) -> dict[UUID, list[FlowRunStepResultFile]]:
+    grouped: dict[UUID, list[FlowRunStepResultFile]] = {}
+    for result_file in result_files:
+        grouped.setdefault(result_file.flow_run_id, []).append(result_file)
+    return grouped
+
+
+def _result_files_by_step_result_id(
+    result_files: Sequence[FlowRunStepResultFile],
+) -> dict[UUID, list[FlowRunStepResultFile]]:
+    grouped: dict[UUID, list[FlowRunStepResultFile]] = {}
+    for result_file in result_files:
+        grouped.setdefault(result_file.step_result_id, []).append(result_file)
+    return grouped
+
+
+class FlowRunService:
+    """Tenant-scoped flow run lifecycle service."""
+
+    def __init__(
+        self,
+        user: UserInDB,
+        flow_repo: FlowRepository,
+        flow_run_repo: FlowRunRepository,
+        provider_call_repo: FlowProviderCallRepository,
+        flow_run_review_checkpoint_repo: FlowRunReviewCheckpointRepository,
+        flow_version_repo: FlowVersionRepository,
+        runtime_upload_repo: FlowRuntimeUploadRepository,
+        file_repo: FileRepository,
+        flow_run_terminalizer: FlowRunTerminalizer,
+        access_policy: FlowRunAccessPolicy,
+        webhook_delivery_repo: FlowRunWebhookDeliveryRepository,
+        settings_service: SettingService,
+    ):
+        self.user = user
+        self.flow_repo = flow_repo
+        self.flow_run_repo = flow_run_repo
+        self.provider_call_repo = provider_call_repo
+        self.flow_run_terminalizer = flow_run_terminalizer
+        self.flow_version_repo = flow_version_repo
+        self.file_repo = file_repo
+        self.runtime_upload_repo = runtime_upload_repo
+        self.settings_service = settings_service
+        self.access_policy = access_policy
+        self.webhook_delivery_repo = webhook_delivery_repo
+
+    async def runtime_capacity(self) -> FlowRuntimeCapacity:
+        """Report how many more concurrent runs may be started.
+
+        A client planning a batch needs the same numbers `_ensure_can_create`
+        enforces, so both read the active count and the effective limit (the
+        administrator's max concurrent flow runs under the server capacity) from
+        here rather than from settings and the repository separately.
+        """
+        policy = await self.settings_service.get_flow_runtime_policy_resolved()
+        active_runs = await self.flow_run_repo.count_active_runs(
+            tenant_id=self.user.tenant_id
+        )
+        return FlowRuntimeCapacity(
+            tenant_id=self.user.tenant_id,
+            active_runs=active_runs,
+            max_concurrent_runs=policy.max_concurrent_runs,
+        )
+
+    def _principal(self) -> FlowPrincipal:
+        return FlowPrincipal.from_user(self.user)
+
+    def _runtime_service_permission(
+        self,
+        principal: FlowPrincipal,
+    ) -> ApiKeyPermission | None:
+        if not principal.is_service_key:
+            return None
+        key = getattr(self.user, "active_api_key", None)
+        assert key is not None, "service-key Flow principal requires active_api_key"
+        return resolve_effective_resource_permission(key, "flows")
+
+    def _validate_idempotency_key(self, idempotency_key: str | None) -> str | None:
+        if idempotency_key is None:
+            return None
+        normalized = idempotency_key.strip()
+        if not normalized or len(normalized) > 255:
+            raise FlowBadRequestException(
+                "Idempotency key must be between 1 and 255 characters.",
+                code=FlowApiErrorCode.RUN_INVALID_IDEMPOTENCY_KEY,
+            )
+        return normalized
+
+    async def create_run(
+        self,
+        *,
+        flow_id: UUID,
+        input_payload_json: FlowPersistedJsonObject | None,
+        run_label: str | None = None,
+        expected_flow_version: int | None = None,
+        step_inputs: FlowRunStepInputs | None = None,
+        idempotency_key: str | None = None,
+        prefix_seed: FlowRunPrefixSeed | None = None,
+        purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
+        speaker_labels: bool | None = None,
+        max_speakers: int | None | NotProvided = NOT_PROVIDED,
+    ) -> CreateRunResult:
+        idempotency_key = self._validate_idempotency_key(idempotency_key)
+        if run_label is not None:
+            run_label = unicodedata.normalize("NFC", run_label)
+            if any(breaks_one_line(char) for char in run_label):
+                raise FlowValidationException(
+                    "run_label must be a single line without control characters.",
+                    code=FlowApiErrorCode.RUN_INVALID_LABEL,
+                    context={
+                        "field": "run_label",
+                        "reason": "not_one_line",
+                        "max_length": ONE_LINE_TEXT_MAX_CHARS,
+                    },
+                )
+            run_label = run_label.strip()
+            if not 1 <= len(run_label) <= ONE_LINE_TEXT_MAX_CHARS:
+                raise FlowValidationException(
+                    "run_label must contain between 1 and "
+                    f"{ONE_LINE_TEXT_MAX_CHARS} characters.",
+                    code=FlowApiErrorCode.RUN_INVALID_LABEL,
+                    context={
+                        "field": "run_label",
+                        "reason": "empty" if not run_label else "too_long",
+                        "max_length": ONE_LINE_TEXT_MAX_CHARS,
+                    },
+                )
+        principal = self._principal()
+        published = await self._load_published_run_definition(
+            flow_id=flow_id,
+            expected_flow_version=expected_flow_version,
+        )
+        prepared = await self._prepare_run_creation(
+            flow_id=flow_id,
+            flow=published.flow,
+            flow_version=published.flow_version,
+            definition=published.definition,
+            principal=principal,
+            input_payload_json=input_payload_json,
+            run_label=run_label,
+            step_inputs=step_inputs,
+            purpose=purpose,
+            speaker_labels=speaker_labels,
+            max_speakers=max_speakers,
+            reused_step_ids=(
+                prefix_seed.reused_step_ids if prefix_seed is not None else frozenset()
+            ),
+        )
+        if prefix_seed is not None:
+            payload = {
+                **(prepared.input_payload_json or {}),
+                TRANSCRIPT_REGENERATION_KEY: prefix_seed.provenance,
+            }
+            if prefix_seed.transcript is not None:
+                transcript = prefix_seed.transcript
+                transcript = inline_transcript(
+                    text=transcript.text,
+                    source_step_id=transcript.reference.source_step_id,
+                    source_attempt_no=1,
+                    selector_path=transcript.reference.selector.path,
+                )
+                payload[FLOW_INPUT_TRANSCRIPTION_KEY] = transcript.model_dump(
+                    mode="json"
+                )
+            if prefix_seed.speaker_labels is not None:
+                payload[SPEAKER_LABELS_KEY] = prefix_seed.speaker_labels
+            if not isinstance(prefix_seed.max_speakers, NotProvided):
+                payload[MAX_SPEAKERS_KEY] = prefix_seed.max_speakers
+            ensure_inline_payload_size_allowed(
+                flow_id=flow_id, input_payload_json=payload
+            )
+            prepared = replace(
+                prepared,
+                input_payload_json=payload,
+                request_fingerprint=self._build_idempotency_fingerprint(
+                    tenant_id=self.user.tenant_id,
+                    principal=principal,
+                    flow_id=flow_id,
+                    flow_version=published.flow_version,
+                    input_payload_json=payload,
+                    run_label=prepared.run_label,
+                    step_input_files=prepared.step_input_files,
+                    purpose=purpose,
+                ),
+            )
+        existing_run = await self._find_idempotent_run_or_enforce_creation_limits(
+            flow_id=flow_id,
+            flow_version=published.flow_version,
+            idempotency_key=idempotency_key,
+            principal=principal,
+            request_fingerprint=prepared.request_fingerprint,
+        )
+        if existing_run is not None:
+            return CreateRunResult(run=existing_run, created=False)
+        if prefix_seed is None:
+            # Replay identity describes the submitted request. Only a new run
+            # settles defaults against current service availability; children
+            # already carry their source run's accepted decisions.
+            steps = published.definition.runtime_steps()
+            wizard = published.definition.metadata().wizard
+            service_gap = await self._speaker_service_gap(
+                flow_id=flow_id, wizard_metadata=wizard
+            )
+            option = speaker_labels_option(
+                steps,
+                wizard_metadata=wizard,
+                service_gap=service_gap,
+            )
+            if speaker_labels is not None and (option is None or not option.selectable):
+                raise FlowValidationException(
+                    "Speaker labels cannot be chosen for this flow. Read "
+                    "transcription.speaker_labels in the run contract.",
+                    code=FlowApiErrorCode.RUN_SPEAKER_LABELS_NOT_SELECTABLE,
+                )
+            # Settled once, like the speaker count, so the run records the
+            # setting it used even after a republish flips the flow's default.
+            effective_speaker_labels = speaker_labels
+            if option is not None and option.required:
+                effective_speaker_labels = True
+            elif option is not None and speaker_labels is None:
+                effective_speaker_labels = option.default
+            form_input = read_semantic_flow_input_payload(prepared.input_payload_json)
+            payload = build_initial_run_input_envelope(
+                normalized_inline_payload=form_input,
+                flow_version=published.flow_version,
+                speaker_labels=effective_speaker_labels,
+                live_transcript_ids=read_live_transcript_ids(
+                    prepared.input_payload_json
+                ),
+                single_recording_steps=read_single_recording_steps(
+                    prepared.input_payload_json
+                ),
+                max_speakers=settle_max_speakers(
+                    max_speakers,
+                    steps=steps,
+                    wizard_metadata=wizard,
+                    speaker_labels=effective_speaker_labels,
+                    service_gap=service_gap,
+                    form_input=form_input,
+                ),
+            )
+            ensure_inline_payload_size_allowed(
+                flow_id=flow_id, input_payload_json=payload
+            )
+            prepared = replace(prepared, input_payload_json=payload)
+        # A child run is admitted for the audio it decodes again, not for the
+        # audio whose transcription it imports.
+        if prepared.admit_audio is not None:
+            payload = with_admitted_audio_seconds(
+                prepared.input_payload_json, await prepared.admit_audio()
+            )
+            ensure_inline_payload_size_allowed(
+                flow_id=flow_id, input_payload_json=payload
+            )
+            prepared = replace(prepared, input_payload_json=payload)
+        live_transcript_ids = read_live_transcript_ids(prepared.input_payload_json)
+        if live_transcript_ids:
+            file_ids_by_step = {
+                projection["step_id"]: projection["file_ids"][0]
+                for projection in prepared.step_input_files
+            }
+            model_id = parse_transcription_config(
+                {"wizard": published.definition.metadata().wizard}
+            ).model_id
+            live_repo = LiveTranscriptRepository(self.flow_run_repo.session)
+            for step_id, transcript_id in sorted(
+                live_transcript_ids.items(), key=lambda item: item[1]
+            ):
+                await live_repo.bind(
+                    transcript_id,
+                    file_id=file_ids_by_step[step_id],
+                    scope=LiveTranscriptScope(
+                        tenant_id=self.user.tenant_id,
+                        user_id=principal.principal_user_id,
+                        flow_id=flow_id,
+                        flow_version=published.flow_version,
+                        step_id=step_id,
+                        model_id=model_id,
+                    ),
+                )
+        created_run = await self._create_persisted_run(
+            flow=published.flow,
+            flow_version=published.flow_version,
+            principal=principal,
+            prepared=prepared,
+            idempotency_key=idempotency_key,
+            purpose=purpose,
+        )
+        if prefix_seed is not None:
+            await self.flow_run_repo.seed_validated_prefix(
+                run=created_run,
+                seed=prefix_seed,
+            )
+        return CreateRunResult(run=created_run, created=True)
+
+    async def _speaker_service_gap(
+        self, *, flow_id: UUID, wizard_metadata: FlowPersistedJsonObject | None
+    ) -> SpeakerServiceGap | None:
+        """Why no connected service would label the flow's speakers in its
+        space, None when one would (``speaker_service_gap``)."""
+
+        async def flow_space():
+            space_service = self.access_policy.space_service
+            assert space_service is not None, "run admission reads the flow's space"
+            # The actor the flow gate built for this request, from its memo.
+            actor, _level = await self.access_policy.load_space_access(flow_id=flow_id)
+            assert actor is not None, "the container wires the policy's actor manager"
+            return await space_service.get_transcription_space(actor)
+
+        return await speaker_service_gap(wizard_metadata, load_space=flow_space)
+
+    async def _load_published_run_definition(
+        self,
+        *,
+        flow_id: UUID,
+        expected_flow_version: int | None,
+    ) -> _PublishedRunDefinition:
+        flow = await self.flow_repo.get(flow_id=flow_id, tenant_id=self.user.tenant_id)
+        if flow.published_version is None:
+            raise FlowBadRequestException(
+                "Flow must be published before a run can be created.",
+                code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
+                context={"flow_id": str(flow_id)},
+            )
+
+        if (
+            expected_flow_version is not None
+            and expected_flow_version != flow.published_version
+        ):
+            raise FlowBadRequestException(
+                "The published flow version changed before this run request was submitted.",
+                code=FlowApiErrorCode.RUN_STALE_VERSION,
+                context={
+                    "expected_flow_version": expected_flow_version,
+                    "published_flow_version": flow.published_version,
+                },
+            )
+        flow_version = flow.published_version
+
+        published_definition = await load_published_definition(
+            flow_version_repo=self.flow_version_repo,
+            flow_id=flow_id,
+            version=flow_version,
+            tenant_id=self.user.tenant_id,
+        )
+        return _PublishedRunDefinition(
+            flow=flow,
+            flow_version=flow_version,
+            definition=published_definition,
+        )
+
+    async def _prepare_run_creation(
+        self,
+        *,
+        flow_id: UUID,
+        flow: Flow,
+        flow_version: int,
+        definition: PublishedFlowDefinition,
+        principal: FlowPrincipal,
+        input_payload_json: FlowPersistedJsonObject | None,
+        run_label: str | None,
+        step_inputs: FlowRunStepInputs | None,
+        purpose: FlowRunPurpose,
+        speaker_labels: bool | None,
+        max_speakers: int | None | NotProvided,
+        reused_step_ids: frozenset[UUID],
+    ) -> _PreparedRunCreation:
+        await require_document_runtime(definition.runtime_steps())
+        normalized_inline_payload = normalize_and_validate_flow_run_payload(
+            metadata=definition.metadata(),
+            payload=input_payload_json,
+        )
+        reject_reserved_input_payload_keys(normalized_inline_payload)
+        # The form names and dates the run when the flow says which fields do;
+        # a caller's own label wins.
+        form_label, run_date = run_identity_from_form(
+            metadata=definition.metadata(), payload=normalized_inline_payload
+        )
+        if run_label is None:
+            run_label = form_label
+        normalized_step_inputs = normalize_step_inputs_payload(step_inputs)
+        preseed_steps: list[PreseedStep] = [
+            {
+                "step_id": identity.step_id,
+                "assistant_id": identity.assistant_id,
+                "step_order": identity.step_order,
+            }
+            for identity in definition.step_identities
+        ]
+        step_input_file_projections: list[FlowRunStepInputFileProjection] = []
+        live_transcript_ids: dict[UUID, UUID] = {}
+        single_recording_steps: frozenset[UUID] = frozenset()
+        admit_audio: Callable[[], Awaitable[dict[UUID, int]]] | None = None
+        if step_inputs is not None or definition.has_required_runtime_input():
+            runtime_steps = definition.runtime_steps()
+            limits = await self._resolve_flow_input_limits()
+            mapped_policy = await resolve_flow_mapped_execution_policy_from_source(
+                self.settings_service
+            )
+            runtime_specs = build_runtime_step_input_specs(
+                steps=runtime_steps,
+                limits=limits,
+                mapped_policy=mapped_policy,
+            )
+            live_transcript_ids = validate_live_transcript_inputs(
+                step_inputs=step_inputs or {},
+                normalized_step_inputs=normalized_step_inputs,
+                specs=runtime_specs,
+            )
+            single_recording_steps = validate_single_recording_inputs(
+                step_inputs=step_inputs or {}, specs=runtime_specs
+            )
+            await validate_submitted_step_inputs(
+                flow_id=flow_id,
+                steps=runtime_steps,
+                specs=runtime_specs,
+                normalized_step_inputs=normalized_step_inputs,
+                inline_payload=normalized_inline_payload,
+                file_repo=self.file_repo,
+                runtime_upload_repo=self.runtime_upload_repo,
+                principal=principal,
+                tenant_id=self.user.tenant_id,
+            )
+            admit_audio = partial(
+                validate_audio_lengths,
+                specs=runtime_specs,
+                normalized_step_inputs={
+                    step_id: file_ids
+                    for step_id, file_ids in normalized_step_inputs.items()
+                    if step_id not in reused_step_ids
+                },
+                single_recording_steps=single_recording_steps,
+                runtime_upload_repo=self.runtime_upload_repo,
+                limits=flow_audio_decode_limits(limits),
+            )
+            step_order_by_id = {
+                runtime_step.step_id: runtime_step.step_order
+                for runtime_step in runtime_steps
+            }
+            step_input_file_projections = [
+                {
+                    "step_id": step_id,
+                    "step_order": step_order_by_id[step_id],
+                    "file_ids": file_ids,
+                }
+                for step_id, file_ids in normalized_step_inputs.items()
+                if file_ids
+            ]
+        prepared_payload = build_initial_run_input_envelope(
+            normalized_inline_payload=normalized_inline_payload,
+            flow_version=flow_version,
+            speaker_labels=speaker_labels,
+            max_speakers=max_speakers,
+            live_transcript_ids=live_transcript_ids,
+            single_recording_steps=single_recording_steps,
+        )
+        ensure_inline_payload_size_allowed(
+            flow_id=flow_id,
+            input_payload_json=prepared_payload,
+        )
+        request_fingerprint = self._build_idempotency_fingerprint(
+            tenant_id=self.user.tenant_id,
+            principal=principal,
+            flow_id=flow_id,
+            flow_version=flow_version,
+            input_payload_json=prepared_payload,
+            run_label=run_label,
+            step_input_files=step_input_file_projections,
+            purpose=purpose,
+        )
+        return _PreparedRunCreation(
+            input_payload_json=prepared_payload,
+            run_label=run_label,
+            run_date=run_date,
+            preseed_steps=preseed_steps,
+            step_input_files=step_input_file_projections,
+            request_fingerprint=request_fingerprint,
+            admit_audio=admit_audio,
+        )
+
+    async def _find_idempotent_run_or_enforce_creation_limits(
+        self,
+        *,
+        flow_id: UUID,
+        flow_version: int,
+        idempotency_key: str | None,
+        principal: FlowPrincipal,
+        request_fingerprint: str,
+    ) -> FlowRun | None:
+        # Keep one lock order across new run creation: tenant first, then target Flow.
+        await self.flow_run_repo.acquire_tenant_run_creation_lock(
+            tenant_id=self.user.tenant_id
+        )
+        if idempotency_key is not None:
+            existing = await self.flow_run_repo.get_idempotent_run(
+                tenant_id=self.user.tenant_id,
+                flow_id=flow_id,
+                idempotency_key=idempotency_key,
+                principal=principal,
+            )
+            if existing is not None:
+                existing_run, existing_fingerprint = existing
+                if existing_fingerprint != request_fingerprint:
+                    raise FlowBadRequestException(
+                        "Idempotency key was already used with a different run request payload.",
+                        code=FlowApiErrorCode.RUN_IDEMPOTENCY_CONFLICT,
+                    )
+                return existing_run
+        locked_published_version = await self.flow_repo.lock_publication_pointer(
+            flow_id=flow_id,
+            tenant_id=self.user.tenant_id,
+        )
+        if locked_published_version is None:
+            raise FlowBadRequestException(
+                "Flow must be published before a run can be created.",
+                code=FlowApiErrorCode.FLOW_NOT_PUBLISHED,
+                context={"flow_id": str(flow_id)},
+            )
+        if locked_published_version != flow_version:
+            raise FlowBadRequestException(
+                "The published flow version changed before the run was accepted.",
+                code=FlowApiErrorCode.RUN_STALE_VERSION,
+                context={
+                    "expected_flow_version": flow_version,
+                    "published_flow_version": locked_published_version,
+                },
+            )
+        # Read under the row lock with the count: a limit change that
+        # lands after this read applies from the next admission.
+        run_limit = (
+            await self.settings_service.get_flow_runtime_policy_resolved()
+        ).max_concurrent_runs
+        active_runs = await self.flow_run_repo.count_active_runs(
+            tenant_id=self.user.tenant_id
+        )
+        if active_runs >= run_limit:
+            raise FlowRunConcurrencyLimitReachedError(max_concurrent_runs=run_limit)
+        return None
+
+    async def _create_persisted_run(
+        self,
+        *,
+        flow: Flow,
+        flow_version: int,
+        principal: FlowPrincipal,
+        prepared: _PreparedRunCreation,
+        idempotency_key: str | None,
+        purpose: FlowRunPurpose,
+    ) -> FlowRun:
+        flow_id = flow.require_persisted_id()
+        try:
+            return await self.flow_run_repo.create(
+                flow_id=flow_id,
+                flow_version=flow_version,
+                principal_type=principal.principal_type.value,
+                principal_user_id=principal.principal_user_id,
+                principal_service_id=principal.principal_service_id,
+                created_by_api_key_id=principal.actor_api_key_id,
+                runtime_service_permission=self._runtime_service_permission(principal),
+                tenant_id=self.user.tenant_id,
+                input_payload_json=prepared.input_payload_json,
+                run_label=prepared.run_label,
+                run_date=prepared.run_date,
+                preseed_steps=prepared.preseed_steps,
+                step_input_files=prepared.step_input_files,
+                idempotency_key=idempotency_key,
+                request_fingerprint=prepared.request_fingerprint,
+                purpose=purpose,
+            )
+        except FlowRunRuntimeUploadBindingRaceError as exc:
+            raise runtime_file_not_bound_to_flow_error(
+                step_id=exc.step_id,
+                file_ids=exc.file_ids,
+            ) from exc
+
+    async def _resolve_flow_input_limits(self) -> FlowInputLimits:
+        return await resolve_flow_input_limits_from_source(self.settings_service)
+
+    def _build_idempotency_fingerprint(
+        self,
+        *,
+        tenant_id: UUID,
+        principal: FlowPrincipal,
+        flow_id: UUID,
+        flow_version: int,
+        input_payload_json: FlowPersistedJsonObject | None,
+        run_label: str | None = None,
+        step_input_files: Sequence[FlowRunStepInputFileProjection] | None = None,
+        purpose: FlowRunPurpose = FlowRunPurpose.PRODUCTION,
+    ) -> str:
+        normalized = {
+            "request_fingerprint_algo_version": 4,
+            **(
+                {"purpose": purpose.value}
+                if purpose is not FlowRunPurpose.PRODUCTION
+                else {}
+            ),
+            "tenant_id": str(tenant_id),
+            "principal_type": principal.principal_type.value,
+            "principal_user_id": (
+                str(principal.principal_user_id)
+                if principal.principal_user_id is not None
+                else None
+            ),
+            "principal_service_id": (
+                str(principal.principal_service_id)
+                if principal.principal_service_id is not None
+                else None
+            ),
+            "flow_id": str(flow_id),
+            "flow_version": flow_version,
+            "input_payload_json": input_payload_json,
+            "run_label": run_label,
+            "step_input_files": _normalize_step_input_files_for_fingerprint(
+                step_input_files
+            ),
+        }
+        payload = json.dumps(
+            normalized,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    async def get_run(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+        access_kind: FlowRunAccessKind = "status",
+        history: bool = False,
+    ) -> FlowRun:
+        return await self.access_policy.load_run(
+            run_id=run_id,
+            flow_id=flow_id,
+            access_kind=access_kind,
+            history=history,
+        )
+
+    async def get_run_status(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+        history: bool = False,
+    ) -> FlowRunStatusSnapshot:
+        return await self.access_policy.load_run_status(
+            run_id=run_id,
+            flow_id=flow_id,
+            history=history,
+        )
+
+    async def list_run_statuses(
+        self,
+        *,
+        flow_id: UUID | None = None,
+        statuses: Sequence[FlowRunStatus] | None = None,
+        mine: bool = False,
+        limit: int | None = None,
+        offset: int | None = None,
+        history: bool = False,
+        listing: FlowRunListing | None = None,
+    ) -> list[FlowRunStatusSnapshot]:
+        principal = self._principal()
+        own_runs_only = mine or not await self._lists_every_run(
+            principal, flow_id=flow_id, history=history
+        )
+        # A principal holds exactly one of the two ids, so filtering on both
+        # keeps the runs it started.
+        return await self.flow_run_repo.list_statuses(
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            statuses=statuses,
+            principal_user_id=principal.principal_user_id if own_runs_only else None,
+            principal_service_id=(
+                principal.principal_service_id if own_runs_only else None
+            ),
+            limit=limit,
+            offset=offset,
+            listing=listing,
+        )
+
+    async def evidence_access(
+        self, run: FlowRunStatusSnapshot, *, history: bool = False
+    ) -> FlowRunEvidenceAccess:
+        """What the caller may do with the run's evidence, decided by the run
+        access policy the evidence routes use."""
+        return await self.access_policy.evidence_access_for_run(run, history=history)
+
+    async def count_run_statuses(
+        self,
+        *,
+        flow_id: UUID,
+        mine: bool = False,
+        history: bool = False,
+        search: str | None = None,
+    ) -> dict[FlowRunStatus, int]:
+        """How many of the runs the caller may list have each status, within
+        ``mine`` and ``search`` and before any status filter: what a status
+        filter would leave."""
+        principal = self._principal()
+        own_runs_only = mine or not await self._lists_every_run(
+            principal, flow_id=flow_id, history=history
+        )
+        return await self.flow_run_repo.count_statuses(
+            tenant_id=self.user.tenant_id,
+            flow_id=flow_id,
+            principal_user_id=principal.principal_user_id if own_runs_only else None,
+            principal_service_id=(
+                principal.principal_service_id if own_runs_only else None
+            ),
+            search=search,
+        )
+
+    async def _lists_every_run(
+        self, principal: FlowPrincipal, *, flow_id: UUID | None, history: bool
+    ) -> bool:
+        """Tenant admins list every run in the tenant, and same-space admins and
+        owners every run of a flow in their space. Everyone else, service keys
+        included, lists the runs they started."""
+        if principal.is_service_key:
+            return False
+        if self.access_policy.is_human_tenant_admin():
+            return True
+        return (
+            flow_id is not None
+            and await self.access_policy.can_list_all_runs_in_flow(
+                flow_id=flow_id, history=history
+            )
+        )
+
+    async def list_step_results(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+    ) -> list[FlowStepResult]:
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="content")
+        return await self.flow_run_repo.list_step_results(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+
+    async def get_run_versioned_view(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        history: bool = False,
+    ) -> FlowRunVersionedView:
+        # The status projection and the one payload key the graph shows: a
+        # poll never loads the run's input payload, a transcript included.
+        (
+            run,
+            speaker_labels,
+        ) = await self.access_policy.load_run_status_with_speaker_labels(
+            run_id=run_id,
+            flow_id=flow_id,
+            access_kind="content",
+            history=history,
+        )
+        published_definition = await load_published_definition(
+            flow_version_repo=self.flow_version_repo,
+            flow_id=run.flow_id,
+            version=run.flow_version,
+            tenant_id=run.tenant_id,
+        )
+        # Annotations only: the graph is polled while a run is active and must
+        # not materialize the run's evidence on every read.
+        step_results = await self.flow_run_repo.list_step_result_annotations(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        return FlowRunVersionedView(
+            published_definition=published_definition,
+            step_results=tuple(step_results),
+            speaker_labels=speaker_labels,
+        )
+
+    async def get_run_with_result_files_and_usage(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        history: bool = False,
+    ) -> FlowRunWithResultFilesAndUsage:
+        run = await self.get_run(
+            run_id=run_id,
+            flow_id=flow_id,
+            access_kind="content",
+            history=history,
+        )
+        return await self.enrich_run_with_result_files_and_usage(run=run)
+
+    async def get_run_detail_with_result_files_and_usage(
+        self,
+        *,
+        flow_id: UUID,
+        run_id: UUID,
+        history: bool = False,
+    ) -> FlowRunDetailView:
+        run_view = await self.get_run_with_result_files_and_usage(
+            flow_id=flow_id,
+            run_id=run_id,
+            history=history,
+        )
+        webhook_deliveries = (
+            await self.webhook_delivery_repo.list_run_delivery_statuses(
+                run_id=run_view.run.id,
+                tenant_id=self.user.tenant_id,
+            )
+        )
+        return FlowRunDetailView(
+            run=run_view.run,
+            result_files=run_view.result_files,
+            token_usage=run_view.token_usage,
+            final_output=run_view.final_output,
+            webhook_deliveries=tuple(webhook_deliveries),
+        )
+
+    async def enrich_run_with_result_files_and_usage(
+        self,
+        *,
+        run: FlowRun,
+    ) -> FlowRunWithResultFilesAndUsage:
+        views = await self._runs_with_result_files_and_usage(runs=(run,))
+        return views[0]
+
+    async def _runs_with_result_files_and_usage(
+        self, *, runs: Sequence[FlowRun]
+    ) -> tuple[FlowRunWithResultFilesAndUsage, ...]:
+        if not runs:
+            return ()
+        run_ids: list[UUID] = []
+        for run in runs:
+            if run.tenant_id != self.user.tenant_id:
+                self.access_policy.deny_run_access(auth_layer="flow_run_argument")
+            run_ids.append(run.id)
+        result_files = await self.flow_run_repo.list_result_files_for_runs(
+            run_ids=run_ids,
+            tenant_id=self.user.tenant_id,
+        )
+        usage_by_run_id = await self.provider_call_repo.list_usage_for_runs(
+            run_ids=run_ids,
+            tenant_id=self.user.tenant_id,
+        )
+        recording_seconds_by_run_id = (
+            await self.flow_run_repo.recording_seconds_by_run_ids(
+                run_ids=run_ids,
+                tenant_id=self.user.tenant_id,
+            )
+        )
+        result_files_by_run_id = _result_files_by_run_id(result_files)
+        final_output_by_version_ref = await self._final_outputs_for_runs(runs=runs)
+        return tuple(
+            FlowRunWithResultFilesAndUsage(
+                run=run,
+                result_files=tuple(result_files_by_run_id.get(run.id, ())),
+                token_usage=_token_usage(usage_by_run_id.get(run.id)),
+                transcription_usage=_transcription_usage(
+                    usage_by_run_id.get(run.id),
+                    recording_seconds_by_run_id.get(run.id),
+                ),
+                final_output=final_output_by_version_ref.get(
+                    (run.flow_id, run.flow_version)
+                ),
+            )
+            for run in runs
+        )
+
+    async def _final_outputs_for_runs(
+        self, *, runs: Sequence[FlowRun]
+    ) -> dict[tuple[UUID, int], FlowFinalOutputContractPublic]:
+        version_refs = tuple(
+            dict.fromkeys(
+                (run.flow_id, run.flow_version)
+                for run in runs
+                if run.status is FlowRunStatus.COMPLETED
+            )
+        )
+        if not version_refs:
+            return {}
+        versions_by_ref = await self.flow_version_repo.get_many(
+            version_refs=version_refs,
+            tenant_id=self.user.tenant_id,
+        )
+        final_outputs: dict[tuple[UUID, int], FlowFinalOutputContractPublic] = {}
+        for version_ref, flow_version in versions_by_ref.items():
+            definition = parse_verified_published_definition(
+                flow_version.definition_json,
+                expected_flow_id=version_ref[0],
+                expected_checksum=flow_version.definition_checksum,
+                flow_version=flow_version.version,
+            )
+            final_output = build_final_output_contract(definition.runtime_steps())
+            if final_output is None:
+                raise FlowPublishedDefinitionWithoutExecutableStepsError(
+                    flow_id=flow_version.flow_id,
+                    flow_version=flow_version.version,
+                )
+            final_outputs[version_ref] = final_output
+        return final_outputs
+
+    async def list_step_results_with_files(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID | None = None,
+        history: bool = False,
+    ) -> tuple[FlowRunStepResultWithFiles, ...]:
+        run = await self.get_run(
+            run_id=run_id, flow_id=flow_id, access_kind="content", history=history
+        )
+        step_results = await self.flow_run_repo.list_step_results(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        result_files = await self.flow_run_repo.list_result_files(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+        )
+        runtime_input_files_by_step_result_id = await self.flow_run_repo.list_current_step_input_file_refs_by_step_result_id(
+            run_id=run.id,
+            tenant_id=self.user.tenant_id,
+            step_results=step_results,
+        )
+        result_files_by_step_result_id = _result_files_by_step_result_id(result_files)
+        views: list[FlowRunStepResultWithFiles] = []
+        for result in step_results:
+            result_id = result.id
+            if result_id is None:
+                # Domain ids are optional; persisted reads normally set this.
+                views.append(
+                    FlowRunStepResultWithFiles(
+                        step_result=result,
+                        runtime_input_file_ids=(),
+                        result_files=(),
+                    )
+                )
+                continue
+            runtime_input_files = runtime_input_files_by_step_result_id.get(
+                result_id, ()
+            )
+            views.append(
+                FlowRunStepResultWithFiles(
+                    step_result=result,
+                    runtime_input_file_ids=tuple(
+                        file.file_id for file in runtime_input_files
+                    ),
+                    result_files=tuple(
+                        result_files_by_step_result_id.get(result_id, ())
+                    ),
+                    # A file the caller's tenant cannot read keeps its id only.
+                    runtime_input_files=tuple(
+                        file for file in runtime_input_files if file.name is not None
+                    ),
+                )
+            )
+        return tuple(views)
+
+    async def cancel_run(self, *, run_id: UUID, flow_id: UUID) -> FlowRun:
+        run = await self.get_run(run_id=run_id, flow_id=flow_id, access_kind="cancel")
+        if is_terminal_flow_run_status(run.status):
+            return run
+        try:
+            result = await self.flow_run_terminalizer.terminalize_run(
+                run_id=run_id,
+                tenant_id=self.user.tenant_id,
+                target_status=FlowRunStatus.CANCELLED,
+                source=FlowRunLifecycleSource.USER_CANCEL,
+                error=FlowRunError.from_source(
+                    FlowRunLifecycleSource.USER_CANCEL,
+                    code=FlowApiErrorCode.RUN_USER_CANCELLED,
+                    message="Run cancelled by user.",
+                ),
+                cancelled_at=datetime.now(timezone.utc),
+                principal=self._principal(),
+            )
+        except FlowRunNotFoundError as exc:
+            raise NotFoundException("Flow run not found.") from exc
+        return result.run

@@ -52,13 +52,11 @@ def _datastore(captured: list[InfoBlobChunk]):
         embeddings.add(chunks, [[0.1, 0.2] for _ in chunks])
         return embeddings
 
-    user = MagicMock()
-    user.tenant_id = uuid4()
     repo = MagicMock()
     repo.add = AsyncMock()
     return (
         Datastore(
-            user=user,
+            tenant_id=uuid4(),
             info_blob_chunk_repo=repo,
             create_embeddings_service=MagicMock(get_embeddings=get_embeddings),
         ),

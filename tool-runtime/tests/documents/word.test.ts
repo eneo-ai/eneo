@@ -170,6 +170,10 @@ describe("inspection", () => {
       label: "Rapportens titel",
       hint: "Rapportens titel",
       location: "body",
+      heading_level: 0,
+      container: "paragraph",
+      in_table: false,
+      multiline: false,
       supported: true,
     });
     expect(Object.keys(report)).not.toContain("styles");
@@ -203,6 +207,44 @@ describe("inspection", () => {
       ["inre", false, "nested inside another control"],
       ["när", false, "date controls are not filled"],
     ]);
+    expect(toReport(inspection).placeholders.map((p) => p.reason_code)).toEqual([
+      undefined,
+      "nested",
+      "unsupported_kind",
+    ]);
+  });
+
+  test("reports where each control sits, for callers with a stricter profile", async () => {
+    const cell = `<w:tbl><w:tr><w:tc><w:p>${textControl("cell", "Cell", "c")}</w:p></w:tc></w:tr></w:tbl>`;
+    const blockText = textControl("lös", "Lös", "l");
+    const untagged = richControl("", "Utan tagg", "u").replace('<w:tag w:val=""/>', "");
+    const inspection = await inspectTemplate(
+      await controlTemplate(REPORT_BODY + cell + blockText + untagged),
+    );
+    const report = toReport(inspection).placeholders;
+    const byName = new Map(report.map((p) => [p.name, p]));
+    expect(byName.get("titel")).toMatchObject({ container: "paragraph", in_table: false });
+    expect(byName.get("sammanfattning")).toMatchObject({
+      container: "part",
+      heading_level: 1,
+      section_heading: "Sammanfattning",
+    });
+    expect(byName.get("cell")).toMatchObject({ container: "paragraph", in_table: true });
+    expect(byName.get("lös")).toMatchObject({ container: "part", kind: "text" });
+    expect(byName.get("")).toMatchObject({
+      supported: false,
+      reason_code: "untagged",
+      label: "Utan tagg",
+    });
+  });
+
+  test("keeps a hint's paragraphs, line breaks and tabs", async () => {
+    const hint = richControl("del", "Del", "Första stycket.").replace(
+      "</w:p></w:sdtContent>",
+      `</w:p><w:p><w:r><w:t>Nästa rad</w:t><w:br/><w:t>och</w:t><w:tab/><w:t>tabb.</w:t></w:r></w:p></w:sdtContent>`,
+    );
+    const inspection = await inspectTemplate(await controlTemplate(hint));
+    expect(inspection.placeholders[0]!.hint).toBe("Första stycket.\n\nNästa rad\noch\ttabb.");
   });
 });
 
@@ -290,7 +332,8 @@ describe("rendering into templates", () => {
 describe("filling templates", () => {
   test("a control name that recurs is filled everywhere, in the header too", async () => {
     const template = await controlTemplate(
-      DOCUMENT_BODY + `<w:p><w:r><w:t xml:space="preserve">Ärende: </w:t></w:r>${textControl("titel", "Titel", "Titel")}</w:p>`,
+      DOCUMENT_BODY +
+        `<w:p><w:r><w:t xml:space="preserve">Ärende: </w:t></w:r>${textControl("titel", "Titel", "Titel")}</w:p>`,
       `<w:p>${textControl("titel", "Titel", "Titel")}</w:p>`,
     );
     const buffer = await renderIntoTemplate(
@@ -336,6 +379,24 @@ describe("filling templates", () => {
       "No value was given for: datum, sammanfattning, bakgrund.",
     );
   });
+  test("a text control takes one line unless it is a multi-line plain text control", async () => {
+    const multiline = textControl("flera", "Flera", "f").replace(
+      "<w:text/>",
+      '<w:text w:multiLine="1"/>',
+    );
+    const template = await controlTemplate(
+      `<w:p><w:r><w:t xml:space="preserve">En: </w:t></w:r>${textControl("en", "En", "e")}</w:p>` +
+        `<w:p><w:r><w:t xml:space="preserve">Flera: </w:t></w:r>${multiline}</w:p>`,
+    );
+    const { buffer } = await fillTemplateDocx(template, {
+      en: "första\n andra ",
+      flera: "första\nandra",
+    });
+    const xml = await partOf(buffer, "word/document.xml");
+    expect(textOf(xml)).toContain("En: första andra");
+    expect(xml.match(/<w:br\/>/g)).toHaveLength(1);
+  });
+
   test("a template with nothing to fill is refused with advice", async () => {
     await expect(
       renderDocument(

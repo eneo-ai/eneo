@@ -10,6 +10,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -45,12 +46,11 @@ def round_trip_db(test_settings):
         password=test_settings.postgres_password,
     )
     conn.autocommit = True
-    command.upgrade(cfg, GRANT_REVISION)
-
-    try:
-        yield {"conn": conn, "cfg": cfg}
-    finally:
-        conn.close()
+    with at_revision(cfg, GRANT_REVISION):
+        try:
+            yield {"conn": conn, "cfg": cfg}
+        finally:
+            conn.close()
 
 
 def _insert_tenant(conn, suffix: str) -> str:

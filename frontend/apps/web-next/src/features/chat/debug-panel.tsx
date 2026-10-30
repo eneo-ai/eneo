@@ -371,6 +371,7 @@ export function DebugTabPanel({
             return (
               <div className="py-3">
                 <Banner
+                  role="status"
                   status="info"
                   title={t("chat_debug_live_turn_title")}
                   description={t("chat_debug_live_turn_description")}

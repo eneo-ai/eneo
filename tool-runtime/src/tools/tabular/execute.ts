@@ -6,9 +6,13 @@ import { join } from "node:path";
 import { ToolError } from "../../errors";
 import { describeCsv, QueryRejectedError, runQuery } from "./engine/duckdb";
 import { convertXlsxToCsvSheets } from "./engine/xlsx-to-csv";
+import { convertJsonLinesToCsv, readJson } from "./engine/json";
 import { queryLimits } from "./config";
 import type {
   IngestJob,
+  IngestResult,
+  JsonExtractJob,
+  JsonReadOutcome,
   QueryJob,
   QueryJobResult,
   SheetMetadata,
@@ -27,14 +31,95 @@ const CSV_TYPES = [
   "text/plain",
   "application/octet-stream",
 ];
+const JSON_LINES_TYPES = [
+  "application/json",
+  "text/json",
+  "application/x-ndjson",
+  "application/jsonl",
+  "application/x-jsonlines",
+  "text/plain",
+  "application/octet-stream",
+];
 const MAX_METADATA_BYTES = 256 * 1024;
+/** Characters of one cell in a query's returned rows; the export file keeps the whole cell. */
+const MAX_CELL_CHARS = 4_000;
+/** Bytes of returned rows per query: the rows must fit the child's reply with room to spare. */
+const MAX_PREVIEW_BYTES = 256 * 1024;
 
-export async function executeIngest(
-  job: IngestJob,
-): Promise<{ sheets: SheetMetadata[] }> {
+/**
+ * The rows a query returns, bounded in two ways a row limit cannot be: a cell is cut to
+ * MAX_CELL_CHARS (a sheet made of JSON records can hold a whole record in one cell) and
+ * the rows stop where MAX_PREVIEW_BYTES is reached, reported as truncation.
+ */
+function boundedRows(rows: unknown[][]): {
+  rows: unknown[][];
+  clippedCells: number;
+  truncated: boolean;
+} {
+  const kept: unknown[][] = [];
+  let bytes = 0;
+  let clippedCells = 0;
+  for (const row of rows) {
+    const bounded = row.map((cell) => {
+      if (typeof cell !== "string" || cell.length <= MAX_CELL_CHARS)
+        return cell;
+      clippedCells += 1;
+      return cell.slice(0, MAX_CELL_CHARS) + "…";
+    });
+    bytes += Buffer.byteLength(JSON.stringify(bounded)) + 1;
+    if (bytes > MAX_PREVIEW_BYTES && kept.length)
+      return { rows: kept, clippedCells, truncated: true };
+    kept.push(bounded);
+  }
+  return { rows: kept, clippedCells, truncated: false };
+}
+
+/** Refuses bytes that are not UTF-8 text of the named kind. */
+function assertUtf8Text(bytes: Buffer, kind: string): void {
+  if (bytes.includes(0))
+    throw new ToolError(
+      "INVALID_FILE",
+      `The file is not a supported UTF-8 ${kind} file.`,
+    );
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(bytes);
+  } catch {
+    throw new ToolError(
+      "INVALID_FILE",
+      `${kind} files must use UTF-8 encoding.`,
+    );
+  }
+}
+
+type IngestedSheet = import("./engine/xlsx-to-csv").SheetCsv;
+
+/** The one sheet of a JSON Lines file, its records; a selection narrows it to some rows. */
+async function jsonLinesSheet(job: IngestJob): Promise<IngestedSheet> {
+  const { config } = job;
+  const csv = await convertJsonLinesToCsv(job.inputPath, {
+    maxExpandedBytes: config.max_expanded_bytes,
+    memoryMb: config.memory_mb,
+  });
+  // The sheet is written with its header line, so it is never sniffed for one.
+  const sheet: IngestedSheet = { name: "records", csv, explicitHeader: true };
+  if (!job.selection) return sheet;
+  const { sheet: requested, source_rows } = job.selection;
+  if (requested && requested !== sheet.name)
+    throw new ToolError(
+      "UNKNOWN_SHEET",
+      "Unknown sheet. Use a name from inspect_table.",
+    );
+  return {
+    ...sheet,
+    csv: selectCsvRows(csv, { source_rows }),
+    sourceRows: source_rows,
+  };
+}
+
+export async function executeIngest(job: IngestJob): Promise<IngestResult> {
   const bytes = await readFile(job.inputPath);
   const { config } = job;
-  if (job.isXlsx) {
+  if (job.format === "xlsx") {
     if (
       bytes.length < 2 ||
       bytes.readUInt16LE(0) !== 0x4b50 ||
@@ -45,31 +130,36 @@ export async function executeIngest(
         "The file is not a supported XLSX workbook.",
       );
     assertZipWithinBounds(bytes, config.max_expanded_bytes);
+  } else if (job.format === "jsonl") {
+    if (!JSON_LINES_TYPES.includes(job.contentType))
+      throw new ToolError(
+        "INVALID_FILE",
+        "The file is not a supported JSON Lines file.",
+      );
+    assertUtf8Text(bytes, "JSON Lines");
   } else {
-    if (!CSV_TYPES.includes(job.contentType) || bytes.includes(0))
+    if (!CSV_TYPES.includes(job.contentType))
       throw new ToolError(
         "INVALID_FILE",
         "The file is not a supported UTF-8 CSV file.",
       );
-    try {
-      new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    } catch {
-      throw new ToolError("INVALID_FILE", "CSV files must use UTF-8 encoding.");
-    }
+    assertUtf8Text(bytes, "CSV");
   }
-  let sheets: import("./engine/xlsx-to-csv").SheetCsv[];
+  let sheets: IngestedSheet[];
   try {
-    sheets = job.isXlsx
-      ? await convertXlsxToCsvSheets(bytes, job.selection)
-      : [
-          {
-            name: "Sheet1",
-            csv: job.selection ? selectCsvRows(bytes, job.selection) : bytes,
-            ...(job.selection
-              ? { sourceRows: job.selection.source_rows, explicitHeader: true }
-              : {}),
-          },
-        ];
+    if (job.format === "xlsx")
+      sheets = await convertXlsxToCsvSheets(bytes, job.selection);
+    else if (job.format === "jsonl") sheets = [await jsonLinesSheet(job)];
+    else
+      sheets = [
+        {
+          name: "Sheet1",
+          csv: job.selection ? selectCsvRows(bytes, job.selection) : bytes,
+          ...(job.selection
+            ? { sourceRows: job.selection.source_rows, explicitHeader: true }
+            : {}),
+        },
+      ];
   } catch (error) {
     if (error instanceof ToolError) throw error;
     throw new ToolError("INVALID_FILE", "The workbook could not be read.");
@@ -129,7 +219,9 @@ export async function executeIngest(
       csv,
       ...(sheet.sourceRows
         ? { sourceRows: sheet.sourceRows, explicitHeader: true }
-        : {}),
+        : sheet.explicitHeader
+          ? { explicitHeader: true }
+          : {}),
       ...(sheet.calculation ? { calculation: sheet.calculation } : {}),
     });
   }
@@ -139,6 +231,18 @@ export async function executeIngest(
       "The workbook's column profile is too large.",
     );
   return { sheets: metadata };
+}
+
+/** The value at a JSONPath in a JSON file the parent downloaded and wrote for this job. */
+export async function executeJsonExtract(
+  job: JsonExtractJob,
+): Promise<JsonReadOutcome> {
+  const bytes = await readFile(job.inputPath);
+  assertUtf8Text(bytes, "JSON");
+  return readJson(job.inputPath, job.path, {
+    maxChars: job.maxChars,
+    memoryMb: job.config.memory_mb,
+  });
 }
 
 export async function executeQuery(job: QueryJob): Promise<QueryJobResult> {
@@ -167,22 +271,39 @@ export async function executeQuery(job: QueryJob): Promise<QueryJobResult> {
           },
         );
         // The caller still gets a bounded preview; the file carries every row.
-        const preview = outcome.rows.slice(0, limits.rowLimit);
+        const preview = boundedRows(outcome.rows.slice(0, limits.rowLimit));
         results.push({
           ok: true,
           outcome: {
             ...outcome,
-            rows: preview,
-            returnedRows: preview.length,
+            rows: preview.rows,
+            returnedRows: preview.rows.length,
             truncated:
-              outcome.truncated || outcome.rows.length > preview.length,
+              outcome.truncated ||
+              preview.truncated ||
+              outcome.rows.length > preview.rows.length,
             exportedRows: outcome.rows.length,
             exportTruncated: outcome.truncated,
+            ...(preview.clippedCells
+              ? { clippedCells: preview.clippedCells }
+              : {}),
           },
         });
         continue;
       }
-      results.push({ ok: true, outcome });
+      const bounded = boundedRows(outcome.rows);
+      results.push({
+        ok: true,
+        outcome: {
+          ...outcome,
+          rows: bounded.rows,
+          returnedRows: bounded.rows.length,
+          truncated: outcome.truncated || bounded.truncated,
+          ...(bounded.clippedCells
+            ? { clippedCells: bounded.clippedCells }
+            : {}),
+        },
+      });
     } catch (error) {
       results.push({
         ok: false,

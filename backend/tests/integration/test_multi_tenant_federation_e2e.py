@@ -15,8 +15,27 @@ from httpx import AsyncClient
 from eneo.authentication.auth_service import AuthService
 from eneo.database.database import sessionmanager
 from eneo.database.tables.tenant_table import Tenants
-from eneo.main.config import get_settings, set_settings
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
 from eneo.tenants.tenant_repo import TenantRepository
+
+
+@pytest.fixture
+def override_runtime_settings(test_settings):
+    """Apply runtime settings changes through the global settings singleton."""
+    from eneo.main.config import get_settings, set_settings
+
+    original_settings = get_settings()
+
+    def _override(**updates):
+        updated = test_settings.model_copy(update=updates)
+        set_settings(updated)
+        return updated
+
+    try:
+        yield _override
+    finally:
+        set_settings(original_settings)
 
 
 async def _patch_federation_config(async_session, tenant_id: UUID, new_config: dict):
@@ -443,9 +462,16 @@ async def test_patch_federation_rejects_null_required_field(
     )
 
     assert response.status_code == 422
-    assert response.json() == {
-        "detail": [{"loc": ["body"], "type": "value_error", "msg": "Invalid value"}]
-    }
+    error = GeneralError.model_validate(response.json())
+    assert error.eneo_error_code is ErrorCodes.VALIDATION_ERROR
+    assert error.code == "request_validation_error"
+    assert isinstance(error.details, dict)
+    errors = error.details.get("errors")
+    assert isinstance(errors, list)
+    assert any(
+        entry["location"] == ["body"] and entry["type"] == "value_error"
+        for entry in errors
+    )
 
 
 @pytest.mark.integration
@@ -854,8 +880,9 @@ async def test_federation_callback_rejects_future_iat_beyond_leeway(
     )
 
     assert response.status_code == 500, response.text
-    detail = response.json().get("detail", "")
-    assert "unexpected" in detail.lower()
+    error = response.json()
+    assert error["code"] == "internal_error"
+    assert "unexpected" in error["message"].lower()
 
 
 @pytest.mark.integration
@@ -869,6 +896,7 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
     monkeypatch,
     mock_transcription_models,
     async_session,
+    override_runtime_settings,
 ):
     slug = f"federation-redirect-{uuid4().hex[:6]}"
     tenant = await _create_tenant(client, super_admin_token, slug)
@@ -911,16 +939,9 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         lambda *_, **__: {"email": allowed_email},
     )
 
-    # Other tests may have replaced the singleton with a settings copy.
-    # Override the instance used by requests, not the original fixture object.
-    original_settings = get_settings()
-    set_settings(
-        original_settings.model_copy(
-            update={
-                "oidc_redirect_grace_period_seconds": 0,
-                "strict_oidc_redirect_validation": True,
-            }
-        )
+    runtime_settings = override_runtime_settings(
+        oidc_redirect_grace_period_seconds=0,
+        strict_oidc_redirect_validation=True,
     )
     try:
         await _configure_federation(
@@ -996,7 +1017,7 @@ async def test_federation_callback_rejects_redirect_mismatch_without_grace(
         assert response.status_code == 400
         assert "redirect" in response.json()["detail"].lower()
     finally:
-        set_settings(original_settings)
+        _ = runtime_settings
 
 
 @pytest.mark.integration

@@ -2,13 +2,15 @@ import { Callout } from "nextra/components";
 
 # Architecture
 
-Eneo is a modular monolith: one FastAPI backend, one SvelteKit frontend, one
-background worker that runs the same backend image, PostgreSQL with pgvector,
-and Redis. The bundled tool runtime runs Eneo-maintained compute and file tools
-in a separate container. Docker Compose supplies the reference deployment;
-Traefik fronts the application, while the runtime stays on the private network.
+Eneo is a modular monolith: one FastAPI backend, one SvelteKit frontend,
+background workers that run the same backend image (a general worker plus a
+platform execution worker and a platform maintenance worker for Flow runs),
+PostgreSQL with pgvector, and Redis. The bundled tool runtime runs
+Eneo-maintained compute and file tools in a separate container. Docker Compose
+supplies the reference deployment; Traefik fronts the application, while the
+runtime stays on the private network.
 
-## High-Level Overview
+## System shape
 
 <div className="bg-white dark:bg-white p-4 rounded-lg border border-gray-200 dark:border-gray-700 my-8">
 
@@ -16,16 +18,17 @@ Traefik fronts the application, while the runtime stays on the private network.
 
 </div>
 
-| Component     | Technology                                             | Reference deployment                       |
-| ------------- | ------------------------------------------------------ | ------------------------------------------ |
-| Reverse proxy | Traefik v3 with Let's Encrypt                          | `traefik` container, ports 80/443          |
-| Frontend      | SvelteKit 2, Svelte 5, TypeScript, Tailwind CSS 4      | `ghcr.io/eneo-ai/eneo-frontend`, port 3000 |
-| Backend API   | FastAPI on Python 3.11, SQLAlchemy 2 (async), Pydantic 2 | `ghcr.io/eneo-ai/eneo-backend`, port 8000  |
-| Worker        | ARQ (Redis-backed async task queue)                    | Same backend image, `RUN_AS_WORKER=true`   |
-| Database      | PostgreSQL 16 with pgvector                            | `pgvector/pgvector:pg16`                   |
-| Cache/queue   | Redis 7                                                | `redis:7-alpine`                           |
-| Tool runtime | Bun, isolated job processes, QuickJS and DuckDB | `ghcr.io/eneo-ai/eneo-tool-runtime`, private network |
-| AI providers  | LiteLLM transport to per-tenant configured providers   | Outbound HTTPS from backend and worker     |
+| Component     | Technology                                               | Reference deployment                                                      |
+| ------------- | -------------------------------------------------------- | ------------------------------------------------------------------------- |
+| Reverse proxy | Traefik v3 with Let's Encrypt                            | `traefik` container, ports 80/443                                         |
+| Frontend      | SvelteKit 2, Svelte 5, TypeScript, Tailwind CSS 4        | `ghcr.io/eneo-ai/eneo-frontend`, port 3000                                |
+| Backend API   | FastAPI on Python 3.11, SQLAlchemy 2 (async), Pydantic 2 | `ghcr.io/eneo-ai/eneo-backend`, port 8000                                 |
+| Worker        | ARQ (Redis-backed async task queue)                      | Same backend image, `RUN_AS_WORKER=true`                                  |
+| Flow workers  | ARQ, separate execution and maintenance queues           | Same backend image, `task-execution-worker` and `task-maintenance-worker` |
+| Database      | PostgreSQL 16 with pgvector                              | `pgvector/pgvector:pg16`                                                  |
+| Cache/queue   | Redis 7                                                  | `redis:7-alpine`                                                          |
+| Tool runtime  | Bun, isolated job processes, QuickJS and DuckDB          | `ghcr.io/eneo-ai/eneo-tool-runtime`, private network                      |
+| AI providers  | LiteLLM transport to per-tenant configured providers     | Outbound HTTPS from backend and worker                                    |
 
 ---
 
@@ -98,9 +101,13 @@ frontend/
     └── eslint-plugin/           # Repository lint rules
 ```
 
----
+The backend is the boundary between users and the data layers, configured
+external providers, optional object storage, and optional modules. The reference
+Compose configuration keeps PostgreSQL and Redis on an internal data network;
+the backend and workers receive the outbound access they need for configured
+providers and integrations.
 
-### Backend (FastAPI)
+## Application components
 
 **Technology stack:**
 
@@ -132,7 +139,7 @@ backend/
     ├── server/                  # FastAPI app, routers, middleware, websockets
     ├── main/                    # Settings, DI container, logging, observability
     ├── database/                # Engine, tables/, repositories/
-    ├── worker/                  # ARQ adapter, upload and crawl tasks, feeder
+    ├── worker/                  # ARQ adapter, upload and crawl tasks
     ├── tenants/  users/  roles/  authentication/  scim/  sysadmin/  admin/
     ├── spaces/  assistants/  group_chat/  sessions/  questions/  conversations/
     ├── collections/  groups_legacy/  info_blobs/  files/  websites/  crawler/
@@ -157,7 +164,9 @@ backend/
   whose origins are matched against the `allowed_origins` table, and
   OpenTelemetry instrumentation.
 
----
+Deployment-specific settings, startup ordering, health checks, network
+boundaries, and optional object storage belong in the
+[deployment guide](/guides/deployment), not in this overview.
 
 ### Space persistence ownership
 
@@ -226,24 +235,24 @@ and `updated_at`. Junction tables use composite primary keys;
 
 **Core tables:**
 
-| Table                                   | Purpose                                                                                  |
-| --------------------------------------- | ---------------------------------------------------------------------------------------- |
-| `tenants`                               | Organisations; hold federation, crawler, and API-key policy as JSONB                     |
-| `users`                                 | Accounts within a tenant, with roles and user groups                                     |
-| `spaces`                                | Workspaces; a personal space has a unique `user_id`, shared spaces have members and roles |
-| `assistants`                            | Assistant configuration, completion model, and knowledge bindings                        |
-| `sessions`                              | Conversations with an assistant, service, or group chat                                  |
-| `questions`                             | One question/answer pair per row, including token counts and tool calls                  |
-| `info_blob_references`                  | Which `info_blobs` a question cited and with which similarity score                     |
-| `groups`                                | Collections of uploaded documents (the code calls them collections)                     |
-| `websites`, `crawl_runs`                | Crawled sources and each crawl execution                                                 |
-| `info_blobs`                            | Extracted text per document or page, with `source_id` and `version_state`                |
-| `info_blob_chunks`                      | Chunked text with its embedding vector                                                   |
-| `files`                                 | Uploaded files and attachments                                                           |
-| `object_contents` and related tables    | Durable byte control plane (see below)                                                   |
-| `jobs`                                  | Background job status for the frontend                                                   |
-| `api_keys_v2`                           | API keys stored as hashes with prefix and suffix for display                             |
-| `audit_logs` and audit config tables    | Audit trail and retention policy                                                         |
+| Table                                | Purpose                                                                                   |
+| ------------------------------------ | ----------------------------------------------------------------------------------------- |
+| `tenants`                            | Organisations; hold federation, crawler, and API-key policy as JSONB                      |
+| `users`                              | Accounts within a tenant, with roles and user groups                                      |
+| `spaces`                             | Workspaces; a personal space has a unique `user_id`, shared spaces have members and roles |
+| `assistants`                         | Assistant configuration, completion model, and knowledge bindings                         |
+| `sessions`                           | Conversations with an assistant, service, or group chat                                   |
+| `questions`                          | One question/answer pair per row, including token counts and tool calls                   |
+| `info_blob_references`               | Which `info_blobs` a question cited and with which similarity score                       |
+| `groups`                             | Collections of uploaded documents (the code calls them collections)                       |
+| `websites`, `crawl_runs`             | Crawled sources and each crawl execution                                                  |
+| `info_blobs`                         | Extracted text per document or page, with `source_id` and `version_state`                 |
+| `info_blob_chunks`                   | Chunked text with its embedding vector                                                    |
+| `files`                              | Uploaded files and attachments                                                            |
+| `object_contents` and related tables | Durable byte control plane (see below)                                                    |
+| `jobs`                               | Background job status for the frontend                                                    |
+| `api_keys_v2`                        | API keys stored as hashes with prefix and suffix for display                              |
+| `audit_logs` and audit config tables | Audit trail and retention policy                                                          |
 
 **Key relationships:**
 
@@ -449,6 +458,14 @@ or provider routing; those changes require a new model and reindexing.
 The worker writes a heartbeat key to Redis; `/api/healthz` reports the worker
 as unhealthy when that heartbeat is stale.
 
+**Flow workers:** Flow execution and maintenance run on dedicated ARQ workers
+started with `uv run task-execution-worker` and `uv run task-maintenance-worker`
+(`backend/src/eneo/worker/platform_tasks_cli.py`). The execution worker owns
+the capacity queue for Flow steps; the maintenance worker owns recovery,
+expiry, and audit-outbox scheduling. Their queues share Redis with the general
+worker but their responsibilities stay separate, so Flow runtime recovery does
+not change unrelated background work. `/api/healthz/flows` reports their state.
+
 ---
 
 ### Audit Logging
@@ -631,9 +648,9 @@ There is no separate CSRF token or refresh-token mechanism.
 
 ### Database
 
-- Keep `WORKER_MAX_JOBS` below roughly 60 % of `DB_POOL_SIZE +
-  DB_POOL_MAX_OVERFLOW` so the API always has connections; the backend
-  environment template documents the sizing formula.
+- Every API and worker process owns its own pool, so size PostgreSQL
+  `max_connections` for the sum of all pools; the backend environment template
+  documents the budget table.
 - Retrieval cost is proportional to the chunks in scope of a search, so large
   tenants benefit from splitting knowledge into focused collections.
 
@@ -647,10 +664,11 @@ services in this order, gated by health checks:
 1. `db` (PostgreSQL 16 + pgvector) and `redis` become healthy.
 2. `db-init` runs `python init_db.py`: Alembic migrations and the default
    tenant and user, then exits.
-3. `backend` and `worker` start; `backend` exposes `/api/healthz`.
+3. `backend`, `worker`, `crawler-worker`, `task-execution-worker`, and
+   `task-maintenance-worker` start; `backend` exposes `/api/healthz`.
 4. `frontend` starts.
 
-Networks: `proxy_tier` (Traefik, frontend, backend, worker; internet-facing),
+Networks: `proxy_tier` (Traefik, frontend, backend, all workers; internet-facing),
 `data_net` (PostgreSQL and Redis; internal only), `module_net` (Traefik and
 backend; reserved for optional module containers), and `tool_runtime_net`
 (backend, general worker and bundled runtime; internal only).
@@ -691,12 +709,12 @@ correlating a user report with server logs.
 
 ### Health Checks
 
-| Endpoint               | Purpose                                                                                                           |
-| ---------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `GET /api/livez`       | Liveness: the API process can serve requests                                                                      |
-| `GET /api/healthz`     | Backend, worker heartbeat, and object-content readiness; `503` when the worker is stale or the store is not ready |
-| `GET /api/readyz`      | Alias of `/api/healthz` for readiness probes                                                                      |
-| `GET /api/healthz/crawler` | Detailed crawler diagnostics; requires the deployment's super API key; not intended for orchestrator probes |
+| Endpoint                   | Purpose                                                                                                           |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| `GET /api/livez`           | Liveness: the API process can serve requests                                                                      |
+| `GET /api/healthz`         | Backend, worker heartbeat, and object-content readiness; `503` when the worker is stale or the store is not ready |
+| `GET /api/readyz`          | Alias of `/api/healthz` for readiness probes                                                                      |
+| `GET /api/healthz/crawler` | Detailed crawler diagnostics; requires the deployment's super API key; not intended for orchestrator probes       |
 
 ---
 

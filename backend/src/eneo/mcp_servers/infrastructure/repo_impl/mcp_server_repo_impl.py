@@ -1,3 +1,4 @@
+from collections.abc import Iterable
 from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
@@ -170,8 +171,22 @@ class MCPServerRepoImpl(
             self.session, self.mapper.to_entities(records)
         )
 
-    async def query(  # type: ignore[override]
+    async def query(
         self, tags: list[str] | None = None, **filters: object
+    ) -> list[MCPServer]:
+        return await self._query(filters, tags=tags)
+
+    async def query_for_purposes(
+        self, purposes: Iterable[str], **filters: object
+    ) -> list[MCPServer]:
+        return await self._query(filters, purposes=purposes)
+
+    async def _query(
+        self,
+        filters: dict[str, object],
+        *,
+        tags: list[str] | None = None,
+        purposes: Iterable[str] | None = None,
     ) -> list[MCPServer]:
         """Query MCP servers with optional tag filtering."""
         query = select(self._db_model)
@@ -179,8 +194,11 @@ class MCPServerRepoImpl(
         if tags:
             # Filter by tags using JSONB contains operator
             query = query.where(
-                sa.or_(*[self._db_model.tags.contains([tag]) for tag in tags])  # type: ignore[union-attr]
+                sa.or_(*[self._db_model.tags.contains([tag]) for tag in tags])
             )
+
+        if purposes is not None:
+            query = query.where(self._db_model.purpose.in_(tuple(purposes)))
 
         if filters:
             query = query.filter_by(**filters)

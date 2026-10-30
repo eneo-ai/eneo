@@ -11,9 +11,13 @@ from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_models import (
     PERMISSION_LEVEL_ORDER,
     ApiKeyHashVersion,
+    ApiKeyOwnership,
+    ApiKeyPermission,
     ApiKeyType,
     ApiKeyV2InDB,
+    ResourcePermissionLevel,
     ResourcePermissions,
+    ServicePrincipalState,
 )
 from eneo.main.config import get_settings
 
@@ -46,6 +50,49 @@ class ApiKeyValidationError(Exception):
         self.context = context
 
 
+def resolve_effective_resource_permission(
+    key: ApiKeyV2InDB,
+    resource_type: str,
+) -> ApiKeyPermission:
+    if not get_settings().api_key_enforce_resource_permissions:
+        return ApiKeyPermission(key.permission)
+
+    if key.resource_permissions is None:
+        return ApiKeyPermission(key.permission)
+
+    try:
+        resource_permissions = ResourcePermissions.model_validate(
+            key.resource_permissions
+        )
+    except Exception:
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_resource_permission",
+            message="API key has malformed resource permissions.",
+        )
+
+    granted_value = getattr(resource_permissions, resource_type, None)
+    if granted_value in (None, ResourcePermissionLevel.NONE):
+        raise ApiKeyValidationError(
+            status_code=403,
+            code="insufficient_resource_permission",
+            message=f"API key does not have '{resource_type}' permission.",
+            context=ResourceDenialContext(
+                resource_type=resource_type,
+                required_level=ApiKeyPermission.READ.value,
+                granted_level=(
+                    granted_value.value
+                    if isinstance(granted_value, ResourcePermissionLevel)
+                    else "none"
+                ),
+                auth_layer="api_key_resource",
+                action="resource_permission_check",
+            ),
+        )
+
+    return ApiKeyPermission(granted_value.value)
+
+
 def check_resource_permission(
     key: ApiKeyV2InDB,
     resource_type: str,
@@ -56,6 +103,7 @@ def check_resource_permission(
     Fail-closed: missing/unrecognized resource keys are treated as "none" (deny).
     If resource_permissions is None, falls back to the key's basic permission
     level as a ceiling (e.g. a read key cannot perform write operations).
+    If resource_permissions is set, absent or "none" resource fields fail closed.
     """
     if not get_settings().api_key_enforce_resource_permissions:
         return
@@ -231,6 +279,30 @@ class ApiKeyAuthResolver:
                 and prefix != ApiKeyType.SK.value
             ):
                 return None
+
+        if record.ownership == ApiKeyOwnership.SERVICE:
+            if record.service_principal_id is None:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key service principal is invalid.",
+                )
+            service_principal = await self.api_key_repo.get_service_principal(
+                service_principal_id=record.service_principal_id,
+                tenant_id=record.tenant_id,
+            )
+            if service_principal is None:
+                raise ApiKeyValidationError(
+                    status_code=401,
+                    code="invalid_api_key",
+                    message="API key service principal is invalid.",
+                )
+            if service_principal.state != ServicePrincipalState.ACTIVE:
+                raise ApiKeyValidationError(
+                    status_code=403,
+                    code="service_principal_disabled",
+                    message="Service principal is disabled.",
+                )
 
         return ResolvedApiKey(key=record, plain_key=plain_key, prefix=prefix)
 

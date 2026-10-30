@@ -9,15 +9,17 @@ from eneo.apps.apps.api.app_models import (
 )
 from eneo.apps.apps.app import App
 from eneo.completion_models.presentation import CompletionModelAssembler
-from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_models import (
     AcceptedFileType,
     FilePublic,
     FileRestrictions,
     Limit,
 )
-from eneo.files.image import ImageMimeTypes
-from eneo.files.text import TextMimeTypes
+from eneo.files.mime_support import (
+    supported_audio_mimes,
+    supported_image_mimes,
+    supported_text_mimes,
+)
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from eneo.prompts.api.prompt_assembler import PromptAssembler
 from eneo.transcription_models.presentation import TranscriptionModelPublic
@@ -56,7 +58,7 @@ class AppAssembler:
                         mimetype=mimetype,
                         size_limit=self.upload_admission.session_file_maximum_bytes,
                     )
-                    for mimetype in TextMimeTypes.values()
+                    for mimetype in supported_text_mimes()
                 ]
             case InputFieldType.AUDIO_UPLOAD:
                 return [
@@ -64,7 +66,7 @@ class AppAssembler:
                         mimetype=mimetype,
                         size_limit=self.upload_admission.session_audio_maximum_bytes,
                     )
-                    for mimetype in AudioMimeTypes.values()
+                    for mimetype in supported_audio_mimes()
                 ]
             case InputFieldType.AUDIO_RECORDER:
                 return [
@@ -72,7 +74,7 @@ class AppAssembler:
                         mimetype=mimetype,
                         size_limit=self.upload_admission.session_audio_maximum_bytes,
                     )
-                    for mimetype in AudioMimeTypes.values()
+                    for mimetype in supported_audio_mimes()
                 ]
             case InputFieldType.IMAGE_UPLOAD:
                 return [
@@ -80,7 +82,7 @@ class AppAssembler:
                         mimetype=mimetype,
                         size_limit=self.upload_admission.session_image_maximum_bytes,
                     )
-                    for mimetype in ImageMimeTypes.values()
+                    for mimetype in supported_image_mimes()
                 ]
 
     def _get_limit(self, input_type: InputFieldType) -> Limit:
@@ -161,7 +163,7 @@ class AppAssembler:
                     mimetype=mimetype,
                     size_limit=self.upload_admission.session_file_maximum_bytes,
                 )
-                for mimetype in TextMimeTypes.values()
+                for mimetype in supported_text_mimes()
             ],
             limit=Limit(
                 max_files=_TEXT_MAX_FILES,

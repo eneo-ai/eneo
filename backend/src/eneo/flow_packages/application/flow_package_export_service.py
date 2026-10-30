@@ -1,0 +1,919 @@
+from __future__ import annotations
+
+import json
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from typing import TYPE_CHECKING, Protocol, cast
+from uuid import UUID
+
+from eneo.flow_packages.application.flow_package_template_uploads import (
+    inspect_package_template,
+)
+from eneo.flow_packages.domain.flow_package_draft import (
+    FlowPackageFlowDraft,
+    FlowPackageStepInputConfig,
+    FlowPackageStepOutputConfig,
+)
+from eneo.flow_packages.domain.flow_package_envelope import FlowPackageEnvelope
+from eneo.flow_packages.domain.flow_package_errors import (
+    FlowPackageExportError,
+    FlowPackageExportErrorCode,
+)
+from eneo.flow_packages.domain.flow_package_limits import MAX_FLOW_PACKAGE_BYTES
+from eneo.flow_packages.domain.flow_package_manifest import (
+    FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA,
+    FlowPackageManifestMetadata,
+    flow_package_filename,
+)
+from eneo.flow_packages.domain.flow_package_provenance import (
+    FlowPackageOmission,
+    FlowPackageProvenance,
+)
+from eneo.flow_packages.domain.flow_package_requirements import (
+    FlowPackageKnowledgeRequirement,
+    FlowPackageModelKind,
+    FlowPackageModelRequirement,
+    FlowPackageRequirementEntry,
+    FlowPackageRequirementSet,
+    FlowPackageTemplateAssetRequirement,
+)
+from eneo.flow_packages.domain.flow_package_templates import (
+    FlowPackageTemplateDescriptor,
+)
+from eneo.flows.assistant_authoring_snapshot import (
+    AssistantAuthoringResourceRef,
+    AssistantAuthoringSnapshot,
+    AssistantAuthoringSnapshots,
+)
+from eneo.flows.citation_sidecar import CITATION_MODE_INLINE_INREF_SIDECAR
+from eneo.flows.domain.flow import Flow, FlowPersistedJsonObject, FlowStep
+from eneo.flows.domain.step_config import clean_inactive_step_config
+from eneo.flows.enums import (
+    FlowInputSource,
+    FlowInputType,
+    FlowOutputMode,
+    FlowOutputType,
+    flow_output_mode_uses_completion_model,
+)
+from eneo.flows.flow_authoring_spec import (
+    AssistantSpec,
+    FlowDraftSpecCore,
+    FormFieldSpec,
+    InputSource,
+    InputType,
+    OutputMode,
+    OutputType,
+    StepSpec,
+)
+from eneo.flows.flow_capability_manifest import is_citation_capable_step
+from eneo.flows.flow_metadata import (
+    FlowFormSchemaParseMode,
+    parse_flow_form_schema,
+)
+from eneo.flows.flow_resource_bindings import (
+    FlowResourceBindingResolutionError,
+    LocalResourceBinding,
+    LocalResourceKind,
+    ResourceSlotAllocator,
+    ResourceSlotKind,
+    index_local_resource_bindings,
+    is_uuid_shaped_resource_ref,
+    local_resource_kinds_for_slot_kind,
+)
+from eneo.flows.flow_validators_template import (
+    has_template_fill_resource_reference,
+    validate_template_placeholder_bindings,
+)
+from eneo.flows.flow_variable_definitions import (
+    RESERVED_RUNTIME_VARIABLES,
+    runtime_variables_for_step,
+)
+from eneo.flows.http_transport import contains_secret_sentinel, is_authored_config
+from eneo.flows.template_reference_analyzer import (
+    TemplateReferenceKind,
+    analyze_template,
+)
+from eneo.main.exceptions import BadRequestException, NotFoundException
+
+if TYPE_CHECKING:
+    from eneo.flows.flow_template_asset_service import FlowTemplateAssetService
+
+_MAX_JSON_SCAN_DEPTH = 32
+# Package bytes are materialized before response; this cap bounds the response payload.
+MAX_PACKAGE_EXPORT_BYTES = MAX_FLOW_PACKAGE_BYTES
+
+FlowPackageWriter = Callable[[FlowPackageEnvelope], bytes]
+FlowPackageClock = Callable[[], datetime]
+
+
+class FlowPackageExportFlowService(Protocol):
+    async def count_flow_step_assistants_with_mcp_configuration(
+        self,
+        *,
+        flow_id: UUID,
+    ) -> int: ...
+
+    async def get_flow_assistant_snapshots(
+        self,
+        flow: Flow,
+    ) -> AssistantAuthoringSnapshots: ...
+
+    async def list_resource_bindings(
+        self,
+        *,
+        flow_id: UUID,
+    ) -> tuple[LocalResourceBinding, ...]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class FlowPackageExportResult:
+    package_bytes: bytes
+    envelope: FlowPackageEnvelope
+    filename: str
+
+
+@dataclass(frozen=True, slots=True)
+class FlowPackageExportTemplate:
+    descriptor: FlowPackageTemplateDescriptor
+    content: bytes
+
+
+class FlowPackageExportService:
+    """Portable export invariants: no source-local provenance ids, capped bytes."""
+
+    def __init__(
+        self,
+        *,
+        flow_service: FlowPackageExportFlowService,
+        package_writer: FlowPackageWriter,
+        clock: FlowPackageClock | None = None,
+        template_asset_service: FlowTemplateAssetService | None = None,
+    ) -> None:
+        self._flow_service = flow_service
+        self._package_writer = package_writer
+        self._clock = clock or _utc_now
+        self._template_asset_service = template_asset_service
+
+    async def export_to_bytes(
+        self,
+        *,
+        flow_id: UUID,
+        flow: Flow,
+        manifest_metadata: FlowPackageManifestMetadata,
+        include_templates: bool = True,
+    ) -> FlowPackageExportResult:
+        omitted_mcp_assistant_count = (
+            await self._flow_service.count_flow_step_assistants_with_mcp_configuration(
+                flow_id=flow_id
+            )
+        )
+        assistant_snapshots = await self._flow_service.get_flow_assistant_snapshots(
+            flow
+        )
+        resource_bindings = await self._flow_service.list_resource_bindings(
+            flow_id=flow_id
+        )
+        template_assets: dict[UUID, FlowPackageExportTemplate] = {}
+        for step in flow.steps:
+            if step.output_mode is not FlowOutputMode.TEMPLATE_FILL:
+                continue
+            if self._template_asset_service is None:
+                raise FlowPackageExportError(
+                    code=FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED,
+                    message="Template export requires a template asset service.",
+                    context={"step_order": step.step_order},
+                )
+            try:
+                asset_id = UUID(
+                    str((step.output_config or {}).get("template_asset_id", ""))
+                )
+            except ValueError as exc:
+                raise _step_config_not_portable(
+                    step_order=step.step_order, config_field="output_config"
+                ) from exc
+            if asset_id in template_assets:
+                continue
+            try:
+                asset, file = await self._template_asset_service.get_asset_with_file(
+                    flow_id=flow_id, asset_id=asset_id
+                )
+                if file.blob is None:
+                    raise BadRequestException(
+                        "The original Word template is unavailable."
+                    )
+                descriptor = await inspect_package_template(
+                    file.blob, filename=asset.name, included=include_templates
+                )
+            except (BadRequestException, NotFoundException, ValueError) as exc:
+                raise FlowPackageExportError(
+                    code=FlowPackageExportErrorCode.TEMPLATE_FILE_INVALID,
+                    message="The Word template is unavailable or invalid; upload it again before exporting.",
+                    context={
+                        "step_order": step.step_order,
+                        "config_field": "output_config",
+                    },
+                ) from exc
+            template_assets[asset_id] = FlowPackageExportTemplate(
+                descriptor=descriptor,
+                content=file.blob if include_templates else b"",
+            )
+            if (
+                sum(
+                    len(content)
+                    for content in {
+                        template.descriptor.checksum: template.content
+                        for template in template_assets.values()
+                    }.values()
+                )
+                > MAX_PACKAGE_EXPORT_BYTES
+            ):
+                raise FlowPackageExportError(
+                    code=FlowPackageExportErrorCode.PACKAGE_BYTES_TOO_LARGE,
+                    message="The Word templates exceed the package size limit.",
+                    context={"max_package_export_bytes": MAX_PACKAGE_EXPORT_BYTES},
+                )
+        envelope = build_flow_package_export_envelope(
+            flow=flow,
+            assistant_snapshots=assistant_snapshots,
+            resource_bindings=resource_bindings,
+            manifest_metadata=manifest_metadata,
+            template_assets=template_assets,
+            provenance=FlowPackageProvenance.for_portable_export(
+                exported_at=self._clock(),
+                omissions=(
+                    [
+                        FlowPackageOmission.mcp_attachment(
+                            count=omitted_mcp_assistant_count
+                        )
+                    ]
+                    if omitted_mcp_assistant_count
+                    else []
+                ),
+            ),
+        )
+        package_bytes = self._package_writer(envelope)
+        if len(package_bytes) > MAX_PACKAGE_EXPORT_BYTES:
+            raise FlowPackageExportError(
+                code=FlowPackageExportErrorCode.PACKAGE_BYTES_TOO_LARGE,
+                message="Flow package export exceeds the allowed size.",
+                context={
+                    "package_size_bytes": len(package_bytes),
+                    "max_package_export_bytes": MAX_PACKAGE_EXPORT_BYTES,
+                },
+            )
+        return FlowPackageExportResult(
+            package_bytes=package_bytes,
+            envelope=envelope,
+            filename=flow_package_filename(envelope.manifest),
+        )
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+@dataclass(frozen=True, slots=True)
+class _StepUsage:
+    step_ref: str
+    step_order: int
+
+
+@dataclass(slots=True)
+class _RequirementDraft:
+    slot_ref_kind: ResourceSlotKind
+    binding: LocalResourceBinding
+    template: FlowPackageTemplateDescriptor | None = None
+    used_by_steps: dict[str, _StepUsage] = field(
+        default_factory=lambda: dict[str, _StepUsage]()
+    )
+
+    def add_usage(self, usage: _StepUsage) -> None:
+        self.used_by_steps.setdefault(usage.step_ref, usage)
+
+
+def build_flow_package_export_envelope(
+    *,
+    flow: Flow,
+    assistant_snapshots: AssistantAuthoringSnapshots,
+    resource_bindings: tuple[LocalResourceBinding, ...],
+    manifest_metadata: FlowPackageManifestMetadata,
+    provenance: FlowPackageProvenance,
+    template_assets: Mapping[UUID, FlowPackageExportTemplate] | None = None,
+) -> FlowPackageEnvelope:
+    try:
+        index_local_resource_bindings(resource_bindings)
+    except FlowResourceBindingResolutionError as exc:
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.DUPLICATE_RESOURCE_BINDING,
+            message="Flow package export found multiple local resources for one package slot.",
+            context=exc.context(),
+        ) from exc
+
+    slot_allocator = ResourceSlotAllocator(prior_bindings=resource_bindings)
+    requirement_drafts: dict[str, _RequirementDraft] = {}
+    form_fields = _form_fields_from_metadata(flow.metadata_json)
+    ordered_steps = sorted(flow.steps, key=lambda item: item.step_order)
+    step_refs_by_order = {step.step_order: _step_ref(step) for step in ordered_steps}
+    form_field_names = {field.name for field in form_fields}
+
+    steps: list[StepSpec] = []
+    for step in ordered_steps:
+        usage = _StepUsage(step_ref=_step_ref(step), step_order=step.step_order)
+        snapshot = assistant_snapshots.get(step.assistant_id)
+        if snapshot is None:
+            raise FlowPackageExportError(
+                code=FlowPackageExportErrorCode.MISSING_ASSISTANT_SNAPSHOT,
+                message="Flow package export requires assistant authoring snapshots.",
+                context={"step_order": step.step_order},
+            )
+        step_spec = _step_spec(
+            step=step,
+            snapshot=snapshot,
+            slot_allocator=slot_allocator,
+            requirement_drafts=requirement_drafts,
+            usage=usage,
+            template_assets=template_assets or {},
+        )
+        _validate_step_template_references(
+            step_spec=step_spec,
+            current_step_order=step.step_order,
+            step_refs_by_order=step_refs_by_order,
+            form_field_names=form_field_names,
+        )
+        steps.append(step_spec)
+
+    draft = FlowPackageFlowDraft(
+        schema_version=1,
+        spec=FlowDraftSpecCore(
+            flow_name=flow.name,
+            flow_description=flow.description or "",
+            steps=steps,
+            form_fields=form_fields or None,
+        ),
+    )
+    return FlowPackageEnvelope.build_for_export(
+        manifest_metadata=(
+            manifest_metadata.model_copy(
+                update={"payload_schema": FLOW_PACKAGE_TEMPLATES_PAYLOAD_SCHEMA}
+            )
+            if template_assets
+            else manifest_metadata
+        ),
+        draft=draft,
+        requirements=FlowPackageRequirementSet(
+            schema_version=1,
+            requirements=_requirements_from_drafts(requirement_drafts.values()),
+        ),
+        provenance=provenance,
+        template_payloads={
+            template.descriptor.asset_path: template.content
+            for template in (template_assets or {}).values()
+            if template.descriptor.asset_path is not None
+        },
+    )
+
+
+def _form_fields_from_metadata(
+    metadata_json: FlowPersistedJsonObject | None,
+) -> list[FormFieldSpec]:
+    try:
+        form_schema = parse_flow_form_schema(
+            metadata_json,
+            mode=FlowFormSchemaParseMode.WRITE,
+        )
+    except BadRequestException as exc:
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.FORM_SCHEMA_INVALID,
+            message="Flow package export requires a valid form schema.",
+        ) from exc
+    if form_schema is None:
+        return []
+    return [
+        FormFieldSpec(
+            name=field.name,
+            type=field.type.value,
+            label=field.label or field.name,
+            required=field.required,
+            options=field.options,
+            role=field.role,
+        )
+        for field in form_schema.fields
+    ]
+
+
+def _step_spec(
+    *,
+    step: FlowStep,
+    snapshot: AssistantAuthoringSnapshot,
+    slot_allocator: ResourceSlotAllocator,
+    requirement_drafts: dict[str, _RequirementDraft],
+    usage: _StepUsage,
+    template_assets: Mapping[UUID, FlowPackageExportTemplate],
+) -> StepSpec:
+    step = clean_inactive_step_config(step)
+    has_template_resource = has_template_fill_resource_reference(step.output_config)
+    if (step.output_mode == FlowOutputMode.TEMPLATE_FILL and not template_assets) or (
+        has_template_resource and step.output_mode is not FlowOutputMode.TEMPLATE_FILL
+    ):
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.TEMPLATE_ASSET_PAYLOAD_UNSUPPORTED,
+            message="Flow package export does not support template asset payloads yet.",
+            context={"step_order": step.step_order},
+        )
+
+    input_config = _portable_input_config(step)
+    output_config = (
+        _portable_template_config(
+            step, template_assets, slot_allocator, requirement_drafts, usage
+        )
+        if step.output_mode is FlowOutputMode.TEMPLATE_FILL
+        else _portable_output_config(step)
+    )
+
+    try:
+        input_source = InputSource(step.input_source.value)
+        input_type = InputType(step.input_type.value)
+        output_mode = OutputMode(step.output_mode.value)
+        output_type = OutputType(step.output_type.value)
+    except ValueError as exc:
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.UNSUPPORTED_STEP_IO,
+            message="Flow step uses IO that is not portable in flow packages.",
+            context={"step_order": step.step_order},
+        ) from exc
+
+    assistant_spec = _assistant_spec(
+        snapshot=snapshot,
+        slot_allocator=slot_allocator,
+        requirement_drafts=requirement_drafts,
+        usage=usage,
+        uses_completion_model=flow_output_mode_uses_completion_model(step.output_mode),
+    )
+    return StepSpec(
+        plan_step_ref=usage.step_ref,
+        name=step.user_description or "",
+        assistant_spec=assistant_spec,
+        input_source=input_source,
+        input_type=input_type,
+        output_mode=output_mode,
+        output_type=output_type,
+        input_bindings=step.input_bindings,
+        input_contract=step.input_contract,
+        output_contract=step.output_contract,
+        input_config=input_config,
+        output_config=output_config,
+        review_policy=step.review_policy,
+    )
+
+
+def _portable_template_config(
+    step: FlowStep,
+    template_assets: Mapping[UUID, FlowPackageExportTemplate],
+    slot_allocator: ResourceSlotAllocator,
+    requirement_drafts: dict[str, _RequirementDraft],
+    usage: _StepUsage,
+) -> FlowPersistedJsonObject:
+    config = step.output_config or {}
+    _reject_known_nonportable_config(
+        config, step_order=step.step_order, config_field="output_config"
+    )
+    if set(config) - {
+        "template_asset_id",
+        "template_name",
+        "template_checksum",
+        "placeholders",
+        "bindings",
+    }:
+        raise _step_config_not_portable(
+            step_order=step.step_order, config_field="output_config"
+        )
+    try:
+        asset_id = UUID(str(config.get("template_asset_id", "")))
+        template = template_assets[asset_id]
+    except (ValueError, KeyError) as exc:
+        raise _step_config_not_portable(
+            step_order=step.step_order, config_field="output_config"
+        ) from exc
+    names = [field.name for field in template.descriptor.fields]
+    bindings = config.get("bindings")
+    try:
+        validate_template_placeholder_bindings(
+            step_order=step.step_order, placeholder_names=names, bindings=bindings
+        )
+        if not isinstance(bindings, dict) or set(
+            cast(dict[str, object], bindings)
+        ) != set(names):
+            raise BadRequestException("Word template mappings include obsolete fields.")
+    except BadRequestException as exc:
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.TEMPLATE_BINDINGS_INCOMPLETE,
+            message="Review the Word step: map every template field and remove obsolete mappings before exporting.",
+            context={"step_order": step.step_order, "config_field": "output_config"},
+        ) from exc
+    slot_ref, binding = slot_allocator.allocate(
+        slot_kind=ResourceSlotKind.TEMPLATE_ASSET,
+        local_kind=LocalResourceKind.TEMPLATE_ASSET,
+        local_ref=str(asset_id),
+        display_name=template.descriptor.filename,
+    )
+    assert binding is not None
+    _record_requirement(requirement_drafts, binding, usage)
+    requirement_drafts[slot_ref.ref].template = template.descriptor
+    return {
+        "template_ref": slot_ref.ref,
+        "placeholders": names,
+        "bindings": config.get("bindings"),
+    }
+
+
+def _portable_input_config(step: FlowStep) -> FlowPersistedJsonObject | None:
+    raw_config = step.input_config
+    if not raw_config:
+        return None
+    _reject_known_nonportable_config(
+        raw_config,
+        step_order=step.step_order,
+        config_field="input_config",
+    )
+    try:
+        # Stored config is JSON; strict JSON parsing accepts exact enum strings
+        # without enabling Python-side scalar coercion.
+        parsed = FlowPackageStepInputConfig.model_validate_json(json.dumps(raw_config))
+    except (TypeError, ValueError) as exc:
+        raise _step_config_not_portable(
+            step_order=step.step_order,
+            config_field="input_config",
+        ) from exc
+
+    portable: FlowPersistedJsonObject = {}
+    if parsed.runtime_input is not None:
+        # Runtime files supplement any portable input source, including text
+        # from prior steps. The run form and executor both read this config.
+        if parsed.runtime_input.enabled or (
+            step.input_source is FlowInputSource.FLOW_INPUT
+            and step.input_type
+            in {FlowInputType.AUDIO, FlowInputType.DOCUMENT, FlowInputType.FILE}
+        ):
+            portable["runtime_input"] = parsed.runtime_input.model_dump(
+                mode="json",
+                exclude_unset=True,
+                exclude_none=True,
+            )
+    if parsed.item_map is not None:
+        supported = (
+            step.input_source is FlowInputSource.PREVIOUS_STEP
+            and step.input_type is FlowInputType.JSON
+            and step.output_mode is FlowOutputMode.PASS_THROUGH
+            and step.output_type is FlowOutputType.JSON
+        )
+        if parsed.item_map.enabled and not supported:
+            raise _step_config_not_portable(
+                step_order=step.step_order,
+                config_field="input_config",
+            )
+        if supported:
+            portable["item_map"] = parsed.item_map.model_dump(
+                mode="json",
+                exclude_unset=True,
+            )
+    if parsed.text_processing is not None:
+        portable["text_processing"] = parsed.text_processing.model_dump(mode="json")
+    if parsed.long_material is not None:
+        portable["long_material"] = parsed.long_material.model_dump(mode="json")
+    return portable or None
+
+
+def _portable_output_config(step: FlowStep) -> FlowPersistedJsonObject | None:
+    raw_config = step.output_config
+    if not raw_config:
+        return None
+    _reject_known_nonportable_config(
+        raw_config,
+        step_order=step.step_order,
+        config_field="output_config",
+    )
+    try:
+        # Keep output parsing on the same strict persisted-JSON boundary as input.
+        parsed = FlowPackageStepOutputConfig.model_validate_json(json.dumps(raw_config))
+    except (TypeError, ValueError) as exc:
+        raise _step_config_not_portable(
+            step_order=step.step_order,
+            config_field="output_config",
+        ) from exc
+
+    portable: FlowPersistedJsonObject = {}
+    if parsed.retrieval_policy is not None:
+        portable["retrieval_policy"] = parsed.retrieval_policy.model_dump(mode="json")
+    if (
+        parsed.speaker_mapping is not None
+        and step.output_mode is FlowOutputMode.SPEAKER_MAPPING
+    ):
+        portable["speaker_mapping"] = parsed.speaker_mapping.model_dump(
+            mode="json",
+            exclude_unset=True,
+        )
+    if (
+        parsed.citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
+        and is_citation_capable_step(
+            output_type=step.output_type,
+            output_mode=step.output_mode,
+            output_config={"citation_mode": parsed.citation_mode},
+        )
+    ):
+        portable["citation_mode"] = parsed.citation_mode
+    return portable or None
+
+
+def _reject_known_nonportable_config(
+    raw_config: FlowPersistedJsonObject,
+    *,
+    step_order: int,
+    config_field: str,
+) -> None:
+    if not is_authored_config(raw_config) and not contains_secret_sentinel(raw_config):
+        return
+    raise _step_config_not_portable(
+        step_order=step_order,
+        config_field=config_field,
+    )
+
+
+def _step_config_not_portable(
+    *,
+    step_order: int,
+    config_field: str,
+) -> FlowPackageExportError:
+    return FlowPackageExportError(
+        code=FlowPackageExportErrorCode.STEP_CONFIG_NOT_PORTABLE,
+        message="Flow package export found step configuration that is not safely portable.",
+        context={"step_order": step_order, "config_field": config_field},
+    )
+
+
+def _assistant_spec(
+    *,
+    snapshot: AssistantAuthoringSnapshot,
+    slot_allocator: ResourceSlotAllocator,
+    requirement_drafts: dict[str, _RequirementDraft],
+    usage: _StepUsage,
+    uses_completion_model: bool,
+) -> AssistantSpec:
+    # A deterministic step never runs its assistant's model, and the spec
+    # loader strips the model_ref on import. Recording a model requirement
+    # for it would ask the importer to bind a slot no step reads.
+    model_ref = None
+    if uses_completion_model and snapshot.model is not None:
+        model_binding = _binding_for_ref(
+            snapshot.model,
+            slot_kind=ResourceSlotKind.MODEL,
+            slot_allocator=slot_allocator,
+        )
+        model_ref = model_binding.slot_ref.ref
+        _record_requirement(requirement_drafts, model_binding, usage)
+
+    knowledge_refs: list[str] = []
+    for resource_ref in snapshot.knowledge_refs:
+        binding = _binding_for_ref(
+            resource_ref,
+            slot_kind=ResourceSlotKind.KNOWLEDGE,
+            slot_allocator=slot_allocator,
+        )
+        knowledge_refs.append(binding.slot_ref.ref)
+        _record_requirement(requirement_drafts, binding, usage)
+
+    return AssistantSpec(
+        instructions=snapshot.instructions,
+        model_ref=model_ref,
+        knowledge_refs=knowledge_refs,
+    )
+
+
+def _binding_for_ref(
+    resource_ref: AssistantAuthoringResourceRef,
+    *,
+    slot_kind: ResourceSlotKind,
+    slot_allocator: ResourceSlotAllocator,
+) -> LocalResourceBinding:
+    _validate_resource_uuid(resource_ref.local_ref)
+    local_kind = _resource_local_kind(resource_ref, slot_kind=slot_kind)
+    _, binding = slot_allocator.allocate(
+        slot_kind=slot_kind,
+        local_kind=local_kind,
+        local_ref=resource_ref.local_ref,
+        display_name=resource_ref.label or "",
+    )
+    if binding is None:
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF,
+            message="Flow package export requires UUID-backed local resource refs.",
+            context={
+                "resource_ref": resource_ref.local_ref,
+                "slot_kind": slot_kind.value,
+            },
+        )
+    return binding
+
+
+def _resource_local_kind(
+    resource_ref: AssistantAuthoringResourceRef,
+    *,
+    slot_kind: ResourceSlotKind,
+) -> LocalResourceKind:
+    if resource_ref.local_kind is None:
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF,
+            message=(
+                "Flow package export requires typed local resource refs before "
+                "they can be converted to portable package slots."
+            ),
+            context={
+                "resource_ref": resource_ref.local_ref,
+                "slot_kind": slot_kind.value,
+            },
+        )
+
+    allowed_local_kinds = local_resource_kinds_for_slot_kind(slot_kind)
+    if resource_ref.local_kind not in allowed_local_kinds:
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF,
+            message=(
+                "Flow package export found a local resource kind that cannot "
+                "satisfy the requested package slot kind."
+            ),
+            context={
+                "resource_ref": resource_ref.local_ref,
+                "slot_kind": slot_kind.value,
+                "local_kind": resource_ref.local_kind.value,
+            },
+        )
+    return resource_ref.local_kind
+
+
+def _validate_resource_uuid(resource_ref: str) -> None:
+    if not is_uuid_shaped_resource_ref(resource_ref):
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF,
+            message="Flow package export requires UUID-backed local resource refs.",
+            context={"resource_ref": resource_ref},
+        )
+
+
+def _record_requirement(
+    requirement_drafts: dict[str, _RequirementDraft],
+    binding: LocalResourceBinding,
+    usage: _StepUsage,
+) -> None:
+    draft = requirement_drafts.setdefault(
+        binding.slot_ref.ref,
+        _RequirementDraft(slot_ref_kind=binding.slot_ref.kind, binding=binding),
+    )
+    draft.add_usage(usage)
+
+
+def _requirements_from_drafts(
+    drafts: Iterable[_RequirementDraft],
+) -> list[FlowPackageRequirementEntry]:
+    return [
+        _requirement_from_draft(draft)
+        for draft in sorted(drafts, key=lambda item: item.binding.slot_ref.ref)
+    ]
+
+
+def _requirement_from_draft(draft: _RequirementDraft) -> FlowPackageRequirementEntry:
+    used_by_steps = [
+        usage.step_ref
+        for usage in sorted(
+            draft.used_by_steps.values(),
+            key=lambda item: (item.step_order, item.step_ref),
+        )
+    ]
+    match draft.slot_ref_kind:
+        case ResourceSlotKind.MODEL:
+            return FlowPackageModelRequirement(
+                slot_ref=draft.binding.slot_ref,
+                used_by_steps=used_by_steps,
+                model_kind=_model_kind_for_binding(draft.binding),
+            )
+        case ResourceSlotKind.KNOWLEDGE:
+            return FlowPackageKnowledgeRequirement(
+                slot_ref=draft.binding.slot_ref,
+                used_by_steps=used_by_steps,
+            )
+        case ResourceSlotKind.TEMPLATE_ASSET:
+            return FlowPackageTemplateAssetRequirement(
+                slot_ref=draft.binding.slot_ref,
+                used_by_steps=used_by_steps,
+                template=draft.template,
+            )
+
+
+def _model_kind_for_binding(binding: LocalResourceBinding) -> FlowPackageModelKind:
+    match binding.local_kind:
+        case LocalResourceKind.COMPLETION_MODEL:
+            return FlowPackageModelKind.COMPLETION_MODEL
+        case LocalResourceKind.TRANSCRIPTION_MODEL:
+            return FlowPackageModelKind.TRANSCRIPTION_MODEL
+        case _:
+            raise FlowPackageExportError(
+                code=FlowPackageExportErrorCode.UNMAPPED_RESOURCE_REF,
+                message="Flow package export found a non-model binding for a model slot.",
+                context={"resource_ref": binding.slot_ref.ref},
+            )
+
+
+def _validate_step_template_references(
+    *,
+    step_spec: StepSpec,
+    current_step_order: int,
+    step_refs_by_order: Mapping[int, str],
+    form_field_names: set[str],
+) -> None:
+    prior_step_refs = {
+        step_ref: step_order
+        for step_order, step_ref in step_refs_by_order.items()
+        if step_order < current_step_order
+    }
+    allowed_step_refs = set(prior_step_refs)
+    for template, runtime_variables in _step_spec_template_strings(step_spec):
+        references = analyze_template(
+            template,
+            step_refs=prior_step_refs,
+            form_field_names=form_field_names,
+            runtime_variables=runtime_variables,
+        )
+        for reference in references:
+            if reference.path_error_code is not None:
+                _raise_invalid_variable_reference(
+                    reference.expression, current_step_order
+                )
+            if reference.kind is TemplateReferenceKind.UNKNOWN:
+                _raise_invalid_variable_reference(
+                    reference.expression, current_step_order
+                )
+            if (
+                reference.kind is TemplateReferenceKind.FORM_FIELD
+                and reference.head not in form_field_names
+            ):
+                _raise_invalid_variable_reference(
+                    reference.expression, current_step_order
+                )
+            if reference.kind is TemplateReferenceKind.STEP:
+                step_ref = reference.step_ref or reference.head
+                if step_ref not in allowed_step_refs:
+                    _raise_invalid_variable_reference(
+                        reference.expression,
+                        current_step_order,
+                    )
+
+
+def _raise_invalid_variable_reference(expression: str, step_order: int) -> None:
+    raise FlowPackageExportError(
+        code=FlowPackageExportErrorCode.VARIABLE_REFERENCE_INVALID,
+        message="Flow package export found an invalid variable reference.",
+        context={"step_order": step_order, "expression": expression},
+    )
+
+
+def _step_spec_template_strings(
+    step_spec: StepSpec,
+) -> Iterator[tuple[str, frozenset[str]]]:
+    # Section variables such as section_index are prompt variables, as in the
+    # Builder's reference validation; step payloads keep the reserved set.
+    yield (
+        step_spec.assistant_spec.instructions,
+        runtime_variables_for_step(step_spec.input_config),
+    )
+    for payload in (
+        step_spec.input_bindings,
+        step_spec.input_contract,
+        step_spec.output_contract,
+        step_spec.input_config,
+        step_spec.output_config,
+    ):
+        for template in _string_leaves(payload):
+            yield template, RESERVED_RUNTIME_VARIABLES
+
+
+def _string_leaves(value: object, *, depth: int = 0) -> Iterator[str]:
+    if depth > _MAX_JSON_SCAN_DEPTH:
+        raise FlowPackageExportError(
+            code=FlowPackageExportErrorCode.JSON_PAYLOAD_TOO_DEEP,
+            message="Flow package export cannot scan deeply nested JSON payloads.",
+        )
+    if isinstance(value, str):
+        yield value
+        return
+    if isinstance(value, Mapping):
+        mapping = cast(Mapping[object, object], value)
+        for nested_value in mapping.values():
+            yield from _string_leaves(nested_value, depth=depth + 1)
+        return
+    if isinstance(value, Sequence) and not isinstance(value, (bytes, bytearray)):
+        sequence = cast(Sequence[object], value)
+        for nested_value in sequence:
+            yield from _string_leaves(nested_value, depth=depth + 1)
+
+
+def _step_ref(step: FlowStep) -> str:
+    return f"step_{step.step_order}"

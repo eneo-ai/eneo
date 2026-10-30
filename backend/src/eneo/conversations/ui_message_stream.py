@@ -10,7 +10,8 @@ Custom data parts (consumed by the web-next chat UI):
 - `data-session`: session id, completion model and uploaded files, replacing
   v2's first_chunk metadata.
 - `data-mcp-tool-references`: MCP resource citations emitted by tool calls.
-- `data-token-usage`: transient prompt/completion/turn token counts.
+- `data-token-usage`: transient prompt/completion/turn token counts (cumulative
+  over the turn's provider requests) plus the final request's context counts.
 - `data-tool-approval`: MCP tool approval requests; reconciled in place by
   part id (the approval_id), so the decision (approved / denied) or a timeout
   (timeout_denied) updates the pending part. The Redis-backed approval
@@ -156,6 +157,10 @@ def _tool_metadata(tool: "ToolCallMetadata") -> dict[str, Any]:
         "app_view": tool.app_view,
         "approved": tool.approved,
         "result_status": tool.result_status,
+        # What a call on one of Eneo's own servers returned as data (a flow
+        # run's id): small, and what a client draws a card from. An external
+        # tool's structured content is read lazily, as its text is.
+        "structured_content": tool.structured_content if tool.is_internal else None,
     }
 
 
@@ -379,11 +384,14 @@ async def _ui_message_chunks(
                     text_index += 1
                     yield {"type": "text-start", "id": text_id}
                 yield {"type": "text-delta", "id": text_id, "delta": delta}
+            # Each text chunk lists every source cited so far; build a source
+            # part only the first time.
             for blob in completion.reference_chunks or []:
+                if str(blob.id) in seen_source_ids:
+                    continue
                 chunk_dict = _source_document_chunk(blob)
-                if chunk_dict["sourceId"] not in seen_source_ids:
-                    seen_source_ids.add(chunk_dict["sourceId"])
-                    yield chunk_dict
+                seen_source_ids.add(chunk_dict["sourceId"])
+                yield chunk_dict
 
         elif response_type == ResponseType.FILES:
             assert completion.generated_file is not None
@@ -459,9 +467,21 @@ async def _ui_message_chunks(
             )
 
         elif response_type == ResponseType.TOKEN_USAGE:
-            prompt = completion.usage.prompt_tokens or 0 if completion.usage else 0
-            generated = (
-                completion.usage.completion_tokens or 0 if completion.usage else 0
+            usage = completion.usage
+            prompt = usage.prompt_tokens or 0 if usage else 0
+            generated = usage.completion_tokens or 0 if usage else 0
+            # prompt/completion accumulate over every provider request in the
+            # turn (tool rounds re-send the whole conversation), so only the
+            # final request's counts describe the context window.
+            context_prompt = (
+                usage.context_prompt_tokens
+                if usage and usage.context_prompt_tokens is not None
+                else prompt
+            )
+            context_completion = (
+                usage.context_completion_tokens
+                if usage and usage.context_completion_tokens is not None
+                else generated
             )
             yield {
                 "type": "data-token-usage",
@@ -469,6 +489,8 @@ async def _ui_message_chunks(
                     "prompt_tokens": prompt,
                     "completion_tokens": generated,
                     "turn_tokens": prompt + generated,
+                    "context_prompt_tokens": context_prompt,
+                    "context_completion_tokens": context_completion,
                 },
                 "transient": True,
             }

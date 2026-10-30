@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 from eneo.files.audio import AudioMimeTypes
 from eneo.files.file_protocol import sanitize_filename
 from eneo.files.file_size_service import FileSizeService
+from eneo.files.mime_support import MimeSupport, classify_mime
 from eneo.files.text import TextMimeTypes
 from eneo.jobs.job_models import Task
 from eneo.jobs.job_service import JobService
@@ -47,12 +48,16 @@ class TaskService:
 
     @staticmethod
     def get_task_type(mimetype: str):
+        state, reason = classify_mime(mimetype)
+        if state is MimeSupport.LEGACY_REJECTED:
+            raise FileNotSupportedException(reason or f"{mimetype} not supported.")
+        if state is MimeSupport.UNKNOWN:
+            raise FileNotSupportedException(f"{mimetype} not supported.")
         if TextMimeTypes.has_value(mimetype):
             return Task.UPLOAD_FILE
-        elif AudioMimeTypes.has_value(mimetype):
+        if AudioMimeTypes.has_value(mimetype):
             return Task.TRANSCRIPTION
-        else:
-            raise FileNotSupportedException(f"{mimetype} not supported.")
+        raise FileNotSupportedException(f"{mimetype} not supported.")
 
     def get_max_size(self, task: Task) -> tuple[int, str | None]:
         if self.upload_admission is None:

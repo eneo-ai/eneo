@@ -1,7 +1,16 @@
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import ForeignKey, Integer, String, Text
+import sqlalchemy as sa
+from sqlalchemy import (
+    CheckConstraint,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.dialects.postgresql import BYTEA
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -32,11 +41,18 @@ class Files(BasePublic):
     file_type: Mapped[str] = mapped_column(server_default=FileType.TEXT)
 
     # Foreign keys
-    user_id: Mapped[UUID] = mapped_column(ForeignKey(Users.id, ondelete="CASCADE"))
+    owner_type: Mapped[str] = mapped_column(nullable=False, server_default="user")
+    owner_user_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey(Users.id, ondelete="RESTRICT"),
+        nullable=True,
+    )
+    owner_service_id: Mapped[Optional[UUID]] = mapped_column(
+        ForeignKey("service_principals.id", ondelete="RESTRICT"),
+        nullable=True,
+    )
     tenant_id: Mapped[UUID] = mapped_column(ForeignKey(Tenants.id, ondelete="CASCADE"))
 
-    # Set for files derived from another upload (e.g. images extracted from a
-    # PDF attachment); derived files are deleted with their parent.
+    # Set for files derived from another upload (for example extracted images).
     parent_file_id: Mapped[Optional[UUID]] = mapped_column(
         ForeignKey("files.id", ondelete="CASCADE"),
         index=True,
@@ -85,4 +101,31 @@ class Files(BasePublic):
         Text,
         deferred=True,
         deferred_raiseload=True,
+    )
+
+    __table_args__ = (
+        CheckConstraint(
+            "owner_type IN ('user','service_key')",
+            name="ck_files_owner_type",
+        ),
+        CheckConstraint(
+            "("
+            "owner_type = 'user' "
+            "AND owner_user_id IS NOT NULL "
+            "AND owner_service_id IS NULL"
+            ") OR ("
+            "owner_type = 'service_key' "
+            "AND owner_user_id IS NULL "
+            "AND owner_service_id IS NOT NULL"
+            ")",
+            name="ck_files_owner_identity",
+        ),
+        UniqueConstraint("id", "tenant_id", name="uq_files_id_tenant_id"),
+        Index(
+            "ix_files_service_owner_created_at",
+            "tenant_id",
+            "owner_service_id",
+            "created_at",
+            postgresql_where=sa.text("owner_type = 'service_key'"),
+        ),
     )

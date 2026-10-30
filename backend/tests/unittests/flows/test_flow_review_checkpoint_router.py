@@ -1,0 +1,842 @@
+from __future__ import annotations
+
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import (
+    AsyncMock,
+    MagicMock,
+)
+from uuid import uuid4
+
+import pytest
+
+from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.auth_dependencies import ScopeFilter
+from eneo.flows.api import flow_access_context as flow_access_context_module
+from eneo.flows.api import flow_run_review_router as router_module
+from eneo.flows.api.flow_assembler import FlowAssembler
+from eneo.flows.api.flow_models import (
+    FlowRunReviewCheckpointApproveRequest,
+    FlowRunReviewCheckpointEditRequest,
+    FlowRunReviewCheckpointRejectRequest,
+    FlowRunReviewCheckpointResumeRequest,
+)
+from eneo.flows.api.flow_run_review_router import (
+    approve_and_continue_flow_run_review_checkpoint,
+    approve_flow_run_review_checkpoint,
+    edit_flow_run_review_checkpoint,
+    get_active_flow_run_review_checkpoint,
+    reject_flow_run_review_checkpoint,
+    resume_flow_run_review_checkpoint,
+)
+from eneo.flows.application.flow_dispatch import (
+    dispatch_flow_run_recoverably_after_commit,
+)
+from eneo.flows.application.flow_run_review_checkpoint_service import (
+    FlowReviewCheckpointApproval,
+)
+from eneo.flows.domain.flow import FlowRunStatus, FlowStepAttempt, FlowStepResult
+from eneo.flows.enums import (
+    FlowRunReviewCheckpointState,
+    FlowStepAttemptStatus,
+    FlowStepResultStatus,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.main.exceptions import AuditLoggingUnavailableException
+from tests.unittests.flows.test_flow_router import (
+    _disable_flow_scope_filter,
+    _enable_explicit_transaction,
+    _enable_review_checkpoint_route_context,
+    _enable_space_access,
+    _flow,
+    _RecordingBackgroundTasks,
+    _review_checkpoint,
+    _run,
+)
+
+
+def _stub_run_starters(container: MagicMock) -> None:
+    """The runs in these tests name no starter: no user or key resolves."""
+    starters = AsyncMock()
+    starters.list_users.return_value = {}
+    starters.list_service_principals.return_value = {}
+    container.flow_run_starter_repo.return_value = starters
+
+
+def _record_review_checkpoint_public(monkeypatch, events: list[str]):
+    async def _present_review_checkpoint(*, container, checkpoint):
+        events.append("present_review_checkpoint")
+        checkpoint_for_public = checkpoint.model_copy(
+            update={
+                "requester_user_id": uuid4(),
+                "decided_by_user_id": uuid4(),
+            }
+        )
+        return FlowAssembler().to_review_checkpoint_public(checkpoint_for_public)
+
+    monkeypatch.setattr(
+        router_module,
+        "_present_review_checkpoint",
+        _present_review_checkpoint,
+    )
+
+
+class _CommitFailureTransaction:
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        if exc is None:
+            raise RuntimeError("commit failed")
+        return False
+
+
+def _enable_citation_presentation(monkeypatch, container, *, ctx, edited_at=None):
+    source_id = "11111111-1111-1111-1111-111111111111"
+    now = datetime.now(timezone.utc)
+    step_result = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=ctx.run.id,
+        flow_id=ctx.flow_id,
+        tenant_id=ctx.run.tenant_id,
+        step_id=ctx.checkpoint.step_id,
+        step_order=ctx.checkpoint.step_order,
+        current_attempt_no=ctx.checkpoint.attempt_no,
+        input_payload_json={
+            "rag": {
+                "citation_sources": [
+                    {
+                        "id": source_id,
+                        "title": "Review source",
+                        "source_container_name_raw": "Review docs",
+                    }
+                ]
+            }
+        },
+        status=FlowStepResultStatus.COMPLETED,
+        created_at=now,
+        updated_at=now,
+    )
+    attempt = FlowStepAttempt(
+        id=uuid4(),
+        flow_run_id=ctx.run.id,
+        flow_id=ctx.flow_id,
+        tenant_id=ctx.run.tenant_id,
+        step_id=ctx.checkpoint.step_id,
+        step_order=ctx.checkpoint.step_order,
+        attempt_no=ctx.checkpoint.attempt_no,
+        status=FlowStepAttemptStatus.COMPLETED,
+        provenance_json={
+            "schema_version": "flow-attempt-provenance.v3",
+            "citations": {
+                "citation_compliance": "observed",
+                "cited_source_ids": [source_id],
+                "unknown_citation_ids": [],
+                "upstream_grounded_step_orders": [],
+            },
+        },
+        started_at=now,
+        finished_at=now,
+        created_at=now,
+        updated_at=now,
+    )
+    run_repo = AsyncMock()
+    run_repo.get.return_value = ctx.run
+    run_repo.get_step_result.return_value = step_result
+    run_repo.get_step_attempt.return_value = attempt
+    container.flow_run_repo.return_value = run_repo
+    container.flow_version_repo.return_value = AsyncMock()
+    definition = SimpleNamespace(
+        runtime_steps=lambda: [
+            SimpleNamespace(
+                step_id=ctx.checkpoint.step_id,
+                step_order=ctx.checkpoint.step_order,
+                output_config={"citation_mode": "inline_inref_sidecar"},
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        router_module,
+        "load_published_definition",
+        AsyncMock(return_value=definition),
+    )
+    checkpoint = ctx.checkpoint.model_copy(
+        update={
+            "state": (
+                FlowRunReviewCheckpointState.EDITED
+                if edited_at is not None
+                else FlowRunReviewCheckpointState.AWAITING_REVIEW
+            ),
+            "requester_user_id": uuid4(),
+            "decided_by_user_id": uuid4() if edited_at is not None else None,
+            "decided_by_principal_type": (
+                ctx.checkpoint.decided_by_principal_type
+                if edited_at is not None
+                else None
+            ),
+            "edited_at": edited_at,
+        }
+    )
+    return checkpoint
+
+
+@pytest.mark.asyncio
+async def test_active_review_checkpoint_includes_current_citation_summary(monkeypatch):
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    checkpoint = _enable_citation_presentation(
+        monkeypatch,
+        container,
+        ctx=ctx,
+    )
+    ctx.review_service.get_active_review_checkpoint.return_value = checkpoint
+    _disable_flow_scope_filter(monkeypatch)
+
+    response = await get_active_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+    )
+
+    assert response is not None
+    assert response.citation_summary is not None
+    assert response.citation_summary.status == "observed"
+    assert response.citation_summary.stale_after_edit is False
+    ctx.run_service.get_run.assert_awaited_once_with(
+        run_id=ctx.run.id,
+        flow_id=ctx.flow_id,
+        access_kind="content",
+        history=True,
+    )
+    audit_event = container.audit_service.return_value.log.await_args.kwargs
+    assert audit_event["action"] is ActionType.FLOW_EVIDENCE_VIEWED
+    assert audit_event["required"] is True
+    assert audit_event["metadata"]["extra"] == {
+        "evidence_detail": "active_review_checkpoint",
+        "checkpoint_present": True,
+        "flow_id": str(ctx.flow_id),
+        "run_id": str(ctx.run.id),
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_kind", ["insert", "commit"])
+async def test_active_review_checkpoint_exposes_no_payload_when_audit_fails(
+    monkeypatch,
+    failure_kind: str,
+) -> None:
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    ctx.review_service.get_active_review_checkpoint.return_value = ctx.checkpoint
+    _record_review_checkpoint_public(monkeypatch, ctx.events)
+    _disable_flow_scope_filter(monkeypatch)
+    if failure_kind == "insert":
+        container.audit_service.return_value.log.side_effect = RuntimeError(
+            "audit insert failed"
+        )
+    else:
+        container.session.return_value.begin.return_value = _CommitFailureTransaction()
+
+    with pytest.raises(AuditLoggingUnavailableException) as exc_info:
+        await get_active_flow_run_review_checkpoint(
+            id=ctx.flow_id,
+            run_id=ctx.run.id,
+            request=SimpleNamespace(state=SimpleNamespace()),
+            container=container,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
+    assert exc_info.value.context == {"audit_required": True}
+
+
+@pytest.mark.asyncio
+async def test_edit_response_marks_citation_summary_stale_without_refetch(monkeypatch):
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    checkpoint = _enable_citation_presentation(
+        monkeypatch,
+        container,
+        ctx=ctx,
+        edited_at=datetime.now(timezone.utc),
+    )
+    ctx.review_service.edit_review_checkpoint.return_value = checkpoint
+    _disable_flow_scope_filter(monkeypatch)
+
+    response = await edit_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointEditRequest(
+            expected_checkpoint_revision=ctx.checkpoint.revision,
+            edited_value="reviewed",
+        ),
+        container=container,
+    )
+
+    assert response.citation_summary is not None
+    assert response.citation_summary.stale_after_edit is True
+
+
+@pytest.mark.asyncio
+async def test_resume_review_checkpoint_schedules_dispatch_after_commit(monkeypatch):
+    container = MagicMock()
+    _stub_run_starters(container)
+    flow_id = uuid4()
+    step_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
+    checkpoint = _review_checkpoint(
+        flow_id=flow_id,
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        step_id=step_id,
+    )
+    events: list[str] = []
+
+    run_service = AsyncMock()
+    review_service = AsyncMock()
+    review_service.resume_review_checkpoint.return_value = SimpleNamespace(
+        checkpoint=checkpoint,
+        run=run,
+        accepted=True,
+    )
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_run_service.return_value = run_service
+    container.flow_run_review_checkpoint_service.return_value = review_service
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    _enable_space_access(container)
+    _enable_explicit_transaction(container, events)
+    _record_review_checkpoint_public(monkeypatch, events)
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+
+    background_tasks = _RecordingBackgroundTasks(events)
+    response = await resume_flow_run_review_checkpoint(
+        id=flow_id,
+        run_id=run.id,
+        checkpoint_id=checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointResumeRequest(
+            expected_checkpoint_revision=checkpoint.revision
+        ),
+        background_tasks=background_tasks,
+        idempotency_key="resume-review-checkpoint",
+        container=container,
+    )
+
+    assert response.run.id == run.id
+    assert response.checkpoint.id == checkpoint.id
+    assert events == [
+        "transaction_enter",
+        "present_review_checkpoint",
+        "transaction_exit",
+        "add_task",
+    ]
+    assert len(background_tasks.tasks) == 1
+    scheduled = background_tasks.tasks[0]
+    assert scheduled.func is dispatch_flow_run_recoverably_after_commit
+    assert scheduled.kwargs == {
+        "run_id": run.id,
+        "tenant_id": user.tenant_id,
+        "expected_revision": run.revision,
+    }
+
+
+def _approve_and_continue_context(monkeypatch, *, accepted: bool):
+    container = MagicMock()
+    _stub_run_starters(container)
+    flow_id = uuid4()
+    user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    run = _run(flow_id=flow_id, tenant_id=user.tenant_id).model_copy(
+        update={"status": FlowRunStatus.QUEUED}
+    )
+    checkpoint = _review_checkpoint(
+        flow_id=flow_id,
+        run_id=run.id,
+        tenant_id=user.tenant_id,
+        step_id=uuid4(),
+    )
+    events: list[str] = []
+    review_service = AsyncMock()
+    review_service.approve_and_resume_review_checkpoint.return_value = SimpleNamespace(
+        checkpoint=checkpoint,
+        run=run,
+        accepted=accepted,
+        corrections_fold=None,
+    )
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = _flow(flow_id)
+    container.flow_run_service.return_value = AsyncMock()
+    container.flow_run_review_checkpoint_service.return_value = review_service
+    container.flow_service.return_value = flow_service
+    container.user.return_value = user
+    _enable_space_access(container)
+    _enable_explicit_transaction(container, events)
+    _record_review_checkpoint_public(monkeypatch, events)
+    monkeypatch.setattr(
+        flow_access_context_module,
+        "get_scope_filter",
+        lambda _request: ScopeFilter(space_id=None),
+    )
+    return SimpleNamespace(
+        container=container,
+        flow_id=flow_id,
+        user=user,
+        run=run,
+        checkpoint=checkpoint,
+        events=events,
+        review_service=review_service,
+    )
+
+
+@pytest.mark.asyncio
+async def test_approve_and_continue_review_checkpoint_dispatches_after_commit(
+    monkeypatch,
+):
+    ctx = _approve_and_continue_context(monkeypatch, accepted=True)
+    background_tasks = _RecordingBackgroundTasks(ctx.events)
+
+    response = await approve_and_continue_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointApproveRequest(
+            expected_checkpoint_revision=ctx.checkpoint.revision
+        ),
+        background_tasks=background_tasks,
+        idempotency_key="approve-and-continue",
+        container=ctx.container,
+    )
+
+    assert response.run.id == ctx.run.id
+    assert response.checkpoint.id == ctx.checkpoint.id
+    # The service receives the header as given; the key rule is its decision.
+    called = ctx.review_service.approve_and_resume_review_checkpoint.await_args.kwargs
+    assert called["idempotency_key"] == "approve-and-continue"
+    assert called["expected_checkpoint_revision"] == ctx.checkpoint.revision
+    assert ctx.events == [
+        "transaction_enter",
+        "present_review_checkpoint",
+        "transaction_exit",
+        "add_task",
+    ]
+    scheduled = background_tasks.tasks[0]
+    assert scheduled.func is dispatch_flow_run_recoverably_after_commit
+    assert scheduled.kwargs == {
+        "run_id": ctx.run.id,
+        "tenant_id": ctx.user.tenant_id,
+        "expected_revision": ctx.run.revision,
+    }
+
+
+@pytest.mark.asyncio
+async def test_approve_and_continue_replay_dispatches_nothing(monkeypatch):
+    ctx = _approve_and_continue_context(monkeypatch, accepted=False)
+    background_tasks = _RecordingBackgroundTasks(ctx.events)
+
+    response = await approve_and_continue_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointApproveRequest(
+            expected_checkpoint_revision=ctx.checkpoint.revision
+        ),
+        background_tasks=background_tasks,
+        idempotency_key="approve-and-continue",
+        container=ctx.container,
+    )
+
+    assert response.run.id == ctx.run.id
+    assert background_tasks.tasks == []
+    assert "add_task" not in ctx.events
+
+
+@pytest.mark.asyncio
+async def test_edit_review_checkpoint_builds_response_inside_transaction(monkeypatch):
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    _record_review_checkpoint_public(monkeypatch, ctx.events)
+
+    async def _edit_review_checkpoint(**_kwargs):
+        ctx.events.append("edit_review_checkpoint")
+        return ctx.checkpoint
+
+    ctx.review_service.edit_review_checkpoint.side_effect = _edit_review_checkpoint
+    _disable_flow_scope_filter(monkeypatch)
+
+    response = await edit_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointEditRequest(
+            expected_checkpoint_revision=ctx.checkpoint.revision,
+            edited_value="reviewed",
+        ),
+        container=container,
+    )
+
+    assert response.id == ctx.checkpoint.id
+    assert ctx.events == [
+        "transaction_enter",
+        "edit_review_checkpoint",
+        "present_review_checkpoint",
+        "transaction_exit",
+    ]
+    ctx.review_service.edit_review_checkpoint.assert_awaited_once_with(
+        flow_id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        expected_checkpoint_revision=ctx.checkpoint.revision,
+        edited_value="reviewed",
+    )
+
+
+@pytest.mark.asyncio
+async def test_approve_review_checkpoint_builds_response_inside_transaction(
+    monkeypatch,
+):
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    _record_review_checkpoint_public(monkeypatch, ctx.events)
+
+    async def _approve_review_checkpoint(**_kwargs):
+        ctx.events.append("approve_review_checkpoint")
+        return FlowReviewCheckpointApproval(
+            checkpoint=ctx.checkpoint, corrections_fold=None
+        )
+
+    ctx.review_service.approve_review_checkpoint.side_effect = (
+        _approve_review_checkpoint
+    )
+    _disable_flow_scope_filter(monkeypatch)
+
+    response = await approve_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointApproveRequest(
+            expected_checkpoint_revision=ctx.checkpoint.revision
+        ),
+        container=container,
+    )
+
+    assert response.id == ctx.checkpoint.id
+    assert ctx.events == [
+        "transaction_enter",
+        "approve_review_checkpoint",
+        "present_review_checkpoint",
+        "transaction_exit",
+    ]
+    ctx.review_service.approve_review_checkpoint.assert_awaited_once_with(
+        flow_id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        expected_checkpoint_revision=ctx.checkpoint.revision,
+    )
+
+
+@pytest.mark.asyncio
+async def test_reject_review_checkpoint_builds_response_inside_transaction(monkeypatch):
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    _record_review_checkpoint_public(monkeypatch, ctx.events)
+
+    async def _reject_review_checkpoint(**_kwargs):
+        ctx.events.append("reject_review_checkpoint")
+        return ctx.checkpoint
+
+    ctx.review_service.reject_review_checkpoint.side_effect = _reject_review_checkpoint
+    _disable_flow_scope_filter(monkeypatch)
+
+    response = await reject_flow_run_review_checkpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        review_in=FlowRunReviewCheckpointRejectRequest(
+            expected_checkpoint_revision=ctx.checkpoint.revision,
+            reason="Needs correction",
+        ),
+        container=container,
+    )
+
+    assert response.id == ctx.checkpoint.id
+    assert ctx.events == [
+        "transaction_enter",
+        "reject_review_checkpoint",
+        "present_review_checkpoint",
+        "transaction_exit",
+    ]
+    ctx.review_service.reject_review_checkpoint.assert_awaited_once_with(
+        flow_id=ctx.flow_id,
+        run_id=ctx.run.id,
+        checkpoint_id=ctx.checkpoint.id,
+        expected_checkpoint_revision=ctx.checkpoint.revision,
+        reason="Needs correction",
+    )
+
+
+def _history_context(monkeypatch, *, corrections=False):
+    from eneo.authentication.principal_types import PrincipalType
+    from eneo.flows.application.flow_run_evidence_service import FlowRunEvidenceService
+    from eneo.flows.domain.flow import FlowRunReviewCheckpointEdit
+    from eneo.flows.domain.transcript_corrections import (
+        FlowTranscriptCorrectionRevision,
+    )
+
+    container = MagicMock()
+    ctx = _enable_review_checkpoint_route_context(container)
+    _disable_flow_scope_filter(monkeypatch)
+    repo = AsyncMock()
+    corrections_repo = AsyncMock()
+    actor_id = uuid4()
+    common = dict(
+        tenant_id=ctx.run.tenant_id,
+        flow_id=ctx.flow_id,
+        flow_run_id=ctx.run.id,
+        edited_by_user_id=None,
+        edited_by_service_id=actor_id,
+        edited_by_principal_type=PrincipalType.SERVICE_KEY,
+        created_at=ctx.checkpoint.created_at,
+    )
+    if corrections:
+        rows = [
+            FlowTranscriptCorrectionRevision(
+                id=uuid4(),
+                correction_set_id=uuid4(),
+                step_id=ctx.checkpoint.step_id,
+                revision=revision,
+                occurrences_json=[{"corrected": f"revision {revision}"}],
+                speaker_edits_json=[],
+                speaker_names={},
+                segments_hash="a" * 64,
+                **common,
+            )
+            for revision in (1, 2, 3)
+        ]
+        reader = corrections_repo.list_revisions
+    else:
+        rows = [
+            FlowRunReviewCheckpointEdit(
+                id=uuid4(),
+                checkpoint_id=ctx.checkpoint.id,
+                revision=revision,
+                cause="reviewer_edit",
+                corrections_revision_id=None,
+                payload_json={"text": f"revision {revision}"},
+                payload_sha256_before="a" * 64,
+                payload_sha256_after="b" * 64,
+                **common,
+            )
+            for revision in (2, 3, 4)
+        ]
+        reader = repo.list_review_checkpoint_edits
+
+    async def list_rows(*, after_revision, limit, **kwargs):
+        remaining = [row for row in rows if row.revision > (after_revision or 0)]
+        return remaining[:limit], len(remaining) > limit, None
+
+    async def read_baseline(*, revision, **kwargs):
+        from eneo.flows.domain.canonical_json_hash import canonical_json_hash
+
+        if revision == 1:
+            payload = ctx.checkpoint.original_payload_json
+            digest = canonical_json_hash(payload)
+        else:
+            edit = next((row for row in rows if row.revision == revision), None)
+            if edit is None:
+                return None, None
+            payload = edit.payload_json
+            digest = edit.payload_sha256_after
+        return SimpleNamespace(
+            revision=revision, payload_json=payload, payload_sha256=digest
+        ), None
+
+    async def read_revision(*, revision, **kwargs):
+        return next((row for row in rows if row.revision == revision), None), None
+
+    repo.get_review_checkpoint_history_baseline.side_effect = read_baseline
+    corrections_repo.get_revision_for_step.side_effect = read_revision
+    reader.side_effect = list_rows
+    service = FlowRunEvidenceService(
+        transcript_source_service=AsyncMock(),
+        user=container.user(),
+        flow_repo=AsyncMock(),
+        flow_run_repo=AsyncMock(),
+        provider_call_repo=AsyncMock(),
+        flow_run_review_checkpoint_repo=repo,
+        flow_version_repo=AsyncMock(),
+        file_repo=AsyncMock(),
+        webhook_delivery_repo=AsyncMock(),
+        access_policy=AsyncMock(),
+        transcript_corrections_repo=corrections_repo,
+    )
+    container.flow_run_evidence_service.return_value = service
+    container.api_key_v2_repo.return_value = AsyncMock()
+    container.api_key_v2_repo.return_value.list_service_principals_by_ids.return_value = {
+        actor_id: SimpleNamespace(id=actor_id, display_name="History editor"),
+    }
+    return container, ctx, repo, rows
+
+
+async def _call_history(
+    container, ctx, *, corrections=False, after_revision=None, limit=50
+):
+    if corrections:
+        from eneo.flows.api import flow_run_transcript_corrections_router
+
+        endpoint = flow_run_transcript_corrections_router.list_flow_run_transcript_correction_revisions
+        identifier = {"step_id": ctx.checkpoint.step_id}
+    else:
+        endpoint = router_module.list_flow_run_review_checkpoint_edits
+        identifier = {"checkpoint_id": ctx.checkpoint.id}
+    return await endpoint(
+        id=ctx.flow_id,
+        run_id=ctx.run.id,
+        request=SimpleNamespace(state=SimpleNamespace()),
+        container=container,
+        after_revision=after_revision,
+        limit=limit,
+        **identifier,
+    )
+
+
+@pytest.mark.asyncio
+async def test_terminal_checkpoint_history_baselines_and_cursor(monkeypatch):
+    container, ctx, repo, rows = _history_context(monkeypatch)
+    page = await _call_history(container, ctx, limit=1)
+    assert page.baseline.revision == 1
+    assert page.baseline.payload_json == ctx.checkpoint.original_payload_json
+    assert [item.revision for item in page.items] == [2]
+    assert page.truncated is True and page.next_after_revision == 2
+    assert page.items[0].edited_by_service_principal.display_name == "History editor"
+    later = await _call_history(container, ctx, after_revision=2, limit=50)
+    assert later.baseline.payload_json == rows[0].payload_json
+    assert [item.revision for item in later.items] == [3, 4]
+    assert later.next_after_revision is None and later.truncated is False
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrections", [False, True])
+async def test_history_byte_budget_advances_or_reports_obstructing_revision(
+    monkeypatch, corrections
+):
+    from eneo.flows.application import flow_run_evidence_service
+    from eneo.flows.domain.canonical_json_hash import canonical_json_bytes
+    from eneo.main.exceptions import FileTooLargeException
+
+    container, ctx, repo, rows = _history_context(monkeypatch, corrections=corrections)
+    complete = await _call_history(container, ctx, corrections=corrections)
+    first_page_bytes = len(
+        canonical_json_bytes(complete.baseline.model_dump(mode="json"))
+    ) + len(canonical_json_bytes(complete.items[0].model_dump(mode="json")))
+    monkeypatch.setattr(
+        flow_run_evidence_service,
+        "RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES",
+        first_page_bytes + 10,
+    )
+    page = await _call_history(container, ctx, corrections=corrections)
+    assert len(page.items) == 1
+    assert page.truncated and page.next_after_revision == rows[0].revision
+    monkeypatch.setattr(
+        flow_run_evidence_service, "RUN_VIEW_MAX_LOADED_SECTION_LOGICAL_BYTES", 1
+    )
+    with pytest.raises(FileTooLargeException) as exc:
+        await _call_history(container, ctx, corrections=corrections)
+    assert exc.value.code == "flow_review_history_too_large"
+    assert exc.value.context["revision"] == rows[0].revision
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrections", [False, True])
+@pytest.mark.parametrize("failure", ["insert", "commit"])
+async def test_history_exposes_no_payload_when_required_audit_fails(
+    monkeypatch, corrections, failure
+):
+    container, ctx, repo, rows = _history_context(monkeypatch, corrections=corrections)
+    if failure == "insert":
+        container.audit_service.return_value.log.side_effect = RuntimeError(
+            "audit unavailable"
+        )
+    else:
+        container.session.return_value.begin.return_value = _CommitFailureTransaction()
+    with pytest.raises(AuditLoggingUnavailableException) as exc:
+        await _call_history(container, ctx, corrections=corrections)
+    assert exc.value.code == FlowApiErrorCode.EVIDENCE_AUDIT_LOGGING_FAILED.value
+
+
+@pytest.mark.asyncio
+async def test_history_unknown_checkpoint_is_not_found(monkeypatch):
+    from eneo.main.exceptions import NotFoundException
+
+    container, ctx, repo, rows = _history_context(monkeypatch)
+    repo.get_review_checkpoint_history_baseline.side_effect = None
+    repo.get_review_checkpoint_history_baseline.return_value = (None, None)
+    with pytest.raises(NotFoundException):
+        await _call_history(container, ctx)
+    repo.list_review_checkpoint_edits.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("corrections", [False, True])
+async def test_history_requires_view_scope_before_reading(monkeypatch, corrections):
+    from eneo.flows.flow_access_policy import FlowApiAction
+    from eneo.main.exceptions import UnauthorizedException
+
+    container, ctx, repo, rows = _history_context(monkeypatch, corrections=corrections)
+    enforce = AsyncMock(side_effect=UnauthorizedException("Missing flows_view"))
+    monkeypatch.setattr(flow_access_context_module, "enforce_flow_scope", enforce)
+    with pytest.raises(UnauthorizedException):
+        await _call_history(container, ctx, corrections=corrections)
+    assert enforce.await_args.kwargs["required_access"] == FlowApiAction.VIEW
+    assert enforce.await_args.kwargs["allow_service_key_principals"] is True
+    repo.get_review_checkpoint_history_baseline.assert_not_awaited()
+    container.flow_run_evidence_service.return_value.transcript_corrections_repo.list_revisions.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_evidence_presenter_enriches_nested_edits_and_correction_revisions(
+    monkeypatch,
+):
+    from eneo.flows.api.flow_service_principal_actor_read_model import (
+        FlowServicePrincipalActorPresenter,
+    )
+
+    container, ctx, repo, rows = _history_context(monkeypatch)
+    presenter = FlowServicePrincipalActorPresenter(
+        api_key_repo=container.api_key_v2_repo(),
+        tenant_id=ctx.run.tenant_id,
+    )
+    payload = {
+        "review_checkpoints": [{"edits": [rows[0].model_dump(mode="json")]}],
+        "transcript_correction_revisions": [
+            {"edited_by_service_id": str(rows[0].edited_by_service_id)}
+        ],
+    }
+    enriched = await presenter.present_evidence(payload)
+    assert (
+        enriched["review_checkpoints"][0]["edits"][0]["edited_by_service_principal"][
+            "display_name"
+        ]
+        == "History editor"
+    )
+    assert (
+        enriched["transcript_correction_revisions"][0]["edited_by_service_principal"][
+            "display_name"
+        ]
+        == "History editor"
+    )
+    container.api_key_v2_repo.return_value.list_service_principals_by_ids.assert_awaited_once()

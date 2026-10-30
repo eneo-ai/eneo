@@ -111,7 +111,7 @@ describe("ComposerAttachments", () => {
     expect(screen.getByText("· 6 kB")).toBeTruthy();
     expect(screen.getByText("1 av 3 klara")).toBeTruthy();
     expect(
-      screen.getByRole("progressbar", { name: "Laddar upp..." }).getAttribute("aria-valuenow")
+      screen.getByRole("progressbar", { name: "Laddar upp…" }).getAttribute("aria-valuenow")
     ).toBe("1");
     expect(screen.queryByRole("list")).toBeNull();
 

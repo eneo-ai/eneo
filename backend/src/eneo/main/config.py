@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urlparse, urlsplit
@@ -19,6 +20,7 @@ from pydantic import (
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from eneo.main.removed_env import UPGRADE_GUIDE_URL, check_removed_variables
+from eneo.object_content.configuration import DEFAULT_FILE_UPLOAD_LIMIT_BYTES
 
 # Version manifest lookup:
 # - Docker: Package is installed with --no-editable, so __file__ points to site-packages.
@@ -30,6 +32,8 @@ _LOCAL_MANIFEST = (
     Path(__file__).resolve().parent.parent.parent.parent
     / ".release-please-manifest.json"
 )
+_PROCESS_STARTED_AT = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+_BUILD_ID_ENV_VARS = ("GIT_COMMIT", "BUILD_ID")
 
 
 URL_SIGNING_KEY_MINIMUM_BYTES = 32
@@ -298,11 +302,19 @@ def _set_app_version():
 
         return version
     except FileNotFoundError:
-        return "DEV"
+        for env_var in _BUILD_ID_ENV_VARS:
+            build_id = os.environ.get(env_var)
+            if build_id:
+                return f"DEV-{build_id[:12]}"
+        return f"DEV-{_PROCESS_STARTED_AT}"
 
 
 _DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "local", "dev"})
 _SHAREPOINT_FIXTURE_ALLOWED_ENVIRONMENTS = _DEVELOPMENT_ENVIRONMENTS | {"test"}
+
+
+# A flow's longest recording, as stored and as a deployment ceiling: whole seconds within a day.
+FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS = 24 * 60 * 60
 
 
 class Settings(BaseSettings):
@@ -359,6 +371,7 @@ class Settings(BaseSettings):
     postgres_db: str
     redis_host: str
     redis_port: int
+    redis_db: int = 0
     # Optional Redis authentication. Unset or blank connects without
     # credentials; a username requires a password (Redis ACL user).
     redis_username: str | None = None
@@ -372,6 +385,9 @@ class Settings(BaseSettings):
     redis_socket_keepalive: bool = True
     redis_health_check_interval: int = 30
     redis_max_connections: int | None = None
+    # How long a command waits for a free connection when REDIS_MAX_CONNECTIONS
+    # bounds its pool. Unset waits up to REDIS_CONN_TIMEOUT.
+    redis_pool_wait_timeout: int | None = None
     # MCP tool approval configuration
     mcp_tool_approval_timeout_seconds: int = 300
     mcp_tool_approval_ttl_seconds: int = 305
@@ -481,6 +497,81 @@ class Settings(BaseSettings):
     # Leave headroom on shared installations. Single-tenant deployments can raise
     # this ceiling to the global limit; existing work is not stopped.
     crawl_job_tenant_concurrency_limit: int | None = Field(default=4, gt=0)
+    flow_max_concurrent_runs_per_tenant: int = 4
+    # Platform task runtime capacity classes. Each queue is consumed by its own
+    # ARQ worker process with an independent max_jobs budget.
+    task_execution_queue: str = "tasks:execution"
+    task_maintenance_queue: str = "tasks:maintenance"
+    task_execution_max_jobs: int = 4
+    task_maintenance_max_jobs: int = 2
+    task_execution_timeout_seconds: int = 28800
+    task_maintenance_timeout_seconds: int = 120
+    # Contract checks one event loop runs at once, each in its own process; at
+    # most TASK_EXECUTION_MAX_JOBS, since a run checks one value at a time.
+    flow_contract_check_slots: int = Field(default=2, gt=0)
+    # The memory each contract check's process may take on Linux (its heap and
+    # private mappings); a check past it ends as not checked, whether the value
+    # is valid or not. At least 128 MiB: the largest request at the default
+    # FLOW_MAX_INLINE_TEXT_BYTES needs 80 MiB to arrive. The default holds a
+    # value at that ceiling in its costliest decoded shape (about 420 MiB of
+    # data measured, 21.5 MiB of it the idle process); that value peaked at
+    # about 440 MiB resident while checked, under an anyOf, uniqueItems or a
+    # recursive $ref alike. anyOf and oneOf keep only a failing branch's first
+    # error, so a valid 3 MiB array of 400,000 integers under a two-branch anyOf
+    # or oneOf passes. A value past a raised ceiling can still exceed it: raise
+    # it with that ceiling.
+    flow_contract_check_child_memory_bytes: int = Field(
+        default=512 * 1024 * 1024, ge=128 * 1024 * 1024
+    )
+    # Seconds between sweeps that cancel the runs of deleted flows; a divisor of
+    # 60, since the sweep runs at fixed seconds of every minute.
+    flow_retired_run_drain_interval_seconds: int = 60
+    # Minutes without a question or mode change after which turning on a flow
+    # chat's edit mode starts a new conversation.
+    flow_authoring_chat_idle_minutes: int = Field(default=45, gt=0)
+    flow_max_inline_text_bytes: int = 8 * 1024 * 1024
+    flow_pdf_max_pages: int = Field(default=2000, gt=0)
+    flow_pdf_max_extracted_bytes: int = Field(default=128 * 1024 * 1024, gt=0)
+    flow_pdf_extraction_timeout_seconds: int = Field(default=900, gt=0)
+    flow_http_request_timeout_seconds: int = 30
+    flow_http_max_timeout_seconds: int = 120
+    flow_http_allow_private_networks: bool = False
+    # Private networks for the MCP servers whose tools flows call. On by default,
+    # unlike the HTTP setting above: only an instance administrator registers an
+    # MCP server, and a server on the internal network is the normal case, while
+    # an HTTP address is written by a flow author. Loopback, link-local and
+    # metadata addresses are refused whatever this says. The registered address
+    # is vetted before the call, and every connection the call opens is to an
+    # address this policy allows when it is opened; the call follows no
+    # redirect.
+    flow_tool_allow_private_networks: bool = True
+    # Threads that resolve host names for flow HTTP. A lookup that stalls holds
+    # its thread, so this bounds how much name resolution a burst of unreachable
+    # flow destinations can occupy; a lookup past it fails at once and is retried.
+    flow_http_dns_workers: int = Field(default=16, gt=0)
+    flow_audio_max_duration_seconds: int = 5 * 60 * 60
+    flow_audio_max_decoded_bytes: int = 2 * 1024 * 1024 * 1024
+    # The longest recording a tenant admin may let flows take (the flow-settings
+    # page; its default is flow_audio_max_duration_seconds). Flow-only: other
+    # transcription keeps flow_audio_max_duration_seconds.
+    flow_audio_max_duration_ceiling_seconds: int = 8 * 60 * 60
+    # How long an audio upload may wait for and take its measuring decode (a few
+    # run at a time); past it the upload is refused as busy, to retry.
+    flow_audio_measurement_timeout_seconds: int = Field(default=600, gt=0)
+    # Live transcription preview. A recording streams audio, silence included,
+    # the whole time, so the idle timeout only ends a paused or stalled client.
+    # The final-text wait covers the audio the model server has not decoded yet
+    # when the recording stops; a server that falls behind (a CPU server, a busy
+    # GPU) needs longer.
+    flow_live_transcription_idle_timeout_seconds: int = Field(default=300, gt=0)
+    flow_live_transcription_final_text_timeout_seconds: int = Field(default=60, gt=0)
+    flow_transcription_include_speaker_review: bool = False
+
+    # Deployment fallback for the per-mapped-step model-call ceiling. Applies when
+    # an organization has never configured its own value; None sets no ceiling
+    # beyond each mapped step's own file or item bound.
+    flow_mapped_step_max_provider_calls_default: int | None = 1000
+
     crawl_heartbeat_interval_seconds: int = (
         300  # Heartbeat every 5 minutes (time-based, not count-based)
     )
@@ -611,7 +702,7 @@ class Settings(BaseSettings):
     # silently truncated. The file count is only an abuse guardrail and the byte
     # cap only bounds storage.
     attachment_max_files: int = 100
-    attachment_max_size_bytes: int = 26214400  # 25 MB
+    attachment_max_size_bytes: int = DEFAULT_FILE_UPLOAD_LIMIT_BYTES
     # Tokens kept free in the input window for the live question (and a little
     # history) when checking whether the prompt + attachments fit.
     attachment_context_reserve_tokens: int = 2000
@@ -892,6 +983,16 @@ class Settings(BaseSettings):
             )
         return v
 
+    @field_validator("flow_mapped_step_max_provider_calls_default", mode="before")
+    @classmethod
+    def parse_optional_mapped_calls_default(cls, v: object) -> object:
+        """Make the documented platform-wide opt-out reachable from the
+        environment: FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT set to an
+        empty string, "none", or "null" disables the deployment fallback."""
+        if isinstance(v, str) and v.strip().lower() in {"", "none", "null"}:
+            return None
+        return v
+
     @model_validator(mode="after")
     def resolve_deprecated_federation_flag(self):
         """Support FEDERATION_PER_TENANT_ENABLED as a deprecated fallback alias."""
@@ -1000,10 +1101,103 @@ class Settings(BaseSettings):
     @model_validator(mode="after")
     def validate_worker_settings(self):
         """Ensure worker-related configuration values are sane."""
+        from eneo.flows.flow_runtime_policy import MIN_TASK_EXECUTION_TIMEOUT_SECONDS
+
         if self.worker_max_jobs <= 0:
             logging.error(
                 "ENEO_WORKER_MAX_JOBS must be greater than zero. Current value: %s",
                 self.worker_max_jobs,
+            )
+            sys.exit(1)
+
+        if self.flow_max_inline_text_bytes <= 0:
+            logging.error(
+                "FLOW_MAX_INLINE_TEXT_BYTES must be greater than zero. Current value: %s",
+                self.flow_max_inline_text_bytes,
+            )
+            sys.exit(1)
+
+        # The admin's shortest setting is a minute: the ceiling, as the decoded-byte
+        # bound (16 kHz mono 16-bit, 32 000 bytes a second) holds it, must reach one.
+        if (
+            min(
+                self.flow_audio_max_duration_ceiling_seconds,
+                self.flow_audio_max_decoded_bytes // 32_000,
+            )
+            < 60
+        ):
+            logging.error(
+                "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS and FLOW_AUDIO_MAX_DECODED_BYTES must "
+                "allow at least a minute of audio. Current values: %s s, %s bytes",
+                self.flow_audio_max_duration_ceiling_seconds,
+                self.flow_audio_max_decoded_bytes,
+            )
+            sys.exit(1)
+        if (
+            self.flow_audio_max_duration_ceiling_seconds
+            > FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS
+        ):
+            logging.error(
+                "FLOW_AUDIO_MAX_DURATION_CEILING_SECONDS must be at most %s. Current value: %s",
+                FLOW_AUDIO_MAX_DURATION_BOUND_SECONDS,
+                self.flow_audio_max_duration_ceiling_seconds,
+            )
+            sys.exit(1)
+        for name in (
+            "flow_audio_max_duration_seconds",
+            "flow_audio_max_decoded_bytes",
+            "flow_audio_max_duration_ceiling_seconds",
+        ):
+            if getattr(self, name) <= 0:
+                logging.error(
+                    "%s must be greater than zero. Current value: %s",
+                    name.upper(),
+                    getattr(self, name),
+                )
+                sys.exit(1)
+
+        if (
+            self.flow_mapped_step_max_provider_calls_default is not None
+            and self.flow_mapped_step_max_provider_calls_default < 2
+        ):
+            logging.error(
+                "FLOW_MAPPED_STEP_MAX_PROVIDER_CALLS_DEFAULT must be at least 2"
+                " (one call is reserved for the native-JSON fallback) or unset."
+                " Current value: %s",
+                self.flow_mapped_step_max_provider_calls_default,
+            )
+            sys.exit(1)
+
+        if self.task_execution_timeout_seconds < MIN_TASK_EXECUTION_TIMEOUT_SECONDS:
+            logging.error(
+                "TASK_EXECUTION_TIMEOUT_SECONDS must be at least %s to fund "
+                "step execution and finalization. Current value: %s",
+                MIN_TASK_EXECUTION_TIMEOUT_SECONDS,
+                self.task_execution_timeout_seconds,
+            )
+            sys.exit(1)
+
+        if self.task_maintenance_timeout_seconds <= 0:
+            logging.error(
+                "TASK_MAINTENANCE_TIMEOUT_SECONDS must be greater than zero. Current value: %s",
+                self.task_maintenance_timeout_seconds,
+            )
+            sys.exit(1)
+
+        drain_interval = self.flow_retired_run_drain_interval_seconds
+        if not 0 < drain_interval <= 60 or 60 % drain_interval:
+            logging.error(
+                "FLOW_RETIRED_RUN_DRAIN_INTERVAL_SECONDS must divide 60. "
+                "Current value: %s",
+                drain_interval,
+            )
+            sys.exit(1)
+
+        if self.task_execution_max_jobs <= 0 or self.task_maintenance_max_jobs <= 0:
+            logging.error(
+                "Task worker concurrency must be greater than zero. Execution=%s maintenance=%s",
+                self.task_execution_max_jobs,
+                self.task_maintenance_max_jobs,
             )
             sys.exit(1)
 
@@ -1096,6 +1290,16 @@ class Settings(BaseSettings):
             logging.error(
                 "REDIS_MAX_CONNECTIONS must be positive when set. Current value: %s",
                 self.redis_max_connections,
+            )
+            sys.exit(1)
+
+        if (
+            self.redis_pool_wait_timeout is not None
+            and self.redis_pool_wait_timeout <= 0
+        ):
+            logging.error(
+                "REDIS_POOL_WAIT_TIMEOUT must be greater than zero when set. Current value: %s",
+                self.redis_pool_wait_timeout,
             )
             sys.exit(1)
 

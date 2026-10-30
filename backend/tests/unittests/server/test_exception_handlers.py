@@ -1,9 +1,9 @@
 import logging
 
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.testclient import TestClient
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.exc import IntegrityError
 
 from eneo.authentication.endpoint_access import (
@@ -14,16 +14,20 @@ from eneo.authentication.endpoint_access import (
 from eneo.files.file_models import FileOriginalNotFoundError
 from eneo.main.exceptions import (
     BadRequestException,
+    ConflictException,
     EncryptionNotConfiguredException,
     ErrorCodes,
     FileTooLargeException,
     TenantQuotaExceededException,
     UserQuotaExceededException,
 )
+from eneo.main.models import GeneralError
 from eneo.server.exception_handlers import (
     add_exception_handlers,
     is_active_display_name_violation,
 )
+from eneo.server.main import get_application
+from eneo.server.middleware.cors import CORS_OPTIONS
 from eneo.users.user import PasswordChangeRequest
 
 
@@ -31,8 +35,6 @@ from eneo.users.user import PasswordChangeRequest
 def password_validation_client() -> TestClient:
     # Exercise the production handler registration without starting a server,
     # database or application lifespan. No credential mutation is performed.
-    from eneo.server.main import get_application
-
     app = get_application()
 
     @app.post("/_test-password-validation", status_code=204)
@@ -91,10 +93,12 @@ def test_password_validation_does_not_echo_input(
     )
 
     assert response.status_code == 422
-    detail = response.json()["detail"][0]
-    assert detail["loc"] == location
-    assert detail["type"] == error_type
-    assert set(detail) == {"loc", "type", "msg"}
+    body = response.json()
+    assert all(set(error) == {"loc", "msg", "type"} for error in body["detail"])
+    error = body["details"]["errors"][0]
+    assert error["location"] == location
+    assert error["type"] == error_type
+    assert set(error) == {"location", "type", "message"}
     assert "secret-sentinel" not in response.text
     assert "secret-sentinel" not in caplog.text
 
@@ -109,8 +113,9 @@ def test_malformed_password_json_does_not_echo_input(
     )
 
     assert response.status_code == 422
-    assert response.json()["detail"][0]["type"] == "json_invalid"
-    assert set(response.json()["detail"][0]) == {"loc", "type", "msg"}
+    error = response.json()["details"]["errors"][0]
+    assert error["type"] == "json_invalid"
+    assert set(error) == {"location", "type", "message"}
     assert "secret-sentinel" not in response.text
     assert "secret-sentinel" not in caplog.text
 
@@ -134,8 +139,12 @@ def test_validation_does_not_echo_custom_validator_messages() -> None:
     response = TestClient(app).post("/validate", json={"password": "secret-sentinel"})
 
     assert response.status_code == 422
-    assert response.json()["detail"] == [
-        {"loc": ["body", "password"], "type": "value_error", "msg": "Invalid value"}
+    assert response.json()["details"]["errors"] == [
+        {
+            "location": ["body", "password"],
+            "message": "Invalid value",
+            "type": "value_error",
+        }
     ]
     assert "secret-sentinel" not in response.text
 
@@ -166,11 +175,13 @@ def test_query_validation_preserves_public_field_and_error_type() -> None:
     response = TestClient(app).get("/items", params={"limit": "invalid-limit"})
 
     assert response.status_code == 422
-    assert response.json() == {
-        "detail": [
-            {"loc": ["query", "limit"], "type": "int_parsing", "msg": "Invalid value"}
-        ]
-    }
+    assert response.json()["details"]["errors"] == [
+        {
+            "location": ["query", "limit"],
+            "message": "Invalid value",
+            "type": "int_parsing",
+        }
+    ]
 
 
 class _FakeOrig:
@@ -187,6 +198,12 @@ class _FakeOrig:
 
 def _integrity_error(orig):
     return IntegrityError("INSERT INTO completion_models ...", {}, orig)
+
+
+class _ValidationPayload(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=3)
 
 
 def test_active_nickname_violation_matched_by_constraint_name():
@@ -232,7 +249,9 @@ def test_active_nickname_violation_maps_to_409():
 
     response = TestClient(app).get("/collide")
     assert response.status_code == 409
-    assert response.json()["eneo_error_code"] == ErrorCodes.NAME_COLLISION
+    error = GeneralError.model_validate(response.json())
+    assert error.eneo_error_code == ErrorCodes.NAME_COLLISION
+    assert error.code == "name_collision"
 
 
 def test_file_too_large_exception_includes_structured_details():
@@ -291,6 +310,158 @@ def test_exception_handler_omits_details_for_exceptions_without_details():
     assert "details" not in body
 
 
+def test_exception_handler_returns_conflict_contract():
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/conflict")
+    async def conflict():
+        raise ConflictException(
+            "Runtime file is already attached to a flow run.",
+            code="flow_runtime_file_attached",
+            context={"file_id": "file-1"},
+        )
+
+    client = TestClient(app)
+    response = client.get("/conflict")
+
+    assert response.status_code == 409
+    body = response.json()
+    assert body["message"] == "Runtime file is already attached to a flow run."
+    assert body["eneo_error_code"] == ErrorCodes.CONFLICT
+    assert body["code"] == "flow_runtime_file_attached"
+    assert body["context"] == {"file_id": "file-1"}
+
+
+def test_request_validation_error_returns_sanitized_general_error():
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.post("/validate")
+    async def validate(payload: _ValidationPayload) -> dict[str, str]:
+        return {"name": payload.name}
+
+    response = TestClient(app).post(
+        "/validate",
+        json={"name": "x", "secret": "submitted-secret"},
+        headers={"x-request-id": "request-validation-id"},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    error = GeneralError.model_validate(body)
+    assert error.message == "Request validation failed."
+    assert error.eneo_error_code is ErrorCodes.VALIDATION_ERROR
+    assert error.code == "request_validation_error"
+    assert error.request_id == "request-validation-id"
+    assert all(set(error) == {"loc", "msg", "type"} for error in body["detail"])
+
+    errors = body["details"]["errors"]
+    assert {
+        ("body", "name"),
+        ("body", "secret"),
+    } <= {tuple(error["location"]) for error in errors}
+    assert {"location", "message", "type"} == set(errors[0])
+    response_text = response.text
+    assert "submitted-secret" not in response_text
+    assert "RequestValidationError" not in response_text
+    assert '"input"' not in response_text
+
+
+def test_main_app_request_validation_error_uses_general_error_for_non_flow_route():
+    app = get_application()
+
+    # The crawler health route takes no parameters, so a probe route stands in
+    # for any non-Flow route with a typed query parameter.
+    @app.get("/_test-query-validation")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for request validation errors.",
+    )
+    async def validate_query_request(include_all: bool = False) -> dict[str, bool]:
+        return {"include_all": include_all}
+
+    response = TestClient(app).get(
+        "/_test-query-validation",
+        params={"include_all": "not-bool"},
+        headers={"x-request-id": "crawler-validation-id"},
+    )
+
+    assert response.status_code == 422
+    body = response.json()
+    assert body["message"] == "Request validation failed."
+    assert body["eneo_error_code"] == ErrorCodes.VALIDATION_ERROR
+    assert body["code"] == "request_validation_error"
+    assert body["request_id"] == "crawler-validation-id"
+    assert body["details"]["errors"][0]["location"] == ["query", "include_all"]
+    assert "not-bool" not in response.text
+
+
+async def _allow_test_origin(_origin: str, *_args: object, **_kwargs: object) -> bool:
+    # Matches get_origin's (origin, headers, is_preflight, request_url) call.
+    return True
+
+
+def _assert_internal_error_contract(response, *, request_id: str) -> None:
+    assert response.status_code == 500
+    error = GeneralError.model_validate(response.json())
+    assert error.code == "internal_error"
+    assert error.eneo_error_code is ErrorCodes.INTERNAL_SERVER_ERROR
+    assert error.request_id == request_id
+    assert error.error_id is not None
+    assert len(error.error_id) == 8
+    assert response.headers["x-trace-id"]
+    assert response.headers["x-correlation-id"] == response.headers["x-trace-id"]
+    exposed = response.headers["access-control-expose-headers"].lower()
+    assert "x-trace-id" in exposed
+    assert "x-correlation-id" in exposed
+
+
+def test_explicit_http_500_uses_platform_error_envelope(monkeypatch) -> None:
+    monkeypatch.setitem(CORS_OPTIONS, "callback", _allow_test_origin)
+    app = get_application()
+
+    @app.get("/_test_explicit_500")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the internal error envelope.",
+    )
+    async def explicit_500() -> None:
+        raise HTTPException(status_code=500, detail="must not leak")
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/_test_explicit_500",
+        headers={"Origin": "http://example.com", "X-Request-ID": "explicit-500"},
+    )
+
+    _assert_internal_error_contract(response, request_id="explicit-500")
+    assert "must not leak" not in response.text
+
+
+def test_unhandled_exception_uses_platform_error_envelope(monkeypatch) -> None:
+    monkeypatch.setitem(CORS_OPTIONS, "callback", _allow_test_origin)
+    app = get_application()
+
+    @app.get("/_test_unhandled_exception")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the internal error envelope.",
+    )
+    async def unhandled_exception() -> None:
+        raise RuntimeError("must not leak")
+
+    response = TestClient(app, raise_server_exceptions=False).get(
+        "/_test_unhandled_exception",
+        headers={"Origin": "http://example.com", "X-Request-ID": "unhandled-500"},
+    )
+
+    _assert_internal_error_contract(response, request_id="unhandled-500")
+    assert "must not leak" not in response.text
+
+
 def test_original_not_found_has_stable_public_contract():
     app = FastAPI()
     add_exception_handlers(app)
@@ -331,6 +502,27 @@ def test_encryption_not_configured_returns_actionable_503_and_logs_it(caplog):
     )
     assert "POST /providers → 503" in caplog.text
     assert "ENCRYPTION_KEY" in caplog.text
+
+
+def test_unknown_model_capacity_returns_actionable_http_error():
+    from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+
+    app = FastAPI()
+    add_exception_handlers(app)
+
+    @app.get("/capacity")
+    async def capacity():
+        raise UnknownModelCapacityError(("max_input_tokens", "max_output_tokens"))
+
+    response = TestClient(app, raise_server_exceptions=False).get("/capacity")
+    assert response.status_code == 400
+    body = response.json()
+    assert body["code"] == "unknown_model_capacity"
+    assert body["context"]["missing_dimensions"] == [
+        "max_input_tokens",
+        "max_output_tokens",
+    ]
+    assert "max_input_tokens" in body["message"]
 
 
 @pytest.mark.parametrize(

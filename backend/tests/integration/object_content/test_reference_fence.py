@@ -44,7 +44,8 @@ def _file(*, tenant_id: UUID, user_id: UUID, name: str) -> Files:
         mimetype="text/plain",
         file_type="text",
         tenant_id=tenant_id,
-        user_id=user_id,
+        owner_type="user",
+        owner_user_id=user_id,
         parent_file_id=None,
     )
 

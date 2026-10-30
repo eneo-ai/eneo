@@ -10,6 +10,7 @@
   /** The pages above this one, nearest last; takes precedence over `parent`. */
   export let parents: Crumb[] | null = null;
   export let title: string | undefined = undefined;
+  export let description: string | undefined = undefined;
   export let truncate = false;
   /** Anchor for the What's new "Show me" spotlight (rendered as data-tour). */
   export let tour: string | undefined = undefined;
@@ -50,11 +51,17 @@
 
 <svelte:window on:resize={setThreshold} />
 
+<!--
+  In a tight header row this block yields width before tabs and buttons do, because
+  the heading and description truncate while a tab or a button cannot shrink without
+  hiding a target. `overflow-hidden` alone would let it collapse to nothing, hence
+  the explicit floor.
+-->
 <div
   bind:this={titleContainer}
   data-tour={tour}
   class:max-w-[40%]={isOverflowing}
-  class="grid translate-y-[0.02rem] flex-col overflow-hidden transition-all"
+  class="grid min-w-[10rem] shrink-[999] translate-y-[0.02rem] flex-col overflow-hidden transition-all"
 >
   <div class="overflow-hidden pl-2 text-[1.4rem]">
     <div class="flex w-full items-baseline gap-2">
@@ -87,7 +94,7 @@
       {/if}
 
       {#if title}
-        <h1
+        <div
           in:fly|global={{
             x: -5,
             duration: crumbs.length > 0 ? 300 : 0,
@@ -95,10 +102,17 @@
             opacity: 0.3
           }}
           class:pl-2={isOverflowing}
-          class="text-primary inline-block w-full items-center gap-2 truncate pr-4 text-[1.45rem] leading-normal font-extrabold"
+          class="min-w-0 pr-4"
         >
-          {title}
-        </h1>
+          <h1 class="text-primary truncate text-[1.35rem] leading-tight font-extrabold">
+            {title}
+          </h1>
+          {#if description}
+            <p class="text-secondary mt-0.5 hidden truncate text-xs leading-tight @4xl:block">
+              {description}
+            </p>
+          {/if}
+        </div>
       {:else}
         <slot></slot>
       {/if}

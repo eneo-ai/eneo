@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import anyio
@@ -14,8 +14,13 @@ from eneo.ai_models.completion_models.completion_model import (
     CompletionModel,
     Context,
     GeneratedFile,
+    ModelKwargs,
     ResponseType,
     ToolCallMetadata,
+)
+from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    SupportedModelKwargs,
 )
 from eneo.completion_models.infrastructure.completion_service import (
     CompletionService,
@@ -34,6 +39,8 @@ class _DummyAdapter:
     def __init__(self, model: CompletionModel):
         self.model = model
         self.litellm_model = "dummy/model"
+        self.response_model_kwargs: list[ModelKwargs | None] = []
+        self.streaming_model_kwargs: list[ModelKwargs | None] = []
 
     def get_token_limit_of_model(self) -> int:
         return self.model.token_limit
@@ -41,7 +48,28 @@ class _DummyAdapter:
     def get_model_route(self) -> str:
         return self.litellm_model
 
-    async def prepare_streaming(self, **kwargs):
+    async def get_response(
+        self,
+        *,
+        context: Context,
+        model_kwargs: ModelKwargs | None,
+        mcp_proxy: object | None,
+        skill_runtime: object | None = None,
+        provider_call_observer: object | None = None,
+        provider_call_reason: str = "initial",
+    ) -> Completion:
+        self.response_model_kwargs.append(model_kwargs)
+        return Completion(response_type=ResponseType.TEXT, text=context.input)
+
+    async def prepare_streaming(
+        self,
+        *,
+        context: Context,
+        model_kwargs: ModelKwargs | None,
+        mcp_proxy: object | None,
+        skill_runtime: object | None = None,
+    ):
+        self.streaming_model_kwargs.append(model_kwargs)
         return SimpleNamespace(_eneo_context={"has_tools": False})
 
     async def iterate_stream(self, **kwargs):
@@ -51,7 +79,10 @@ class _DummyAdapter:
         yield Completion(response_type=ResponseType.TEXT, text="hello")
 
 
-def _make_completion_model() -> CompletionModel:
+def _make_completion_model(
+    *,
+    supported_model_kwargs: SupportedModelKwargs | None = None,
+) -> CompletionModel:
     now = datetime.now(timezone.utc)
     return CompletionModel(
         id=uuid4(),
@@ -72,7 +103,397 @@ def _make_completion_model() -> CompletionModel:
         is_org_default=False,
         tenant_id=uuid4(),
         provider_id=uuid4(),
+        model_kwargs_capabilities=supported_model_kwargs,
     )
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_omits_optional_kwargs_when_capabilities_are_missing():
+    completion_model = _make_completion_model()
+    adapter = _DummyAdapter(model=completion_model)
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    adapter_loader = AsyncMock(return_value=adapter)
+    service._get_adapter = adapter_loader
+
+    await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        model_kwargs=ModelKwargs(temperature=0.4, top_p=0.7),
+    )
+
+    adapter_loader.assert_awaited_once_with(completion_model)
+    assert len(adapter.response_model_kwargs) == 1
+    effective_kwargs = adapter.response_model_kwargs[0]
+    assert effective_kwargs is not None
+    assert effective_kwargs.model_dump(exclude_none=True) == {}
+
+
+@pytest.mark.asyncio
+async def test_model_route_infers_reasoning_choices_from_litellm_when_admin_metadata_is_missing():
+    completion_model = _make_completion_model()
+    completion_model.reasoning = True
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/gpt-5.6-terra", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.resolve_reasoning_effort_options",
+        return_value=("low", "medium", "high", "xhigh"),
+    ) as resolve_options:
+        route = await service.resolve_model_route(completion_model)
+
+    capability = route.supported_model_kwargs.reasoning_effort
+    assert capability.supported is True
+    assert capability.control == "select"
+    assert capability.options == ["low", "medium", "high", "xhigh"]
+    resolve_options.assert_called_once_with(
+        litellm_model="openai/gpt-5.6-terra",
+        provider_type="openai",
+    )
+
+
+def _stored_completion_model(capabilities: object) -> CompletionModel:
+    """A reasoning model loaded from its row, capability JSON as stored."""
+    loaded = _make_completion_model().model_dump(
+        exclude={"supported_model_kwargs", "token_limit", "model_kwargs_capabilities"}
+    )
+    return CompletionModel.model_validate(
+        SimpleNamespace(
+            **{**loaded, "reasoning": True},
+            model_kwargs_capabilities=capabilities,
+        )
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "expected_options"),
+    [
+        # Untagged (develop, or before the squashed tagging migration): the
+        # stored record decides, as a discovered snapshot does.
+        (
+            {
+                "reasoning_effort": {
+                    "supported": True,
+                    "control": "select",
+                    "options": ["low", "medium", "high"],
+                }
+            },
+            ["low", "medium", "high"],
+        ),
+        # Malformed or invalid: fails closed, never widened by discovery.
+        (
+            {
+                "_evidence": "not-a-tag",
+                "reasoning_effort": {"supported": True, "options": ["high"]},
+            },
+            None,
+        ),
+        ({"reasoning_effort": {"supported": "invalid"}}, None),
+    ],
+    ids=["untagged", "malformed-tag", "invalid"],
+)
+async def test_model_route_reads_a_stored_snapshot_without_rediscovering_it(
+    stored: object, expected_options: list[str] | None
+):
+    completion_model = _stored_completion_model(stored)
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/gpt-5-mini", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.resolve_reasoning_effort_options",
+        return_value=("minimal", "low", "medium", "high", "xhigh"),
+    ) as resolve_options:
+        route = await service.resolve_model_route(completion_model)
+
+    capability = route.supported_model_kwargs.reasoning_effort
+    assert capability.supported is (expected_options is not None)
+    assert capability.options == expected_options
+    resolve_options.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_model_route_preserves_explicit_admin_reasoning_capability():
+    completion_model = _make_completion_model(
+        supported_model_kwargs=SupportedModelKwargs(
+            reasoning_effort=ModelKwargCapability(
+                supported=True,
+                control="select",
+                options=["high"],
+            )
+        )
+    )
+    completion_model.reasoning = True
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/custom-model", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    with patch(
+        "eneo.completion_models.infrastructure.tenant_model_capabilities.resolve_reasoning_effort_options"
+    ) as resolve_options:
+        route = await service.resolve_model_route(completion_model)
+
+    assert route.supported_model_kwargs.reasoning_effort.options == ["high"]
+    resolve_options.assert_not_called()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("reasoning", [True, False])
+async def test_a_reasoning_row_may_think_without_effort_metadata(reasoning: bool):
+    # Mutant: route resolution drops the row's reasoning flag, so a reasoning
+    # model on a deployment LiteLLM does not know waits only the silence
+    # deadline for its first output.
+    completion_model = _make_completion_model(
+        supported_model_kwargs=SupportedModelKwargs()
+    )
+    completion_model.reasoning = reasoning
+    adapter = MagicMock()
+    adapter.provider_type = "azure"
+    adapter.resolve_litellm_params.return_value = ("azure/our-deployment", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.tenant_model_capabilities.resolve_reasoning_effort_options",
+            return_value=(),
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.completion_service.route_takes_reasoning_effort",
+            return_value=False,
+        ),
+    ):
+        route = await service.resolve_model_route(completion_model)
+        may_reason = route.may_reason_by_default()
+
+    assert route.supported_model_kwargs.reasoning_effort.supported is False
+    assert may_reason is reasoning
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("supports_strict_tool_schema", [True, False])
+async def test_model_route_carries_the_supports_strict_tool_schema_capability(
+    supports_strict_tool_schema: bool,
+):
+    completion_model = _make_completion_model()
+    completion_model.supports_strict_tool_schema = supports_strict_tool_schema
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/custom-model", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    route = await service.resolve_model_route(completion_model)
+
+    assert route.supports_strict_tool_schema is supports_strict_tool_schema
+
+
+@pytest.mark.asyncio
+async def test_model_route_drops_strict_schemas_without_tool_calling():
+    completion_model = _make_completion_model()
+    completion_model.supports_strict_tool_schema = True
+    completion_model.supports_tool_calling = False
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/custom-model", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    route = await service.resolve_model_route(completion_model)
+
+    assert route.supports_strict_tool_schema is False
+
+
+@pytest.mark.asyncio
+async def test_model_route_without_measured_capability_is_not_strict_capable():
+    completion_model = _make_completion_model()
+    adapter = MagicMock()
+    adapter.provider_type = "openai"
+    adapter.resolve_litellm_params.return_value = ("openai/gpt-5.6-luna", {})
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    route = await service.resolve_model_route(completion_model)
+
+    assert route.supports_strict_tool_schema is False
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_keeps_temperature_for_a_legacy_untagged_slider():
+    completion_model = _make_completion_model()
+    completion_model.reasoning = True
+    object.__setattr__(
+        completion_model,
+        "model_kwargs_capabilities",
+        {
+            "temperature": {
+                "supported": True,
+                "control": "slider",
+                "minimum": 0,
+                "maximum": 2,
+                "step": 0.01,
+            }
+        },
+    )
+    adapter = _DummyAdapter(model=completion_model)
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        model_kwargs=ModelKwargs(temperature=0.0),
+    )
+
+    assert len(adapter.response_model_kwargs) == 1
+    effective_kwargs = adapter.response_model_kwargs[0]
+    assert effective_kwargs is not None
+    # Read as a legacy discovered snapshot, as develop reads it.
+    assert effective_kwargs.model_dump(exclude_none=True) == {"temperature": 0.0}
+
+
+@pytest.mark.asyncio
+async def test_non_streaming_preserves_supported_kwargs_and_response_format():
+    completion_model = _make_completion_model(
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider")
+        )
+    )
+    adapter = _DummyAdapter(model=completion_model)
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+    response_format = {"type": "json_object"}
+
+    await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        model_kwargs=ModelKwargs(
+            temperature=0.33,
+            top_p=0.8,
+            response_format=response_format,
+        ),
+    )
+
+    assert len(adapter.response_model_kwargs) == 1
+    effective_kwargs = adapter.response_model_kwargs[0]
+    assert effective_kwargs is not None
+    assert effective_kwargs.model_dump(exclude_none=True) == {
+        "temperature": 0.33,
+        "response_format": response_format,
+    }
+
+
+@pytest.mark.asyncio
+async def test_streaming_omits_kwargs_for_invalid_capability_evidence():
+    completion_model = _make_completion_model()
+    object.__setattr__(
+        completion_model,
+        "model_kwargs_capabilities",
+        {"temperature": {"supported": "invalid"}},
+    )
+    adapter = _DummyAdapter(model=completion_model)
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    adapter_loader = AsyncMock(return_value=adapter)
+    service._get_adapter = adapter_loader
+    response_format = {"type": "json_object"}
+
+    await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        model_kwargs=ModelKwargs(
+            temperature=0.4,
+            top_p=0.7,
+            response_format=response_format,
+        ),
+        stream=True,
+    )
+
+    adapter_loader.assert_awaited_once_with(completion_model)
+    assert len(adapter.streaming_model_kwargs) == 1
+    effective_kwargs = adapter.streaming_model_kwargs[0]
+    assert effective_kwargs is not None
+    assert effective_kwargs.model_dump(exclude_none=True) == {
+        "response_format": response_format
+    }
+
+
+@pytest.mark.asyncio
+async def test_streaming_preserves_supported_optional_kwargs():
+    completion_model = _make_completion_model(
+        supported_model_kwargs=SupportedModelKwargs(
+            temperature=ModelKwargCapability(supported=True, control="slider")
+        )
+    )
+    adapter = _DummyAdapter(model=completion_model)
+    service = CompletionService(
+        context_builder=_DummyContextBuilder(),
+        tenant=SimpleNamespace(id=uuid4()),
+        session=AsyncMock(),
+    )
+    service._get_adapter = AsyncMock(return_value=adapter)
+
+    await service.get_response(
+        model=completion_model,
+        text_input="hi",
+        model_kwargs=ModelKwargs(temperature=0.61),
+        stream=True,
+    )
+
+    assert len(adapter.streaming_model_kwargs) == 1
+    effective_kwargs = adapter.streaming_model_kwargs[0]
+    assert effective_kwargs is not None
+    assert effective_kwargs.model_dump(exclude_none=True) == {"temperature": 0.61}
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,6 @@
 """A tool's view may call tools only on a server one of the user's turns with
-the assistant would reach now: one of the assistant's enabled servers within
-the space's security classification, the servers a governance policy enforces
+the assistant would reach now: one of the assistant's enabled servers that the
+space still has, within the space's security classification, the servers a governance policy enforces
 in their place, or the provider serving the user for a capability the
 assistant has. The provider of a capability is found the same way."""
 
@@ -23,12 +23,21 @@ def _server(**kwargs) -> MCPServer:
     )
 
 
-def _service(assistant, *, space_capabilities=(), classification=None, personal=False):
+def _service(
+    assistant,
+    *,
+    space_capabilities=(),
+    classification=None,
+    personal=False,
+    removed_from_space=(),
+):
+    removed_ids = {server.id for server in removed_from_space}
     space = SimpleNamespace(
         get_assistant=lambda assistant_id: assistant,
         security_classification=classification,
         is_personal=lambda: personal,
         enabled_capabilities=list(space_capabilities),
+        is_mcp_server_in_space=lambda server_id: server_id not in removed_ids,
     )
     service = AssistantService.__new__(AssistantService)
     service.user = MagicMock()
@@ -65,6 +74,17 @@ async def test_server_the_assistant_does_not_have_is_not_reached():
 
     found = await _service(assistant).mcp_server_for_view(
         assistant_id=assistant.id, mcp_server_id=uuid4()
+    )
+
+    assert found is None
+
+
+async def test_server_the_space_no_longer_has_is_not_reached():
+    server = _server()
+    assistant = _assistant(server)
+
+    found = await _service(assistant, removed_from_space=[server]).mcp_server_for_view(
+        assistant_id=assistant.id, mcp_server_id=server.id
     )
 
     assert found is None

@@ -39,11 +39,13 @@ import { initIcons } from "./endpoints/icons.js";
 import { initModelProviders } from "./endpoints/model-providers.js";
 import { initTenantModels } from "./endpoints/tenant-models.js";
 import { initApiKeys } from "./endpoints/api-keys.js";
+import { initFlows } from "./endpoints/flows.js";
 import { initHelpAssistants } from "./endpoints/helpAssistants.js";
 import { initSkills } from "./endpoints/skills.js";
 import { initObjectContentPolicy } from "./endpoints/object-content-policy.js";
 import { initObjectStoreConnection } from "./endpoints/object-store-connection.js";
 import { initModules } from "./endpoints/modules.js";
+import { initTranscriptionServices } from "./endpoints/transcription-services.js";
 
 /**
  * Create an Eneo.js object to interact with the eneo backend.
@@ -99,11 +101,13 @@ export function createEneo(args) {
     modelProviders: initModelProviders(client),
     tenantModels: initTenantModels(client),
     apiKeys: initApiKeys(client),
+    flows: initFlows(client),
     helpAssistants: initHelpAssistants(client),
     skills: initSkills(client),
     objectContentPolicy: initObjectContentPolicy(client),
     objectStoreConnection: initObjectStoreConnection(client),
     modules: initModules(client),
+    transcriptionServices: initTranscriptionServices(client),
     client
   };
 }

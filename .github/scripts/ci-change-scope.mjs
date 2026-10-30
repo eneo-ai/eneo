@@ -166,7 +166,15 @@ function isFullCiFile(file) {
 }
 
 function isBackendFile(file) {
-  return file.startsWith("backend/");
+  // Flow document tests render through the tool runtime's document engine.
+  return (
+    file.startsWith("backend/") ||
+    file.startsWith("tool-runtime/src/tools/documents/") ||
+    file.startsWith("tool-runtime/tests/support/") ||
+    ["tool-runtime/src/server.ts", "tool-runtime/src/main.ts", "tool-runtime/bun.lock"].includes(
+      file,
+    )
+  );
 }
 
 function isShippedFrontendFile(file) {

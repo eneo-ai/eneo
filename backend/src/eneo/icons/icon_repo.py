@@ -171,7 +171,9 @@ class IconRepository:
             media_type=row.legacy_mimetype,
         )
 
-    async def delete_if_unreferenced(self, icon_id: UUID) -> bool:
+    async def delete_if_unreferenced(
+        self, icon_id: UUID, *, tenant_id: UUID | None = None
+    ) -> bool:
         """Delete the icon unless a resource still shows it; returns whether it did.
 
         Must run inside a transaction.
@@ -189,6 +191,7 @@ class IconRepository:
                 sa.delete(Icons)
                 .where(
                     Icons.id == icon_id,
+                    *([Icons.tenant_id == tenant_id] if tenant_id is not None else []),
                     *(
                         ~sa.exists().where(column == Icons.id)
                         for column in ICON_REFERENCES

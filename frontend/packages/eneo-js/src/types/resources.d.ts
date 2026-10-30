@@ -1,4 +1,5 @@
 import { components, paths } from "./schema";
+import type { EneoBinaryResponse } from "./fetch";
 
 export type Assistant =
   components["schemas"]["AssistantPublic"] | components["schemas"]["DefaultAssistant"];
@@ -23,6 +24,8 @@ export type AssistantSkillRuntimeSummary = components["schemas"]["AssistantSkill
 export type SkillRuntimePolicy = components["schemas"]["SkillRuntimePolicyPublic"];
 export type SkillRuntimePolicyUpdate = components["schemas"]["SkillRuntimePolicyUpdate"];
 export type SkillRuntimeModelProjections = components["schemas"]["SkillRuntimeModelProjections"];
+export type SkillExecutionBlockPublic = components["schemas"]["SkillExecutionBlockPublic"];
+export type SkillExecutionBlockState = components["schemas"]["SkillExecutionBlockState"];
 export type OrganizationSkillPublic = components["schemas"]["OrganizationSkillPublic"];
 export type SkillUsageCounts = components["schemas"]["SkillUsageCountsPublic"];
 export type SkillRemovalRequest = components["schemas"]["SkillRemovalRequest"];
@@ -120,8 +123,16 @@ export type MovePauseResult = components["schemas"]["MovePausePublic"];
 export type ObjectStoreConnection = components["schemas"]["ObjectStoreConnectionPublic"];
 export type ObjectStoreConnectionCreate = components["schemas"]["ObjectStoreConnectionInput"];
 export type ObjectStoreCredentialRotation = components["schemas"]["ObjectStoreCredentialRotation"];
-export type Role = components["schemas"]["RolePublic"];
+export type TranscriptionService = components["schemas"]["TranscriptionServicePublic"];
+export type TranscriptionServiceCreate = components["schemas"]["TranscriptionServiceCreate"];
+export type TranscriptionServiceUpdate = components["schemas"]["TranscriptionServiceUpdate"];
+export type TranscriptionServiceCheck = components["schemas"]["TranscriptionServiceCheckPublic"];
+export type TranscriptionServiceLastCheck =
+  components["schemas"]["TranscriptionServiceLastCheckPublic"];
+export type TranscriptionServiceSummary = components["schemas"]["TranscriptionServiceSummary"];
+export type SpaceTranscriptionServiceLink = components["schemas"]["SpaceTranscriptionServiceLink"];
 export type Permission = components["schemas"]["Permission"];
+export type Role = components["schemas"]["RolePublic"];
 export type ResourcePermission = components["schemas"]["ResourcePermission"];
 export type CrawlRun = components["schemas"]["CrawlRunPublic"];
 export type AdminCrawlerOverview = components["schemas"]["AdminCrawlerOverview"];
@@ -152,10 +163,11 @@ export type WebsiteContentFolder = components["schemas"]["WebsiteContentFolderPu
 export type WebsiteContentFolders = components["schemas"]["WebsiteContentFoldersPublic"];
 export type WebsiteBulkActionError = components["schemas"]["WebsiteBulkActionError"];
 export type Settings = components["schemas"]["SettingsPublic"];
+export type FlowRunStatusCapabilities = components["schemas"]["FlowRunStatusCapabilitiesPublic"];
+export type FlowRunStatusCapability = components["schemas"]["FlowRunStatusCapabilityPublic"];
 export type WhatsNewState = components["schemas"]["WhatsNewStatePublic"];
-export type SkillExecutionBlockPublic = components["schemas"]["SkillExecutionBlockPublic"];
-export type SkillExecutionBlockState = components["schemas"]["SkillExecutionBlockState"];
-export type WebsiteSparse = components["schemas"]["WebsiteSparse"];
+// The API has one website shape; there is no sparse schema to name.
+export type WebsiteSparse = components["schemas"]["WebsitePublic"];
 export type Space = components["schemas"]["SpacePublic"];
 export type SpaceSparse = components["schemas"]["SpaceSparse"];
 export type Dashboard = components["schemas"]["Dashboard"];
@@ -220,6 +232,127 @@ export type ConversationTools = components["schemas"]["UseTools"];
 export type ChatTurnDiagnostics = components["schemas"]["ChatTurnDiagnostics"];
 export type PreflightResponse = components["schemas"]["PreflightResponse"];
 export type GroupChat = components["schemas"]["GroupChatPublic"];
+
+export type FlowStep = components["schemas"]["FlowStepPublic"];
+export type FlowSparse = components["schemas"]["FlowSparsePublic"];
+export type Flow = components["schemas"]["FlowPublic"];
+export type FlowRunRetention = Flow["run_history_retention"];
+export type FlowTemplatePlaceholder = components["schemas"]["FlowTemplatePlaceholderPublic"];
+export type FlowTemplateInspection = components["schemas"]["FlowTemplateInspectionPublic"];
+export type FlowTemplateAsset = components["schemas"]["FlowTemplateAssetPublic"];
+export type FlowPackageExportRequest = components["schemas"]["FlowPackageExportRequest"];
+export type FlowPackageOmission = components["schemas"]["FlowPackageOmission"];
+export type FlowPackageExportResponse = EneoBinaryResponse & {
+  omissions: FlowPackageOmission[];
+};
+export type FlowPackageImportPlan = components["schemas"]["FlowPackageImportPlan"];
+export type FlowPackageTemplateUpload = components["schemas"]["FlowPackageTemplateUpload"];
+export type FlowPackageImportPlanSummary = components["schemas"]["FlowPackageImportPlanSummary"];
+export type FlowPackageImportPlanStatus = components["schemas"]["FlowPackageImportPlanStatus"];
+export type FlowPackageImportTargetState = components["schemas"]["FlowPackageImportTargetState"];
+export type FlowPackageImportResult = components["schemas"]["FlowPackageImportPublic"];
+export type FlowPackageValidation = components["schemas"]["FlowPackageValidationPublic"];
+export type FlowPackageDependencyResolution = NonNullable<
+  FlowPackageImportPlan["dependency_resolutions"]
+>[number];
+export type FlowPackageLocalCandidate = components["schemas"]["FlowPackageLocalCandidate"];
+export type FlowPackageModelCandidate = components["schemas"]["FlowPackageModelCandidate"];
+export type FlowPackageResourceSlotRef = components["schemas"]["FlowPackageResourceSlotRefJson"];
+export type FlowPackageImportResourceBinding =
+  components["schemas"]["FlowPackageImportResourceBindingRequest"];
+export type FlowPackageRequirementDataSensitivity =
+  components["schemas"]["FlowPackageRequirementDataSensitivity"];
+export type LocalResourceBinding = components["schemas"]["LocalResourceBinding"];
+export type LocalResourceKind = components["schemas"]["LocalResourceKind"];
+export type FlowRunContractStepInput = components["schemas"]["FlowRuntimeInputContractPublic"];
+export type FlowRunContractTemplateReadiness = components["schemas"]["FlowTemplateReadinessPublic"];
+export type FlowRunContractSecurityClassification =
+  components["schemas"]["FlowSecurityClassificationPublic"];
+export type FlowRunContract = components["schemas"]["FlowRunContractPublic"];
+export type FlowRuntimeUploadPolicy = components["schemas"]["FlowRuntimeUploadPolicyPublic"];
+export type FlowRunContractTranscription = components["schemas"]["FlowTranscriptionContractPublic"];
+export type FlowLiveTranscriptionSession =
+  components["schemas"]["FlowLiveTranscriptionSessionPublic"];
+export type FlowHttpTestRequest = components["schemas"]["HttpTestRequest"];
+export type FlowHttpTestResponse = components["schemas"]["HttpTestResponse"];
+export type FlowHttpRequestPreview = components["schemas"]["HttpRequestPreview"];
+export type FlowHttpTransportError = components["schemas"]["HttpTransportError"];
+export type FlowRunResultFile = components["schemas"]["FlowRunStepResultFile"];
+export type FlowRunResult = NonNullable<components["schemas"]["FlowRunPublic"]["result"]>;
+export type FlowRunTokenUsage = components["schemas"]["FlowRunTokenUsagePublic"];
+export type FlowRunTranscriptionUsage = components["schemas"]["FlowRunTranscriptionUsagePublic"];
+export type FlowRunError = components["schemas"]["FlowRunError"];
+
+export type FlowRunOutputPayload = {
+  text?: string;
+  text_overflow?: {
+    generated_file_ids: [string];
+    inline_text_bytes: number;
+    full_text_bytes: number;
+  };
+  structured?: Record<string, unknown> | unknown[];
+  template_fill_debug?: Record<string, unknown>;
+  template_provenance?: Record<string, unknown>;
+  section_manifest?: Record<string, unknown>;
+};
+
+type WithTypedStepOutput<T extends { output_payload_json?: unknown }> = Omit<
+  T,
+  "output_payload_json"
+> & {
+  output_payload_json?: FlowRunOutputPayload | null;
+};
+
+export type FlowRun = components["schemas"]["FlowRunPublic"];
+export type FlowRunSummary = components["schemas"]["FlowRunSummaryPublic"];
+export type FlowRunStepInput = components["schemas"]["StepRunInput"] & { file_ids: string[] };
+export type FlowRunStepInputs = Record<string, FlowRunStepInput>;
+export type FlowRunStep = WithTypedStepOutput<components["schemas"]["FlowRunStepPublic"]>;
+export type FlowGraphNode = components["schemas"]["GraphNode"];
+export type FlowGraphEdge = components["schemas"]["GraphEdge"];
+export type FlowGraph = components["schemas"]["GraphResponse"];
+export type FlowRunDebugIoTypes = components["schemas"]["FlowRunDebugIoTypes"];
+export type FlowRunDebugInput = components["schemas"]["FlowRunDebugInput"];
+export type FlowRunDebugOutput = components["schemas"]["FlowRunDebugOutput"];
+export type FlowRunDebugRagReference = components["schemas"]["FlowRunDebugRagReference"];
+export type RetrievedPassage = components["schemas"]["RetrievedPassage"];
+export type FlowRunDebugRag = components["schemas"]["FlowRunDebugRag"];
+export type FlowRunDebugStep = components["schemas"]["FlowRunDebugStep"];
+export type FlowRunDebugAttempt = components["schemas"]["FlowRunDebugAttempt"];
+export type FlowRunDebugExport = components["schemas"]["FlowRunDebugExport"];
+export type FlowCitationSummary = components["schemas"]["FlowCitationSummaryPublic"];
+export type FlowCitationSource = components["schemas"]["FlowCitationSourcePublic"];
+export type FlowRunReviewCheckpoint = components["schemas"]["FlowRunReviewCheckpointPublic"];
+export type FlowRunReviewCheckpointEdit =
+  components["schemas"]["FlowRunReviewCheckpointEditPublic"];
+export type FlowRunReviewCheckpointEditPage =
+  components["schemas"]["FlowRunReviewCheckpointEditPagePublic"];
+export type FlowRunReviewCheckpointState = components["schemas"]["FlowRunReviewCheckpointState"];
+export type FlowRunReviewCheckpointResumeResponse =
+  components["schemas"]["FlowRunReviewCheckpointResumeResponse"];
+export type FlowRunTranscriptCorrections = components["schemas"]["FlowTranscriptCorrectionsPublic"];
+export type FlowTranscriptCorrectionRevision =
+  components["schemas"]["FlowTranscriptCorrectionRevisionPublic"];
+export type FlowTranscriptCorrectionRevisionPage =
+  components["schemas"]["FlowTranscriptCorrectionRevisionPagePublic"];
+export type FlowTranscriptCorrectionOccurrence =
+  components["schemas"]["TranscriptCorrectionOccurrencePublic"];
+export type FlowTranscriptSpeakerEdit = components["schemas"]["TranscriptSpeakerEditPublic"];
+export type FlowRunTranscriptWords = components["schemas"]["FlowTranscriptWordsPublic"];
+export type FlowRunTranscriptSourcePage =
+  | components["schemas"]["PresentTranscriptSourcePage"]
+  | components["schemas"]["OmittedTranscriptSourcePage"]
+  | components["schemas"]["UnavailableTranscriptSourcePage"];
+export type FlowTranscriptSourceOmissionReason =
+  components["schemas"]["TranscriptSourceOmissionReason"];
+export type FlowTranscriptSegmentWords = components["schemas"]["TranscriptSegmentWordsPublic"];
+export type FlowTranscriptWord = components["schemas"]["TranscriptWordPublic"];
+export type FlowRunEvidence = components["schemas"]["FlowRunEvidenceResponse"];
+export type FlowProviderCallEvidence = components["schemas"]["ProviderCallEvidence"];
+export type FlowProviderCallEvidencePage = components["schemas"]["ProviderCallEvidencePage"];
+export type FlowRunEvidenceExport = components["schemas"]["FlowRunEvidenceExportResponse"];
+export type FlowRunRedispatchRequest = components["schemas"]["FlowRunRedispatchRequest"];
+export type FlowRunRedispatchResult = components["schemas"]["FlowRunRedispatchResponse"];
 export type GroupChatSparse = Omit<components["schemas"]["GroupChatSparse"], "user_id">;
 export type ChatPartner =
   | { id: string; type: "assistant" }
@@ -288,9 +421,12 @@ export type ModelKwargs = components["schemas"]["ModelKwargs"];
 export type ModelKwargCapability = components["schemas"]["ModelKwargCapability"];
 export type SupportedModelKwargs = components["schemas"]["SupportedModelKwargs"];
 
-// Tenant model update types
+// Tenant model create and update types
+export type TenantCompletionModelCreate = components["schemas"]["TenantCompletionModelCreate"];
 export type TenantCompletionModelUpdate = components["schemas"]["TenantCompletionModelUpdate"];
 export type TenantEmbeddingModelUpdate = components["schemas"]["TenantEmbeddingModelUpdate"];
+export type TenantTranscriptionModelCreate =
+  components["schemas"]["TenantTranscriptionModelCreate"];
 export type TenantTranscriptionModelUpdate =
   components["schemas"]["TenantTranscriptionModelUpdate"];
 export type TenantImageModelCreate = components["schemas"]["TenantImageModelCreate"];

@@ -10,6 +10,7 @@ import pytest
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant_service import AssistantService
+from eneo.assistants.assistant_update import AssistantUpdateCommand
 from eneo.completion_models.domain.completion_model import (
     CompletionModel as DomainCompletionModel,
 )
@@ -24,6 +25,7 @@ from eneo.completion_models.domain.skill_activation import (
 from eneo.completion_models.domain.skill_context import SkillContextMeasurement
 from eneo.governance_policy.domain.policy_resolver import EffectiveConfig
 from eneo.main.exceptions import BadRequestException
+from eneo.main.models import NOT_PROVIDED
 from eneo.services.service import DatastoreResult
 from eneo.sessions.session import SessionInDB
 from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_turn
@@ -107,7 +109,20 @@ def _service_with_effective_config(effective_config_service: AsyncMock):
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
+    )
+
+
+async def _update_assistant(
+    service: AssistantService,
+    *,
+    assistant_id,
+    **fields: object,
+):
+    return await service.update_assistant(
+        assistant_id=assistant_id,
+        update=AssistantUpdateCommand.model_validate(fields),
     )
 
 
@@ -115,7 +130,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     assistant_id = uuid4()
     now = datetime.now(UTC)
     effective_model = DomainCompletionModel(
-        user=TEST_USER,
+        tenant=TEST_USER.tenant,
         id=TEST_MODEL_GPT4.id,
         created_at=now,
         updated_at=now,
@@ -157,13 +172,16 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
     datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
 
     assistant = MagicMock()
+    assistant.hidden = False
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
     assistant.is_default = True
     assistant.completion_model = TEST_MODEL_CHATGPT
     assistant.completion_model_kwargs = ModelKwargs()
+    assistant.request_model_kwargs.side_effect = _sendable_stored_settings
     assistant.tool_assistants = []
+    assistant.get_prompt_text.return_value = ""
     assistant.ask = AsyncMock(return_value=(response, datastore_result))
 
     space = MagicMock()
@@ -223,6 +241,7 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -248,6 +267,11 @@ async def test_ask_uses_effective_model_for_session_metadata_and_response():
         assistant.ask.await_args.kwargs["model_kwargs_override"].reasoning_effort
         == "high"
     )
+    # The stored settings are filtered against the model the policy chose,
+    # and the policy's effort replaces the stored one.
+    assistant.request_model_kwargs.assert_called_once_with(
+        effective_model, reasoning_effort="high"
+    )
     assert assistant.ask.await_args.kwargs["prompt_override"] is None
     assert (
         session_service.create_session_with_question_placeholder.await_args.kwargs[
@@ -264,6 +288,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
     assistant_id = uuid4()
 
     assistant = MagicMock()
+    assistant.hidden = False
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
@@ -322,6 +347,7 @@ async def test_ask_rejects_empty_model_policy_before_creating_history():
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
 
@@ -350,6 +376,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
     policy_server = SimpleNamespace(id=uuid4(), name="Sundsvall.se", purpose=None)
 
     assistant = MagicMock()
+    assistant.hidden = False
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
@@ -413,6 +440,7 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -421,6 +449,15 @@ async def test_ask_grants_policy_mcp_servers_to_personal_assistant():
 
     assistant.ask.assert_awaited_once()
     assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [policy_server]
+
+
+def _sendable_stored_settings(
+    model: object, *, reasoning_effort: object = NOT_PROVIDED
+) -> ModelKwargs:
+    """Stand-in for Assistant.request_model_kwargs with empty stored settings."""
+    if reasoning_effort is NOT_PROVIDED:
+        return ModelKwargs()
+    return ModelKwargs.model_validate({"reasoning_effort": reasoning_effort})
 
 
 @pytest.mark.parametrize(
@@ -451,6 +488,7 @@ async def test_ask_applies_governed_file_policy_to_personal_assistant(
     datastore_result = DatastoreResult(chunks=[], no_duplicate_chunks=[], info_blobs=[])
 
     assistant = MagicMock()
+    assistant.hidden = False
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
@@ -515,6 +553,7 @@ async def test_ask_applies_governed_file_policy_to_personal_assistant(
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -536,6 +575,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
     server_b = SimpleNamespace(id=uuid4(), name="Confluence", purpose=None)
 
     assistant = MagicMock()
+    assistant.hidden = False
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
@@ -550,6 +590,9 @@ async def test_ask_respects_disabled_mcp_server_ids():
     space.can_ask_assistant.return_value = None
     space.is_personal.return_value = True
     space.security_classification = None
+    # Kills the mutant that asks the space's own list for a policy grant: the
+    # policy is what gives these servers to the personal assistant.
+    space.is_mcp_server_in_space.return_value = False
 
     actor = MagicMock()
     actor.can_read_assistant.return_value = True
@@ -599,6 +642,7 @@ async def test_ask_respects_disabled_mcp_server_ids():
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]
@@ -611,6 +655,80 @@ async def test_ask_respects_disabled_mcp_server_ids():
 
     assistant.ask.assert_awaited_once()
     assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [server_b]
+
+
+async def test_ask_skips_a_server_the_space_no_longer_has():
+    # Kills the mutant that asks the space only when an assistant is saved: a
+    # server a space admin removed stayed callable for assistants that had it.
+    service, assistant, _ = _runtime_service(
+        personal_default=False, skill_service=_empty_skill_service()
+    )
+    kept = SimpleNamespace(id=uuid4(), name="kept", purpose=None)
+    removed = SimpleNamespace(id=uuid4(), name="removed", purpose=None)
+    assistant.mcp_servers = [kept, removed]
+    space = service.space_repo.get_space_by_assistant.return_value
+    space.security_classification = None
+    space.is_mcp_server_in_space.side_effect = lambda server_id: server_id == kept.id
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [kept]
+
+
+async def test_ask_asks_the_space_when_a_policy_does_not_govern_mcp():
+    # Kills the mutant that lets ANY policy grant every server: only a policy
+    # that enforces MCP replaces the space's own list.
+    service, assistant, _ = _runtime_service(
+        personal_default=True,
+        skill_service=_empty_skill_service(),
+        effective_config=SimpleNamespace(
+            models_enforced=False,
+            available_models=[],
+            policy_default_model=None,
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            enabled_capabilities=[],
+            prompt_enforced=False,
+            enforced_prompt_text=None,
+            reasoning_policy_configured=False,
+            inline_file_text=None,
+            governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+        ),
+    )
+    kept = SimpleNamespace(id=uuid4(), name="kept", purpose=None)
+    removed = SimpleNamespace(id=uuid4(), name="removed", purpose=None)
+    assistant.mcp_servers = [kept, removed]
+    space = service.space_repo.get_space_by_assistant.return_value
+    space.security_classification = None
+    space.is_mcp_server_in_space.side_effect = lambda server_id: server_id == kept.id
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [kept]
+
+
+async def test_ask_skips_a_removed_server_when_a_capability_is_requested(monkeypatch):
+    # Kills the mutant that resolves capabilities without the space: that path
+    # replaces the server list, so the removed server came back with web search.
+    monkeypatch.setattr(
+        "eneo.mcp_servers.application.capability_resolver.active_capability_providers",
+        AsyncMock(return_value=[]),
+    )
+    service, assistant, _ = _runtime_service(
+        personal_default=False, skill_service=_empty_skill_service()
+    )
+    kept = SimpleNamespace(id=uuid4(), name="kept", purpose=None)
+    removed = SimpleNamespace(id=uuid4(), name="removed", purpose=None)
+    assistant.mcp_servers = [kept, removed]
+    assistant.enabled_capabilities = ["web_search"]
+    space = service.space_repo.get_space_by_assistant.return_value
+    space.security_classification = None
+    space.enabled_capabilities = ["web_search"]
+    space.is_mcp_server_in_space.side_effect = lambda server_id: server_id == kept.id
+
+    await service.ask(question="hello", assistant_id=assistant.id)
+
+    assert assistant.ask.await_args.kwargs["mcp_servers_override"] == [kept]
 
 
 async def test_update_guard_rejects_disallowed_model_on_personal_default_assistant():
@@ -640,6 +758,145 @@ async def test_update_guard_rejects_disallowed_model_on_personal_default_assista
             completion_model_id=uuid4(),
             mcp_server_ids=None,
         )
+
+
+def _personal_default_update_subject(effective_config):
+    effective_config_service = AsyncMock()
+    effective_config_service.resolve_for.return_value = effective_config
+    service = _service_with_effective_config(effective_config_service)
+
+    assistant = MagicMock()
+    assistant.hidden = False
+    assistant.id = uuid4()
+    assistant.is_default = True
+    assistant.completion_model = TEST_MODEL_CHATGPT
+    assistant.integration_knowledge_list = []
+    assistant.get_prompt_text.return_value = ""
+
+    space = MagicMock()
+    space.is_personal.return_value = True
+    space.default_assistant = assistant
+    space.get_assistant.return_value = assistant
+    space.is_completion_model_available.return_value = True
+    space.is_completion_model_in_space.return_value = True
+    service.space_repo.get_space_by_assistant.return_value = space
+    service.space_repo.one.return_value = space
+
+    actor = MagicMock()
+    actor.can_edit_default_assistant.return_value = True
+    actor.can_edit_assistants.return_value = False
+    service.actor_manager.get_space_actor_from_space.return_value = actor
+
+    return service, effective_config_service, assistant, space
+
+
+async def test_update_assistant_omitted_model_is_not_a_model_change():
+    """An omitted completion model must not be read as a model update."""
+    service, effective_config_service, assistant, _ = _personal_default_update_subject(
+        SimpleNamespace(
+            models_enforced=True,
+            available_models=[TEST_MODEL_GPT4],
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            prompt_enforced=False,
+        )
+    )
+
+    await _update_assistant(service, assistant_id=assistant.id)
+
+    assistant.update.assert_called_once()
+    assert assistant.update.call_args.kwargs["completion_model"] is NOT_PROVIDED
+    effective_config_service.resolve_for.assert_not_awaited()
+
+
+async def test_update_assistant_allows_allowed_model_change():
+    service, effective_config_service, assistant, space = (
+        _personal_default_update_subject(
+            SimpleNamespace(
+                models_enforced=True,
+                available_models=[TEST_MODEL_GPT4],
+                policy_default_model=None,
+                mcp_enforced=False,
+                available_mcp_servers=[],
+                prompt_enforced=False,
+                enforced_prompt_text=None,
+                governance_skill_resolution=SkillRuntimeResolution(
+                    eligible=(), blocked=()
+                ),
+            )
+        )
+    )
+    space.get_completion_model.return_value = TEST_MODEL_GPT4
+
+    await _update_assistant(
+        service,
+        assistant_id=assistant.id,
+        completion_model_id=TEST_MODEL_GPT4.id,
+    )
+
+    assistant.update.assert_called_once()
+    assert assistant.update.call_args.kwargs["completion_model"] is TEST_MODEL_GPT4
+    effective_config_service.resolve_for.assert_awaited_once_with(
+        assistant, space_is_personal=True
+    )
+
+
+async def test_update_assistant_rejects_disallowed_model_change():
+    """A real requested model change must still be governed."""
+    disallowed_model_id = uuid4()
+    service, effective_config_service, assistant, _ = _personal_default_update_subject(
+        SimpleNamespace(
+            models_enforced=True,
+            available_models=[TEST_MODEL_GPT4],
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            prompt_enforced=False,
+            governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+        )
+    )
+
+    with pytest.raises(
+        BadRequestException,
+        match="Model not allowed by personal assistant governance policy",
+    ):
+        await _update_assistant(
+            service,
+            assistant_id=assistant.id,
+            completion_model_id=disallowed_model_id,
+        )
+
+    assistant.update.assert_not_called()
+    effective_config_service.resolve_for.assert_awaited_once_with(
+        assistant, space_is_personal=True
+    )
+
+
+async def test_update_assistant_explicit_none_clears_model_with_one_policy_lookup():
+    """Explicit None clears the model and validates the resulting runtime once."""
+    service, effective_config_service, assistant, _ = _personal_default_update_subject(
+        SimpleNamespace(
+            models_enforced=True,
+            available_models=[TEST_MODEL_GPT4],
+            policy_default_model=None,
+            mcp_enforced=False,
+            available_mcp_servers=[],
+            prompt_enforced=False,
+            enforced_prompt_text=None,
+            governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
+        )
+    )
+
+    await _update_assistant(
+        service,
+        assistant_id=assistant.id,
+        completion_model_id=None,
+    )
+
+    assistant.update.assert_called_once()
+    assert assistant.update.call_args.kwargs["completion_model"] is None
+    effective_config_service.resolve_for.assert_awaited_once_with(
+        assistant, space_is_personal=True
+    )
 
 
 async def test_update_guard_rejects_prompt_change_when_prompt_enforced():
@@ -813,6 +1070,7 @@ async def test_get_assistant_with_effective_config_enforces_read_auth():
     from eneo.main.exceptions import UnauthorizedException
 
     assistant = MagicMock()
+    assistant.hidden = False
     assistant.is_default = False
     assistant.completion_model = TEST_MODEL_CHATGPT
 
@@ -837,6 +1095,7 @@ async def test_get_assistant_with_effective_config_allows_personal_default_for_b
     # A PERSONAL_CHAT-only user (no ASSISTANTS permission) can read their own
     # personal default assistant via the carve-out.
     assistant = MagicMock()
+    assistant.hidden = False
     assistant.id = uuid4()
     assistant.is_default = True
     assistant.completion_model = TEST_MODEL_CHATGPT
@@ -914,6 +1173,7 @@ def _runtime_service(
     effective_config: SimpleNamespace | None = None,
 ):
     assistant = MagicMock()
+    assistant.hidden = False
     assistant.id = uuid4()
     assistant.space_id = _SPACE_ID
     assistant.name = "Assistant"
@@ -1449,7 +1709,7 @@ async def test_ask_checks_space_with_policy_default_when_assistant_has_no_model(
     assistant_id = uuid4()
     now = datetime.now(UTC)
     effective_model = DomainCompletionModel(
-        user=TEST_USER,
+        tenant=TEST_USER.tenant,
         id=TEST_MODEL_GPT4.id,
         created_at=now,
         updated_at=now,
@@ -1476,12 +1736,14 @@ async def test_ask_checks_space_with_policy_default_when_assistant_has_no_model(
     )
     session = SessionInDB(id=uuid4(), name="hello", user_id=TEST_USER.id, questions=[])
     assistant = MagicMock()
+    assistant.hidden = False
     assistant.id = assistant_id
     assistant.name = "Personal assistant"
     assistant.description = None
     assistant.is_default = True
     assistant.completion_model = None
     assistant.completion_model_kwargs = ModelKwargs()
+    assistant.request_model_kwargs.side_effect = _sendable_stored_settings
     assistant.tool_assistants = []
     assistant.ask = AsyncMock(
         return_value=(
@@ -1547,6 +1809,7 @@ async def test_ask_checks_space_with_policy_default_when_assistant_has_no_model(
         org_space_assistant_role_repo=_not_helper_role_repo(),
         help_assistant_assignment_history_repo=_not_helper_history_repo(),
         skill_service=_empty_skill_service(),
+        api_key_scope_revoker=AsyncMock(),
         effective_config_service=effective_config_service,
     )
     service._handle_response = AsyncMock(return_value="answer")  # type: ignore[method-assign]

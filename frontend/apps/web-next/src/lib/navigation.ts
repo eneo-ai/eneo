@@ -56,6 +56,8 @@ export type ReadonlySearchParams = Omit<URLSearchParams, "append" | "delete" | "
 export type UrlState = {
   /** A phone settings section has an index entry immediately behind it. */
   settingsSectionFromIndex?: boolean;
+  /** Steps opened since the Flows list entry, for its “All steps” control. */
+  flowStepDepth?: number;
 };
 
 export type UrlOptions = { state?: UrlState };
@@ -85,6 +87,11 @@ export function replaceUrl(href: string | URL, options?: UrlOptions): void {
 /** Opens an in-page view as a new history entry, keeping scroll and mounted state. */
 export function pushUrl(href: string | URL, options?: UrlOptions): void {
   window.history.pushState(options?.state ?? null, "", href);
+}
+
+/** Traverses existing entries through the current router. */
+export function goHistory(delta: number): void {
+  window.history.go(delta);
 }
 
 /** Metadata of the entry currently shown; controls use it to choose Back or replace. */

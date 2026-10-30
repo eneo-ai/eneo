@@ -4,6 +4,7 @@ import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { cursorPagination } from "@/lib/api/pagination";
 import type { SpaceResource } from "@/features/spaces/space";
+import { crawlProgressFrom } from "./crawl-progress";
 
 export type Collection = Schema<"CollectionPublic">;
 export type Website = Schema<"WebsitePublic">;
@@ -75,6 +76,28 @@ export function websiteLatestRunQueryOptions(api: EneoClient, websiteId: string)
         api.GET("/api/v1/websites/{id}/runs/latest/", { params: { path: { id: websiteId } } })
       )) ?? null
   });
+}
+
+/**
+ * The running crawls of the websites a space shows, read without the space
+ * itself: what a page polls while a crawl runs.
+ */
+export function websiteCrawlProgressQueryOptions(api: EneoClient, spaceId: string) {
+  return queryOptions({
+    queryKey: ["websites", "crawl-progress", spaceId],
+    queryFn: () =>
+      unwrap(
+        api.GET("/api/v1/spaces/{id}/knowledge/websites/crawl-progress/", {
+          params: { path: { id: spaceId } }
+        })
+      ),
+    select: selectCrawlProgress
+  });
+}
+
+// One function for every render, so the selected map keeps its identity while the data does.
+function selectCrawlProgress(data: Schema<"WebsiteCrawlProgressList">) {
+  return crawlProgressFrom(data.items);
 }
 
 /** The website's crawl history, newest first, a page at a time. */

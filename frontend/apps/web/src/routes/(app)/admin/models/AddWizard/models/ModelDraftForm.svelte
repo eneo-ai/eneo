@@ -5,7 +5,7 @@
   fields based on `modelType`:
     - completion   → token budgets + capability checkboxes
     - embedding    → family + dimensions + max input
-    - transcription → name + display name + hosting + classification
+    - transcription → name + display name + live transcription + hosting + classification
     - image        → cost per image + default size/quality
 -->
 
@@ -27,6 +27,7 @@
   import SelectSecurityClassification from "$lib/features/security-classifications/components/SelectSecurityClassification.svelte";
 
   import HelpTooltip from "$lib/components/HelpTooltip.svelte";
+  import { speaksRealtimeDialect } from "../../modelProviderCapabilities";
   import {
     IMAGE_QUALITIES,
     IMAGE_SIZES,
@@ -35,11 +36,15 @@
   } from "$lib/features/ai-models/imageModelOptions";
   import {
     MAX_COST_INPUT,
+    declareStrictToolSchema,
+    isStrictToolSchemaDeclared,
     perMillionFromTokenCost,
     RERANK_CANDIDATE_FACTOR,
     RERANK_MAX_CANDIDATES,
+    setDraftModelName,
     type ModelDraftState,
-    type ModelType
+    type ModelType,
+    applyCatalogueCeilings
   } from "./draft";
 
   let {
@@ -83,6 +88,10 @@
 
   let isLookingUpDefaults = $state(false);
 
+  // The server refuses live transcription for any provider but vLLM, so the
+  // form says why up front instead of failing on save.
+  const realtimeAvailable = $derived(speaksRealtimeDialect(providerType));
+
   onMount(async () => {
     await tick();
     document.getElementById("model-name")?.focus();
@@ -114,10 +123,7 @@
         return;
       }
       if (modelType === "completion") {
-        if (result.max_input_tokens != null)
-          draft.maxInputTokensStr = String(result.max_input_tokens);
-        if (result.max_output_tokens != null)
-          draft.maxOutputTokensStr = String(result.max_output_tokens);
+        applyCatalogueCeilings(draft, result);
         draft.vision = result.supports_vision ?? false;
         draft.reasoning = result.supports_reasoning ?? false;
         draft.supportsToolCalling = result.supports_function_calling ?? false;
@@ -163,7 +169,8 @@
     </Field.Label>
     <Input
       id="model-name"
-      bind:value={draft.name}
+      value={draft.name}
+      oninput={(event) => setDraftModelName(draft, event.currentTarget.value)}
       readonly={nameReadOnly}
       placeholder={modelType === "completion"
         ? m.model_identifier_placeholder_completion()
@@ -212,7 +219,11 @@
       <Input
         id="max-input-tokens"
         type="number"
-        bind:value={draft.maxInputTokensStr}
+        value={draft.maxInputTokensStr}
+        oninput={(event) => {
+          draft.maxInputTokensStr = event.currentTarget.value;
+          draft.maxInputTokensTouched = true;
+        }}
         placeholder={m.max_input_tokens()}
         min="1024"
         max="10000000"
@@ -228,7 +239,11 @@
       <Input
         id="max-output-tokens"
         type="number"
-        bind:value={draft.maxOutputTokensStr}
+        value={draft.maxOutputTokensStr}
+        oninput={(event) => {
+          draft.maxOutputTokensStr = event.currentTarget.value;
+          draft.maxOutputTokensTouched = true;
+        }}
         placeholder={m.max_output_tokens()}
         min="1"
         max="10000000"
@@ -261,8 +276,43 @@
           <HelpTooltip text={m.tool_calling_help()} />
         </Field.Label>
       </Field.Field>
+      <Field.Field orientation="horizontal" class="w-fit">
+        <Checkbox
+          id="cap-strict-tools"
+          bind:checked={
+            () => isStrictToolSchemaDeclared(draft),
+            (declared) => declareStrictToolSchema(draft, declared)
+          }
+        />
+        <Field.Label for="cap-strict-tools" class="flex items-center gap-1">
+          {m.strict_tool_schema_support()}
+          <HelpTooltip text={m.strict_tool_schema_help()} />
+        </Field.Label>
+      </Field.Field>
     </div>
   </fieldset>
+{/if}
+
+{#if modelType === "transcription"}
+  <Field.Field orientation="horizontal">
+    <Checkbox
+      id="cap-realtime"
+      bind:checked={draft.supportsRealtime}
+      disabled={!realtimeAvailable}
+      aria-describedby={realtimeAvailable ? undefined : "cap-realtime-description"}
+    />
+    <Field.Content>
+      <Field.Label for="cap-realtime" class="flex items-center gap-1">
+        {m.live_transcription_support()}
+        <HelpTooltip text={m.live_transcription_help()} />
+      </Field.Label>
+      {#if !realtimeAvailable}
+        <Field.Description id="cap-realtime-description">
+          {m.live_transcription_needs_vllm()}
+        </Field.Description>
+      {/if}
+    </Field.Content>
+  </Field.Field>
 {/if}
 
 {#if modelType === "embedding"}

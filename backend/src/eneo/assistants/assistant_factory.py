@@ -6,7 +6,7 @@ from uuid import UUID
 
 from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import KnowledgeMode
-from eneo.assistants.assistant import Assistant
+from eneo.assistants.assistant import Assistant, AssistantOrigin
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.database.tables.assistant_table import Assistants
 from eneo.database.tables.prompts_table import Prompts
@@ -74,6 +74,9 @@ class AssistantFactory:
         data_retention_days: int | None = None,
         metadata_json: dict[str, object] | None = None,
         description: str | None = None,
+        hidden: bool = False,
+        origin: AssistantOrigin = AssistantOrigin.USER,
+        managing_flow_id: UUID | None = None,
     ) -> Assistant:
         # Avoid mutable default anti-pattern
         if completion_model_kwargs is None:
@@ -102,6 +105,9 @@ class AssistantFactory:
             data_retention_days=data_retention_days,
             metadata_json=metadata_json,
             description=description,
+            hidden=hidden,
+            origin=origin,
+            managing_flow_id=managing_flow_id,
         )
 
     def create_assistant_from_db(
@@ -141,10 +147,6 @@ class AssistantFactory:
             )
             completion_model_kwargs = ModelKwargs.model_validate(
                 completion_model_kwargs_raw
-            )
-        if completion_model is not None:
-            completion_model_kwargs = completion_model_kwargs.filter_unsupported(
-                completion_model.get_supported_model_kwargs()
             )
 
         source_template = (
@@ -187,13 +189,18 @@ class AssistantFactory:
             inline_file_text=assistant_in_db.inline_file_text,
             knowledge_mode=KnowledgeMode(assistant_in_db.knowledge_mode),
             icon_id=assistant_in_db.icon_id,
+            hidden=assistant_in_db.hidden,
+            origin=AssistantOrigin(
+                assistant_in_db.origin or AssistantOrigin.USER.value
+            ),
+            managing_flow_id=assistant_in_db.managing_flow_id,
             rerank_model_id=assistant_in_db.rerank_model_id,
         )
 
     def create_space_assistant_from_db(
         self,
         assistant_in_db: Assistants,
-        user: UserInDB,
+        user: UserInDB | None,
         *,
         attachments: Sequence[File],
         completion_models: Sequence[CompletionModel] | None = None,
@@ -205,7 +212,7 @@ class AssistantFactory:
         collections = list(collections or [])
         websites = list(websites or [])
         integration_knowledge_list = list(integration_knowledge_list or [])
-        user_sparse = UserSparse.model_validate(user)
+        user_sparse = UserSparse.model_validate(user) if user is not None else None
         collection_ids = [
             assistant_collection.group_id
             for assistant_collection in assistant_in_db.assistant_groups
@@ -270,11 +277,6 @@ class AssistantFactory:
             ),
             None,
         )
-        if completion_model is not None:
-            completion_model_kwargs = completion_model_kwargs.filter_unsupported(
-                completion_model.get_supported_model_kwargs()
-            )
-
         source_template = (
             self.assistant_template_factory.create_assistant_template(
                 assistant_in_db.template
@@ -318,5 +320,10 @@ class AssistantFactory:
             data_retention_days=assistant_in_db.data_retention_days,
             metadata_json=assistant_in_db.metadata_json,
             icon_id=assistant_in_db.icon_id,
+            hidden=assistant_in_db.hidden,
+            origin=AssistantOrigin(
+                assistant_in_db.origin or AssistantOrigin.USER.value
+            ),
+            managing_flow_id=assistant_in_db.managing_flow_id,
             rerank_model_id=assistant_in_db.rerank_model_id,
         )

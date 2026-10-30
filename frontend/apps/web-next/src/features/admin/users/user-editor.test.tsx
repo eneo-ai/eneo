@@ -218,7 +218,7 @@ describe("UserEditorDialog", () => {
       Promise.resolve({
         error: {
           message: "Password does not meet the local password policy.",
-          eneo_error_code: 9059
+          eneo_error_code: 9062
         },
         response: new Response(null, { status: 400 })
       })

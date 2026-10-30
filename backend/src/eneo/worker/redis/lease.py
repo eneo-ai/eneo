@@ -49,7 +49,7 @@ async def redis_lease(
     renew_interval_seconds: float | None = None,
     refresh_timeout_seconds: float | None = None,
     log_lock_key: bool = True,
-) -> AsyncGenerator[bool]:
+) -> AsyncGenerator[bool, None]:
     """Acquire a self-renewing distributed lock for the duration of the block.
 
     Yields ``True`` if the lock was acquired (a watchdog keeps it alive until the

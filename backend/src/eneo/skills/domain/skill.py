@@ -1553,7 +1553,7 @@ class SkillTurnPlan:
         self,
         *,
         selected_model_route: str,
-        max_input_tokens: int,
+        max_input_tokens: int | None,
         supports_tool_calling: bool,
     ) -> "SkillActivationRuntime":
         from eneo.completion_models.domain.skill_activation import (

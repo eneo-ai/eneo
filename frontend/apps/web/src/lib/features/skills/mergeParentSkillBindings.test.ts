@@ -118,7 +118,7 @@ describe.each([
     ];
 
     harness.setBindings(orderedBindings);
-    await expect(harness.saveBindings()).resolves.toBe(true);
+    await expect(harness.saveBindings()).resolves.toEqual({ saved: true });
 
     expect(harness.updateParent).toHaveBeenCalledTimes(1);
     expect(harness.updateParent.mock.calls[0]?.[0].update).toEqual({
@@ -130,7 +130,7 @@ describe.each([
     expect(harness.hasUnsavedChanges()).toBe(false);
 
     harness.setName("Renamed");
-    await expect(harness.saveAll()).resolves.toBe(true);
+    await expect(harness.saveAll()).resolves.toEqual({ saved: true });
 
     expect(harness.updateParent).toHaveBeenCalledTimes(2);
     expect(harness.updateParent.mock.calls[1]?.[0].update).toEqual({ name: "Renamed" });
@@ -161,13 +161,13 @@ test("Assistant Skill modes survive save, later parent edits, and discard", asyn
   ];
 
   harness.setBindings(updatedBindings);
-  await expect(harness.saveBindings()).resolves.toBe(true);
+  await expect(harness.saveBindings()).resolves.toEqual({ saved: true });
   expect(harness.updateParent.mock.calls[0]?.[0].update).toEqual({
     skill_bindings: updatedBindings
   });
 
   harness.setName("Renamed");
-  await expect(harness.saveAll()).resolves.toBe(true);
+  await expect(harness.saveAll()).resolves.toEqual({ saved: true });
   expect(harness.persistedBindings()).toEqual(updatedBindings);
 
   harness.setBindings([
@@ -192,7 +192,7 @@ test("Assistant saves report the persisted fields to post-save projections", asy
   ];
 
   harness.setBindings(updatedBindings);
-  await expect(harness.saveBindings()).resolves.toBe(true);
+  await expect(harness.saveBindings()).resolves.toEqual({ saved: true });
 
   expect(harness.onUpdateDone).toHaveBeenCalledWith(expect.objectContaining({ id: "parent-1" }), {
     skill_bindings: updatedBindings

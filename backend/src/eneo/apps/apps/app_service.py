@@ -13,6 +13,9 @@ from eneo.apps.apps.app_factory import AppFactory
 from eneo.apps.apps.app_repo import AppRepository
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.auth_models import ApiKeyScopeType, ApiKeyStateReasonCode
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    validate_model_kwargs_update,
+)
 from eneo.files.attachment_budget import assert_prompt_and_files_fit_context
 from eneo.files.file_models import File
 from eneo.files.file_service import FileService, require_requested_files
@@ -181,7 +184,7 @@ class AppService:
     def _assert_context_fits(
         *,
         model_name: str,
-        max_input_tokens: int,
+        max_input_tokens: int | None,
         prompt_text: str,
         files: Sequence[File],
     ) -> None:
@@ -500,6 +503,18 @@ class AppService:
                 owner_user_id=app.user_id,
             )
 
+        if completion_model_kwargs is not None:
+            kwargs_model = completion_model or app.completion_model
+            if kwargs_model is not None:
+                stored_model = app.completion_model
+                validate_model_kwargs_update(
+                    completion_model_kwargs,
+                    kwargs_model.supported_model_kwargs,
+                    stored=app.completion_model_kwargs
+                    if stored_model is not None and kwargs_model.id == stored_model.id
+                    else None,
+                )
+
         app.update(
             name=name,
             description=description,
@@ -573,7 +588,9 @@ class AppService:
         icon_id = await self.repo.delete(app_id)
 
         if icon_id:
-            await self.icon_repo.delete_if_unreferenced(icon_id)
+            await self.icon_repo.delete_if_unreferenced(
+                icon_id, tenant_id=self.user.tenant_id
+            )
 
     async def _get_runnable_app(self, app_id: UUID) -> App:
         space = await self.space_repo.get_space_by_app(app_id=app_id)

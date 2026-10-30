@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { createEventDispatcher } from "svelte";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import { Input } from "$lib/components/ui/input/index.js";
   import * as Select from "$lib/components/ui/select/index.js";
@@ -16,6 +17,8 @@
 
   export let kwArgs: ModelKwargs;
   export let selectedModel: CompletionModelWithSupportedKwargs | null = null;
+
+  const dispatch = createEventDispatcher<{ change: { kwArgs: ModelKwargs } }>();
 
   type NumericKwargName = Extract<
     ModelKwargName,
@@ -92,6 +95,7 @@
       ...kwArgs,
       [kwargName]: useDefault ? null : numericValues[kwargName]
     };
+    dispatch("change", { kwArgs });
   }
 
   function setNumericKwarg(kwargName: NumericKwargName, value = numericValues[kwargName]) {
@@ -102,6 +106,7 @@
       ...kwArgs,
       [kwargName]: value
     };
+    dispatch("change", { kwArgs });
   }
 
   function setSelectKwarg(kwargName: SelectKwargName, value: string) {
@@ -110,6 +115,7 @@
       ...kwArgs,
       [kwargName]: value || null
     };
+    dispatch("change", { kwArgs });
   }
 
   function getNumericMinimum(kwargName: NumericKwargName) {
@@ -174,7 +180,13 @@
     class="border-default hover:bg-hover-stronger flex min-h-[4.125rem] items-center justify-between gap-8 border-b px-4 py-3"
   >
     <div class="flex items-center gap-2">
-      <p class="w-36" aria-label={getKwargLabel(kwargName)}>{getKwargLabel(kwargName)}</p>
+      {#if isSelectKwargName(kwargName)}
+        <label class="w-36" for={`model-setting-${kwargName}`}>
+          {getKwargLabel(kwargName)}
+        </label>
+      {:else}
+        <p class="w-36">{getKwargLabel(kwargName)}</p>
+      {/if}
       <Tooltip.Root>
         <Tooltip.Trigger class="cursor-default">
           <IconQuestionMark class="text-muted hover:text-primary" />
@@ -190,7 +202,11 @@
         value={selectValues[kwargName] || "default"}
         onValueChange={(value) => setSelectKwarg(kwargName, value === "default" ? "" : value)}
       >
-        <Select.Trigger class="w-48" aria-label={getKwargLabel(kwargName)}>
+        <Select.Trigger
+          id={`model-setting-${kwargName}`}
+          class="w-48"
+          aria-label={getKwargLabel(kwargName)}
+        >
           {selectValues[kwargName]
             ? getModelKwargOptionLabel(selectValues[kwargName] ?? "")
             : m.default_behavior()}

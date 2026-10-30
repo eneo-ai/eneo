@@ -1,15 +1,15 @@
-"""Tests for ARQ job root-span creation (worker._traced_job).
+"""Tests for ARQ job root-span creation (worker.traced_job).
 
 Spec acceptance criterion this covers:
     "All log entries within a job are correlated via the job's own trace_id."
 
 v1 decision: each ARQ job runs inside its own root span. We verify that
-`_traced_job` opens a span around the job coroutine, names it by kind
+`traced_job` opens a span around the job coroutine, names it by kind
 ("arq.job <name>" / "arq.cron <name>"), tags it with the job id when present,
 and that code running inside the job sees that span as the active one (which
 is what makes in-job log lines carry the matching trace_id).
 
-These are unit tests: `_traced_job` is pure span plumbing and needs no DB or
+These are unit tests: `traced_job` is pure span plumbing and needs no DB or
 Redis. We monkeypatch the module-level `_tracer` so spans land in an isolated
 InMemorySpanExporter regardless of global TracerProvider state.
 """
@@ -49,7 +49,7 @@ async def test_traced_job_creates_root_span_and_propagates_trace_id(captured_spa
         seen_trace_id.append(format(span_ctx.trace_id, "032x"))
         return "done"
 
-    traced = worker_module._traced_job("job", fake_job)
+    traced = worker_module.traced_job("job", fake_job)
     job_id = UUID("12345678-1234-5678-1234-567812345678")
 
     result = await traced({"job_id": job_id}, params=None)
@@ -76,7 +76,7 @@ async def test_traced_cron_uses_cron_kind_without_job_id(captured_spans):
     async def fake_cron(ctx):  # noqa: ARG001
         return None
 
-    traced = worker_module._traced_job("cron", fake_cron)
+    traced = worker_module.traced_job("cron", fake_cron)
 
     await traced({"job_id": "cron:fake_cron:1717000000"})
 
@@ -95,7 +95,7 @@ async def test_traced_job_records_exception(captured_spans):
     async def failing_job(ctx, params):  # noqa: ARG001
         raise ValueError("boom")
 
-    traced = worker_module._traced_job("job", failing_job)
+    traced = worker_module.traced_job("job", failing_job)
 
     with pytest.raises(ValueError, match="boom"):
         await traced({"job_id": UUID("12345678-1234-5678-1234-567812345678")}, None)

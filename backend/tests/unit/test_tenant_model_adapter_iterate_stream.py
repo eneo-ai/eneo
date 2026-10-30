@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -26,9 +27,14 @@ from eneo.completion_models.infrastructure.adapters.tenant_model_adapter import 
     _ToolResultBudget,
 )
 from eneo.files.model_file_references import file_handle
+from eneo.flows.runtime.step_deadline import (
+    StepDeadline,
+    current_step_deadline_scope,
+    step_deadline_scope,
+)
 from eneo.main import stream_lifecycle
 from eneo.main.config import get_settings
-from eneo.main.exceptions import OpenAIException
+from eneo.main.exceptions import OpenAIException, TypedIOValidationException
 from eneo.mcp_apps.domain.mcp_app_view import McpAppViewInfo
 from eneo.mcp_servers.infrastructure.tool_approval import (
     ToolApprovalDecision,
@@ -102,6 +108,24 @@ def _text_chunk(text: str, finish_reason: str | None = None):
     delta = SimpleNamespace(content=text, tool_calls=None)
     choice = SimpleNamespace(delta=delta, finish_reason=finish_reason)
     return SimpleNamespace(choices=[choice])
+
+
+def _usage_chunk(
+    *,
+    prompt_tokens: int | None,
+    completion_tokens: int | None,
+    reasoning_tokens: int | None,
+):
+    return SimpleNamespace(
+        choices=[],
+        usage=SimpleNamespace(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            completion_tokens_details=SimpleNamespace(
+                reasoning_tokens=reasoning_tokens
+            ),
+        ),
+    )
 
 
 def _reasoning_chunk(reasoning: str):
@@ -226,10 +250,10 @@ class _InternalMCPProxy(_FakeMCPProxy):
         return {"knowledge__search_knowledge"}
 
     def get_tool_info(self, prefixed_tool_name: str):
-        return ("knowledge", "search_knowledge", "Search knowledge")
+        return ("Assistant knowledge", "search_knowledge", "Search knowledge")
 
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
-        return prefixed_tool_name == "knowledge__search_knowledge"
+        return True
 
     def is_bundled_tool(self, prefixed_tool_name: str) -> bool:
         del prefixed_tool_name
@@ -254,7 +278,7 @@ class _MixedMCPProxy(_FakeMCPProxy):
 
     def get_tool_info(self, prefixed_tool_name: str):
         if prefixed_tool_name == "knowledge__search_knowledge":
-            return ("knowledge", "search_knowledge", "Search knowledge")
+            return ("Assistant knowledge", "search_knowledge", "Search knowledge")
         return ("Server", "tool", "Tool title")
 
     def is_internal_tool(self, prefixed_tool_name: str) -> bool:
@@ -269,8 +293,51 @@ def _make_adapter() -> TenantModelAdapter:
     adapter = object.__new__(TenantModelAdapter)
     adapter.litellm_model = "openai/test-model"
     adapter.provider_type = "openai"
-    adapter.model = SimpleNamespace(name="test-model", token_limit=8000)
+    adapter.model = SimpleNamespace(
+        name="test-model", token_limit=8000, max_output_tokens=4000
+    )
     return adapter
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("finish_reason", ["length", "stop"])
+async def test_iterate_stream_records_raw_content_before_normalization(finish_reason):
+    chunks = ["<think>hemligt å</think>  ", '{"fact":"svar"}', "\n        "]
+    stream = _AsyncChunkStream(
+        [
+            *[_text_chunk(text) for text in chunks],
+            _text_chunk("", finish_reason=finish_reason),
+        ]
+    )
+    completions = [
+        completion async for completion in _make_adapter().iterate_stream(stream)
+    ]
+    assert (
+        "".join(completion.text or "" for completion in completions)
+        == '{"fact":"svar"}\n        '
+    )
+    final = completions[-1]
+    raw = "".join(chunks)
+    assert final.raw_text_bytes == len(raw.encode())
+    assert final.raw_text_sha256 == hashlib.sha256(raw.encode()).hexdigest()
+    assert final.raw_text == (raw if finish_reason == "length" else None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("content", [None, ""])
+async def test_iterate_stream_distinguishes_missing_and_empty_raw_content(content):
+    completions = [
+        completion
+        async for completion in _make_adapter().iterate_stream(
+            _AsyncChunkStream([_text_chunk(content, finish_reason="length")])
+        )
+    ]
+    final = completions[-1]
+    assert final.raw_text == content
+    assert final.raw_text_bytes == (0 if content is not None else None)
+    assert final.raw_text_sha256 == (
+        hashlib.sha256(b"").hexdigest() if content is not None else None
+    )
 
 
 def test_build_tool_result_with_references_uses_self_describing_resource_blocks():
@@ -486,6 +553,90 @@ async def _collect(adapter: TenantModelAdapter, stream, **kwargs):
     ):
         output.append(chunk)
     return output
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("method_name", ["get_response", "prepare_streaming"])
+async def test_completion_preserves_typed_validation_error(method_name):
+    adapter = _make_completion_adapter()
+    error = TypedIOValidationException("Invalid input")
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=error),
+    ):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await getattr(adapter, method_name)(
+                context=SimpleNamespace(), model_kwargs={}
+            )
+    assert exc_info.value is error
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("follow_up", [False, True])
+async def test_streaming_budget_refusal_does_not_send_or_become_an_error_event(
+    follow_up,
+):
+    adapter = _make_completion_adapter()
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": _FakeMCPProxy(),
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+    with (
+        patch(
+            "eneo.model_providers.infrastructure.litellm_transport.litellm.acompletion",
+            AsyncMock(),
+        ) as request,
+        step_deadline_scope(StepDeadline.start(0), step_order=1),
+    ):
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            if follow_up:
+                await _collect(adapter, stream, require_tool_approval=False)
+            else:
+                await adapter.prepare_streaming(
+                    context=SimpleNamespace(), model_kwargs={}
+                )
+    assert exc_info.value.code == "flow_step_timeout"
+    request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("outcome", ["completed", "cancelled", "failed"])
+async def test_stream_dispatch_and_settlement_publish_provider_facts(outcome):
+    adapter = _make_completion_adapter()
+
+    async def chunks():
+        assert current_step_deadline_scope().provider_request_in_flight
+        if outcome == "cancelled":
+            raise asyncio.CancelledError()
+        if outcome == "failed":
+            raise httpx.ReadError("Connection lost after dispatch")
+        yield _text_chunk("done", finish_reason="stop")
+
+    with (
+        patch(
+            "eneo.model_providers.infrastructure.litellm_transport.litellm.acompletion",
+            AsyncMock(return_value=chunks()),
+        ),
+        step_deadline_scope(StepDeadline.start(30), step_order=1) as scope,
+    ):
+        stream = await adapter.prepare_streaming(
+            context=SimpleNamespace(), model_kwargs={}
+        )
+        assert scope.provider_request_in_flight is True
+        if outcome == "cancelled":
+            with pytest.raises(asyncio.CancelledError):
+                await _collect(adapter, stream)
+        else:
+            completions = await _collect(adapter, stream)
+            if outcome == "failed":
+                assert completions[-1].response_type is ResponseType.ERROR
+        assert scope.provider_request_in_flight is False
+        assert scope.provider_outcome_unresolved is (outcome != "completed")
 
 
 @pytest.mark.asyncio
@@ -758,9 +909,10 @@ def test_tool_result_budget_admits_until_exhausted_then_withholds():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_non_streaming_withholds_tool_results_after_budget_exhaustion():
     adapter = _make_completion_adapter()
-    adapter.model.token_limit = 2
+    adapter.get_token_limit_of_model = lambda: 2
     mcp_proxy = _FakeMCPProxy()
     responses = [
         _response(
@@ -799,7 +951,7 @@ async def test_non_streaming_withholds_tool_results_after_budget_exhaustion():
 @pytest.mark.asyncio
 async def test_iterate_stream_withholds_tool_results_after_budget_exhaustion():
     adapter = _make_adapter()
-    adapter.model.token_limit = 2
+    adapter.get_token_limit_of_model = lambda: 2
     mcp_proxy = _FakeMCPProxy()
     messages: list[dict] = []
     follow_ups = [
@@ -935,6 +1087,147 @@ def _tool_call_events(completions):
         for c in completions
         if c.response_type == ResponseType.TOOL_CALL and c.tool_calls_metadata
     ]
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_remembers_missing_usage_before_known_follow_up():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream(
+        [
+            _text_chunk("done", finish_reason="stop"),
+            _usage_chunk(
+                prompt_tokens=6,
+                completion_tokens=2,
+                reasoning_tokens=0,
+            ),
+        ]
+    )
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    final = next(completion for completion in completions if completion.stop)
+    assert final.usage is not None
+    assert final.usage.prompt_tokens is None
+    assert final.usage.completion_tokens is None
+    assert final.usage.reasoning_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_aggregates_each_usage_dimension_conservatively():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream(
+        [
+            _text_chunk("done", finish_reason="stop"),
+            _usage_chunk(
+                prompt_tokens=6,
+                completion_tokens=2,
+                reasoning_tokens=5,
+            ),
+        ]
+    )
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_chunk(),
+            _usage_chunk(
+                prompt_tokens=10,
+                completion_tokens=None,
+                reasoning_tokens=0,
+            ),
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(
+            adapter,
+            stream,
+            require_tool_approval=False,
+            approval_manager=None,
+            approval_context=None,
+            pending_approval_ids=set(),
+        )
+
+    final = next(completion for completion in completions if completion.stop)
+    assert final.usage is not None
+    assert final.usage.prompt_tokens == 16
+    assert final.usage.completion_tokens is None
+    assert final.usage.reasoning_tokens == 5
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_missing_follow_up_usage_makes_aggregate_unknown():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    follow_up_stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+    stream = _AsyncChunkStream(
+        [
+            _tool_call_chunk(),
+            _usage_chunk(
+                prompt_tokens=10,
+                completion_tokens=4,
+                reasoning_tokens=0,
+            ),
+        ],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": True,
+        },
+    )
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(return_value=follow_up_stream),
+    ):
+        completions = await _collect(adapter, stream)
+
+    final = next(completion for completion in completions if completion.stop)
+    assert final.usage is not None
+    assert final.usage.prompt_tokens is None
+    assert final.usage.completion_tokens is None
+    assert final.usage.reasoning_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_preserves_missing_usage_for_single_stream():
+    adapter = _make_adapter()
+    stream = _AsyncChunkStream([_text_chunk("done", finish_reason="stop")])
+
+    completions = await _collect(adapter, stream)
+
+    final = next(completion for completion in completions if completion.stop)
+    assert final.usage is None
 
 
 @pytest.mark.asyncio
@@ -1133,6 +1426,35 @@ async def test_iterate_stream_no_pending_event_for_disallowed_tool():
 
     assert not _tool_call_events(completions)
     assert any(c.response_type == ResponseType.ERROR for c in completions)
+
+
+@pytest.mark.asyncio
+async def test_iterate_stream_does_not_report_round_limit_without_tool_execution():
+    adapter = _make_adapter()
+    mcp_proxy = _FakeMCPProxy()
+
+    stream = _AsyncChunkStream(
+        [_tool_call_chunk()],
+        eneo_context={
+            "mcp_proxy": mcp_proxy,
+            "messages": [],
+            "kwargs": {},
+            "has_tools": False,
+        },
+    )
+
+    completions = await _collect(
+        adapter,
+        stream,
+        require_tool_approval=False,
+        approval_manager=None,
+        approval_context=None,
+        pending_approval_ids=set(),
+    )
+
+    assert mcp_proxy.calls == []
+    assert not any(c.response_type == ResponseType.ERROR for c in completions)
+    assert completions[-1].stop is True
 
 
 @pytest.mark.asyncio
@@ -1586,6 +1908,7 @@ async def test_iterate_stream_denied_tools_produce_structured_denial_payload():
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_iterate_stream_approved_tools_execute_and_continue():
     adapter = _make_adapter()
     mcp_proxy = _FakeMCPProxy()
@@ -1644,10 +1967,12 @@ def _cap_tool_rounds(monkeypatch: pytest.MonkeyPatch, rounds: int) -> int:
     return rounds
 
 
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer(
     monkeypatch: pytest.MonkeyPatch,
 ):
     adapter = _make_completion_adapter()
+    adapter.model.max_output_tokens = 8000
     mcp_proxy = _FakeMCPProxy()
     max_rounds = _cap_tool_rounds(monkeypatch, 3)
     responses = [
@@ -1659,10 +1984,18 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer(
     ]
     responses.append(_response(content="answer from gathered context"))
 
-    with patch(
-        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
-        AsyncMock(side_effect=responses),
-    ) as completion_call:
+    reserves = [100 + 10 * index for index in range(max_rounds + 2)]
+    reserves[-1] = 50
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            side_effect=[SimpleNamespace(tokens=value) for value in reserves],
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=responses),
+        ) as completion_call,
+    ):
         completion = await adapter.get_response(
             context=SimpleNamespace(),
             model_kwargs={},
@@ -1676,6 +2009,9 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer(
     assert len(mcp_proxy.calls) == max_rounds
     # Initial call + one follow-up per executed round + the forced final.
     assert completion_call.await_count == max_rounds + 2
+    assert [call.kwargs["max_tokens"] for call in completion_call.await_args_list] == [
+        8000 - value for value in reserves
+    ]
     final_call = completion_call.await_args_list[-1]
     assert final_call.kwargs["tool_choice"] == "none"
     refusals = [
@@ -1688,10 +2024,39 @@ async def test_non_streaming_round_cap_refuses_calls_and_forces_final_answer(
     assert refusals[0]["tool_call_id"] == f"call_{max_rounds}"
 
 
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_non_streaming_round_cap_fails_when_forced_final_requests_tools():
+    adapter = _make_completion_adapter()
+    mcp_proxy = _FakeMCPProxy()
+    max_rounds = get_settings().max_tool_rounds
+    responses = [
+        _response(
+            tool_calls=[_response_tool_call(f"call_{i}", '{"q":"x"}')],
+            finish_reason="tool_calls",
+        )
+        for i in range(max_rounds + 2)
+    ]
+
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(side_effect=responses),
+    ):
+        with pytest.raises(OpenAIException) as exc_info:
+            await adapter.get_response(
+                context=SimpleNamespace(),
+                model_kwargs={},
+                mcp_proxy=mcp_proxy,
+            )
+
+    assert exc_info.value.code == "tool_round_limit"
+
+
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
     monkeypatch: pytest.MonkeyPatch,
 ):
     adapter = _make_adapter()
+    adapter.model.max_output_tokens = 8000
     mcp_proxy = _FakeMCPProxy()
     messages: list[dict] = []
     max_rounds = _cap_tool_rounds(monkeypatch, 3)
@@ -1713,10 +2078,18 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
         },
     )
 
-    with patch(
-        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
-        AsyncMock(side_effect=follow_ups),
-    ) as completion_call:
+    reserves = [100 + 10 * index for index in range(max_rounds + 1)]
+    reserves[-1] = 50
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            side_effect=[SimpleNamespace(tokens=value) for value in reserves],
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=follow_ups),
+        ) as completion_call,
+    ):
         completions = await _collect(
             adapter,
             stream,
@@ -1730,6 +2103,9 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
     assert len(mcp_proxy.calls) == max_rounds
     # One follow-up per executed round + the forced toolless final.
     assert completion_call.await_count == max_rounds + 1
+    assert [call.kwargs["max_tokens"] for call in completion_call.await_args_list] == [
+        8000 - value for value in reserves
+    ]
     assert completion_call.await_args_list[-1].kwargs["tool_choice"] == "none"
     refusals = [
         message
@@ -1757,7 +2133,7 @@ async def test_iterate_stream_round_cap_refuses_calls_and_forces_final_answer(
     assert refused_events
 
 
-async def test_forced_final_drops_ignored_tool_calls_without_pending_events(
+async def test_forced_final_surfaces_ignored_tool_calls_as_terminal_error(
     monkeypatch: pytest.MonkeyPatch,
 ):
     adapter = _make_adapter()
@@ -1813,9 +2189,52 @@ async def test_forced_final_drops_ignored_tool_calls_without_pending_events(
         if tm.tool_call_id == "call_ignored"
     ]
     assert ignored == []
-    # Text streamed by the final response is preserved and the turn stops.
+    # Text streamed before the protocol violation is preserved, then the turn
+    # ends with an explicit error instead of a silent partial success.
     assert "partial answer" in "".join(c.text for c in completions if c.text)
-    assert any(c.stop for c in completions)
+    errors = [c for c in completions if c.response_type == ResponseType.ERROR]
+    assert len(errors) == 1
+    assert errors[0].stop is True
+    assert "tool round limit" in (errors[0].error or "")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("missing_output", [False, True])
+@pytest.mark.usefixtures("declared_capabilities")
+async def test_stream_follow_up_capacity_refusal_is_terminal_before_io(missing_output):
+    adapter = _make_adapter()
+    adapter.model.token_limit = 1
+    if missing_output:
+        adapter.model.max_output_tokens = None
+    proxy = _FakeMCPProxy()
+    stream = PreparedModelStream(
+        stream=_AsyncChunkStream([_tool_call_chunk()]),
+        messages=[],
+        kwargs={},
+        mcp_proxy=proxy,
+        has_tools=True,
+        eneo_tools=[],
+    )
+    with patch(
+        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+        AsyncMock(),
+    ) as dispatch:
+        completions = [chunk async for chunk in adapter.iterate_stream(stream)]
+    dispatch.assert_not_awaited()
+    assert completions[-1].response_type == ResponseType.ERROR
+    assert completions[-1].stop is True
+    assert completions[-1].error_code == (422 if missing_output else 413)
+    assert (
+        "max_output_tokens" if missing_output else "context exceeds"
+    ) in completions[-1].error
+
+
+@pytest.fixture
+def declared_capabilities(monkeypatch):
+    monkeypatch.setattr(
+        "litellm.get_supported_openai_params",
+        lambda **kwargs: ["max_tokens", "max_completion_tokens"],
+    )
 
 
 async def test_model_is_told_how_many_tool_rounds_remain_near_the_cap(
@@ -2308,6 +2727,20 @@ async def test_structured_content_is_dropped_for_a_call_without_a_view():
     call = await _executed_tool_call(_StructuredPlainProxy())
 
     assert call.structured_content is None
+
+
+class _StructuredInternalProxy(_StructuredResultMixin, _FakeMCPProxy):
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        del prefixed_tool_name
+        return True
+
+
+async def test_structured_content_is_kept_for_a_call_on_an_own_server():
+    # A flow run started from the flow chat: its id is what the run card reads.
+    call = await _executed_tool_call(_StructuredInternalProxy())
+
+    assert call.is_internal is True
+    assert call.structured_content == {"temperature": 12}
 
 
 @pytest.mark.asyncio

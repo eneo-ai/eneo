@@ -12,7 +12,7 @@
   import { m } from "$lib/paraglide/messages";
 
   export type StatusIcon = {
-    icon: "deprecated" | "retiring" | "reasoning" | "vision" | "tools";
+    icon: "deprecated" | "retiring" | "reasoning" | "vision" | "tools" | "realtime";
     tooltip: string;
     color: string;
     ariaLabel: string;
@@ -69,6 +69,15 @@
       });
     }
 
+    if ("supports_realtime" in model && model.supports_realtime) {
+      icons.push({
+        icon: "realtime",
+        tooltip: m.model_tooltip_live_transcription(),
+        color: "text-secondary",
+        ariaLabel: m.live_transcription_support()
+      });
+    }
+
     return icons;
   }
 </script>
@@ -80,6 +89,7 @@
   import Eye from "@lucide/svelte/icons/eye";
   import Wrench from "@lucide/svelte/icons/wrench";
   import Clock from "@lucide/svelte/icons/clock";
+  import AudioLines from "@lucide/svelte/icons/audio-lines";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 
   export let model: AnyModel;
@@ -93,7 +103,8 @@
     retiring: Clock,
     reasoning: Brain,
     vision: Eye,
-    tools: Wrench
+    tools: Wrench,
+    realtime: AudioLines
   };
 </script>
 

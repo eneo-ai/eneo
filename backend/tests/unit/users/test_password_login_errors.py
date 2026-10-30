@@ -94,6 +94,13 @@ def login_log(caplog: pytest.LogCaptureFixture, message: str) -> logging.LogReco
     return next(record for record in caplog.records if record.getMessage() == message)
 
 
+def validation_errors(response) -> list[dict[str, object]]:
+    error = GeneralError.model_validate(response.json())
+    assert error.code == "request_validation_error"
+    assert error.eneo_error_code == ErrorCodes.VALIDATION_ERROR
+    return response.json()["details"]["errors"]
+
+
 def logged_correlation_ids(caplog: pytest.LogCaptureFixture) -> set[str]:
     return {
         record.correlation_id  # type: ignore[attr-defined]
@@ -125,11 +132,13 @@ def test_invalid_login_uses_safe_public_validation_errors(
 
     assert response.status_code == 422
     # Same location shape as FastAPI's own form errors for this endpoint.
-    assert response.json() == {
-        "detail": [
-            {"loc": ["body", form_field], "type": error_type, "msg": "Invalid value"}
-        ]
-    }
+    assert validation_errors(response) == [
+        {
+            "location": ["body", form_field],
+            "type": error_type,
+            "message": "Invalid value",
+        }
+    ]
     assert response.headers["X-Correlation-ID"]
     assert password not in response.text
     assert password not in structured_logs(caplog)
@@ -148,10 +157,10 @@ def test_missing_form_field_and_manual_validation_report_locations_alike(
         LOGIN_PATH, data={"username": EMAIL, "password": "short"}
     )
 
-    assert [error["loc"] for error in missing.json()["detail"]] == [
+    assert [error["location"] for error in validation_errors(missing)] == [
         ["body", "password"]
     ]
-    assert [error["loc"] for error in malformed.json()["detail"]] == [
+    assert [error["location"] for error in validation_errors(malformed)] == [
         ["body", "password"]
     ]
 
@@ -160,14 +169,24 @@ def test_missing_form_field_and_manual_validation_report_locations_alike(
     ("password", "expected_status"),
     [("short", 422), (PASSWORD, 401), ("Unexpected-" + PASSWORD, 500)],
 )
+@pytest.mark.parametrize("tracing", [True, False], ids=["traced", "untraced"])
 def test_correlation_header_names_the_id_in_the_login_logs(
     login_endpoint: LoginEndpoint,
     caplog: pytest.LogCaptureFixture,
+    monkeypatch: pytest.MonkeyPatch,
     password: str,
     expected_status: int,
+    tracing: bool,
 ) -> None:
     """Support reads the header and searches the logs for it; the caller's own
     id is still echoed as ``request_id`` in the body, as documented."""
+    if not tracing:
+        for target in (
+            "eneo.server.middleware.trace_id.current_trace_id",
+            "eneo.server.middleware.request_context._current_trace_id",
+            "eneo.server.main.current_trace_id",
+        ):
+            monkeypatch.setattr(target, lambda: None)
     login_endpoint.service.login.side_effect = (
         RuntimeError("boom") if expected_status == 500 else AuthenticationException()
     )
@@ -202,7 +221,8 @@ def test_form_validation_never_echoes_credentials(
 
     assert response.status_code == 422
     assert all(
-        set(error) == {"loc", "type", "msg"} for error in response.json()["detail"]
+        set(error) == {"location", "type", "message"}
+        for error in validation_errors(response)
     )
     assert PASSWORD not in response.text
     assert PASSWORD not in structured_logs(caplog)
@@ -234,7 +254,8 @@ def test_multipart_file_cannot_bypass_safe_form_validation(
 
     assert response.status_code == 422
     assert all(
-        set(error) == {"loc", "type", "msg"} for error in response.json()["detail"]
+        set(error) == {"location", "type", "message"}
+        for error in validation_errors(response)
     )
     assert PASSWORD not in response.text
     assert PASSWORD not in structured_logs(caplog)
@@ -383,7 +404,9 @@ def test_unexpected_errors_keep_diagnostics_with_the_password_redacted(
     assert response.status_code == 500
     error = GeneralError.model_validate(response.json())
     assert error.eneo_error_code == ErrorCodes.INTERNAL_SERVER_ERROR
-    assert error.code == "login_unavailable"
+    # The shared 500 envelope: a generic message and the support error_id.
+    assert error.code == "internal_error"
+    assert error.error_id
     assert response.headers["X-Correlation-ID"]
     assert PASSWORD not in response.text
     logs = structured_logs(caplog)

@@ -21,6 +21,7 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi import UploadFile
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.main.exceptions import ErrorCodes
 from eneo.server.dependencies.container import load_container_upload_admission
 from eneo.users.user import UserAdd, UserState
@@ -958,7 +959,8 @@ async def test_space_scoped_user_key_cannot_delete_another_users_file(
 
     async with db_container() as container:
         file = await container.file_repo().get_by_id(file_id=UUID(file_id))
-    assert file.user_id == other_user.id
+    assert file.owner_type is PrincipalType.USER
+    assert file.owner_user_id == other_user.id
 
 
 # ---------------------------------------------------------------------------

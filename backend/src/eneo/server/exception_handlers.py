@@ -1,7 +1,8 @@
 import logging
 import traceback
 import uuid
-from typing import Any, Protocol, cast
+from collections.abc import Mapping, Sequence
+from typing import Any, Protocol, TypeGuard, cast
 
 from fastapi import FastAPI, Request
 from fastapi.exceptions import RequestValidationError
@@ -11,6 +12,10 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.responses import Response
 
 from eneo.authentication.browser_session import SessionGenerationMismatchError
+from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+from eneo.completion_models.infrastructure.context_builder import (
+    ContextWindowExceededError,
+)
 from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
@@ -45,6 +50,7 @@ from eneo.object_content.content import (
     ObjectContentUnavailableError,
 )
 from eneo.object_content.deployment_policy import (
+    DeploymentPolicyCapacityExceeded,
     DeploymentPolicyConflict,
     ObjectStoreTargetNotSelectable,
 )
@@ -89,6 +95,7 @@ from eneo.skills.domain.skill import (
     SkillRuntimePolicyChangedError,
     SkillSlugConflictError,
 )
+from eneo.transcription_services.models import SERVICE_ENDPOINT_MESSAGES
 from eneo.users.password import (
     CurrentPasswordIncorrectError,
     LocalPasswordChangeUnavailableError,
@@ -104,6 +111,8 @@ from eneo.websites.domain.crawl_run_repo import (
 # Partial unique indexes that guard active model display names, per
 # 20260602_unique_model_display_names. Their names all end in this suffix.
 _ACTIVE_NICKNAME_INDEX_SUFFIX = "_active_nickname"
+REQUEST_VALIDATION_ERROR_CODE = "request_validation_error"
+REQUEST_VALIDATION_ERROR_MESSAGE = "Request validation failed."
 
 
 def is_active_display_name_violation(exc: IntegrityError) -> bool:
@@ -136,6 +145,8 @@ def _default_message_for_status(status_code: int) -> str:
         return "Forbidden: you do not have permission to perform this action."
     if status_code == 404:
         return "Not found"
+    if status_code == 410:
+        return "Gone."
     if status_code == 409:
         return "Conflict."
     if status_code >= 500:
@@ -152,11 +163,11 @@ def default_error_code_for_status(status_code: int) -> ErrorCodes:
     numeric field is not left guessing at which layer refused the request.
     Precision lives in the string `code`, which the raiser owns.
 
-    Only statuses whose meaning the category restates are mapped. A status that
-    covers several domain failures, such as 409, falls through to the coarse
-    one: the web client turns a category into a sentence for the reader, so
-    inferring `NAME_COLLISION` from any conflict would tell someone resolving
-    an approval conflict that a display name is taken.
+    Only statuses whose meaning the category restates are mapped. A 409 gets
+    the generic `CONFLICT`, never a domain category: the web client turns a
+    category into a sentence for the reader, so inferring `NAME_COLLISION` from
+    any conflict would tell someone resolving an approval conflict that a
+    display name is taken. `CONFLICT` is left to the backend's own message.
     """
     if status_code == 401:
         return ErrorCodes.AUTHENTICATION_ERROR
@@ -164,6 +175,8 @@ def default_error_code_for_status(status_code: int) -> ErrorCodes:
         return ErrorCodes.UNAUTHORIZED
     if status_code == 404:
         return ErrorCodes.NOT_FOUND
+    if status_code == 409:
+        return ErrorCodes.CONFLICT
     if status_code == 429:
         return ErrorCodes.QUOTA_EXCEEDED
     if status_code >= 500:
@@ -184,6 +197,90 @@ def extract_request_id(request: Request | None = None) -> str | None:
         if request_id:
             return request_id
     return get_request_context().get("correlation_id")
+
+
+def _validation_error_location(raw_location: object) -> list[str | int]:
+    if not _is_validation_error_sequence(raw_location):
+        return []
+    return [part for part in raw_location if isinstance(part, (str, int))]
+
+
+def _is_validation_error_sequence(value: object) -> TypeGuard[Sequence[object]]:
+    return isinstance(value, Sequence) and not isinstance(
+        value, (str, bytes, bytearray)
+    )
+
+
+def _is_validation_error_mapping(value: object) -> TypeGuard[Mapping[str, object]]:
+    return isinstance(value, Mapping)
+
+
+def _validation_error_entry(error: Mapping[str, object]) -> dict[str, object]:
+    entry: dict[str, object] = {}
+    location = _validation_error_location(error.get("loc"))
+    if location:
+        entry["location"] = location
+
+    message = error.get("msg")
+    if isinstance(message, str):
+        entry["message"] = message
+
+    error_type = error.get("type")
+    if isinstance(error_type, str):
+        entry["type"] = error_type
+
+    return entry
+
+
+_PUBLIC_VALIDATION_MESSAGES: dict[str, str] = {
+    **SERVICE_ENDPOINT_MESSAGES,
+    "missing": "Field required",
+    "string_type": "Input should be a valid string",
+    "json_invalid": "Invalid JSON",
+    # Raised for a blank completion-model token limit (completion_model.py).
+    "token_limit_required": (
+        "A completion model needs both max_input_tokens and max_output_tokens, "
+        "so a token limit cannot be blank"
+    ),
+}
+
+
+def validation_error_details(detail: object) -> dict[str, list[dict[str, object]]]:
+    errors: list[dict[str, object]] = []
+    if _is_validation_error_sequence(detail):
+        for item in detail:
+            if _is_validation_error_mapping(item):
+                entry = _validation_error_entry(item)
+                if entry:
+                    errors.append(entry)
+    elif isinstance(detail, str) and detail.strip():
+        errors.append({"message": detail, "type": "value_error"})
+
+    return {"errors": errors}
+
+
+def validation_error_response_content(
+    *, request: Request, detail: object
+) -> dict[str, object]:
+    details = validation_error_details(detail)
+    content = GeneralError(
+        message=REQUEST_VALIDATION_ERROR_MESSAGE,
+        eneo_error_code=ErrorCodes.VALIDATION_ERROR,
+        code=REQUEST_VALIDATION_ERROR_CODE,
+        request_id=extract_request_id(request),
+        details=details,
+        # One-release compatibility for clients reading FastAPI's detail list.
+        # Rebuild it from the public fields; raw input and context never escape.
+        detail=[
+            {
+                "loc": error.get("location", []),
+                "msg": error.get("message", "Invalid value"),
+                "type": error.get("type", "value_error"),
+            }
+            for error in details["errors"]
+        ],
+    ).model_dump(exclude_none=True)
+    return {str(key): value for key, value in content.items()}
 
 
 def correlation_headers() -> dict[str, str] | None:
@@ -229,6 +326,9 @@ def _exception_context(
     else:
         result = {}
 
+    if isinstance(exc, UnknownModelCapacityError):
+        result["missing_dimensions"] = list(exc.missing_dimensions)
+
     if isinstance(exc, UnauthorizedException):
         result.setdefault("auth_layer", "domain_policy")
 
@@ -246,6 +346,8 @@ logger = logging.getLogger(__name__)
 # server adapter may depend on a domain package without reversing that
 # dependency. One map, so "where do I register this?" has one answer.
 DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] = {
+    UnknownModelCapacityError: (400, None, ErrorCodes.UNKNOWN_MODEL_CAPACITY),
+    ContextWindowExceededError: (413, None, ErrorCodes.BAD_REQUEST),
     # --- Local user credentials ---
     CurrentPasswordIncorrectError: (
         400,
@@ -304,6 +406,7 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ContentTooLargeError: (413, None, ErrorCodes.FILE_TOO_LARGE),
     InvalidContentRangeError: (416, None, ErrorCodes.BAD_REQUEST),
     DeploymentPolicyConflict: (409, None, ErrorCodes.DEPLOYMENT_POLICY_CONFLICT),
+    DeploymentPolicyCapacityExceeded: (422, None, ErrorCodes.VALIDATION_ERROR),
     ObjectStoreTargetNotSelectable: (
         409,
         None,
@@ -470,6 +573,16 @@ def add_exception_handlers(app: FastAPI):
         # The raiser's headers win; otherwise carry the request's correlation
         # id like the canonical handlers do, so the header matches the logs.
         headers = {**(correlation_headers() or {}), **(http_exc.headers or {})}
+        if http_exc.status_code == 500:
+            return await unhandled_exception_handler(request, http_exc)
+        if http_exc.status_code == 422:
+            return JSONResponse(
+                status_code=422,
+                content=validation_error_response_content(
+                    request=request, detail=http_exc.detail
+                ),
+                headers=headers,
+            )
         if http_exc.status_code in {204, 304}:
             return Response(status_code=http_exc.status_code, headers=headers)
         return JSONResponse(
@@ -501,6 +614,9 @@ def add_exception_handlers(app: FastAPI):
 
         error_content: dict[str, Any] = {
             "error": "Internal server error",
+            "eneo_error_code": ErrorCodes.INTERNAL_SERVER_ERROR.value,
+            "code": "internal_error",
+            "request_id": extract_request_id(request),
             "error_id": error_id,
             "message": "An unexpected error occurred. Please try again or contact support with the error_id.",
         }
@@ -512,7 +628,9 @@ def add_exception_handlers(app: FastAPI):
                 "method": request.method,
             }
 
-        response = JSONResponse(status_code=500, content=error_content)
+        response = JSONResponse(
+            status_code=500, content=error_content, headers=correlation_headers()
+        )
         trace_id = current_trace_id()
         if trace_id:
             response.headers["X-Trace-Id"] = trace_id
@@ -521,35 +639,6 @@ def add_exception_handlers(app: FastAPI):
         return response
 
     app.add_exception_handler(Exception, unhandled_exception_handler)
-
-    async def request_validation_error_handler(
-        request: Request, exc: Exception
-    ) -> JSONResponse:
-        # Keep the documented HTTPValidationError shape, but never serialize
-        # raw input, validation context or validator-generated messages. Even
-        # SecretStr cannot redact input when a required sibling is missing,
-        # and a custom validator may embed a secret in its error message.
-        validation_exc = cast(RequestValidationError, exc)
-        public_messages = {
-            "missing": "Field required",
-            "string_type": "Input should be a valid string",
-            "json_invalid": "Invalid JSON",
-        }
-        details: list[dict[str, object]] = [
-            {
-                "loc": error["loc"],
-                "type": error["type"],
-                "msg": public_messages.get(error["type"], "Invalid value"),
-            }
-            for error in validation_exc.errors()
-        ]
-        return JSONResponse(
-            status_code=422,
-            content={"detail": details},
-            headers=correlation_headers(),
-        )
-
-    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
 
     exception_handlers = (
         *EXCEPTION_MAP.items(),
@@ -569,6 +658,16 @@ def add_exception_handlers(app: FastAPI):
                 message = _default_message_for_status(status_code)
             request_id = extract_request_id(request)
             context = _exception_context(status_code=status_code, exc=exc)
+            raw_code = (
+                "context_window_exceeded"
+                if isinstance(exc, ContextWindowExceededError)
+                else getattr(exc, "code", None)
+            )
+            public_code = (
+                raw_code
+                if isinstance(raw_code, str) and raw_code.strip()
+                else error_code.name.lower()
+            )
             raw_details = getattr(exc, "details", None)
             details: dict[str, object] | None
             if isinstance(raw_details, dict) and raw_details:
@@ -595,7 +694,7 @@ def add_exception_handlers(app: FastAPI):
                 content=GeneralError(
                     message=message,
                     eneo_error_code=error_code,
-                    code=getattr(exc, "code", None),
+                    code=public_code,
                     context=context,
                     request_id=request_id,
                     details=details,
@@ -603,6 +702,41 @@ def add_exception_handlers(app: FastAPI):
             )
 
         app.add_exception_handler(exception, handler)
+
+    async def request_validation_error_handler(
+        request: Request, exc: Exception
+    ) -> JSONResponse:
+        if not isinstance(exc, RequestValidationError):
+            raise exc
+
+        # Never serialize raw input, validation context or validator-generated
+        # messages. Even SecretStr cannot redact input when a required sibling
+        # is missing, and a custom validator may embed a secret in its message.
+        errors: list[dict[str, object]] = [
+            {
+                "loc": error["loc"],
+                "type": error["type"],
+                "msg": _PUBLIC_VALIDATION_MESSAGES.get(
+                    str(error["type"]), "Invalid value"
+                ),
+            }
+            for error in exc.errors()
+        ]
+        details = validation_error_details(errors)
+        logger.warning(
+            "%s %s → 422: %s",
+            request.method,
+            request.url.path,
+            REQUEST_VALIDATION_ERROR_MESSAGE,
+            extra={"details": details, "error_code": ErrorCodes.VALIDATION_ERROR},
+        )
+        return JSONResponse(
+            status_code=422,
+            content=validation_error_response_content(request=request, detail=errors),
+            headers=correlation_headers(),
+        )
+
+    app.add_exception_handler(RequestValidationError, request_validation_error_handler)
 
     async def integrity_error_handler(request: Request, exc: Exception) -> JSONResponse:
         # Concurrent creates/renames to the same display name both pass the
@@ -626,6 +760,7 @@ def add_exception_handlers(app: FastAPI):
             content=GeneralError(
                 message="A model with this display name already exists.",
                 eneo_error_code=ErrorCodes.NAME_COLLISION,
+                code="name_collision",
                 request_id=request_id,
             ).model_dump(exclude_none=True),
         )

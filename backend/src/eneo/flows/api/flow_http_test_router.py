@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+from typing import Annotated, Any, Literal
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, Path, Request, status
+from pydantic import ValidationError
+
+from eneo.audit.application.audit_metadata import AuditMetadata
+from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.entity_types import EntityType
+from eneo.audit.domain.outcome import Outcome
+from eneo.authentication.access_denial_code import AccessDenialCode
+from eneo.authentication.endpoint_access import (
+    Authentication,
+    Authorization,
+    endpoint_access,
+)
+from eneo.flows.api import flow_http_test_models
+from eneo.flows.api.flow_api_common import error_response
+from eneo.flows.api.flow_definition_access import require_flow_edit_access
+from eneo.flows.domain.flow import Flow
+from eneo.flows.flow_access_policy import FlowApiAction, flow_action_access_reason
+from eneo.flows.http_transport import (
+    HttpAuthoredConfig,
+    HttpTemplateInterpolationError,
+    is_authored_config,
+)
+from eneo.flows.http_transport.test_action import execute_http_test
+from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.config import get_settings
+from eneo.main.container.container import Container
+from eneo.main.exceptions import BadRequestException, ErrorCodes, NotFoundException
+from eneo.server.dependencies.container import get_container
+
+router = APIRouter()
+
+
+@router.post(
+    "/{id}/http-test",
+    response_model=flow_http_test_models.HttpTestResponse,
+    status_code=status.HTTP_200_OK,
+    operation_id="test_flow_http",
+    summary="Test HTTP Connection",
+    description=(
+        "Send a test HTTP request using the submitted authored config snapshot and "
+        "return a typed preview of the attempted request and response. This endpoint "
+        "requires the saved step_id in this flow; stored credentials are resolved "
+        "only from that step and the submitted direction. "
+        "A stored credential is reused only for the same scheme, host and effective "
+        "port. Credential-bearing requests require a fixed HTTPS origin and active credential "
+        "encryption. Declared secret headers are redacted in previews, and response "
+        "bodies are not read or previewed for credential-bearing requests. "
+        "It does not persist the config or publish the flow; it is for authoring UIs that "
+        "need to validate URL, auth, timeout, headers, body mode, and SSRF guard behavior "
+        "before saving an HTTP input or output step. `test_variables` is the raw "
+        "template context used for URL, non-secret header values, Basic-auth username, "
+        "API-key header name, and body interpolation. Credential values are literal. "
+        "Callers can send flat keys such as `name` or runtime-shaped keys such as `flow_input` "
+        "and `step_1`."
+    ),
+    responses={
+        200: {
+            "description": (
+                "HTTP test result. `success=false` is still returned with 200 when "
+                "the submitted config is syntactically valid but the target request "
+                "fails, times out, returns an error status, or references a stored "
+                "secret that cannot be resolved."
+            ),
+        },
+        400: error_response(
+            description=(
+                "The submitted HTTP config or the selected saved step's HTTP config "
+                "is invalid."
+            ),
+            message="Stored HTTP step configuration is invalid.",
+            eneo_error_code=ErrorCodes.BAD_REQUEST,
+        ),
+        403: error_response(
+            description="Caller lacks permission to edit this flow.",
+            message="Insufficient permissions.",
+            eneo_error_code=ErrorCodes.UNAUTHORIZED,
+            code=AccessDenialCode.INSUFFICIENT_SCOPE,
+            context={"auth_layer": "space_membership"},
+        ),
+        404: error_response(
+            description="The flow or the selected saved step was not found.",
+            message="Flow step not found.",
+            eneo_error_code=ErrorCodes.NOT_FOUND,
+        ),
+        503: error_response(
+            description="Credential encryption is unavailable for authored secrets.",
+            message="HTTP credential encryption is unavailable.",
+            eneo_error_code=ErrorCodes.ENCRYPTION_NOT_CONFIGURED,
+        ),
+    },
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=flow_action_access_reason(FlowApiAction.EDIT),
+)
+async def test_flow_http(
+    id: Annotated[UUID, Path(description="Flow ID")],
+    request: Request,
+    body: flow_http_test_models.HttpTestRequest,
+    container: Container = Depends(
+        get_container(with_user=True, with_module_user=True)
+    ),
+):
+    access_context = await require_flow_edit_access(request, container, flow_id=id)
+    settings = get_settings()
+
+    config = body.config
+    flow = access_context.flow
+    stored_config = find_stored_http_config(flow, body.step_id, body.direction)
+    encryption_service = (
+        container.encryption_service()
+        if hasattr(container, "encryption_service")
+        else None
+    )
+    variable_resolver = FlowVariableResolver()
+    http_runtime = FlowHttpRuntimeHelper(
+        variable_resolver=variable_resolver,
+        request_timeout_seconds=float(settings.flow_http_request_timeout_seconds),
+        max_timeout_seconds=float(settings.flow_http_max_timeout_seconds),
+        allow_private_networks=bool(settings.flow_http_allow_private_networks),
+    )
+
+    def _interpolate_http_test_template(template: str, context: dict[str, Any]) -> str:
+        try:
+            return variable_resolver.interpolate(template, context)
+        except BadRequestException as exc:
+            raise HttpTemplateInterpolationError(str(exc)) from exc
+
+    result = await execute_http_test(
+        config=config,
+        direction=body.direction,
+        method=body.method,
+        test_variables=body.test_variables,
+        stored_config=stored_config,
+        encryption_service=encryption_service,
+        interpolate=_interpolate_http_test_template,
+        send_http_request=http_runtime.send_request,
+        max_timeout=float(settings.flow_http_max_timeout_seconds),
+    )
+
+    user = container.user()
+    failure_code = result.error_code.value if result.error_code is not None else None
+    await container.audit_service().log_async(
+        tenant_id=user.tenant_id,
+        user=user,
+        action=ActionType.FLOW_HTTP_OUTBOUND_CALL,
+        entity_type=EntityType.FLOW,
+        entity_id=id,
+        description=f"Tested HTTP {body.method} connection for Flow authoring",
+        metadata=AuditMetadata.standard(
+            actor=user,
+            target=flow,
+            extra={
+                "flow_id": str(id),
+                "step_id": str(body.step_id),
+                "test_direction": body.direction,
+                "test_success": result.success,
+                "status_code": result.status_code,
+                "failure_code": failure_code,
+            },
+        ),
+        outcome=Outcome.SUCCESS if result.success else Outcome.FAILURE,
+        error_message=failure_code if not result.success else None,
+    )
+
+    return flow_http_test_models.HttpTestResponse(
+        success=result.success,
+        status_code=result.status_code,
+        duration_ms=result.duration_ms,
+        response_preview=result.response_preview,
+        request_preview=result.request_preview,
+        error_code=result.error_code,
+        error_message=result.error_message,
+    )
+
+
+def find_stored_http_config(
+    flow: Flow, step_id: UUID, direction: Literal["input", "output"]
+) -> HttpAuthoredConfig | None:
+    step = next((step for step in flow.steps if step.id == step_id), None)
+    if step is None:
+        raise NotFoundException(
+            "Flow step not found.", context={"step_id": str(step_id)}
+        )
+    config = step.output_config if direction == "output" else step.input_config
+    if config is None or not is_authored_config(config):
+        return None
+    try:
+        return HttpAuthoredConfig.model_validate(config)
+    except ValidationError as exc:
+        raise BadRequestException(
+            "Stored HTTP step configuration is invalid.",
+            context={"step_id": str(step_id)},
+        ) from exc
+
+
+__all__ = ["router"]

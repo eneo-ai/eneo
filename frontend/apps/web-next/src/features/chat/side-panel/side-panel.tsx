@@ -567,6 +567,7 @@ export function SidePanel({
           }}
           label={label}
           height={nonModal ? "capped" : "tall"}
+          padding={0}
           hasScrim={!nonModal}
         >
           {/* pt clears the sheet's grab handle, which floats over its top. */}

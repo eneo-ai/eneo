@@ -178,6 +178,14 @@ def is_capability_purpose(purpose: str | None) -> bool:
     return bool(purpose) and purpose != GENERAL_PURPOSE
 
 
+def is_general_server(*, purpose: str | None, http_auth_type: str | None) -> bool:
+    """An ordinary server whose tools are picked: neither a capability provider
+    nor one of Eneo's own servers."""
+    return not is_capability_purpose(purpose) and not is_builtin_provider(
+        http_auth_type
+    )
+
+
 def duplicate_capability_purposes(purposes: Iterable[str | None]) -> list[str]:
     """Capability purposes that occur more than once, in first-seen order.
 

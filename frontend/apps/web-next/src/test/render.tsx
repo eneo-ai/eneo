@@ -68,6 +68,7 @@ export function testAppContext({
     settings: { using_templates: false, api_key_expiry_notifications: false, chatbot_widget: null },
     federationStatus: { has_multi_tenant_federation: false },
     limits: { attachments: { formats: [] }, info_blobs: { formats: [] } },
+    featureFlags: { flows: false },
     links: { accessibilityStatement: null, helpCenter: null, legacyApp: null },
     versions: { frontend: "0.1.0", backend: "1.2.3" }
   };

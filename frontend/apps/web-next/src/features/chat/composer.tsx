@@ -1,7 +1,14 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
+import {
+  ChatComposer,
+  ChatComposerDrawer,
+  useChatComposerContext,
+  type ChatComposerInputHandle,
+  type ChatComposerToken,
+  type ChatComposerTrigger
+} from "@astryxdesign/core/Chat";
 import { useAnnounce, useMergedRefs } from "@astryxdesign/core/hooks";
 import { Kbd } from "@astryxdesign/core/Kbd";
 import { Popover } from "@astryxdesign/core/Popover";
@@ -20,7 +27,9 @@ import {
 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import {
+  useEffect,
   useId,
+  useImperativeHandle,
   useRef,
   useState,
   type ClipboardEvent,
@@ -30,6 +39,8 @@ import {
 } from "react";
 import { useFileDrop } from "@/features/files/use-file-drop";
 import { revealProblems } from "@/components/composites/field-problem";
+import { ChatComposerInput } from "@/components/astryx/chat-composer-input";
+import type { ComposerInsert } from "./chat-references";
 import type { KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
@@ -42,6 +53,19 @@ type Attachments = ReturnType<typeof useAttachments>;
 const PILL_CLASS =
   "focus-visible:outline-ring inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-[13px] font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 disabled:cursor-not-allowed disabled:text-ax-text-disabled pointer-coarse:h-11 pointer-coarse:min-w-11";
 const PILL_ACTIVE_CLASS = "bg-ax-accent-muted text-ax-text-accent";
+
+/**
+ * What a page holds of the composer's text field: a way to focus it, and the
+ * element itself for focus rescue, for both the textarea and reference input.
+ */
+export type ComposerHandle = {
+  focus: () => void;
+  element: HTMLElement | null;
+  /** Puts text at the caret, as typed: a trigger character opens its menu. */
+  insertText: (text: string) => void;
+  /** Puts a token (a pill) at the caret, as a menu pick does. */
+  insertToken: (token: ChatComposerToken) => void;
+};
 
 /**
  * The composer's text field. A real <textarea> (e2e and assistive tech rely
@@ -70,9 +94,31 @@ function ComposerTextarea({
   onPasteFiles: (files: File[]) => void;
   onBackspaceEmpty: () => void;
   rows: number;
-  ref?: Ref<HTMLTextAreaElement>;
+  ref?: Ref<ComposerHandle>;
 }) {
   const composer = useChatComposerContext();
+  const field = useRef<HTMLTextAreaElement>(null);
+  const onChange = useRef(composer?.onChange);
+  useEffect(() => {
+    onChange.current = composer?.onChange;
+  });
+  useImperativeHandle(ref, () => {
+    const insertText = (text: string) => {
+      const element = field.current;
+      if (!element) return;
+      element.focus();
+      element.setRangeText(text, element.selectionStart, element.selectionEnd, "end");
+      onChange.current?.(element.value);
+    };
+    return {
+      focus: () => field.current?.focus(),
+      get element() {
+        return field.current;
+      },
+      insertText,
+      insertToken: (token) => insertText(token.value)
+    };
+  }, []);
   const [composing, setComposing] = useState(false);
 
   const onKeyDown = (event: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -103,7 +149,7 @@ function ComposerTextarea({
 
   return (
     <textarea
-      ref={ref}
+      ref={field}
       name="message"
       rows={rows}
       value={composer?.value ?? ""}
@@ -120,6 +166,179 @@ function ComposerTextarea({
       // (focus-within), so the field itself has none.
       // eslint-disable-next-line eneo/no-weak-focus-indicator -- ring drawn by ChatComposer
       className="text-ax-text placeholder:text-ax-text-secondary block [field-sizing:content] max-h-[min(12rem,30dvh)] min-h-[46px] w-full resize-none bg-transparent px-1.5 py-0.5 text-base leading-normal focus:outline-none"
+    />
+  );
+}
+
+const isToken = (node: Node | null): node is HTMLElement =>
+  node instanceof HTMLElement && node.hasAttribute("data-astryx-token");
+const isBlank = (node: Node | null): node is Text =>
+  node?.nodeType === Node.TEXT_NODE && /^[  ]?$/.test(node.textContent ?? "");
+
+/**
+ * Removes the token (a pill) just before a collapsed caret, with the blank
+ * Astryx keeps after it. One Backspace takes the pill; Astryx's own handling
+ * only takes the blank first, which looks like nothing happened. False when
+ * the caret is not right after a token.
+ */
+function removeTokenBeforeCaret(editable: HTMLElement): boolean {
+  const selection = window.getSelection();
+  if (!selection?.rangeCount || !selection.isCollapsed) return false;
+  const { startContainer: node, startOffset: offset } = selection.getRangeAt(0);
+  if (!editable.contains(node)) return false;
+  let before: Node | null;
+  if (node.nodeType === Node.TEXT_NODE) {
+    // At the start of a text, or at the end of the blank after a token.
+    if (offset === 0) before = node.previousSibling;
+    else if (isBlank(node) && offset === (node.textContent?.length ?? 0)) before = node;
+    else return false;
+  } else if (node === editable) {
+    before = editable.childNodes[offset - 1] ?? null;
+  } else {
+    return false;
+  }
+  const blank = isBlank(before) ? before : null;
+  const token = blank ? blank.previousSibling : before;
+  if (!isToken(token)) return false;
+  blank?.remove();
+  token.remove();
+  return true;
+}
+
+/**
+ * The composer's text field: Astryx ChatComposerInput on ChatComposer's
+ * context. Ctrl/⌘+Enter sends; Enter adds a line. An IME's Enter
+ * commits its candidate instead. Pasted or
+ * dropped files become attachments and Backspace in an empty field removes
+ * the last attachment. Message history and paste-as-token are off: a chat
+ * draft is the person's own text. With `triggers`, typing their character
+ * opens a menu whose picks become inline tokens (the flow chat's references).
+ */
+function ComposerInput({
+  label,
+  describedBy,
+  invalid,
+  placeholder,
+  onSend,
+  onPasteFiles,
+  onBackspaceEmpty,
+  minRows,
+  triggers,
+  ref
+}: {
+  label: string;
+  describedBy: string;
+  invalid: boolean;
+  placeholder: string;
+  onSend: () => void;
+  onPasteFiles: (files: File[]) => void;
+  onBackspaceEmpty: () => void;
+  minRows: 1 | 2;
+  triggers?: ChatComposerTrigger[];
+  ref?: Ref<ComposerHandle>;
+}) {
+  const handle = useRef<ChatComposerInputHandle>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const composing = useRef(false);
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => handle.current?.focus(),
+      get element() {
+        return root.current?.querySelector<HTMLElement>("[contenteditable]") ?? null;
+      },
+      insertToken: (token) => {
+        handle.current?.focus();
+        handle.current?.insertToken(token);
+        // Astryx's menu emits the change after its own insert; the public
+        // insert does not, so the field would keep its placeholder and the
+        // page its old value.
+        root.current
+          ?.querySelector("[contenteditable]")
+          ?.dispatchEvent(new Event("input", { bubbles: true }));
+      },
+      insertText: (text) => {
+        const editable = root.current?.querySelector<HTMLElement>("[contenteditable]");
+        handle.current?.focus();
+        handle.current?.insertText(text);
+        if (!editable) return;
+        // Astryx reads the text before the caret from the text node the
+        // caret is in; a programmatic insert can leave the caret between
+        // nodes instead. Put it at the end of the text just written.
+        const selection = window.getSelection();
+        const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+        if (selection && range?.collapsed && range.startContainer === editable) {
+          const node = editable.childNodes[range.startOffset - 1];
+          if (node?.nodeType === Node.TEXT_NODE) {
+            const caret = document.createRange();
+            caret.setStart(node, node.textContent?.length ?? 0);
+            caret.collapse(true);
+            selection.removeAllRanges();
+            selection.addRange(caret);
+          }
+        }
+        // Astryx opens a trigger menu from the input event, not from the insert.
+        editable.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }),
+    []
+  );
+
+  const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
+    // An open trigger menu has taken its keys before this runs.
+    if (event.key === "Enter") {
+      // Astryx leaves an IME's Enter alone; so does this.
+      if (event.nativeEvent.isComposing) return;
+      if (composing.current) {
+        // Astryx submits when the browser omits isComposing on the final key.
+        event.preventDefault();
+        return;
+      }
+      // Sending is the page's: a blocked send keeps the text (Astryx's own
+      // Enter would clear the field first).
+      event.preventDefault();
+      if (event.metaKey || event.ctrlKey) {
+        onSend();
+      } else {
+        handle.current?.insertText("\n");
+        root.current
+          ?.querySelector("[contenteditable]")
+          ?.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      return;
+    }
+    if (event.key === "Backspace") {
+      const editable = root.current?.querySelector<HTMLElement>("[contenteditable]");
+      if (editable && removeTokenBeforeCaret(editable)) {
+        event.preventDefault();
+        // Astryx emits the change and drops the token's portal on input.
+        editable.dispatchEvent(new Event("input", { bubbles: true }));
+        return;
+      }
+      if ((handle.current?.getValue() ?? "") === "") onBackspaceEmpty();
+    }
+  };
+
+  return (
+    <ChatComposerInput
+      ref={root}
+      handleRef={handle}
+      label={label}
+      aria-describedby={describedBy}
+      aria-invalid={invalid || undefined}
+      placeholder={placeholder}
+      hasHistory={false}
+      pasteAsToken={false}
+      onFiles={onPasteFiles}
+      onKeyDown={onKeyDown}
+      onCompositionStart={() => {
+        composing.current = true;
+      }}
+      onCompositionEnd={() => {
+        composing.current = false;
+      }}
+      triggers={triggers}
+      className={cn("py-0.5", minRows === 2 && "[&_[contenteditable]]:min-h-[2.75rem]")}
     />
   );
 }
@@ -211,8 +430,19 @@ export type ComposerProps = {
   contextBar?: ReactNode;
   /** A passage quoted from a file or a view, sent as the opening lines of the question. */
   quote?: ComposerQuote | null;
+  /** Menus the text field opens as their character is typed (the flow chat's references). */
+  triggers?: ChatComposerTrigger[];
+  /**
+   * Small icon-only buttons above the text field. A function gets a way to
+   * put text in the field (a "Referera" button that types "@").
+   */
+  headerActions?: ReactNode | ((input: ComposerInsert) => ReactNode);
+  /** Controls after the pills in the footer (the flow chat's Fråga/Redigera picker). */
+  footerActions?: ReactNode;
   variant?: "docked" | "start";
-  textareaRef?: Ref<HTMLTextAreaElement>;
+  inputRef?: Ref<ComposerHandle>;
+  /** The field as something to insert into, while it is on screen. */
+  onInput?: (input: ComposerInsert | null) => void;
 };
 
 export type ComposerQuote = {
@@ -265,8 +495,8 @@ function ComposerQuoteCard({ quote }: { quote: ComposerQuote }) {
 
 /**
  * The chat composer (Astryx ChatComposer): drawer with attachment cards,
- * a textarea, and a row with attach, the knowledge pill (accent tint, clearly
- * lighter than Send), tools, the model picker and send/stop. Files
+ * the text field, and a row with attach, the knowledge pill (accent tint,
+ * clearly lighter than Send), tools, the model picker and send/stop. Files
  * can be dropped anywhere on it; the attach button is the non-drag
  * alternative (WCAG 2.5.7). Footer: data-sovereignty note.
  */
@@ -289,17 +519,27 @@ export function Composer({
   partnerToken,
   contextBar,
   quote = null,
+  triggers,
+  headerActions,
+  footerActions,
   variant = "docked",
-  textareaRef
+  inputRef,
+  onInput
 }: ComposerProps) {
   const t = useTranslations();
   const announce = useAnnounce();
   const hintId = useId();
   const problemId = useId();
-  const field = useRef<HTMLTextAreaElement>(null);
-  const fieldRef = useMergedRefs(field, textareaRef);
-  // What stopped the last send, shown at the field until the draft changes.
   const [problem, setProblem] = useState<string | null>(null);
+  // The field's handle as state, so a control above the field can be given it
+  // while rendering (a ref must not be read then).
+  const [input, setInput] = useState<ComposerHandle | null>(null);
+  const inputRefs = useMergedRefs(inputRef, setInput);
+  useEffect(() => {
+    onInput?.(input);
+  }, [input, onInput]);
+  const tokenInput = triggers !== undefined;
+  const Input = tokenInput ? ComposerInput : ComposerTextarea;
   const canAttach = attachments.maxFiles !== 0;
   const { dragging, handlers } = useFileDrop((files) => void attachments.addFiles(files), {
     enabled: canAttach && attachments.canAddMore
@@ -318,7 +558,7 @@ export function Composer({
     const missing = value.trim() === "" ? t("chat_composer_empty") : sendBlocked;
     if (missing) {
       // Rendered first, so the field is read with its new description.
-      revealProblems(() => setProblem(missing), field.current);
+      revealProblems(() => setProblem(missing), input?.element ?? null);
       announce(missing);
       return;
     }
@@ -334,15 +574,15 @@ export function Composer({
         <ChatComposer
           value={value}
           onChange={change}
-          // Submission runs through `send` (the textarea's ⌘/Ctrl+Return and
+          // Submission runs through `send` (the field's ⌘/Ctrl+Return and
           // the send button) so a blocked send never clears the field.
           onSubmit={send}
           onStop={onStop}
           isStopShown={busy}
           elevation="none"
           className={cn(
-            "rounded-ax-chat [&>div:has(textarea)]:shadow-ax-med",
-            variant === "start" && "[&>div:has(textarea)]:rounded-[1.375rem]"
+            "rounded-ax-chat [&>div:has(textarea,[contenteditable])]:shadow-ax-med",
+            variant === "start" && "[&>div:has(textarea,[contenteditable])]:rounded-[1.375rem]"
           )}
           drawer={
             hasAttachments || quote ? (
@@ -354,14 +594,23 @@ export function Composer({
               </ChatComposerDrawer>
             ) : undefined
           }
+          headerActions={
+            typeof headerActions === "function"
+              ? input
+                ? headerActions(input)
+                : null
+              : headerActions
+          }
           input={
-            <ComposerTextarea
-              ref={fieldRef}
+            <Input
+              ref={inputRefs}
               label={label}
               describedBy={problem ? `${problemId} ${hintId}` : hintId}
               invalid={problem !== null}
               placeholder={placeholder}
+              minRows={variant === "start" ? 2 : 1}
               rows={variant === "start" ? 2 : 1}
+              triggers={triggers}
               onSend={send}
               onPasteFiles={(files) => void attachments.addFiles(files)}
               onBackspaceEmpty={() => {
@@ -391,6 +640,7 @@ export function Composer({
               {tools}
               {skills}
               {mention}
+              {footerActions}
             </div>
           }
           sendActions={

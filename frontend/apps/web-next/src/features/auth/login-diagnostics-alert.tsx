@@ -1,11 +1,11 @@
 import { useTranslations } from "use-intl";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { loginDiagnosticMessageKey, type LoginDiagnostics } from "@/lib/auth/login-diagnostics";
 
 export function LoginDiagnosticsAlert({ diagnostics }: { diagnostics: LoginDiagnostics }) {
   const t = useTranslations();
   return (
-    <QuietBanner
+    <Banner
       status="error"
       title={t("authentication_failed")}
       description={t(loginDiagnosticMessageKey(diagnostics))}
@@ -22,6 +22,6 @@ export function LoginDiagnosticsAlert({ diagnostics }: { diagnostics: LoginDiagn
           </p>
         ) : null}
       </div>
-    </QuietBanner>
+    </Banner>
   );
 }

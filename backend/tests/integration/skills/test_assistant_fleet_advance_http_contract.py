@@ -13,6 +13,7 @@ from PIL import Image
 
 from eneo.ai_models.completion_models.completion_model import Completion
 from eneo.audit.domain.action_types import ActionType
+from eneo.authentication.principal_types import PrincipalType
 from eneo.database.tables.ai_models_table import CompletionModels
 from eneo.database.tables.assistant_table import (
     AssistantMCPServers,
@@ -39,7 +40,7 @@ from eneo.database.tables.skill_table import (
     SkillRuntimePolicies,
 )
 from eneo.database.tables.spaces_table import Spaces, SpacesUsers
-from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_models import FileContentVariant, FileOwner, FileType
 from eneo.files.file_repo import FileRepository
 from eneo.main.config import get_settings
 from eneo.main.exceptions import BadRequestException
@@ -1401,7 +1402,8 @@ async def _seed_owner_attachment_fleet(
                 mimetype="text/plain",
                 file_type=FileType.TEXT.value,
                 tenant_id=admin_user.tenant_id,
-                user_id=owner.id,
+                owner_type="user",
+                owner_user_id=owner.id,
             )
             session.add(root)
             await session.flush()
@@ -1411,7 +1413,8 @@ async def _seed_owner_attachment_fleet(
                 mimetype="image/png",
                 file_type=FileType.IMAGE.value,
                 tenant_id=admin_user.tenant_id,
-                user_id=owner.id,
+                owner_type="user",
+                owner_user_id=owner.id,
                 parent_file_id=root.id,
             )
             session.add(derived)
@@ -1922,7 +1925,11 @@ async def test_failed_owner_derivative_is_a_stable_runtime_omission(
     async with db_container() as container:
         runtime_derived = await FileRepository(container.session()).get_by_parent_ids(
             parent_ids=[seed.root_file_id],
-            user_id=seed.owner_user_id,
+            owner=FileOwner(
+                tenant_id=admin_user.tenant_id,
+                owner_type=PrincipalType.USER,
+                owner_user_id=seed.owner_user_id,
+            ),
         )
     assert runtime_derived == []
 
@@ -2163,7 +2170,7 @@ async def test_always_candidate_counts_mcp_baseline_and_fitting_control_can_ask(
         lambda **_kwargs: 0,
     )
     monkeypatch.setattr(
-        "eneo.assistants.assistant_service.measure_provider_input_tokens",
+        "eneo.assistants.assistant_service.measure_provider_input_reserve",
         lambda *_args, **_kwargs: TokenCount(
             tokens=8_000,
             source=TokenCountSource.LITELLM,

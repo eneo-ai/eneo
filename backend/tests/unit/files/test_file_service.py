@@ -9,11 +9,16 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.authentication.principal_types import PrincipalType
 from eneo.files import file_service as module
-from eneo.files.file_models import FileContentVariant, FileType
+from eneo.files.file_models import FileContentVariant, FileOwner, FileType
 from eneo.files.file_repo import FileContentReferenceRecord
 from eneo.files.file_service import FileOriginalNotFoundError, FileService
-from eneo.object_content.content import ContentAccessClass, StorageKind
+from eneo.object_content.content import (
+    ContentAccessClass,
+    ContentState,
+    StorageKind,
+)
 
 
 def _service_with_explicit_transactions() -> tuple[FileService, dict[str, bool]]:
@@ -121,6 +126,7 @@ def _reference(variant):
         size_bytes=1,
         media_type="image/png",
         access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        state=ContentState.AVAILABLE,
         storage_kind=StorageKind.POSTGRES_INLINE,
     )
 
@@ -159,7 +165,8 @@ def _text_metadata():
         name="report.pdf",
         mimetype="application/pdf",
         file_type=FileType.TEXT,
-        user_id=uuid4(),
+        owner_type=PrincipalType.USER,
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
         parent_file_id=None,
     )
@@ -179,6 +186,7 @@ def _original_reference(metadata, storage_kind):
         size_bytes=4,
         media_type="application/pdf",
         access_class=ContentAccessClass.PRIVATE_RESOURCE,
+        state=ContentState.AVAILABLE,
         storage_kind=storage_kind,
     )
 
@@ -227,7 +235,9 @@ async def test_download_reference_follows_original_readability(
 
 async def test_generated_document_records_the_version_it_was_edited_from():
     service, _ = _service_with_explicit_transactions()
-    service.user = SimpleNamespace(id=uuid4(), tenant_id=uuid4())
+    service._explicit_owner = FileOwner(
+        tenant_id=uuid4(), owner_type=PrincipalType.USER, owner_user_id=uuid4()
+    )
     service.repo.add_metadata = AsyncMock(side_effect=lambda create: create)
     captured = SimpleNamespace(
         prepared=SimpleNamespace(

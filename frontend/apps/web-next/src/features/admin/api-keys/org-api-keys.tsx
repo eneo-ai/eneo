@@ -5,7 +5,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { Typeahead } from "@/components/astryx/typeahead";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
@@ -425,7 +425,7 @@ function KeyFilterForm({
           onChange={(user) => update({ user })}
           minQueryLength={MIN_SEARCH_LENGTH}
           debounceMs={SEARCH_DEBOUNCE_MS}
-          emptySearchResultsText={t("audit_user_search_empty")}
+          emptySearchText={t("audit_user_search_empty")}
           hasClear
           width="100%"
         />

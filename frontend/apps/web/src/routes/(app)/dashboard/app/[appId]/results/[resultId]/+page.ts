@@ -1,7 +1,9 @@
+import { requireUuidRouteParam } from "$lib/core/routeParams";
+
 export const load = async (event) => {
   const { eneo } = await event.parent();
-  const selectedAppId = event.params.appId;
-  const selectedRun = event.params.resultId;
+  const selectedAppId = requireUuidRouteParam(event.params.appId, "App");
+  const selectedRun = requireUuidRouteParam(event.params.resultId, "App run");
 
   const [app, result] = await Promise.all([
     eneo.apps.get({ id: selectedAppId }),

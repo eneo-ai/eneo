@@ -39,14 +39,18 @@
 
   import ModelDraftForm from "./AddWizard/models/ModelDraftForm.svelte";
   import {
+    MAX_COST_INPUT,
+    completionUpdateCapabilities,
     createEmptyDraft,
     findDraftCostOverflow,
     hasValidCompletionTokenBudgets,
+    completionUpdateCeilings,
     hasValidRerankCandidateSettings,
-    MAX_COST_INPUT,
     modelToDraft,
     rawCostToNumber,
+    submittedModelName,
     tokenCostFromPerMillion,
+    transcriptionUpdateCapabilities,
     type ModelDraftState,
     type ModelType
   } from "./AddWizard/models/draft";
@@ -130,16 +134,13 @@
 
   function buildCompletionUpdate(): TenantCompletionModelUpdate {
     return {
-      name: draft.name.trim(),
+      name: submittedModelName(draft),
       display_name: draft.displayName.trim(),
       description: draft.description.trim() || null,
       hosting: draft.hosting,
       open_source: openSource,
-      max_input_tokens: draft.maxInputTokensStr ? parseInt(draft.maxInputTokensStr, 10) : null,
-      max_output_tokens: draft.maxOutputTokensStr ? parseInt(draft.maxOutputTokensStr, 10) : null,
-      vision: draft.vision,
-      reasoning: draft.reasoning,
-      supports_tool_calling: draft.supportsToolCalling,
+      ...completionUpdateCeilings(draft),
+      ...completionUpdateCapabilities(draft),
       input_cost_per_token: tokenCostFromPerMillion(draft.inputCostPerTokenStr),
       output_cost_per_token: tokenCostFromPerMillion(draft.outputCostPerTokenStr),
       ...(hasDefaultToggle ? { is_default: isDefault } : {}),
@@ -170,6 +171,7 @@
       hosting: draft.hosting,
       open_source: openSource,
       cost_per_minute: rawCostToNumber(draft.costPerMinuteStr),
+      ...transcriptionUpdateCapabilities(draft),
       ...(hasDefaultToggle ? { is_default: isDefault } : {}),
       ...securityClassificationPatch()
     };
@@ -208,13 +210,12 @@
       error = m.display_name_required();
       return;
     }
-    // Mirror the AddWizard guard: completion models cannot persist with
-    // null/0 token budgets — the backend rejects them and downstream code
-    // would divide by zero on context-window math.
     if (modelType === "rerank" && !hasValidRerankCandidateSettings(draft)) {
       error = m.rerank_candidate_settings_invalid();
       return;
     }
+    // Mirror the AddWizard guard: a completion model cannot serve any request
+    // without both token limits, so a save with a blank one is refused.
     if (modelType === "completion" && !hasValidCompletionTokenBudgets(draft)) {
       error = m.completion_token_budgets_required();
       return;

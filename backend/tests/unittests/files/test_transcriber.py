@@ -1,10 +1,237 @@
+from __future__ import annotations
+
+from contextlib import asynccontextmanager
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
-from eneo.files.file_models import File
-from eneo.files.transcriber import Transcriber
+from eneo.files.transcriber import TranscribedAudio, Transcriber
+from eneo.transcription_models.infrastructure.adapters.litellm_transcription import (
+    AdapterTranscription,
+)
+
+
+def _file_service() -> AsyncMock:
+    service = AsyncMock()
+    service.save_transcription.side_effect = lambda _file_id, text: text
+    return service
+
+
+@pytest.mark.asyncio
+async def test_transcriber_uses_cache_for_auto_language():
+    file_service = _file_service()
+    transcriber = Transcriber(file_service=file_service)
+    transcriber.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(text="fresh-transcript", duration_seconds=12.5)
+    )
+
+    file = SimpleNamespace(
+        id=uuid4(),
+        blob=b"audio-bytes",
+        mimetype="audio/wav",
+        transcription="cached-transcript",
+    )
+    model = SimpleNamespace(name="whisper-1")
+
+    result = await transcriber.transcribe(file, model, language=None)
+
+    # Nothing was decoded, so there is no audio length to report.
+    assert result == TranscribedAudio(text="cached-transcript", duration_seconds=None)
+    transcriber.transcribe_from_filepath.assert_not_awaited()
+    file_service.save_transcription.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_transcriber_bypasses_cache_for_explicit_language():
+    file_service = _file_service()
+    transcriber = Transcriber(file_service=file_service)
+    transcriber.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(text="sv-transcript", duration_seconds=8.0)
+    )
+
+    file = SimpleNamespace(
+        id=uuid4(),
+        blob=b"audio-bytes",
+        mimetype="audio/wav",
+        transcription="cached-transcript",
+    )
+    model = SimpleNamespace(name="whisper-1")
+
+    result = await transcriber.transcribe(file, model, language="sv")
+
+    assert result == TranscribedAudio(text="sv-transcript", duration_seconds=8.0)
+    assert file.transcription == "cached-transcript"
+    transcriber.transcribe_from_filepath.assert_awaited_once()
+    file_service.save_transcription.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_transcriber_auto_language_can_bypass_file_cache():
+    file_service = _file_service()
+    transcriber = Transcriber(file_service=file_service)
+    transcriber.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(text="fresh-transcript", duration_seconds=61.25)
+    )
+
+    file = SimpleNamespace(
+        id=uuid4(),
+        blob=b"audio-bytes",
+        mimetype="audio/wav",
+        transcription="cached-transcript",
+    )
+    model = SimpleNamespace(name="whisper-1")
+
+    result = await transcriber.transcribe(
+        file,
+        model,
+        language=None,
+        persist_cache_to_file=False,
+    )
+
+    assert result == TranscribedAudio(text="fresh-transcript", duration_seconds=61.25)
+    assert file.transcription == "cached-transcript"
+    transcriber.transcribe_from_filepath.assert_awaited_once()
+    assert transcriber.transcribe_from_filepath.await_args.kwargs["language"] is None
+    file_service.save_transcription.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_transcriber_explicit_language_does_not_fill_auto_cache():
+    file_service = _file_service()
+    transcriber = Transcriber(file_service=file_service)
+    transcriber.transcribe_from_filepath = AsyncMock(
+        side_effect=[
+            TranscribedAudio(text="sv-transcript", duration_seconds=8.0),
+            TranscribedAudio(text="auto-transcript", duration_seconds=8.0),
+        ]
+    )
+
+    file = SimpleNamespace(
+        id=uuid4(),
+        blob=b"audio-bytes",
+        mimetype="audio/wav",
+        transcription=None,
+    )
+    model = SimpleNamespace(name="whisper-1")
+
+    explicit_result = await transcriber.transcribe(file, model, language="sv")
+    auto_result = await transcriber.transcribe(file, model, language=None)
+
+    assert explicit_result.text == "sv-transcript"
+    assert auto_result.text == "auto-transcript"
+    assert [
+        call.kwargs["language"]
+        for call in transcriber.transcribe_from_filepath.await_args_list
+    ] == ["sv", None]
+    file_service.save_transcription.assert_awaited_once_with(
+        file.id,
+        "auto-transcript",
+    )
+
+
+@pytest.mark.asyncio
+async def test_transcriber_auto_language_without_cache_persists_result():
+    file_service = _file_service()
+    transcriber = Transcriber(file_service=file_service)
+    transcriber.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(text="new-transcript", duration_seconds=3.5)
+    )
+
+    file = SimpleNamespace(
+        id=uuid4(),
+        blob=b"audio-bytes",
+        mimetype="audio/wav",
+        transcription=None,
+    )
+    model = SimpleNamespace(name="whisper-1")
+
+    result = await transcriber.transcribe(file, model, language=None)
+
+    assert result == TranscribedAudio(text="new-transcript", duration_seconds=3.5)
+    transcriber.transcribe_from_filepath.assert_awaited_once()
+    assert transcriber.transcribe_from_filepath.await_args.kwargs["language"] is None
+    file_service.save_transcription.assert_awaited_once_with(
+        file.id,
+        "new-transcript",
+    )
+
+
+@pytest.mark.parametrize("language", ["sv", "en", None])
+@pytest.mark.asyncio
+async def test_transcribe_from_filepath_passes_language_to_adapter(
+    monkeypatch, tmp_path, language
+):
+    transcriber = Transcriber(file_service=_file_service())
+    adapter = SimpleNamespace(
+        get_text_from_file=AsyncMock(
+            return_value=AdapterTranscription(text="transcript", segments=())
+        )
+    )
+    transcriber._get_adapter = AsyncMock(return_value=adapter)
+    wav_file = SimpleNamespace(name="converted.wav", duration=42.0)
+
+    @asynccontextmanager
+    async def fake_to_wav(_filepath, *, limits=None):
+        yield wav_file
+
+    monkeypatch.setattr("eneo.files.transcriber.audio.to_wav", fake_to_wav)
+
+    result = await transcriber.transcribe_from_filepath(
+        filepath=tmp_path / "input.wav",
+        transcription_model=SimpleNamespace(name="whisper-1"),
+        language=language,
+    )
+
+    # The decoded length reaches the caller with the text it paid for.
+    assert result == TranscribedAudio(
+        text="transcript", duration_seconds=42.0, segments=()
+    )
+    adapter.get_text_from_file.assert_awaited_once_with(
+        wav_file, language=language, observer=None
+    )
+
+
+@pytest.mark.asyncio
+async def test_transcriber_rejects_non_audio_files():
+    transcriber = Transcriber(file_service=_file_service())
+    file = SimpleNamespace(
+        id=uuid4(),
+        blob=b"not-audio",
+        mimetype="text/plain",
+        transcription=None,
+    )
+    model = SimpleNamespace(name="whisper-1")
+
+    with pytest.raises(ValueError, match="audio file"):
+        await transcriber.transcribe(file, model, language=None)
+
+
+@pytest.mark.asyncio
+async def test_transcriber_auto_language_reuses_cache_even_if_model_changes():
+    file_service = _file_service()
+    transcriber = Transcriber(file_service=file_service)
+    transcriber.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(text="fresh-transcript", duration_seconds=5.0)
+    )
+
+    file = SimpleNamespace(
+        id=uuid4(),
+        blob=b"audio-bytes",
+        mimetype="audio/wav",
+        transcription="cached-transcript",
+    )
+    original_model = SimpleNamespace(name="whisper-1")
+    different_model = SimpleNamespace(name="kb-whisper-large")
+
+    first = await transcriber.transcribe(file, original_model, language=None)
+    second = await transcriber.transcribe(file, different_model, language=None)
+
+    assert first.text == "cached-transcript"
+    assert second.text == "cached-transcript"
+    transcriber.transcribe_from_filepath.assert_not_awaited()
+    file_service.save_transcription.assert_not_awaited()
 
 
 @pytest.mark.asyncio
@@ -12,8 +239,10 @@ async def test_transcribe_returns_the_durable_winner_from_a_racing_write() -> No
     file_service = MagicMock()
     file_service.save_transcription = AsyncMock(return_value="durable winner")
     transcriber = Transcriber(file_service)
-    transcriber.transcribe_from_filepath = AsyncMock(return_value="provider result")
-    file = File.model_construct(
+    transcriber.transcribe_from_filepath = AsyncMock(
+        return_value=TranscribedAudio(text="provider result", duration_seconds=9.0)
+    )
+    file = SimpleNamespace(
         id=uuid4(),
         blob=b"audio",
         mimetype="audio/mpeg",
@@ -22,7 +251,7 @@ async def test_transcribe_returns_the_durable_winner_from_a_racing_write() -> No
 
     result = await transcriber.transcribe(file, MagicMock())
 
-    assert result == "durable winner"
+    assert result == TranscribedAudio(text="durable winner", duration_seconds=9.0)
     file_service.save_transcription.assert_awaited_once_with(
         file.id,
         "provider result",

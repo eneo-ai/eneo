@@ -1,0 +1,321 @@
+from __future__ import annotations
+
+import logging
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass
+from datetime import datetime
+from uuid import UUID
+
+import sqlalchemy as sa
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from eneo.database.tables.files_table import Files
+from eneo.database.tables.flow_tables import (
+    FlowTemplateAssets,
+    FlowVersionFileReferences,
+    FlowVersions,
+)
+from eneo.flows.domain.flow import FlowPersistedJsonObject, FlowVersion
+from eneo.flows.published_definition import (
+    PublishedTemplateReferenceScan,
+    merge_published_template_reference_scans,
+    published_definition_checksum,
+    published_file_references,
+    scan_published_template_references,
+)
+from eneo.main.exceptions import NotFoundException
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class FlowVersionEvidenceMeasurement:
+    row_count: int
+    stored_json_bytes: int
+    logical_json_bytes: int
+
+    @classmethod
+    def empty(cls) -> "FlowVersionEvidenceMeasurement":
+        return cls(row_count=0, stored_json_bytes=0, logical_json_bytes=0)
+
+
+async def scan_flow_version_template_references(
+    session: AsyncSession,
+    *,
+    flow_id: UUID,
+    tenant_id: UUID,
+) -> PublishedTemplateReferenceScan:
+    stmt = (
+        sa.select(FlowVersions.definition_json)
+        .where(FlowVersions.flow_id == flow_id)
+        .where(FlowVersions.tenant_id == tenant_id)
+        .order_by(FlowVersions.version.desc())
+    )
+    definitions = (await session.execute(stmt)).scalars().all()
+    return merge_published_template_reference_scans(
+        scan_published_template_references(item) for item in definitions
+    )
+
+
+class FlowVersionRepository:
+    """Tenant-scoped repository for immutable flow definition snapshots."""
+
+    async def measure_definition_evidence(
+        self,
+        *,
+        flow_id: UUID,
+        version: int,
+        tenant_id: UUID,
+    ) -> FlowVersionEvidenceMeasurement:
+        row = (
+            await self.session.execute(
+                sa.select(
+                    sa.func.count().label("row_count"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.func.pg_column_size(FlowVersions.definition_json)
+                        ),
+                        0,
+                    ).label("stored_json_bytes"),
+                    sa.func.coalesce(
+                        sa.func.sum(
+                            sa.func.octet_length(
+                                sa.cast(FlowVersions.definition_json, sa.Text)
+                            )
+                        ),
+                        0,
+                    ).label("logical_json_bytes"),
+                )
+                .where(FlowVersions.flow_id == flow_id)
+                .where(FlowVersions.version == version)
+                .where(FlowVersions.tenant_id == tenant_id)
+            )
+        ).one()
+        return FlowVersionEvidenceMeasurement(
+            row_count=int(row.row_count),
+            stored_json_bytes=int(row.stored_json_bytes),
+            logical_json_bytes=int(row.logical_json_bytes),
+        )
+
+    def __init__(self, session: AsyncSession):
+        self.session = session
+
+    async def create(
+        self,
+        flow_id: UUID,
+        version: int,
+        definition_json: FlowPersistedJsonObject,
+        tenant_id: UUID,
+        first_published_at: datetime | None = None,
+        source_draft_revision: int | None = None,
+    ) -> FlowVersion:
+        """Persist a snapshot with checksum derived from the exact inserted payload."""
+        definition_checksum = published_definition_checksum(definition_json)
+        stmt = (
+            sa.insert(FlowVersions)
+            .values(
+                flow_id=flow_id,
+                version=version,
+                tenant_id=tenant_id,
+                first_published_at=first_published_at,
+                source_draft_revision=source_draft_revision,
+                definition_checksum=definition_checksum,
+                definition_json=definition_json,
+            )
+            .returning(FlowVersions)
+        )
+        version_in_db = await self.session.scalar(stmt)
+        if version_in_db is None:
+            raise NotFoundException("Could not create flow version.")
+        unresolved = await self.record_file_references(
+            flow_id=flow_id,
+            version=version,
+            tenant_id=tenant_id,
+            definition_json=definition_json,
+        )
+        if unresolved:
+            logger.info(
+                "Flow version names ids that resolve to no file; nothing retained.",
+                extra={
+                    "flow_id": str(flow_id),
+                    "version": version,
+                    "unresolved_ids": unresolved,
+                },
+            )
+        return FlowVersion.model_validate(version_in_db)
+
+    async def record_file_references(
+        self,
+        *,
+        flow_id: UUID,
+        version: int,
+        tenant_id: UUID,
+        definition_json: FlowPersistedJsonObject,
+    ) -> int:
+        """Retain the files a snapshot names, in the snapshot's transaction.
+
+        Returns how many named ids resolve to no file (a deleted file or an
+        id of another flow or tenant), which have nothing to retain. Files are
+        kept for as long as the version exists.
+        """
+        references = published_file_references(definition_json)
+        named = len(references.file_ids) + len(references.template_asset_ids)
+        if not named:
+            return 0
+        direct = sa.select(Files.id, Files.id).where(
+            Files.tenant_id == tenant_id, Files.id.in_(references.file_ids)
+        )
+        through_asset = sa.select(
+            FlowTemplateAssets.id, FlowTemplateAssets.file_id
+        ).where(
+            FlowTemplateAssets.flow_id == flow_id,
+            FlowTemplateAssets.tenant_id == tenant_id,
+            FlowTemplateAssets.id.in_(references.template_asset_ids),
+        )
+        resolved = (
+            await self.session.execute(sa.union_all(direct, through_asset))
+        ).all()
+        # Take the shared lock the reference's foreign key takes before
+        # inserting (publishers do not block each other): a concurrent delete
+        # either finishes first (the file is skipped here) or waits for this
+        # transaction and then sees the reference (409).
+        locked = set(
+            await self.session.scalars(
+                sa.select(Files.id)
+                .where(
+                    Files.tenant_id == tenant_id,
+                    Files.id.in_({file_id for _, file_id in resolved}),
+                )
+                .with_for_update(read=True, key_share=True, of=Files)
+            )
+        )
+        resolved = [row for row in resolved if row[1] in locked]
+        await self.add_file_references(
+            flow_id, version, tenant_id, {file_id for _, file_id in resolved}
+        )
+        return named - len({named_id for named_id, _ in resolved})
+
+    async def add_file_references(
+        self, flow_id: UUID, version: int, tenant_id: UUID, file_ids: Collection[UUID]
+    ) -> None:
+        """Retain snapshot files idempotently."""
+        if not file_ids:
+            return
+        await self.session.execute(
+            pg_insert(FlowVersionFileReferences).on_conflict_do_nothing(
+                index_elements=["flow_id", "version", "file_id"]
+            ),
+            [
+                {
+                    "flow_id": flow_id,
+                    "version": version,
+                    "tenant_id": tenant_id,
+                    "file_id": file_id,
+                }
+                for file_id in sorted(set(file_ids))
+            ],
+        )
+
+    async def get(self, flow_id: UUID, version: int, tenant_id: UUID) -> FlowVersion:
+        stmt = (
+            sa.select(FlowVersions)
+            .where(FlowVersions.flow_id == flow_id)
+            .where(FlowVersions.version == version)
+            .where(FlowVersions.tenant_id == tenant_id)
+        )
+        version_in_db = await self.session.scalar(stmt)
+        if version_in_db is None:
+            raise NotFoundException("Flow version not found.")
+        return FlowVersion.model_validate(version_in_db)
+
+    async def get_many(
+        self,
+        *,
+        version_refs: Sequence[tuple[UUID, int]],
+        tenant_id: UUID,
+    ) -> dict[tuple[UUID, int], FlowVersion]:
+        unique_refs = tuple(dict.fromkeys(version_refs))
+        if not unique_refs:
+            return {}
+        stmt = (
+            sa.select(FlowVersions)
+            .where(FlowVersions.tenant_id == tenant_id)
+            .where(
+                sa.tuple_(FlowVersions.flow_id, FlowVersions.version).in_(unique_refs)
+            )
+        )
+        versions = (await self.session.execute(stmt)).scalars().all()
+        versions_by_ref = {
+            (item.flow_id, item.version): FlowVersion.model_validate(item)
+            for item in versions
+        }
+        if any(ref not in versions_by_ref for ref in unique_refs):
+            raise NotFoundException("Flow version not found.")
+        return versions_by_ref
+
+    async def versions_with_checksum(
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+        definition_checksum: str,
+        versions: Collection[int],
+    ) -> frozenset[int]:
+        """Which of ``versions`` persisted a definition with this checksum.
+
+        One primary-key read of the named version rows, returning version
+        numbers alone: bounded by the candidates the caller holds rather than
+        by the flow's publish history, and no historical definition_json is
+        ever loaded to decide content identity.
+        """
+        candidates = sorted(set(versions))
+        if not candidates:
+            return frozenset()
+        stmt = (
+            sa.select(FlowVersions.version)
+            .where(FlowVersions.flow_id == flow_id)
+            .where(FlowVersions.tenant_id == tenant_id)
+            .where(FlowVersions.version.in_(candidates))
+            .where(FlowVersions.definition_checksum == definition_checksum)
+        )
+        return frozenset((await self.session.execute(stmt)).scalars().all())
+
+    async def list_versions(self, flow_id: UUID, tenant_id: UUID) -> list[FlowVersion]:
+        stmt = (
+            sa.select(FlowVersions)
+            .where(FlowVersions.flow_id == flow_id)
+            .where(FlowVersions.tenant_id == tenant_id)
+            .order_by(FlowVersions.version.desc())
+        )
+        versions = (await self.session.execute(stmt)).scalars().all()
+        return [FlowVersion.model_validate(item) for item in versions]
+
+    async def scan_template_references(
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> PublishedTemplateReferenceScan:
+        return await scan_flow_version_template_references(
+            self.session,
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+        )
+
+    async def has_template_asset_reference(
+        self,
+        *,
+        flow_id: UUID,
+        tenant_id: UUID,
+        template_asset_id: UUID,
+        template_file_id: UUID,
+    ) -> bool:
+        scan = await self.scan_template_references(
+            flow_id=flow_id,
+            tenant_id=tenant_id,
+        )
+        return scan.may_reference(
+            template_asset_id=template_asset_id,
+            template_file_id=template_file_id,
+        )

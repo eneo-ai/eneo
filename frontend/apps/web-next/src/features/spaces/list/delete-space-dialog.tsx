@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
-import { TextInput } from "@/components/astryx/text-input";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";

@@ -76,6 +76,15 @@ docker exec -i eneo_devcontainer-db-1 psql -U postgres -d eneo_<branch> \
   -c "select version_num from alembic_version;"
 ```
 
+### Renumbered migration ids
+
+Flows and builder migrations whose ids develop later used for its own
+migrations were renumbered; `src/eneo/database/renumbered_revisions.py` lists
+each old and new id. A database that branch migrated and that is still stamped
+at one of the old ids is refused by `alembic upgrade` with the repair: run
+`uv run alembic stamp --purge <new id>` (the id the message names), then
+`uv run alembic upgrade head` again.
+
 ## Crawl history
 
 Migration `202609091300` adds failed page and file addresses to crawl history and
@@ -134,7 +143,6 @@ for view semantics, query bounds and rollback behavior.
 | MOBILITYGUARD_DISCOVERY_ENDPOINT |          |                                                          |
 | MOBILITYGUARD_CLIENT_ID          |          |                                                          |
 | MOBILITYGUARD_CLIENT_SECRET      |          |                                                          |
-| OBJECT_CONTENT_INLINE_MAXIMUM_BYTES |          | Operator safety ceiling for one PostgreSQL-inline payload |
 | MAX_IN_QUESTION                  | x        | Max files in a question                                  |
 | SKILL_MAX_BINDINGS               |          | One-time seed for the Skill runtime-policy migration; the stored tenant policy owns the limit afterwards |
 | USING_ACCESS_MANAGEMENT          | x        | Feature flag if using access management (example: False) |

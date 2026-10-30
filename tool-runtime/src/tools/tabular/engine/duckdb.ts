@@ -152,9 +152,13 @@ export async function describeCsv(
     const rejectedRows = toFiniteNumber(rejectReader.getRowsJS()[0]?.[0]);
 
     const sampleReader = await conn.runAndReadAll(`SELECT * FROM src LIMIT 5`);
-    const sampleRows = sampleReader.getRowObjectsJson() as Array<
-      Record<string, unknown>
-    >;
+    const sampleRows = (
+      sampleReader.getRowObjectsJson() as Array<Record<string, unknown>>
+    ).map((row) =>
+      Object.fromEntries(
+        Object.entries(row).map(([name, value]) => [name, clipped(value)]),
+      ),
+    );
 
     const profiles = await profileColumns(conn, columns);
     const columnsWithProfile: TabularColumn[] = columns.map((c, i) => ({
@@ -194,12 +198,10 @@ async function detectSkippedLines(
     const reader = await conn.runAndReadAll(
       `DESCRIBE SELECT * FROM read_csv_auto(${parts.join(", ")})`,
     );
-    return reader
-      .getRowObjectsJS()
-      .map((r) => ({
-        name: String(r.column_name),
-        type: String(r.column_type),
-      }));
+    return reader.getRowObjectsJS().map((r) => ({
+      name: String(r.column_name),
+      type: String(r.column_type),
+    }));
   };
   const first = await schema(0);
   const generic = first.filter((c) => GENERIC_COLUMN.test(c.name)).length;
@@ -267,6 +269,25 @@ const TEXT_SHAPE_SHARE = 0.9;
  * (high-card text — an id or free-text column not worth enumerating). A text column that
  * is really numbers or dates in a local format also carries a `hint` with the cast to use.
  */
+/**
+ * Columns profiled per query. Every DISTINCT aggregate keeps a hash table of its own, and a
+ * hundred of them in one query outgrow the memory limit however few the rows are.
+ */
+const PROFILE_BATCH_COLUMNS = 40;
+
+/**
+ * Characters of a cell shown in a profile or sample row. A cell can hold a whole JSON
+ * record; the profile shows the model the shape of a column, not its content, and a wide
+ * sheet's metadata has to stay within its size limit.
+ */
+const MAX_PROFILE_TEXT_CHARS = 200;
+
+function clipped<T>(value: T): T | string {
+  if (typeof value !== "string" || value.length <= MAX_PROFILE_TEXT_CHARS)
+    return value;
+  return value.slice(0, MAX_PROFILE_TEXT_CHARS) + "…";
+}
+
 async function profileColumns(
   conn: DuckDBConnection,
   columns: Array<{ name: string; type: string }>,
@@ -274,41 +295,47 @@ async function profileColumns(
   if (columns.length === 0) return [];
 
   // Scan 1: distinct counts (all columns), min/max (range types), examples and shape
-  // shares (text).
-  const aggSelects: string[] = [];
-  columns.forEach((c, i) => {
-    const col = quoteIdent(c.name);
-    aggSelects.push(`count(DISTINCT ${col}) AS d${i}`);
-    if (isRangeType(c.type)) {
-      aggSelects.push(`min(${col})::VARCHAR AS lo${i}`);
-      aggSelects.push(`max(${col})::VARCHAR AS hi${i}`);
-    }
-    if (c.type === "VARCHAR") {
-      aggSelects.push(
-        `min(${col}) AS e${i}_0`,
-        `quantile_disc(${col}, 0.5) AS e${i}_1`,
-        `max(${col}) AS e${i}_2`,
-      );
-      for (const shape of TEXT_SHAPES)
+  // shares (text). In column batches, one query each.
+  const agg: Record<string, unknown> = {};
+  for (let start = 0; start < columns.length; start += PROFILE_BATCH_COLUMNS) {
+    const aggSelects: string[] = [];
+    columns.slice(start, start + PROFILE_BATCH_COLUMNS).forEach((c, offset) => {
+      const i = start + offset;
+      const col = quoteIdent(c.name);
+      aggSelects.push(`count(DISTINCT ${col}) AS d${i}`);
+      if (isRangeType(c.type)) {
+        aggSelects.push(`min(${col})::VARCHAR AS lo${i}`);
+        aggSelects.push(`max(${col})::VARCHAR AS hi${i}`);
+      }
+      if (c.type === "VARCHAR") {
         aggSelects.push(
-          `avg(CASE WHEN ${col} IS NULL THEN NULL WHEN regexp_matches(${col}, ${quoteSqlString(shape.pattern)}) THEN 1 ELSE 0 END) AS ${shape.key}${i}`,
+          `min(${col}) AS e${i}_0`,
+          `quantile_disc(${col}, 0.5) AS e${i}_1`,
+          `max(${col}) AS e${i}_2`,
         );
-    }
-  });
-  const aggReader = await conn.runAndReadAll(
-    `SELECT ${aggSelects.join(", ")} FROM src`,
-  );
-  const agg = (aggReader.getRowObjectsJS()[0] ?? {}) as Record<string, unknown>;
+        for (const shape of TEXT_SHAPES)
+          aggSelects.push(
+            `avg(CASE WHEN ${col} IS NULL THEN NULL WHEN regexp_matches(${col}, ${quoteSqlString(shape.pattern)}) THEN 1 ELSE 0 END) AS ${shape.key}${i}`,
+          );
+      }
+    });
+    const aggReader = await conn.runAndReadAll(
+      `SELECT ${aggSelects.join(", ")} FROM src`,
+    );
+    Object.assign(agg, aggReader.getRowObjectsJS()[0] ?? {});
+  }
 
   // The columns we'll enumerate exact values for.
   const lowCard = columns
     .map((c, i) => ({ i, d: toFiniteNumber(agg[`d${i}`]) }))
     .filter(({ d }) => d > 0 && d <= MAX_ENUMERATED_DISTINCT);
 
-  // Scan 2 (only if there's anything to enumerate): the distinct value lists.
+  // Scan 2 (only if there's anything to enumerate): the distinct value lists, in the same
+  // column batches.
   const valuesByIndex = new Map<number, string[]>();
-  if (lowCard.length > 0) {
-    const valSelects = lowCard.map(
+  for (let start = 0; start < lowCard.length; start += PROFILE_BATCH_COLUMNS) {
+    const batch = lowCard.slice(start, start + PROFILE_BATCH_COLUMNS);
+    const valSelects = batch.map(
       ({ i }) => `list(DISTINCT ${quoteIdent(columns[i]!.name)}) AS v${i}`,
     );
     const valReader = await conn.runAndReadAll(
@@ -318,13 +345,14 @@ async function profileColumns(
       string,
       unknown
     >;
-    for (const { i } of lowCard) {
+    for (const { i } of batch) {
       const raw = valRow[`v${i}`];
       if (!Array.isArray(raw)) continue;
       const values = raw
         .filter((v) => v !== null && v !== undefined)
         .map((v) => String(v))
-        .sort(compareValues);
+        .sort(compareValues)
+        .map(clipped);
       valuesByIndex.set(i, values);
     }
   }
@@ -349,7 +377,7 @@ async function profileColumns(
       ...new Set(
         [agg[`e${i}_0`], agg[`e${i}_1`], agg[`e${i}_2`]]
           .filter((v) => v !== null && v !== undefined)
-          .map((v) => String(v)),
+          .map((v) => clipped(String(v))),
       ),
     ];
     return {

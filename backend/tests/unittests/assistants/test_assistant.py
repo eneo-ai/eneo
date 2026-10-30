@@ -1,3 +1,4 @@
+import logging
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
@@ -227,6 +228,15 @@ def test_has_mcp(assistant: Assistant):
     assert assistant.has_mcp()
 
 
+def test_assistant_update_accepts_none_completion_model(assistant: Assistant) -> None:
+    completion_model = MagicMock(can_access=True)
+    assistant.completion_model = completion_model
+
+    assistant.update(completion_model=None)
+
+    assert assistant.completion_model is None
+
+
 def test_update_metadata_json(assistant: Assistant):
     metadata_json = {"key": "value"}
     assistant.update(metadata_json=metadata_json)
@@ -246,6 +256,7 @@ def test_update_metadata_json(assistant: Assistant):
 def assistant_with_model():
     completion_model = MagicMock()
     completion_model.token_limit = 4000
+    completion_model.max_input_tokens = 4000
     completion_model.vision = False
     return Assistant(
         id=None,
@@ -291,6 +302,28 @@ async def test_ask_forwards_mcp_alongside_knowledge(assistant_with_model):
 
 
 @pytest.mark.asyncio
+async def test_get_response_skips_mcp_when_knowledge_present(
+    assistant_with_model, caplog
+):
+    embedding_model = MagicMock(id=1)
+    assistant_with_model.mcp_servers = [MagicMock()]
+    assistant_with_model.collections = [MagicMock(embedding_model=embedding_model)]
+
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+
+    with caplog.at_level(logging.WARNING):
+        await assistant_with_model.get_response(
+            question="test",
+            completion_service=completion_service,
+        )
+
+    call_kwargs = completion_service.get_response.call_args.kwargs
+    assert call_kwargs["mcp_servers"] == []
+    assert "assistant_mcp_suppressed_due_to_knowledge" in caplog.messages
+
+
+@pytest.mark.asyncio
 async def test_ask_uses_mcp_when_no_knowledge(assistant_with_model):
     mcp_servers = [MagicMock()]
     assistant_with_model.mcp_servers = mcp_servers
@@ -316,6 +349,40 @@ async def test_ask_uses_mcp_when_no_knowledge(assistant_with_model):
     # MCP servers should be passed to completion call
     call_kwargs = completion_service.get_response.call_args.kwargs
     assert call_kwargs["mcp_servers"] == mcp_servers
+
+
+@pytest.mark.asyncio
+async def test_get_response_uses_mcp_when_no_knowledge(assistant_with_model):
+    mcp_servers = [MagicMock()]
+    assistant_with_model.mcp_servers = mcp_servers
+    assistant_with_model.collections = []
+    assistant_with_model.websites = []
+
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+
+    await assistant_with_model.get_response(
+        question="test",
+        completion_service=completion_service,
+    )
+
+    call_kwargs = completion_service.get_response.call_args.kwargs
+    assert call_kwargs["mcp_servers"] == mcp_servers
+
+
+@pytest.mark.asyncio
+async def test_get_response_applies_prompt_override(assistant_with_model):
+    completion_service = MagicMock()
+    completion_service.get_response = AsyncMock(return_value=MagicMock())
+
+    await assistant_with_model.get_response(
+        question="test",
+        completion_service=completion_service,
+        prompt_override="runtime prompt",
+    )
+
+    call_kwargs = completion_service.get_response.call_args.kwargs
+    assert call_kwargs["prompt"] == "runtime prompt"
 
 
 @pytest.mark.asyncio
@@ -370,6 +437,20 @@ async def test_ask_uses_runtime_prompt_files_without_mutating_attachments(
     call_kwargs = completion_service.get_response.call_args.kwargs
     assert call_kwargs["prompt_files"] == [stored_attachment, runtime_attachment_image]
     assert assistant_with_model.attachments == [stored_attachment]
+
+
+async def test_unknown_input_capacity_refuses_chunk_budget(assistant_with_model):
+    from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+
+    assistant_with_model.completion_model.max_input_tokens = None
+    with pytest.raises(UnknownModelCapacityError) as error:
+        await assistant_with_model.ask(
+            question="test",
+            references_service=MagicMock(),
+            completion_service=MagicMock(),
+            version=2,
+        )
+    assert error.value.missing_dimensions == ("max_input_tokens",)
 
 
 @pytest.mark.asyncio

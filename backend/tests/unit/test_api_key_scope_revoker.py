@@ -31,7 +31,7 @@ async def test_scope_revoker_updates_and_audits():
     key = _make_key()
     repo = AsyncMock()
     repo.list_by_scope.return_value = [key]
-    repo.update.return_value = key
+    repo.revoke_unrevoked.return_value = key
     audit = AsyncMock()
     user = SimpleNamespace(id=uuid4(), tenant_id=key.tenant_id)
 
@@ -44,10 +44,13 @@ async def test_scope_revoker_updates_and_audits():
     )
 
     assert revoked == 1
-    repo.update.assert_awaited()
+    repo.revoke_unrevoked.assert_awaited()
     assert (
-        repo.update.call_args.kwargs["revoked_reason_code"]
+        repo.revoke_unrevoked.call_args.kwargs["revoked_reason_code"]
         == ApiKeyStateReasonCode.SCOPE_REMOVED.value
     )
-    audit.log_async.assert_awaited()
-    assert audit.log_async.call_args.kwargs["action"] == ActionType.API_KEY_REVOKED
+    # Written in the caller's transaction, never queued outside it.
+    audit.log_async.assert_not_awaited()
+    audit.log.assert_awaited_once()
+    assert audit.log.call_args.kwargs["action"] == ActionType.API_KEY_REVOKED
+    assert audit.log.call_args.kwargs["user"] is user

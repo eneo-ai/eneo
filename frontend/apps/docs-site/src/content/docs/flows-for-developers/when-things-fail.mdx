@@ -1,0 +1,110 @@
+# When things fail
+
+Flow failures use stable machine-readable codes and sanitized messages. Do not
+infer recovery from free text. The authoritative catalog is
+`FlowApiErrorCode` plus `flow_error_taxonomy.py`; generated OpenAPI types expose
+the public vocabulary.
+
+## Where errors appear
+
+| Surface | Contract |
+| --- | --- |
+| HTTP request | normal API error envelope with a stable Flow code |
+| Run | terminal or recoverable `error` payload on the run projection |
+| Step result/attempt | step-local status, code, diagnosis, and evidence |
+| Review | typed lifecycle error with current checkpoint revision/state |
+| Evidence/artifact | explicit unavailable, purged, redacted, or corrupted projection |
+| Health | bounded operator flags and counts from `/api/healthz/flows` |
+
+Provider text, secrets, credentials, raw prompts, and unredacted evidence must
+not be copied into public errors or logs.
+
+## Triage by lifecycle stage
+
+### Authoring and publication
+
+Validation errors mean the draft graph, step contract, variable reference,
+template, resource binding, or model capability is invalid. Correct the draft
+and publish a new immutable version. Runtime must not silently reinterpret an
+invalid published definition.
+
+### Run creation and access
+
+Not-found responses intentionally hide tenant and authorization distinctions.
+Check tenant, space, principal, published version, capacity, input contract, and
+file ownership. A service principal may access only runs and capabilities
+explicitly granted to that principal.
+
+### Dispatch
+
+- A rejected send records a bounded dispatch failure and retries according to
+  the persisted generation.
+- An unknown send outcome remains queued because the broker may have accepted
+  the task.
+- Exhaustion before any accepted/unknown send may terminalize the run.
+- Accepted exhaustion requires generation-fenced owner redispatch after worker
+  and broker health are verified.
+
+Never clear dispatch fields with SQL. Delayed or duplicate tasks are expected
+to converge through worker claim CAS.
+
+### Step execution
+
+Input, extraction, transcription, model-window, provider, HTTP, schema, render,
+and template failures are recorded against the attempt that observed them.
+Before creating a new run, decide whether repeating the provider or external
+effect is safe. A timeout or unknown provider outcome does not prove that the
+remote side did nothing.
+
+### Review
+
+Revision conflicts and inactive/expired checkpoints require a reload. Edited
+payloads must preserve runtime-owned metadata and match the published output
+contract. Approval plus resume is idempotent; rejection and expiry terminalize
+through the normal lifecycle owner.
+
+### Evidence and artifacts
+
+Evidence may honestly report that a source was never captured, was corrupted,
+was redacted, or was removed by retention. Do not synthesize missing provider,
+source, or actor facts. Artifact bytes may be gone while metadata remains; the
+API reports that state instead of returning a broken signed URL.
+
+### Delivery and recovery
+
+Audit and webhook delivery use durable outboxes. Pending/claimed rows may still
+own external effects, so stale-running recovery excludes unsafe rows until the
+delivery lifecycle converges. Dead letters are preserved for diagnosis and
+block retention where required.
+
+The platform maintenance worker performs stale-running reconciliation,
+review-expiry reconciliation, stale-queued redispatch, and outbox delivery.
+There is no Flow-specific scheduler or Celery process.
+
+## Starting again after failure
+
+The final product does not expose partial-step rerun or invalidation. After
+fixing the cause, create a new run from the desired published version. This
+preserves the failed run and its evidence and makes repeated provider/external
+effects explicit.
+
+## Debugging checklist
+
+1. Record tenant, flow, run, step, attempt, and checkpoint identifiers without
+   copying protected payloads.
+2. Read the stable code and lifecycle state, not only the message.
+3. Check execution and maintenance worker health separately.
+4. Inspect dispatch generation, active attempt, review checkpoint, and outbox
+   ownership before changing anything.
+5. Verify whether a remote effect may have succeeded before repeating work.
+6. Use the canonical API/service recovery path; never patch lifecycle state
+   directly in PostgreSQL.
+
+## Source of truth
+
+- Public codes: `backend/src/eneo/flows/flow_api_error_code.py`
+- Taxonomy: `backend/src/eneo/flows/flow_error_taxonomy.py`
+- Run error payloads: `backend/src/eneo/flows/flow_run_error.py`
+- Exception mapping: `backend/src/eneo/flows/api/flow_exception_mapping.py`
+- Health and recovery: `backend/src/eneo/flows/api/flow_runtime_health_router.py`
+- Operator actions: `docs/runbooks/flows.md`

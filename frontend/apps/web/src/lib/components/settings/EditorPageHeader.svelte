@@ -1,5 +1,6 @@
 <script lang="ts">
   import type { Readable } from "svelte/store";
+  import type { ResourceSaveResult } from "$lib/core/editing/ResourceEditor";
   import { fade } from "svelte/transition";
   import { afterNavigate } from "$app/navigation";
   import { page } from "$app/state";
@@ -13,7 +14,7 @@
         currentChanges: Readable<{ hasUnsavedChanges: boolean }>;
         isSaving: Readable<boolean>;
       };
-      saveChanges: () => Promise<boolean>;
+      saveChanges: () => Promise<ResourceSaveResult>;
       discardChanges: () => void;
     };
     resourceName: string;
@@ -33,7 +34,7 @@
 
   async function save() {
     beforeSave?.();
-    if (!(await editor.saveChanges())) return;
+    if (!(await editor.saveChanges()).saved) return;
     showSavedNotice = true;
     clearTimeout(savedNoticeTimeout);
     savedNoticeTimeout = setTimeout(() => {

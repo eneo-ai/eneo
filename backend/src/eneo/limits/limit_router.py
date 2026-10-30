@@ -22,7 +22,7 @@ with_user_container = get_container(
 @router.get(
     "/",
     response_model=Limits,
-    description="Get the configured size and count limits for uploads and crawls.",
+    description="Get configured upload limits.",
     responses=responses.get_responses([]),
 )
 @endpoint_access(
@@ -30,6 +30,6 @@ with_user_container = get_container(
     authorization=Authorization.AUTHENTICATED,
     reason="Tenant members may read their applicable service limits.",
 )
-def get_limits(container: Annotated[Container, Depends(with_user_container)]):
+async def get_limits(container: Annotated[Container, Depends(with_user_container)]):
     service = container.limit_service()
-    return service.get_limits()
+    return await service.get_limits()

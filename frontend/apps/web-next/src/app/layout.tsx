@@ -6,7 +6,7 @@ import { ThemeProvider } from "next-themes";
 import { Providers } from "@/components/providers";
 import { ThemeColor } from "@/components/providers/theme-color";
 import { Toaster } from "@/components/ui/sonner";
-import { eneoTheme } from "@/theme/eneo";
+import { ENEO_THEME_NAME } from "@/theme/theme-name";
 import { surfaceColors } from "@/theme/surface-colors";
 import "@/styles/globals.css";
 
@@ -59,7 +59,7 @@ export default async function RootLayout({
       lang={locale}
       // The Astryx theme scope, server-rendered so tokens exist on <html> (and
       // in portals) from first paint; the root <Theme> keeps it in sync.
-      data-astryx-theme={eneoTheme.name}
+      data-astryx-theme={ENEO_THEME_NAME}
       className="antialiased"
       suppressHydrationWarning
     >

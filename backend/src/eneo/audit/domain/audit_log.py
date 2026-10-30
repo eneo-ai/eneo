@@ -58,6 +58,7 @@ class AuditLog:
     description: str
     metadata: dict[str, Any]
     outcome: Outcome
+    actor_api_key_id: Optional[UUID] = None
     ip_address: Optional[str] = None
     user_agent: Optional[str] = None
     request_id: Optional[UUID] = None

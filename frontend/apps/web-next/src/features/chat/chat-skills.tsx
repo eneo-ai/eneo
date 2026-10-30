@@ -16,8 +16,8 @@ import {
   type ReactNode,
   type RefObject
 } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
-import { TextInput } from "@/components/astryx/text-input";
+import { Banner } from "@astryxdesign/core/Banner";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import {
@@ -353,7 +353,7 @@ function SkillsPanel({
             )}
           >
             {layer?.status === "suspended" && layer.reason && (
-              <QuietBanner
+              <Banner
                 status="warning"
                 title={t("personal_chat_skills_paused_title")}
                 description={layerReasonText(layer.reason, layer.detail, t)}

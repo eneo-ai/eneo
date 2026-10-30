@@ -1,0 +1,252 @@
+# Transcription and speaker identification
+
+A flow that takes recorded audio turns it into text. This guide shows administrators and operators how to set up the three parts an organisation can use for that, and how to keep a speaker identification service working.
+
+| What you want                             | What you connect                                                                | Example server                                                                                    | Where in the admin interface                                                                   |
+| ----------------------------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------- |
+| A transcript of a recording               | A transcription model on a model provider                                       | Any provider that serves a transcription model, such as [vadsa](https://github.com/eneo-ai/vadsa) | **Admin → Models → Transcription models**, section **Transcription models**                    |
+| The text on screen while someone records  | A transcription model on a provider of type vLLM, marked for live transcription | vadsa                                                                                             | The same section, in the model's **Edit model** dialog                                         |
+| Word times, and labels that say who spoke | A speaker identification service                                                | [Vemsa](https://github.com/eneo-ai/vemsa)                                                         | **Admin → Models → Transcription models**, section **Word timings and speaker identification** |
+
+In the Swedish interface the path is **Administratör → Modeller → Transkription**, and the two sections are **Transkriberingsmodeller** and **Ordtider och talaridentifiering**.
+
+Only flows use live transcription and speaker identification services.
+
+## How the parts work together
+
+- **The flow's transcription model always writes the text.** A speaker identification service never does, so the live text and the final transcript come from the same model.
+- **A speaker identification service places the words in time, and labels who spoke when a run asks for labels.** When the model has written the text, Eneo sends the service the audio file and the transcript with its timestamps. Without speaker labels, the service returns the time of every word: the transcript keeps the model's text exactly, so the steps after it read no timestamps, and a reader can play the recording from any word. With speaker labels, the service returns the same text with a speaker label on each line, such as `SPEAKER_00` and `SPEAKER_01`. Either way this adds one upload of the audio and the service's processing time to the run.
+- **Eneo uses the service the flow chose in every run, when the flow's space can use it.** A space can use a service that it has been given access to, that is switched on, and whose security class is not lower than the space's. A run labels speakers when the flow's speaker identification setting says so, unless the app that starts the run chooses otherwise. A flow uses only the service stored in the flow: the one its author chose, or the organisation's default that Eneo filled in when the draft was saved. Nothing is chosen when a flow runs, and a stored service is never replaced with another.
+- **Without a chosen service, a flow still transcribes.** The transcript then has no word times and no speaker labels. The exception is a flow with a step that maps speakers to names, which needs the labels. See [Use speaker identification in a flow](#use-speaker-identification-in-a-flow).
+- **Word times never stop a run.** When the service cannot time the words, the run goes on with the model's text without word times, and the step's details record why. A run that labels speakers fails when the service cannot label them.
+
+## Set up a transcription model
+
+Before you start, make sure the provider's endpoint is reachable from the Eneo backend and workers, and that you are signed in as an administrator.
+
+1. Add the provider and the transcription model as described in [Adding a provider](/guides/ai-providers#adding-a-provider-admin-ui). A provider that sends [outbound headers](/guides/ai-providers#outbound-headers) cannot transcribe, so put transcription models on a provider without them.
+2. Give each space that needs the model access to it. In the space's **Settings**, under **Advanced Settings**, switch the model on in **Transcription models**.
+3. Check the result. In the new web app, open a flow draft in the space, choose **Change settings** and turn on **Transcribe audio** in the **Transcription** part. The model is in the **Transcription model** list.
+
+A flow stores the model it transcribes with, and Eneo never picks one on its own. To spare flow authors the choice, mark one transcription model as the organisation's default: open the model's **Edit** dialog and tick **Default** (**standard**). Flows that are imported then get that model filled in, in spaces that can use it. With no default marked, the author chooses the model in the flow's transcription settings, and the flow cannot be published until one is chosen.
+
+## Set up live transcription
+
+An app that records audio for a flow can show the text while someone speaks. When the recording ends, the app uploads it to the flow run as usual. If the live session heard the whole recording, the app can hand its transcript to the run, and the run uses that text without transcribing the recording again. In every other case, and when Eneo cannot match the live transcript to the uploaded recording, the flow's transcription model transcribes the recording. To build the app side, see [Show live text while recording](/guides/flows/integrating-flows#show-live-text-while-recording).
+
+Live transcription needs a transcription model on a server that implements vLLM's realtime transcription API, such as vLLM or [vadsa](https://github.com/eneo-ai/vadsa). vadsa is a Swedish speech recognition server for the [KlangAI/pianissimo-sv](https://huggingface.co/KlangAI/pianissimo-sv) model, published as images under `ghcr.io/eneo-ai/vadsa`. The Eneo backend opens the realtime connection itself: it connects to `/v1/realtime` under the provider's endpoint (`ws://` for an `http://` endpoint, `wss://` for an `https://` endpoint) and sends the provider's API key as a bearer token.
+
+Before you start, make sure the model server is reachable from the Eneo backend and workers, and that you are signed in as an administrator.
+
+1. **Add the server as a provider.** In **Admin → Models**, add a provider of type **vLLM**. Set **Endpoint** to the server's root URL, for example `http://vadsa:8000`, and **API Key** to one of the server's keys. For vadsa, use one of the keys in `VADSA_API_KEYS`.
+2. **Add the transcription model.** Add a transcription model on that provider, with the name the server serves as its identifier. For vadsa, the identifier is `KlangAI/pianissimo-sv` unless `VADSA_SERVED_MODEL_NAME` sets another name.
+3. **Mark the model for live transcription.** In **Admin → Models → Transcription models**, open the model's actions menu (the **⋯** button) and choose **Edit model**. Select **Live transcription** and choose **Save**. You can also select it in the model step while you add the model. In the Swedish interface the path is **Administratör → Modeller → Transkription**, then **Redigera modell**, and the checkbox is **Livetranskribering**.
+
+   The checkbox is available only for a model on a provider of type vLLM. For any other provider it is disabled, with the note "Requires a provider of type vLLM." After you save, the model's **Details** column (**Detaljer**) in the table shows the live transcription icon, a sound wave with the tooltip "The model can write out speech while someone is talking".
+
+   To automate this step, set `supports_realtime` through the admin API instead. Look up the model's `id` with `GET /api/v1/transcription-models/`, then:
+
+   ```bash
+   curl -X PUT "https://eneo.example.com/api/v1/admin/tenant-models/transcription/$MODEL_ID/" \
+     -H "Authorization: Bearer $ADMIN_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"supports_realtime": true}'
+   ```
+
+   The API applies the same rule: for a provider that is not of type vLLM, Eneo answers `400`. You can also send `"supports_realtime": true` when you create the model with `POST /api/v1/admin/tenant-models/transcription/`.
+
+4. **Use the model in a flow.** Enable the model in the space settings under **Transcription models**, choose it as the flow's transcription model, and publish the flow.
+5. **Check the flow.** Request `GET /api/v1/flows/{id}/run-contract/`. The response contains `"live": { "available": true, "reason": null }` inside `transcription`.
+
+If `transcription` is `null`, the flow has no audio input step or does not transcribe audio. If `transcription.live.available` is `false`, `transcription.live.reason` says why:
+
+| `reason`                 | Meaning                                                                                 |
+| ------------------------ | --------------------------------------------------------------------------------------- |
+| `transcription_disabled` | The flow does not transcribe audio.                                                     |
+| `model_unavailable`      | The flow has no transcription model, or its model is not available in the flow's space. |
+| `model_not_realtime`     | The model is not marked for live transcription, or its provider is not of type vLLM.    |
+
+### Proxy and session limits
+
+Apps connect to the live transcription WebSocket at `/api/v1/live-transcription`, under the same `/api/` prefix as the `/api/v1/ws` socket. A reverse proxy that meets the [WebSocket requirement](/guides/deployment#reverse-proxy-requirements) passes it without changes.
+
+A live session accepts at most `FLOW_AUDIO_MAX_DURATION_SECONDS` of audio, the same limit as an uploaded recording. `FLOW_LIVE_TRANSCRIPTION_IDLE_TIMEOUT_SECONDS` and `FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS` bound how long a session waits for audio and for the final text; see [Environment configuration](/guides/deployment#environment-configuration).
+
+## Connect a speaker identification service
+
+Before you start, make sure that:
+
+- The service serves the job API that Vemsa defines: `/v1/jobs` for jobs and an authenticated `/v1/health/ready`, both with a bearer key. It must accept jobs that time the words of a transcript Eneo supplies (`timestamp`) and label its speakers (`diarize`). A general speech-to-text API does not qualify.
+- The service's address is reachable from the Eneo backend, which tests the connection, and from the flow execution worker (`task-execution-worker`), which sends the audio during a run.
+- You have an API key that the service issued for Eneo.
+- Eneo has an `ENCRYPTION_KEY`. Eneo stores the service's key encrypted and refuses to save it without one.
+- You are signed in as an administrator.
+
+1. Open **Admin → Models → Transcription models** and go to the **Word timings and speaker identification** section (**Ordtider och talaridentifiering**).
+2. Choose **Connect service** (**Anslut tjänst**).
+3. Fill in the dialog:
+
+   | Field                                   | What to enter                                                                                                                                                                                    |
+   | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+   | **Name** (**Namn**)                     | A name that space administrators and flow authors recognise. It must be unique in your organisation.                                                                                             |
+   | **Address** (**Adress**)                | The service's base address, for example `https://vemsa.kommun.se`. It starts with `http://` or `https://` and contains no user name, password, `?` or `#`. Eneo removes a trailing `/` or `/v1`. |
+   | **API key** (**API-nyckel**)            | The key the service issued for Eneo. Eneo never shows it again.                                                                                                                                  |
+   | **Security class** (**Säkerhetsklass**) | Optional. A space that has a security class can use the service only when the service's class is the same or higher. A service without a class can be used only by spaces without one.           |
+
+4. Choose **Connect** (**Anslut**). The dialog stays open and Eneo tests the connection.
+5. Check the result in the dialog. The connection works when it shows **Accepting jobs** with the text "The service can identify speakers." Then choose **Done** (**Klar**).
+
+The service is switched on from the start, but no space can use it until you [give the space access](#give-a-space-access-to-a-service).
+
+### What the connection test checks
+
+The test is one request with the service's key to `/v1/health/ready` on the service. It sends no audio and starts no job, and it waits at most 10 seconds for the answer.
+
+| Status                                                                            | What it means                                                                                                                                                                                           | What to do                                                                                            |
+| --------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| **Accepting jobs** (**Tar emot jobb**), with "The service can identify speakers." | The service answered, accepted the key, would take a job from Eneo now, and lists speaker identification among its tasks.                                                                               | Nothing.                                                                                              |
+| **Accepting jobs**, with "The service does not say which tasks it can handle."    | The service would take a job, but its answer has no task list, so Eneo cannot tell whether it identifies speakers.                                                                                      | Upgrade the service if it is an older Vemsa. Otherwise run a flow with a short recording to find out. |
+| **Cannot identify speakers** (**Kan inte identifiera talare**)                    | The service would take a job, but its task list does not include speaker identification.                                                                                                                | Connect a service that identifies speakers.                                                           |
+| **Not accepting jobs right now** (**Tar inte emot jobb just nu**)                 | The service answered and accepted the key, but its queue has no room for a job from Eneo.                                                                                                               | Test again later. If it happens often, raise the queue limits on the service.                         |
+| **Not available** (**Inte tillgänglig**)                                          | Eneo got no usable answer: the address is wrong or unreachable from the backend, the service is down or reports that it is not ready, or the answer did not come from a speaker identification service. | Check the address, the network path from the backend, and that every part of the service is running.  |
+| **Key not accepted** (**Nyckeln godtogs inte**)                                   | The service refused the key.                                                                                                                                                                            | Choose **Edit**, enter a new key and save.                                                            |
+
+### How the status is kept
+
+Eneo stores the latest test result with the service. Every administrator sees it in the **Connection** column (**Anslutning**), together with when the test ran, such as "Tested 2 minutes ago" (**Testad för 2 minuter sedan**). Point at that text to see the exact time.
+
+The status describes the latest test, not the service as it is now. Eneo does not test in the background, and a failed flow run does not change the status. To refresh it, open the service's actions menu (the **⋯** button) and choose **Test the connection** (**Testa anslutningen**).
+
+A service whose current address and key have not been tested shows **Not tested** (**Inte testad**).
+
+### Connect a service through the API
+
+An administrator can do the same through the API under `/api/v1/admin/transcription-services/`: `POST` connects a service, `PATCH` on `/api/v1/admin/transcription-services/{id}/` changes it, `DELETE` removes it, and `POST /api/v1/admin/transcription-services/{id}/check/` tests it and stores the result. The admin interface tests on its own when you connect a service and when you save a new address or key. The API does not, so call the check yourself. The request and response fields are in your instance's OpenAPI specification, see [API reference](/docs/api#base-url-and-openapi-specification).
+
+The stored result, `last_check`, says whether the service identifies speakers (`identifies_speakers`) and whether it times words (`times_words`), each `null` when the service lists no tasks. When the test got no usable answer, `reason` says why: `unreachable` (no connection or response), `timeout` (no answer within 10 seconds), `http_status` (another status than `200`, given in `status_code`), `malformed` (an answer that is not a readiness answer) or `credentials` (the key was refused).
+
+## Give a space access to a service
+
+A space administrator does this for each space. The service must be switched on, and its security class must not be lower than the space's.
+
+1. Open the space and choose **Settings** (**Inställningar**).
+2. Under **Advanced Settings** (**Avancerade inställningar**), find **Word timings and speaker identification** (**Ordtider och talaridentifiering**). The row lists every service your organisation has connected, by name only.
+3. Switch the service on. Eneo saves the change at once.
+4. Check the result. In the new web app, open a flow draft in the space and choose **Change settings** (**Ändra inställningar**). With transcription on, the service is listed under **Word timings and speakers** (**Ordtider och talare**) in the **Transcription** (**Transkribering**) part.
+
+The list says which service is the organisation's default. A service that cannot be added shows the reason next to its name: "Turned off by an administrator." or "The security class is lower than the space's." A service that was added before it became unusable stays in the list with that reason, and you can still switch it off.
+
+Access does not make a flow use the service. Each flow stores its own service: the author's choice, or [the organisation's default](#set-a-default-service) filled in when the draft is saved. Giving the space a second service therefore changes nothing for the flows that already run.
+
+To replace a server without asking every author to choose again, [change the address of the existing service](#change-switch-off-or-remove-a-service) instead of connecting a second one.
+
+## Set a default service
+
+An administrator can mark one service as the organisation's default, so that flow authors do not have to choose it in every flow.
+
+1. Open **Admin → Models → Transcription models** and go to the **Word timings and speaker identification** section.
+2. Open the service's actions menu (the **⋯** button) and choose **Edit** (**Redigera**).
+3. Tick **Default for new flows** (**Standard för nya flöden**) and save.
+4. Check the result. The service shows **Default** (**Standard**) in the list. Only one service can be the default: marking another one moves the mark.
+
+You can also tick **Default for new flows** in the dialog when you connect a service.
+
+What the default does:
+
+- When a flow draft that transcribes is saved without a choice of service, Eneo stores the default as the flow's service, whether or not the flow identifies speakers. This happens only in a space that can use the service, and it also covers flows that are imported. A flow whose author chose no service keeps that choice.
+- The author sees the service in the flow's transcription settings, marked "(default)" ("(förval)"), and can choose another.
+- The default only fills in drafts. A published flow keeps the service it was published with: marking another service, or clearing the mark, changes nothing for it.
+- Eneo never works out a default on its own. With no default marked, or in a space that cannot use the default, the author chooses.
+
+To mark the default through the API, send `{"is_default": true}` in the `PATCH` of the service.
+
+## Use word timings and speaker identification in a flow
+
+Flows are built in the new web app. Flow authors choose these on the flow's page under **Settings** (**Inställningar**): choose **Change settings** (**Ändra inställningar**) and go to the **Transcription** (**Transkribering**) part. A published flow is read-only, so unpublish it to change these settings and publish it again to apply them. When the space has no service it can use, the part says that the transcription is text only.
+
+1. Under **Word timings and speakers** (**Ordtider och talare**), choose the service. The list shows the services the space can use, and **None, text only** (**Ingen, bara text**). When your organisation has a default service that the space can use, Eneo fills it in when the draft is saved, and you can choose another. Otherwise choose the service yourself: Eneo never picks one on its own, also when the space has only one. The line under the list says what the choice means, for example that audio and transcript are sent to the service for word timings.
+2. With a service, every word of the transcript gets a time: a reader can click a word and hear it, and the word being said lights up. The text the flow's next steps read stays the transcription model's own text, so word timings add no tokens. Choosing **None, text only** keeps the transcript as text: no audio goes to a service, and speakers cannot be identified.
+3. Turn on **Label speakers** (**Märk talare**) to also label who says what. Turning it off keeps the service, and the words are still timed. A flow with speaker identification on cannot be published until a service is chosen. When a step names the speakers, the switch is always on and the flow needs a service.
+4. Leave **Most speakers** (**Högst antal talare**), which appears when speakers are labelled, empty to let the service count the speakers. The empty field shows "Counted automatically" ("Räknas automatiskt"). Enter a whole number of at least 1 to set the most speakers the service may label.
+5. Save the settings and publish the flow.
+6. Check the result. Run the flow with a recording of two people. With speakers identified, each line of the transcript starts with a time range and a label, such as `[00:00:12 - 00:00:15] SPEAKER_00:`.
+
+When the words could not be timed, for example because the service did not answer, the step still finishes with the model's text, and the transcription records `word_timing` as `{"status": "failed", "reason": ...}`. A flow that identifies speakers fails the step instead, since the labels are part of what it promised.
+
+A chosen service is never replaced by another. If it can no longer be used in the space, the flow's settings name the service and say why, and the flow gets no word times and identifies no speakers until you choose again.
+
+A step that maps speakers to names, **Review transcript** (**Granska transkript**), needs the labels. A flow with such a step labels speakers in every run, so the editor keeps **Identify speakers** on and does not offer **None – text only**, and the flow cannot be published without a chosen service. When the chosen service can no longer be used, Eneo's run dialog says so before anything is recorded: "This flow cannot be run right now" (**Flödet kan inte köras just nu**), with the reason. An app sees the same reason in the run contract as `transcription.speaker_labels.unavailable_reason`, see [Check that speaker labels can be produced](/guides/flows/integrating-flows#check-that-speaker-labels-can-be-produced).
+
+An app that starts runs through the API can choose labels and a speaker limit for each run. See [Live text and speaker labels](/guides/flows/integrating-flows#live-text-and-speaker-labels).
+
+## Change, switch off or remove a service
+
+Open **Admin → Models → Transcription models** and go to the **Word timings and speaker identification** section.
+
+**Change the name or security class.** Open the service's actions menu and choose **Edit** (**Redigera**). The stored status is kept. If you lower the security class below a space's class, that space can no longer use the service.
+
+**Change the address or the key.** In **Edit**, enter the new value. To keep the saved key, leave **API key** empty. A new address always needs the key entered again, because Eneo never sends a stored key to another address. Saving a new address or key clears the stored status, and the admin interface tests the new settings at once. To move to another server, change the address and key here: spaces keep their access and flows keep the service they chose.
+
+**Switch a service off.** Turn off the switch in the **Active** column (**Aktiv**). When spaces use the service, Eneo first asks you to confirm and says how many spaces use it. No new run uses a service that is switched off. A step that has already started keeps the service it started with. Spaces keep their access, so switching the service on again restores word times and speaker identification everywhere.
+
+**Remove a service.** Open the actions menu and choose **Remove** (**Ta bort**), then confirm. Eneo removes the service and every space's access to it. If you connect the same server again, it is a new service: give the spaces access again, and choose it again in each flow that had chosen the old one.
+
+After you switch off or remove a service, or take away a space's access:
+
+| Who                                                                    | What they see                                                                                                                                                                                                                                                                                          |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| A space administrator                                                  | In the space's settings, a service that is switched off shows "Turned off by an administrator." A removed service is gone from the list.                                                                                                                                                               |
+| The author of a flow that had chosen this service                      | The editor names the service and says why it cannot be used, for example "Vemsa has been switched off by an administrator.", and asks the author to choose another service, or **None – text only**. A removed service is no longer named. The flow cannot be published again until then. |
+| A person who runs a flow that had chosen this service                  | New runs give a transcript without word times and speaker labels. The run dialog says so before the recording: "Speakers are not identified in this run" (**Talare identifieras inte i den här körningen**), with the reason.                                                                          |
+| A person who runs such a flow when it has a **Review transcript** step | The run dialog says "This flow cannot be run right now" with the reason, before anything is recorded. A run started through the API fails at its audio step with `typed_io_speaker_service_unavailable`.                                                                                               |
+
+## Troubleshooting
+
+| Symptom                                                                                              | Likely cause                                                                                                                                                                                                                                                                                                                                                                                                      | What to do                                                                                                                                                                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| The connection shows **Key not accepted**                                                            | The service answered `401`: the key is not one it accepts.                                                                                                                                                                                                                                                                                                                                                        | Enter a new key under **Edit** and save. For Vemsa, the key is the part after `=` in an entry of `VEMSA_API_TOKENS`.                                                                                                                                                                                                                                                          |
+| The connection shows **Not available**                                                               | The backend got no usable answer within 10 seconds: a wrong address, a firewall between the backend and the service, a service that is down, or a server that is not a speaker identification service. Vemsa also answers that it is not ready, with `503`, while its worker or its database is down.                                                                                                             | From the backend host, request `/v1/health/ready` on the service with the key. A Vemsa started with its Compose file publishes its API on `127.0.0.1` unless `VEMSA_BIND` is set.                                                                                                                                                                                             |
+| The connection shows **Not accepting jobs right now**                                                | The service's queue has no room for Eneo's key.                                                                                                                                                                                                                                                                                                                                                                   | Test again later. For Vemsa, raise `VEMSA_MAX_QUEUED_JOBS_PER_CLIENT` or `VEMSA_MAX_QUEUED_JOBS`, or add workers.                                                                                                                                                                                                                                                             |
+| The connection shows **Cannot identify speakers**                                                    | The service lists its tasks, and speaker identification (`diarize`) is not one of them.                                                                                                                                                                                                                                                                                                                           | Connect a service that identifies speakers.                                                                                                                                                                                                                                                                                                                                   |
+| The connection shows **Accepting jobs**, but runs fail with `typed_io_speaker_identification_failed` | The model wrote the text and the service then failed. The flow execution worker cannot reach the address, the service refused the key or the job, the job failed or was cancelled on the service, or the service cannot label a transcript it did not write.                                                                                                                                                      | Read `transcription_failure_kind` (`input`, `capacity`, `provider`, `internal` or `cancelled`) and `transcription_service_reason` in the run error's `details`. Test the connection, check that `task-execution-worker` reaches the address, and read the service's log. The person can run again. A flow that lets a run choose speaker labels can also be run without them. |
+| A run fails with `typed_io_speaker_service_unavailable`                                              | The run needs speaker labels, but the service the flow chose cannot be used in the flow's space. Eneo stops the step before it transcribes anything. The run was started through the API without checking the run contract, or the service became unusable after the run was created.                                                                                                                             | Read `speaker_service_gap` in the run error's `details` and use the table below.                                                                                                                                                                                                                                                                                              |
+| A run fails with `flow_step_timeout` while speakers are identified                                   | The step's time limit ran out while the job waited or ran on the service. With `transcription_failure_kind` set to `capacity`, the service kept refusing the job because its queue was full.                                                                                                                                                                                                                      | Check the service's queue and workers. Raise its queue limits, or the step's time limit.                                                                                                                                                                                                                                                                                      |
+| Transcripts have no word times                                                                       | The flow chose no service, or the service could not time the words. The step's transcription details record `word_timing` with a `reason`: `unavailable` (the service could not be used or reached), `unsupported` (the service does not accept the `timestamp` task), `credentials` (the key was refused), `failed` (the job failed on the service) or `no_timings` (the service returned no usable word times). | Check the flow's transcription settings and the space's **Word timings and speaker identification** setting. For `unsupported`, upgrade the service; otherwise test the connection and read the service's log.                                                                                                                                                               |
+| Transcripts have no speaker labels                                                                   | The flow has speaker identification off, the run chose no labels, or the flow's chosen service could not be used when the run was created. In the last case the run dialog said "Speakers will not be labelled in this run".                                                                                                                                                                                        | Check the flow's transcription settings and the space's **Word timings and speaker identification** setting.                                                                                                                                                                                                                                                                  |
+
+`speaker_service_gap` has one of two values:
+
+| `speaker_service_gap` | Meaning                                                                                                                                                                                                                                  | What to do                                                                                          |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `picked_unavailable`  | The service the flow's author chose can no longer be used in the space: it was removed or switched off, the space lost access, or its security class is now lower than the space's. Eneo does not replace a chosen service with another. | Choose another service in the flow and publish again, or restore the service or the space's access. |
+| `not_chosen`          | The flow needs speaker labels and its author has chosen no service. Eneo does not publish a flow in this state, so the value is a safeguard.                                                                                             | Choose a service in the flow and publish again.                                                     |
+
+For every run error code, see [Error codes](/guides/flows/reference/errors).
+
+## Run Vemsa and vadsa
+
+Both servers are separate projects: [Vemsa](https://github.com/eneo-ai/vemsa) identifies speakers, and [vadsa](https://github.com/eneo-ai/vadsa) transcribes. Each has a quick start that takes you from an empty host to a server connected to Eneo: the [Vemsa quick start](https://github.com/eneo-ai/vemsa/blob/main/docs/QUICKSTART.md) and the [vadsa quick start](https://github.com/eneo-ai/vadsa/blob/main/docs/quickstart.md). Eneo depends on these settings on their side.
+
+**Vemsa**
+
+| Setting                                                     | What Eneo depends on                                                                                                                                                                                                                                                      |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VEMSA_API_TOKENS`                                          | Comma-separated credentials of the form `client_id=token`. Give Eneo its own entry, for example `eneo=` followed by a long random value, and enter the part after `=` as the **API key** in Eneo. Every space that uses the connection shares this one client.            |
+| `VEMSA_BIND`                                                | The Compose file publishes the API on `127.0.0.1`. Set a private address that the Eneo backend and the flow execution worker reach, or attach the API to a Docker network that Eneo shares with Vemsa's `compose.eneo.yaml`. Eneo then reaches it at `http://vemsa:8000`. |
+| `VEMSA_MAX_QUEUED_JOBS_PER_CLIENT`, `VEMSA_MAX_QUEUED_JOBS` | The most jobs one client and all clients may have waiting or running, `10` and `100` by default. When Eneo's share is used up, the connection test shows **Not accepting jobs right now** and a run waits for room until its step's time limit.                           |
+| `VEMSA_MAX_AUDIO_BYTES`                                     | The largest audio file Vemsa accepts, 2 GiB by default. Keep it at or above the largest audio file your flows accept.                                                                                                                                                     |
+| `VEMSA_ENGINE`                                              | Eneo only asks Vemsa to time words and label speakers, never to transcribe, so the `diarize` engine, which loads no speech recognition model, is enough.                                                                                                                  |
+
+A current Vemsa lists its tasks in its readiness answer, which is how Eneo knows that it times words and identifies speakers. A Vemsa without the `timestamp` task refuses the timing jobs; runs then keep the model's text without word times.
+
+**vadsa**
+
+| Setting                     | What Eneo depends on                                                                                                                                                                                                                                   |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `VADSA_API_KEYS`            | Comma-separated bearer keys. Enter one as the provider's **API Key** in Eneo.                                                                                                                                                                          |
+| `VADSA_SERVED_MODEL_NAME`   | The name Eneo must use as the transcription model's identifier, `KlangAI/pianissimo-sv` by default.                                                                                                                                                    |
+| `VADSA_BIND`, `VADSA_PORT`  | The Compose file publishes the server on `127.0.0.1:8000`. Set an address that the Eneo backend and workers reach, or attach vadsa to a Docker network that Eneo shares with vadsa's `compose.eneo.yaml`. Eneo then reaches it at `http://vadsa:8000`. |
+| `VADSA_MAX_SESSION_SECONDS` | The most audio a live session may send, 5 hours by default. Keep it at or above Eneo's `FLOW_AUDIO_MAX_DURATION_SECONDS`, so that Eneo's limit and message come first.                                                                                 |
+| `VADSA_FINALIZE_SECONDS`    | The longest vadsa takes to send the final text of a live session, 45 seconds by default. Keep it below Eneo's `FLOW_LIVE_TRANSCRIPTION_FINAL_TEXT_TIMEOUT_SECONDS`.                                                                                    |
+
+vadsa transcribes Swedish only. In a flow that uses it, set **Language** in the flow's transcription settings to **Svenska** or **Detect the language**.

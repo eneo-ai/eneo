@@ -10,6 +10,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
 import { useTranslations } from "use-intl";
 import {
+  memo,
   useCallback,
   useEffect,
   useEffectEvent,
@@ -49,14 +50,23 @@ import { conversationUploads, type PanelContents } from "./side-panel/panel-cont
 import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
 import { SidePanel, type SidePanelLayout } from "./side-panel/side-panel";
+import type { ToolCallRecord } from "./side-panel/message-tool-calls";
+import { finishedToolCallIds, newlyFinishedToolCalls } from "./finished-tool-calls";
 import { SidePanelProvider, useSidePanel } from "./side-panel/use-side-panel";
 import { appViewSubject, appViewTitle, messageAppViewCalls } from "@/features/mcp-apps/mcp-apps";
 import type { PreviewFile } from "@/features/workspace/preview/preview-kind";
 import { useAnswerFeedback } from "./answer-feedback";
 import { disabledCapabilitiesForRequest } from "./chat-capabilities";
 import { matchesUpload } from "./chat-attachment-plan";
-import { ChatMessage, PendingAnswer, PendingQuestion, type ActivityRequest } from "./chat-message";
-import { Composer } from "./composer";
+import {
+  ChatMessage,
+  PendingAnswer,
+  PendingQuestion,
+  type ActivityRequest,
+  type ToolCards
+} from "./chat-message";
+import type { ChatReferences } from "./chat-references";
+import { Composer, type ComposerHandle } from "./composer";
 import { ComposerDock, ConversationLayout } from "./conversation-layout";
 import {
   pendingTools,
@@ -69,7 +79,7 @@ import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
-import { StartState } from "./start-state";
+import { StartState, type StartHeadingLevel } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
 
@@ -128,17 +138,47 @@ function quietLog(element: HTMLDivElement | null) {
  * conversation can be rated on its own; the rating starts from the one stored
  * with the answer.
  */
-function ConversationMessage({
+const ConversationMessage = memo(function ConversationMessage({
   sessionId,
+  onToggleActivity,
   ...props
-}: Omit<ComponentProps<typeof ChatMessage>, "feedback"> & { sessionId: string | null }) {
+}: Omit<ComponentProps<typeof ChatMessage>, "feedback" | "onActivityToggle"> & {
+  sessionId: string | null;
+  /** One handler for every message, so a finished message's props stay the same. */
+  onToggleActivity: (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => void;
+}) {
   const { message, isStreaming } = props;
   const [rating, rate] = useAnswerFeedback(message.id, message.metadata?.feedback ?? null);
   const feedback =
     sessionId !== null && message.role === "assistant" && !isStreaming
       ? { value: rating, onChange: (value: AnswerRating) => rate(sessionId, value) }
       : null;
-  return <ChatMessage {...props} sessionId={sessionId} feedback={feedback} />;
+  return (
+    <ChatMessage
+      {...props}
+      sessionId={sessionId}
+      feedback={feedback}
+      onActivityToggle={(trigger, request) => onToggleActivity(message.id, trigger, request)}
+    />
+  );
+});
+
+/**
+ * What a file list shows of each file, as one string: a file's content (an
+ * upload's transcription) never changes under its id, so it is left out.
+ */
+function previewFilesKey(files: readonly PreviewFile[]): string {
+  return JSON.stringify(
+    files.map((file) => [
+      file.id,
+      file.name,
+      file.mimetype,
+      file.size,
+      file.original_size,
+      file.revises_file_id,
+      file.created_at
+    ])
+  );
 }
 
 type ChatViewProps = {
@@ -172,6 +212,27 @@ type ChatViewProps = {
   onPanelOpenChange?: (open: boolean) => void;
   /** The row the side panel shares with the page's history. */
   layout?: SidePanelLayout;
+  /**
+   * A tool call of this visit reached its result or failed, once per call
+   * (calls already in `initialMessages` are not reported). For a page that
+   * shows what the conversation's tools change, such as a flow's definition.
+   */
+  onToolCallFinished?: (call: ToolCallRecord) => void;
+  /** An answer ended: finished, stopped or failed. */
+  onAnswerFinished?: () => void;
+  /**
+   * Outline level of the start state's heading: 1 (default) on a chat page,
+   * lower where the chat sits inside a page with its own h1.
+   */
+  startHeadingLevel?: StartHeadingLevel;
+  /** What the conversation can refer to (the flow chat's steps and values). */
+  references?: ChatReferences;
+  /** A card the page draws for a tool call of an answer (the flow chat's run card). */
+  toolCards?: ToolCards;
+  /** Controls after the composer's pills (the flow chat's Fråga/Redigera picker). */
+  footerActions?: ReactNode;
+  /** The text field's placeholder, when the page has a better one than "Fråga …". */
+  placeholder?: string;
 };
 
 /**
@@ -204,7 +265,14 @@ function ConversationView({
   activity,
   onActivityChange,
   onPanelOpenChange,
-  layout
+  layout,
+  onToolCallFinished,
+  onAnswerFinished,
+  startHeadingLevel,
+  references,
+  toolCards,
+  footerActions,
+  placeholder
 }: ChatViewProps) {
   const t = useTranslations();
   const { can } = useAppContext();
@@ -255,11 +323,15 @@ function ConversationView({
       mounted.current = false;
     };
   }, []);
+  // What the context window holds after the last turn: the final provider
+  // request's counts. The cumulative prompt/completion sums every tool round
+  // (each re-sends the conversation) and only stands in for rows saved
+  // before the final request's counts were recorded.
   const [lockedTokens, setLockedTokens] = useState(() => {
-    const last = initialMessages[initialMessages.length - 1];
+    const tokens = initialMessages[initialMessages.length - 1]?.metadata?.tokens;
     return {
-      input: last?.metadata?.tokens?.prompt ?? 0,
-      output: last?.metadata?.tokens?.completion ?? 0
+      input: tokens?.contextPrompt ?? tokens?.prompt ?? 0,
+      output: tokens?.contextCompletion ?? tokens?.completion ?? 0
     };
   });
   // Running conversation total, seeded from history (sum of each turn's
@@ -283,16 +355,16 @@ function ConversationView({
   // docked one (and a first question that fails before it is sent swaps
   // back); keep keyboard focus in the composer (WCAG 2.4.3).
   const dockElement = useRef<HTMLDivElement | null>(null);
-  const dockTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const startTextareaRef = useRef<HTMLTextAreaElement>(null);
-  const startDockTextareaRef = useRef<HTMLTextAreaElement>(null);
+  const dockInputRef = useRef<ComposerHandle>(null);
+  const startInputRef = useRef<ComposerHandle>(null);
+  const startDockInputRef = useRef<ComposerHandle>(null);
   // Phones dock the start composer where it stays (decision 5): CSS picks
   // from the first paint, and once the width is known the other place goes.
   const phone = useMediaMatch(PHONE);
   /** The start composer's field the user has: docked on phones, centred from 640px. */
-  const startTextarea = () =>
-    ((phone ?? window.matchMedia(PHONE).matches) ? startDockTextareaRef : startTextareaRef).current;
-  const startField = useEffectEvent(startTextarea);
+  const startInput = () =>
+    ((phone ?? window.matchMedia(PHONE).matches) ? startDockInputRef : startInputRef).current;
+  const startField = useEffectEvent(startInput);
   const refocusComposer = useRef(false);
   // Crossing 640px (a phone turned, a window resized) swaps the start
   // composer's place, and the field being typed in goes with it: the new
@@ -307,7 +379,7 @@ function ConversationView({
   }, [phone]);
   const rescue = useFocusRescue();
   useEffect(() => {
-    if (focusComposerIfLost) rescue(startField());
+    if (focusComposerIfLost) rescue(() => startField()?.element ?? null);
   }, [focusComposerIfLost, rescue]);
 
   const transport = useMemo(() => createChatTransport(), []);
@@ -346,8 +418,8 @@ function ConversationView({
         }
         if (part.type === "data-token-usage") {
           setLockedTokens({
-            input: part.data.prompt_tokens ?? 0,
-            output: part.data.completion_tokens ?? 0
+            input: part.data.context_prompt_tokens ?? part.data.prompt_tokens ?? 0,
+            output: part.data.context_completion_tokens ?? part.data.completion_tokens ?? 0
           });
           timings.markTokens(part.data.completion_tokens ?? 0);
           const turnTokens = part.data.turn_tokens ?? 0;
@@ -396,6 +468,7 @@ function ConversationView({
         if (mounted.current) {
           if (isAbort) announce(t("chat_announce_stopped"));
           else if (!isError) announce(t("chat_announce_answer_ready"));
+          onAnswerFinished?.();
         }
         // Auto-title after the first exchange of a fresh conversation (also when
         // the view has gone: the history then lists it under its title).
@@ -424,7 +497,7 @@ function ConversationView({
   }, [timings, messages, busy]);
 
   // What the conversation has to show in the side panel.
-  const documents = useMemo(
+  const documentsNow = useMemo(
     () =>
       conversationDocuments(
         messages.map((message) => ({
@@ -434,14 +507,25 @@ function ConversationView({
       ),
     [messages]
   );
+  // A streamed chunk rarely changes the documents: keep them by content so
+  // finished messages keep the same props.
+  const documentsKey = useMemo(
+    () => documentsNow.documents.map((document) => previewFilesKey(document.versions)).join("\n"),
+    [documentsNow]
+  );
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- compared by content
+  const documents = useMemo(() => documentsNow, [documentsKey]);
   const uploads = useMemo(() => conversationUploads(messages), [messages]);
   useEffect(() => {
     uploadsRef.current = uploads;
   }, [uploads]);
-  const allFiles = useMemo<PreviewFile[]>(
+  const allFilesNow = useMemo<PreviewFile[]>(
     () => [...uploads, ...messages.flatMap(messageGeneratedFiles)],
     [uploads, messages]
   );
+  const allFilesKey = useMemo(() => previewFilesKey(allFilesNow), [allFilesNow]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- compared by content
+  const allFiles = useMemo(() => allFilesNow, [allFilesKey]);
   const panelContents: PanelContents = {
     views: messages
       .flatMap(messageAppViewCalls)
@@ -547,7 +631,7 @@ function ConversationView({
         const text = panel.takeSuggestion();
         if (text === null) return;
         setInput((current) => (current.trim() ? `${current}\n${text}` : text));
-        dockTextareaRef.current?.focus();
+        dockInputRef.current?.focus();
       }),
     [panel]
   );
@@ -570,6 +654,20 @@ function ConversationView({
   const openAttachmentDialog = useCallback(() => {
     fileInput.current?.click();
   }, []);
+
+  // Tool calls that had finished before this visit are not news; the first
+  // run takes them as seen.
+  const seenToolCalls = useRef<Set<string> | null>(null);
+  const reportToolCall = useEffectEvent((call: ToolCallRecord) => onToolCallFinished?.(call));
+  useEffect(() => {
+    if (seenToolCalls.current === null) {
+      seenToolCalls.current = new Set(finishedToolCallIds(messages));
+      return;
+    }
+    for (const call of newlyFinishedToolCalls(messages, seenToolCalls.current)) {
+      reportToolCall(call);
+    }
+  }, [messages]);
 
   const started = messages.length > 0 || pendingQuestion !== null;
 
@@ -603,7 +701,7 @@ function ConversationView({
   const wasDeciding = useRef(false);
   useEffect(() => {
     if (wasDeciding.current && !deciding && document.activeElement === document.body) {
-      dockTextareaRef.current?.focus();
+      dockInputRef.current?.focus();
     }
     wasDeciding.current = deciding;
   }, [deciding]);
@@ -612,7 +710,7 @@ function ConversationView({
     reportStarted(started);
     if (refocusComposer.current) {
       refocusComposer.current = false;
-      (started ? dockTextareaRef.current : startField())?.focus();
+      (started ? dockInputRef.current : startField())?.focus();
     }
   }, [started]);
 
@@ -816,16 +914,6 @@ function ConversationView({
   useEffect(() => {
     if (!activity) activityFocusedFor.current = null;
   }, [activity]);
-  const toggleActivity = (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => {
-    const tab = request?.tab ?? "steps";
-    // The pill toggles; a citation (or menu item with a tab) opens or switches.
-    if (activity?.messageId === messageId && !request?.tab) {
-      closeActivity();
-      return;
-    }
-    activityTrigger.current = trigger;
-    onActivityChange({ messageId, tab, source: request?.source ?? null });
-  };
   const closeActivity = useCallback(() => {
     onActivityChange(null);
     const trigger = activityTrigger.current;
@@ -839,11 +927,28 @@ function ConversationView({
   useEffect(() => {
     if (deciding && activityOpen) closeActivity();
   }, [deciding, activityOpen, closeActivity]);
+  const openActivityId = activity?.messageId;
+  const toggleActivity = useCallback(
+    (messageId: string, trigger: HTMLElement, request?: ActivityRequest) => {
+      const tab = request?.tab ?? "steps";
+      // The pill toggles; a citation (or menu item with a tab) opens or switches.
+      if (openActivityId === messageId && !request?.tab) {
+        closeActivity();
+        return;
+      }
+      activityTrigger.current = trigger;
+      onActivityChange({ messageId, tab, source: request?.source ?? null });
+    },
+    [openActivityId, closeActivity, onActivityChange]
+  );
 
   const failure = error ? describeChatFailure(error, streamError, t) : null;
 
   const partnerName = displayPartnerName(partner, t);
-  const assistantIdentity = { id: partner.id, name: partnerName, iconId: partner.iconId };
+  const assistantIdentity = useMemo(
+    () => ({ id: partner.id, name: partnerName, iconId: partner.iconId }),
+    [partner.id, partnerName, partner.iconId]
+  );
   const mention =
     partner.type === "group-chat" && (partner.mentionableAssistants?.length ?? 0) > 0 ? (
       <Selector
@@ -887,7 +992,7 @@ function ConversationView({
     // A stop while the question still waits for its uploads takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),
     label: composerLabel,
-    placeholder: composerLabel,
+    placeholder: placeholder ?? composerLabel,
     attachments: composerAttachments,
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
@@ -896,6 +1001,10 @@ function ConversationView({
     mention,
     modelSelector,
     quote: composerQuote,
+    triggers: references?.triggers,
+    headerActions: references?.headerActions,
+    footerActions,
+    onInput: references?.onComposer,
     contextBar: (
       <ContextUsageBar
         usage={usage}
@@ -966,9 +1075,10 @@ function ConversationView({
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
           <StartState
             partner={partner}
+            headingLevel={startHeadingLevel}
             onPickStarter={(prompt) => {
               setInput(prompt);
-              startTextarea()?.focus();
+              startInput()?.focus();
             }}
             composer={
               phone !== true && (
@@ -983,7 +1093,7 @@ function ConversationView({
                     {...composerProps}
                     variant="start"
                     partnerToken={partnerToken}
-                    textareaRef={startTextareaRef}
+                    inputRef={startInputRef}
                   />
                 </div>
               )
@@ -1003,7 +1113,7 @@ function ConversationView({
               <Composer
                 {...composerProps}
                 partnerToken={partnerToken}
-                textareaRef={startDockTextareaRef}
+                inputRef={startDockInputRef}
               />
             </div>
           </ComposerDock>
@@ -1085,7 +1195,7 @@ function ConversationView({
                 {decisionBar ? (
                   <ToolDecisionBar data={decisionBar} assistantName={partnerName} />
                 ) : (
-                  <Composer {...composerProps} textareaRef={dockTextareaRef} />
+                  <Composer {...composerProps} inputRef={dockInputRef} />
                 )}
               </div>
             }
@@ -1111,19 +1221,20 @@ function ConversationView({
                     knowledge={partner.knowledge}
                     durations={timings.durations(message.id)}
                     activityExpanded={activity?.messageId === message.id}
-                    onActivityToggle={(trigger, request) =>
-                      toggleActivity(message.id, trigger, request)
-                    }
+                    onToggleActivity={toggleActivity}
                     canDebug={debugAvailable && sessionId !== null}
                     conversationFiles={allFiles}
                     documents={documents.documents}
                     draft={streaming ? liveDraft : null}
+                    references={references}
+                    toolCards={toolCards}
                   />
                 );
               })}
               {pendingQuestion && (
                 <PendingQuestion
                   text={pendingQuestion.text}
+                  references={references}
                   uploads={pendingUploads}
                   conversationFiles={allFiles}
                 />

@@ -1,0 +1,211 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+from uuid import uuid4
+
+from eneo.flows.api.flow_runtime_paths import (
+    FlowReviewCheckpointRuntimePathsPublic,
+    FlowRuntimePathsPublic,
+    FlowRuntimePublic,
+    build_flow_runtime_paths,
+)
+
+
+def test_retry_path_has_registered_runtime_operation():
+    from eneo.flows.api.flow_runtime_endpoint_registry import (
+        FLOW_RUNTIME_ENDPOINT_CONTRACTS,
+    )
+    from eneo.flows.api.flow_runtime_paths import (
+        FLOW_RUN_RETRY_PATH,
+        build_flow_endpoint_template,
+    )
+
+    assert FLOW_RUN_RETRY_PATH == "/{id}/runs/{run_id}/retry/"
+    assert (
+        build_flow_endpoint_template(FLOW_RUN_RETRY_PATH, api_prefix="/custom")
+        == "/custom/flows/{id}/runs/{run_id}/retry/"
+    )
+    contract = next(
+        c
+        for c in FLOW_RUNTIME_ENDPOINT_CONTRACTS
+        if c.route_path == FLOW_RUN_RETRY_PATH
+    )
+    assert contract.method == "post"
+    assert contract.success_status == 201
+    assert contract.operation_id == "retry_flow_run_from_failed_step"
+
+
+def _runtime_review_paths_payload() -> dict[str, str]:
+    return {
+        "active_template": "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/",
+        "edit_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/"
+        ),
+        "approve_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/"
+            "{checkpoint_id}/approve/"
+        ),
+        "reject_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/"
+            "{checkpoint_id}/reject/"
+        ),
+        "resume_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/"
+            "{checkpoint_id}/resume/"
+        ),
+        "approve_and_continue_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/"
+            "{checkpoint_id}/approve-and-continue/"
+        ),
+    }
+
+
+def _runtime_paths_payload() -> dict[str, object]:
+    return {
+        "run_contract": "/api/v1/flows/{id}/run-contract/",
+        "graph": "/api/v1/flows/{id}/graph/",
+        "upload_step_runtime_file_template": (
+            "/api/v1/flows/{id}/steps/{step_id}/runtime-files/"
+        ),
+        "delete_runtime_file_template": ("/api/v1/flows/{id}/runtime-files/{file_id}/"),
+        "create_run": "/api/v1/flows/{id}/runs/",
+        "list_runs": "/api/v1/flows/{id}/runs/",
+        "cancel_run_template": "/api/v1/flows/{id}/runs/{run_id}/cancel/",
+        "redispatch_run_template": ("/api/v1/flows/{id}/runs/{run_id}/redispatch/"),
+        "review_checkpoints": _runtime_review_paths_payload(),
+        "get_graph_for_run_template": "/api/v1/flows/{id}/graph/?run_id={run_id}",
+        "get_run_template": "/api/v1/flows/{id}/runs/{run_id}/",
+        "get_run_status_template": "/api/v1/flows/{id}/runs/{run_id}/status/",
+        "list_steps_template": "/api/v1/flows/{id}/runs/{run_id}/steps/",
+        "evidence_template": "/api/v1/flows/{id}/runs/{run_id}/evidence/",
+        "provider_calls_template": ("/api/v1/flows/{id}/runs/{run_id}/provider-calls/"),
+        "export_evidence_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/evidence/export"
+        ),
+        "artifact_signed_url_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/"
+        ),
+        "input_file_signed_url_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/"
+        ),
+        "transcript_corrections_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/"
+        ),
+        "edit_transcript_corrections_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/"
+        ),
+        "transcript_words_template": (
+            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/"
+        ),
+    }
+
+
+def test_build_flow_runtime_paths_uses_explicit_api_prefix() -> None:
+    flow_id = uuid4()
+
+    runtime_paths = build_flow_runtime_paths(flow_id, api_prefix="/custom-api/")
+
+    assert runtime_paths.run_contract == f"/custom-api/flows/{flow_id}/run-contract/"
+    assert runtime_paths.graph == f"/custom-api/flows/{flow_id}/graph/"
+    assert (
+        runtime_paths.upload_step_runtime_file_template
+        == f"/custom-api/flows/{flow_id}/steps/{{step_id}}/runtime-files/"
+    )
+    assert (
+        runtime_paths.delete_runtime_file_template
+        == f"/custom-api/flows/{flow_id}/runtime-files/{{file_id}}/"
+    )
+    assert runtime_paths.create_run == f"/custom-api/flows/{flow_id}/runs/"
+    assert runtime_paths.list_runs == f"/custom-api/flows/{flow_id}/runs/"
+    assert (
+        runtime_paths.cancel_run_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/cancel/"
+    )
+    assert (
+        runtime_paths.redispatch_run_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/redispatch/"
+    )
+    assert (
+        runtime_paths.review_checkpoints.active_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/"
+        "review-checkpoints/active/"
+    )
+    assert (
+        runtime_paths.review_checkpoints.resume_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/"
+        "review-checkpoints/{checkpoint_id}/resume/"
+    )
+    assert (
+        runtime_paths.review_checkpoints.approve_and_continue_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/"
+        "review-checkpoints/{checkpoint_id}/approve-and-continue/"
+    )
+    assert runtime_paths.get_run_status_template == (
+        f"/custom-api/flows/{flow_id}/runs/{{run_id}}/status/"
+    )
+    assert (
+        runtime_paths.get_graph_for_run_template
+        == f"/custom-api/flows/{flow_id}/graph/?run_id={{run_id}}"
+    )
+    assert (
+        runtime_paths.export_evidence_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/evidence/export"
+    )
+    assert runtime_paths.provider_calls_template == (
+        f"/custom-api/flows/{flow_id}/runs/{{run_id}}/provider-calls/"
+    )
+    assert (
+        runtime_paths.artifact_signed_url_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/artifacts/"
+        "{file_id}/signed-url/"
+    )
+    assert (
+        runtime_paths.input_file_signed_url_template
+        == f"/custom-api/flows/{flow_id}/runs/{{run_id}}/input-files/"
+        "{file_id}/signed-url/"
+    )
+
+
+def test_build_flow_runtime_paths_normalizes_missing_leading_slash() -> None:
+    flow_id = uuid4()
+
+    runtime_paths = build_flow_runtime_paths(flow_id, api_prefix="api")
+
+    assert runtime_paths.create_run == f"/api/flows/{flow_id}/runs/"
+
+
+def test_flow_runtime_discovery_models_construct_from_attributes() -> None:
+    review_paths = SimpleNamespace(
+        **_runtime_review_paths_payload(), legacy_extra="ignored"
+    )
+    runtime_paths = SimpleNamespace(
+        **{
+            **_runtime_paths_payload(),
+            "review_checkpoints": review_paths,
+            "legacy_extra": "ignored",
+        }
+    )
+    runtime = SimpleNamespace(
+        id=uuid4(),
+        space_id=uuid4(),
+        name="Published flow",
+        description=None,
+        published_version=3,
+        created_at=None,
+        updated_at=None,
+        runtime_paths=runtime_paths,
+        legacy_extra="ignored",
+    )
+
+    review_paths_public = FlowReviewCheckpointRuntimePathsPublic.model_validate(
+        review_paths
+    )
+    runtime_paths_public = FlowRuntimePathsPublic.model_validate(runtime_paths)
+    runtime_public = FlowRuntimePublic.model_validate(runtime)
+
+    assert review_paths_public.resume_template.endswith("{checkpoint_id}/resume/")
+    assert runtime_paths_public.review_checkpoints is not None
+    assert runtime_public.runtime_paths.get_run_template.endswith("{run_id}/")
+    assert runtime_public.runtime_paths.get_run_status_template.endswith(
+        "{run_id}/status/"
+    )

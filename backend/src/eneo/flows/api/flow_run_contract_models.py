@@ -1,0 +1,705 @@
+from __future__ import annotations
+
+from typing import Annotated, Any, Literal, TypeAlias, cast
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from eneo.flows.api.flow_live_transcription_models import (
+    FlowLiveTranscriptionAvailabilityPublic,
+)
+from eneo.flows.domain.text_processing import TextProcessingMode
+from eneo.flows.enums import (
+    FlowOutputDelivery,
+    FlowOutputMode,
+    FlowOutputType,
+    FlowRuntimeInputFormat,
+    FlowTemplateAssetStatus,
+)
+from eneo.flows.flow_input_limits import (
+    FlowRuntimeUploadPolicy,
+    effective_runtime_upload_policy,
+)
+from eneo.flows.flow_metadata import FlowFormFieldType
+from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
+from eneo.flows.flow_review_policy import FlowStepReviewMode
+from eneo.flows.flow_run_step_result_file import FlowRunStepResultFile
+from eneo.flows.transcription_config import SpeakerServiceGap
+from eneo.json_types import JsonObject, JsonValue
+
+FlowCitationSummaryStatus: TypeAlias = Literal[
+    "unavailable",
+    "citations_on_without_sources",
+    "observed",
+    "missing_required_citations",
+    "unknown_citation_ids_present",
+]
+
+
+class FlowCitationSourcePublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    identity_resolved: bool
+    display_name: str | None
+    container_label: str | None
+
+
+class FlowCitationSummaryPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: FlowCitationSummaryStatus
+    sources: list[FlowCitationSourcePublic]
+    matched_cited_source_count: int = Field(ge=0)
+    sources_truncated: bool
+    stale_after_edit: bool
+
+
+FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE: dict[str, Any] = {
+    "flow_id": "00000000-0000-0000-0000-000000000001",
+    "published_flow_version": 3,
+    "final_output": {
+        "step_id": "00000000-0000-0000-0000-000000000104",
+        "step_order": 3,
+        "label": "Create Word report",
+        "output_type": "docx",
+        "output_mode": "pass_through",
+        "delivery": "artifact",
+        "output_contract": None,
+    },
+    "form_fields": [
+        {
+            "name": "employee_name",
+            "type": "text",
+            "label": "Employee name",
+            "required": True,
+        }
+    ],
+    "steps_requiring_input": [
+        {
+            "step_id": "00000000-0000-0000-0000-000000000101",
+            "step_order": 1,
+            "label": "Upload audio",
+            "description": "Provide the recorded review conversation.",
+            "required": True,
+            "input_format": "audio",
+            "max_files": 1,
+            "max_file_size_bytes": 52428800,
+            "max_duration_seconds": 18000,
+            "accepted_mimetypes": ["audio/wav", "audio/mpeg"],
+        }
+    ],
+    "runtime_upload_policy": {
+        "min_timeout_seconds": 120,
+        "seconds_per_mebibyte": 8,
+        "max_timeout_seconds": 600,
+        "idle_timeout_seconds": 120,
+        "response_timeout_seconds": 960,
+    },
+    "steps_requiring_review": [
+        {
+            "step_id": "00000000-0000-0000-0000-000000000103",
+            "step_order": 2,
+            "label": "Review transcription",
+            "review_mode": "edit",
+            "output_type": "json",
+            "expires_after_seconds": FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
+            "output_contract": {
+                "type": "object",
+                "properties": {"transcription": {"type": "string"}},
+            },
+        }
+    ],
+    "aggregate_max_files": 1,
+    "template_readiness": [
+        {
+            "step_id": "00000000-0000-0000-0000-000000000102",
+            "template_asset_id": None,
+            "template_file_id": None,
+            "template_name": None,
+            "checksum": None,
+            "published_flow_version": 3,
+            "status": "unavailable",
+            "can_edit": False,
+            "can_download": False,
+            "message_code": None,
+        }
+    ],
+    "transcription": {
+        "live": {"available": True, "reason": None},
+        "speaker_labels": {"selectable": True, "required": False, "default": True},
+    },
+    "security_classification": {
+        "name": "Open information",
+        "description": "Do not upload personal data.",
+        "security_level": 0,
+    },
+}
+
+
+FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION = (
+    "Client-side timeout policy for runtime file uploads. Consumers should "
+    "calculate each upload's initial timeout from the actual file size: "
+    "`clamp(min_timeout_seconds, max_timeout_seconds, "
+    "ceil(file_size_mib * seconds_per_mebibyte))`, then keep a progressing "
+    "upload alive until `idle_timeout_seconds` passes without progress, and wait "
+    "`response_timeout_seconds` for the response once every byte is sent."
+)
+
+
+class FlowRuntimeUploadPolicyPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    min_timeout_seconds: int = Field(
+        gt=0,
+        description="Minimum wall-clock timeout clients should allow for each runtime file upload.",
+    )
+    seconds_per_mebibyte: int = Field(
+        gt=0,
+        description=(
+            "Multiplier clients should apply to the actual file size when calculating "
+            "a per-file upload timeout."
+        ),
+    )
+    max_timeout_seconds: int = Field(
+        gt=0,
+        description="Cap on the initial no-progress timeout for each runtime file upload.",
+    )
+    idle_timeout_seconds: int = Field(
+        gt=0,
+        description="Timeout clients should allow after the latest upload progress event.",
+    )
+    response_timeout_seconds: int = Field(
+        gt=0,
+        description=(
+            "Time clients should allow for the response once every byte is sent: the "
+            "server measures audio and extracts PDF text before it answers."
+        ),
+    )
+
+    @classmethod
+    def from_domain(
+        cls, policy: FlowRuntimeUploadPolicy
+    ) -> "FlowRuntimeUploadPolicyPublic":
+        return cls(
+            min_timeout_seconds=policy.min_timeout_seconds,
+            seconds_per_mebibyte=policy.seconds_per_mebibyte,
+            max_timeout_seconds=policy.max_timeout_seconds,
+            idle_timeout_seconds=policy.idle_timeout_seconds,
+            response_timeout_seconds=policy.response_timeout_seconds,
+        )
+
+
+def default_runtime_upload_policy_public() -> FlowRuntimeUploadPolicyPublic:
+    return FlowRuntimeUploadPolicyPublic.from_domain(effective_runtime_upload_policy())
+
+
+class FlowRuntimeInputContractPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: UUID
+    step_order: int
+    label: str | None = None
+    description: str | None = None
+    required: bool
+    input_format: FlowRuntimeInputFormat
+    max_files: int | None = None
+    max_file_size_bytes: int | None = None
+    max_duration_seconds: int | None = Field(
+        default=None,
+        description=(
+            "Audio length, in whole seconds rounded down, that one file of this "
+            "input can hold and still be transcribed: the tighter of Eneo's duration "
+            "and decoded-size limits. Set only for audio inputs."
+        ),
+    )
+    max_recording_seconds: int | None = Field(
+        default=None,
+        description=(
+            "The longest recording this input takes when its files are sent as "
+            "the parts of one recording (`single_recording`): the parts' lengths "
+            "together, overlaps included, in whole seconds. A tenant admin sets "
+            "it on the flow-settings page. Stop recording before it. Set only "
+            "for audio inputs."
+        ),
+    )
+    recording_part_seconds: int | None = Field(
+        default=None,
+        description=(
+            "How long each part of a recording should be for the input's file "
+            "slots (`max_files`) to hold a recording of `max_recording_seconds`: "
+            "start a new part at this length, or earlier when a part nears "
+            "`max_duration_seconds` or `max_file_size_bytes`. Set only for audio "
+            "inputs."
+        ),
+    )
+    accepted_mimetypes: list[str] = Field(default_factory=list)
+
+
+class FlowReviewStepContractPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: UUID
+    step_order: int
+    label: str | None = Field(
+        default=None,
+        description="Published step label to show before a run reaches review.",
+    )
+    review_mode: FlowStepReviewMode = Field(
+        description="Review behavior the runtime will use when this step completes.",
+    )
+    output_type: FlowOutputType = Field(
+        description="Published output type of the step that can pause for review.",
+    )
+    expires_after_seconds: int = Field(
+        default=FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
+        description=(
+            "Effective review window in seconds, starting when this checkpoint "
+            "opens. This value is already resolved from the step policy and the "
+            "platform default, so clients can prepare review deadlines before the "
+            "run reaches awaiting_review."
+        ),
+    )
+    output_contract: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Published output contract for the step, when one is configured. "
+            "This is useful for prebuilding review forms before the run starts."
+        ),
+    )
+
+
+class FlowFinalOutputContractPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: UUID = Field(
+        description="Published step id that produces the run's terminal output.",
+    )
+    step_order: int = Field(
+        description="Published order of the step that produces the terminal output.",
+    )
+    label: str | None = Field(
+        default=None,
+        description="Published label of the step that produces the terminal output.",
+    )
+    output_type: FlowOutputType = Field(
+        description=(
+            "Terminal output type clients should expect after a successful run. "
+            "Read `FlowRunPublic.result.kind`: text is either exact `inline_text` "
+            "or `file_backed_text`, JSON is `structured`, and `docx` or `pdf` "
+            "is an `artifact` for generated file download."
+        ),
+    )
+    output_mode: FlowOutputMode = Field(
+        description=(
+            "Terminal output mode configured for the published final step. This "
+            "helps clients distinguish ordinary document generation from "
+            "template-fill flows."
+        ),
+    )
+    delivery: FlowOutputDelivery = Field(
+        description=(
+            "How clients should retrieve or present the terminal result. For "
+            "`payload`, read `FlowRunPublic.result.kind` and handle exact "
+            "`inline_text` separately from `file_backed_text`; `artifact` means "
+            "offer a generated file download, and `outbound_http` means the step "
+            "sends its result to the configured HTTP endpoint."
+        ),
+    )
+    output_contract: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Published terminal output contract when the final step is structured. "
+            "Null means the final output is unstructured text or a generated document."
+        ),
+    )
+
+
+class FlowRunInlineTextResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["inline_text"] = Field(
+        description="Discriminator for an inline terminal text result."
+    )
+    text: str = Field(
+        description="Exact terminal text produced by the published final step."
+    )
+
+
+class FlowRunFileBackedTextResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["file_backed_text"] = Field(
+        description="Discriminator for terminal text stored in a result file."
+    )
+    preview: str = Field(
+        description=(
+            "Bounded, incomplete, non-authoritative prefix of the terminal text. "
+            "When `file.availability` is `content_purged`, this incomplete preview "
+            "is the only remaining text and must not be treated as the full result."
+        )
+    )
+    file: FlowRunStepResultFile = Field(
+        description=(
+            "Current-attempt generated output containing the complete terminal "
+            "text. Download only when `availability` is `available`; "
+            "`content_purged` means the content is gone and download returns 410."
+        )
+    )
+
+
+class FlowRunStructuredResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["structured"] = Field(
+        description="Discriminator for an authored structured terminal result."
+    )
+    value: JsonValue = Field(
+        description=(
+            "Opaque authored JSON value produced by the published final step. "
+            "Interpret it with `output_contract` and the enclosing run's `flow_version`."
+        )
+    )
+    output_contract: JsonObject | None = Field(
+        description=(
+            "Historical published output contract for this run version. Null when "
+            "the published structured step did not declare a contract."
+        )
+    )
+
+
+class FlowRunArtifactResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["artifact"] = Field(
+        description="Discriminator for a terminal file-artifact result."
+    )
+    files: list[FlowRunStepResultFile] = Field(
+        min_length=1,
+        description=(
+            "Current-attempt artifacts produced by the published final step. File "
+            "content remains behind the authorized run-artifact download endpoint."
+        ),
+    )
+
+
+class FlowRunOutboundHttpResultPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    kind: Literal["outbound_http"] = Field(
+        description="Discriminator for a completed outbound HTTP delivery."
+    )
+    delivery_status: Literal["delivered"] = Field(
+        description=(
+            "Stable delivery receipt for a successfully completed outbound step. "
+            "Destination configuration and request payload are never exposed."
+        ),
+    )
+
+
+FlowRunResultPublic: TypeAlias = Annotated[
+    FlowRunInlineTextResultPublic
+    | FlowRunFileBackedTextResultPublic
+    | FlowRunStructuredResultPublic
+    | FlowRunArtifactResultPublic
+    | FlowRunOutboundHttpResultPublic,
+    Field(discriminator="kind"),
+]
+
+
+class FlowTemplateReadinessPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: UUID
+    template_asset_id: UUID | None = None
+    template_file_id: UUID | None = None
+    template_name: str | None = None
+    checksum: str | None = None
+    published_flow_version: int | None = None
+    status: FlowTemplateAssetStatus
+    can_edit: bool = False
+    can_download: bool = False
+    message_code: str | None = None
+
+
+class FormFieldPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description=(
+            "Runtime input key clients send in `input_payload_json`. This is also "
+            "available to prompts as `{{flow_input.<name>}}`."
+        ),
+    )
+    type: FlowFormFieldType = Field(
+        description=(
+            "Form control type clients should render. One of: text, number, "
+            "date, select, multiselect, list."
+        ),
+    )
+    label: str | None = Field(
+        default=None,
+        description="Human-readable label to show in the run form. Falls back to `name` when null.",
+    )
+    required: bool = Field(
+        default=False,
+        description="Whether run creation requires a value for this input field.",
+    )
+    options: list[str] | None = Field(
+        default=None,
+        description=(
+            "Allowed choices for select and multiselect fields. Absent for list "
+            "fields, which accept any strings."
+        ),
+    )
+    order: int | None = Field(
+        default=None,
+        description="Display order for generated run forms.",
+    )
+
+
+class FlowRunCapacityPublic(BaseModel):
+    """How many more concurrent runs the caller's tenant may start right now.
+
+    Clients that submit batches read this before the first run instead of
+    discovering the ceiling as a rejected `create_run`.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        from_attributes=True,
+        json_schema_extra={
+            "example": {
+                "tenant_id": "00000000-0000-0000-0000-000000000010",
+                "active_runs": 3,
+                "max_concurrent_runs": 10,
+                "available_slots": 7,
+            }
+        },
+    )
+
+    tenant_id: UUID = Field(description="Tenant the capacity is measured for.")
+    active_runs: int = Field(
+        description=(
+            "Runs currently occupying tenant concurrency: those `queued` or "
+            "`running`. Includes work from other clients. A run paused at "
+            "`awaiting_review` is not terminal but holds no slot, so it is "
+            "not counted here."
+        )
+    )
+    max_concurrent_runs: int = Field(
+        description=(
+            "Effective limit on queued and running runs: the administrator's "
+            "max concurrent flow runs when set, otherwise the server capacity. "
+            "`create_run` rejects a run once `active_runs` reaches it."
+        )
+    )
+    available_slots: int = Field(
+        description=(
+            "`max_concurrent_runs` minus `active_runs`, never negative. A "
+            "snapshot, not a reservation: another client can consume a slot "
+            "between this call and `create_run`."
+        )
+    )
+
+
+class FlowTextProcessingStepPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    step_id: UUID
+    step_order: int = Field(ge=1)
+    mode: TextProcessingMode
+    output_array_key: str
+    item_schema: dict[str, Any]
+
+
+class FlowSpeakerLabelsOptionPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    selectable: bool = Field(
+        description=(
+            "Whether a run may choose with `speaker_labels` on run creation. False "
+            "when the flow has no speaker identification service it can use in "
+            "its space, or the flow requires labels."
+        )
+    )
+    required: bool = Field(
+        description="Whether the flow needs speaker labels, because a step maps speakers to names."
+    )
+    default: bool = Field(
+        description=(
+            "What a run gets when it makes no choice: the flow's own speaker-label "
+            "setting, or false while the flow has no speaker identification "
+            "service it can use in its space."
+        )
+    )
+    unavailable_reason: SpeakerServiceGap | None = Field(
+        description=(
+            "Why the speaker labels this flow asks for cannot be produced, or "
+            "null. `picked_unavailable`: the speaker identification service the "
+            "flow chose cannot be used in its space now (it was taken from the "
+            "space, switched off, or is below the space's security "
+            "classification); reported while the flow asks for labels, that is "
+            "`required` is true or the flow's own speaker-label setting is on. "
+            "`not_chosen`: the flow chose no service although a step needs "
+            "labels; reported only while `required` is true. Null otherwise: a "
+            "flow that chose no service and requires no labels simply "
+            "transcribes. A service is never chosen on the flow's behalf. When "
+            "this is set and `required` is true, do not record or upload: the "
+            "run would fail its transcription step with "
+            "`typed_io_speaker_service_unavailable`. When this is set and "
+            "`required` is false, the run goes on without speaker labels, so "
+            "say so and let the person continue."
+        )
+    )
+
+
+class FlowMaxSpeakersOptionPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    form_field: str | None = Field(
+        description=(
+            "The form field that already asks for the speaker count (a "
+            "speaker-mapping step's count field), or null. When set, a client "
+            "should not offer a second count control; a run's `max_speakers` "
+            "still overrides the field."
+        )
+    )
+    participants_field: str | None = Field(
+        description=(
+            "The form field that lists the people expected to speak (a "
+            "speaker-mapping step's participants field), or null. A client may "
+            "offer the number of names as a visible, editable prefill for "
+            "`max_speakers`. Eneo itself never derives the bound from the names: "
+            "a bound below the real count would merge unlisted voices into one "
+            "person."
+        )
+    )
+    default: int | None = Field(
+        description=(
+            "The bound a run uses when it sends no `max_speakers` and the form "
+            "field is empty: the flow's default, or null to let the service "
+            "count the speakers."
+        )
+    )
+
+
+class FlowTranscriptionContractPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    live: FlowLiveTranscriptionAvailabilityPublic = Field(
+        description="Whether the audio step can show a live transcript preview while recording."
+    )
+    speaker_labels: FlowSpeakerLabelsOptionPublic
+    max_speakers: FlowMaxSpeakersOptionPublic | None = Field(
+        default=None,
+        description=(
+            "Whether a run may bound the speaker count with `max_speakers`: "
+            "present whenever a speaker identification service labels speakers "
+            "for the flow, including when a speaker-mapping step requires labels. "
+            "Null when the space has no service it can use."
+        ),
+    )
+    single_recording: bool = Field(
+        default=False,
+        description=(
+            "Whether a run may mark an audio step's files as the parts of one "
+            "recording with the step input's `single_recording`: the parts then take "
+            "the step's `max_recording_seconds` together, and a transcription service "
+            "that labels speakers labels them once across the parts. Send the flag "
+            "only when this is true."
+        ),
+    )
+
+
+class FlowSecurityClassificationPublic(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(
+        description="The classification's name as the organization set it, to show users."
+    )
+    description: str | None = Field(
+        default=None,
+        description=(
+            "What information the classification allows, as the organization "
+            "wrote it. Null when it has no description."
+        ),
+    )
+    security_level: int = Field(
+        description=(
+            "The classification's rank among the organization's classifications. "
+            "A higher level allows more sensitive information."
+        )
+    )
+
+
+class FlowRunContractPublic(BaseModel):
+    model_config = ConfigDict(
+        extra="forbid", json_schema_extra={"example": FLOW_RUN_CONTRACT_PUBLIC_EXAMPLE}
+    )
+
+    flow_id: UUID
+    published_flow_version: int
+    text_processing_steps: list[FlowTextProcessingStepPublic] = Field(
+        default_factory=lambda: cast(list[FlowTextProcessingStepPublic], []),
+        description="Steps that emit one ordered record per text section, with a persisted section manifest.",
+    )
+    final_output: FlowFinalOutputContractPublic | None = Field(
+        default=None,
+        description=(
+            "Published terminal output contract for this flow version. API consumers "
+            "should use this before starting a run to decide whether their app will "
+            "display output or offer a generated file download. After success, "
+            "branch on `FlowRunPublic.result.kind`, including exact `inline_text` "
+            "and `file_backed_text` for terminal text."
+        ),
+    )
+    form_fields: list[FormFieldPublic] = Field(
+        default_factory=lambda: cast(list[FormFieldPublic], [])
+    )
+    steps_requiring_input: list[FlowRuntimeInputContractPublic] = Field(
+        default_factory=lambda: cast(list[FlowRuntimeInputContractPublic], [])
+    )
+    runtime_upload_policy: FlowRuntimeUploadPolicyPublic = Field(
+        default_factory=default_runtime_upload_policy_public,
+        description=FLOW_RUNTIME_UPLOAD_POLICY_DESCRIPTION,
+    )
+    steps_requiring_review: list[FlowReviewStepContractPublic] = Field(
+        default_factory=lambda: cast(list[FlowReviewStepContractPublic], []),
+        description=(
+            "Published steps that can pause the run for human review. API consumers "
+            "can use this before starting a run to decide whether their app needs "
+            "review screens, then use the active checkpoint endpoint once the run "
+            "status becomes `awaiting_review`. An empty list means this published "
+            "flow version will not pause for human-in-the-loop review."
+        ),
+    )
+    aggregate_max_files: int | None = Field(
+        default=None,
+        description=(
+            "Total number of files a caller may attach across all runtime-input "
+            "steps for this published flow version. `0` means no published steps "
+            "currently require runtime files. `null` means at least one runtime "
+            "file-input step is intentionally unbounded, so clients should enforce "
+            "the per-step limits in `steps_requiring_input` instead."
+        ),
+    )
+    template_readiness: list[FlowTemplateReadinessPublic] = Field(
+        default_factory=lambda: cast(list[FlowTemplateReadinessPublic], [])
+    )
+    transcription: FlowTranscriptionContractPublic | None = Field(
+        default=None,
+        description=(
+            "Options for a flow that transcribes recorded audio: whether the audio "
+            "step can show a live transcript preview, and whether a run may choose "
+            "speaker labels with `speaker_labels` on run creation. Null when the "
+            "flow transcribes no audio."
+        ),
+    )
+    security_classification: FlowSecurityClassificationPublic | None = Field(
+        default=None,
+        description=(
+            "The security classification of the flow's space, which tells users "
+            "what information the flow may take. Null when the space has none or "
+            "the organization has turned security classifications off."
+        ),
+    )

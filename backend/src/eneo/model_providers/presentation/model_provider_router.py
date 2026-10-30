@@ -25,6 +25,7 @@ from eneo.model_providers.domain.connection_check import (
     ConnectionCheckError,
     ConnectionCheckStatus,
 )
+from eneo.model_providers.domain.endpoints import normalize_destination
 from eneo.model_providers.domain.model_defaults_lookup import resolve_model_defaults
 from eneo.model_providers.domain.model_provider import ModelProvider
 from eneo.model_providers.domain.model_provider_service import (
@@ -32,7 +33,6 @@ from eneo.model_providers.domain.model_provider_service import (
     UNCHANGED,
     ConnectionCheckNotSupportedException,
     ModelProviderService,
-    normalize_destination,
     per_image_cost,
 )
 from eneo.model_providers.domain.outbound_header_destinations import (

@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "use-intl";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { useOnline } from "@/lib/hooks/use-online";
 import { cn } from "@/lib/utils";
@@ -19,7 +19,7 @@ export function ConnectionBanner({ className }: { className?: string }) {
   const t = useTranslations();
   if (!useOnline()) {
     return (
-      <QuietBanner
+      <Banner
         status="warning"
         title={t("offline_banner_title")}
         description={t("offline_banner_description")}

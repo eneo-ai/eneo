@@ -1,9 +1,16 @@
 from typing import Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Query
 
+from eneo.authentication.auth_models import (
+    ApiKeyListCursor,
+    ApiKeyListResponse,
+    ApiKeyV2,
+)
 from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.main.container.container import Container
+from eneo.main.exceptions import BadRequestException, NotFoundException
 from eneo.main.models import PaginatedResponse
 from eneo.modules.module import (
     MODULE_KEY_MAX_LENGTH,
@@ -50,6 +57,65 @@ async def list_module_installations(
 ) -> PaginatedResponse[ModuleInstallation]:
     installations = await container.module_installation_service().list_installations()
     return PaginatedResponse[ModuleInstallation](items=installations)
+
+
+@router.get(
+    "/service-keys/",
+    response_model=ApiKeyListResponse,
+    description=(
+        "List one bounded page of active service-owned sk_ keys that can be "
+        "bound to a module installation. Eligibility remains revalidated in "
+        "the installation transaction."
+    ),
+    responses=responses.get_responses([400]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.MODULES,
+    reason="Module administration requires a real user session with the modules permission.",
+)
+async def list_module_service_keys(
+    container: _ReadContainer,
+    limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+    search: Annotated[str | None, Query(max_length=200)] = None,
+) -> ApiKeyListResponse:
+    try:
+        decoded_cursor = ApiKeyListCursor.deserialize(cursor) if cursor else None
+    except ValueError as exc:
+        raise BadRequestException("Invalid API key cursor.") from exc
+    normalized_search = search.strip() if search else None
+    return await container.module_installation_service().list_service_keys(
+        limit=limit,
+        cursor=decoded_cursor,
+        search=normalized_search or None,
+    )
+
+
+@router.get(
+    "/service-keys/{service_key_id}/",
+    response_model=ApiKeyV2,
+    description=(
+        "Get one module-bindable service key by ID. Missing, cross-tenant and "
+        "currently ineligible keys all return the same not-found response."
+    ),
+    responses=responses.get_responses([404]),
+)
+@endpoint_access(
+    authentication=Authentication.SESSION,
+    authorization=Permission.MODULES,
+    reason="Module administration requires a real user session with the modules permission.",
+)
+async def get_module_service_key(
+    service_key_id: UUID,
+    container: _ReadContainer,
+) -> ApiKeyV2:
+    key = await container.module_installation_service().get_service_key(
+        service_key_id=service_key_id
+    )
+    if key is None:
+        raise NotFoundException("Module service key not found.")
+    return key
 
 
 @router.put(

@@ -11,9 +11,14 @@ from pydantic import ValidationError
 
 from eneo.audit.domain.action_types import ActionType
 from eneo.authentication.auth_models import (
+    ApiKeyListCursor,
+    ApiKeyListResponse,
     ApiKeyOwnership,
     ApiKeyPermission,
+    ApiKeyScopeType,
+    ApiKeyState,
     ApiKeyType,
+    ApiKeyV2InDB,
 )
 from eneo.authentication.auth_service import AuthService
 from eneo.main.config import get_settings
@@ -42,6 +47,14 @@ MODULE_KEY = "tal-till-text"
 SERVICE_KEY_ID = uuid4()
 USER_ID = uuid4()
 REDIRECT_URI = "https://ttt.example.com/auth/callback"
+TEST_JWT_SECRET = "unit-test-secret-padded-to-the-hs256-minimum"
+
+
+@pytest.fixture(autouse=True)
+def secure_test_jwt_secret(monkeypatch):
+    """Keep module-auth token tests independent of the developer .env secret."""
+    monkeypatch.setattr(get_settings(), "jwt_secret", TEST_JWT_SECRET)
+    monkeypatch.setattr("eneo.authentication.auth_service.JWT_SECRET", TEST_JWT_SECRET)
 
 
 class FakeRedis:
@@ -110,6 +123,25 @@ def make_api_key(**overrides):
     for k, v in overrides.items():
         setattr(key, k, v)
     return key
+
+
+def make_api_key_record(**overrides) -> ApiKeyV2InDB:
+    values = {
+        "id": SERVICE_KEY_ID,
+        "tenant_id": TENANT_ID,
+        "ownership": ApiKeyOwnership.SERVICE,
+        "key_prefix": "sk_",
+        "key_suffix": "12345678",
+        "name": "Module service key",
+        "key_type": ApiKeyType.SK,
+        "permission": ApiKeyPermission.WRITE,
+        "scope_type": ApiKeyScopeType.TENANT,
+        "state": ApiKeyState.ACTIVE,
+        "key_hash": "test-hash",
+        "hash_version": "hmac_sha256",
+    }
+    values.update(overrides)
+    return ApiKeyV2InDB(**values)
 
 
 def make_broker(module=None, config=None, user=None, redis=None):
@@ -780,6 +812,71 @@ class TestModuleTicketRequest:
 
 
 class TestModuleServiceKeyRegistration:
+    async def test_lists_keys_through_generic_bounded_repository_filters(self):
+        broker = make_broker()
+        cursor = ApiKeyListCursor(
+            created_at=datetime.now(timezone.utc),
+            key_id=SERVICE_KEY_ID,
+        )
+        broker.api_key_repo.list_paginated.return_value = []
+
+        result = await broker.list_client_config_service_keys(
+            tenant_id=TENANT_ID,
+            limit=50,
+            cursor=cursor,
+            search="reports",
+        )
+
+        assert result == ApiKeyListResponse(
+            items=[],
+            limit=50,
+            next_cursor=None,
+            previous_cursor=cursor.serialize(),
+            total_count=None,
+        )
+        expected_filters = {
+            "tenant_id": TENANT_ID,
+            "ownership": ApiKeyOwnership.SERVICE.value,
+            "key_type": ApiKeyType.SK.value,
+            "min_permission": ApiKeyPermission.WRITE.value,
+            "effectively_active": True,
+            "search": "reports",
+        }
+        broker.api_key_repo.list_paginated.assert_awaited_once_with(
+            **expected_filters,
+            limit=50,
+            cursor=cursor,
+        )
+        broker.api_key_repo.count.assert_not_awaited()
+
+    async def test_exact_lookup_returns_only_currently_eligible_key(self):
+        broker = make_broker()
+        broker.api_key_repo.get.return_value = make_api_key_record()
+
+        result = await broker.get_client_config_service_key(
+            tenant_id=TENANT_ID,
+            service_key_id=SERVICE_KEY_ID,
+        )
+
+        assert result.id == SERVICE_KEY_ID
+        broker.api_key_repo.get.assert_awaited_once_with(
+            key_id=SERVICE_KEY_ID,
+            tenant_id=TENANT_ID,
+        )
+
+    async def test_exact_lookup_hides_ineligible_key(self):
+        broker = make_broker()
+        broker.api_key_repo.get.return_value = make_api_key(
+            permission=ApiKeyPermission.READ
+        )
+
+        result = await broker.get_client_config_service_key(
+            tenant_id=TENANT_ID,
+            service_key_id=SERVICE_KEY_ID,
+        )
+
+        assert result is None
+
     async def test_accepts_same_tenant_service_sk_with_write_permission(self):
         broker = make_broker()
 

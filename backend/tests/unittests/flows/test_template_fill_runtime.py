@@ -1,0 +1,1598 @@
+from __future__ import annotations
+
+import hashlib
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
+
+from eneo.authentication.principal_types import PrincipalType
+from eneo.files import text as file_text_module
+from eneo.files.file_models import FileType
+from eneo.flows.domain.flow import (
+    FlowRun,
+    FlowRunStatus,
+    FlowStepResult,
+    FlowStepResultStatus,
+)
+from eneo.flows.domain.runtime import (
+    RunExecutionState,
+    RuntimeStep,
+    StepExecutionOutput,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_input_envelope import FlowRunInputEnvelopePatch
+from eneo.flows.runtime import template_fill_runtime as template_fill_runtime_module
+from eneo.flows.runtime.docx_template_runtime import extract_docx_text
+from eneo.flows.runtime.generated_file_names import GeneratedFileNames
+from eneo.flows.runtime.step_handlers.template_fill import TemplateFillStepHandler
+from eneo.flows.runtime.template_fill_runtime import (
+    TemplateFillRuntimeDeps,
+    prepare_template_fill_step,
+)
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import (
+    NotFoundException,
+    TypedIOValidationException,
+)
+from tests.docx_template_fixtures import control_template_bytes
+
+# Template inspection and filling run in the shared tool runtime.
+pytestmark = pytest.mark.usefixtures("shared_document_runtime")
+
+
+def _build_template_bytes() -> bytes:
+    return control_template_bytes(
+        text=[("title", "Titel", "Titel"), ("author", "Författare", "Namn")],
+        rich=[("summary", "Sammanfattning", "Sammanfattning i löpande text")],
+    )
+
+
+def _placeholder_template_bytes() -> bytes:
+    return control_template_bytes(
+        text=[
+            ("title", "Titel", "Titel"),
+            ("author", "Författare", "Namn"),
+            ("step_a.output.text", "Sammanfattning", "Sammanfattning"),
+            ("step_b.output.structured.summary", "Analys", "Analys"),
+            ("föregående_steg", "Malltext", "Malltext"),
+            ("customer   name", "Kund", "Kund"),
+            ("transkribering", "Transkribering", "Transkribering"),
+            ("flow_input.transkribering", "Flow-indata", "Flow-indata"),
+            ("flow.input.transkribering", "Flow", "Flow"),
+        ],
+    )
+
+
+def _build_unicode_template_bytes() -> bytes:
+    return control_template_bytes(
+        text=[("ämne", "Ämne", "Ämne"), ("summary", "Sammanfattning", "Text")],
+    )
+
+
+def _build_summary_only_template_bytes() -> bytes:
+    return control_template_bytes(rich=[("slutsats", "Slutsats", "Slutsatsen")])
+
+
+def _run() -> FlowRun:
+    now = datetime.now(timezone.utc)
+    return FlowRun(
+        id=uuid4(),
+        flow_id=uuid4(),
+        flow_version=3,
+        principal_type=PrincipalType.USER,
+        principal_user_id=uuid4(),
+        tenant_id=uuid4(),
+        trace_id=uuid4(),
+        status=FlowRunStatus.RUNNING,
+        input_payload_json={
+            "title": "Social medias påverkan",
+            "author": "Anders Svensson",
+            "customer name": "Ada Lovelace",
+        },
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _completed_result(
+    *,
+    run: FlowRun,
+    step_order: int = 1,
+    output_payload: dict[str, object] | None = None,
+) -> FlowStepResult:
+    now = datetime.now(timezone.utc)
+    return FlowStepResult(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=step_order,
+        assistant_id=uuid4(),
+        input_payload_json={"text": "ignored"},
+        effective_prompt="prompt",
+        output_payload_json=(
+            output_payload
+            if output_payload is not None
+            else {"text": "Detta är sammanfattningen."}
+        ),
+        model_parameters_json={},
+        num_tokens_input=10,
+        num_tokens_output=20,
+        status=FlowStepResultStatus.COMPLETED,
+        current_attempt_no=4,
+        flow_step_execution_hash="hash",
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _state(
+    *,
+    result: FlowStepResult,
+    additional_results: tuple[FlowStepResult, ...] = (),
+) -> RunExecutionState:
+    results = (result, *additional_results)
+    return RunExecutionState(
+        completed_by_order={item.step_order: item for item in results},
+        prior_results=list(results),
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_names_by_order={
+            item.step_order: f"Step {item.step_order}" for item in results
+        },
+    )
+
+
+def _step(
+    *,
+    template_asset_id=None,
+    template_checksum: str | None = "checksum",
+) -> RuntimeStep:
+    template_asset_id = template_asset_id or uuid4()
+    return RuntimeStep(
+        step_id=uuid4(),
+        step_order=2,
+        assistant_id=uuid4(),
+        user_description="Assemble report",
+        input_source="all_previous_steps",
+        input_bindings=None,
+        input_config=None,
+        output_mode="template_fill",
+        output_config={
+            "template_asset_id": str(template_asset_id),
+            "template_checksum": template_checksum,
+            "bindings": {
+                "title": "{{title}}",
+                "author": "{{author}}",
+                "summary": "{{step_1.output.text}}",
+            },
+        },
+        output_type="docx",
+    )
+
+
+def _asset_step(
+    *,
+    template_asset_id,
+    template_checksum: str | None = "checksum",
+) -> RuntimeStep:
+    return _step(
+        template_asset_id=template_asset_id,
+        template_checksum=template_checksum,
+    )
+
+
+def _logger() -> SimpleNamespace:
+    return SimpleNamespace(
+        info=lambda *args, **kwargs: None,
+        debug=lambda *args, **kwargs: None,
+        exception=lambda *args, **kwargs: None,
+    )
+
+
+def _runtime_deps(
+    *,
+    file_repo: AsyncMock | None = None,
+    template_asset_repo: AsyncMock | None = None,
+    template_file: SimpleNamespace | None = None,
+    file_content_loader: AsyncMock | None = None,
+    file_service: AsyncMock | None = None,
+) -> TemplateFillRuntimeDeps:
+    if file_repo is None:
+        file_repo = AsyncMock()
+    if template_asset_repo is None:
+        template_asset_repo = AsyncMock()
+    if file_content_loader is None:
+        file_content_loader = AsyncMock()
+    if file_service is None:
+        file_service = AsyncMock()
+        file_service.save_generated_file.return_value = SimpleNamespace(id=uuid4())
+    if template_file is not None:
+        metadata = SimpleNamespace(
+            id=template_file.id,
+            name=template_file.name,
+            checksum=template_file.checksum,
+        )
+        file_repo.get_by_id.return_value = metadata
+        file_content_loader.load.return_value = {metadata.id: template_file}
+        if template_asset_repo.get.side_effect is None:
+            template_asset_repo.get.return_value = SimpleNamespace(
+                file_id=template_file.id
+            )
+    return TemplateFillRuntimeDeps(
+        variable_resolver=FlowVariableResolver(),
+        file_repo=file_repo,
+        file_content_loader=file_content_loader,
+        file_service=file_service,
+        template_asset_repo=template_asset_repo,
+        logger=_logger(),
+        file_names=GeneratedFileNames.for_run(
+            flow_name="Nämndmöte",
+            steps=(),
+            run_created_at=datetime(2026, 9, 23, 12, tzinfo=timezone.utc),
+        ),
+    )
+
+
+async def execute_template_fill_step(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    deps: TemplateFillRuntimeDeps,
+) -> StepExecutionOutput:
+    handler = TemplateFillStepHandler(
+        deps=deps,
+        activate_resolved_input_edges=AsyncMock(),
+    )
+    result = await handler.execute(
+        step=step,
+        run=run,
+        state=state,
+        version_metadata=None,
+        attempt_no=1,
+    )
+    return result.output
+
+
+@pytest.mark.asyncio
+async def test_prepare_template_fill_step_static_binding_adds_no_resolved_input_edge() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        template_file=template_file,
+    )
+    step = _step()
+    step.output_config["bindings"] = {"title": "Statisk titel"}
+    step.output_config["placeholders"] = ["title"]
+
+    prepared = await prepare_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    assert prepared.resolved_bindings == {"title": "Statisk titel"}
+    assert prepared.resolved_input_edges == ()
+
+
+@pytest.mark.asyncio
+async def test_prepare_template_fill_step_records_exact_dynamic_binding_source() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        template_file=template_file,
+    )
+    step = _step()
+    step.output_config["bindings"] = {
+        "summary": "{{step_1.output.text}}",
+    }
+    step.output_config["placeholders"] = ["summary"]
+
+    prepared = await prepare_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    assert prepared.resolved_bindings == {"summary": "Detta är sammanfattningen."}
+    assert len(prepared.resolved_input_edges) == 1
+    edge = prepared.resolved_input_edges[0]
+    assert edge.binding_ref == "output_config.bindings.summary:step_1.output.text"
+    assert edge.source.kind == "step_result"
+    assert edge.source.source_step_id == result.step_id
+    assert edge.source.source_attempt_no == 4
+    assert edge.source.selector.path == ("output", "text")
+    selected = "Detta är sammanfattningen.".encode("utf-8")
+    assert edge.selection.encoding == "utf8"
+    assert edge.selection.byte_size == len(selected)
+    assert edge.selection.sha256 == hashlib.sha256(selected).hexdigest()
+
+
+@pytest.mark.asyncio
+async def test_template_fill_activation_failure_prevents_render_and_persist(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        template_file=template_file,
+    )
+    render_docx_template = MagicMock()
+    monkeypatch.setattr(
+        template_fill_runtime_module,
+        "render_docx_template",
+        render_docx_template,
+    )
+    handler = TemplateFillStepHandler(
+        deps=deps,
+        activate_resolved_input_edges=AsyncMock(
+            side_effect=RuntimeError("activation failed")
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="activation failed"):
+        await handler.execute(
+            step=_step(),
+            run=run,
+            state=state,
+            version_metadata=None,
+            attempt_no=1,
+        )
+
+    render_docx_template.assert_not_called()
+    deps.file_service.save_generated_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_renders_and_persists_docx() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_asset_id = uuid4()
+    template_file_id = uuid4()
+    step = _step(template_asset_id=template_asset_id)
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    file_service = AsyncMock()
+    file_service.save_generated_file.return_value = SimpleNamespace(id=uuid4())
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        template_file=template_file,
+        file_service=file_service,
+    )
+
+    output = await execute_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    assert output.persisted_text == (
+        "## title\n\nSocial medias påverkan\n\n"
+        "## author\n\nAnders Svensson\n\n"
+        "## summary\n\nDetta är sammanfattningen."
+    )
+    assert output.artifacts == [
+        {
+            "file_id": str(file_service.save_generated_file.return_value.id),
+            "name": "Nämndmöte 2026-09-23.docx",
+            "mimetype": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "size": len(file_service.save_generated_file.await_args.kwargs["payload"]),
+            "checksum": hashlib.sha256(
+                file_service.save_generated_file.await_args.kwargs["payload"]
+            ).hexdigest(),
+            "file_type": "document",
+        }
+    ]
+    assert output.model_parameters_json["mode"] == "template_fill"
+    assert "Detta är sammanfattningen." in output.full_text
+    assert output.output_payload_extensions == {
+        "template_fill_debug": {
+            "rendered_docx_text_raw": output.full_text,
+            "summary_mode": "resolved_bindings",
+            "placeholder_count": 3,
+        },
+        "template_provenance": {
+            "template_name": "template.docx",
+            "template_asset_id": str(template_asset_id),
+            "template_file_id": str(template_file_id),
+            "template_checksum": "checksum",
+            "published_flow_version": run.flow_version,
+        },
+    }
+    assert output.num_tokens_input == 0
+    assert output.num_tokens_output == 0
+    assert '"title": "Social medias påverkan"' in output.input_text
+    file_service.save_generated_file.assert_awaited_once()
+    save_kwargs = file_service.save_generated_file.await_args.kwargs
+    assert save_kwargs["name"] == "Nämndmöte 2026-09-23.docx"
+    assert (
+        save_kwargs["mimetype"]
+        == "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    )
+    assert save_kwargs["file_type"] == FileType.DOCUMENT
+    template_asset_repo.get.assert_awaited_once_with(
+        asset_id=template_asset_id,
+        tenant_id=run.tenant_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_template_fill_renders_run_input_step_results_and_transcript_without_tokens() -> (
+    None
+):
+    from eneo.flows.domain.step_output import inline_transcript
+
+    run = _run()
+    prior_result = _completed_result(run=run)
+    run.input_payload_json = FlowRunInputEnvelopePatch.transcription(
+        transcript=inline_transcript(
+            text="Verifierad transkribering",
+            source_step_id=prior_result.step_id,
+            source_attempt_no=1,
+        ),
+    ).apply_to(run.input_payload_json)
+    analysis_result = _completed_result(
+        run=run,
+        step_order=2,
+        output_payload={
+            "structured": {"summary": "Verifierad mellananalys"},
+        },
+    )
+    writer_result = _completed_result(
+        run=run,
+        step_order=3,
+        output_payload={"text": "Färdig malltext från skrivsteget."},
+    )
+    state = _state(
+        result=prior_result,
+        additional_results=(analysis_result, writer_result),
+    )
+    file_id = uuid4()
+    template_bytes = _placeholder_template_bytes()
+    asset_id = uuid4()
+    output_config = {
+        "bindings": {
+            "title": "{{ flow_input.title }}",
+            "author": "{{ flow_input.author }}",
+            "step_a.output.text": "{{ step_1.output.text }}",
+            "step_b.output.structured.summary": (
+                "{{ step_2.output.structured.summary }}"
+            ),
+            "föregående_steg": "{{ föregående_steg }}",
+            "customer   name": "{{ flow_input.customer name }}",
+            "transkribering": "{{ transkribering }}",
+            "flow_input.transkribering": "{{ flow_input.transkribering }}",
+            "flow.input.transkribering": "{{ flow.input.transkribering }}",
+        },
+        "template_asset_id": str(asset_id),
+    }
+    runtime_step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=4,
+        assistant_id=uuid4(),
+        user_description="Fill",
+        input_source="previous_step",
+        input_bindings=None,
+        input_config=None,
+        output_mode="template_fill",
+        output_config=output_config,
+        output_type="docx",
+    )
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=file_id,
+        name="builder-template.docx",
+        checksum="checksum",
+        blob=template_bytes,
+    )
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=file_id)
+
+    output = await execute_template_fill_step(
+        step=runtime_step,
+        run=run,
+        state=state,
+        deps=_runtime_deps(
+            file_repo=file_repo,
+            template_asset_repo=template_asset_repo,
+            template_file=template_file,
+        ),
+    )
+
+    assert "Detta är sammanfattningen." in output.full_text
+    assert "Verifierad mellananalys" in output.full_text
+    assert "Färdig malltext från skrivsteget." in output.full_text
+    assert "Ada Lovelace" in output.full_text
+    assert output.full_text.count("Verifierad transkribering") == 3
+    assert output.num_tokens_input == 0
+    assert output.num_tokens_output == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("written", ["", None])
+async def test_a_bound_field_written_empty_renders_empty_and_null_stops_the_fill(
+    written: str | None,
+) -> None:
+    # A run whose step writes null for a bound field (a provider that ignores
+    # the schema) stops at the fill step, and a run that writes "" leaves the
+    # control empty in the document.
+    run = _run()
+    template_file_id = uuid4()
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    file_service = AsyncMock()
+    file_service.save_generated_file.return_value = SimpleNamespace(id=uuid4())
+    deps = _runtime_deps(
+        file_repo=AsyncMock(),
+        template_asset_repo=template_asset_repo,
+        template_file=SimpleNamespace(
+            id=template_file_id,
+            name="template.docx",
+            checksum="checksum",
+            blob=control_template_bytes(text=[("title", "Titel", "Titel")]),
+        ),
+        file_service=file_service,
+    )
+    runtime_step = RuntimeStep(
+        step_id=uuid4(),
+        step_order=2,
+        assistant_id=uuid4(),
+        user_description="Fill",
+        input_source="previous_step",
+        input_bindings=None,
+        input_config=None,
+        output_mode="template_fill",
+        output_config={
+            "bindings": {"title": "{{ step_1.output.structured.title }}"},
+            "template_asset_id": str(uuid4()),
+            "template_checksum": "checksum",
+        },
+        output_type="docx",
+    )
+    state = _state(
+        result=_completed_result(
+            run=run, output_payload={"structured": {"title": written}}
+        )
+    )
+
+    if written is None:
+        with pytest.raises(TypedIOValidationException) as exc_info:
+            await execute_template_fill_step(
+                step=runtime_step, run=run, state=state, deps=deps
+            )
+        assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED
+        assert "without a value: title" in str(exc_info.value)
+        file_service.save_generated_file.assert_not_awaited()
+        return
+
+    output = await execute_template_fill_step(
+        step=runtime_step, run=run, state=state, deps=deps
+    )
+
+    assert output.persisted_text == "## title"
+    file_service.save_generated_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_a_bound_key_the_step_did_not_write_stops_the_fill_naming_the_key() -> (
+    None
+):
+    # Publication refuses a placeholder bound to a field the step may leave
+    # out; a run that reaches the fill without the key stops on it.
+    run = _run()
+    state = _state(
+        result=_completed_result(run=run, output_payload={"structured": {}}),
+    )
+    step = _step()
+    step.output_config["bindings"]["summary"] = "{{step_1.output.structured.note}}"
+    deps = _runtime_deps(
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        template_file=SimpleNamespace(
+            id=uuid4(),
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        ),
+    )
+
+    with pytest.raises(TypedIOValidationException, match="Missing key 'note'"):
+        await execute_template_fill_step(step=step, run=run, state=state, deps=deps)
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_loads_template_asset_by_tenant() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_asset_id = uuid4()
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        template_file=template_file,
+    )
+
+    output = await execute_template_fill_step(
+        step=_asset_step(
+            template_asset_id=template_asset_id,
+        ),
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    template_asset_repo.get.assert_awaited_once_with(
+        asset_id=template_asset_id,
+        tenant_id=run.tenant_id,
+    )
+    file_repo.get_by_id.assert_awaited_once_with(
+        file_id=template_file_id,
+        tenant_id=run.tenant_id,
+    )
+    deps.file_content_loader.load.assert_awaited_once_with(
+        [file_repo.get_by_id.return_value],
+        include_text_original_bytes=True,
+    )
+    assert output.output_payload_extensions["template_provenance"] == {
+        "template_name": "template.docx",
+        "template_asset_id": str(template_asset_id),
+        "template_file_id": str(template_file_id),
+        "template_checksum": "checksum",
+        "published_flow_version": run.flow_version,
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_resolves_asset_id_only_config() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_asset_id = uuid4()
+    asset_file_id = uuid4()
+    step = _asset_step(
+        template_asset_id=template_asset_id,
+    )
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=asset_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=asset_file_id)
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        template_file=template_file,
+    )
+
+    output = await execute_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    template_asset_repo.get.assert_awaited_once_with(
+        asset_id=template_asset_id,
+        tenant_id=run.tenant_id,
+    )
+    file_repo.get_by_id.assert_awaited_once_with(
+        file_id=asset_file_id,
+        tenant_id=run.tenant_id,
+    )
+    deps.file_content_loader.load.assert_awaited_once_with(
+        [file_repo.get_by_id.return_value],
+        include_text_original_bytes=True,
+    )
+    assert output.output_payload_extensions["template_provenance"] == {
+        "template_name": "template.docx",
+        "template_asset_id": str(template_asset_id),
+        "template_file_id": str(asset_file_id),
+        "template_checksum": "checksum",
+        "published_flow_version": run.flow_version,
+    }
+    assert output.model_parameters_json["template_asset_id"] == str(template_asset_id)
+    assert output.model_parameters_json["template_file_id"] == str(asset_file_id)
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_missing_template_asset() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_asset_id = uuid4()
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.side_effect = NotFoundException("missing asset")
+    file_repo = AsyncMock()
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await execute_template_fill_step(
+            step=_asset_step(
+                template_asset_id=template_asset_id,
+            ),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value
+    file_repo.get_by_id.assert_not_awaited()
+    deps.file_content_loader.load.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_missing_template_asset_file() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_asset_id = uuid4()
+    template_file_id = uuid4()
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    file_repo = AsyncMock()
+    file_repo.get_by_id.side_effect = NotFoundException("missing file")
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await execute_template_fill_step(
+            step=_asset_step(
+                template_asset_id=template_asset_id,
+            ),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TEMPLATE_NOT_ACCESSIBLE.value
+    deps.file_content_loader.load.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_rejects_template_file_id_identity() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_asset_id = uuid4()
+    template_file_id = uuid4()
+    step = _asset_step(
+        template_asset_id=template_asset_id,
+    )
+    step.output_config["template_file_id"] = str(template_file_id)
+    template_asset_repo = AsyncMock()
+    file_repo = AsyncMock()
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+    )
+
+    with pytest.raises(
+        TypedIOValidationException, match="template_file_id is not supported"
+    ):
+        await execute_template_fill_step(
+            step=step,
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+    template_asset_repo.get.assert_not_awaited()
+    file_repo.get_by_id.assert_not_awaited()
+    deps.file_content_loader.load.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_missing_template_asset_content() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_asset_id = uuid4()
+    template_file_id = uuid4()
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=None,
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        template_file=template_file,
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await execute_template_fill_step(
+            step=_asset_step(
+                template_asset_id=template_asset_id,
+            ),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+    assert exc_info.value.code == FlowApiErrorCode.TEMPLATE_MISSING_CONTENT.value
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_template_asset_checksum_drift() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_asset_id = uuid4()
+    template_file_id = uuid4()
+    template_asset_repo = AsyncMock()
+    template_asset_repo.get.return_value = SimpleNamespace(file_id=template_file_id)
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="other-checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=template_asset_repo,
+        template_file=template_file,
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await execute_template_fill_step(
+            step=_asset_step(
+                template_asset_id=template_asset_id,
+                template_checksum="expected-checksum",
+            ),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "typed_io_template_checksum_mismatch"
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_rejects_checksum_drift() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="other-checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+
+    with pytest.raises(TypedIOValidationException, match="checksum"):
+        await execute_template_fill_step(
+            step=_step(template_checksum="expected-checksum"),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+    deps.file_service.save_generated_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("binding", "author_input"),
+    [
+        ("", "Anders Svensson"),
+        # An optional number, date or select left empty is stored as null and an
+        # empty multiselect or list as an empty list. These rows kill the mutant
+        # that drops the run-input branch of _template_binding_text: the step
+        # then stops on "without a value" or "structured data".
+        ("{{author}}", None),
+        ("{{author}}", []),
+    ],
+)
+async def test_execute_template_fill_step_allows_explicit_empty_binding(
+    binding: str, author_input: object
+) -> None:
+    run = _run()
+    run.input_payload_json["author"] = author_input
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+
+    step = _step()
+    step.output_config["bindings"]["author"] = binding
+
+    output = await execute_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    assert '"author": ""' in output.input_text
+    assert "\n\n## author\n\n## summary" in output.persisted_text
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_strips_duplicate_leading_heading_from_summary_only() -> (
+    None
+):
+    run = _run()
+    now = datetime.now(timezone.utc)
+    result = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        input_payload_json={"text": "ignored"},
+        effective_prompt="prompt",
+        output_payload_json={"text": "Slutsats:\n\nDet här är själva brödtexten."},
+        model_parameters_json={},
+        num_tokens_input=10,
+        num_tokens_output=20,
+        status=FlowStepResultStatus.COMPLETED,
+        current_attempt_no=4,
+        flow_step_execution_hash="hash",
+        created_at=now,
+        updated_at=now,
+    )
+    state = RunExecutionState(
+        completed_by_order={1: result},
+        prior_results=[result],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_names_by_order={1: "slutsats"},
+    )
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_summary_only_template_bytes(),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+    step = _step()
+    step.output_config["bindings"] = {"slutsats": "{{step_1.output.text}}"}
+    step.output_config["placeholders"] = ["slutsats"]
+
+    output = await execute_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    assert output.persisted_text == "## slutsats\n\nDet här är själva brödtexten."
+    assert "Slutsats:\n\nDet här är själva brödtexten." in output.full_text
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_failed_upstream_step_clearly() -> (
+    None
+):
+    run = _run()
+    now = datetime.now(timezone.utc)
+    failed_result = FlowStepResult(
+        id=uuid4(),
+        flow_run_id=run.id,
+        flow_id=run.flow_id,
+        tenant_id=run.tenant_id,
+        step_id=uuid4(),
+        step_order=1,
+        assistant_id=uuid4(),
+        input_payload_json={"text": "ignored"},
+        effective_prompt="prompt",
+        output_payload_json={},
+        model_parameters_json={},
+        num_tokens_input=1,
+        num_tokens_output=1,
+        status=FlowStepResultStatus.FAILED,
+        error_message="boom",
+        flow_step_execution_hash="hash",
+        created_at=now,
+        updated_at=now,
+    )
+    state = RunExecutionState(
+        completed_by_order={},
+        prior_results=[failed_result],
+        assistant_cache={},
+        json_mode_supported={},
+        file_cache={},
+        step_names_by_order={1: "Sammanfatta"},
+    )
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+
+    with pytest.raises(TypedIOValidationException, match="failed earlier in the run"):
+        await execute_template_fill_step(
+            step=_step(),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_missing_template_blob_clearly() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=None,
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+
+    with pytest.raises(
+        TypedIOValidationException,
+        match="could not be read because the saved file content is missing",
+    ):
+        await execute_template_fill_step(
+            step=_step(),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_generated_document_save_failure() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    file_service = AsyncMock()
+    file_service.save_generated_file.side_effect = RuntimeError("storage unavailable")
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+        file_service=file_service,
+    )
+
+    with pytest.raises(TypedIOValidationException, match="saving the generated DOCX"):
+        await execute_template_fill_step(
+            step=_step(),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reads_the_generated_document_once(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _run()
+    state = _state(result=_completed_result(run=run))
+    template_file = SimpleNamespace(
+        id=uuid4(),
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(template_file=template_file)
+    reads: list[bytes] = []
+    read_body_text = file_text_module.extract_docx_body_text
+
+    def counting_read(document_bytes: bytes) -> str:
+        reads.append(document_bytes)
+        return read_body_text(document_bytes)
+
+    monkeypatch.setattr(file_text_module, "extract_docx_body_text", counting_read)
+
+    output = await execute_template_fill_step(
+        step=_step(), run=run, state=state, deps=deps
+    )
+
+    saved = deps.file_service.save_generated_file.await_args.kwargs["payload"]
+    assert reads == [saved]
+    monkeypatch.undo()
+    assert output.full_text == extract_docx_text(saved)
+    assert "Detta är sammanfattningen." in output.full_text
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_a_generated_document_read_failure_at_render(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    monkeypatch.setattr(
+        file_text_module,
+        "extract_docx_body_text",
+        lambda blob: (_ for _ in ()).throw(RuntimeError("document parse failed")),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+
+    with pytest.raises(TypedIOValidationException, match="rendering the DOCX template"):
+        await execute_template_fill_step(
+            step=_step(),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+    deps.file_service.save_generated_file.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_rejects_template_file_id_key() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    step = _step()
+    step.output_config["template_file_id"] = str(uuid4())
+    deps = _runtime_deps(
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+    )
+
+    with pytest.raises(
+        TypedIOValidationException, match="template_file_id is not supported"
+    ):
+        await execute_template_fill_step(
+            step=step,
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_rejects_non_string_binding_values() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    step = _step()
+    step.output_config["bindings"]["summary"] = {"bad": "value"}
+    deps = _runtime_deps(
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+    )
+
+    with pytest.raises(TypedIOValidationException, match="must be a string expression"):
+        await execute_template_fill_step(
+            step=step,
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_missing_published_template_file() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    file_repo = AsyncMock()
+    file_repo.get_by_id.side_effect = NotFoundException("missing file")
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+    )
+
+    with pytest.raises(
+        TypedIOValidationException, match="asset file is no longer available"
+    ):
+        await execute_template_fill_step(
+            step=_step(),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_reports_render_stage_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    monkeypatch.setattr(
+        template_fill_runtime_module,
+        "render_docx_template",
+        lambda **kwargs: (_ for _ in ()).throw(RuntimeError("render broke")),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+
+    with pytest.raises(TypedIOValidationException, match="rendering the DOCX template"):
+        await execute_template_fill_step(
+            step=_step(),
+            run=run,
+            state=state,
+            deps=deps,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_supports_datum_system_variable() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+    step = _step()
+    step.output_config["bindings"]["author"] = "{{datum}}"
+
+    output = await execute_template_fill_step(
+        step=step,
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    assert '"author": "' in output.input_text
+    assert output.input_text.count("-") >= 2
+    assert "## author\n\n" in output.persisted_text
+
+
+@pytest.mark.asyncio
+# The empty list kills the mutant that leaves a placeholder empty for an empty
+# list from any source, not only from run input.
+@pytest.mark.parametrize("structured", [{"status": "approved", "score": 5}, []])
+async def test_execute_template_fill_step_rejects_structured_json_binding(
+    structured: object,
+) -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    result = result.model_copy(
+        update={
+            "output_payload_json": {
+                "text": '{"status":"preview"}',
+                "structured": structured,
+            }
+        },
+        deep=True,
+    )
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+    step = _step()
+    step.output_config["bindings"]["summary"] = "{{step_1.output.structured}}"
+
+    with pytest.raises(TypedIOValidationException, match="structured data"):
+        await execute_template_fill_step(step=step, run=run, state=state, deps=deps)
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_supports_unicode_placeholder_names() -> None:
+    run = _run()
+    result = _completed_result(run=run)
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_unicode_template_bytes(),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+    step = _step()
+    step.output_config["placeholders"] = ["ämne", "summary"]
+    step.output_config["bindings"] = {
+        "ämne": "{{title}}",
+        "summary": "{{step_1.output.text}}",
+    }
+
+    output = await execute_template_fill_step(
+        step=step, run=run, state=state, deps=deps
+    )
+
+    assert output.persisted_text.startswith(
+        "## ämne\n\nSocial medias påverkan\n\n## summary"
+    )
+
+
+@pytest.mark.asyncio
+async def test_execute_template_fill_step_preserves_long_summary_in_persisted_text() -> (
+    None
+):
+    run = _run()
+    result = _completed_result(run=run)
+    result = result.model_copy(
+        update={"output_payload_json": {"text": "L" * 10000}},
+        deep=True,
+    )
+    state = _state(result=result)
+    template_file_id = uuid4()
+    file_repo = AsyncMock()
+    template_file = SimpleNamespace(
+        id=template_file_id,
+        name="template.docx",
+        checksum="checksum",
+        blob=_build_template_bytes(),
+    )
+    deps = _runtime_deps(
+        file_repo=file_repo,
+        template_asset_repo=AsyncMock(),
+        template_file=template_file,
+    )
+
+    output = await execute_template_fill_step(
+        step=_step(),
+        run=run,
+        state=state,
+        deps=deps,
+    )
+
+    assert "## summary" in output.persisted_text
+    assert "L" * 10000 in output.persisted_text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ownership_lost", [False, True])
+async def test_template_publication_rechecks_ownership_after_activation(
+    monkeypatch, ownership_lost
+):
+    from contextlib import nullcontext
+
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from eneo.flows.infrastructure.flow_run_repo import FlowRunExecutionOwner
+    from eneo.flows.runtime.execution_heartbeat import (
+        FlowExecutionHeartbeats,
+        FlowExecutionOwnershipLost,
+    )
+
+    run = _run()
+    session = AsyncMock(spec=AsyncSession)
+    session.in_transaction.return_value = False
+    session.scalar.side_effect = [run.id, None if ownership_lost else run.id]
+    deps = _runtime_deps(
+        template_file=SimpleNamespace(
+            id=uuid4(),
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        ),
+    )
+    deps.file_service.repo.session = session
+    activate = AsyncMock()
+    handler = TemplateFillStepHandler(deps=deps, activate_resolved_input_edges=activate)
+    manager = FlowExecutionHeartbeats(max_active=1)
+    monkeypatch.setattr(manager, "start", lambda: None)
+    with pytest.raises(FlowExecutionOwnershipLost) if ownership_lost else nullcontext():
+        async with manager.track(
+            FlowRunExecutionOwner(run.id, run.tenant_id, run.revision)
+        ):
+            await handler.execute(
+                step=_step(),
+                run=run,
+                state=_state(result=_completed_result(run=run)),
+                version_metadata=None,
+                attempt_no=1,
+            )
+    activate.assert_awaited_once()
+    session.begin.assert_called_once()
+    if ownership_lost:
+        session.rollback.assert_awaited_once()
+        deps.file_service.save_generated_file.assert_not_awaited()
+    else:
+        session.rollback.assert_not_awaited()
+        deps.file_service.save_generated_file.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_an_unresolved_binding_with_too_many_digits_is_named_like_any_other() -> (
+    None
+):
+    # Kills the mutant that converts the digits of an unresolved binding
+    # unguarded: Python refuses more than 4300 of them, and the run then
+    # reported a general assembly failure that blames the template asset.
+    run = _run()
+    state = _state(result=_completed_result(run=run))
+    step = _step()
+    step.output_config["bindings"]["summary"] = "{{flow_input.step_" + "9" * 5000 + "}}"
+    deps = _runtime_deps(
+        file_repo=AsyncMock(),
+        template_asset_repo=AsyncMock(),
+        template_file=SimpleNamespace(
+            id=uuid4(),
+            name="template.docx",
+            checksum="checksum",
+            blob=_build_template_bytes(),
+        ),
+    )
+
+    with pytest.raises(
+        TypedIOValidationException,
+        match="Template binding 'summary' could not be resolved",
+    ) as exc_info:
+        await execute_template_fill_step(step=step, run=run, state=state, deps=deps)
+
+    assert exc_info.value.code == FlowApiErrorCode.TYPED_IO_TEMPLATE_RENDER_FAILED
+    deps.file_service.save_generated_file.assert_not_awaited()

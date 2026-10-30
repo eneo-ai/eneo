@@ -13,6 +13,7 @@ from eneo.actors import (
     SpaceResourceType,
 )
 from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceRoleFact
+from eneo.assistants.assistant import AssistantOrigin
 from eneo.roles.permissions import Permission
 
 # All tenant-level permissions — test users should have these by default
@@ -89,6 +90,10 @@ class MockPermission:
     COLLECTIONS = "collections"
     WEBSITES = "websites"
     SERVICES = "services"
+    FLOWS = "flows"
+    FLOWS_VIEW = "flows_view"
+    FLOWS_RUN = "flows_run"
+    FLOWS_MANAGE = "flows_manage"
 
 
 def _actor(user, space: MockSpace) -> SpaceActor:
@@ -151,6 +156,8 @@ def test_space_access_facts_from_space_preserves_authorization_inputs() -> None:
     group_id = uuid4()
     default_assistant_id = uuid4()
     assistant_id = uuid4()
+    unloaded_hidden_id = uuid4()
+    flow_managed_id = uuid4()
     app_id = uuid4()
     space = MagicMock(
         id=space_id,
@@ -166,8 +173,10 @@ def test_space_access_facts_from_space_preserves_authorization_inputs() -> None:
         assistants=[
             MagicMock(id=default_assistant_id),
             MagicMock(id=assistant_id),
+            MagicMock(id=flow_managed_id, origin=AssistantOrigin.FLOW_MANAGED),
         ],
         apps=[MagicMock(id=app_id), MagicMock(id=None)],
+        unloaded_hidden_assistant_ids=frozenset({unloaded_hidden_id}),
     )
 
     facts = SpaceAccessFacts.from_space(space)
@@ -178,7 +187,10 @@ def test_space_access_facts_from_space_preserves_authorization_inputs() -> None:
     assert facts.members[member_id].role == MockSpaceRole.ADMIN
     assert facts.group_members[group_id].role == MockSpaceRole.EDITOR
     assert facts.default_assistant_id == default_assistant_id
-    assert facts.assistant_ids == frozenset({default_assistant_id, assistant_id})
+    # A flow-managed assistant is never an API key scope.
+    assert facts.assistant_ids == frozenset(
+        {default_assistant_id, assistant_id, unloaded_hidden_id}
+    )
     assert facts.app_ids == frozenset({app_id})
 
 
@@ -911,6 +923,25 @@ def test_bearer_user_without_key_keeps_full_membership_role():
     assert actor.can_read_space()
     assert actor.can_edit_space()
     assert actor.can_delete_space()
+
+
+def test_shared_space_flow_access_accepts_legacy_flows_permission_alias():
+    user = MockUser(id=42, role="admin", permissions=[Permission.FLOWS])
+    space = MockSpace(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1",
+        id="s1",
+        members={user.id: MockUser(id=user.id, role="admin")},
+    )
+
+    actor = SpaceActor(user, space)
+
+    assert actor.can_read_flows()
+    assert actor.can_create_flows()
+    assert actor.can_edit_flows()
+    assert actor.can_delete_flows()
+    assert actor.can_publish_flows()
 
 
 def test_personal_space_owner_with_read_key_can_still_read():

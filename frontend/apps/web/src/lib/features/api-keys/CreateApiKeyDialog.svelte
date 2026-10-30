@@ -10,6 +10,7 @@
     ApiKeyUpdateRequest,
     ApiKeyV2,
     ResourcePermissionLevel,
+    ResourcePermissions,
     SpaceSparse
   } from "@eneo/eneo-js";
   import { toast } from "svelte-sonner";
@@ -44,6 +45,7 @@
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import Ban from "@lucide/svelte/icons/ban";
   import Link2 from "@lucide/svelte/icons/link-2";
+  import Workflow from "@lucide/svelte/icons/workflow";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import ScopeResourceSelector from "$lib/features/api-keys/ScopeResourceSelector.svelte";
@@ -140,11 +142,22 @@
   // Fine-grained permissions (HuggingFace-style)
   type ResourcePermission = "none" | "read" | "write" | "admin";
   type ResourcePermissionKey =
-    "assistants" | "apps" | "spaces" | "knowledge" | "conversations" | "files" | "jobs" | "prompts";
+    | "assistants"
+    | "apps"
+    | "flows"
+    | "flow_evidence"
+    | "spaces"
+    | "knowledge"
+    | "conversations"
+    | "files"
+    | "jobs"
+    | "prompts";
 
   const ALL_RESOURCE_PERMISSION_KEYS: ReadonlyArray<ResourcePermissionKey> = [
     "assistants",
     "apps",
+    "flows",
+    "flow_evidence",
     "spaces",
     "knowledge",
     "conversations",
@@ -153,10 +166,6 @@
     "prompts"
   ];
 
-  // Keep in sync with backend `_SCOPE_RESOURCE_PERMISSION_FIELDS` and
-  // `_SCOPE_REQUIRED_RESOURCE_PERMISSION_FIELD` in
-  // backend/src/eneo/authentication/api_key_policy.py — drift will surface
-  // as a 400 from the policy validator when the form submits.
   const SCOPE_RESOURCE_PERMISSION_KEYS: Record<
     ApiKeyScopeType,
     ReadonlyArray<ResourcePermissionKey>
@@ -183,6 +192,8 @@
   // Per-resource permission levels
   let assistantsPermission = $state<ResourcePermission>("read");
   let appsPermission = $state<ResourcePermission>("read");
+  let flowsPermission = $state<ResourcePermission>("read");
+  let flowEvidencePermission = $state<ResourcePermission>("none");
   let spacesPermission = $state<ResourcePermission>("read");
   let knowledgePermission = $state<ResourcePermission>("read");
   let conversationsPermission = $state<ResourcePermission>("read");
@@ -270,7 +281,11 @@
   // jobs/prompts are infrastructure concepts that browser-side end-users do
   // not understand; the backend rejects them on pk_ keys, so the UI hides
   // them too.
-  const PK_FORBIDDEN_RESOURCES: ReadonlySet<ResourcePermissionKey> = new Set(["jobs", "prompts"]);
+  const PK_FORBIDDEN_RESOURCES: ReadonlySet<ResourcePermissionKey> = new Set([
+    "jobs",
+    "prompts",
+    "flow_evidence"
+  ]);
 
   const allResourcePermissionOptions: ReadonlyArray<ResourcePermissionOption> = [
     {
@@ -296,6 +311,18 @@
           ? m.api_keys_resource_selected_app_desc()
           : m.api_keys_resource_applications_desc(),
       icon: AppWindow
+    },
+    {
+      key: "flows",
+      label: () => m.api_keys_resource_flows(),
+      description: () => m.api_keys_resource_flows_desc(),
+      icon: Workflow
+    },
+    {
+      key: "flow_evidence",
+      label: () => m.api_keys_resource_flow_evidence(),
+      description: () => m.api_keys_resource_flow_evidence_desc(),
+      icon: ShieldCheck
     },
     {
       key: "spaces",
@@ -460,6 +487,7 @@
     if (keyType === "pk_") {
       if (jobsPermission !== "none") jobsPermission = "none";
       if (promptsPermission !== "none") promptsPermission = "none";
+      if (flowEvidencePermission !== "none") flowEvidencePermission = "none";
     }
   });
 
@@ -604,6 +632,9 @@
     if (key.resource_permissions && scopeSupportsFineGrained) {
       assistantsPermission = (key.resource_permissions.assistants ?? "none") as ResourcePermission;
       appsPermission = (key.resource_permissions.apps ?? "none") as ResourcePermission;
+      flowsPermission = (key.resource_permissions.flows ?? "none") as ResourcePermission;
+      flowEvidencePermission = (key.resource_permissions.flow_evidence ??
+        "none") as ResourcePermission;
       spacesPermission = (key.resource_permissions.spaces ?? "none") as ResourcePermission;
       knowledgePermission = (key.resource_permissions.knowledge ?? "none") as ResourcePermission;
       conversationsPermission = (key.resource_permissions.conversations ??
@@ -619,6 +650,8 @@
       } else {
         assistantsPermission = "none";
         appsPermission = "none";
+        flowsPermission = "none";
+        flowEvidencePermission = "none";
         spacesPermission = "none";
         knowledgePermission = "none";
         conversationsPermission = "none";
@@ -882,6 +915,8 @@
     };
     assistantsPermission = clamp("assistants");
     appsPermission = clamp("apps");
+    flowsPermission = clamp("flows");
+    flowEvidencePermission = "none";
     spacesPermission = clamp("spaces");
     knowledgePermission = clamp("knowledge");
     conversationsPermission = clamp("conversations");
@@ -894,6 +929,8 @@
     permission = "read";
     assistantsPermission = "read";
     appsPermission = "read";
+    flowsPermission = "none";
+    flowEvidencePermission = "none";
     spacesPermission = "none";
     knowledgePermission = "none";
     conversationsPermission = "none";
@@ -919,6 +956,10 @@
           return assistantsPermission;
         case "apps":
           return appsPermission;
+        case "flows":
+          return flowsPermission;
+        case "flow_evidence":
+          return flowEvidencePermission;
         case "spaces":
           return spacesPermission;
         case "knowledge":
@@ -948,6 +989,12 @@
       case "apps":
         appsPermission = level;
         break;
+      case "flows":
+        flowsPermission = level;
+        break;
+      case "flow_evidence":
+        flowEvidencePermission = level;
+        break;
       case "spaces":
         spacesPermission = level;
         break;
@@ -969,14 +1016,20 @@
     }
   }
 
-  function buildResourcePermissionsRequest() {
+  function buildResourcePermissionsRequest(): ResourcePermissions {
     const allowedKeys = new Set(scopeResourcePermissionKeys);
-    return {
+    const request: ResourcePermissions = {
       assistants: (allowedKeys.has("assistants")
         ? getResourcePermission("assistants")
         : "none") as ResourcePermissionLevel,
       apps: (allowedKeys.has("apps")
         ? getResourcePermission("apps")
+        : "none") as ResourcePermissionLevel,
+      flows: (allowedKeys.has("flows")
+        ? getResourcePermission("flows")
+        : "none") as ResourcePermissionLevel,
+      flow_evidence: (allowedKeys.has("flow_evidence")
+        ? getResourcePermission("flow_evidence")
         : "none") as ResourcePermissionLevel,
       spaces: (allowedKeys.has("spaces")
         ? getResourcePermission("spaces")
@@ -997,6 +1050,7 @@
         ? getResourcePermission("prompts")
         : "none") as ResourcePermissionLevel
     };
+    return request;
   }
 
   function shouldSendResourcePermissions() {
@@ -1326,7 +1380,7 @@
                   <div
                     class="relative flex h-10 w-10 items-center justify-center rounded-full border-2 transition-all duration-200
                     {isActive
-                      ? 'border-accent-default bg-accent-default text-on-fill shadow-accent-default/40 step-bounce shadow-lg'
+                      ? 'border-accent-default bg-accent-default text-on-fill shadow-accent-default/40 step-scale-in shadow-lg'
                       : ''}
                     {isCompleted
                       ? 'border-positive-default bg-positive-default/10 text-positive-stronger'
@@ -2250,19 +2304,19 @@
 </Dialog.Root>
 
 <style>
-  /* Step indicator bounce animation */
-  @keyframes step-bounce {
-    0%,
-    100% {
-      transform: scale(1);
+  /* Step indicator emphasis: one-directional ease-out scale, no overshoot
+     (bounce/elastic easing is banned by the motion standard). */
+  @keyframes step-scale-in {
+    from {
+      transform: scale(0.94);
     }
-    50% {
-      transform: scale(1.08);
+    to {
+      transform: scale(1);
     }
   }
 
-  :global(.step-bounce) {
-    animation: step-bounce 0.3s ease-out;
+  :global(.step-scale-in) {
+    animation: step-scale-in 0.2s ease-out;
   }
 
   /* Staggered entrance for fine-grained permission cards */
@@ -2327,5 +2381,14 @@
 
   :global(.secret-ring-pulse) {
     animation: ring-pulse 1.8s ease-out 0.3s;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(.step-scale-in),
+    :global(.permission-card-enter),
+    :global(.submit-pulse),
+    :global(.secret-ring-pulse) {
+      animation: none;
+    }
   }
 </style>

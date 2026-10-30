@@ -116,51 +116,53 @@ function policy(overrides: Record<string, unknown> = {}) {
         configured_bytes: 20 * 1024 * 1024,
         effective_bytes: 8 * 1024 * 1024,
         storage_target: "postgres_inline",
-        operator_ceiling_bytes: 8 * 1024 * 1024,
-        constraining_source: "operator_ceiling"
+        storage_capacity_bytes: 8 * 1024 * 1024,
+        constraining_source: "storage_capacity"
       },
       {
         use_case: "session_image",
         configured_bytes: 10 * 1024 * 1024,
         effective_bytes: 8 * 1024 * 1024,
         storage_target: "postgres_inline",
-        operator_ceiling_bytes: 8 * 1024 * 1024,
-        constraining_source: "operator_ceiling"
+        storage_capacity_bytes: 8 * 1024 * 1024,
+        constraining_source: "storage_capacity"
       },
       {
         use_case: "session_audio",
         configured_bytes: 100 * 1024 * 1024,
         effective_bytes: 8 * 1024 * 1024,
         storage_target: "postgres_inline",
-        operator_ceiling_bytes: 8 * 1024 * 1024,
-        constraining_source: "operator_ceiling"
+        storage_capacity_bytes: 8 * 1024 * 1024,
+        constraining_source: "storage_capacity"
       },
       {
         use_case: "knowledge_file",
         configured_bytes: 50 * 1024 * 1024,
         effective_bytes: 8 * 1024 * 1024,
         storage_target: "postgres_inline",
-        operator_ceiling_bytes: 8 * 1024 * 1024,
-        constraining_source: "operator_ceiling"
+        storage_capacity_bytes: 8 * 1024 * 1024,
+        constraining_source: "storage_capacity"
       },
       {
         use_case: "knowledge_audio",
         configured_bytes: 100 * 1024 * 1024,
         effective_bytes: 8 * 1024 * 1024,
         storage_target: "postgres_inline",
-        operator_ceiling_bytes: 8 * 1024 * 1024,
-        constraining_source: "operator_ceiling"
+        storage_capacity_bytes: 8 * 1024 * 1024,
+        constraining_source: "storage_capacity"
       }
     ],
     capabilities: [
       {
         target: "postgres_inline",
+        maximum_bytes: 512 * 1024 ** 2 - 513,
         configured: true,
         selectable: true,
         readiness_code: "ready"
       },
       {
         target: "object_store",
+        maximum_bytes: 80 * 1024 ** 3,
         configured: false,
         selectable: false,
         readiness_code: "object_store_not_configured"
@@ -176,6 +178,7 @@ function inventory() {
       {
         owner: "file_content",
         target: "postgres_inline",
+        maximum_bytes: 512 * 1024 ** 2 - 513,
         state: "available",
         count: 3,
         bytes: 4096,
@@ -184,6 +187,7 @@ function inventory() {
       {
         owner: "knowledge_file",
         target: "object_store",
+        maximum_bytes: 80 * 1024 ** 3,
         state: "available",
         count: 4,
         bytes: 8 * 1024,
@@ -192,6 +196,7 @@ function inventory() {
       {
         owner: "knowledge_file",
         target: "object_store",
+        maximum_bytes: 80 * 1024 ** 3,
         state: "tombstoned",
         count: 2,
         bytes: 16 * 1024,
@@ -214,6 +219,7 @@ function moves(overrides: Record<string, unknown> = {}) {
     moves: [
       {
         target: "object_store",
+        maximum_bytes: 80 * 1024 ** 3,
         state: "pending",
         failure_code: null,
         count: 3,
@@ -334,7 +340,7 @@ describe("admin storage settings page", () => {
       .element(page.getByText("20 storage_unit_mb", { exact: true }).first())
       .toBeVisible();
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .not.toBeInTheDocument();
     expect(getInventory).not.toHaveBeenCalled();
     expect(getMoves).not.toHaveBeenCalled();
@@ -1516,6 +1522,7 @@ describe("admin storage settings page", () => {
         moves: [
           {
             target: "object_store",
+            maximum_bytes: 80 * 1024 ** 3,
             state: "pending",
             failure_code: null,
             count: 1234,
@@ -1545,12 +1552,14 @@ describe("admin storage settings page", () => {
       capabilities: [
         {
           target: "postgres_inline",
+          maximum_bytes: 512 * 1024 ** 2 - 513,
           configured: true,
           selectable: true,
           readiness_code: "ready"
         },
         {
           target: "object_store",
+          maximum_bytes: 80 * 1024 ** 3,
           configured: true,
           selectable: true,
           readiness_code: "ready"
@@ -1650,12 +1659,14 @@ describe("admin storage settings page", () => {
         capabilities: [
           {
             target: "postgres_inline",
+            maximum_bytes: 512 * 1024 ** 2 - 513,
             configured: true,
             selectable: true,
             readiness_code: "ready"
           },
           {
             target: "object_store",
+            maximum_bytes: 80 * 1024 ** 3,
             configured: true,
             selectable: true,
             readiness_code: "ready"
@@ -1756,12 +1767,14 @@ describe("admin storage settings page", () => {
         capabilities: [
           {
             target: "postgres_inline",
+            maximum_bytes: 512 * 1024 ** 2 - 513,
             configured: true,
             selectable: true,
             readiness_code: "ready"
           },
           {
             target: "object_store",
+            maximum_bytes: 80 * 1024 ** 3,
             configured: true,
             selectable: true,
             readiness_code: "ready"
@@ -1795,12 +1808,14 @@ describe("admin storage settings page", () => {
         capabilities: [
           {
             target: "postgres_inline",
+            maximum_bytes: 512 * 1024 ** 2 - 513,
             configured: true,
             selectable: true,
             readiness_code: "ready"
           },
           {
             target: "object_store",
+            maximum_bytes: 80 * 1024 ** 3,
             configured: true,
             selectable: true,
             readiness_code: "ready"
@@ -1835,6 +1850,7 @@ describe("admin storage settings page", () => {
         moves: [
           {
             target: "object_store",
+            maximum_bytes: 80 * 1024 ** 3,
             state: "pending",
             failure_code: null,
             count: 4,
@@ -1885,7 +1901,7 @@ describe("admin storage settings page", () => {
       .element(page.getByLabelText("storage_limit_session_image", { exact: true }))
       .toHaveValue(10);
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .toBeDisabled();
     expect(replacePolicy).not.toHaveBeenCalled();
   });
@@ -1908,7 +1924,7 @@ describe("admin storage settings page", () => {
     render(StoragePage);
 
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     expect(replacePolicy).toHaveBeenCalledWith(expect.objectContaining({ expected_revision: 4 }));
   });
@@ -1946,7 +1962,7 @@ describe("admin storage settings page", () => {
 
     await page.getByRole("button", { name: "storage_moves_pause" }).click();
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     expect(replacePolicy).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -1975,7 +1991,10 @@ describe("admin storage settings page", () => {
     render(StoragePage);
 
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
-    const saveButton = page.getByRole("button", { name: "storage_settings_save" });
+    const saveButton = page.getByRole("button", {
+      name: "storage_settings_save",
+      exact: true
+    });
     const pauseButton = page.getByRole("button", { name: "storage_moves_pause" });
     const saveClick = (async () => {
       await saveButton.click();
@@ -2024,7 +2043,7 @@ describe("admin storage settings page", () => {
     render(StoragePage);
 
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
     await page.getByRole("button", { name: "storage_moves_resume" }).click();
 
     expect(setMovesPaused).toHaveBeenCalledWith({
@@ -2039,12 +2058,14 @@ describe("admin storage settings page", () => {
       capabilities: [
         {
           target: "postgres_inline",
+          maximum_bytes: 512 * 1024 ** 2 - 513,
           configured: true,
           selectable: true,
           readiness_code: "ready"
         },
         {
           target: "object_store",
+          maximum_bytes: 80 * 1024 ** 3,
           configured: true,
           selectable: true,
           readiness_code: "ready"
@@ -2066,7 +2087,7 @@ describe("admin storage settings page", () => {
 
     await page.getByLabelText("storage_limit_session_file", { exact: true }).fill("30");
     const save = (async () => {
-      await page.getByRole("button", { name: "storage_settings_save" }).click();
+      await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
     })();
     await expect.element(page.getByRole("button", { name: "storage_moves_pause" })).toBeDisabled();
     await page.getByRole("button", { name: "storage_moves_queue" }).click();
@@ -2260,12 +2281,14 @@ describe("admin storage settings page", () => {
       capabilities: [
         {
           target: "postgres_inline",
+          maximum_bytes: 512 * 1024 ** 2 - 513,
           configured: true,
           selectable: true,
           readiness_code: "ready"
         },
         {
           target: "object_store",
+          maximum_bytes: 80 * 1024 ** 3,
           configured: true,
           selectable: true,
           readiness_code: "ready"
@@ -2345,12 +2368,14 @@ describe("admin storage settings page", () => {
       capabilities: [
         {
           target: "postgres_inline",
+          maximum_bytes: 512 * 1024 ** 2 - 513,
           configured: true,
           selectable: true,
           readiness_code: "ready"
         },
         {
           target: "object_store",
+          maximum_bytes: 80 * 1024 ** 3,
           configured: true,
           selectable: true,
           readiness_code: "ready"
@@ -2384,7 +2409,7 @@ describe("admin storage settings page", () => {
     await expect.element(page.getByTestId("policy-recovery-alert")).toHaveFocus();
     await expect.element(sessionFileInput).toHaveValue(31);
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .toBeDisabled();
 
     await page.getByRole("button", { name: "storage_settings_reload_latest" }).click();
@@ -2401,12 +2426,14 @@ describe("admin storage settings page", () => {
       capabilities: [
         {
           target: "postgres_inline",
+          maximum_bytes: 512 * 1024 ** 2 - 513,
           configured: true,
           selectable: true,
           readiness_code: "ready"
         },
         {
           target: "object_store",
+          maximum_bytes: 80 * 1024 ** 3,
           configured: true,
           selectable: true,
           readiness_code: "ready"
@@ -2440,7 +2467,7 @@ describe("admin storage settings page", () => {
       .element(page.getByText("20 storage_unit_mb", { exact: true }).first())
       .toBeVisible();
     await expect
-      .element(page.getByRole("button", { name: "storage_settings_save" }))
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
       .not.toBeInTheDocument();
     await expect
       .element(page.getByText("storage_settings_save_outcome_unknown_title"))
@@ -2473,7 +2500,7 @@ describe("admin storage settings page", () => {
 
     const sessionFileInput = page.getByLabelText("storage_limit_session_file", { exact: true });
     await sessionFileInput.fill("31");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     await expect.element(page.getByText("storage_settings_stale_title")).toBeVisible();
     await expect.element(sessionFileInput).toHaveValue(31);
@@ -2501,12 +2528,14 @@ describe("admin storage settings page", () => {
 
     const sessionFileInput = page.getByLabelText("storage_limit_session_file", { exact: true });
     await sessionFileInput.fill("31");
-    await page.getByRole("button", { name: "storage_settings_save" }).click();
+    await page.getByRole("button", { name: "storage_settings_save", exact: true }).click();
 
     await expect.element(page.getByText("storage_settings_target_unavailable_title")).toBeVisible();
     await expect.element(page.getByText("storage_settings_stale_title")).not.toBeInTheDocument();
     await expect.element(sessionFileInput).toHaveValue(31);
-    await expect.element(page.getByRole("button", { name: "storage_settings_save" })).toBeEnabled();
+    await expect
+      .element(page.getByRole("button", { name: "storage_settings_save", exact: true }))
+      .toBeEnabled();
   });
 
   test("truthfully shows a degraded selected object store while preventing it from being reselected", async () => {
@@ -2521,12 +2550,14 @@ describe("admin storage settings page", () => {
         capabilities: [
           {
             target: "postgres_inline",
+            maximum_bytes: 512 * 1024 ** 2 - 513,
             configured: true,
             selectable: true,
             readiness_code: "ready"
           },
           {
             target: "object_store",
+            maximum_bytes: 80 * 1024 ** 3,
             configured: true,
             selectable: false,
             readiness_code: "store_degraded"
@@ -2555,12 +2586,14 @@ describe("admin storage settings page", () => {
         capabilities: [
           {
             target: "postgres_inline",
+            maximum_bytes: 512 * 1024 ** 2 - 513,
             configured: true,
             selectable: true,
             readiness_code: "ready"
           },
           {
             target: "object_store",
+            maximum_bytes: 80 * 1024 ** 3,
             configured: false,
             selectable: false,
             readiness_code: "database_unavailable"
@@ -2581,6 +2614,21 @@ describe("admin storage settings page", () => {
       .not.toBeInTheDocument();
   });
 
+  test("validates draft sizes against storage capacity and exposes legacy clamping", async () => {
+    testUser.canAdministerStorage = true;
+    getPolicy.mockResolvedValue(policy());
+    render(StoragePage);
+    await expect.element(page.getByText("storage_limits_clamped_warning")).toBeVisible();
+    const field = page.getByLabelText("storage_limit_session_file", { exact: true });
+    const save = page.getByRole("button", { name: "storage_settings_save", exact: true });
+    await field.fill("600");
+    await expect.element(field).toHaveAttribute("aria-invalid", "true");
+    await expect.element(save).toBeDisabled();
+    await field.fill("400");
+    await expect.element(field).toHaveAttribute("aria-invalid", "false");
+    await expect.element(save).toBeEnabled();
+  });
+
   test("shows all five effective limits plus bounded capability and inventory facts", async () => {
     testUser.canAdministerStorage = true;
     const currentPolicy = policy();
@@ -2591,7 +2639,7 @@ describe("admin storage settings page", () => {
             ? {
                 ...limit,
                 effective_bytes: limit.configured_bytes,
-                operator_ceiling_bytes: 20 * 1024 * 1024,
+                storage_capacity_bytes: 20 * 1024 * 1024,
                 constraining_source: "admin_policy"
               }
             : limit
@@ -2612,7 +2660,7 @@ describe("admin storage settings page", () => {
       await expect.element(page.getByText(`storage_use_case_${useCase}`)).toBeVisible();
     }
     await expect
-      .element(page.getByText("storage_constraint_operator_ceiling").first())
+      .element(page.getByText("storage_constraint_storage_capacity").first())
       .toBeVisible();
     await expect.element(page.getByText("storage_constraint_admin_policy").first()).toBeVisible();
     await expect
@@ -2690,6 +2738,7 @@ describe("admin storage settings page", () => {
         {
           owner: "file_content",
           target: "postgres_inline",
+          maximum_bytes: 512 * 1024 ** 2 - 513,
           state: "delete_pending",
           count: 1,
           bytes: 2 * 1024,
@@ -2718,6 +2767,7 @@ describe("admin storage settings page", () => {
         {
           owner: "file_content",
           target: "postgres_inline",
+          maximum_bytes: 512 * 1024 ** 2 - 513,
           state: "available",
           count: 100,
           bytes: 100 * 1024 * 1024 * 1024,
@@ -2726,6 +2776,7 @@ describe("admin storage settings page", () => {
         {
           owner: "knowledge_file",
           target: "object_store",
+          maximum_bytes: 80 * 1024 ** 3,
           state: "available",
           count: 1,
           bytes: 1024 * 1024,

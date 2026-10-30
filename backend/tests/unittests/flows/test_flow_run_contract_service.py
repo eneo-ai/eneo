@@ -1,0 +1,1565 @@
+from __future__ import annotations
+
+from dataclasses import replace
+from datetime import datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import UUID, uuid4
+
+import pytest
+
+from eneo.flows.api.flow_models import FlowOutputDelivery
+from eneo.flows.api.flow_run_contract_models import FlowSpeakerLabelsOptionPublic
+from eneo.flows.domain.flow import Flow, FlowStep
+from eneo.flows.domain.flow_invariant_exceptions import FlowPersistedIdMissingError
+from eneo.flows.domain.runtime import RuntimeStep
+from eneo.flows.domain.runtime_invariant_exceptions import (
+    FlowPublishedDefinitionWithoutExecutableStepsError,
+)
+from eneo.flows.enums import FlowOutputType, final_step_output_type
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_input_limits import FlowInputLimits
+from eneo.flows.flow_metadata import FlowFormFieldType
+from eneo.flows.flow_review_expiry_policy import FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
+from eneo.flows.flow_run_contract_service import (
+    FlowRunContractService,
+    build_final_output_contract,
+    max_speakers_option,
+    settle_max_speakers,
+    speaker_labels_option,
+    speaker_service_gap,
+    speaker_service_gap_in_space,
+    speakers_identifiable,
+)
+from eneo.flows.published_definition import (
+    FLOW_DEFINITION_SCHEMA_VERSION,
+    FLOW_PUBLISHED_FORM_SCHEMA_INVALID,
+    published_definition_checksum,
+)
+from eneo.flows.transcription_config import SpeakerServiceGap
+from eneo.main.config import Settings, get_settings
+from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.models import NOT_PROVIDED
+from eneo.security_classifications.domain.entities.security_classification import (
+    SecurityClassification,
+)
+from tests.flow_snapshot_fixtures import assistant_snapshot
+from tests.unittests.spaces.test_space_transcription_services import (
+    _connection,
+    _space,
+)
+
+
+def _flow(*, step: FlowStep) -> Flow:
+    now = datetime.now(timezone.utc)
+    return Flow(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        space_id=uuid4(),
+        name="Flow",
+        steps=[step],
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _step(*, step_order: int, input_type: str) -> FlowStep:
+    return FlowStep(
+        id=uuid4(),
+        assistant_id=uuid4(),
+        step_order=step_order,
+        input_source="flow_input",
+        input_type=input_type,
+        output_mode="pass_through",
+        output_type="text",
+    )
+
+
+def _limits() -> FlowInputLimits:
+    return FlowInputLimits(
+        file_max_size_bytes=12_000_000,
+        audio_max_size_bytes=25_000_000,
+        max_files_per_run=5,
+    )
+
+
+@pytest.mark.parametrize("mode", ["process_each_section", "summarize"])
+async def test_run_contract_projects_published_section_processing_steps(mode):
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1})
+    schema = {
+        "type": "object",
+        "properties": {"records": {"type": "array", "items": {"type": "object"}}},
+        "required": ["records"],
+    }
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    versions = AsyncMock()
+    versions.get.return_value = _published_version(
+        version=1,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "step_order": 1,
+                    "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": {"text_processing": {"mode": mode}},
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "output_contract": schema,
+                }
+            ],
+        },
+    )
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert len(contract.text_processing_steps) == 1
+    processing = contract.text_processing_steps[0]
+    assert processing.model_dump(mode="json") == {
+        "step_id": str(step.id),
+        "step_order": 1,
+        "mode": mode,
+        "output_array_key": "records",
+        "item_schema": {"type": "object"},
+    }
+
+
+def _published_version(
+    *,
+    version: int | None,
+    definition_json: dict[str, object],
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        version=version,
+        definition_checksum=published_definition_checksum(definition_json),
+        definition_json=definition_json,
+    )
+
+
+def _service(
+    *,
+    flow_service: AsyncMock,
+    settings_service: AsyncMock,
+    flow_version_repo: AsyncMock,
+    template_asset_repo: AsyncMock | None = None,
+    settings: Settings | None = None,
+) -> FlowRunContractService:
+    return FlowRunContractService(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=template_asset_repo or AsyncMock(),
+        settings=settings or get_settings(),
+    )
+
+
+# The space the caller was authorized in; it offers no transcription models
+# and carries no security classification.
+_SPACE = SimpleNamespace(transcription_models=[], security_classification=None)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("classification", "expected"),
+    [
+        (
+            SecurityClassification(
+                tenant_id=uuid4(),
+                name="Känslig",
+                description="Personuppgifter får behandlas.",
+                security_level=2,
+                security_enabled=True,
+            ),
+            {
+                "name": "Känslig",
+                "description": "Personuppgifter får behandlas.",
+                "security_level": 2,
+            },
+        ),
+        (None, None),
+        (
+            SecurityClassification(
+                tenant_id=uuid4(),
+                name="Känslig",
+                security_level=2,
+                security_enabled=False,
+            ),
+            None,
+        ),
+    ],
+    ids=["classified", "unclassified", "classifications_turned_off"],
+)
+async def test_run_contract_carries_the_spaces_security_classification(
+    classification: SecurityClassification | None,
+    expected: dict[str, object] | None,
+) -> None:
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1})
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    versions = AsyncMock()
+    versions.get.return_value = _published_version(
+        version=1,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "step_order": 1,
+                    "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "text",
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+    ).get_run_contract(
+        flow_id=flow.id,
+        space=SimpleNamespace(
+            transcription_models=[], security_classification=classification
+        ),
+    )
+
+    assert contract.model_dump(mode="json")["security_classification"] == expected
+
+
+@pytest.mark.asyncio
+async def test_a_step_that_maps_speakers_requires_labels_so_a_run_cannot_choose() -> (
+    None
+):
+    audio_step = _step(step_order=1, input_type="audio")
+    mapping_assistant_id = uuid4()
+    chosen = _connection(1)
+    flow = _flow(step=audio_step).model_copy(update={"published_version": 1})
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    versions = AsyncMock()
+    versions.get.return_value = _published_version(
+        version=1,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(uuid4())},
+                    "transcription_speaker_service": {"id": str(chosen.id)},
+                }
+            },
+            "steps": [
+                {
+                    "step_id": str(audio_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(audio_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(audio_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "input_config": {
+                        "runtime_input": {"enabled": True, "input_format": "audio"}
+                    },
+                    "output_mode": "transcribe_only",
+                    "output_type": "text",
+                },
+                {
+                    "step_id": str(uuid4()),
+                    "step_order": 2,
+                    "assistant_id": str(mapping_assistant_id),
+                    "assistant_snapshot": assistant_snapshot(mapping_assistant_id),
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_mode": "speaker_mapping",
+                    "output_type": "json",
+                    "review_policy": {"mode": "edit"},
+                },
+            ],
+        },
+    )
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+    ).get_run_contract(flow_id=flow.id, space=_space(None, [chosen]))
+
+    assert contract.transcription is not None
+    assert contract.transcription.speaker_labels.model_dump() == {
+        "selectable": False,
+        "required": True,
+        "default": True,
+        "unavailable_reason": None,
+    }
+    # A speaker service labels a multi-part recording as one.
+    assert contract.transcription.single_recording is True
+
+    # Once the space lost it, the parts are still one recording: they take the
+    # longest recording together.
+    unlabelled = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+    ).get_run_contract(flow_id=flow.id, space=_space(None))
+    assert unlabelled.transcription is not None
+    assert unlabelled.transcription.single_recording is True
+    # The labels the flow requires cannot be produced, and the contract says why.
+    assert unlabelled.transcription.speaker_labels.model_dump() == {
+        "selectable": False,
+        "required": True,
+        "default": False,
+        "unavailable_reason": SpeakerServiceGap.PICKED_UNAVAILABLE,
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("granted", "pick", "selectable", "reason"),
+    [
+        # A flow that chose no service simply transcribes, whatever its space
+        # has: nothing is chosen for it, and there is nothing to report.
+        (0, None, False, None),
+        (1, None, False, None),
+        (2, None, False, None),
+        (2, 1, True, None),
+        # The picked service's grant was revoked; the space's other service
+        # does not stand in for the author's pick.
+        (1, "revoked", False, SpeakerServiceGap.PICKED_UNAVAILABLE),
+    ],
+    ids=[
+        "no_pick_no_service",
+        "no_pick_one_service",
+        "no_pick_two_services",
+        "usable_pick",
+        "revoked_pick",
+    ],
+)
+async def test_a_run_chooses_speaker_labels_only_when_the_flows_own_service_labels_them(
+    granted: int,
+    pick: int | str | None,
+    selectable: bool,
+    reason: SpeakerServiceGap | None,
+) -> None:
+    connections = [_connection(1) for _ in range(granted)]
+    wizard: dict[str, object] = {
+        "transcription_enabled": True,
+        "transcription_model": {"id": str(uuid4())},
+    }
+    if pick is not None:
+        picked = uuid4() if pick == "revoked" else connections[int(pick)].id
+        wizard["transcription_speaker_service"] = {"id": str(picked)}
+    audio_step = _step(step_order=1, input_type="audio")
+    flow = _flow(step=audio_step).model_copy(update={"published_version": 1})
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    versions = AsyncMock()
+    versions.get.return_value = _published_version(
+        version=1,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {"wizard": wizard},
+            "steps": [
+                {
+                    "step_id": str(audio_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(audio_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(audio_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "input_config": {
+                        "runtime_input": {"enabled": True, "input_format": "audio"}
+                    },
+                    "output_mode": "transcribe_only",
+                    "output_type": "text",
+                },
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+    ).get_run_contract(flow_id=flow.id, space=_space(None, connections))
+
+    assert contract.transcription is not None
+    assert contract.transcription.speaker_labels.selectable is selectable
+    # The flow asks for labels by default; without its service a run gets none.
+    assert contract.transcription.speaker_labels.default is selectable
+    assert (contract.transcription.max_speakers is not None) is selectable
+    assert contract.transcription.speaker_labels.unavailable_reason is reason
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("tenant_seconds", "max_duration_seconds", "max_decoded_bytes", "longest"),
+    [
+        (None, 7200, 2 * 2**30, 7200),
+        # The admin's longest recording, not the deployment default.
+        (21_600, 18000, 2 * 2**30, 21_600),
+        # 16 kHz mono 16-bit decodes to 32 000 bytes a second: this size
+        # ceiling binds at one hour although the duration setting says five.
+        (None, 18000, 115_200_000, 3600),
+    ],
+)
+async def test_an_audio_input_states_the_longest_file_and_recording_eneo_transcribes(
+    tenant_seconds: int | None,
+    max_duration_seconds: int,
+    max_decoded_bytes: int,
+    longest: int,
+) -> None:
+    audio_step = _step(step_order=1, input_type="audio")
+    flow = _flow(step=audio_step).model_copy(update={"published_version": 1})
+    flow_service = AsyncMock()
+    flow_service.get_flow.return_value = flow
+    settings_service = AsyncMock()
+    settings_service.get_flow_input_limits_resolved.return_value = replace(
+        _limits(), audio_max_duration_seconds=tenant_seconds
+    )
+    versions = AsyncMock()
+    versions.get.return_value = _published_version(
+        version=1,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {},
+            "steps": [
+                {
+                    "step_id": str(audio_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(audio_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(audio_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "audio",
+                    "input_config": {
+                        "runtime_input": {"enabled": True, "input_format": "audio"}
+                    },
+                    "output_mode": "transcribe_only",
+                    "output_type": "text",
+                },
+            ],
+        },
+    )
+    limits = get_settings().model_copy(
+        update={
+            "flow_audio_max_duration_seconds": max_duration_seconds,
+            "flow_audio_max_decoded_bytes": max_decoded_bytes,
+        }
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=versions,
+        settings=limits,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    step = contract.steps_requiring_input[0]
+    assert step.max_duration_seconds == longest
+    # The parts of one recording together (single_recording) take the same.
+    assert step.max_recording_seconds == longest
+    # Parts long enough that the step's file slots hold the whole recording.
+    assert step.max_files is not None
+    assert step.recording_part_seconds == -(-longest // step.max_files)
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_requires_persisted_flow_id() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    step = _step(step_order=1, input_type="text")
+    flow_service.get_flow.return_value = _flow(step=step).model_copy(
+        update={"id": None, "published_version": 1}
+    )
+    service = _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    )
+
+    with pytest.raises(FlowPersistedIdMissingError):
+        await service.get_run_contract(flow_id=uuid4(), space=_SPACE)
+
+    flow_version_repo.get.assert_not_awaited()
+    settings_service.get_flow_input_limits_resolved.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_requires_published_flow() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(
+        update={"published_version": None, "steps": [step]}
+    )
+    flow_service.get_flow.return_value = flow
+    service = _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await service.get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert exc_info.value.code is FlowApiErrorCode.FLOW_NOT_PUBLISHED
+    assert str(exc_info.value) == (
+        "Flow must be published before a run contract can be created."
+    )
+    flow_version_repo.get.assert_not_awaited()
+    settings_service.get_flow_input_limits_resolved.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_rejects_checksum_drift_before_limits() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
+    definition_json = {
+        "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+        "flow_id": str(flow.id),
+        "steps": [
+            {
+                "step_id": str(step.id),
+                "step_order": step.step_order,
+                "assistant_id": str(step.assistant_id),
+                "assistant_snapshot": assistant_snapshot(step.assistant_id),
+                "input_source": step.input_source,
+                "input_type": step.input_type,
+                "output_mode": step.output_mode,
+                "output_type": step.output_type,
+            }
+        ],
+    }
+    flow_service.get_flow.return_value = flow
+    flow_version_repo.get.return_value = SimpleNamespace(
+        version=flow.published_version,
+        definition_checksum="stored-checksum-does-not-match",
+        definition_json=definition_json,
+    )
+
+    with pytest.raises(FlowBadRequestException) as exc_info:
+        await _service(
+            flow_service=flow_service,
+            settings_service=settings_service,
+            flow_version_repo=flow_version_repo,
+        ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert exc_info.value.code is FlowApiErrorCode.DEFINITION_CHECKSUM_MISMATCH
+    settings_service.get_flow_input_limits_resolved.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_returns_published_inputs_final_output_and_templates() -> (
+    None
+):
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    template_asset_repo = AsyncMock()
+
+    runtime_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "required": True,
+                    "max_files": 2,
+                    "input_format": "document",
+                    "label": "Upload",
+                    "description": "Attach source files",
+                }
+            }
+        }
+    )
+    template_step = _step(step_order=2, input_type="text").model_copy(
+        update={
+            "output_mode": "template_fill",
+            "output_type": "docx",
+            "output_config": {
+                "template_asset_id": str(uuid4()),
+                "template_checksum": "published-checksum",
+                "template_name": "Published template",
+                "bindings": {"Body": "{{step_1.output.text}}"},
+            },
+        }
+    )
+    flow = _flow(step=runtime_step).model_copy(
+        update={
+            "published_version": 4,
+            "steps": [runtime_step, template_step],
+            "metadata_json": {
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "live_draft_field",
+                            "type": "text",
+                            "order": 1,
+                        }
+                    ]
+                }
+            },
+        }
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    asset_id = UUID(str(template_step.output_config["template_asset_id"]))
+    template_file_id = uuid4()
+    template_asset_repo.get.return_value = SimpleNamespace(
+        id=asset_id,
+        file_id=template_file_id,
+        name="Shared template",
+        checksum="published-checksum",
+    )
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {
+                "form_schema": {
+                    "fields": [
+                        {
+                            "name": "published_field",
+                            "type": "text",
+                            "label": "Published field",
+                            "required": True,
+                            "order": 1,
+                        }
+                    ]
+                }
+            },
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                },
+                {
+                    "step_id": str(template_step.id),
+                    "step_order": 2,
+                    "assistant_id": str(template_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(
+                        template_step.assistant_id
+                    ),
+                    "input_source": "previous_step",
+                    "input_type": "text",
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": template_step.output_config,
+                },
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=template_asset_repo,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert contract.published_flow_version == 4
+    assert contract.final_output is not None
+    assert contract.final_output.step_id == template_step.id
+    assert contract.final_output.output_type == "docx"
+    assert contract.final_output.output_mode == "template_fill"
+    assert contract.final_output.delivery == FlowOutputDelivery.ARTIFACT
+    assert contract.aggregate_max_files == 2
+    assert contract.form_fields[0].name == "published_field"
+    assert contract.form_fields[0].type is FlowFormFieldType.TEXT
+    assert contract.form_fields[0].label == "Published field"
+    assert contract.steps_requiring_input[0].step_id == runtime_step.id
+    assert contract.steps_requiring_input[0].label == "Upload"
+    assert contract.steps_requiring_input[0].required is True
+    assert contract.steps_requiring_input[0].max_files == 2
+    assert contract.steps_requiring_input[0].max_file_size_bytes == 12_000_000
+    assert contract.steps_requiring_input[0].max_duration_seconds is None
+    assert contract.steps_requiring_input[0].max_recording_seconds is None
+    assert contract.steps_requiring_input[0].recording_part_seconds is None
+    assert contract.runtime_upload_policy.min_timeout_seconds == 120
+    assert contract.runtime_upload_policy.seconds_per_mebibyte == 8
+    assert contract.runtime_upload_policy.max_timeout_seconds == 600
+    assert contract.runtime_upload_policy.idle_timeout_seconds == 120
+    assert (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        in contract.steps_requiring_input[0].accepted_mimetypes
+    )
+    assert contract.template_readiness[0].status == "ready"
+    assert contract.template_readiness[0].template_asset_id == asset_id
+    assert contract.template_readiness[0].can_edit is False
+    assert contract.template_readiness[0].can_download is True
+
+
+@pytest.mark.parametrize(
+    ("published_checksum", "current_checksum"),
+    [
+        ("published-checksum", "current-checksum"),
+        (" template-checksum ", "template-checksum"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_get_run_contract_marks_template_checksum_drift_needs_action(
+    published_checksum: str,
+    current_checksum: str,
+) -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    template_asset_repo = AsyncMock()
+
+    template_asset_id = uuid4()
+    template_file_id = uuid4()
+    output_config = {
+        "template_asset_id": str(template_asset_id),
+        "template_checksum": published_checksum,
+        "template_name": "Published template",
+        "bindings": {"Body": "{{step_1.output.text}}"},
+    }
+
+    template_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "output_mode": "template_fill",
+            "output_type": "docx",
+            "output_config": output_config,
+        }
+    )
+    flow = _flow(step=template_step).model_copy(
+        update={"published_version": 4, "steps": [template_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    asset_id_asset = SimpleNamespace(
+        id=template_asset_id,
+        file_id=template_file_id,
+        name="Asset-id template",
+        checksum=current_checksum,
+    )
+    template_asset_repo.get.return_value = asset_id_asset
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(template_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(template_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(
+                        template_step.assistant_id
+                    ),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": template_step.output_config,
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=template_asset_repo,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    readiness = contract.template_readiness[0]
+    assert readiness.status == "needs_action"
+    assert (
+        readiness.message_code
+        == FlowApiErrorCode.TYPED_IO_TEMPLATE_CHECKSUM_MISMATCH.value
+    )
+    assert readiness.template_asset_id == asset_id_asset.id
+    assert readiness.template_file_id == template_file_id
+    assert readiness.template_name == asset_id_asset.name
+    assert readiness.checksum == current_checksum
+    assert readiness.can_edit is False
+    assert readiness.can_download is True
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("fields", "shown"),
+    [
+        (
+            [
+                {"name": "second", "type": "email", "order": 2},
+                {"name": "first", "type": "textarea", "order": 1},
+            ],
+            ["first", "second"],
+        ),
+        # A field without an order sits at its position, as the editor shows it.
+        (
+            [
+                {"name": "explicit", "type": "text", "order": 2},
+                {"name": "implicit", "type": "text"},
+            ],
+            ["explicit", "implicit"],
+        ),
+        # A legacy order a persisted read tolerates (0) sits at its position.
+        (
+            [
+                {"name": "a", "type": "text", "order": 3},
+                {"name": "b", "type": "text", "order": 4},
+                {"name": "c", "type": "text", "order": 0},
+            ],
+            ["a", "c", "b"],
+        ),
+    ],
+    ids=["by-order", "mixed", "legacy"],
+)
+async def test_get_run_contract_normalizes_and_sorts_published_form_fields(
+    fields: list[dict[str, object]], shown: list[str]
+) -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {"form_schema": {"fields": fields}},
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "step_order": 1,
+                    "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    # Published orders are the display positions a client re-sorts by.
+    assert [(field.name, field.order) for field in contract.form_fields] == [
+        (name, position) for position, name in enumerate(shown, start=1)
+    ]
+    assert {field.type for field in contract.form_fields} == {"text"}
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_preserves_invalid_form_schema_error_code() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "metadata_json": {"form_schema": {"fields": [{"type": "text"}]}},
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "step_order": 1,
+                    "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                }
+            ],
+        },
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await _service(
+            flow_service=flow_service,
+            settings_service=settings_service,
+            flow_version_repo=flow_version_repo,
+        ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert exc_info.value.code == FLOW_PUBLISHED_FORM_SCHEMA_INVALID
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_rejects_published_snapshot_without_executable_steps() -> (
+    None
+):
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 7, "steps": [step]})
+    flow_service.get_flow.return_value = flow
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [],
+        },
+    )
+
+    with pytest.raises(FlowPublishedDefinitionWithoutExecutableStepsError) as exc_info:
+        await _service(
+            flow_service=flow_service,
+            settings_service=settings_service,
+            flow_version_repo=flow_version_repo,
+        ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert exc_info.value.flow_id == flow.id
+    assert exc_info.value.flow_version == 7
+    settings_service.get_flow_input_limits_resolved.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_caps_step_file_count_by_tenant_limit() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    runtime_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "max_files": 10,
+                    "input_format": "document",
+                    "label": "Upload",
+                }
+            }
+        }
+    )
+    flow = _flow(step=runtime_step).model_copy(
+        update={"published_version": 1, "steps": [runtime_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert contract.aggregate_max_files == 5
+    assert contract.steps_requiring_input[0].max_files == 5
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_returns_zero_aggregate_when_no_runtime_inputs() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    step = _step(step_order=1, input_type="text")
+    flow = _flow(step=step).model_copy(update={"published_version": 1, "steps": [step]})
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(step.id),
+                    "step_order": 1,
+                    "assistant_id": str(step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert contract.aggregate_max_files == 0
+    assert contract.steps_requiring_input == []
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_returns_deployment_ceiling_when_step_is_unbounded() -> (
+    None
+):
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    runtime_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "input_config": {
+                "runtime_input": {
+                    "enabled": True,
+                    "input_format": "document",
+                    "label": "Upload",
+                }
+            }
+        }
+    )
+    flow = _flow(step=runtime_step).model_copy(
+        update={"published_version": 1, "steps": [runtime_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = FlowInputLimits(
+        file_max_size_bytes=12_000_000,
+        audio_max_size_bytes=25_000_000,
+        max_files_per_run=None,
+    )
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(runtime_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(runtime_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(runtime_step.assistant_id),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "input_config": runtime_step.input_config,
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert contract.aggregate_max_files == 1000
+    assert contract.steps_requiring_input[0].max_files == 1000
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_returns_review_steps() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    review_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "user_description": "Review extracted transcription",
+            "output_type": "json",
+            "output_contract": {
+                "type": "object",
+                "required": ["transcription"],
+                "properties": {"transcription": {"type": "string"}},
+                "additionalProperties": False,
+            },
+            "review_policy": {"mode": "edit"},
+        }
+    )
+    flow = _flow(step=review_step).model_copy(
+        update={"published_version": 2, "steps": [review_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(review_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(review_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(review_step.assistant_id),
+                    "user_description": review_step.user_description,
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "output_contract": review_step.output_contract,
+                    "review_policy": review_step.review_policy,
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert len(contract.steps_requiring_review) == 1
+    review_contract = contract.steps_requiring_review[0]
+    assert review_contract.step_id == review_step.id
+    assert review_contract.label == "Review extracted transcription"
+    assert review_contract.review_mode == "edit"
+    assert review_contract.output_type == "json"
+    assert review_contract.output_contract == review_step.output_contract
+    assert review_contract.expires_after_seconds == FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_uses_terminal_step_after_review_step() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+
+    review_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "user_description": "Review transcription",
+            "output_type": "json",
+            "output_contract": {
+                "type": "object",
+                "properties": {"transcription": {"type": "string"}},
+            },
+            "review_policy": {"mode": "edit"},
+        }
+    )
+    final_step = _step(step_order=2, input_type="json").model_copy(
+        update={
+            "input_source": "previous_step",
+            "user_description": "Create Word report",
+            "output_type": "docx",
+        }
+    )
+    flow = _flow(step=review_step).model_copy(
+        update={"published_version": 3, "steps": [review_step, final_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(review_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(review_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(review_step.assistant_id),
+                    "user_description": review_step.user_description,
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "pass_through",
+                    "output_type": "json",
+                    "output_contract": review_step.output_contract,
+                    "review_policy": review_step.review_policy,
+                },
+                {
+                    "step_id": str(final_step.id),
+                    "step_order": 2,
+                    "assistant_id": str(final_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(final_step.assistant_id),
+                    "user_description": final_step.user_description,
+                    "input_source": "previous_step",
+                    "input_type": "json",
+                    "output_mode": "pass_through",
+                    "output_type": "docx",
+                },
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert contract.final_output is not None
+    assert contract.final_output.step_id == final_step.id
+    assert contract.final_output.label == "Create Word report"
+    assert contract.final_output.output_type == "docx"
+    assert contract.final_output.delivery == FlowOutputDelivery.ARTIFACT
+    assert [step.step_id for step in contract.steps_requiring_review] == [
+        review_step.id
+    ]
+
+
+@pytest.mark.asyncio
+async def test_get_run_contract_marks_missing_template_assets_unavailable() -> None:
+    flow_service = AsyncMock()
+    settings_service = AsyncMock()
+    flow_version_repo = AsyncMock()
+    template_asset_repo = AsyncMock()
+
+    template_step = _step(step_order=1, input_type="text").model_copy(
+        update={
+            "output_mode": "template_fill",
+            "output_type": "docx",
+            "output_config": {
+                "template_asset_id": str(uuid4()),
+                "template_checksum": "published-checksum",
+                "template_name": "Published template",
+                "bindings": {"Body": "{{step_1.output.text}}"},
+            },
+        }
+    )
+    flow = _flow(step=template_step).model_copy(
+        update={"published_version": 4, "steps": [template_step]}
+    )
+    flow_service.get_flow.return_value = flow
+    settings_service.get_flow_input_limits_resolved.return_value = _limits()
+    template_asset_repo.get.side_effect = NotFoundException("missing")
+    flow_version_repo.get.return_value = _published_version(
+        version=flow.published_version,
+        definition_json={
+            "schema_version": FLOW_DEFINITION_SCHEMA_VERSION,
+            "flow_id": str(flow.id),
+            "steps": [
+                {
+                    "step_id": str(template_step.id),
+                    "step_order": 1,
+                    "assistant_id": str(template_step.assistant_id),
+                    "assistant_snapshot": assistant_snapshot(
+                        template_step.assistant_id
+                    ),
+                    "input_source": "flow_input",
+                    "input_type": "text",
+                    "output_mode": "template_fill",
+                    "output_type": "docx",
+                    "output_config": template_step.output_config,
+                }
+            ],
+        },
+    )
+
+    contract = await _service(
+        flow_service=flow_service,
+        settings_service=settings_service,
+        flow_version_repo=flow_version_repo,
+        template_asset_repo=template_asset_repo,
+    ).get_run_contract(flow_id=flow.id, space=_SPACE)
+
+    assert contract.template_readiness[0].status == "unavailable"
+    assert contract.template_readiness[0].message_code == "flow_template_not_accessible"
+    assert contract.template_readiness[0].can_edit is False
+    assert contract.template_readiness[0].can_download is True
+
+
+def _runtime_step(*, step_order: int, output_type: str) -> RuntimeStep:
+    return RuntimeStep(
+        step_id=uuid4(),
+        step_order=step_order,
+        assistant_id=uuid4(),
+        user_description=None,
+        input_source="flow_input" if step_order == 1 else "previous_step",
+        input_bindings=None,
+        input_config=None,
+        output_mode="pass_through",
+        output_config=None,
+        output_type=output_type,
+    )
+
+
+def test_final_step_output_type_returns_none_for_no_steps() -> None:
+    assert final_step_output_type([]) is None
+
+
+def test_final_step_output_type_returns_the_last_steps_type_in_step_order() -> None:
+    assert final_step_output_type(["text", "json", "pdf"]) == FlowOutputType.PDF
+
+
+def test_build_final_output_contract_output_type_matches_final_step_output_type() -> (
+    None
+):
+    """`build_final_output_contract`'s `output_type` must be the literal
+    result of `final_step_output_type`, not a separate computation over the
+    same steps — proving there is exactly one output-type derivation to
+    import, rather than that two independent computations happen to agree.
+    """
+    steps = [
+        _runtime_step(step_order=1, output_type="text"),
+        _runtime_step(step_order=2, output_type="docx"),
+    ]
+
+    derived = final_step_output_type([step.output_type for step in steps])
+    assert derived == FlowOutputType.DOCX
+
+    contract = build_final_output_contract(steps)
+
+    assert contract is not None
+    assert contract.output_type == derived
+
+
+def test_build_final_output_contract_returns_none_for_no_steps() -> None:
+    assert build_final_output_contract([]) is None
+    assert final_step_output_type([]) is None
+
+
+@pytest.mark.parametrize(
+    ("output_config", "participants_field"),
+    [
+        (None, None),
+        ({"speaker_mapping": {"infer_names": True}}, None),
+        ({"speaker_mapping": {"participants_field": "deltagare"}}, "deltagare"),
+    ],
+)
+def test_the_speaker_count_option_names_the_participants_field(
+    output_config: dict[str, object] | None, participants_field: str | None
+) -> None:
+    steps = [_runtime_step(step_order=1, output_type="text")]
+    if output_config is not None:
+        steps.append(
+            replace(
+                _runtime_step(step_order=2, output_type="json"),
+                output_mode="speaker_mapping",
+                output_config=output_config,
+            )
+        )
+
+    option = max_speakers_option(
+        steps,
+        wizard_metadata=None,
+        speaker_labels=FlowSpeakerLabelsOptionPublic(
+            selectable=True, required=False, default=True, unavailable_reason=None
+        ),
+        service_gap=None,
+    )
+
+    assert option is not None
+    assert option.participants_field == participants_field
+
+
+_AUDIO_INPUT = {"runtime_input": {"enabled": True, "input_format": "audio"}}
+
+
+@pytest.mark.parametrize("gap", [None, *SpeakerServiceGap])
+def test_a_flow_that_asks_for_labels_reports_why_none_can_be_produced(
+    gap: SpeakerServiceGap | None,
+) -> None:
+    audio_step = replace(
+        _runtime_step(step_order=1, output_type="text"), input_config=_AUDIO_INPUT
+    )
+    mapping_step = replace(
+        _runtime_step(step_order=2, output_type="json"), output_mode="speaker_mapping"
+    )
+    labels_on: dict[str, object] = {"transcription_enabled": True}
+    labels_off: dict[str, object] = {**labels_on, "transcription_diarization": False}
+    identifiable = gap is None
+
+    # A step that maps speakers needs the labels whatever the flow's setting.
+    required = speaker_labels_option(
+        [audio_step, mapping_step], wizard_metadata=labels_off, service_gap=gap
+    )
+    preferred = speaker_labels_option(
+        [audio_step], wizard_metadata=labels_on, service_gap=gap
+    )
+    not_asked = speaker_labels_option(
+        [audio_step], wizard_metadata=labels_off, service_gap=gap
+    )
+
+    assert required is not None and preferred is not None and not_asked is not None
+    assert required.model_dump() == {
+        "selectable": False,
+        "required": True,
+        "default": False,
+        "unavailable_reason": gap,
+    }
+    # A flow that chose no service and requires no labels simply transcribes:
+    # only a chosen service the space cannot use is worth reporting.
+    assert preferred.model_dump() == {
+        "selectable": identifiable,
+        "required": False,
+        "default": identifiable,
+        "unavailable_reason": (
+            gap if gap is SpeakerServiceGap.PICKED_UNAVAILABLE else None
+        ),
+    }
+    assert not_asked.model_dump() == {
+        "selectable": identifiable,
+        "required": False,
+        "default": False,
+        "unavailable_reason": None,
+    }
+
+
+@pytest.mark.parametrize(
+    ("choice", "form_count", "flow_default", "settled"),
+    [
+        (4, 6, 3, 4),
+        (None, 6, 3, None),
+        (NOT_PROVIDED, 6, 3, 6),
+        (NOT_PROVIDED, None, 3, 3),
+        (NOT_PROVIDED, None, None, None),
+    ],
+    ids=[
+        "run-choice-wins",
+        "run-asks-for-automatic",
+        "form-field",
+        "flow-default",
+        "automatic",
+    ],
+)
+def test_the_speaker_bound_comes_from_the_run_the_form_the_flow_or_automatic(
+    choice: object, form_count: int | None, flow_default: int | None, settled: object
+) -> None:
+    steps = [
+        replace(
+            _runtime_step(step_order=1, output_type="text"), input_config=_AUDIO_INPUT
+        ),
+        replace(
+            _runtime_step(step_order=2, output_type="json"),
+            output_mode="speaker_mapping",
+            output_config={"speaker_mapping": {"speaker_count_field": "antal"}},
+        ),
+    ]
+    wizard: dict[str, object] = {"transcription_enabled": True}
+    if flow_default is not None:
+        wizard["transcription_max_speakers"] = flow_default
+
+    bound = settle_max_speakers(
+        choice,  # pyright: ignore[reportArgumentType]
+        steps=steps,
+        wizard_metadata=wizard,
+        speaker_labels=True,
+        service_gap=None,
+        form_input={"antal": form_count} if form_count is not None else {},
+    )
+
+    assert bound == settled
+
+
+_USABLE = _connection(1)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("wizard", "gap", "reads"),
+    [
+        (None, SpeakerServiceGap.NOT_CHOSEN, 0),
+        (
+            {"transcription_speaker_service": {"id": str(_USABLE.id)}},
+            SpeakerServiceGap.NOT_CHOSEN,
+            0,
+        ),
+        (
+            {
+                "transcription_enabled": True,
+                "transcription_speaker_service": {"id": "not-a-uuid"},
+            },
+            SpeakerServiceGap.NOT_CHOSEN,
+            0,
+        ),
+        ({"transcription_enabled": True}, SpeakerServiceGap.NOT_CHOSEN, 0),
+        (
+            {
+                "transcription_enabled": True,
+                "transcription_speaker_service": {"id": str(_USABLE.id)},
+            },
+            None,
+            1,
+        ),
+        (
+            {
+                "transcription_enabled": True,
+                "transcription_speaker_service": {"id": str(uuid4())},
+            },
+            SpeakerServiceGap.PICKED_UNAVAILABLE,
+            1,
+        ),
+    ],
+    ids=[
+        "no_settings",
+        "transcribes_nothing",
+        "unreadable_choice",
+        "no_service_chosen",
+        "usable_service",
+        "service_the_space_may_not_use",
+    ],
+)
+async def test_the_space_is_read_only_when_the_flow_chose_a_speaker_service(
+    wizard: dict[str, object] | None, gap: SpeakerServiceGap | None, reads: int
+) -> None:
+    space = _space(None, [_USABLE])
+    load_space = AsyncMock(return_value=space)
+
+    found = await speaker_service_gap(wizard, load_space=load_space)
+
+    assert found is gap
+    # The answer a caller holding the whole space gets.
+    assert found is speaker_service_gap_in_space(wizard, space)
+    assert load_space.await_count == reads
+    assert await speakers_identifiable(wizard, load_space=load_space) is (gap is None)

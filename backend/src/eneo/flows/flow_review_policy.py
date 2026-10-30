@@ -1,0 +1,122 @@
+from __future__ import annotations
+
+from collections.abc import Mapping
+from enum import Enum
+from typing import TypeAlias
+
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
+
+from eneo.flows.enums import (
+    FlowOutputMode,
+    FlowOutputType,
+    flow_output_mode_has_outbound_delivery,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_review_expiry_policy import (
+    FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS,
+    FLOW_REVIEW_EXPIRY_MAX_SECONDS,
+    FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+)
+from eneo.main.exceptions import BadRequestException
+
+FLOW_REVIEW_POLICY_INVALID = FlowApiErrorCode.REVIEW_POLICY_INVALID.value
+FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED = (
+    "flow_review_policy_outbound_output_unsupported"
+)
+FLOW_STEP_REVIEW_POLICY_DESCRIPTION = (
+    "Optional human-in-the-loop checkpoint for this step. Set mode to `view` "
+    "to pause after the step until a reviewer approves it, or `edit` to let "
+    "the reviewer edit the step output before downstream steps continue. Use "
+    "`null` or omit the field for no pause. Review policy cannot be combined "
+    "with outbound delivery output modes."
+)
+FlowStepReviewPolicyJson: TypeAlias = dict[str, str | int]
+
+
+class FlowStepReviewMode(str, Enum):
+    VIEW = "view"
+    EDIT = "edit"
+
+
+class FlowStepReviewPolicy(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    mode: FlowStepReviewMode = Field(
+        description=(
+            "`view` pauses the run for approval of this step output. `edit` "
+            "also lets the reviewer replace the output used by downstream steps."
+        )
+    )
+    expires_after_seconds: int | None = Field(
+        default=None,
+        ge=FLOW_REVIEW_EXPIRY_MIN_SECONDS,
+        le=FLOW_REVIEW_EXPIRY_MAX_SECONDS,
+        description=(
+            "How long the unresolved review checkpoint may wait before it expires. "
+            "Null inherits the platform default "
+            f"({FLOW_REVIEW_EXPIRY_DEFAULT_SECONDS // 86_400} days)."
+        ),
+    )
+
+
+def dump_flow_step_review_policy(
+    review_policy: FlowStepReviewPolicy | None,
+) -> FlowStepReviewPolicyJson | None:
+    if review_policy is None:
+        return None
+    serialized: FlowStepReviewPolicyJson = {"mode": review_policy.mode.value}
+    if review_policy.expires_after_seconds is not None:
+        serialized["expires_after_seconds"] = review_policy.expires_after_seconds
+    return serialized
+
+
+def parse_flow_step_review_policy(
+    *,
+    raw_policy: object,
+    output_mode: FlowOutputMode,
+    output_type: FlowOutputType,
+) -> FlowStepReviewPolicy | None:
+    if raw_policy is None:
+        if output_mode is FlowOutputMode.SPEAKER_MAPPING:
+            raise BadRequestException(
+                "Steps with output_mode 'speaker_mapping' require review_policy.mode 'edit'.",
+                code=FLOW_REVIEW_POLICY_INVALID,
+            )
+        return None
+    if flow_output_mode_has_outbound_delivery(output_mode):
+        raise BadRequestException(
+            "Step review_policy cannot be combined with outbound delivery output modes.",
+            code=FLOW_REVIEW_POLICY_OUTBOUND_OUTPUT_UNSUPPORTED,
+        )
+    if isinstance(raw_policy, FlowStepReviewPolicy):
+        policy = raw_policy
+    elif not isinstance(raw_policy, Mapping):
+        raise BadRequestException(
+            "Step review_policy must be an object.",
+            code=FLOW_REVIEW_POLICY_INVALID,
+        )
+    else:
+        try:
+            policy = FlowStepReviewPolicy.model_validate(raw_policy)
+        except ValidationError as exc:
+            raise BadRequestException(
+                "Step review_policy is invalid.",
+                code=FLOW_REVIEW_POLICY_INVALID,
+            ) from exc
+    if (
+        output_mode is FlowOutputMode.SPEAKER_MAPPING
+        and policy.mode is not FlowStepReviewMode.EDIT
+    ):
+        raise BadRequestException(
+            "Steps with output_mode 'speaker_mapping' require review_policy.mode 'edit'.",
+            code=FLOW_REVIEW_POLICY_INVALID,
+        )
+    if policy.mode is FlowStepReviewMode.EDIT and output_type in {
+        FlowOutputType.PDF,
+        FlowOutputType.DOCX,
+    }:
+        raise BadRequestException(
+            "Edit review is not supported for artifact-producing PDF or DOCX steps.",
+            code=FLOW_REVIEW_POLICY_INVALID,
+        )
+    return policy

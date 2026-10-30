@@ -1,0 +1,1271 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import math
+import traceback
+from dataclasses import dataclass
+from typing import Any
+from unittest.mock import AsyncMock
+
+import h11
+import httpx
+import pytest
+from cryptography.fernet import Fernet
+
+from eneo.audit.domain.outcome import Outcome
+from eneo.flows.runtime.http_orchestration import (
+    WebhookDeliveryError,
+    deliver_webhook,
+    resolve_http_input_source_text,
+)
+from eneo.flows.runtime.http_runtime import FlowHttpRuntimeHelper
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.settings.encryption_service import EncryptionService
+from tests.unittests.flows.async_test_support import until_task_reaches
+
+# deliver_webhook outside a delivery job: only the step's timeout bounds the send.
+_NO_JOB_DEADLINE = math.inf
+
+
+@dataclass
+class _Step:
+    step_order: int
+    step_id: str
+    input_type: str
+    input_source: str
+    input_config: dict[str, Any] | None = None
+    output_config: dict[str, Any] | None = None
+    user_description: str | None = None
+
+
+@dataclass
+class _Run:
+    id: str
+    flow_id: str
+    tenant_id: str
+
+
+@dataclass
+class _Deps:
+    encryption_service: Any
+    variable_resolver: Any
+    resolve_timeout_seconds: Any
+    read_response_text: Any
+    send_http_request: Any
+    audit_http_outbound: Any
+
+
+def _make_deps(
+    *,
+    send_http_request: Any,
+    read_response_text: Any | None = None,
+    encryption_service: object | None = None,
+    variable_resolver: object | None = None,
+    resolve_timeout_seconds: object | None = None,
+) -> _Deps:
+    resolver = FlowVariableResolver()
+    return _Deps(
+        encryption_service=encryption_service or object(),
+        variable_resolver=variable_resolver or resolver,
+        resolve_timeout_seconds=resolve_timeout_seconds or (lambda value, **_: 5.0),
+        read_response_text=read_response_text or (lambda **_: "ok"),
+        send_http_request=send_http_request,
+        audit_http_outbound=AsyncMock(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_resolve_http_input_source_text_json_success_audits_success() -> None:
+    step = _Step(
+        step_order=1,
+        step_id="s1",
+        input_type="json",
+        input_source="http_get",
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
+    )
+    run = _Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1")
+    request = httpx.Request("GET", "https://example.org/data")
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, json={"a": 1}),
+    )
+    deps = _make_deps(
+        send_http_request=send_http_request, read_response_text=lambda **_: '{"a":1}'
+    )
+
+    resolution = await resolve_http_input_source_text(
+        step=step,
+        run=run,
+        context=FlowVariableResolver().build_context_with_evidence({}, []),
+        deps=deps,
+    )
+
+    assert resolution.text == '{"a": 1}'
+    assert resolution.structured == {"a": 1}
+    deps.audit_http_outbound.assert_awaited()
+    assert deps.audit_http_outbound.await_args.kwargs["call_type"] == "http_input"
+
+
+@pytest.mark.asyncio
+async def test_http_input_resolution_includes_request_and_successful_response_edges() -> (
+    None
+):
+    step = _Step(
+        step_order=1,
+        step_id="s1",
+        input_type="text",
+        input_source="http_get",
+        input_config={
+            "url": "https://example.org/{{ flow_input.case_id }}",
+            "auth": {"mode": "none"},
+        },
+    )
+    request = httpx.Request("GET", "https://example.org/A-17")
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="remote value")
+    )
+    resolver = FlowVariableResolver()
+    deps = _make_deps(
+        send_http_request=send_http_request,
+        read_response_text=lambda **_: "remote value",
+        variable_resolver=resolver,
+    )
+
+    resolution = await resolve_http_input_source_text(
+        step=step,
+        run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+        context=resolver.build_context_with_evidence({"case_id": "A-17"}, []),
+        deps=deps,
+    )
+
+    assert resolution.text == "remote value"
+    assert resolution.structured is None
+    assert [edge.source.kind for edge in resolution.resolved_input_edges] == [
+        "flow_input",
+        "http_response",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_resolve_http_input_source_text_rejects_legacy_post_before_send() -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="json",
+        input_source="http_post",
+        input_config={
+            "url": "https://api.example.test/items",
+            "auth": {"mode": "none"},
+            "response_format": "json",
+        },
+    )
+    run = _Run(id="run-2", flow_id="flow-1", tenant_id="tenant-1")
+    send_http_request = AsyncMock()
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await resolve_http_input_source_text(
+            step=step,
+            run=run,
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "typed_io_invalid_input_source_combination"
+    send_http_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_http_input_source_text_rejects_flat_config_before_send() -> None:
+    step = _Step(
+        step_order=12,
+        step_id="s12",
+        input_type="text",
+        input_source="http_get",
+        input_config={"url": "https://example.org/data"},
+    )
+    request = httpx.Request("GET", "https://example.org/data")
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="ok")
+    )
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(TypedIOValidationException, match="authored HTTP config") as exc:
+        await resolve_http_input_source_text(
+            step=step,
+            run=_Run(id="run-12", flow_id="flow-1", tenant_id="tenant-1"),
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+
+    assert exc.value.code == "typed_io_http_invalid_config"
+    send_http_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_http_input_source_text_authored_timeout_uses_runtime_cap() -> (
+    None
+):
+    runtime_http = FlowHttpRuntimeHelper(
+        variable_resolver=FlowVariableResolver(),
+        request_timeout_seconds=5,
+        max_timeout_seconds=10,
+        allow_private_networks=True,
+    )
+    step = _Step(
+        step_order=21,
+        step_id="s21",
+        input_type="text",
+        input_source="http_get",
+        input_config={
+            "url": "https://api.example.test/items",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 11,
+        },
+    )
+    deps = _make_deps(
+        send_http_request=AsyncMock(),
+        variable_resolver=runtime_http.variable_resolver,
+        resolve_timeout_seconds=runtime_http.resolve_timeout_seconds,
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await resolve_http_input_source_text(
+            step=step,
+            run=_Run(id="run-21", flow_id="flow-1", tenant_id="tenant-1"),
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+
+    assert exc.value.code == "typed_io_http_invalid_config"
+
+
+@pytest.mark.asyncio
+async def test_resolve_http_input_source_text_timeout_maps_to_typed_code() -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="text",
+        input_source="http_get",
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
+    )
+    run = _Run(id="run-2", flow_id="flow-1", tenant_id="tenant-1")
+    send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await resolve_http_input_source_text(
+            step=step,
+            run=run,
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+
+    assert exc.value.code == "typed_io_http_timeout"
+    deps.audit_http_outbound.assert_awaited()
+
+
+@pytest.mark.parametrize("status_code", [302, 503])
+@pytest.mark.asyncio
+async def test_resolve_http_input_source_text_non_success_maps_to_typed_code(
+    status_code: int,
+) -> None:
+    step = _Step(
+        step_order=3,
+        step_id="s3",
+        input_type="text",
+        input_source="http_get",
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
+    )
+    run = _Run(id="run-3", flow_id="flow-1", tenant_id="tenant-1")
+    request = httpx.Request("GET", "https://example.org/data")
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(status_code, request=request, text="unavailable")
+    )
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await resolve_http_input_source_text(
+            step=step,
+            run=run,
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+
+    assert exc.value.code == "typed_io_http_non_success"
+
+
+@pytest.mark.asyncio
+async def test_resolve_http_input_source_text_malformed_json_maps_to_typed_code() -> (
+    None
+):
+    step = _Step(
+        step_order=31,
+        step_id="s31",
+        input_type="json",
+        input_source="http_get",
+        input_config={"url": "https://example.org/data", "auth": {"mode": "none"}},
+    )
+    run = _Run(id="run-31", flow_id="flow-1", tenant_id="tenant-1")
+    request = httpx.Request("GET", "https://example.org/data")
+    send_http_request = AsyncMock(
+        return_value=httpx.Response(200, request=request, text="not-json")
+    )
+    deps = _make_deps(
+        send_http_request=send_http_request, read_response_text=lambda **_: "not-json"
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc:
+        await resolve_http_input_source_text(
+            step=step,
+            run=run,
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+
+    assert exc.value.code == "typed_io_http_malformed_response"
+    deps.audit_http_outbound.assert_awaited()
+    audit_kwargs = deps.audit_http_outbound.await_args.kwargs
+    assert audit_kwargs["outcome"].name == "FAILURE"
+    assert audit_kwargs["status_code"] == 200
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ending", "message"),
+    [
+        pytest.param(
+            "untyped",
+            "The call ended with an error that has no typed code.",
+            id="untyped",
+        ),
+        pytest.param(
+            "cancelled", "The call was stopped before it ended.", id="cancelled"
+        ),
+        pytest.param(
+            "too_large", "Step 4: the response is too large.", id="typed-late"
+        ),
+        pytest.param(
+            "timeout", "Step 4: HTTP GET input timed out after 5s.", id="typed-early"
+        ),
+    ],
+)
+async def test_an_http_input_read_is_audited_once_however_it_ends(
+    ending: str, message: str
+) -> None:
+    # Kills the mutants that write no audit record for an HTTP input read that
+    # was cancelled, ended by an error without a typed code, or refused as
+    # too large after its response, that audit such a read with the error's
+    # own text, and that audit a typed failure twice.
+    entered = asyncio.Event()
+    request = httpx.Request("GET", "https://example.org/data")
+
+    async def send(**_: Any) -> httpx.Response:
+        if ending == "untyped":
+            raise RuntimeError("upstream said sk-http-secret")
+        if ending == "timeout":
+            raise httpx.TimeoutException("timeout")
+        if ending == "cancelled":
+            entered.set()
+            await asyncio.Event().wait()
+        return httpx.Response(200, request=request, text="ok")
+
+    def too_large(**_: Any) -> str:
+        raise TypedIOValidationException(
+            "Step 4: the response is too large.",
+            code="typed_io_http_response_too_large",
+        )
+
+    deps = _make_deps(send_http_request=send, read_response_text=too_large)
+    read = asyncio.create_task(
+        resolve_http_input_source_text(
+            step=_Step(
+                step_order=4,
+                step_id="s4",
+                input_type="text",
+                input_source="http_get",
+                input_config={
+                    "url": "https://example.org/data",
+                    "auth": {"mode": "none"},
+                },
+            ),
+            run=_Run(id="run-4", flow_id="flow-1", tenant_id="tenant-1"),
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+    )
+    if ending == "cancelled":
+        await until_task_reaches(entered, read)
+        read.cancel()
+    with pytest.raises(BaseException):
+        await read
+
+    deps.audit_http_outbound.assert_awaited_once()
+    audit = deps.audit_http_outbound.await_args.kwargs
+    assert (audit["outcome"].name, audit["error_message"]) == ("FAILURE", message)
+    assert "sk-http-secret" not in repr(audit)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("ending", "stop_while", "queue_answers", "queued"),
+    [
+        pytest.param("stuck", "sending", False, 0, id="stopped-hung-queue"),
+        pytest.param("timeout", None, False, 0, id="typed-hung-queue"),
+        pytest.param("ok", "queueing", True, 1, id="stopped-while-queued"),
+        pytest.param("ok", "queueing", False, 0, id="stopped-while-hung-queue"),
+    ],
+)
+async def test_an_http_input_read_waits_little_for_its_one_audit(
+    monkeypatch, ending: str, stop_while: str | None, queue_answers: bool, queued: int
+) -> None:
+    # Kills the mutants that wait without a limit for the audit log (after a
+    # stop, after a typed failure, or for a record being queued when the read
+    # is stopped), that drop the record being queued when the read is
+    # stopped, and that queue a second record for that read.
+    from eneo.flows.runtime import http_audit
+
+    monkeypatch.setattr(http_audit, "READ_AUDIT_TIMEOUT_SECONDS", 0.05)
+    reached = {"sending": asyncio.Event(), "queueing": asyncio.Event()}
+    answered = asyncio.Event()
+    records: list[dict[str, Any]] = []
+
+    async def send(**_: Any) -> httpx.Response:
+        reached["sending"].set()
+        if ending == "timeout":
+            raise httpx.TimeoutException("timeout")
+        if ending == "stuck":
+            await asyncio.Event().wait()
+        return httpx.Response(200, request=httpx.Request("GET", "https://e.org"))
+
+    async def enqueue(**record: Any) -> None:
+        reached["queueing"].set()
+        await answered.wait()
+        records.append(record)
+
+    deps = _make_deps(send_http_request=send)
+    deps.audit_http_outbound.side_effect = enqueue
+    read = asyncio.create_task(
+        resolve_http_input_source_text(
+            step=_Step(
+                step_order=5,
+                step_id="s5",
+                input_type="text",
+                input_source="http_get",
+                input_config={
+                    "url": "https://example.org/data",
+                    "auth": {"mode": "none"},
+                },
+            ),
+            run=_Run(id="run-5", flow_id="flow-1", tenant_id="tenant-1"),
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+    )
+    if stop_while is not None:
+        await until_task_reaches(reached[stop_while], read)
+        read.cancel()
+    if queue_answers:
+        answered.set()
+
+    done, _ = await asyncio.wait({read}, timeout=5)
+
+    assert done == {read}
+    assert read.cancelled() or isinstance(read.exception(), TypedIOValidationException)
+    assert read.cancelled() == (stop_while is not None)
+    assert len(records) == queued
+    deps.audit_http_outbound.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_does_not_start_a_send_past_the_job_deadline() -> None:
+    """Kills: a send started with no time left, which spends the attempt on a
+    request the job cannot wait for."""
+    from eneo.flows.runtime import http_orchestration
+
+    send_http_request = AsyncMock()
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(http_orchestration.WebhookSendNotStartedError):
+        await deliver_webhook(
+            step=_Step(
+                step_order=4,
+                step_id="step-4",
+                input_type="text",
+                input_source="flow_input",
+                output_config={
+                    "url": "https://example.org/webhook",
+                    "auth": {"mode": "none"},
+                },
+            ),
+            text_payload="payload",
+            run=_Run(id="run-4", flow_id="flow-1", tenant_id="tenant-1"),
+            context={},
+            deps=deps,
+            idempotency_key="run-4:step-4:1:webhook",
+            sends_end_at=asyncio.get_running_loop().time(),
+        )
+
+    send_http_request.assert_not_awaited()
+    deps.audit_http_outbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_timeout_maps_to_delivery_error_and_audits() -> None:
+    step = _Step(
+        step_order=4,
+        step_id="step-4",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
+    )
+    run = _Run(id="run-4", flow_id="flow-1", tenant_id="tenant-1")
+    send_http_request = AsyncMock(side_effect=httpx.TimeoutException("timeout"))
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(WebhookDeliveryError) as exc:
+        await deliver_webhook(
+            step=step,
+            text_payload="payload",
+            run=run,
+            context={},
+            deps=deps,
+            idempotency_key="run-4:step-4:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    assert "timed out" in str(exc.value)
+    deps.audit_http_outbound.assert_awaited()
+    assert deps.audit_http_outbound.await_args.kwargs["call_type"] == "webhook_delivery"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("direction", ["input", "output"])
+@pytest.mark.parametrize("failure", ["invalid-header", "timeout"])
+@pytest.mark.parametrize(
+    "audit_fails", [False, True], ids=["audit-success", "audit-failure"]
+)
+async def test_http_transport_failures_do_not_disclose_credentials_to_run_audit_or_logs(
+    direction: str, failure: str, audit_fails: bool
+) -> None:
+    # Mutant: publish raw HTTP errors or retain their credential-bearing traceback chain.
+    canary = "synthetic-value-canary"
+    encryption = EncryptionService(Fernet.generate_key().decode())
+    config = {
+        "url": "https://example.org/webhook",
+        "auth": {"mode": "none"},
+        "custom_headers": [
+            {
+                "name": "X-Integration-Value",
+                "value": encryption.encrypt(canary + "\n"),
+                "secret": True,
+            }
+        ],
+    }
+    step = _Step(
+        step_order=44,
+        step_id="step-44",
+        input_type="text",
+        input_source="http_get" if direction == "input" else "flow_input",
+        input_config=config if direction == "input" else None,
+        output_config=config if direction == "output" else None,
+    )
+    run = _Run(id="run-44", flow_id="flow-1", tenant_id="tenant-1")
+
+    async def fail_transport(**kwargs):
+        if failure == "timeout":
+            raise httpx.TimeoutException(canary)
+        try:
+            h11.Request(
+                method=kwargs["method"],
+                target="/webhook",
+                headers=[("Host", "example.org"), *kwargs["headers"].items()],
+            )
+        except h11.LocalProtocolError as exc:
+            raise httpx.LocalProtocolError(str(exc)) from exc
+        raise AssertionError("h11 should refuse the credential's newline")
+
+    deps = _make_deps(send_http_request=fail_transport, encryption_service=encryption)
+    if audit_fails:
+        deps.audit_http_outbound.side_effect = RuntimeError(
+            "Audit recorder unavailable"
+        )
+        error_type = RuntimeError
+    else:
+        error_type = (
+            TypedIOValidationException if direction == "input" else WebhookDeliveryError
+        )
+
+    with pytest.raises(error_type) as exc:
+        if direction == "input":
+            await resolve_http_input_source_text(
+                step=step,
+                run=run,
+                context=FlowVariableResolver().build_context_with_evidence({}, []),
+                deps=deps,
+            )
+        else:
+            await deliver_webhook(
+                step=step,
+                text_payload="payload",
+                run=run,
+                context={},
+                deps=deps,
+                idempotency_key="run-44:step-44:1:webhook",
+                sends_end_at=_NO_JOB_DEADLINE,
+            )
+
+    assert canary not in str(exc.value)
+    audit_error = deps.audit_http_outbound.await_args.kwargs["error_message"]
+    assert canary not in audit_error
+    assert canary not in "".join(traceback.format_exception(exc.value))
+    if audit_fails:
+        assert str(exc.value) == "Audit recorder unavailable"
+    elif direction == "input":
+        assert exc.value.code == (
+            "typed_io_http_timeout"
+            if failure == "timeout"
+            else "typed_io_http_connection_error"
+        )
+    else:
+        assert exc.value.status_code is None
+
+
+@pytest.mark.parametrize("status_code", [301, 302, 408, 429, 400, 422, 503])
+@pytest.mark.asyncio
+async def test_deliver_webhook_exposes_typed_http_status(status_code: int) -> None:
+    step = _Step(
+        step_order=43,
+        step_id="step-43",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
+    )
+    run = _Run(id="run-43", flow_id="flow-1", tenant_id="tenant-1")
+    request = httpx.Request("POST", "https://example.org/webhook")
+    deps = _make_deps(
+        send_http_request=AsyncMock(
+            return_value=httpx.Response(status_code, request=request)
+        )
+    )
+
+    with pytest.raises(WebhookDeliveryError) as exc:
+        await deliver_webhook(
+            step=step,
+            text_payload="payload",
+            run=run,
+            context={},
+            deps=deps,
+            idempotency_key="run-43:step-43:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    assert exc.value.status_code == status_code
+    assert f"status {status_code}" in str(exc.value)
+    audit = deps.audit_http_outbound.await_args.kwargs
+    assert audit["status_code"] == status_code
+    assert audit["outcome"] == Outcome.FAILURE
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_requires_url_in_output_config() -> None:
+    step = _Step(
+        step_order=41,
+        step_id="step-41",
+        input_type="text",
+        input_source="flow_input",
+        output_config={"url": "   ", "auth": {"mode": "none"}},
+    )
+    run = _Run(id="run-41", flow_id="flow-1", tenant_id="tenant-1")
+    deps = _make_deps(send_http_request=AsyncMock())
+
+    with pytest.raises(BadRequestException, match="output_config.url"):
+        await deliver_webhook(
+            step=step,
+            text_payload="payload",
+            run=run,
+            context={},
+            deps=deps,
+            idempotency_key="run-41:step-41:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    deps.audit_http_outbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_maps_typed_transport_error_to_bad_request() -> None:
+    step = _Step(
+        step_order=42,
+        step_id="step-42",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
+    )
+    run = _Run(id="run-42", flow_id="flow-1", tenant_id="tenant-1")
+    send_http_request = AsyncMock(
+        side_effect=TypedIOValidationException(
+            "HTTP URL blocked by SSRF policy.",
+            code="typed_io_http_ssrf_blocked",
+        )
+    )
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(BadRequestException, match="SSRF policy") as exc:
+        await deliver_webhook(
+            step=step,
+            text_payload="payload",
+            run=run,
+            context={},
+            deps=deps,
+            idempotency_key="run-42:step-42:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    # The typed code travels with the failure: delivery decides retry by it.
+    assert exc.value.code == "typed_io_http_ssrf_blocked"
+    deps.audit_http_outbound.assert_awaited_once()
+    audit_kwargs = deps.audit_http_outbound.await_args.kwargs
+    assert audit_kwargs["call_type"] == "webhook_delivery"
+    assert audit_kwargs["outcome"].name == "FAILURE"
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_sets_idempotency_key() -> None:
+    step = _Step(
+        step_order=5,
+        step_id="step-5",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+            "custom_headers": [
+                {
+                    "name": "idempotency-key",
+                    "value": "authored-key-must-not-escape",
+                    "secret": False,
+                }
+            ],
+        },
+    )
+    run = _Run(id="run-5", flow_id="flow-1", tenant_id="tenant-1")
+    request = httpx.Request("POST", "https://example.org/webhook")
+    send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    deps = _make_deps(send_http_request=send_http_request)
+
+    await deliver_webhook(
+        step=step,
+        text_payload="payload",
+        run=run,
+        context={},
+        deps=deps,
+        idempotency_key="run-5:step-5:3:webhook",
+        sends_end_at=_NO_JOB_DEADLINE,
+    )
+
+    kwargs = send_http_request.await_args.kwargs
+    assert (
+        kwargs["headers"]["Idempotency-Key"]
+        == hashlib.sha256(b"run-5:step-5:3:webhook").hexdigest()
+    )
+    assert [name.lower() for name in kwargs["headers"]].count("idempotency-key") == 1
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_authored_config_compiles_request() -> None:
+    runtime_http = FlowHttpRuntimeHelper(
+        variable_resolver=FlowVariableResolver(),
+        request_timeout_seconds=5,
+        max_timeout_seconds=10,
+        allow_private_networks=True,
+    )
+    step = _Step(
+        step_order=51,
+        step_id="step-51",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://hooks.example.test/{{ step_1.output.endpoint }}",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 7,
+            "body": {
+                "mode": "text_template",
+                "template": "done={{ step_1.output.token }}",
+            },
+            "custom_headers": [
+                {
+                    "name": "X-Trace",
+                    "value": "{{ step_1.output.trace_id }}",
+                    "secret": False,
+                }
+            ],
+        },
+    )
+    run = _Run(id="run-51", flow_id="flow-1", tenant_id="tenant-1")
+    request = httpx.Request("POST", "https://hooks.example.test/complete")
+    send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    deps = _make_deps(
+        send_http_request=send_http_request,
+        variable_resolver=runtime_http.variable_resolver,
+        resolve_timeout_seconds=runtime_http.resolve_timeout_seconds,
+    )
+
+    await deliver_webhook(
+        step=step,
+        text_payload="fallback",
+        run=run,
+        context={
+            "step_1": {
+                "output": {
+                    "endpoint": "complete",
+                    "token": "runtime-token",
+                    "trace_id": "trace-42",
+                }
+            }
+        },
+        deps=deps,
+        idempotency_key="run-51:step-51:1:webhook",
+        sends_end_at=_NO_JOB_DEADLINE,
+    )
+
+    kwargs = send_http_request.await_args.kwargs
+    assert kwargs["method"] == "POST"
+    assert kwargs["url"] == "https://hooks.example.test/complete"
+    assert kwargs["headers"]["X-Trace"] == "trace-42"
+    assert (
+        kwargs["headers"]["Idempotency-Key"]
+        == hashlib.sha256(b"run-51:step-51:1:webhook").hexdigest()
+    )
+    assert kwargs["timeout_seconds"] == 7.0
+    assert kwargs["body_bytes"] == b"done=runtime-token"
+    assert kwargs["json_body"] is None
+    assert kwargs["read_response_body"] is False
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_authored_auto_body_uses_text_payload() -> None:
+    runtime_http = FlowHttpRuntimeHelper(
+        variable_resolver=FlowVariableResolver(),
+        request_timeout_seconds=5,
+        max_timeout_seconds=10,
+        allow_private_networks=True,
+    )
+    step = _Step(
+        step_order=52,
+        step_id="step-52",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://hooks.example.test/auto",
+            "auth": {"mode": "none"},
+            "timeout_seconds": 6,
+            "body": {"mode": "auto"},
+            "custom_headers": [
+                {
+                    "name": "X-Trace",
+                    "value": "{{ step_1.output.trace_id }}",
+                    "secret": False,
+                }
+            ],
+        },
+    )
+    run = _Run(id="run-52", flow_id="flow-1", tenant_id="tenant-1")
+    request = httpx.Request("POST", "https://hooks.example.test/auto")
+    send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    deps = _make_deps(
+        send_http_request=send_http_request,
+        variable_resolver=runtime_http.variable_resolver,
+        resolve_timeout_seconds=runtime_http.resolve_timeout_seconds,
+    )
+
+    await deliver_webhook(
+        step=step,
+        text_payload="payload",
+        run=run,
+        context={"step_1": {"output": {"trace_id": "trace-52"}}},
+        deps=deps,
+        idempotency_key="run-52:step-52:1:webhook",
+        sends_end_at=_NO_JOB_DEADLINE,
+    )
+
+    kwargs = send_http_request.await_args.kwargs
+    assert kwargs["headers"]["X-Trace"] == "trace-52"
+    assert kwargs["body_bytes"] == b"payload"
+    assert kwargs["json_body"] is None
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_rejects_flat_config_before_send() -> None:
+    step = _Step(
+        step_order=53,
+        step_id="step-53",
+        input_type="text",
+        input_source="flow_input",
+        output_config={"url": "https://example.org/webhook"},
+    )
+    request = httpx.Request("POST", "https://example.org/webhook")
+    send_http_request = AsyncMock(return_value=httpx.Response(200, request=request))
+    deps = _make_deps(send_http_request=send_http_request)
+
+    with pytest.raises(BadRequestException, match="authored HTTP config"):
+        await deliver_webhook(
+            step=step,
+            text_payload="payload",
+            run=_Run(id="run-53", flow_id="flow-1", tenant_id="tenant-1"),
+            context={},
+            deps=deps,
+            idempotency_key="run-53:step-53:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    send_http_request.assert_not_awaited()
+    deps.audit_http_outbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_deliver_webhook_retry_keeps_same_idempotency_key_after_partial_failure() -> (
+    None
+):
+    step = _Step(
+        step_order=6,
+        step_id="step-6",
+        input_type="text",
+        input_source="flow_input",
+        output_config={
+            "url": "https://example.org/webhook",
+            "auth": {"mode": "none"},
+        },
+    )
+    run = _Run(id="run-6", flow_id="flow-1", tenant_id="tenant-1")
+    keys: list[str] = []
+
+    async def _send_http_request(**kwargs):
+        keys.append(kwargs["headers"]["Idempotency-Key"])
+        if len(keys) == 1:
+            raise httpx.TimeoutException("timeout")
+        request = httpx.Request("POST", "https://example.org/webhook")
+        return httpx.Response(200, request=request)
+
+    deps = _make_deps(send_http_request=_send_http_request)
+
+    with pytest.raises(WebhookDeliveryError, match="timed out"):
+        await deliver_webhook(
+            step=step,
+            text_payload="payload",
+            run=run,
+            context={},
+            deps=deps,
+            idempotency_key="run-6:step-6:4:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    await deliver_webhook(
+        step=step,
+        text_payload="payload",
+        run=run,
+        context={},
+        deps=deps,
+        idempotency_key="run-6:step-6:4:webhook",
+        sends_end_at=_NO_JOB_DEADLINE,
+    )
+
+    assert len(keys) == 2
+    assert keys[0] == keys[1]
+    assert deps.audit_http_outbound.await_count == 2
+    first_outcome = deps.audit_http_outbound.await_args_list[0].kwargs["outcome"]
+    second_outcome = deps.audit_http_outbound.await_args_list[1].kwargs["outcome"]
+    assert first_outcome.name == "FAILURE"
+    assert second_outcome.name == "SUCCESS"
+
+
+class _NoEncryption:
+    def is_encrypted(self, value: str) -> bool:
+        return False
+
+
+_CREDENTIAL_WITH_TEMPLATE = {
+    "url": "https://example.org/hook",
+    "auth": {"mode": "bearer_token", "token": "{{ step_1.output.text }}"},
+}
+
+
+@pytest.mark.asyncio
+async def test_http_input_refuses_a_template_in_a_credential_before_send() -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="text",
+        input_source="http_get",
+        input_config=_CREDENTIAL_WITH_TEMPLATE,
+    )
+    send_http_request = AsyncMock()
+    deps = _make_deps(
+        send_http_request=send_http_request, encryption_service=_NoEncryption()
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await resolve_http_input_source_text(
+            step=step,
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context=FlowVariableResolver().build_context_with_evidence({}, []),
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert "auth.token" in str(exc_info.value)
+    send_http_request.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_webhook_refuses_a_template_in_a_credential_before_send() -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="text",
+        input_source="previous_step",
+        output_config={
+            "url": "https://example.org/hook",
+            "auth": {"mode": "none"},
+            "custom_headers": [
+                {"name": "X-Key", "value": "{{ step_1.output.text }}", "secret": True}
+            ],
+        },
+    )
+    send_http_request = AsyncMock()
+    deps = _make_deps(
+        send_http_request=send_http_request, encryption_service=_NoEncryption()
+    )
+
+    with pytest.raises(
+        BadRequestException, match=r"custom_headers\[0\]\.value"
+    ) as exc_info:
+        await deliver_webhook(
+            step=step,
+            text_payload="done",
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context={"step_1": {"output": {"text": "classified"}}},
+            deps=deps,
+            idempotency_key="run-1:s2:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    # The typed code stays on the error, so a delivery can tell it is permanent.
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert isinstance(exc_info.value.__cause__, TypedIOValidationException)
+    send_http_request.assert_not_awaited()
+
+
+_UNACCEPTED_WEBHOOK_CONFIGS = [
+    pytest.param(
+        {"url": "https://example.org/hook"}, "output_config", id="missing-auth"
+    ),
+    pytest.param(
+        {"url": "https://example.org/hook", "auth": {"mode": "bogus"}},
+        "output_config.auth",
+        id="bogus-auth-mode",
+    ),
+    pytest.param(
+        {"url": "not a url", "auth": {"mode": "none"}},
+        "output_config.url",
+        id="malformed-url",
+    ),
+    pytest.param(
+        {"url": "{{ step_1.output.text }}", "auth": {"mode": "none"}},
+        "output_config.url",
+        id="url-that-fills-to-something-malformed",
+    ),
+    pytest.param(
+        {"url": "   ", "auth": {"mode": "none"}},
+        "output_config.url",
+        id="empty-url",
+    ),
+    pytest.param(
+        {
+            "url": "https://alice:secret@{{ step_1.output.text }}/hook",
+            "auth": {"mode": "none"},
+        },
+        "output_config.url",
+        id="templated-userinfo",
+    ),
+    pytest.param(
+        {
+            "url": "ftp://example.org/{{ step_1.output.text }}",
+            "auth": {"mode": "none"},
+        },
+        "output_config.url",
+        id="fixed-non-http-scheme-before-a-template",
+    ),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("config", "field"), _UNACCEPTED_WEBHOOK_CONFIGS)
+async def test_webhook_raises_the_typed_code_for_a_config_the_runtime_rejects(
+    config: dict[str, Any], field: str
+) -> None:
+    send_http_request = AsyncMock()
+    deps = _make_deps(
+        send_http_request=send_http_request, encryption_service=_NoEncryption()
+    )
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await deliver_webhook(
+            step=_Step(
+                step_order=2,
+                step_id="s2",
+                input_type="text",
+                input_source="previous_step",
+                output_config=config,
+            ),
+            text_payload="done",
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context={"step_1": {"output": {"text": "not a url"}}},
+            deps=deps,
+            idempotency_key="run-1:s2:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert field in str(exc_info.value)
+    assert "alice:secret" not in str(exc_info.value)
+    send_http_request.assert_not_awaited()
+    deps.audit_http_outbound.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_http_input_refuses_an_effective_url_that_is_not_absolute_http() -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="text",
+        input_source="http_get",
+        input_config={"url": "{{ flow_input.target }}", "auth": {"mode": "none"}},
+    )
+    send_http_request = AsyncMock()
+    deps = _make_deps(
+        send_http_request=send_http_request, encryption_service=_NoEncryption()
+    )
+    context = FlowVariableResolver().build_context_with_evidence(
+        {"target": "ftp://example.org/x"}, []
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await resolve_http_input_source_text(
+            step=step,
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context=context,
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert "input_config.url" in str(exc_info.value)
+    send_http_request.assert_not_awaited()
+
+
+class _NoClient:
+    """A sender client factory that fails the test if a client is ever built."""
+
+    def __call__(self, **_kwargs: object) -> object:
+        raise AssertionError("a client must not exist for a malformed URL")
+
+
+def _real_sender() -> FlowHttpRuntimeHelper:
+    return FlowHttpRuntimeHelper(
+        variable_resolver=FlowVariableResolver(),
+        request_timeout_seconds=5,
+        max_timeout_seconds=5,
+        allow_private_networks=False,
+        client_factory=_NoClient(),
+    )
+
+
+@pytest.mark.parametrize("port", ["abc", "0", "99999", "80:81"])
+@pytest.mark.asyncio
+async def test_http_input_reports_a_malformed_interpolated_port_as_invalid_config(
+    port: str,
+) -> None:
+    """The step's own check runs before the sender: a URL that is malformed once
+    variables are filled is the step's invalid config, and nothing is sent."""
+    step = _Step(
+        step_order=1,
+        step_id="s1",
+        input_type="text",
+        input_source="http_get",
+        input_config={
+            "url": "http://example.com:{{ flow_input.port }}/",
+            "auth": {"mode": "none"},
+        },
+    )
+    resolver = FlowVariableResolver()
+    deps = _make_deps(
+        send_http_request=_real_sender().send_request, variable_resolver=resolver
+    )
+
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await resolve_http_input_source_text(
+            step=step,
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context=resolver.build_context_with_evidence({"port": port}, []),
+            deps=deps,
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+    assert "input_config.url" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("port", ["abc", "99999"])
+@pytest.mark.asyncio
+async def test_webhook_reports_a_malformed_interpolated_port_as_invalid_config(
+    port: str,
+) -> None:
+    step = _Step(
+        step_order=2,
+        step_id="s2",
+        input_type="text",
+        input_source="previous_step",
+        output_config={
+            "url": "http://example.com:{{ step_1.output.text }}/hook",
+            "auth": {"mode": "none"},
+        },
+    )
+    deps = _make_deps(send_http_request=_real_sender().send_request)
+
+    with pytest.raises(BadRequestException) as exc_info:
+        await deliver_webhook(
+            step=step,
+            text_payload="done",
+            run=_Run(id="run-1", flow_id="flow-1", tenant_id="tenant-1"),
+            context={"step_1": {"output": {"text": port}}},
+            deps=deps,
+            idempotency_key="run-1:s2:1:webhook",
+            sends_end_at=_NO_JOB_DEADLINE,
+        )
+
+    assert exc_info.value.code == "typed_io_http_invalid_config"
+
+
+@pytest.mark.asyncio
+async def test_the_sender_reports_the_same_url_as_invalid_url_when_it_is_reached() -> (
+    None
+):
+    """A request that reaches the sender without the step's check (a direct
+    send) is refused by the same parse, under the sender's own code."""
+    with pytest.raises(TypedIOValidationException) as exc_info:
+        await _real_sender().send_request(
+            method="GET",
+            url="http://example.com:abc/",
+            headers={},
+            timeout_seconds=1,
+        )
+    assert exc_info.value.code == "typed_io_http_invalid_url"

@@ -1,9 +1,19 @@
+import asyncio
 import logging
+import math
+import multiprocessing
+import os
+import signal
+import time
 import zipfile
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
 from enum import Enum
+from multiprocessing.process import BaseProcess
 from pathlib import Path
-from typing import Any, cast
+from tempfile import TemporaryDirectory
+from typing import Any, Final, Literal, cast
 
 import magic
 import pdfplumber
@@ -12,6 +22,7 @@ from docx2python import docx2python
 from pdfminer.pdfdocument import PDFPasswordIncorrect
 from pdfminer.pdfparser import PDFSyntaxError
 from pptx.exc import PackageNotFoundError
+from pydantic import BaseModel, TypeAdapter
 
 from eneo.files.extraction_limits import (
     FileExtractionLimits,
@@ -19,6 +30,10 @@ from eneo.files.extraction_limits import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Use half the reported CPUs for PDF parsing, with at least one slot and a
+# two-CPU fallback when the CPU count is unavailable.
+_PDF_EXTRACTION_SEMAPHORE = asyncio.Semaphore(max(1, (os.cpu_count() or 2) // 2))
 
 
 # =============================================================================
@@ -33,6 +48,52 @@ class ExtractionError(Exception):
         self.message = message
         self.code = code
         super().__init__(self.message)
+
+
+PdfExtractionLimit = Literal["pages", "extracted_bytes", "seconds"]
+
+
+@dataclass(frozen=True, slots=True)
+class PdfExtractionLimits:
+    max_pages: int
+    max_extracted_bytes: int
+    timeout_seconds: int
+
+
+class PdfExtractionLimitExceeded(ExtractionError):
+    """Raised when PDF text extraction exceeds a deployment ceiling."""
+
+    def __init__(
+        self,
+        limit: PdfExtractionLimit,
+        measured: int | float,
+        ceiling: int,
+        *,
+        reason: Literal["extraction_capacity"] | None = None,
+    ):
+        self.limit: PdfExtractionLimit = limit
+        self.measured = measured
+        self.ceiling = ceiling
+        self.reason = reason
+        super().__init__(
+            f"PDF extraction exceeds {limit} limit ({measured} > {ceiling})"
+        )
+
+
+class _PdfLimitResult(BaseModel):
+    limit: PdfExtractionLimit
+    measured: int | float
+    ceiling: int
+
+
+class _PdfErrorResult(BaseModel):
+    kind: Literal["encrypted", "corrupt", "error"]
+    details: str
+
+
+_PDF_RESULT: TypeAdapter[str | _PdfLimitResult | _PdfErrorResult] = TypeAdapter(
+    str | _PdfLimitResult | _PdfErrorResult
+)
 
 
 class NoExtractableTextError(ExtractionError):
@@ -130,6 +191,42 @@ class TextMimeTypes(MimeTypesBase):
 # Text Processing
 # =============================================================================
 
+TextExtractionWarning = Literal["pdf_text_likely_reversed"]
+PDF_TEXT_LIKELY_REVERSED_WARNING: Final[TextExtractionWarning] = (
+    "pdf_text_likely_reversed"
+)
+TEXT_EXTRACTION_WARNINGS: Final[frozenset[TextExtractionWarning]] = frozenset(
+    {PDF_TEXT_LIKELY_REVERSED_WARNING}
+)
+_PDF_TEXT_MIN_TOKENS_FOR_REVERSAL_WARNING: Final = 40
+_PDF_TEXT_MIN_REVERSED_COMMON_TOKENS: Final = 5
+_PDF_TEXT_MIN_VERTICAL_LETTER_RUN: Final = 8
+_PDF_TEXT_COMMON_WORDS: Final = frozenset(
+    (
+        "och",
+        "att",
+        "det",
+        "den",
+        "som",
+        "med",
+        "till",
+        "eller",
+        "ska",
+        "har",
+        "kan",
+        "inte",
+    )
+)
+_PDF_TEXT_REVERSED_COMMON_WORDS: Final = frozenset(
+    word[::-1] for word in _PDF_TEXT_COMMON_WORDS
+)
+
+
+def parse_text_extraction_warning(value: object) -> TextExtractionWarning | None:
+    if isinstance(value, str) and value in TEXT_EXTRACTION_WARNINGS:
+        return value
+    return None
+
 
 class TextSanitizer:
     @staticmethod
@@ -193,6 +290,55 @@ class TextExtractor:
         return "\n".join(lines)
 
     @classmethod
+    def pdf_text_quality_warnings(cls, text: str) -> tuple[TextExtractionWarning, ...]:
+        if cls._looks_likely_reversed_pdf_text(text):
+            return (PDF_TEXT_LIKELY_REVERSED_WARNING,)
+        return ()
+
+    @classmethod
+    def _looks_likely_reversed_pdf_text(cls, text: str) -> bool:
+        if cls._has_vertical_letter_run(text):
+            return True
+        tokens = cls._text_quality_tokens(text)
+        if len(tokens) < _PDF_TEXT_MIN_TOKENS_FOR_REVERSAL_WARNING:
+            return False
+        reversed_hits = sum(
+            1 for token in tokens if token in _PDF_TEXT_REVERSED_COMMON_WORDS
+        )
+        if reversed_hits < _PDF_TEXT_MIN_REVERSED_COMMON_TOKENS:
+            return False
+        common_hits = sum(1 for token in tokens if token in _PDF_TEXT_COMMON_WORDS)
+        return reversed_hits > common_hits
+
+    @staticmethod
+    def _text_quality_tokens(text: str) -> list[str]:
+        tokens: list[str] = []
+        token: list[str] = []
+        for char in text.casefold():
+            if char.isalpha():
+                token.append(char)
+                continue
+            if token:
+                tokens.append("".join(token))
+                token = []
+        if token:
+            tokens.append("".join(token))
+        return tokens
+
+    @staticmethod
+    def _has_vertical_letter_run(text: str) -> bool:
+        run = 0
+        for raw_line in text.splitlines():
+            line = raw_line.strip()
+            if len(line) == 1 and line.isalpha():
+                run += 1
+                if run >= _PDF_TEXT_MIN_VERTICAL_LETTER_RUN:
+                    return True
+            elif line:
+                run = 0
+        return False
+
+    @classmethod
     def _extract_pdf_page(cls, page: Any) -> str:
         # pdfplumber ships no type stubs — treat the page as Any and pin the
         # types we rely on at the boundaries.
@@ -230,6 +376,8 @@ class TextExtractor:
             try:
                 try:
                     page_text = cls._extract_pdf_page(page)
+                except PdfExtractionLimitExceeded:
+                    raise
                 except Exception as e:
                     logger.warning(
                         f"Table-aware extraction failed on page "
@@ -276,52 +424,152 @@ class TextExtractor:
         limits: FileExtractionLimits | None = None,
     ) -> str:
         display_name = filename or filepath.name
-        try:
-            with pdfplumber.open(filepath) as pdf:
-                page_count = len(pdf.pages)
-                if limits is not None and page_count > limits.max_pdf_pages:
-                    raise PdfPageLimitError(display_name, limits.max_pdf_pages)
-                layout_max_pages = (
-                    limits or get_file_extraction_limits()
-                ).pdf_layout_max_pages
-                if page_count > layout_max_pages:
-                    logger.info(
-                        f"PDF '{display_name}' has {page_count} pages (over "
-                        f"{layout_max_pages}); reading its text layer without "
-                        "table detection"
-                    )
-                    texts = cls._text_layer_page_texts(filepath)
-                else:
-                    texts = cls._layout_page_texts(pdf, display_name)
-
-                page_texts: list[str] = []
-                output_bytes = 0
-                has_content = False
-                for page_number, page_text in enumerate(texts, start=1):
-                    has_content = has_content or bool(page_text.strip())
-                    marked_text = f"[PAGE {page_number}]\n{page_text}"
-                    output_bytes += len(marked_text.encode("utf-8")) + (
-                        2 if page_texts else 0
-                    )
-                    if limits is not None and output_bytes > limits.max_output_bytes:
-                        raise ExtractionLimitError(display_name, "text output limit")
-                    page_texts.append(marked_text)
-
-                extracted_text = "\n\n".join(page_texts)
-
-            # Warn if no text extracted (likely image-only/scanned PDF)
-            if not has_content:
-                logger.warning(
-                    f"No text extracted from PDF '{display_name}' - "
-                    "file may be image-only or scanned"
+        pdf_limits = (
+            None
+            if limits is None
+            else PdfExtractionLimits(
+                max_pages=limits.max_pdf_pages,
+                max_extracted_bytes=limits.max_output_bytes,
+                timeout_seconds=math.ceil(limits.timeout_seconds),
+            )
+        )
+        with cls._pdf_errors(display_name):
+            try:
+                return cls._extract_pdf_text(
+                    filepath,
+                    display_name,
+                    pdf_limits,
+                    layout_max_pages=(
+                        limits or get_file_extraction_limits()
+                    ).pdf_layout_max_pages,
                 )
-                # Return empty rather than bare page markers, so downstream
-                # empty-content handling keeps working.
-                return ""
+            except PdfExtractionLimitExceeded as exc:
+                # Background extraction reports every ceiling as one limit error;
+                # the deadline itself is owned by the extraction subprocess.
+                if exc.limit == "pages":
+                    raise PdfPageLimitError(display_name, exc.ceiling) from exc
+                raise ExtractionLimitError(display_name, "text output limit") from exc
 
-            return TextSanitizer.sanitize(extracted_text)
+    @classmethod
+    async def extract_from_pdf_async(
+        cls,
+        filepath: Path,
+        filename: str | None = None,
+        *,
+        limits: PdfExtractionLimits,
+    ) -> str:
+        started = time.monotonic()
+        display_name = filename or filepath.name
+        semaphore = _PDF_EXTRACTION_SEMAPHORE
+        try:
+            async with asyncio.timeout(limits.timeout_seconds):
+                await semaphore.acquire()
+        except TimeoutError as exc:
+            raise PdfExtractionLimitExceeded(
+                "seconds",
+                time.monotonic() - started,
+                limits.timeout_seconds,
+                reason="extraction_capacity",
+            ) from exc
+        try:
+            elapsed = time.monotonic() - started
+            if elapsed >= limits.timeout_seconds:
+                raise PdfExtractionLimitExceeded(
+                    "seconds",
+                    elapsed,
+                    limits.timeout_seconds,
+                    reason="extraction_capacity",
+                )
+            with cls._pdf_errors(display_name):
+                with cls._pdf_process(filepath, display_name, limits, started) as (
+                    process,
+                    result_path,
+                ):
+                    while process.is_alive():
+                        remaining = limits.timeout_seconds - (
+                            time.monotonic() - started
+                        )
+                        if remaining <= 0:
+                            break
+                        await asyncio.sleep(min(0.05, remaining))
+                    return cls._pdf_process_result(
+                        process, result_path, started, limits
+                    )
+        finally:
+            semaphore.release()
 
-        except ExtractionLimitError:
+    @classmethod
+    @contextmanager
+    def _pdf_process(
+        cls,
+        filepath: Path,
+        display_name: str,
+        limits: PdfExtractionLimits,
+        started: float,
+    ) -> Generator[tuple[BaseProcess, Path]]:
+        # A file avoids a full result pipe blocking child exit before join().
+        with TemporaryDirectory(prefix="eneo-pdf-") as directory:
+            result_path = Path(directory) / "result.json"
+            process = multiprocessing.get_context("spawn").Process(
+                target=cls._extract_pdf_in_child,
+                args=(
+                    filepath,
+                    display_name,
+                    limits,
+                    get_file_extraction_limits().pdf_layout_max_pages,
+                    started + limits.timeout_seconds,
+                    result_path,
+                ),
+            )
+            try:
+                process.start()
+                yield process, result_path
+            finally:
+                if process.is_alive():
+                    process.kill()
+                if process.pid is not None:
+                    process.join()
+                process.close()
+
+    @staticmethod
+    def _pdf_process_result(
+        process: BaseProcess,
+        result_path: Path,
+        started: float,
+        limits: PdfExtractionLimits,
+    ) -> str:
+        elapsed = time.monotonic() - started
+        if (
+            process.is_alive()
+            or elapsed >= limits.timeout_seconds
+            or process.exitcode == -signal.SIGALRM
+        ):
+            raise PdfExtractionLimitExceeded(
+                "seconds", max(elapsed, limits.timeout_seconds), limits.timeout_seconds
+            )
+        if process.exitcode != 0:
+            raise ExtractionError(
+                f"PDF extraction process exited with code {process.exitcode}"
+            )
+        result = _PDF_RESULT.validate_json(result_path.read_bytes())
+        if isinstance(result, str):
+            return result
+        if isinstance(result, _PdfLimitResult):
+            raise PdfExtractionLimitExceeded(
+                result.limit, result.measured, result.ceiling
+            )
+        if result.kind == "encrypted":
+            raise PDFPasswordIncorrect(result.details)
+        if result.kind == "corrupt":
+            raise PDFSyntaxError(result.details)
+        raise ExtractionError(result.details)
+
+    @staticmethod
+    @contextmanager
+    def _pdf_errors(display_name: str) -> Generator[None]:
+        try:
+            yield
+        except ExtractionError:
             raise
         except PDFPasswordIncorrect as e:
             logger.warning(f"Password-protected PDF rejected: {display_name}")
@@ -334,6 +582,95 @@ class TextExtractor:
             raise ExtractionError(
                 f"PDF extraction failed for '{display_name}': {str(e)}"
             )
+
+    @classmethod
+    def _extract_pdf_in_child(
+        cls,
+        filepath: Path,
+        display_name: str,
+        limits: PdfExtractionLimits,
+        layout_max_pages: int,
+        deadline: float,
+        result_path: Path,
+    ) -> None:
+        # The OS deadline survives supervisor death and does not require the
+        # parser to release the GIL or execute a Python signal handler.
+        signal.signal(signal.SIGALRM, signal.SIG_DFL)
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            signal.raise_signal(signal.SIGALRM)
+        signal.setitimer(signal.ITIMER_REAL, remaining)
+        result: str | _PdfLimitResult | _PdfErrorResult
+        try:
+            result = cls._extract_pdf_text(
+                filepath, display_name, limits, layout_max_pages=layout_max_pages
+            )
+        except PdfExtractionLimitExceeded as exc:
+            result = _PdfLimitResult(
+                limit=exc.limit, measured=exc.measured, ceiling=exc.ceiling
+            )
+        except PDFPasswordIncorrect as exc:
+            result = _PdfErrorResult(kind="encrypted", details=str(exc))
+        except PDFSyntaxError as exc:
+            result = _PdfErrorResult(kind="corrupt", details=str(exc))
+        except Exception as exc:
+            result = _PdfErrorResult(
+                kind="error",
+                details=f"PDF extraction failed for '{display_name}': {exc}",
+            )
+        result_path.write_bytes(_PDF_RESULT.dump_json(result))
+
+    @classmethod
+    def _extract_pdf_text(
+        cls,
+        filepath: Path,
+        display_name: str,
+        limits: PdfExtractionLimits | None,
+        *,
+        layout_max_pages: int,
+    ) -> str:
+        with pdfplumber.open(filepath) as pdf:
+            page_count = len(pdf.pages)
+            if limits is not None and page_count > limits.max_pages:
+                raise PdfExtractionLimitExceeded("pages", page_count, limits.max_pages)
+            if page_count > layout_max_pages:
+                logger.info(
+                    f"PDF '{display_name}' has {page_count} pages (over "
+                    f"{layout_max_pages}); reading its text layer without "
+                    "table detection"
+                )
+                texts = cls._text_layer_page_texts(filepath)
+            else:
+                texts = cls._layout_page_texts(pdf, display_name)
+            page_texts: list[str] = []
+            extracted_bytes = 0
+            has_content = False
+            for page_number, page_text in enumerate(texts, start=1):
+                framed_text = f"[PAGE {page_number}]\n{page_text}"
+                if limits is not None:
+                    extracted_bytes += len(framed_text.encode("utf-8"))
+                    if page_texts:
+                        extracted_bytes += 2
+                    if extracted_bytes > limits.max_extracted_bytes:
+                        raise PdfExtractionLimitExceeded(
+                            "extracted_bytes",
+                            extracted_bytes,
+                            limits.max_extracted_bytes,
+                        )
+                has_content = has_content or bool(page_text.strip())
+                page_texts.append(framed_text)
+
+            extracted_text = "\n\n".join(page_texts)
+
+        if not has_content:
+            logger.warning(
+                f"No text extracted from PDF '{display_name}' - "
+                "file may be image-only or scanned"
+            )
+            # Bare page markers must not bypass downstream empty-content handling.
+            return ""
+
+        return TextSanitizer.sanitize(extracted_text)
 
     @staticmethod
     def extract_from_docx(filepath: Path, filename: str | None = None) -> str:
@@ -555,4 +892,23 @@ class TextExtractor:
         self._reject_legacy_format(mimetype, filename or filepath.name)
         return await extract_in_process(
             filepath, mimetype, filename or filepath.name, limits=limits
+        )
+
+
+def extract_docx_body_text(document_bytes: bytes) -> str:
+    """Read body paragraphs, controls and tables using the shared Word reader.
+
+    Page furniture is deliberately excluded for consumers of a document's body.
+    Callers enforce archive limits before passing untrusted bytes here.
+    """
+    from io import BytesIO
+
+    with docx2python(BytesIO(document_bytes)) as content:
+        return "\n\n".join(
+            paragraph.strip()
+            for table in content.body
+            for row in table
+            for cell in row
+            for paragraph in cell
+            if paragraph.strip()
         )

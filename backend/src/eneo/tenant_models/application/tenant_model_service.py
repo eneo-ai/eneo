@@ -20,6 +20,10 @@ from uuid import UUID
 
 import sqlalchemy as sa
 
+from eneo.ai_models.completion_models.completion_model import (
+    moves_completion_model_route,
+    require_token_limits,
+)
 from eneo.ai_models.display_name_validation import (
     validate_unique_display_name as _validate_unique_display_name,
 )
@@ -30,6 +34,9 @@ from eneo.completion_models.domain.completion_model_repo import (
     CompletionModelRepository,
 )
 from eneo.completion_models.domain.model_kwargs_capabilities import (
+    ModelKwargCapability,
+    persist_discovered_model_kwargs_capabilities,
+    persist_explicit_model_kwargs_capabilities,
     reasoning_effort_options_from_model_info,
     snapshot_supported_model_kwargs,
 )
@@ -60,9 +67,12 @@ from eneo.rerank_models.domain.rerank_model_repo import RerankModelRepository
 from eneo.security_classifications.tenant_validation import (
     resolve_tenant_security_classification,
 )
+from eneo.transcription_models.domain.realtime import speaks_realtime_dialect
 from eneo.transcription_models.domain.transcription_model_repo import (
     TranscriptionModelRepository,
 )
+
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from eneo.audit.application.audit_service import AuditService
@@ -96,9 +106,6 @@ if TYPE_CHECKING:
     )
     from eneo.users.user import UserInDB
 
-logger = logging.getLogger(__name__)
-
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -119,6 +126,14 @@ async def _validate_active_provider(
     return provider
 
 
+def _require_realtime_dialect(provider_type: str | None) -> None:
+    if provider_type is None or not speaks_realtime_dialect(provider_type):
+        raise BadRequestException(
+            "Live transcription needs a provider of type vLLM, which serves the "
+            "realtime API (for example vadsa)."
+        )
+
+
 async def _unset_other_defaults(
     session: "AsyncSession", table: Any, tenant_id: UUID
 ) -> None:
@@ -137,9 +152,7 @@ async def _unset_other_defaults(
 def _snapshot_completion_capabilities(
     provider_type: str,
     model_name: str,
-    *,
-    reasoning: bool,
-) -> dict[str, object]:
+) -> dict[str, object] | None:
     model_route = resolve_model_route(
         provider_type=provider_type,
         model_name=model_name,
@@ -148,28 +161,40 @@ def _snapshot_completion_capabilities(
         supported_params = get_supported_openai_params(model_route)
     except Exception:
         logger.warning(
-            "Could not discover model parameter capabilities; using conservative defaults",
+            "Could not discover model parameter capabilities; omitting controls",
             extra={"model_route": model_route},
             exc_info=True,
         )
-        supported_params = None
+        return None
+    if supported_params is None:
+        return None
     reasoning_effort_options: list[str] | None = None
-    if supported_params is not None and "reasoning_effort" in supported_params:
+    levels_unknown = False
+    if "reasoning_effort" in supported_params:
         try:
             reasoning_effort_options = reasoning_effort_options_from_model_info(
                 get_model_info(model_route)
             )
         except Exception:
+            # LiteLLM forwards the parameter but does not know the model:
+            # that proves nothing about the levels the endpoint accepts.
             logger.warning(
-                "Could not discover model reasoning levels; using conservative defaults",
+                "Could not discover model reasoning levels; recording them as unknown",
                 extra={"model_route": model_route},
                 exc_info=True,
             )
-    return snapshot_supported_model_kwargs(
+            reasoning_effort_options = []
+            levels_unknown = True
+    snapshot = snapshot_supported_model_kwargs(
         supported_params,
-        reasoning=reasoning,
+        reasoning=False,
         reasoning_effort_options=reasoning_effort_options,
-    ).model_dump()
+    )
+    if levels_unknown:
+        snapshot = snapshot.model_copy(
+            update={"reasoning_effort": ModelKwargCapability(unknown=True)}
+        )
+    return persist_discovered_model_kwargs_capabilities(snapshot)
 
 
 def _ensure_tenant_owned(model: Any) -> None:
@@ -277,6 +302,7 @@ class TenantCompletionModelService:
         new_model.vision = payload.vision
         new_model.reasoning = payload.reasoning
         new_model.supports_tool_calling = payload.supports_tool_calling
+        new_model.supports_strict_tool_schema = payload.supports_strict_tool_schema
         new_model.family = payload.family
         new_model.hosting = payload.hosting
         new_model.org = None
@@ -289,12 +315,13 @@ class TenantCompletionModelService:
         new_model.deployment_name = None
         new_model.base_url = None
         new_model.model_kwargs_capabilities = (
-            payload.model_kwargs_capabilities.model_dump()
+            persist_explicit_model_kwargs_capabilities(
+                payload.model_kwargs_capabilities
+            )
             if payload.model_kwargs_capabilities is not None
             else _snapshot_completion_capabilities(
                 provider.provider_type,
                 payload.name,
-                reasoning=payload.reasoning,
             )
         )
         new_model.input_cost_per_token = payload.input_cost_per_token
@@ -305,7 +332,7 @@ class TenantCompletionModelService:
         self.session.add(new_model)
         await self.session.flush()
 
-        repo = CompletionModelRepository(self.session, self.user)
+        repo = CompletionModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(model_id=new_model.id)
 
         await _audit(
@@ -335,8 +362,21 @@ class TenantCompletionModelService:
         _ensure_tenant_owned(model)
 
         provided = payload.model_fields_set
+        # Moving the route withdraws declarations made
+        # against the previous one, unless the same update declares the new
+        # route below. The edit dialog resends the unchanged name, so the shared
+        # rule compares values rather than presence.
+        renames_route = moves_completion_model_route(
+            current={"name": model.name},
+            provided={"name": payload.name} if payload.name is not None else {},
+        )
         if payload.name is not None:
             model.name = payload.name
+        if renames_route:
+            # The strict tool-schema declaration was assessed against the old
+            # route. The token limits stay: a model without them cannot serve
+            # any request, so only an explicit new value replaces them.
+            model.supports_strict_tool_schema = False
         if payload.display_name is not None:
             await _validate_unique_display_name(
                 self.session,
@@ -349,16 +389,22 @@ class TenantCompletionModelService:
             model.nickname = payload.display_name
         if "description" in provided:
             model.description = payload.description
-        if payload.max_input_tokens is not None:
+        if "max_input_tokens" in provided:
             model.max_input_tokens = payload.max_input_tokens
-        if payload.max_output_tokens is not None:
+        if "max_output_tokens" in provided:
             model.max_output_tokens = payload.max_output_tokens
+        require_token_limits(
+            max_input_tokens=model.max_input_tokens,
+            max_output_tokens=model.max_output_tokens,
+        )
         if payload.vision is not None:
             model.vision = payload.vision
         if payload.reasoning is not None:
             model.reasoning = payload.reasoning
         if payload.supports_tool_calling is not None:
             model.supports_tool_calling = payload.supports_tool_calling
+        if payload.supports_strict_tool_schema is not None:
+            model.supports_strict_tool_schema = payload.supports_strict_tool_schema
         if payload.hosting is not None:
             model.hosting = payload.hosting
         if payload.open_source is not None:
@@ -369,10 +415,11 @@ class TenantCompletionModelService:
             model.input_cost_per_token = payload.input_cost_per_token
         if "output_cost_per_token" in provided:
             model.output_cost_per_token = payload.output_cost_per_token
-        # Name or reasoning changes invalidate the stored capability snapshot;
-        # re-discover with both fields settled. An explicit capability payload
-        # below still wins over the refreshed snapshot.
-        if payload.name is not None or payload.reasoning is not None:
+        # Name or reasoning changes replace the route-specific capability snapshot.
+        # An explicit capability payload below still wins over the discovered value.
+        if (
+            renames_route or payload.reasoning is not None
+        ) and "model_kwargs_capabilities" not in provided:
             if model.provider_id is None:
                 raise BadRequestException(
                     "Tenant completion model is missing its provider"
@@ -385,11 +432,12 @@ class TenantCompletionModelService:
             model.model_kwargs_capabilities = _snapshot_completion_capabilities(
                 provider.provider_type,
                 model.name,
-                reasoning=model.reasoning,
             )
         if "model_kwargs_capabilities" in provided:
             model.model_kwargs_capabilities = (
-                payload.model_kwargs_capabilities.model_dump()
+                persist_explicit_model_kwargs_capabilities(
+                    payload.model_kwargs_capabilities
+                )
                 if payload.model_kwargs_capabilities is not None
                 else None
             )
@@ -410,7 +458,7 @@ class TenantCompletionModelService:
 
         await self.session.flush()
 
-        repo = CompletionModelRepository(self.session, self.user)
+        repo = CompletionModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(model_id=model.id)
 
         await _audit(
@@ -523,7 +571,7 @@ class TenantEmbeddingModelService:
         self.session.add(new_model)
         await self.session.flush()
 
-        repo = EmbeddingModelRepository(self.session, self.user)
+        repo = EmbeddingModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(new_model.id)
 
         await _audit(
@@ -608,7 +656,7 @@ class TenantEmbeddingModelService:
 
         await self.session.flush()
 
-        repo = EmbeddingModelRepository(self.session, self.user)
+        repo = EmbeddingModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(model.id)
 
         await _audit(
@@ -709,9 +757,11 @@ class TenantTranscriptionModelService:
     async def create(
         self, payload: "TenantTranscriptionModelCreate"
     ) -> "TranscriptionModel":
-        await _validate_active_provider(
+        provider = await _validate_active_provider(
             self.session, payload.provider_id, self.user.tenant_id
         )
+        if payload.supports_realtime:
+            _require_realtime_dialect(provider.provider_type)
         await _validate_unique_display_name(
             self.session,
             TranscriptionModels,
@@ -752,12 +802,15 @@ class TenantTranscriptionModelService:
                 is_enabled=payload.is_active,
                 is_default=payload.is_default,
                 security_classification_id=classification_id,
+                supports_realtime=payload.supports_realtime,
             )
         )
         self.session.add(new_model)
         await self.session.flush()
 
-        repo = TranscriptionModelRepository(self.session, self.user)
+        repo = TranscriptionModelRepository(
+            session=self.session, tenant=self.user.tenant
+        )
         loaded = await repo.one(new_model.id)
 
         await _audit(
@@ -823,10 +876,22 @@ class TenantTranscriptionModelService:
                     self.user.tenant_id,
                 )
             )
+        if payload.supports_realtime is not None:
+            if payload.supports_realtime:
+                provider_type = None
+                if model.provider_id is not None:
+                    provider = await ModelProviderRepository(
+                        session=self.session, tenant_id=self.user.tenant_id
+                    ).get_by_id(model.provider_id)
+                    provider_type = provider.provider_type
+                _require_realtime_dialect(provider_type)
+            model.supports_realtime = payload.supports_realtime
 
         await self.session.flush()
 
-        repo = TranscriptionModelRepository(self.session, self.user)
+        repo = TranscriptionModelRepository(
+            session=self.session, tenant=self.user.tenant
+        )
         loaded = await repo.one(model.id)
 
         await _audit(
@@ -956,7 +1021,7 @@ class TenantImageModelService:
         self.session.add(new_model)
         await self.session.flush()
 
-        repo = ImageModelRepository(self.session, self.user)
+        repo = ImageModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(new_model.id)
 
         await _audit(
@@ -1028,7 +1093,7 @@ class TenantImageModelService:
 
         await self.session.flush()
 
-        repo = ImageModelRepository(self.session, self.user)
+        repo = ImageModelRepository(session=self.session, tenant=self.user.tenant)
         loaded = await repo.one(model.id)
 
         await _audit(

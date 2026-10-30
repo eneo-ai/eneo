@@ -1,0 +1,1399 @@
+/** @typedef {import('../client/client').EneoError} EneoError */
+/** @typedef {import('../types/resources').FlowRunStepInputs} FlowRunStepInputs */
+/** @typedef {NonNullable<import('../types/schema').operations["list_flow_runs"]["parameters"]["query"]>} FlowRunListQuery */
+/** @typedef {NonNullable<import('../types/schema').operations["export_flow_run_evidence"]["parameters"]["query"]>} FlowRunEvidenceExportQuery */
+/** @typedef {NonNullable<import('../types/schema').operations["list_flow_run_provider_calls"]["parameters"]["query"]>} FlowRunProviderCallListQuery */
+import { FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS } from "../flows/flow-run-reserved-input-payload-keys.js";
+
+const FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER = "Eneo-Package-Omitted-Mcp-Assistant-Count";
+
+/**
+ * @param {import('../types/fetch').EneoBinaryResponse} response
+ * @returns {import('../types/resources').FlowPackageExportResponse}
+ */
+function withFlowPackageOmissions(response) {
+  const headerValue = response.headers.get(FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER);
+  if (headerValue === null) return { ...response, omissions: [] };
+
+  if (!/^[1-9]\d*$/.test(headerValue)) {
+    throw new Error("Flow package export returned an invalid MCP omission count.");
+  }
+  const count = Number(headerValue);
+  if (!Number.isSafeInteger(count)) {
+    throw new Error("Flow package export returned an invalid MCP omission count.");
+  }
+  return {
+    ...response,
+    omissions: [{ kind: "mcp_attachment", count }]
+  };
+}
+
+/**
+ * @param {import('../client/client').Client} client Provide a client with which to call the endpoints
+ */
+export function initFlows(client) {
+  const _fetch = client.fetch;
+  /** @type {import('../types/fetch').EneoBinaryFetchFunction} */
+  const _binaryFetch = (path, options) => {
+    if (!("binaryFetch" in client) || typeof client.binaryFetch !== "function") {
+      throw new Error("Flow package export requires a client with binaryFetch support.");
+    }
+    return client.binaryFetch(path, options);
+  };
+  const _textEncoder = new TextEncoder();
+
+  /**
+   * Sort object keys for stable JSON while preserving array order.
+   * @param {any} value
+   * @returns {any}
+   */
+  const _stableSortObjectKeys = (value) => {
+    if (Array.isArray(value)) {
+      return value.map(_stableSortObjectKeys);
+    }
+    if (
+      value &&
+      typeof value === "object" &&
+      !(value instanceof Date) &&
+      !(value instanceof File)
+    ) {
+      return Object.keys(value)
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = _stableSortObjectKeys(value[key]);
+          return acc;
+        }, /** @type {Record<string, any>} */ ({}));
+    }
+    return value;
+  };
+
+  /**
+   * @param {ArrayBuffer} buffer
+   * @returns {string}
+   */
+  const _hexFromBuffer = (buffer) =>
+    Array.from(new Uint8Array(buffer))
+      .map((byte) => byte.toString(16).padStart(2, "0"))
+      .join("");
+
+  /** @returns {Error & {code: string, status: number}} */
+  const _removedTopLevelFileIdsError = () => {
+    const error = /** @type {Error & {code: string, status: number}} */ (
+      new Error("Top-level file_ids is no longer supported. Use step_inputs[stepId].file_ids.")
+    );
+    error.code = "flow_run_top_level_file_ids_not_supported";
+    error.status = 400;
+    return error;
+  };
+
+  /** @param {unknown} file_ids */
+  const _rejectTopLevelFileIds = (file_ids) => {
+    if (file_ids !== undefined) {
+      throw _removedTopLevelFileIdsError();
+    }
+  };
+
+  /** @type {ReadonlySet<string>} */
+  const _reservedInputPayloadKeys = new Set(FLOW_RUN_RESERVED_INPUT_PAYLOAD_KEYS);
+
+  /** @param {unknown} input_payload_json */
+  const _rejectReservedInputPayloadKeys = (input_payload_json) => {
+    if (
+      !input_payload_json ||
+      Array.isArray(input_payload_json) ||
+      typeof input_payload_json !== "object"
+    ) {
+      return;
+    }
+    const keys = Object.keys(input_payload_json).filter((key) =>
+      _reservedInputPayloadKeys.has(key)
+    );
+    if (keys.length === 0) {
+      return;
+    }
+    const error = /** @type {Error & {code: string, status: number, keys: string[]}} */ (
+      new Error("input_payload_json contains reserved Flow run orchestration keys.")
+    );
+    error.code = "flow_run_reserved_input_payload_key";
+    error.status = 400;
+    error.keys = keys.sort();
+    throw error;
+  };
+
+  /**
+   * @param {Record<string, {file_ids?: string[]}> | undefined} step_inputs
+   * @returns {Record<string, {file_ids?: string[]}> | undefined}
+   */
+  const _normalizeStepInputs = (step_inputs) =>
+    step_inputs == null
+      ? undefined
+      : Object.keys(step_inputs)
+          .sort()
+          .reduce((acc, stepId) => {
+            acc[stepId] = _stableSortObjectKeys(step_inputs[stepId] ?? {});
+            return acc;
+          }, /** @type {Record<string, any>} */ ({}));
+
+  /**
+   * @param {{
+   *   flowId: string,
+   *   expectedFlowVersion?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean | null
+   * }} params
+   * @returns {{
+   *   flow_id: string,
+   *   expected_flow_version?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean
+   * }}
+   */
+  const _normalizeRunIntent = ({
+    flowId,
+    expectedFlowVersion,
+    input_payload_json,
+    step_inputs,
+    speaker_labels
+  }) => {
+    const normalizedStepInputs = _normalizeStepInputs(step_inputs);
+    return {
+      flow_id: flowId,
+      ...(expectedFlowVersion != null ? { expected_flow_version: expectedFlowVersion } : {}),
+      ...(input_payload_json !== undefined
+        ? { input_payload_json: _stableSortObjectKeys(input_payload_json) }
+        : {}),
+      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {}),
+      // The API fingerprints the choice with the run request, so a different
+      // choice is a different intent.
+      ...(speaker_labels != null ? { speaker_labels } : {})
+    };
+  };
+
+  /**
+   * @param {{
+   *   expected_flow_version?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean | null
+   * }} params
+   * @returns {{
+   *   expected_flow_version?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean
+   * }}
+   */
+  const _buildRunRequestBody = ({
+    expected_flow_version,
+    input_payload_json,
+    step_inputs,
+    speaker_labels
+  }) => {
+    const normalizedStepInputs = _normalizeStepInputs(step_inputs);
+    return {
+      ...(expected_flow_version != null ? { expected_flow_version } : {}),
+      ...(input_payload_json !== undefined
+        ? { input_payload_json: _stableSortObjectKeys(input_payload_json) }
+        : {}),
+      ...(normalizedStepInputs ? { step_inputs: normalizedStepInputs } : {}),
+      ...(speaker_labels != null ? { speaker_labels } : {})
+    };
+  };
+
+  /**
+   * @param {{
+   *   flowId: string,
+   *   expectedFlowVersion?: number,
+   *   input_payload_json?: any,
+   *   step_inputs?: Record<string, {file_ids?: string[]}>,
+   *   speaker_labels?: boolean | null,
+   *   file_ids?: never
+   * }} params
+   * @returns {Promise<string>}
+   */
+  const _deriveUploadIntentIdempotencyKey = async (params) => {
+    _rejectTopLevelFileIds(params.file_ids);
+    _rejectReservedInputPayloadKeys(params.input_payload_json);
+    if (!globalThis.crypto?.subtle) {
+      throw new Error("Web Crypto is required to derive Flow run idempotency keys.");
+    }
+
+    const normalizedPayload = _normalizeRunIntent(params);
+    const digest = await globalThis.crypto.subtle.digest(
+      "SHA-256",
+      _textEncoder.encode(JSON.stringify(normalizedPayload))
+    );
+    return `flow-run:${_hexFromBuffer(digest)}`;
+  };
+
+  /**
+   * @param {{flowId?: string, flow_id?: string}} run
+   * @param {string} operation
+   * @returns {string}
+   */
+  const _requireFlowIdForRunRoute = (run, operation) => {
+    const flowId = run.flowId ?? run.flow_id;
+    if (!flowId) {
+      throw new Error(`Flow run ${operation} requires flowId.`);
+    }
+    return flowId;
+  };
+
+  return {
+    /**
+     * Test the submitted HTTP snapshot with credentials from the selected saved step.
+     * @param {{id: string, request: import('../types/resources').FlowHttpTestRequest}} args
+     * @returns {Promise<import('../types/resources').FlowHttpTestResponse>}
+     * @throws {EneoError}
+     */
+    httpTest: async ({ id, request }) =>
+      _fetch("/api/v1/flows/{id}/http-test", {
+        method: "post",
+        params: { path: { id } },
+        requestBody: { "application/json": request }
+      }),
+    retention: {
+      /**
+       * Preview or explicitly purge a bounded batch of due Flow run history.
+       * Requires tenant-admin permission. Review-required runs remain stored.
+       * @param {(import('../types/schema').components['schemas']['FlowRunHistoryPurgeRequest'] & ({scope?: 'organization'} | {scope: 'space', spaceId: string} | {scope: 'flow', flowId: string}))} [options]
+       * @throws {EneoError}
+       */
+      purge: async (options = {}) => {
+        if (
+          (options.scope !== undefined &&
+            !["organization", "space", "flow"].includes(options.scope)) ||
+          (options.scope !== "space" && "spaceId" in options) ||
+          (options.scope !== "flow" && "flowId" in options)
+        ) {
+          throw new Error("Flow history purge requires a valid scope and matching scope ID.");
+        }
+        const requestBody = {
+          "application/json": {
+            dry_run: options.dry_run ?? true,
+            limit: options.limit ?? 100
+          }
+        };
+        if (options.scope === "space") {
+          return _fetch("/api/v1/settings/flow-run-retention-policy/spaces/{space_id}/purge", {
+            method: "post",
+            params: { path: { space_id: options.spaceId } },
+            requestBody
+          });
+        }
+        if (options.scope === "flow") {
+          return _fetch("/api/v1/settings/flow-run-retention-policy/flows/{flow_id}/purge", {
+            method: "post",
+            params: { path: { flow_id: options.flowId } },
+            requestBody
+          });
+        }
+        return _fetch("/api/v1/settings/flow-run-retention-policy/purge", {
+          method: "post",
+          requestBody
+        });
+      }
+    },
+    /**
+     * Create a new, empty Flow. Its steps run assistants the flow owns: create
+     * them with `flows.assistants.create` once the flow exists, then set the
+     * steps with `flows.update`.
+     * @param {{spaceId: string, name: string, description?: string, metadata_json?: any}} flow
+     * @throws {EneoError}
+     */
+    create: async (flow) => {
+      const { spaceId, name, description, metadata_json } = flow;
+      return _fetch("/api/v1/flows/", {
+        method: "post",
+        requestBody: {
+          "application/json": {
+            space_id: spaceId,
+            name,
+            description,
+            metadata_json
+          }
+        }
+      });
+    },
+
+    /**
+     * List the flows the caller can see: those in `spaceId`, or without it the
+     * flows of every space the signed-in user belongs to. Service keys must
+     * send `spaceId`. `publishedOnly` returns published flows only, for
+     * clients that run flows rather than edit them.
+     * @param {{spaceId?: string, publishedOnly?: boolean, limit?: number, offset?: number}} [params]
+     * @throws {EneoError}
+     */
+    list: async ({ spaceId, publishedOnly, limit = 50, offset = 0 } = {}) => {
+      return _fetch("/api/v1/flows/", {
+        method: "get",
+        params: {
+          query: { space_id: spaceId, published_only: publishedOnly, limit, offset }
+        }
+      });
+    },
+
+    /**
+     * Get a flow by id
+     * @param {{id: string}} flow
+     * @throws {EneoError}
+     */
+    get: async (flow) => {
+      return _fetch("/api/v1/flows/{id}/", {
+        method: "get",
+        params: { path: { id: flow.id } }
+      });
+    },
+
+    /**
+     * Update a flow
+     * @param {{flow: {id: string}, update: object}} params
+     * @throws {EneoError}
+     */
+    update: async ({ flow, update }) => {
+      return _fetch("/api/v1/flows/{id}/", {
+        method: "patch",
+        params: { path: { id: flow.id } },
+        requestBody: { "application/json": update }
+      });
+    },
+
+    /**
+     * Delete a flow
+     * @param {{id: string}} flow
+     * @returns {Promise<true>}
+     * @throws {EneoError}
+     */
+    delete: async (flow) => {
+      await _fetch("/api/v1/flows/{id}/", {
+        method: "delete",
+        params: { path: { id: flow.id } }
+      });
+      return true;
+    },
+
+    /**
+     * Publish a flow
+     * @param {{id: string}} flow
+     * @throws {EneoError}
+     */
+    publish: async (flow) => {
+      return _fetch("/api/v1/flows/{id}/publish/", {
+        method: "post",
+        params: { path: { id: flow.id } }
+      });
+    },
+
+    /**
+     * Unpublish a flow (return to draft)
+     * @param {{id: string}} flow
+     * @throws {EneoError}
+     */
+    unpublish: async (flow) => {
+      return _fetch("/api/v1/flows/{id}/unpublish/", {
+        method: "post",
+        params: { path: { id: flow.id } }
+      });
+    },
+
+    /**
+     * Get the graph representation of a flow
+     * @param {{id: string, run_id?: string}} params
+     * @throws {EneoError}
+     */
+    graph: async ({ id, run_id }) => {
+      const query = run_id ? { run_id } : {};
+      return _fetch("/api/v1/flows/{id}/graph/", {
+        method: "get",
+        params: { path: { id }, query }
+      });
+    },
+
+    packages: {
+      /**
+       * Validate a portable Flow package before selecting a target space.
+       * @param {{file: File, signal?: AbortSignal}} params
+       * @throws {EneoError}
+       */
+      validate: async ({ file, signal }) => {
+        const formData = new FormData();
+        formData.append("package_file", file);
+        return _fetch("/api/v1/flow-packages/validate/", {
+          method: "post",
+          requestBody: { "multipart/form-data": formData },
+          signal
+        });
+      },
+
+      /**
+       * Preview package dependency resolution for a target space.
+       * @param {{spaceId: string, file: File, templateUploads?: import('../types/resources').FlowPackageTemplateUpload[], signal?: AbortSignal}} params
+       * @throws {EneoError}
+       */
+      createImportPlan: async ({ spaceId, file, templateUploads = [], signal }) => {
+        const formData = new FormData();
+        formData.append("package_file", file);
+        if (templateUploads.length)
+          formData.append(
+            "template_uploads",
+            new Blob([JSON.stringify(templateUploads)], { type: "application/json" }),
+            "templates.json"
+          );
+        return _fetch("/api/v1/spaces/{id}/flow-packages/import-plan/", {
+          method: "post",
+          params: { path: { id: spaceId } },
+          requestBody: { "multipart/form-data": formData },
+          signal
+        });
+      },
+
+      /**
+       * Import a package into a target space as a draft Flow.
+       * @param {{spaceId: string, packageBase64: string, expectedContentChecksum: string, expectedTargetState: import('../types/resources').FlowPackageImportTargetState, selectedBindings?: import('../types/resources').FlowPackageImportResourceBinding[], templateUploads?: import('../types/resources').FlowPackageTemplateUpload[], expectedTemplateUploadChecksums?: Record<string, string>}} params
+       * @throws {EneoError}
+       */
+      importDraft: async ({
+        spaceId,
+        packageBase64,
+        expectedContentChecksum,
+        expectedTargetState,
+        selectedBindings = [],
+        templateUploads = [],
+        expectedTemplateUploadChecksums = {}
+      }) => {
+        return _fetch("/api/v1/spaces/{id}/flow-packages/imports/", {
+          method: "post",
+          params: { path: { id: spaceId } },
+          requestBody: {
+            "application/json": {
+              package_base64: packageBase64,
+              expected_content_checksum: expectedContentChecksum,
+              expected_target_state: expectedTargetState,
+              selected_bindings: selectedBindings,
+              template_uploads: templateUploads,
+              expected_template_upload_checksums: expectedTemplateUploadChecksums
+            }
+          }
+        });
+      },
+
+      /**
+       * Export a draft Flow as a portable package bundle.
+       * @param {{id: string, packageId: string, packageVersion: string, name: string, description?: string, includeTemplates?: boolean, signal?: AbortSignal}} params
+       * @returns {Promise<import('../types/resources').FlowPackageExportResponse>}
+       * @throws {EneoError}
+       */
+      export: async ({
+        id,
+        packageId,
+        packageVersion,
+        name,
+        description = "",
+        includeTemplates = true,
+        signal
+      }) => {
+        const response = await _binaryFetch("/api/v1/flows/{id}/package-exports/", {
+          method: "post",
+          params: { path: { id } },
+          requestBody: {
+            "application/json": {
+              package_id: packageId,
+              package_version: packageVersion,
+              name,
+              description,
+              include_templates: includeTemplates
+            }
+          },
+          signal
+        });
+        return withFlowPackageOmissions(response);
+      }
+    },
+
+    published: {
+      /**
+       * Fetch the service-key-safe published runtime projection for a Flow.
+       * @param {string | {id: string}} flowOrId
+       * @throws {EneoError}
+       */
+      get: async (flowOrId) => {
+        const id = typeof flowOrId === "string" ? flowOrId : flowOrId.id;
+        return _fetch("/api/v1/flows/{id}/published/", {
+          method: "get",
+          params: { path: { id } }
+        });
+      }
+    },
+
+    /**
+     * List every tool of the MCP servers the flow's space has activated, for a step
+     * whose input source is a tool. A tool a flow may not use is listed with the
+     * level that refuses it.
+     * @param {{id: string}} params
+     * @throws {EneoError}
+     */
+    toolOptions: async ({ id }) => {
+      return _fetch("/api/v1/flows/{id}/tool-options", {
+        method: "get",
+        params: { path: { id } }
+      });
+    },
+
+    runContract: {
+      /**
+       * Fetch canonical run contract for runtime step inputs and template readiness.
+       * @param {{id: string}} params
+       * @throws {EneoError}
+       */
+      get: async ({ id }) => {
+        return _fetch("/api/v1/flows/{id}/run-contract/", {
+          method: "get",
+          params: { path: { id } }
+        });
+      }
+    },
+
+    liveTranscription: {
+      /**
+       * Admit a live transcript preview for an audio step of the published flow and
+       * get a single-use ticket for the WebSocket at `websocket_path`. The preview
+       * is not the run's transcript: upload the recording and create the run as usual.
+       * `recordingId` names the recording, so Eneo keeps the text of a session that
+       * heard all of it as `transcript_id`; without it the session is a preview only.
+       * @param {{id: string, stepId: string, recordingId?: string}} params
+       * @throws {EneoError} 409 `flow_live_transcription_unavailable` with `context.reason`
+       */
+      createSession: async ({ id, stepId, recordingId }) => {
+        return _fetch("/api/v1/flows/{id}/steps/{step_id}/live-transcription-sessions/", {
+          method: "post",
+          params: { path: { id, step_id: stepId } },
+          ...(recordingId
+            ? { requestBody: { "application/json": { recording_id: recordingId } } }
+            : {})
+        });
+      }
+    },
+
+    /**
+     * Inspect placeholders in an uploaded DOCX template for a flow.
+     * @param {{id: string, fileId: string}} params
+     * @throws {EneoError}
+     */
+    inspectTemplate: async ({ id, fileId }) => {
+      return _fetch("/api/v1/flows/{id}/template-inspect/", {
+        method: "get",
+        params: { path: { id }, query: { file_id: fileId } }
+      });
+    },
+
+    templates: {
+      /**
+       * List flow-scoped DOCX template assets.
+       * @param {{id: string}} params
+       * @throws {EneoError}
+       */
+      list: async ({ id }) => {
+        return _fetch("/api/v1/flows/{id}/template-files/", {
+          method: "get",
+          params: { path: { id } }
+        });
+      },
+
+      /**
+       * Upload a reusable DOCX template asset for Flow template_fill steps.
+       * @param {{id: string, file: File, signal?: AbortSignal}} params
+       * @throws {EneoError}
+       */
+      upload: async ({ id, file, signal }) => {
+        const formData = new FormData();
+        formData.append("upload_file", file);
+        return _fetch("/api/v1/flows/{id}/template-files/", {
+          method: "post",
+          params: { path: { id } },
+          requestBody: { "multipart/form-data": formData },
+          signal
+        });
+      },
+
+      /**
+       * Delete a flow-scoped DOCX template asset.
+       * @param {{id: string, fileId: string, signal?: AbortSignal}} params
+       * @throws {EneoError}
+       */
+      delete: async ({ id, fileId, signal }) => {
+        return _fetch("/api/v1/flows/{id}/template-files/{file_id}/", {
+          method: "delete",
+          params: { path: { id, file_id: fileId } },
+          signal
+        });
+      },
+
+      /**
+       * Inspect placeholders in a flow-scoped DOCX template asset.
+       * @param {{id: string, fileId: string}} params
+       * @throws {EneoError}
+       */
+      inspect: async ({ id, fileId }) => {
+        return _fetch("/api/v1/flows/{id}/template-inspect/", {
+          method: "get",
+          params: { path: { id }, query: { file_id: fileId } }
+        });
+      },
+
+      /**
+       * Generate signed URL for flow template asset download.
+       * @param {{id: string, fileId: string, expiresIn?: number, contentDisposition?: "attachment" | "inline"}} params
+       * @throws {EneoError}
+       */
+      signedUrl: async ({ id, fileId, expiresIn = 3600, contentDisposition = "attachment" }) => {
+        return _fetch("/api/v1/flows/{id}/template-files/{file_id}/signed-url/", {
+          method: "post",
+          params: { path: { id, file_id: fileId } },
+          requestBody: {
+            "application/json": {
+              expires_in: expiresIn,
+              content_disposition: contentDisposition
+            }
+          }
+        });
+      }
+    },
+
+    steps: {
+      runtimeFiles: {
+        /**
+         * Upload runtime files for a specific flow step. Pass onProgress to use
+         * XHR progress events and keep long browser uploads alive while bytes
+         * continue to transfer. The returned file id may be reused under
+         * multiple compatible step_inputs entries when creating the run.
+         * @param {{id: string, stepId: string, file: File, signal?: AbortSignal, abortController?: AbortController, onProgress?: (ev: ProgressEvent) => void}} params
+         * @throws {EneoError}
+         */
+        upload: async ({ id, stepId, file, signal, abortController, onProgress }) => {
+          const formData = new FormData();
+          formData.append("upload_file", file);
+          if (onProgress || abortController) {
+            const controller = abortController ?? new AbortController();
+            if (signal?.aborted) {
+              controller.abort();
+            } else {
+              signal?.addEventListener("abort", () => controller.abort(), { once: true });
+            }
+            return client.xhr(
+              "/api/v1/flows/{id}/steps/{step_id}/runtime-files/",
+              {
+                method: "post",
+                params: { path: { id, step_id: stepId } },
+                requestBody: { "multipart/form-data": formData }
+              },
+              { onProgress },
+              controller
+            );
+          }
+          return _fetch("/api/v1/flows/{id}/steps/{step_id}/runtime-files/", {
+            method: "post",
+            params: { path: { id, step_id: stepId } },
+            requestBody: { "multipart/form-data": formData },
+            signal
+          });
+        },
+
+        /**
+         * Delete an orphan runtime file before it is attached to a flow run.
+         * Files already persisted in run input or output state return a typed
+         * 409 conflict from the API.
+         * @param {{id: string, fileId: string, signal?: AbortSignal}} params
+         * @throws {EneoError}
+         */
+        delete: async ({ id, fileId, signal }) => {
+          return _fetch("/api/v1/flows/{id}/runtime-files/{file_id}/", {
+            method: "delete",
+            params: { path: { id, file_id: fileId } },
+            signal
+          });
+        }
+      }
+    },
+
+    assistants: {
+      /**
+       * Create a flow-managed assistant owned by the flow.
+       * @param {{id: string, name: string}} params
+       * @throws {EneoError}
+       */
+      create: async ({ id, name }) => {
+        return _fetch("/api/v1/flows/{id}/assistants/", {
+          method: "post",
+          params: { path: { id } },
+          requestBody: { "application/json": { name } }
+        });
+      },
+
+      /**
+       * Get a flow-managed assistant.
+       * @param {{id: string, assistantId: string}} params
+       * @throws {EneoError}
+       */
+      get: async ({ id, assistantId }) => {
+        return _fetch("/api/v1/flows/{id}/assistants/{assistant_id}/", {
+          method: "get",
+          params: { path: { id, assistant_id: assistantId } }
+        });
+      },
+
+      /**
+       * Update a flow-managed assistant. The assistant is part of the flow's
+       * draft: the update advances the flow's `draft_revision` and returns it.
+       * Pass the revision you hold as `update.expected_revision`; a draft that
+       * has moved on since is refused with code `stale_revision`.
+       * @param {{id: string, assistantId: string, update: object}} params
+       * @throws {EneoError}
+       */
+      update: async ({ id, assistantId, update }) => {
+        const body = /** @type {{description?: string | null} & Record<string, any>} */ ({
+          ...update
+        });
+        if (typeof body.description === "string" && body.description.trim() === "") {
+          body.description = null;
+        }
+        return _fetch("/api/v1/flows/{id}/assistants/{assistant_id}/", {
+          method: "patch",
+          params: { path: { id, assistant_id: assistantId } },
+          requestBody: { "application/json": body }
+        });
+      },
+
+      /**
+       * Delete a flow-managed assistant.
+       * @param {{id: string, assistantId: string}} params
+       * @returns {Promise<true>}
+       * @throws {EneoError}
+       */
+      delete: async ({ id, assistantId }) => {
+        await _fetch("/api/v1/flows/{id}/assistants/{assistant_id}/", {
+          method: "delete",
+          params: { path: { id, assistant_id: assistantId } }
+        });
+        return true;
+      }
+    },
+
+    runs: {
+      statusCapabilities: {
+        /**
+         * Fetch canonical Flow run status capability metadata.
+         * @throws {EneoError}
+         */
+        get: async () => {
+          return _fetch("/api/v1/flows/runs/status-capabilities/", {
+            method: "get"
+          });
+        }
+      },
+
+      /**
+       * Create a flow run
+       * @param {{
+       *  flow: {id: string},
+       *  expected_flow_version?: number,
+       *  idempotencyKey?: string,
+       *  input_payload_json?: any,
+       *  step_inputs?: FlowRunStepInputs,
+       *  speaker_labels?: boolean | null,
+       *  file_ids?: never
+       * }} params
+       * `step_inputs[stepId].file_ids` is ordered run input. The SDK preserves
+       * caller order and leaves duplicate collapse to the API. Send
+       * `speaker_labels` only when the run contract's
+       * `transcription.speaker_labels.selectable` is true; null or omitted keeps
+       * the flow's default.
+       * @throws {EneoError}
+       */
+      create: async ({
+        flow,
+        expected_flow_version,
+        idempotencyKey,
+        input_payload_json,
+        step_inputs,
+        speaker_labels,
+        file_ids
+      }) => {
+        _rejectTopLevelFileIds(file_ids);
+        _rejectReservedInputPayloadKeys(input_payload_json);
+        const requestBody = _buildRunRequestBody({
+          expected_flow_version,
+          input_payload_json,
+          step_inputs,
+          speaker_labels
+        });
+        return _fetch("/api/v1/flows/{id}/runs/", {
+          method: "post",
+          params: {
+            path: { id: flow.id },
+            header: idempotencyKey ? { "Idempotency-Key": idempotencyKey } : undefined
+          },
+          requestBody: {
+            "application/json": requestBody
+          }
+        });
+      },
+
+      /**
+       * Reuse a failed run's completed prefix and execute from its first unfinished step.
+       * Replaying the required idempotency key returns the same child run.
+       * @param {{flowId: string, runId: string, idempotencyKey: string}} params
+       * @throws {EneoError}
+       */
+      retryFromFailedStep: async ({ flowId, runId, idempotencyKey }) => {
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/retry/", {
+          method: "post",
+          params: {
+            path: { id: flowId, run_id: runId },
+            header: { "Idempotency-Key": idempotencyKey }
+          }
+        });
+      },
+
+      /**
+       * Derive a stable Idempotency-Key value for upload-driven Flow runs.
+       * @param {{
+       *  flowId: string,
+       *  expectedFlowVersion?: number,
+       *  input_payload_json?: any,
+       *  step_inputs?: FlowRunStepInputs,
+       *  speaker_labels?: boolean | null,
+       *  file_ids?: never
+       * }} params
+       * `step_inputs[stepId].file_ids` order contributes to the derived key.
+       * Reordering the same file ids produces a different key.
+       * @returns {Promise<string>}
+       */
+      deriveUploadIntentIdempotencyKey: async (params) => {
+        return _deriveUploadIntentIdempotencyKey(params);
+      },
+
+      /**
+       * List runs for a flow. `mine` keeps only the runs the caller started,
+       * within the runs the caller may see.
+       * @param {{flowId: string, limit?: FlowRunListQuery["limit"], offset?: FlowRunListQuery["offset"], status?: FlowRunListQuery["status"], mine?: FlowRunListQuery["mine"]}} params
+       * @throws {EneoError}
+       */
+      list: async ({ flowId, limit = 50, offset = 0, status, mine }) => {
+        return _fetch("/api/v1/flows/{id}/runs/", {
+          method: "get",
+          params: { path: { id: flowId }, query: { limit, offset, status, mine } }
+        });
+      },
+
+      /**
+       * Get a specific flow run
+       * @param {{id: string, flowId: string, flow_id?: string}} run
+       * @throws {EneoError}
+       */
+      get: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "get");
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/", {
+          method: "get",
+          params: { path: { id: flowId, run_id: run.id } }
+        });
+      },
+
+      /**
+       * Poll a flow run without retrieving its input, result, files, or usage.
+       * @param {{id: string, flowId: string, flow_id?: string}} run
+       * @throws {EneoError}
+       */
+      status: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "status");
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/status/", {
+          method: "get",
+          params: { path: { id: flowId, run_id: run.id } }
+        });
+      },
+
+      /**
+       * List step outputs for a specific run under a flow.
+       * @param {{flowId: string, runId: string}} params
+       * @throws {EneoError}
+       */
+      steps: async ({ flowId, runId }) => {
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/steps/", {
+          method: "get",
+          params: { path: { id: flowId, run_id: runId } }
+        });
+      },
+
+      /**
+       * Cancel a flow run
+       * @param {{id: string, flowId: string, flow_id?: string}} run
+       * @throws {EneoError}
+       */
+      cancel: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "cancel");
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/cancel/", {
+          method: "post",
+          params: { path: { id: flowId, run_id: run.id } }
+        });
+      },
+
+      /**
+       * Redispatch a stale queued flow run, optionally rearming the observed exhausted epoch.
+       * @param {{id: string, flowId: string, flow_id?: string} & import('../types/resources').FlowRunRedispatchRequest} run
+       * @returns {Promise<import('../types/resources').FlowRunRedispatchResult>}
+       * @throws {EneoError}
+       */
+      redispatch: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "redispatch");
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/redispatch/", {
+          method: "post",
+          params: { path: { id: flowId, run_id: run.id } },
+          requestBody: {
+            "application/json": {
+              expected_dispatch_exhausted_at: run.expected_dispatch_exhausted_at
+            }
+          }
+        });
+      },
+
+      /**
+       * Get evidence for a flow run
+       * @param {{id: string, flowId: string, flow_id?: string}} run
+       * @throws {EneoError}
+       */
+      evidence: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "evidence");
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/evidence/", {
+          method: "get",
+          params: { path: { id: flowId, run_id: run.id } }
+        });
+      },
+
+      /**
+       * List ordered provider-call lifecycle evidence for a flow run.
+       * Pass the returned next_after_event_id as afterEventId to fetch the next page.
+       * @param {{id: string, flowId: string, flow_id?: string, limit?: FlowRunProviderCallListQuery["limit"], afterEventId?: string, attemptId?: string}} run
+       * @returns {Promise<import('../types/resources').FlowProviderCallEvidencePage>}
+       * @throws {EneoError}
+       */
+      providerCalls: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "providerCalls");
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/provider-calls/", {
+          method: "get",
+          params: {
+            path: { id: flowId, run_id: run.id },
+            query: {
+              limit: run.limit,
+              after_event_id: run.afterEventId,
+              attempt_id: run.attemptId
+            }
+          }
+        });
+      },
+
+      /**
+       * Export canonical evidence bundle for a flow run.
+       * @param {{id: string, flowId: string, flow_id?: string, format?: FlowRunEvidenceExportQuery["format"], detail?: FlowRunEvidenceExportQuery["detail"], reason?: FlowRunEvidenceExportQuery["reason"]}} run
+       * @returns {Promise<import('../types/resources').FlowRunEvidenceExport>}
+       * @throws {EneoError}
+       */
+      exportEvidence: async (run) => {
+        const flowId = _requireFlowIdForRunRoute(run, "exportEvidence");
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/evidence/export", {
+          method: "get",
+          params: {
+            path: { id: flowId, run_id: run.id },
+            query: {
+              format: run.format ?? "json",
+              detail: run.detail,
+              reason: run.reason
+            }
+          }
+        });
+      },
+
+      reviewCheckpoints: {
+        /**
+         * @param {{flowId: string, runId: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint | null>}
+         */
+        active: async ({ flowId, runId }) => {
+          return _fetch("/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/active/", {
+            method: "get",
+            params: { path: { id: flowId, run_id: runId } }
+          });
+        },
+
+        /**
+         * Submit the corrected step output itself: a string for a `text` output
+         * step, or a JSON object or array for a `json` output step.
+         *
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, editedValue: string | Record<string, unknown> | unknown[]}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint>}
+         */
+        edit: async ({ flowId, runId, checkpointId, expectedCheckpointRevision, editedValue }) => {
+          return _fetch("/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/", {
+            method: "patch",
+            params: { path: { id: flowId, run_id: runId, checkpoint_id: checkpointId } },
+            requestBody: {
+              "application/json": {
+                expected_checkpoint_revision: expectedCheckpointRevision,
+                edited_value: _stableSortObjectKeys(editedValue)
+              }
+            }
+          });
+        },
+
+        /**
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint>}
+         */
+        approve: async ({ flowId, runId, checkpointId, expectedCheckpointRevision }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve/",
+            {
+              method: "post",
+              params: { path: { id: flowId, run_id: runId, checkpoint_id: checkpointId } },
+              requestBody: {
+                "application/json": {
+                  expected_checkpoint_revision: expectedCheckpointRevision
+                }
+              }
+            }
+          );
+        },
+
+        /**
+         * Approve the checkpoint and resume its run in one transaction. The
+         * checkpoint ends `resumed` and the run `queued`, or nothing changes.
+         * `idempotencyKey` is required; replaying it returns the current
+         * checkpoint and run without approving or dispatching again.
+         *
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, idempotencyKey: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpointResumeResponse>}
+         */
+        approveAndContinue: async ({
+          flowId,
+          runId,
+          checkpointId,
+          expectedCheckpointRevision,
+          idempotencyKey
+        }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/approve-and-continue/",
+            {
+              method: "post",
+              params: {
+                path: { id: flowId, run_id: runId, checkpoint_id: checkpointId },
+                header: { "Idempotency-Key": idempotencyKey }
+              },
+              requestBody: {
+                "application/json": {
+                  expected_checkpoint_revision: expectedCheckpointRevision
+                }
+              }
+            }
+          );
+        },
+
+        /**
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, reason: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpoint>}
+         */
+        reject: async ({ flowId, runId, checkpointId, expectedCheckpointRevision, reason }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/reject/",
+            {
+              method: "post",
+              params: { path: { id: flowId, run_id: runId, checkpoint_id: checkpointId } },
+              requestBody: {
+                "application/json": {
+                  expected_checkpoint_revision: expectedCheckpointRevision,
+                  reason
+                }
+              }
+            }
+          );
+        },
+
+        /**
+         * Page through the committed changes of one review checkpoint, in
+         * revision order. `baseline` is what the first item changed (the
+         * original output, or the revision named by `afterRevision`), so a
+         * reader can explain every item against its predecessor. A page
+         * whose baseline and first item exceed the page byte limit fails with
+         * `flow_review_history_too_large` instead of skipping a revision.
+         *
+         * @param {{flowId: string, runId: string, checkpointId: string, limit?: number, afterRevision?: number | null}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpointEditPage>}
+         */
+        edits: async ({ flowId, runId, checkpointId, limit = 50, afterRevision = null }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/edits",
+            {
+              method: "get",
+              params: {
+                path: { id: flowId, run_id: runId, checkpoint_id: checkpointId },
+                query: {
+                  limit,
+                  ...(afterRevision === null ? {} : { after_revision: afterRevision })
+                }
+              }
+            }
+          );
+        },
+
+        /**
+         * @param {{flowId: string, runId: string, checkpointId: string, expectedCheckpointRevision: number, idempotencyKey: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunReviewCheckpointResumeResponse>}
+         */
+        resume: async ({
+          flowId,
+          runId,
+          checkpointId,
+          expectedCheckpointRevision,
+          idempotencyKey
+        }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/review-checkpoints/{checkpoint_id}/resume/",
+            {
+              method: "post",
+              params: {
+                path: { id: flowId, run_id: runId, checkpoint_id: checkpointId },
+                header: { "Idempotency-Key": idempotencyKey }
+              },
+              requestBody: {
+                "application/json": {
+                  expected_checkpoint_revision: expectedCheckpointRevision
+                }
+              }
+            }
+          );
+        }
+      },
+
+      transcriptCorrections: {
+        /**
+         * List stored transcript corrections for a run, one entry per
+         * transcription step that has corrections. Entries flagged `stale`
+         * anchor to a transcript that has since been replaced and must not
+         * be applied.
+         *
+         * @param {{flowId: string, runId: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunTranscriptCorrections[]>}
+         */
+        list: async ({ flowId, runId }) => {
+          return _fetch("/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/", {
+            method: "get",
+            params: { path: { id: flowId, run_id: runId } }
+          });
+        },
+
+        /**
+         * Page through the committed revisions of one transcription step's
+         * correction set, in revision order. `baseline` is the preceding
+         * revision (an empty set before the first save), so a revert can be
+         * explained against what it removed.
+         *
+         * @param {{flowId: string, runId: string, stepId: string, limit?: number, afterRevision?: number | null}} params
+         * @returns {Promise<import('../types/resources').FlowTranscriptCorrectionRevisionPage>}
+         */
+        revisions: async ({ flowId, runId, stepId, limit = 50, afterRevision = null }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/transcript-corrections/{step_id}/revisions",
+            {
+              method: "get",
+              params: {
+                path: { id: flowId, run_id: runId, step_id: stepId },
+                query: {
+                  limit,
+                  ...(afterRevision === null ? {} : { after_revision: afterRevision })
+                }
+              }
+            }
+          );
+        },
+
+        /**
+         * Replace one transcription step's correction list. Send the full
+         * `occurrences` and `speakerEdits` lists; `expectedRevision` is the
+         * compare token (null creates the step's first set, empty lists
+         * clear it). `segmentsHash` is the whole-source hash the transcript
+         * source page reported; a save anchored to another transcript is
+         * refused as stale.
+         *
+         * @param {{flowId: string, runId: string, stepId: string, expectedRevision: number | null, occurrences: import('../types/resources').FlowTranscriptCorrectionOccurrence[], speakerEdits?: import('../types/resources').FlowTranscriptSpeakerEdit[], segmentsHash: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunTranscriptCorrections>}
+         */
+        save: async ({
+          flowId,
+          runId,
+          stepId,
+          expectedRevision = null,
+          occurrences,
+          speakerEdits = [],
+          segmentsHash
+        }) => {
+          return _fetch(
+            "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-corrections/",
+            {
+              method: "patch",
+              params: { path: { id: flowId, run_id: runId, step_id: stepId } },
+              requestBody: {
+                "application/json": {
+                  expected_revision: expectedRevision,
+                  occurrences,
+                  speaker_edits: speakerEdits,
+                  schema_version: 3,
+                  segments_hash: segmentsHash
+                }
+              }
+            }
+          );
+        }
+      },
+
+      /**
+       * Create a separate downstream run from a saved reviewed transcript.
+       * Reuse idempotencyKey when retrying the same logical action.
+       * @param {{flowId: string, runId: string, stepId: string, expectedRunRevision: number, expectedCorrectionRevision: number | null, segmentsHash: string, idempotencyKey: string}} params
+       * @returns {Promise<import('../types/schema').components['schemas']['FlowTranscriptRegenerationPublic']>}
+       */
+      regenerateTranscript: async ({
+        flowId,
+        runId,
+        stepId,
+        expectedRunRevision,
+        expectedCorrectionRevision,
+        segmentsHash,
+        idempotencyKey
+      }) => {
+        return _fetch(
+          "/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/",
+          {
+            method: "post",
+            params: {
+              path: { id: flowId, run_id: runId, step_id: stepId },
+              header: { "Idempotency-Key": idempotencyKey }
+            },
+            requestBody: {
+              "application/json": {
+                expected_run_revision: expectedRunRevision,
+                expected_correction_revision: expectedCorrectionRevision,
+                segments_hash: segmentsHash
+              }
+            }
+          }
+        );
+      },
+
+      transcriptSource: {
+        /**
+         * One page of the immutable transcript source behind a transcription
+         * attempt: up to 200 segments with absolute indexes, the complete
+         * source hash (send it unchanged as `segments_hash` when saving
+         * corrections), and, on the first page only, the speaker review
+         * detail. Follow `next_segment_index` until it is null. A page whose
+         * status is `omitted` or `unavailable_pre_row` carries no segments.
+         *
+         * @param {{flowId: string, runId: string, stepId: string, attemptNo: number, startSegmentIndex?: number}} params
+         * @returns {Promise<import('../types/resources').FlowRunTranscriptSourcePage>}
+         */
+        get: async ({ flowId, runId, stepId, attemptNo, startSegmentIndex = 0 }) => {
+          return _fetch(
+            "/api/v1/flows/{flow_id}/runs/{run_id}/steps/{step_id}/attempts/{attempt_no}/transcript-source/",
+            {
+              method: "get",
+              params: {
+                path: { flow_id: flowId, run_id: runId, step_id: stepId, attempt_no: attemptNo },
+                query: { start_segment_index: startSegmentIndex }
+              }
+            }
+          );
+        }
+      },
+
+      transcriptWords: {
+        /**
+         * Word timings behind one transcription step's stored segments,
+         * keyed by segment index. Rejects with 404 when the step stored no
+         * words; a response flagged `stale` anchors to a transcript that
+         * has since been replaced and must not be used.
+         *
+         * @param {{flowId: string, runId: string, stepId: string}} params
+         * @returns {Promise<import('../types/resources').FlowRunTranscriptWords>}
+         */
+        get: async ({ flowId, runId, stepId }) => {
+          return _fetch("/api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-words/", {
+            method: "get",
+            params: { path: { id: flowId, run_id: runId, step_id: stepId } }
+          });
+        }
+      },
+
+      /**
+       * Generate signed URL for a flow run artifact download.
+       * Uses tenant-scoped access so any user with flow access can download artifacts.
+       * @param {{flowId: string, runId: string, fileId: string, expiresIn?: number, contentDisposition?: "attachment" | "inline"}} params
+       * @throws {EneoError}
+       */
+      artifactSignedUrl: async ({
+        flowId,
+        runId,
+        fileId,
+        expiresIn = 3600,
+        contentDisposition = "attachment"
+      }) => {
+        return _fetch("/api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/", {
+          method: "post",
+          params: { path: { id: flowId, run_id: runId, file_id: fileId } },
+          requestBody: {
+            "application/json": {
+              expires_in: expiresIn,
+              content_disposition: contentDisposition
+            }
+          }
+        });
+      },
+
+      /**
+       * Generate a signed URL for a file the run received as step input, such as
+       * the audio a transcription step read. Access follows the run's artifact
+       * policy, so a reviewer who did not upload the file can still play it.
+       * The signed path is re-based on this client's host so the URL can be used
+       * directly as a same-origin media source (Range requests included).
+       * @param {{flowId: string, runId: string, fileId: string, expiresIn?: number, contentDisposition?: "attachment" | "inline"}} params
+       * @returns {Promise<{url: string, expires_at: number}>}
+       * @throws {EneoError}
+       */
+      inputFileSignedUrl: async ({
+        flowId,
+        runId,
+        fileId,
+        expiresIn = 3600,
+        contentDisposition = "inline"
+      }) => {
+        const res = await _fetch(
+          "/api/v1/flows/{id}/runs/{run_id}/input-files/{file_id}/signed-url/",
+          {
+            method: "post",
+            params: { path: { id: flowId, run_id: runId, file_id: fileId } },
+            requestBody: {
+              "application/json": {
+                expires_in: expiresIn,
+                content_disposition: contentDisposition
+              }
+            }
+          }
+        );
+        const signedUrl = new URL(res.url);
+        const url = new URL(
+          `${signedUrl.pathname}${signedUrl.search}${signedUrl.hash}`,
+          client.baseUrl
+        );
+        return { url: url.toString(), expires_at: res.expires_at };
+      }
+    }
+  };
+}

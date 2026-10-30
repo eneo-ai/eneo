@@ -1,19 +1,25 @@
-from eneo.files.audio import AudioMimeTypes
 from eneo.files.extensions import MIMETYPE_EXTENSIONS_MAPPER
-from eneo.files.image import ImageMimeTypes
-from eneo.files.text import TextMimeTypes
+from eneo.files.mime_support import (
+    supported_audio_mimes,
+    supported_image_mimes,
+    supported_text_mimes,
+)
 from eneo.limits.limit import AttachmentLimits, FormatLimit, InfoBlobLimits, Limits
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 
 
 class LimitService:
-    def __init__(self, upload_admission: UploadAdmissionSnapshot) -> None:
+    def __init__(
+        self,
+        *,
+        upload_admission: UploadAdmissionSnapshot,
+    ) -> None:
         self.upload_admission = upload_admission
 
     def _get_info_blob_limits(self) -> InfoBlobLimits:
         formats: list[FormatLimit] = []
 
-        for item in TextMimeTypes.values():
+        for item in supported_text_mimes():
             formats.append(
                 FormatLimit(
                     mimetype=item,
@@ -23,7 +29,7 @@ class LimitService:
                 )
             )
 
-        for item in AudioMimeTypes.values():
+        for item in supported_audio_mimes():
             formats.append(
                 FormatLimit(
                     mimetype=item,
@@ -35,10 +41,10 @@ class LimitService:
 
         return InfoBlobLimits(formats=formats)
 
-    def _get_attachment_limits(self) -> AttachmentLimits:
+    async def _get_attachment_limits(self) -> AttachmentLimits:
         formats: list[FormatLimit] = []
 
-        for item in TextMimeTypes.values():
+        for item in supported_text_mimes():
             formats.append(
                 FormatLimit(
                     mimetype=item,
@@ -48,7 +54,7 @@ class LimitService:
                 )
             )
 
-        for item in ImageMimeTypes.values():
+        for item in supported_image_mimes():
             formats.append(
                 FormatLimit(
                     mimetype=item,
@@ -58,12 +64,10 @@ class LimitService:
                 )
             )
 
-        return AttachmentLimits(
-            formats=formats,
-        )
+        return AttachmentLimits(formats=formats)
 
-    def get_limits(self) -> Limits:
+    async def get_limits(self) -> Limits:
         return Limits(
             info_blobs=self._get_info_blob_limits(),
-            attachments=self._get_attachment_limits(),
+            attachments=await self._get_attachment_limits(),
         )

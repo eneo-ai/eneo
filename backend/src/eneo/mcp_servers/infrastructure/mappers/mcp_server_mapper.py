@@ -28,9 +28,9 @@ class MCPServerToolMapper:
         """Convert database table to domain entity."""
 
         return MCPServerTool(
-            id=db_model.id,  # type: ignore[arg-type]
-            created_at=db_model.created_at,  # type: ignore[arg-type]
-            updated_at=db_model.updated_at,  # type: ignore[arg-type]
+            id=db_model.id,
+            created_at=db_model.created_at,
+            updated_at=db_model.updated_at,
             mcp_server_id=db_model.mcp_server_id,
             name=db_model.name,
             title=db_model.title,
@@ -144,9 +144,9 @@ class MCPServerMapper:
                 )
 
         return MCPServer(
-            id=db_model.id,  # type: ignore[arg-type]
-            created_at=db_model.created_at,  # type: ignore[arg-type]
-            updated_at=db_model.updated_at,  # type: ignore[arg-type]
+            id=db_model.id,
+            created_at=db_model.created_at,
+            updated_at=db_model.updated_at,
             tenant_id=db_model.tenant_id,
             name=db_model.name,
             description=db_model.description,

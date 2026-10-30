@@ -67,9 +67,11 @@ ATTACHED_FILE_REFERENCES_INSTRUCTION = (
     'chosen tool fails, read_file ("Read attached file"), when available, accepts '
     'every file_ref in its url input. Entries with "kind": "image" are images; '
     "pass their file_ref to image tools, not read_file. "
-    "For an attached CSV, TSV or Excel file, use inspect_table and query_table, "
-    "which read the file itself: to describe what it contains as well as for "
-    "totals, groupings, comparisons and other calculations. Do not calculate from "
+    "For an attached CSV, TSV, Excel or JSON Lines file, use inspect_table and "
+    "query_table, which read the file itself: to describe what it contains as "
+    "well as for totals, groupings, comparisons and other calculations. For an "
+    "attached JSON document, use query_json: without a path for its structure, "
+    "then with a path for a value or a part of the tree. Do not calculate from "
     "quoted text, earlier samples or a full-file text dump, and do not re-type "
     "the file's rows into another tool. "
     "For Selected table rows, pass the provided file reference, including sheet and "

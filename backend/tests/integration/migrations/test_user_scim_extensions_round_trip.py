@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import create_engine, inspect
-from testcontainers.postgres import PostgresContainer
+from testcontainers.community.postgres import PostgresContainer
 
 from alembic import command
 from alembic.config import Config
@@ -13,7 +13,7 @@ from alembic.config import Config
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
 _REVISION = "202609281000"
-_PREVIOUS_REVISION = "202609221000"
+_PREVIOUS_REVISION = "202610051000"
 
 
 @pytest.fixture(scope="session", autouse=True)

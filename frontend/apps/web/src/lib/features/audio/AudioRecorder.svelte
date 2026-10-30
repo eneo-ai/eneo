@@ -1,0 +1,1685 @@
+<script lang="ts" module>
+  import type { RecordingEndReason, RecordingStopReason } from "./recordedAudioFile";
+
+  // How long a recording waits for a listener preparing on its audio graph
+  // (the live preview tapping it) before it starts anyway.
+  export const AUDIO_GRAPH_PREPARATION_MS = 2_000;
+
+  // The recorder's own audio graph, handed to a listener such as a live preview.
+  export type RecorderAudioGraph = {
+    context: AudioContext;
+    source: MediaStreamAudioSourceNode;
+  };
+
+  // What the recorder tells a journal about the segment it records.
+  export type RecorderJournal = {
+    begin(partId: string, mimeType: string): void;
+    append(partId: string, blob: Blob): void;
+    // The recorder went away while recording: the part stays, to be rebuilt later.
+    leave(partId: string): void;
+    discard(partId: string): void;
+  };
+
+  // Chromium's MediaRecorder drops the last 9-71 ms before stop() (measured
+  // 2026-09-23: the audio still waiting for its next Opus packet), so a rotated
+  // recorder keeps capturing this long after the next one starts: the two files
+  // overlap instead of leaving a gap.
+  export const ROTATION_OVERLAP_MS = 150;
+
+  export function generateSessionId(): string {
+    if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+      return crypto.randomUUID();
+    }
+    const rand = () => Math.random().toString(16).slice(2, 10);
+    return `${rand()}${rand()}-${rand()}-${rand()}-${rand()}-${rand()}${rand()}${rand()}`;
+  }
+
+  // What the dialog's recording session calls on the recorder.
+  export type RecorderHandle = {
+    startExternal: () => Promise<void>;
+    stopExternal: (reason?: RecordingEndReason) => Promise<void>;
+    rotate: () => boolean;
+    // Replaced parts still finishing their files: each takes a file slot and an
+    // upload place before the caller has it.
+    pendingHandovers: () => number;
+  };
+</script>
+
+<script lang="ts">
+  import { IconMicrophone } from "@eneo/icons/microphone";
+  import { IconStop } from "@eneo/icons/stop";
+  import { IconDownload } from "@eneo/icons/download";
+  import { IconPause } from "@eneo/icons/pause";
+  import { IconPlay } from "@eneo/icons/play";
+  import { Button } from "$lib/components/ui/button/index.js";
+  import * as Tooltip from "$lib/components/ui/tooltip/index.js";
+  import { onDestroy, onMount } from "svelte";
+
+  import { formatRecordingLength, monotonicNow } from "./recordingLimits";
+  import { getLocale } from "$lib/paraglide/runtime";
+  import { ScreenWakeLock } from "./screenWakeLock";
+  import { m } from "$lib/paraglide/messages";
+  import { toast } from "$lib/components/toast";
+  import {
+    SPEECH_OPUS_BITRATE,
+    estimateRecordingBytes,
+    estimateRecordingDurationSeconds,
+    selectAudioRecordingOptions
+  } from "./audioRecordingOptions";
+  import { buildRecordedAudioFile } from "./recordedAudioFile";
+  import { downloadRecordedAudioFile } from "./downloadRecordedAudioFile";
+  import { withRecordedDuration } from "./webmDuration";
+
+  // Every stop reports once. `blob` is null when nothing was captured, so a
+  // caller still hears a failure to retry, or the user's own stop.
+  export let onRecordingDone: (params: {
+    blob: Blob | null;
+    mimeType: string;
+    reason: RecordingStopReason;
+    // Captured at finalize-time from the rAF tick clock; useful so callers
+    // can label resumed segments by length without having to read the blob.
+    durationMs: number;
+    // The segment's part in the journal.
+    partId: string;
+  }) => void;
+  // `false` comes once every segment of the recording has been reported
+  // through onRecordingDone; the last one arrives a moment after the stop.
+  // The session needs to know whether `true` came from a user click or from
+  // its own retry path. Without this, the dialog had to infer intent by
+  // peeking at session phase + a side-channel flag, which raced with the
+  // queued retry timer. `meta.origin` makes intent explicit at the source.
+  export let onRecordingStateChange: (
+    isRecording: boolean,
+    meta?: { origin: "user" | "external" }
+  ) => void = () => {};
+
+  // The live transcript preview listens to this recorder's own audio graph: it
+  // gets the graph once the microphone is open and `null` in the task the
+  // recording stops (again, harmlessly, before the graph is released). Rotation
+  // keeps the graph, so one preview spans every segment.
+  // While it returns a pending promise the recording waits, at most
+  // AUDIO_GRAPH_PREPARATION_MS; `signal` aborts once the recording stops
+  // waiting, and a listener that fails never keeps the recording from starting.
+  export let onAudioGraph: (
+    graph: RecorderAudioGraph | null,
+    signal?: AbortSignal
+  ) => void | Promise<void> = () => {};
+  // The recorder paused on its own: its file lacks what the microphone heard
+  // meanwhile, so live text of the recording can no longer stand in for it.
+  export let onCaptureInterrupted: () => void = () => {};
+
+  type RecordingStartOrigin = "user" | "external";
+  export let maxBytes: number | null = null;
+  // What a recording started now may still hold, said before it starts; and
+  // whether it continues one that already has parts.
+  export let recordingRoomMs: number | null = null;
+  export let continuesRecording = false;
+  // How long the running recording has before it stops by itself (the caller's
+  // session knows its limits); read on every tick of the clock.
+  export let timeLeftMs: () => number = () => Infinity;
+  // The segment's file nears its size limit: the caller starts a new part, or
+  // stops at its last file slot. At the limit itself the recording stops.
+  export let onFileNearlyFull: () => void = () => {};
+  // The user paused (true) or went on (false): the caller's session and live text follow.
+  export let onPauseChange: (paused: boolean) => void = () => {};
+  export let resetToken: unknown = 0;
+  // False while the caller cannot take another recording; stopping stays possible.
+  export let canStart = true;
+
+  // Every segment's audio as it arrives, so a closed tab or a crash keeps what
+  // was recorded; the caller commits or discards the part it is handed.
+  export let journal: RecorderJournal | null = null;
+
+  // A recording reports to the callbacks it started with: its last segment
+  // arrives after the stop, when the caller may have moved on.
+  let reportTo = {
+    onRecordingDone,
+    onRecordingStateChange,
+    journal,
+    onFileNearlyFull,
+    onPauseChange
+  };
+
+  let isRecording: boolean = false;
+  // The recorded clock: time since the recording started, the user's pauses excluded.
+  let isPaused = false;
+  let clockStartedAt = 0;
+  let pausedAt: number | null = null;
+  let pausedTotalMs = 0;
+  // Pause events the user's own pauses still owe: not an interruption of capture.
+  let userPauseEvents = 0;
+  const recordedNow = () => (pausedAt ?? monotonicNow()) - clockStartedAt - pausedTotalMs;
+  let elapsedTime = "";
+  let recordingError: string | null = null;
+  let recordingErrorHint: string | null = null;
+  let elapsedSeconds = 0;
+  let recordingState: "idle" | "preparing" | "recording" | "processing" | "error" | "complete" =
+    "idle";
+
+  let volumeLevel: number = 0;
+
+  let mediaStream: MediaStream | null;
+  let mediaStreamNode: MediaStreamAudioSourceNode | null;
+  let mediaRecorder: MediaRecorder | null;
+  let audioContext: AudioContext | null;
+  let analyserNode: AnalyserNode | null;
+  let levelBuffer = new Float32Array();
+
+  let recordedBlob: Blob | null = null;
+  let recordedMimeType = "";
+  // The file name's local wall-clock stamp, as the dayjs pattern
+  // `YYYY-MM-DDTHH-mm-ss[Z]` wrote it before dayjs left the app.
+  function recordingFileTimestamp(at: number): string {
+    const date = new Date(at);
+    const pad = (value: number) => String(value).padStart(2, "0");
+    return (
+      `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+      `T${pad(date.getHours())}-${pad(date.getMinutes())}-${pad(date.getSeconds())}Z`
+    );
+  }
+
+  let completedRecordingAt = Date.now();
+  let audioURL: string | null = null;
+  let previewAudioEl: HTMLAudioElement | null = null;
+  let isPreviewPlaying = false;
+  let stopReason: RecordingStopReason = "manual";
+  let handleStreamEnded: ((event: Event) => void) | null = null;
+  let animationFrameId: number | null = null;
+  let discardRecordingOnStop = false;
+  // Recorders a rotation replaced; each still finishes its own segment.
+  const replacedRecorders = new WeakSet<MediaRecorder>();
+  let handoversPending = 0;
+  // Settles once the latest segment recorder has handed its file over: each waits
+  // for the one before, so parts arrive in recording order whichever file is built first.
+  let handoverQueue: Promise<void> = Promise.resolve();
+  // Settles once a recorder's stop has been handled.
+  const recorderStops = new WeakMap<MediaRecorder, Promise<void>>();
+  // The replaced recorder still capturing the rotation overlap.
+  let overlappingRecorder: MediaRecorder | null = null;
+  let overlapTimer: ReturnType<typeof setTimeout> | null = null;
+  let isDestroyed = false;
+  let lastResetToken: unknown = resetToken;
+  let activeAudioBitsPerSecond = SPEECH_OPUS_BITRATE;
+  let lastMeterUpdateAt = 0;
+  let lastAudibleAt = 0;
+  let showMicSilentHint = false;
+  let firstChunkSeen = false;
+  let hiddenSinceMs: number | null = null;
+  let stallIntervalId: ReturnType<typeof setInterval> | null = null;
+  let requestDataPendingAt: number | null = null;
+  let stopReasonLocked = false;
+  let visibilityHandler: (() => void) | null = null;
+  // Drives the inline "muted" / "reconnecting" hint below the volume meter.
+  // We surface these as live status so the user knows the recorder is still
+  // trying — silent failures are exactly what the previous version did.
+  let isMicMuted = false;
+
+  const TIMESLICE_MS = 2000;
+  // Two-phase stall detection. On slower devices the encoder can take up to
+  // ~10 s to emit the first chunk; once data is flowing a 5 s gap means the
+  // capture has actually stopped (tab freeze, device disconnect, OS denial).
+  // When the watchdog suspects a stall it first calls requestData() and
+  // waits 2 s — this catches Firefox queuing delays under load before we
+  // kill an otherwise-healthy session.
+  const STALL_PRE_FIRST_CHUNK_MS = 10_000;
+  const STALL_STEADY_STATE_MS = 5_000;
+  const STALL_REQUEST_DATA_GRACE_MS = 2_000;
+  const STALL_CHECK_INTERVAL_MS = 500;
+  const METER_UPDATE_MS = 50;
+  const MIC_ACTIVITY_THRESHOLD = 0.035;
+  const MIC_SILENCE_HINT_MS = 6000;
+
+  // "384", "12,5" or, below a megabyte, "0,04" in the page's language: a recording's
+  // first minutes grow its file visibly, never "384.00".
+  const megabytes = new Intl.NumberFormat(getLocale(), { maximumFractionDigits: 1 });
+  const underAMegabyte = new Intl.NumberFormat(getLocale(), { maximumFractionDigits: 2 });
+  const formatMegabytes = (bytes: number) => {
+    const value = bytes / (1024 * 1024);
+    return (value < 1 ? underAMegabyte : megabytes).format(value);
+  };
+  let maxSizeLabel: string | null = null;
+  $: maxSizeLabel =
+    typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+      ? formatMegabytes(maxBytes)
+      : null;
+
+  let recordingStats = {
+    chunks: 0,
+    totalBytes: 0,
+    lastChunkTime: 0,
+    firstChunkSeenAt: 0,
+    recorderMimeType: "",
+    errors: [] as string[],
+    requestDataAttempts: [] as { at: number; outcome: string }[],
+    visibilityTransitions: [] as { at: number; state: string }[]
+  };
+
+  function setStopReason(reason: RecordingStopReason) {
+    // Lock to the first non-default reason so a teardown sequence (e.g. a
+    // limit hit followed by a stall during cleanup) cannot relabel the
+    // original cause that the caller wants to surface.
+    if (stopReasonLocked) return;
+    stopReason = reason;
+    stopReasonLocked = true;
+  }
+
+  function resetStopReason() {
+    stopReason = "manual";
+    stopReasonLocked = false;
+  }
+
+  let isLiveSizeEstimated = false;
+  $: isLiveSizeEstimated =
+    isRecording && recordingStats.chunks === 0 && elapsedSeconds > TIMESLICE_MS / 1000;
+
+  let visibleRecordingBytes = 0;
+  $: visibleRecordingBytes = isLiveSizeEstimated
+    ? estimateRecordingBytes(elapsedSeconds, activeAudioBitsPerSecond)
+    : recordingStats.totalBytes;
+
+  let estimatedLimitLabel: string | null = null;
+  $: estimatedLimitLabel =
+    typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+      ? formatDurationEstimate(estimateRecordingDurationSeconds(maxBytes, activeAudioBitsPerSecond))
+      : null;
+
+  // Rounded up to the minute, as a countdown: "1 min kvar" until it is over.
+  let timeLeftLabel: string | null = null;
+  // Read again on every tick of the elapsed time.
+  $: timeLeftLabel = isRecording && elapsedSeconds >= 0 ? formatTimeLeft(timeLeftMs()) : null;
+
+  let recordingRateLabel = "";
+  $: recordingRateLabel = formatMegabytes(estimateRecordingBytes(3600, activeAudioBitsPerSecond));
+
+  // The visible hint that explains *why* the meter is silent. Mute beats
+  // reconnecting because a known-muted track is the more specific signal,
+  // and reconnecting beats the existing silent-hint because the meter is
+  // about to come back from the watchdog rescue.
+  let micRecoveryHintKey: "muted" | "reconnecting" | null = null;
+  $: micRecoveryHintKey = !isRecording
+    ? null
+    : isMicMuted
+      ? "muted"
+      : requestDataPendingAt !== null
+        ? "reconnecting"
+        : null;
+
+  const audioConstraints: MediaTrackConstraints = {
+    channelCount: 1,
+    noiseSuppression: true,
+    echoCancellation: true,
+    autoGainControl: true
+  };
+
+  const isFallbackCandidate = (error: unknown) =>
+    error instanceof DOMException &&
+    (error.name === "NotFoundError" || error.name === "OverconstrainedError");
+
+  const formatMediaError = (error: unknown) => {
+    if (error instanceof DOMException) {
+      return `${error.name}: ${error.message}`;
+    }
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return String(error);
+  };
+
+  const getFriendlyErrorMessage = (errorName: string | null) => {
+    switch (errorName) {
+      case "NotAllowedError":
+      case "PermissionDeniedError":
+        return m.recording_error_permission();
+      case "NotFoundError":
+        return m.recording_error_not_found();
+      case "NotReadableError":
+        return m.recording_error_not_readable();
+      case "OverconstrainedError":
+        return m.recording_error_overconstrained();
+      case "SecurityError":
+        return m.recording_error_security();
+      case "NotSupportedError":
+        return m.recording_error_not_supported();
+      default:
+        return m.recording_error_generic();
+    }
+  };
+
+  const setRecordingErrorState = (message: string, error?: unknown) => {
+    recordingError = error ? formatMediaError(error) : message;
+
+    if (error instanceof DOMException) {
+      recordingErrorHint = getFriendlyErrorMessage(error.name);
+    } else if (message.includes("MediaDevices API is not available")) {
+      recordingErrorHint = m.recording_error_not_supported();
+    } else {
+      recordingErrorHint = m.recording_error_generic();
+    }
+  };
+
+  const collectMediaDiagnostics = async (context: string, error?: unknown) => {
+    try {
+      const hasMediaDevices = !!navigator.mediaDevices;
+      const supportsGetUserMedia = !!navigator.mediaDevices?.getUserMedia;
+      const supportsEnumerateDevices = !!navigator.mediaDevices?.enumerateDevices;
+      const secureContext = window.isSecureContext;
+      const protocol = window.location?.protocol ?? "unknown";
+
+      recordingStats.errors.push(
+        `${context} | secureContext=${secureContext} protocol=${protocol} mediaDevices=${supportsGetUserMedia}`
+      );
+
+      if (hasMediaDevices && supportsEnumerateDevices) {
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const audioInputs = devices.filter((device) => device.kind === "audioinput");
+        const labeledInputs = audioInputs.filter((device) => device.label?.trim().length);
+        recordingStats.errors.push(
+          `Audio inputs detected: ${audioInputs.length} (${labeledInputs.length} labeled)`
+        );
+        console.warn("AudioRecorder diagnostics", {
+          context,
+          error,
+          secureContext,
+          protocol,
+          devices
+        });
+      }
+    } catch (diagnosticsError) {
+      console.warn("AudioRecorder diagnostics failed", diagnosticsError);
+    }
+  };
+
+  const requestAudioStream = async () => {
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const errorMsg = "MediaDevices API is not available";
+      recordingStats.errors.push(errorMsg);
+      throw new Error(errorMsg);
+    }
+
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints
+      });
+    } catch (error) {
+      await collectMediaDiagnostics("Primary getUserMedia failed", error);
+      if (!isFallbackCandidate(error)) {
+        throw error;
+      }
+
+      recordingStats.errors.push("Retrying getUserMedia with relaxed audio constraints");
+
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        const track = fallbackStream.getAudioTracks()[0];
+        if (track?.applyConstraints) {
+          try {
+            await track.applyConstraints(audioConstraints);
+          } catch (applyError) {
+            const applyErrorMsg = `Failed to apply audio constraints: ${formatMediaError(applyError)}`;
+            recordingStats.errors.push(applyErrorMsg);
+            console.warn(applyErrorMsg, applyError);
+          }
+        }
+        return fallbackStream;
+      } catch (fallbackError) {
+        await collectMediaDiagnostics("Fallback getUserMedia failed", fallbackError);
+        throw fallbackError;
+      }
+    }
+  };
+
+  function clearAudioPreviewUrl() {
+    previewAudioEl?.pause();
+    isPreviewPlaying = false;
+    if (audioURL) {
+      URL.revokeObjectURL(audioURL);
+      audioURL = null;
+    }
+  }
+
+  function clearCompletedRecording() {
+    clearAudioPreviewUrl();
+    recordedBlob = null;
+    recordedMimeType = "";
+    recordingError = null;
+    recordingErrorHint = null;
+    recordingStats = {
+      chunks: 0,
+      totalBytes: 0,
+      lastChunkTime: 0,
+      firstChunkSeenAt: 0,
+      recorderMimeType: "",
+      errors: [],
+      requestDataAttempts: [],
+      visibilityTransitions: []
+    };
+    firstChunkSeen = false;
+    requestDataPendingAt = null;
+    hiddenSinceMs = null;
+    isMicMuted = false;
+    elapsedSeconds = 0;
+    elapsedTime = "";
+    if (!isRecording && recordingState !== "preparing" && recordingState !== "processing") {
+      recordingState = "idle";
+    }
+  }
+
+  function stopMonitoringLoop() {
+    if (animationFrameId !== null) {
+      window.cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+  }
+
+  function detachStreamEndedHandler() {
+    if (mediaStream && handleStreamEnded) {
+      const streamEndedHandler = handleStreamEnded;
+      mediaStream.removeEventListener("inactive", streamEndedHandler);
+      mediaStream.getAudioTracks().forEach((track) => {
+        track.removeEventListener("ended", streamEndedHandler);
+      });
+    }
+    handleStreamEnded = null;
+  }
+
+  function releaseMediaCapture() {
+    if (audioContext) onAudioGraph(null);
+    stopMonitoringLoop();
+    stopStallChecker();
+    detachVisibilityHandler();
+    mediaRecorder = null;
+    mediaStreamNode?.disconnect();
+    mediaStreamNode = null;
+    analyserNode = null;
+    levelBuffer = new Float32Array();
+    volumeLevel = 0;
+    showMicSilentHint = false;
+
+    detachStreamEndedHandler();
+    mediaStream?.getAudioTracks().forEach((track) => {
+      track.stop();
+    });
+    mediaStream = null;
+
+    const context = audioContext;
+    audioContext = null;
+    if (context && context.state !== "closed") {
+      void context.close().catch((error) => {
+        console.warn("Failed to close audio context", error);
+      });
+    }
+  }
+
+  function isMediaStreamLive(stream: MediaStream | null | undefined) {
+    return !!stream?.active && stream.getAudioTracks().some((track) => track.readyState === "live");
+  }
+
+  async function prepareMediaCapture() {
+    if (isMediaStreamLive(mediaStream) && analyserNode && audioContext) {
+      return mediaStream;
+    }
+
+    releaseMediaCapture();
+    const nextStream = await requestAudioStream();
+    if (isDestroyed) {
+      nextStream.getAudioTracks().forEach((track) => track.stop());
+      throw new Error("Recorder was closed before microphone access completed.");
+    }
+
+    const streamEndedHandler = (_: Event) => {
+      if (!isRecording) return;
+      const errorMsg = m.recording_device_disconnected();
+      setRecordingErrorState(errorMsg);
+      recordingStats.errors.push(errorMsg + " at " + new Date().toISOString());
+      setStopReason("error");
+      stopRecording();
+    };
+
+    mediaStream = nextStream;
+    handleStreamEnded = streamEndedHandler;
+    mediaStream.addEventListener("inactive", streamEndedHandler);
+    mediaStream.getAudioTracks().forEach((track) => {
+      track.addEventListener("ended", streamEndedHandler);
+      // mute/unmute fire on iOS during Bluetooth route changes and on some
+      // platforms when the OS reclaims the mic briefly. Logging them helps
+      // us debug intermittent reports, but we deliberately do not stop
+      // recording here — the encoder keeps running and resumes producing
+      // chunks once the route stabilises.
+      track.addEventListener("mute", () => {
+        isMicMuted = true;
+        recordingStats.errors.push("Track muted at " + new Date().toISOString());
+      });
+      track.addEventListener("unmute", () => {
+        isMicMuted = false;
+        recordingStats.errors.push("Track unmuted at " + new Date().toISOString());
+      });
+    });
+
+    audioContext = new AudioContext();
+    analyserNode = audioContext.createAnalyser();
+    levelBuffer = new Float32Array(analyserNode.fftSize);
+    mediaStreamNode = audioContext.createMediaStreamSource(mediaStream);
+    mediaStreamNode.connect(analyserNode);
+    const graph = { context: audioContext, source: mediaStreamNode };
+    if (audioContext.state === "suspended") {
+      await audioContext.resume();
+    }
+    // Unless the recorder closed while the context resumed.
+    if (audioContext === graph.context) await prepareAudioGraphListener(graph);
+
+    return mediaStream;
+  }
+
+  async function prepareAudioGraphListener(graph: RecorderAudioGraph) {
+    const waiting = new AbortController();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      await Promise.race([
+        onAudioGraph(graph, waiting.signal),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, AUDIO_GRAPH_PREPARATION_MS);
+        })
+      ]);
+    } catch (error) {
+      console.warn("Audio graph listener failed to prepare", error);
+    } finally {
+      clearTimeout(timer);
+      waiting.abort();
+    }
+  }
+
+  // The session controller can call startExternal in parallel with a user
+  // click on the record button (e.g. user manually presses record while a
+  // queued retry timer is firing). Without this guard, the second call would
+  // wipe `recordingBuffer` and tear down the in-flight MediaRecorder mid-
+  // capture. Coalescing on `startPromise` makes startRecording reentrant-safe.
+  let startPromise: Promise<void> | null = null;
+
+  // A phone whose screen locks can stop the capture: the screen stays on while recording.
+  const screenWakeLock = new ScreenWakeLock();
+
+  async function startRecording(origin: RecordingStartOrigin = "user"): Promise<void> {
+    if (isRecording || recordingState === "recording" || recordingState === "preparing") {
+      return startPromise ?? Promise.resolve();
+    }
+    if (startPromise) return startPromise;
+
+    startPromise = doStartRecording(origin).finally(() => {
+      startPromise = null;
+    });
+    return startPromise;
+  }
+
+  async function doStartRecording(origin: RecordingStartOrigin): Promise<void> {
+    reportTo = {
+      onRecordingDone,
+      onRecordingStateChange,
+      journal,
+      onFileNearlyFull,
+      onPauseChange
+    };
+    try {
+      recordedBlob = null;
+      recordedMimeType = "";
+      recordingError = null;
+      recordingErrorHint = null;
+      recordingState = "preparing";
+      resetStopReason();
+      discardRecordingOnStop = false;
+      clearAudioPreviewUrl();
+
+      recordingStats = {
+        chunks: 0,
+        totalBytes: 0,
+        // lastChunkTime is set after recorder.start() once the encoder is
+        // actually running — initialising it here would charge the watchdog
+        // for the time spent awaiting getUserMedia.
+        lastChunkTime: 0,
+        firstChunkSeenAt: 0,
+        recorderMimeType: "",
+        errors: [],
+        requestDataAttempts: [],
+        visibilityTransitions: []
+      };
+      firstChunkSeen = false;
+      requestDataPendingAt = null;
+      hiddenSinceMs = null;
+
+      if (typeof MediaRecorder === "undefined") {
+        throw new DOMException("MediaRecorder API is not available", "NotSupportedError");
+      }
+
+      const stream = await prepareMediaCapture();
+      if (isDestroyed) {
+        releaseMediaCapture();
+        return;
+      }
+
+      if (stream) {
+        // The recorded clock starts before the first part reads it.
+        clockStartedAt = monotonicNow();
+        pausedAt = null;
+        pausedTotalMs = 0;
+        isPaused = false;
+        userPauseEvents = 0;
+        mediaRecorder = startSegmentRecorder(stream);
+        // Initialise the watchdog AFTER recorder.start() so getUserMedia
+        // latency (especially on the very first permission grant) does not
+        // eat into the stall budget.
+        const startTimestamp = performance.now();
+        recordingStats.lastChunkTime = startTimestamp;
+        lastMeterUpdateAt = 0;
+        lastAudibleAt = startTimestamp;
+        showMicSilentHint = false;
+        elapsedSeconds = 0;
+        elapsedTime = "00:00";
+        recordingState = "recording";
+        isRecording = true;
+        reportTo.onRecordingStateChange(true, { origin });
+        startMonitoringLoop();
+        startStallChecker();
+        attachVisibilityHandler();
+        screenWakeLock.hold();
+      } else {
+        const errorMsg = "No media stream available";
+        setRecordingErrorState(errorMsg);
+        recordingStats.errors.push(errorMsg);
+        isRecording = false;
+        reportTo.onRecordingStateChange(false);
+        recordingState = "error";
+      }
+    } catch (error) {
+      releaseMediaCapture();
+      if (isDestroyed) {
+        return;
+      }
+      const errorMsg =
+        "Failed to start recording: " + (error instanceof Error ? error.message : String(error));
+      console.error(errorMsg, error);
+      setRecordingErrorState(errorMsg, error);
+      recordingStats.errors.push(errorMsg);
+      isRecording = false;
+      reportTo.onRecordingStateChange(false);
+      recordingState = "error";
+    }
+  }
+
+  // One MediaRecorder per segment. Rotation hands the live stream to a new
+  // recorder while the replaced one finishes its own file, so everything a
+  // recorder needs to finish lives in this closure.
+  function startSegmentRecorder(stream: MediaStream): MediaRecorder {
+    const recordingOptions = selectAudioRecordingOptions();
+    activeAudioBitsPerSecond = recordingOptions.audioBitsPerSecond;
+    const recorder = new MediaRecorder(stream, recordingOptions);
+    const initialMimeType = recorder.mimeType || recordingOptions.mimeType || "";
+    const chunks: Blob[] = [];
+    const segmentStartedAt = recordedNow();
+    const onRecordingDone = reportTo.onRecordingDone;
+    // Its place in the handover queue, taken once the recorder runs.
+    let earlierHandovers: Promise<void> = Promise.resolve();
+    let handedOver = () => {};
+    const handOver = async (segment: Parameters<typeof onRecordingDone>[0]) => {
+      await earlierHandovers;
+      onRecordingDone(segment);
+    };
+    const partJournal = reportTo.journal;
+    const fileNearlyFull = reportTo.onFileNearlyFull;
+    const partId = generateSessionId();
+    const isReplaced = () => replacedRecorders.has(recorder);
+    let stopHandled = () => {};
+    recorderStops.set(
+      recorder,
+      new Promise<void>((resolve) => {
+        stopHandled = resolve;
+      })
+    );
+    // The part's file, its WebM header carrying the recorded duration.
+    const finishedSegment = async () => {
+      const mimeType =
+        recorder.mimeType ||
+        initialMimeType ||
+        chunks.find((chunk) => chunk.type)?.type ||
+        "audio/webm";
+      // Measured at the stop, before the header is read.
+      const durationMs = Math.max(0, recordedNow() - segmentStartedAt);
+      const [first, ...rest] = chunks;
+      return {
+        blob: new Blob([await withRecordedDuration(first!, durationMs, mimeType), ...rest], {
+          type: mimeType
+        }),
+        mimeType,
+        durationMs,
+        partId
+      };
+    };
+
+    recorder.addEventListener("dataavailable", (event) => {
+      if (event.data.size > 0) {
+        // Always retain the chunk before the size-limit stop. Dropping
+        // it would discard up to TIMESLICE_MS of audio that the user
+        // already produced; a few hundred bytes over the cap is the
+        // less-bad outcome.
+        chunks.push(event.data);
+        partJournal?.append(partId, event.data);
+        // A replaced recorder's last chunk belongs to its own file, not to
+        // the live segment's size and stall bookkeeping.
+        if (isReplaced()) return;
+        const now = performance.now();
+        const maxBytesValue =
+          typeof maxBytes === "number" && Number.isFinite(maxBytes) && maxBytes > 0
+            ? maxBytes
+            : null;
+        const nextTotalBytes = recordingStats.totalBytes + event.data.size;
+        recordingStats.chunks++;
+        recordingStats.totalBytes = nextTotalBytes;
+        recordingStats.lastChunkTime = now;
+        requestDataPendingAt = null;
+        if (!firstChunkSeen) {
+          firstChunkSeen = true;
+          recordingStats.firstChunkSeenAt = now;
+        }
+
+        // Two more chunks of this size would reach the limit: time for a new part
+        // (the replaced recorder adds up to one more during the handover). Asked on
+        // every chunk until it happens: a rotation that could not start tries again.
+        if (maxBytesValue && nextTotalBytes + 2 * event.data.size >= maxBytesValue) {
+          fileNearlyFull();
+        }
+        if (maxBytesValue && nextTotalBytes >= maxBytesValue) {
+          recordingStats.errors.push(
+            "Recording stopped after reaching size limit at " + new Date().toISOString()
+          );
+          setStopReason("limit");
+          stopRecording();
+        }
+      } else {
+        // Empty chunks must NOT bump lastChunkTime: that would silently
+        // disarm the stall watchdog when the microphone is producing
+        // zero audio, which is exactly the failure we are trying to
+        // detect (Windows + Firefox produced only 287 B / 6.9 KB files).
+        console.warn("Received empty data chunk");
+        recordingStats.errors.push("Empty chunk received at " + new Date().toISOString());
+      }
+    });
+
+    recorder.addEventListener("error", (event) => {
+      const errorMsg = "MediaRecorder error: " + (event.error?.message || "Unknown error");
+      console.error(errorMsg, event);
+      recordingStats.errors.push(errorMsg);
+      // A replaced recorder failing to finish its file must not stop the live one.
+      if (isReplaced()) return;
+      setRecordingErrorState(errorMsg, event.error);
+      recordingState = "error";
+      setStopReason("error");
+      stopRecording();
+    });
+
+    recorder.addEventListener("stop", () => {
+      void finishStop()
+        .catch((error) => console.error("Failed to finish a recorded segment", error))
+        .finally(() => {
+          void earlierHandovers.then(handedOver);
+          stopHandled();
+        });
+    });
+
+    async function finishStop() {
+      if (isReplaced()) {
+        // Rotation replaced this recorder: hand its file over and leave the
+        // stream, the meter and the live recorder alone. The segment is
+        // complete, so not even an unmount drops it.
+        const segment = chunks.length > 0 ? await finishedSegment() : null;
+        if (segment) await handOver({ ...segment, reason: "rotation" });
+        else partJournal?.discard(partId);
+        handoversPending -= 1;
+        return;
+      }
+      if (discardRecordingOnStop) {
+        // Unmounted while recording (the page went elsewhere): the journal keeps it.
+        partJournal?.leave(partId);
+        releaseMediaCapture();
+        return;
+      }
+      // Read now: another recording may start while the file is built.
+      const reason = stopReason;
+      resetStopReason();
+      recordingState = "processing";
+      releaseMediaCapture();
+      let segment: Awaited<ReturnType<typeof finishedSegment>> | null = null;
+      if (chunks.length === 0) {
+        const errorMsg = m.no_audio_data_captured();
+        setRecordingErrorState(errorMsg);
+        recordingStats.errors.push(errorMsg);
+        recordingState = "error";
+      } else {
+        try {
+          segment = await finishedSegment();
+          // A recording started meanwhile owns the recorder's view; an unmounted one has none.
+          if (!isRecording && !isDestroyed) {
+            completedRecordingAt = Date.now();
+            recordedMimeType = segment.mimeType;
+            recordedBlob = segment.blob;
+            audioURL = URL.createObjectURL(recordedBlob);
+            recordingState = "complete";
+          }
+        } catch (error) {
+          const errorMsg =
+            "Failed to process recording: " +
+            (error instanceof Error ? error.message : String(error));
+          console.error(errorMsg, error);
+          setRecordingErrorState(errorMsg, error);
+          recordingStats.errors.push(errorMsg);
+          recordingState = "error";
+        }
+      }
+      // Reported whether or not there is audio: an error or stall that
+      // captured nothing still has to reach the caller's retry loop.
+      await handOver({
+        blob: segment?.blob ?? null,
+        mimeType: segment?.mimeType ?? "",
+        reason,
+        durationMs: segment?.durationMs ?? 0,
+        partId
+      });
+    }
+
+    recorder.addEventListener("pause", () => {
+      recordingStats.errors.push("Recorder paused at " + new Date().toISOString());
+      // The event of the user's own pause comes after the pause, maybe after a resume too.
+      if (userPauseEvents > 0) {
+        userPauseEvents -= 1;
+        return;
+      }
+      console.warn("MediaRecorder was paused unexpectedly");
+      onCaptureInterrupted();
+    });
+
+    recorder.addEventListener("resume", () => {
+      recordingStats.errors.push("Recorder resumed at " + new Date().toISOString());
+    });
+
+    recorder.start(TIMESLICE_MS);
+    earlierHandovers = handoverQueue;
+    handoverQueue = new Promise<void>((resolve) => (handedOver = resolve));
+    recordingStats.recorderMimeType = recorder.mimeType || initialMimeType;
+    partJournal?.begin(partId, recordingStats.recorderMimeType || "audio/webm");
+    return recorder;
+  }
+
+  // Rotation starts the next segment's recorder on the live stream and stops
+  // the current one ROTATION_OVERLAP_MS later, while the microphone,
+  // AudioContext and meter keep running. The replaced recorder hands its file
+  // over with the "rotation" reason once it stops.
+  // False when the running part goes on: nothing records, or the next part could not start.
+  function rotateSegment(): boolean {
+    const replaced = mediaRecorder;
+    if (!isRecording || !mediaStream || !replaced || replaced.state === "inactive") return false;
+    void stopOverlappingRecorder();
+    try {
+      mediaRecorder = startSegmentRecorder(mediaStream);
+    } catch (error) {
+      // Keep recording into the current file; the next rotation tries again.
+      console.warn("Segment rotation failed", error);
+      recordingStats.errors.push("Segment rotation failed: " + formatMediaError(error));
+      return false;
+    }
+    replacedRecorders.add(replaced);
+    handoversPending += 1;
+    overlappingRecorder = replaced;
+    overlapTimer = setTimeout(() => void stopOverlappingRecorder(), ROTATION_OVERLAP_MS);
+    // The new file starts empty: the size limit and the stall watchdog
+    // measure it from zero.
+    recordingStats.totalBytes = 0;
+    recordingStats.lastChunkTime = performance.now();
+    firstChunkSeen = false;
+    requestDataPendingAt = null;
+    return true;
+  }
+
+  // Ends the rotation overlap now; settles once the replaced recorder has
+  // handed over its file.
+  function stopOverlappingRecorder(): Promise<void> {
+    if (overlapTimer !== null) {
+      clearTimeout(overlapTimer);
+      overlapTimer = null;
+    }
+    const recorder = overlappingRecorder;
+    overlappingRecorder = null;
+    if (!recorder) return Promise.resolve();
+    if (recorder.state !== "inactive") recorder.stop();
+    return recorderStops.get(recorder) ?? Promise.resolve();
+  }
+
+  // Stops the recording, the replaced recorder of an overlap first, so its
+  // file comes before the final one and the stream outlives both. Settles
+  // once every stopped recorder has handed over its file; only then is the
+  // recording reported as ended.
+  function stopRecording(): Promise<void> {
+    const overlapStopped = stopOverlappingRecorder();
+    stopStallChecker();
+    detachVisibilityHandler();
+    screenWakeLock.release();
+    const endsRecording = isRecording;
+    if (isRecording) {
+      isRecording = false;
+      recordingState = "processing";
+    }
+
+    const live = mediaRecorder;
+    try {
+      if (live && live.state !== "inactive") {
+        live.stop();
+      }
+    } catch (error) {
+      const errorMsg =
+        "Failed to stop recording: " + (error instanceof Error ? error.message : String(error));
+      console.error(errorMsg, error);
+      setRecordingErrorState(errorMsg, error);
+      recordingStats.errors.push(errorMsg);
+      recordingState = "error";
+    }
+    // Live audio ends here too, not once the last file is handed over a moment
+    // later: it hears only what the file has.
+    if (endsRecording && audioContext) onAudioGraph(null);
+    const handedOver = Promise.all([
+      overlapStopped,
+      live ? recorderStops.get(live) : undefined
+    ]).then(() => undefined);
+    if (endsRecording) {
+      const report = reportTo.onRecordingStateChange;
+      void handedOver.then(() => report(false));
+    }
+    return handedOver;
+  }
+
+  // The user's pause: the recorder and its clock stand still, and so do the caller's
+  // session (parts, time left) and live text, which it tells.
+  function togglePause() {
+    const recorder = mediaRecorder;
+    if (!isRecording || !recorder) return;
+    if (recorder.state === "recording") {
+      // A part being handed over records nothing of the pause either.
+      void stopOverlappingRecorder();
+      isPaused = true;
+      pausedAt = monotonicNow();
+      userPauseEvents += 1;
+      recorder.pause();
+      reportTo.onPauseChange(true);
+    } else if (recorder.state === "paused" && isPaused && pausedAt !== null) {
+      pausedTotalMs += monotonicNow() - pausedAt;
+      pausedAt = null;
+      isPaused = false;
+      recorder.resume();
+      // The watchdog measures from now: no chunk came while paused.
+      recordingStats.lastChunkTime = performance.now();
+      requestDataPendingAt = null;
+      reportTo.onPauseChange(false);
+    }
+  }
+
+  function toggleRecording() {
+    if (!isRecording) {
+      if (!canStart) return;
+      void startRecording("user");
+    } else {
+      stopRecording();
+    }
+  }
+
+  // Imperative entry points for the session controller. The session needs
+  // to restart the recorder after a "track ended" event without the user
+  // clicking again, and the recorder must surface success/failure clearly
+  // because the session schedules its next retry off the result.
+  export async function startExternal(): Promise<void> {
+    await startRecording("external");
+    if (recordingState === "error") {
+      throw new Error(recordingErrorHint ?? recordingError ?? "Failed to start recording");
+    }
+  }
+
+  // Stops and labels the finished recording with the reason, and settles once every
+  // segment has been handed over. A rotation is rotate(), which records on.
+  export function stopExternal(reason: RecordingEndReason = "manual"): Promise<void> {
+    setStopReason(reason);
+    return stopRecording();
+  }
+
+  // The next part starts on the live stream; false when the running part goes on.
+  export function rotate(): boolean {
+    return rotateSegment();
+  }
+
+  export function pendingHandovers(): number {
+    return handoversPending;
+  }
+
+  const onAnimationFrame = () => {
+    if (analyserNode && levelBuffer.length > 0) {
+      analyserNode.getFloatTimeDomainData(levelBuffer);
+      let sumSquares = 0.0;
+      for (const amplitude of levelBuffer) {
+        sumSquares += amplitude * amplitude;
+      }
+      const rms = Math.sqrt(sumSquares / levelBuffer.length);
+      const nextVolumeLevel = Math.min(1, rms / 0.15);
+      const now = performance.now();
+      if (nextVolumeLevel > MIC_ACTIVITY_THRESHOLD) {
+        lastAudibleAt = now;
+      }
+      showMicSilentHint = isRecording && !isPaused && now - lastAudibleAt > MIC_SILENCE_HINT_MS;
+      if (now - lastMeterUpdateAt >= METER_UPDATE_MS) {
+        const attack = nextVolumeLevel > volumeLevel ? 0.55 : 0.16;
+        volumeLevel = volumeLevel + (nextVolumeLevel - volumeLevel) * attack;
+        lastMeterUpdateAt = now;
+      }
+    }
+    elapsedSeconds = Math.floor(recordedNow() / 1000);
+    elapsedTime = formatElapsed(elapsedSeconds);
+    animationFrameId = window.requestAnimationFrame(onAnimationFrame);
+  };
+
+  function startMonitoringLoop() {
+    stopMonitoringLoop();
+    animationFrameId = window.requestAnimationFrame(onAnimationFrame);
+  }
+
+  function startStallChecker() {
+    stopStallChecker();
+    // The stall watchdog runs on setInterval, not requestAnimationFrame:
+    // browsers throttle rAF to ~1 Hz on hidden tabs, which used to make
+    // any tab-switch look like an immediate stall. setInterval ticks
+    // through the throttle, and the visibility handler shifts the
+    // watchdog clock across the hidden interval so we do not fire on
+    // return either.
+    stallIntervalId = setInterval(checkStall, STALL_CHECK_INTERVAL_MS);
+  }
+
+  function stopStallChecker() {
+    if (stallIntervalId !== null) {
+      clearInterval(stallIntervalId);
+      stallIntervalId = null;
+    }
+    requestDataPendingAt = null;
+  }
+
+  function checkStall() {
+    if (!isRecording || !mediaRecorder || mediaRecorder.state !== "recording") return;
+    // Suspend stall decisions entirely while the tab is hidden. setInterval
+    // keeps ticking on hidden tabs (unlike rAF), so without this guard a
+    // user who switches tabs for >7 s sees the watchdog kill an otherwise-
+    // healthy recording. The visibility handler shifts the clock forward
+    // when the tab returns; this just stops us deciding while we cannot
+    // see what the encoder is doing.
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+      return;
+    }
+
+    const now = performance.now();
+    const threshold = firstChunkSeen ? STALL_STEADY_STATE_MS : STALL_PRE_FIRST_CHUNK_MS;
+    const sinceLastChunk = now - recordingStats.lastChunkTime;
+
+    if (sinceLastChunk <= threshold) {
+      requestDataPendingAt = null;
+      return;
+    }
+
+    if (requestDataPendingAt === null) {
+      // Try to flush any buffered data before declaring a stall: some
+      // Firefox builds queue chunks past TIMESLICE_MS under load, and a
+      // healthy encoder will respond to requestData() within tens of ms.
+      let outcome = "ok";
+      try {
+        mediaRecorder.requestData();
+      } catch (error) {
+        outcome = error instanceof Error ? error.name : "threw";
+      }
+      requestDataPendingAt = now;
+      recordingStats.requestDataAttempts.push({ at: now, outcome });
+      return;
+    }
+
+    if (now - requestDataPendingAt < STALL_REQUEST_DATA_GRACE_MS) return;
+
+    recordingStats.errors.push(
+      "Recording stopped due to stalled data at " + new Date().toISOString()
+    );
+    setStopReason("stall");
+    stopRecording();
+  }
+
+  function attachVisibilityHandler() {
+    detachVisibilityHandler();
+    visibilityHandler = () => {
+      const at = performance.now();
+      if (document.visibilityState === "hidden") {
+        hiddenSinceMs = at;
+        // Drop any in-flight requestData rescue: it would otherwise be
+        // measured against a clock that's about to be shifted forward,
+        // and on return checkStall would compute `now - requestDataPendingAt`
+        // ≫ grace and fire an instant stall on a healthy recording.
+        requestDataPendingAt = null;
+        recordingStats.visibilityTransitions.push({ at, state: "hidden" });
+        return;
+      }
+      if (document.visibilityState === "visible") {
+        if (hiddenSinceMs !== null) {
+          const hiddenAt = hiddenSinceMs;
+          const shift = at - hiddenAt;
+          // Only shift timestamps that predate the hidden window. Some
+          // browsers (Firefox in particular) still deliver dataavailable
+          // while hidden — if a chunk arrived during hidden, lastChunkTime
+          // is already current and shifting it again would push it into
+          // the future and over-forgive future stalls by one hidden span.
+          if (recordingStats.lastChunkTime > 0 && recordingStats.lastChunkTime <= hiddenAt) {
+            recordingStats.lastChunkTime += shift;
+          }
+          if (lastAudibleAt > 0 && lastAudibleAt <= hiddenAt) {
+            lastAudibleAt += shift;
+          }
+        }
+        hiddenSinceMs = null;
+        requestDataPendingAt = null;
+        recordingStats.visibilityTransitions.push({ at, state: "visible" });
+      }
+    };
+    document.addEventListener("visibilitychange", visibilityHandler);
+  }
+
+  function detachVisibilityHandler() {
+    if (visibilityHandler) {
+      document.removeEventListener("visibilitychange", visibilityHandler);
+      visibilityHandler = null;
+    }
+    hiddenSinceMs = null;
+  }
+
+  async function copyDiagnostics() {
+    const payload = {
+      capturedAt: new Date().toISOString(),
+      state: recordingState,
+      isRecording,
+      elapsedSeconds,
+      activeAudioBitsPerSecond,
+      maxBytes,
+      error: recordingError,
+      hint: recordingErrorHint,
+      stats: recordingStats
+    };
+    const text = JSON.stringify(payload, null, 2);
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        console.warn("Recording diagnostics:", payload);
+        toast.info(m.diagnostics_logged_console());
+        return;
+      } catch (error) {
+        console.warn("Failed to copy diagnostics to clipboard", error);
+      }
+    }
+    console.warn("Recording diagnostics:", payload);
+    toast.info(m.diagnostics_logged_console());
+  }
+
+  const formatElapsed = (seconds: number) => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+    }
+    return `${minutes.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
+
+  function formatTimeLeft(ms: number): string | null {
+    if (!Number.isFinite(ms)) return null;
+    return formatRecordingLength(Math.ceil(Math.max(ms, 0) / 60_000) * 60_000);
+  }
+
+  function formatDurationEstimate(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds <= 0) return "0 min";
+    const totalMinutes = Math.max(1, Math.round(seconds / 60));
+    if (totalMinutes < 60) return `${totalMinutes} min`;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return minutes > 0 ? `${hours} h ${minutes} min` : `${hours} h`;
+  }
+
+  async function saveCompletedRecording() {
+    if (!recordedBlob) {
+      toast.error(m.recording_not_found());
+      return;
+    }
+
+    const file = buildRecordedAudioFile({
+      blob: recordedBlob,
+      mimeType: recordedMimeType || recordedBlob.type || "audio/webm",
+      fileNameBase: m.recording_filename_template({
+        datetime: recordingFileTimestamp(completedRecordingAt)
+      })
+    });
+
+    try {
+      await downloadRecordedAudioFile(file);
+    } catch (error) {
+      console.error("Failed to save recording:", error);
+      toast.error(m.recording_save_failed());
+    }
+  }
+
+  async function toggleAudioPreview() {
+    if (!previewAudioEl || !audioURL) return;
+
+    if (isPreviewPlaying) {
+      previewAudioEl.pause();
+      isPreviewPlaying = false;
+      return;
+    }
+
+    try {
+      previewAudioEl.currentTime = 0;
+      await previewAudioEl.play();
+      isPreviewPlaying = true;
+    } catch (error) {
+      console.error("Failed to preview recording:", error);
+      toast.error(m.recording_preview_failed());
+    }
+  }
+
+  $: if (resetToken !== lastResetToken) {
+    lastResetToken = resetToken;
+    clearCompletedRecording();
+  }
+
+  function disposeRecorder() {
+    isDestroyed = true;
+    screenWakeLock.release();
+    clearCompletedRecording();
+    // A replaced recorder's segment is complete, so it is still handed over.
+    void stopOverlappingRecorder();
+
+    // A recording still running at unmount is not handed over (its journal keeps
+    // it for recovery); one stopped just before (the dialog stops it as it
+    // closes) still hands over its file.
+    if (mediaRecorder && mediaRecorder.state !== "inactive") {
+      discardRecordingOnStop = true;
+      try {
+        mediaRecorder.stop();
+      } catch (e) {
+        console.error("Error stopping mediaRecorder during cleanup:", e);
+      }
+    }
+    if (isRecording) {
+      isRecording = false;
+      reportTo.onRecordingStateChange(false);
+    }
+    releaseMediaCapture();
+  }
+
+  onMount(() => {
+    window.addEventListener("beforeunload", disposeRecorder);
+    return () => window.removeEventListener("beforeunload", disposeRecorder);
+  });
+
+  onDestroy(() => {
+    disposeRecorder();
+  });
+</script>
+
+<div class="flex flex-col items-center justify-center gap-2">
+  <div data-is-recording={isRecording} data-state={recordingState} class="recording-widget">
+    <Tooltip.Root>
+      <!-- The trigger owns the click (its own closes the tooltip) and the disabled
+           state; the Button renders both. -->
+      <Tooltip.Trigger
+        onclick={toggleRecording}
+        disabled={recordingState === "preparing" ||
+          recordingState === "processing" ||
+          (!isRecording && !canStart)}
+      >
+        {#snippet child({ props })}
+          <Button
+            {...props}
+            size="icon"
+            class="record-button bg-negative-default text-on-fill hover:bg-negative-stronger relative size-12 rounded-full [&_svg:not([class*='size-'])]:size-6"
+            data-is-recording={isRecording}
+            aria-label={isRecording ? m.stop_recording() : m.start_recording()}
+          >
+            {#if !isRecording}
+              <IconMicrophone />
+            {:else}
+              <IconStop />
+            {/if}
+          </Button>
+        {/snippet}
+      </Tooltip.Trigger>
+      <Tooltip.Content>{isRecording ? m.stop_recording() : m.start_recording()}</Tooltip.Content>
+    </Tooltip.Root>
+
+    {#if isRecording}
+      <div class="recording-stats">
+        <div class="recording-status-row">
+          {#if isPaused}
+            <IconPause class="text-secondary size-3.5" aria-hidden="true" />
+          {:else}
+            <span class="recording-status-dot" aria-hidden="true"></span>
+          {/if}
+          <span class="recording-status-label" data-paused={isPaused} role="status">
+            {isPaused ? m.recording_paused() : m.recording_in_progress()}
+          </span>
+          <div class="time-display">{elapsedTime}</div>
+          <Button variant="outline" size="sm" onclick={togglePause}>
+            {#if isPaused}
+              <IconPlay data-icon="inline-start" />
+              {m.recording_resume()}
+            {:else}
+              <IconPause data-icon="inline-start" />
+              {m.recording_pause()}
+            {/if}
+          </Button>
+        </div>
+        <div class="mic-activity-row">
+          <span class="mic-activity-label">{m.recording_mic_activity()}</span>
+          <div class="mic-activity-track" aria-hidden="true">
+            <div class="mic-activity-fill" style="transform: scaleX({volumeLevel})"></div>
+          </div>
+        </div>
+        {#if micRecoveryHintKey !== null}
+          <div class="recording-mic-recovery-hint" role="status" aria-live="polite">
+            {micRecoveryHintKey === "muted"
+              ? m.recording_mic_muted_hint()
+              : m.recording_mic_reconnecting_hint()}
+          </div>
+        {:else if showMicSilentHint}
+          <div class="recording-mic-silent-hint" role="status" aria-live="polite">
+            {m.recording_mic_silent_hint()}
+          </div>
+        {/if}
+        {#if maxSizeLabel}
+          <div class="size-row">
+            <span class="size-display">
+              {isLiveSizeEstimated ? "≈ " : ""}{m.mb({
+                value: `${formatMegabytes(visibleRecordingBytes)} / ${maxSizeLabel}`
+              })}
+            </span>
+            <span class="size-rate">{m.recording_size_rate({ size: recordingRateLabel })}</span>
+          </div>
+        {/if}
+        {#if timeLeftLabel}
+          <div class="recording-estimate">{m.recording_time_left({ duration: timeLeftLabel })}</div>
+        {/if}
+      </div>
+    {:else if recordingState === "preparing"}
+      <div class="px-6 py-2 font-mono">{m.recording_preparing()}</div>
+    {:else if recordingState === "processing"}
+      <div class="px-6 py-2 font-mono">{m.processing_recording()}</div>
+    {:else if recordingState === "error"}
+      <div class="flex flex-col gap-2 px-4 py-3">
+        <div class="flex flex-col gap-0.5">
+          <div class="text-negative-stronger text-sm font-semibold">
+            {m.recording_error()}
+          </div>
+          {#if recordingErrorHint}
+            <div class="text-negative-stronger/90 text-sm leading-snug">
+              {recordingErrorHint}
+            </div>
+          {/if}
+        </div>
+        {#if recordingError}
+          <details class="error-details-collapse">
+            <summary
+              class="text-negative-default hover:text-negative-stronger cursor-pointer list-none text-xs font-medium underline underline-offset-2 transition-colors select-none"
+            >
+              {m.view_diagnostics()}
+            </summary>
+            <div
+              class="bg-negative-default/15 text-negative-stronger/80 border-negative-default/25 mt-2 rounded-md border px-3 py-2 font-mono text-xs leading-relaxed break-words"
+            >
+              {recordingError}
+            </div>
+          </details>
+        {:else}
+          <button
+            class="text-negative-default hover:text-negative-stronger cursor-pointer text-left text-xs font-medium underline underline-offset-2 transition-colors"
+            onclick={copyDiagnostics}
+          >
+            {m.view_diagnostics()}
+          </button>
+        {/if}
+      </div>
+    {:else if audioURL}
+      <div class="recording-complete">
+        <div class="recording-complete-header">
+          <span class="recording-complete-title">{m.recording_last_clip_ready()}</span>
+          <span class="recording-complete-copy">{m.recording_ready_hint()}</span>
+          {#if continuesRecording && recordingRoomMs}
+            <span class="recording-complete-copy"
+              >{m.recording_room_hint({ duration: formatRecordingLength(recordingRoomMs) })}</span
+            >
+          {/if}
+        </div>
+        <div class="recording-complete-actions">
+          <audio
+            bind:this={previewAudioEl}
+            src={audioURL}
+            preload="metadata"
+            class="sr-only"
+            onended={() => {
+              isPreviewPlaying = false;
+            }}
+            onpause={() => {
+              isPreviewPlaying = false;
+            }}
+          ></audio>
+          <Button variant="ghost" size="sm" onclick={toggleAudioPreview}>
+            {#if isPreviewPlaying}
+              <IconStop data-icon="inline-start" />
+              {m.recording_stop_preview()}
+            {:else}
+              <IconPlay data-icon="inline-start" />
+              {m.recording_preview()}
+            {/if}
+          </Button>
+          <Button variant="outline" size="sm" onclick={saveCompletedRecording}>
+            <IconDownload data-icon="inline-start" />
+            {m.save_as_file()}
+          </Button>
+        </div>
+      </div>
+    {:else}
+      <div class="idle-recording-copy">
+        {#if recordingRoomMs !== null}
+          {#if recordingRoomMs > 0}
+            <span
+              >{(continuesRecording ? m.recording_room_hint : m.recording_length_hint)({
+                duration: formatRecordingLength(recordingRoomMs)
+              })}</span
+            >
+          {/if}
+        {:else if estimatedLimitLabel && maxSizeLabel}
+          <span
+            >{m.recording_estimated_limit({
+              duration: estimatedLimitLabel,
+              size: maxSizeLabel
+            })}</span
+          >
+        {/if}
+      </div>
+    {/if}
+  </div>
+</div>
+
+<style lang="postcss">
+  /* The app's own sheet, not the package's: `app.css` imports the package and
+     then raises `--text-xs` to the 12px floor and repoints `text-muted` at the
+     AA-compliant shade. Referencing the package alone resolves `@apply` against
+     the base theme and silently opts this component out of both. */
+  @reference "../../../app.css";
+
+  @keyframes breathe-ring {
+    0%,
+    100% {
+      transform: scale(1);
+      opacity: 0.4;
+    }
+    50% {
+      transform: scale(1.15);
+      opacity: 0;
+    }
+  }
+
+  /* The button is the shadcn Button, rendered by its own component. */
+  .recording-widget :global(.record-button[data-is-recording="true"]::before) {
+    content: "";
+    position: absolute;
+    inset: -4px;
+    border-radius: 9999px;
+    border: 2px solid currentColor;
+    animation: breathe-ring 2s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .recording-widget :global(.record-button[data-is-recording="true"]::before) {
+      animation: none;
+      opacity: 0;
+    }
+  }
+
+  .recording-widget {
+    @apply border-stronger bg-primary flex min-h-20 w-[min(36rem,calc(100vw-4rem))] max-w-full items-center rounded-[2rem] border p-2 shadow-lg transition-[background-color,border-color,box-shadow] duration-200 ease-out;
+  }
+
+  .recording-widget[data-is-recording="true"] {
+    @apply border-negative-default/30 bg-primary shadow-xl;
+  }
+
+  .recording-widget[data-state="error"] {
+    @apply bg-negative-dimmer border-negative-default/40 max-w-sm rounded-2xl border;
+  }
+
+  .recording-widget[data-state="processing"] {
+    @apply bg-accent-dimmer text-accent-stronger;
+  }
+
+  .error-details-collapse summary::before {
+    content: "▶ ";
+    display: inline;
+    font-size: 0.6em;
+    vertical-align: middle;
+    margin-right: 0.25em;
+  }
+
+  .error-details-collapse[open] summary::before {
+    content: "▼ ";
+  }
+
+  .error-details-collapse summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .recording-stats {
+    @apply text-primary flex min-w-0 flex-1 flex-col gap-1.5 px-4 py-1;
+  }
+
+  .recording-status-row {
+    @apply flex items-center gap-2;
+  }
+
+  .time-display {
+    @apply ml-auto font-mono text-sm font-semibold tabular-nums;
+  }
+
+  .recording-status-label {
+    @apply text-negative-stronger text-xs font-medium tracking-[0.08em] uppercase;
+  }
+
+  .recording-status-label[data-paused="true"] {
+    @apply text-secondary;
+  }
+
+  .recording-status-dot {
+    @apply bg-negative-default size-2 rounded-full;
+  }
+
+  .mic-activity-row {
+    @apply flex items-center gap-2;
+  }
+
+  .mic-activity-label {
+    @apply text-muted text-xs whitespace-nowrap;
+  }
+
+  .mic-activity-track {
+    @apply bg-secondary/40 h-1.5 min-w-20 flex-1 overflow-hidden rounded-full;
+  }
+
+  .mic-activity-fill {
+    @apply bg-accent-default h-full origin-left rounded-full transition-transform duration-75 ease-out;
+  }
+
+  .recording-mic-silent-hint {
+    @apply text-warning-stronger text-xs leading-relaxed;
+  }
+
+  .recording-mic-recovery-hint {
+    @apply text-negative-stronger text-xs leading-relaxed;
+  }
+
+  .size-row {
+    @apply text-muted flex flex-wrap items-center gap-x-2 gap-y-0.5;
+  }
+
+  .size-display {
+    @apply font-mono text-xs whitespace-nowrap tabular-nums;
+  }
+
+  .size-rate {
+    @apply text-xs;
+  }
+
+  .idle-recording-copy {
+    @apply text-muted min-w-0 flex-1 px-4 py-1 text-sm leading-snug;
+  }
+
+  .recording-estimate {
+    @apply text-muted text-xs;
+  }
+
+  .recording-complete {
+    @apply flex min-w-0 flex-1 items-center justify-between gap-3 px-3 py-1;
+  }
+
+  .recording-complete-header {
+    @apply flex min-w-0 flex-col gap-0.5;
+  }
+
+  .recording-complete-title {
+    @apply text-sm font-medium;
+  }
+
+  .recording-complete-copy {
+    @apply text-muted line-clamp-2 text-xs leading-relaxed;
+  }
+
+  .recording-complete-actions {
+    @apply flex shrink-0 flex-wrap items-center justify-end gap-2;
+  }
+
+  @media (max-width: 420px) {
+    .recording-widget {
+      @apply max-w-full min-w-0 rounded-2xl;
+    }
+
+    .recording-stats {
+      @apply min-w-0;
+    }
+
+    .recording-complete {
+      @apply flex-col items-stretch;
+    }
+
+    .recording-complete-actions {
+      @apply justify-start;
+    }
+  }
+</style>

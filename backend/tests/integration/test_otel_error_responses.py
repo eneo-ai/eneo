@@ -3,17 +3,27 @@
 Spec acceptance criteria this covers:
     "X-Trace-Id is included in HTTP responses and exposed via
      Access-Control-Expose-Headers on all responses, including 4xx and 5xx."
+
+The 500 cases separately exercise an explicit HTTP 500 and an unhandled
+exception. Both must retain the typed platform error envelope, support identity,
+trace headers, and the manual CORS behavior owned by ``server.main``.
 """
 
 from __future__ import annotations
 
 import pytest
+from fastapi import HTTPException, Response
 
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
     endpoint_access,
 )
+from eneo.flow_packages.headers import (
+    FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
+)
+from eneo.main.exceptions import ErrorCodes
+from eneo.main.models import GeneralError
 
 
 @pytest.fixture
@@ -64,15 +74,42 @@ async def test_cors_exposes_both_trace_headers(
     assert "x-correlation-id" in expose, (
         f"Access-Control-Expose-Headers missing X-Correlation-ID: {expose!r}"
     )
+    assert FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER.lower() in expose
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_cors_exposes_positive_package_omission_header(app, allowed_origin):
+    from httpx import ASGITransport, AsyncClient
+
+    @app.get("/api/v1/_test_package_omission_header")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the package omission CORS header.",
+    )
+    async def _package_omission_header() -> Response:
+        return Response(headers={FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER: "2"})
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test.local") as client:
+        response = await client.get(
+            "/api/v1/_test_package_omission_header",
+            headers={"Origin": allowed_origin},
+        )
+
+    assert response.status_code == 200
+    assert response.headers[FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER] == "2"
+    expose = response.headers.get("access-control-expose-headers", "").lower()
+    assert FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER.lower() in expose
 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
 @pytest.mark.parametrize("same_origin", [False, True])
 async def test_500_exposes_trace_headers(app, allowed_origin, same_origin):
-    """An unhandled 500 must still expose the trace headers via CORS and carry
-    error_id, exercising the manual CORS block in the Exception handler that
-    reads CORS_OPTIONS (server/middleware/cors.py).
+    """An unhandled 500 retains the typed envelope, trace headers, support identity,
+    and the shared CORS_OPTIONS policy from server/middleware/cors.py.
 
     A throwaway route raises so the catch-all Exception handler runs. We use a
     client with raise_app_exceptions=False because Starlette's
@@ -100,7 +137,10 @@ async def test_500_exposes_trace_headers(app, allowed_origin, same_origin):
 
     assert response.status_code == 500
     assert response.headers["access-control-allow-origin"] == request_origin
-    assert "error_id" in response.json(), "error_id must be present on 500 responses"
+    error = GeneralError.model_validate(response.json())
+    assert error.code == "internal_error"
+    assert error.eneo_error_code is ErrorCodes.INTERNAL_SERVER_ERROR
+    assert error.error_id is not None
 
     expose = response.headers.get("access-control-expose-headers", "").lower()
     assert "x-trace-id" in expose, (
@@ -109,3 +149,42 @@ async def test_500_exposes_trace_headers(app, allowed_origin, same_origin):
     assert "x-correlation-id" in expose, (
         f"500 response missing X-Correlation-ID in Access-Control-Expose-Headers: {expose!r}"
     )
+    assert FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER.lower() in expose
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_explicit_http_500_preserves_error_identity_and_cors(app, allowed_origin):
+    from httpx import ASGITransport, AsyncClient
+
+    @app.get("/api/v1/_test_explicit_500")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the internal error envelope.",
+    )
+    async def _explicit_500():
+        raise HTTPException(status_code=500, detail="must not leak")
+
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test.local") as client:
+        response = await client.get(
+            "/api/v1/_test_explicit_500",
+            headers={
+                "Origin": allowed_origin,
+                "X-Request-ID": "explicit-http-500",
+            },
+        )
+
+    assert response.status_code == 500
+    error = GeneralError.model_validate(response.json())
+    assert error.code == "internal_error"
+    assert error.eneo_error_code is ErrorCodes.INTERNAL_SERVER_ERROR
+    assert error.request_id == "explicit-http-500"
+    assert error.error_id is not None
+    assert "must not leak" not in response.text
+    assert response.headers["x-trace-id"]
+    assert response.headers["x-correlation-id"] == response.headers["x-trace-id"]
+    expose = response.headers["access-control-expose-headers"].lower()
+    assert "x-trace-id" in expose
+    assert "x-correlation-id" in expose

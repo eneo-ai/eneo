@@ -9,6 +9,11 @@ from eneo.info_blobs.info_blob import InfoBlobInDBWithScore
 from eneo.main.config import get_settings
 from eneo.services.service import DatastoreResult
 
+# Version-1 retrieval returns at most this many chunks in total. The flows
+# evidence policy default records everything a retrieval can return per
+# source; a contract test binds the two values so neither drifts silently.
+VERSION_1_RETRIEVAL_CHUNK_LIMIT = 30
+
 if TYPE_CHECKING:
     from eneo.collections.domain.collection import Collection
     from eneo.embedding_models.domain.embedding_model import EmbeddingModel
@@ -55,6 +60,26 @@ class ReferencesService:
         self.info_blobs_repo = info_blobs_repo
         self.datastore = datastore
 
+    @staticmethod
+    def select_embedding_model(
+        collections: list["Collection"],
+        websites: list["Website"],
+        integration_knowledge_list: Sequence["IntegrationKnowledge"],
+    ) -> Optional["EmbeddingModel"]:
+        """The single embedding model a retrieval over these sources runs against.
+
+        Retrieval embeds the query once, so the first non-empty knowledge kind
+        decides the model. Callers that record which model was used must read it
+        from here rather than repeating this precedence.
+        """
+        if collections:
+            return collections[0].embedding_model
+        if websites:
+            return websites[0].embedding_model
+        if integration_knowledge_list:
+            return integration_knowledge_list[0].embedding_model
+        return None
+
     async def _query_datastore_if_groups_or_websites(
         self,
         input_string: str,
@@ -64,17 +89,12 @@ class ReferencesService:
         context_window_tokens: Optional[int] = None,
         version: int = 1,
         rerank: Optional["RerankSpec"] = None,
-    ) -> list["InfoBlobChunkInDBWithScore"]:
+    ) -> tuple[list["InfoBlobChunkInDBWithScore"], Optional["EmbeddingModel"]]:
         integration_knowledge_list = list(integration_knowledge_list or [])
         if (collections or websites or integration_knowledge_list) and input_string:
-            embedding_model = None
-            if collections:
-                embedding_model = collections[0].embedding_model
-            elif websites:
-                embedding_model = websites[0].embedding_model
-            elif integration_knowledge_list:
-                embedding_model = integration_knowledge_list[0].embedding_model
-
+            embedding_model = self.select_embedding_model(
+                collections, websites, integration_knowledge_list
+            )
             # At least one knowledge source is non-empty, so embedding_model is set.
             assert embedding_model is not None, (
                 "embedding_model must be set when knowledge sources are present"
@@ -84,14 +104,14 @@ class ReferencesService:
             # **kwargs would silently bind to any parameter semantic_search
             # grows later.
             if version == 1:
-                autocut_cutoff, chunk_limit = 3, 30
+                autocut_cutoff, chunk_limit = 3, VERSION_1_RETRIEVAL_CHUNK_LIMIT
             elif version == 2:
                 autocut_cutoff = None
                 chunk_limit = _candidate_count(context_window_tokens, embedding_model)
             else:
                 raise ValueError(f"Unsupported retrieval version: {version}")
 
-            return await self.datastore.semantic_search(
+            chunks = await self.datastore.semantic_search(
                 input_string,
                 embedding_model=embedding_model,
                 collections=collections,
@@ -104,8 +124,9 @@ class ReferencesService:
                 autocut_cutoff=autocut_cutoff,
                 rerank=rerank,
             )
+            return chunks, embedding_model
 
-        return []
+        return [], None
 
     async def _get_info_blobs_from_chunks(
         self, info_blob_chunks: list["InfoBlobChunkInDBWithScore"]
@@ -192,6 +213,7 @@ class ReferencesService:
         embed_method: EmbedMethod = EmbedMethod.CONCATENATE,
         context_window_tokens: Optional[int] = None,
         version: int = 1,
+        include_info_blobs: bool = True,
         rerank: Optional["RerankSpec"] = None,
     ) -> "DatastoreResult":
         files = files or []
@@ -207,7 +229,7 @@ class ReferencesService:
             # EmbedMethod.LAST_QUESTION or any future variant
             input_string = question
 
-        chunks = await self._query_datastore_if_groups_or_websites(
+        chunks, embedding_model = await self._query_datastore_if_groups_or_websites(
             input_string,
             collections=collections,
             websites=websites,
@@ -217,10 +239,27 @@ class ReferencesService:
             rerank=rerank,
         )
         no_duplicate_chunks = self._get_info_blob_chunks_without_duplicates(chunks)
-        info_blobs = await self._get_info_blobs_from_chunks(no_duplicate_chunks)
+        info_blobs = (
+            await self._get_info_blobs_from_chunks(no_duplicate_chunks)
+            if include_info_blobs
+            else []
+        )
 
         return DatastoreResult(
             chunks=chunks,
             no_duplicate_chunks=no_duplicate_chunks,
             info_blobs=info_blobs,
+            embedding_model_id=(
+                embedding_model.id if embedding_model is not None else None
+            ),
+            embedding_model_name=(
+                embedding_model.name if embedding_model is not None else None
+            ),
         )
+
+    async def get_reference_metadata(
+        self,
+        *,
+        info_blob_ids: list[UUID],
+    ) -> dict[str, dict[str, object | None]]:
+        return await self.info_blobs_repo.get_reference_metadata_by_ids(info_blob_ids)

@@ -97,6 +97,35 @@ function authenticatedResponse(requestHeaders: Headers, csp: string) {
   );
 }
 
+/**
+ * The live transcription WebSocket of the flow run form, on the app's origin.
+ * The REST proxy route cannot carry a WebSocket, so the upgrade is rewritten
+ * to the backend here and Next proxies it (it proxies upgrades of an external
+ * rewrite, with `x-forwarded-host` set to the app's host, which the backend's
+ * Origin check accepts). The backend authorises the socket by the single-use
+ * ticket its session route issued; the session cookie stays behind, as on
+ * every proxied request.
+ */
+export const LIVE_TRANSCRIPTION_SOCKET_PATH = "/api/eneo/api/v1/live-transcription";
+
+async function liveTranscriptionSocket(request: NextRequest, csp: string) {
+  const refuse = (status: number, message: string) =>
+    withContentSecurityPolicy(NextResponse.json({ message }, { status }), csp);
+  if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+    return refuse(426, "WebSocket upgrade required");
+  }
+  const raw = request.cookies.get(SESSION_COOKIE)?.value;
+  if (!raw || !(await openSession(raw, env.SESSION_SECRET))) {
+    return refuse(401, "Unauthenticated");
+  }
+  const headers = new Headers(request.headers);
+  headers.delete("cookie");
+  const target = new URL(
+    `${env.ENEO_BACKEND_URL.replace(/\/$/, "")}${request.nextUrl.pathname.replace(/^\/api\/eneo/, "")}`
+  );
+  return NextResponse.rewrite(target, { request: { headers } });
+}
+
 function isPublic(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
@@ -126,6 +155,8 @@ export async function proxy(request: NextRequest) {
       );
     }
   }
+
+  if (pathname === LIVE_TRANSCRIPTION_SOCKET_PATH) return liveTranscriptionSocket(request, csp);
 
   const apiRequest = pathname.startsWith("/api/");
   const publicPage = isPublic(pathname);

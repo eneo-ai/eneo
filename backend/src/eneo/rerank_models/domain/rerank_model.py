@@ -16,13 +16,13 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.database.tables.ai_models_table import RerankModels as RerankModelsDB
-    from eneo.users.user import UserInDB
+    from eneo.tenants.tenant import TenantInDB
 
 
 class RerankModel(AIModel):
     def __init__(
         self,
-        user: UserInDB,
+        tenant: TenantInDB,
         id: UUID,
         created_at: datetime,
         updated_at: datetime,
@@ -47,7 +47,7 @@ class RerankModel(AIModel):
         max_candidates: int = DEFAULT_MAX_CANDIDATES,
     ):
         super().__init__(
-            user=user,
+            tenant=tenant,
             id=id,
             created_at=created_at,
             updated_at=updated_at,
@@ -77,12 +77,12 @@ class RerankModel(AIModel):
     def create_from_db(
         cls,
         rerank_model_db: RerankModelsDB,
-        user: UserInDB,
+        tenant: TenantInDB,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
     ) -> RerankModel:
         return cls(
-            user=user,
+            tenant=tenant,
             id=rerank_model_db.id,
             created_at=rerank_model_db.created_at,
             updated_at=rerank_model_db.updated_at,

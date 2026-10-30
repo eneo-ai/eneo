@@ -6,6 +6,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 
 from eneo.audit.application.audit_config_service import settable_action_updates
+from eneo.audit.domain.action_types import ActionType
 from eneo.audit.schemas.audit_config_schemas import (
     ActionConfigResponse,
     ActionConfigUpdateRequest,
@@ -80,7 +81,6 @@ async def update_audit_config(
 
     Requires admin permission.
     """
-    from eneo.audit.domain.action_types import ActionType
     from eneo.audit.domain.entity_types import EntityType
 
     user = container.user()
@@ -135,7 +135,7 @@ async def update_audit_config(
     "/actions",
     response_model=ActionConfigResponse,
     summary="Get per-action audit configuration",
-    description="Retrieve all 65 actions with their enabled status for the modal UI.",
+    description=f"Retrieve all {len(ActionType)} actions with their enabled status for the modal UI.",
     responses=responses.get_responses([403]),
 )
 @endpoint_access(
@@ -149,7 +149,7 @@ async def get_action_config(
     """
     Get all actions with their enabled status (considering category + overrides).
 
-    Returns all 65 actions grouped by category with Swedish metadata.
+    Returns all actions grouped by category. Display text is translated by the frontend.
     Used for populating the audit configuration modal UI.
 
     Requires admin permission.
@@ -187,7 +187,6 @@ async def update_action_config(
 
     Requires admin permission.
     """
-    from eneo.audit.domain.action_types import ActionType
     from eneo.audit.domain.entity_types import EntityType
 
     user = container.user()

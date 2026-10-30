@@ -33,5 +33,10 @@ export function useSidePanel(): SidePanelStore | null {
   return store;
 }
 
+/** The side panel without re-rendering on its changes: for callers that use it only in event handlers. */
+export function useSidePanelStore(): SidePanelStore | null {
+  return use(SidePanelContext);
+}
+
 const noSubscription = () => () => {};
 const zero = () => 0;

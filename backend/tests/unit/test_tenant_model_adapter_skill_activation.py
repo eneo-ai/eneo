@@ -56,14 +56,13 @@ class _FakeMCPProxy:
     def get_allowed_tool_names(self) -> set[str]:
         return {"server__lookup"}
 
+    def is_internal_tool(self, prefixed_tool_name: str) -> bool:
+        return False
+
     def get_tool_info(self, name: str) -> tuple[str, str, str | None] | None:
         if name == "server__lookup":
             return ("server", "lookup", "Lookup")
         return None
-
-    def is_internal_tool(self, name: str) -> bool:
-        del name
-        return False
 
     def is_bundled_tool(self, name: str) -> bool:
         del name
@@ -157,6 +156,7 @@ def _adapter() -> TenantModelAdapter:
         name="test-model",
         supports_tool_calling=True,
         token_limit=128000,
+        max_output_tokens=16000,
     )
     adapter._prepare_kwargs = Mock(return_value={})
     adapter._create_messages_from_context = Mock(
@@ -271,8 +271,10 @@ def _reasoning_chunk(reasoning: str) -> object:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_non_streaming_activates_skill_before_follow_up() -> None:
     adapter = _adapter()
+    adapter.model.max_output_tokens = 128000
     runtime = _runtime()
     responses = [
         _response(
@@ -288,10 +290,24 @@ async def test_non_streaming_activates_skill_before_follow_up() -> None:
         _response(content="Payroll answer"),
     ]
 
-    with patch(
-        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
-        AsyncMock(side_effect=responses),
-    ) as completion_call:
+    measured_payloads = []
+
+    def reserve(messages, tools, model, *, response_format=None):
+        measured_payloads.append(str(messages))
+        return SimpleNamespace(
+            tokens=500 if "Use the exact payroll procedure." in str(messages) else 100
+        )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            side_effect=reserve,
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(side_effect=responses),
+        ) as completion_call,
+    ):
         completion = await adapter.get_response(
             context=SimpleNamespace(),
             model_kwargs={},
@@ -304,6 +320,11 @@ async def test_non_streaming_activates_skill_before_follow_up() -> None:
     assert follow_up_messages[0]["role"] == "system"
     assert "Use the exact payroll procedure." in follow_up_messages[0]["content"]
     assert "KNOWLEDGE_SENTINEL" in follow_up_messages[0]["content"]
+
+    assert [call.kwargs["max_tokens"] for call in completion_call.await_args_list] == [
+        127900,
+        127500,
+    ]
 
 
 @pytest.mark.asyncio
@@ -667,6 +688,7 @@ async def test_accepted_activation_defers_external_sibling_call() -> None:
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_rejected_activation_keeps_external_sibling_dispatchable() -> None:
     adapter = _adapter()
     runtime = _runtime()
@@ -708,8 +730,10 @@ async def test_rejected_activation_keeps_external_sibling_dispatchable() -> None
 
 
 @pytest.mark.asyncio
+@pytest.mark.usefixtures("declared_capabilities")
 async def test_streaming_activates_skill_without_mcp_proxy() -> None:
     adapter = _adapter()
+    adapter.model.max_output_tokens = 128000
     runtime = _runtime()
     prepared = PreparedModelStream(
         stream=_AsyncChunkStream(
@@ -736,10 +760,24 @@ async def test_streaming_activates_skill_without_mcp_proxy() -> None:
         has_tools=True,
     )
 
-    with patch(
-        "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
-        AsyncMock(return_value=_AsyncChunkStream([_text_chunk("Payroll answer")])),
-    ) as completion_call:
+    measured_payloads = []
+
+    def reserve(messages, tools, model, *, response_format=None):
+        measured_payloads.append(str(messages))
+        return SimpleNamespace(
+            tokens=500 if "Use the exact payroll procedure." in str(messages) else 100
+        )
+
+    with (
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter.measure_provider_input_reserve",
+            side_effect=reserve,
+        ),
+        patch(
+            "eneo.completion_models.infrastructure.adapters.tenant_model_adapter._acompletion_call",
+            AsyncMock(return_value=_AsyncChunkStream([_text_chunk("Payroll answer")])),
+        ) as completion_call,
+    ):
         output = [
             completion
             async for completion in adapter.iterate_stream(
@@ -771,6 +809,9 @@ async def test_streaming_activates_skill_without_mcp_proxy() -> None:
         (s.tool_call_id, s.tool_name, s.result_status, s.mcp_tool_name)
         for s in activation_steps
     ] == [("activation-1", "skill-1", "completed", SKILL_ACTIVATION_TOOL_NAME)]
+
+    assert completion_call.await_args.kwargs["max_tokens"] == 127500
+    assert "Use the exact payroll procedure." in measured_payloads[-1]
 
 
 @pytest.mark.asyncio
@@ -1244,6 +1285,7 @@ def test_reserved_activation_tool_collision_is_dropped_and_recorded() -> None:
         name="test-model",
         supports_tool_calling=True,
         token_limit=128000,
+        max_output_tokens=16000,
     )
     runtime = _runtime()
     built_in = {
@@ -1266,6 +1308,7 @@ def test_reserved_activation_tool_collision_is_dropped_during_fallback() -> None
         name="test-model",
         supports_tool_calling=True,
         token_limit=128000,
+        max_output_tokens=16000,
     )
     runtime = _runtime(selective_activation_enabled=False)
     proxy = _CollisionMCPProxy()
@@ -1348,4 +1391,12 @@ async def test_streaming_reports_always_active_skills_as_steps() -> None:
             next(c for c in output if c.response_type is ResponseType.TOOL_CALL)
         )
         == 0
+    )
+
+
+@pytest.fixture
+def declared_capabilities(monkeypatch):
+    monkeypatch.setattr(
+        "litellm.get_supported_openai_params",
+        lambda **kwargs: ["max_tokens", "max_completion_tokens"],
     )

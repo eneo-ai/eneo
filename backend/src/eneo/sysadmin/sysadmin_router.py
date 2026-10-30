@@ -1590,9 +1590,10 @@ async def update_completion_model_metadata(
             exclude_id=id,
         )
 
-        # Ensure model_data has the id
+        update_payload = model_data.model_dump(exclude={"id"}, exclude_unset=True)
         update_with_id = CompletionModelUpdate(
-            id=id, **model_data.model_dump(exclude={"id"}, exclude_unset=True)
+            id=id,
+            **update_payload,
         )
         model = await repo.update_model(update_with_id)
 

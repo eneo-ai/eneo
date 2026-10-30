@@ -85,7 +85,9 @@
   }}
 ></div>
 
-<div class="bg-tertiary fixed inset-x-0 h-[8.275rem] transition-all duration-700 ease-in-out"></div>
+<div
+  class="bg-tertiary fixed inset-x-0 h-[8.275rem] transition-all duration-700 ease-in-out motion-reduce:transition-none"
+></div>
 
 <!-- Hover preloading is scoped to the authenticated shell: its navigation
      loads are reads, so a hovered link fetches the next page's data early.
@@ -115,7 +117,7 @@
   <header
     class:max-h-0={!$showHeader}
     class:max-h-14={$showHeader}
-    class="border-stronger bg-secondary z-10 box-border flex items-start overflow-clip rounded-t-sm transition-all duration-500 ease-in-out"
+    class="border-stronger bg-secondary z-10 box-border flex items-start overflow-clip rounded-t-sm transition-all duration-500 ease-in-out motion-reduce:transition-none"
   >
     <div
       class="border-default hover:bg-accent-dimmer group flex h-[3.25rem] min-w-[3.85rem] items-center justify-between border-r-[0.5px] pr-3 pl-6 md:w-[17rem] md:min-w-[17rem]"
@@ -131,6 +133,7 @@
         type="button"
         class="text-accent-stronger hover:bg-hover-default hidden h-9 w-9 cursor-pointer items-center justify-center rounded-lg text-lg md:group-hover:flex"
         aria-label={m.hide_header()}
+        title={m.hide_header()}
         on:click={() => {
           $showHeader = false;
         }}
@@ -177,7 +180,9 @@
     </nav>
   </header>
 
-  <main class="bg-primary relative z-10 flex-grow overflow-clip transition-all">
+  <main
+    class="bg-primary relative z-10 flex-grow overflow-clip transition-all motion-reduce:transition-none"
+  >
     <slot />
   </main>
 </div>

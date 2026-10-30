@@ -7,15 +7,25 @@ import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions } from "@/lib/api/conversations";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
+import { composerValue, typeIntoComposer } from "@/test/composer";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
+import type { ToolCallRecord } from "./side-panel/message-tool-calls";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   sent: [] as { text: string; body: unknown }[],
   mode: "fail" as
-    "fail" | "refused" | "json" | "answer" | "hold" | "approval" | "approval-break" | "provider",
+    | "fail"
+    | "refused"
+    | "json"
+    | "answer"
+    | "hold"
+    | "approval"
+    | "approval-break"
+    | "provider"
+    | "tool",
   titled: [] as string[],
   rated: [] as { path: string; params: unknown; body: unknown }[],
   /** While set, the files upload waits for the test to finish it. */
@@ -109,6 +119,23 @@ vi.mock("@/lib/chat/transport", () => ({
             web_search_references: []
           }
         },
+        ...(spies.mode === "tool"
+          ? [
+              {
+                type: "tool-input-available",
+                toolCallId: "call-1",
+                toolName: "move_step",
+                input: { step_id: "step-2", position: 1 },
+                dynamic: true
+              },
+              {
+                type: "tool-output-available",
+                toolCallId: "call-1",
+                output: { content: [], structuredContent: { draft_revision: 5 } },
+                dynamic: true
+              }
+            ]
+          : []),
         { type: "text-start", id: "t" },
         { type: "text-delta", id: "t", delta: "Gränsen är 700 000 kr." },
         { type: "text-end", id: "t" },
@@ -176,11 +203,15 @@ const partner: ChatPartner = {
 function Harness({
   onSessionCreated,
   onTitle,
+  onToolCallFinished,
+  onAnswerFinished,
   chatPartner = partner,
   initialMessages
 }: {
   onSessionCreated?: (id: string) => void;
   onTitle?: (title: string) => void;
+  onToolCallFinished?: (call: ToolCallRecord) => void;
+  onAnswerFinished?: () => void;
   chatPartner?: ChatPartner;
   initialMessages?: EneoUIMessage[];
 }) {
@@ -193,6 +224,8 @@ function Harness({
       onActivityChange={setActivity}
       onSessionCreated={onSessionCreated}
       onTitle={onTitle}
+      onToolCallFinished={onToolCallFinished}
+      onAnswerFinished={onAnswerFinished}
     />
   );
 }
@@ -221,6 +254,24 @@ describe("ChatView streaming an answer", () => {
     expect(spies.titled).toEqual(["session-1"]);
     // A new assistant-first send sends the assistant id, not a session.
     expect(spies.sent[0]?.body).toMatchObject({ assistant_id: "assistant-1", session_id: null });
+  });
+
+  it("tells the page about each tool call that finished and about the finished answer", async () => {
+    spies.mode = "tool";
+    const onToolCallFinished = vi.fn();
+    const onAnswerFinished = vi.fn();
+    renderInApp(
+      <Harness onToolCallFinished={onToolCallFinished} onAnswerFinished={onAnswerFinished} />
+    );
+    ask("Flytta steget först");
+
+    await waitFor(() => expect(onAnswerFinished).toHaveBeenCalledTimes(1));
+    expect(onToolCallFinished).toHaveBeenCalledTimes(1);
+    expect(onToolCallFinished.mock.calls[0]?.[0]).toMatchObject({
+      toolCallId: "call-1",
+      toolName: "move_step",
+      state: "output-available"
+    });
   });
 
   it("refreshes the partner's history and the recent list once the answer is saved", async () => {

@@ -1,0 +1,904 @@
+import { Callout } from "nextra/components";
+
+# Flows
+
+A Flow is a multi-step AI pipeline you build inside a space. You design it as a draft, publish it to make it runnable, and then execute runs against that published version. Every run is tied to an immutable version snapshot, so results are traceable to the exact definition that produced them.
+
+Flows are built, run and administered in the new web app: open a space and choose **Flows**, and an administrator finds the organization's flow settings under **Admin → Flows**. The SvelteKit app has no flow screens; its space menu links to the new app's flows page when the deployment sets `NEW_APP_URL`.
+
+<Callout type="info">
+  If you want to build on Flows from your own application, read this page first
+  and then continue with the{" "}
+  <a href="/guides/flows">Eneo Flows API consumer guide</a>. A Flow can also be
+  drafted in an ordinary assistant chat, which edits the Flow through the flow
+  tools and the same rules as the editor.
+</Callout>
+
+![High-level Flows lifecycle diagram showing user-principal-only authoring, publishing to a versioned definition, and runtime execution with outputs, artifacts, and evidence](/diagrams/flows-overview.svg)
+
+_Flows at a glance: user principals author and publish drafts, API consumers run published versions, and completed runs produce outputs, artifacts, and evidence._
+
+## Key terms
+
+| Term                 | Meaning                                                               |
+| -------------------- | --------------------------------------------------------------------- |
+| Space                | The workspace where flows, assistants, and permissions live           |
+| Step                 | One ordered unit in the flow pipeline                                 |
+| Execution principal  | The identity that owns a run: a user principal or a service key       |
+| Material             | The text or structured data a step actually receives as input         |
+| Classification level | The security level that constrains how data can move through the flow |
+
+## The mental model
+
+The easiest way to understand Flows is to think in three layers:
+
+| Layer                        | What it does                                                               |
+| ---------------------------- | -------------------------------------------------------------------------- |
+| Human-owned draft            | Lets a user-principal author design and publish the flow                   |
+| Published execution contract | Defines the versioned runtime shape that API consumers call                |
+| Evidence-aware runtime       | Executes runs, stores outputs and artifacts, and records RAG/evidence data |
+
+The rest of this page explains those three layers in order.
+
+## Drafts, published versions, and runs
+
+A flow definition lives inside a space and contains:
+
+- top-level authoring metadata such as name, description, creator, and owner
+- an ordered list of steps
+- optional form fields and runtime input requirements for published runs
+- optional DOCX template assets for document assembly
+
+Run-history retention is an operational administrator policy, not part of the Flow definition. See [Flow run-history retention](/guides/flows/retention-policy).
+
+### Three separate objects
+
+| Concept           | What it means                            | Who owns it                                                |
+| ----------------- | ---------------------------------------- | ---------------------------------------------------------- |
+| Draft flow        | The editable authoring definition        | A human draft owner                                        |
+| Published version | An immutable snapshot used for execution | Versioned from the draft                                   |
+| Flow run          | One execution of a published version     | The execution principal: a user principal or a service key |
+
+That split is intentional. Draft editing stays human-governed, while runtime execution can safely belong to a machine principal.
+
+Published versions are schema-versioned and checksummed. Eneo verifies that the
+stored definition still matches the checksum created at publish time before any
+functional read uses it—for example, run creation, retry, runtime-contract and
+versioned-graph reads, webhook delivery, and worker execution. A mismatch fails
+closed with `flow_definition_checksum_mismatch`. Do not retry an operation pinned
+to that version: publish a valid version and start a new run. Keep the old run for
+authorized evidence and forensic inspection; republishing does not repair its
+immutable snapshot.
+
+### Assistant snapshots at publish time
+
+Each published version stores the assistant execution surface used by every step:
+
+- instructions
+- model identity and model parameters
+- knowledge-source references
+
+When a run starts, Eneo compares the published assistant surface with the current
+assistant configuration. If the assistant changed after publish, the run fails
+before any step executes. Republish the Flow after reviewing the change.
+
+A step that calls an AI model runs only with the model its published snapshot
+names. Publishing refuses such a step when its assistant has no model, with
+`flow_assistant_model_provider_required` naming the step. When security
+classifications are on and such a step must clear a classification level,
+publish reports the classification refusal first. A run of a version published without one fails with the same code
+before any step executes.
+
+This protects against silent configuration drift. It does not freeze the contents
+behind a knowledge source. If that source changes, the Flow still uses its current
+data at run time. A step's assistant does not use MCP servers or tools in a
+Flow; a step whose `input_source` is `tool` is where a Flow calls one MCP tool.
+
+### Owner vs creator
+
+For authoring, Flows track both:
+
+- the person who originally created the draft
+- the person who currently owns the draft
+
+In the API and backend this maps to `created_by_user_id` and `owner_user_id`. The distinction matters because authorship history and current authoring authority are not always the same thing.
+
+## Export and import a flow
+
+Choose **Export** in the flow editor to download an `.eneopkg` package. It carries
+step instructions, form fields, settings, and resource requirements. Run history,
+credentials, and knowledge-source contents are excluded. At import, choose the
+local models and knowledge sources that the new draft should use.
+
+If the flow fills a Word template, **Include Word templates** is selected by
+default. The package includes the original DOCX files and field mappings. Review
+the files before sharing: text already present in a template travels with it.
+Imported templates become separate assets owned by the new flow; source-local
+file and template identifiers are replaced.
+
+Clear the checkbox to share only the definition and mappings. During import,
+upload a replacement DOCX for each missing template. Eneo checks that its content
+control tags and field types match the package before allowing import. You may
+change layout and other document text while preserving those fields.
+
+An import is refused before any Word template is opened when its request is
+larger than the package limit allows (the included templates plus its
+replacement files), or when its Word templates together unpack to more than
+100 MiB. Each template slot counts with its own copy of the unpacked size, so a
+file reused by many slots counts once per slot.
+
+Packages with template requirements use `eneo.flow_package.v2` and require an
+Eneo version that supports this format, whether or not the DOCX files are
+included. Existing `eneo.flow_package.v1` packages remain readable. Imports create
+unpublished drafts. Review the mappings, publish the draft when ready, and test the generated Word
+document before colleagues start using the flow.
+
+## How a flow executes
+
+Flows execute **sequentially**. Each step receives input, produces output, and passes input data onward according to its `input_source`.
+
+![Sequential step execution diagram showing run input flowing through three example steps (Transcribe, Summarize, Render DOCX) into run output, with reference panels for input_source, output_mode, and output_type values](/diagrams/flows-sequence.svg)
+
+_A worked example: audio goes in, a DOCX document comes out. Each step declares where it reads from and how it writes its result._
+
+### Core step fields
+
+| Field                            | What it controls                                   | Common values                                                                                                                  | Default behavior  |
+| -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ----------------- |
+| `input_source`                   | Where the step gets its material from              | `flow_input`, `previous_step`, `all_previous_steps`, `http_get`, `tool`                                                        | Explicit per step |
+| `input_type`                     | What kind of input the step expects                | `text`, `json`, `audio`, `document`, `file`, `any`. `image` exists in the enum but the runtime rejects it; do not build on it. | Explicit per step |
+| `output_mode`                    | How the step produces its result                   | `pass_through`, `compose_text`, `copy_input`, `http_post`, `transcribe_only`, `render_verbatim`, `template_fill`                             | Explicit per step |
+| `output_type`                    | The result shape                                   | `text`, `json`, `pdf`, `docx`                                                                                                  | Explicit per step |
+| `output_classification_override` | Optional higher classification for the step output | integer: the level of one of your organisation's security classes                                                              | No override       |
+
+A step whose `input_source` is `tool` names one MCP tool in `input_config.tool`: the server's id, the tool's id and the arguments. It is configured in the step editor's Advanced mode, where the source is called "Fetch from a tool", or through the API.
+
+- An argument is a fixed JSON value or one whole reference such as `{{step_1.output.structured.days}}`, which keeps the JSON type of what it names. Text around a reference is refused, and so is a reference inside a list or an object. A reference whose value is null (an optional run-form field left empty reads as null) is not sent when the input schema's top-level `required` does not name the argument; a fixed null is sent.
+- A fixed string cannot contain `{{...}}`: it is read as a reference. There is no escape syntax.
+- While the organization has security classifications on, the editor shows, once a tool is chosen, the security class of its server and the rule it sets: the server must have at least the space's class, and a value from an earlier step is sent only if the class of that step's result is not higher than the server's; otherwise the flow cannot be published. For a server without a class it says that the flow cannot be published while the space has a class or while an argument reads an earlier step whose result has a class.
+- Argument values are stored and returned as written and are not treated as secrets. Do not put a credential in an argument; the MCP server's credential is stored with the server.
+- Such a step reads `text` or `json`, takes no uploaded files and cannot use `template_fill`.
+- Publishing requires each reference to name one of these: an earlier step's text (`step_N.output.text`, or the step's name alone), its status, its error message or a field of its declared contract, a declared run-form field, or a runtime variable. A step's name with a path after it (`{{Hämta.output.text}}`) is refused, because a run binds the name to the step's text only. Publishing does not judge whether a runtime variable that depends on the run's data (a transcript, an upload) has a value in a run. It also refuses a step that gives no value for an argument the tool's approved input schema names in its top-level `required`, unless the schema is of JSON Schema draft 3, 4, 6 or 7 and has a top-level `$ref`, which in those drafts stands for the whole schema, so a run does not read that `required`. It refuses an argument, fixed or a reference, whose name the schema refuses whatever its value: the schema's top-level `additionalProperties` is `false`, it has no top-level `patternProperties`, and its top-level `properties` does not name the argument (with the same exception for such a `$ref`). It refuses a fixed value (not a reference) that does not fit what the schema's top-level `properties` declares for that argument, with the same exception for such a `$ref`. Publishing checks fixed properties in a child process with a hard time limit, including regular expressions. If that check times out, cannot evaluate the property schema, or cannot run on the host, publishing leaves the value to the run's check. A value bound to a reference, and every other rule of the schema, are checked when the step runs. It also asks whether the instance and the space allow the tool in the flow's space, and stores the tool's name and the fingerprint of its approved input schema in the published version. The instance does not allow a tool whose server takes a credential (a bearer token, an API key, or a user name or password in the address) at a plain `http` address other than `localhost`, `127.0.0.1` or `[::1]`: it is refused as `server_credential_needs_https` at publish, in the editor's tool list and when a run asks, so the credential is never sent; a run refuses a call to such a loopback address later, through the destination policy, as `typed_io_tool_destination_blocked`. The instance administrator registers the server's `https` address, without a user name or password in it; see [MCP servers](/guides/mcp-servers#authentication).
+
+At run time a step with `tool` calls the pinned tool once per step attempt, with the MCP server's stored credential, and the answer becomes the step's input: for `input_type` `json` the structured content, or one text block that is a JSON object or array; for `text` the text blocks, or the structured content as JSON text. An answer with a number JSON does not have (NaN, an infinity), with the character U+0000, or with a block that is not text, is refused. The tool must belong to a general MCP server that the flow's space has activated, be switched on, and have an approved definition. The flow calls the tool once per step run; a tool that changes something changes it again when the run is started again, and Eneo does not prevent a repeated change. When a run fails at a step at or after a tool step, or its dispatch fails after it has completed one (also one it took over from the run a retry started from), its error has `retryable` false; for a code that is retryable otherwise, `error.details.tool_call_possible` is true.
+
+A run asks every level about its tool steps before it runs them (when it starts, and again when it is taken up after a review, for the tool steps it has not completed) and once more before the call. Between that last question and the call, the server's registered address is vetted against the flow destination policy and its name is resolved, within the time the step has left. The call follows no redirect. Every connection the call opens is vetted again when it is opened and goes to an address the policy allows then, so a name that answers otherwise at that moment is not connected to. Resolving the name and the exchange with the server (connecting, initializing, the call, closing) each get at most `MCP_CLIENT_CALL_TIMEOUT_SECONDS` (60 seconds by default), or less when the step's timeout leaves less. Cancelling a run does not stop a tool read that is in flight: the call can still reach the server, and the read ends within those two bounds, one second more at the latest.
+
+What a run keeps of a tool read:
+
+- On a successful read, the evidence edges of the bound arguments the call sent and one `tool_answer` edge with the server's id, the tool's id and name, the security classification level the answer was counted at, and the hash and size of the answer, never the value.
+- One audit record for each read that reached out for the server, however it ended: the server's scheme, host and port (not the path or query of its address, where a token can be), the outcome, the duration, the server's id and the tool's name, never the arguments. A typed failure records its message. A read that was cancelled, or stopped because its attempt had closed, records "The call was stopped before it ended.", and one that failed with an error that has no typed code records "The call ended with an error that has no typed code."; when that happened before the request was sent (while the server's address was being checked or the call's start stored), the record says so instead: "The read was stopped before its request was sent." or "The read ended with an error that has no typed code before its request was sent." The error's own text is not recorded. However it ended, a read waits at most 5 seconds for its audit record to be put on the audit log's Redis queue; if that has not finished in that time, the read ends without waiting further and the worker logs a warning that the record may not have been queued. The record is queued outside the run's transaction, by an audit service on a short database session of its own, which serves only the audit settings that service reads; a write cut off at the limit finishes unwinding on that session while the run goes on with its own. A record that cannot be queued (the audit log or that session fails) does not fail the read. A read that is stopped while its record is being queued waits for that same record, within the same 5 seconds, and then stops; it does not queue a second one. An HTTP input read is audited the same way once its request is sent. An audit record is queued only when the read's ending is known, so a worker process that is killed outright (for example with SIGKILL) during a read writes no audit record for it. What is left of such a read differs: a tool read whose call start was committed (below; that happens after the server's address is checked and before the request) keeps that start, while a tool read killed before then keeps nothing; an HTTP input read keeps no record of its request, so nothing stored shows that it was made.
+- A read that fails keeps that one audit record and no argument edge.
+- On the step attempt, a record of the call in the attempt's `input_payload_json`. `tool_call_start` (the server's id, the tool's id and name, the fingerprint of the input schema pinned at publish and of the approved one read before the call, and the complete arguments object with bound values resolved) is stored and committed before the request is sent. It records what was prepared for the server, not that the server received it. If it cannot be stored whole (its JSON text is larger than the deployment's inline limit, `FLOW_MAX_INLINE_TEXT_BYTES`, or it is nested deeper than the record can be read back), the step fails with `typed_io_input_too_large` and no request is sent; if the write fails, no request is sent either. `tool_call_result` is stored before the step goes on: `answered` with the duration and the size and hash of the answer the step took (the same as its `tool_answer` edge), or `failed` with the duration and the typed code. A result that cannot be stored fails the step before its answer is used. A run that ends while its call is in flight keeps the start and no result: nothing is written on an attempt after it is closed.
+- The attempt's `tool_call_state` reads that record: `answered` or `failed` from the result, `in_progress` while the attempt is open without one, and `interrupted` when the attempt was closed before a result was stored, for example because the run was cancelled during the call. A worker that stops during the call leaves the start without a result, so once its attempt is closed the call reads as interrupted. An interrupted call may or may not have reached the server. A step a retried run took over from its source run made no call in that run and has no record. Redacted evidence applies the same masking to the record as to the rest of the attempt: a string value under a secret-named key (such as `api_key`) is masked, while a number, a boolean or an object under such a key is not. Debug-evidence retention and run-history purge remove it with the attempt's input.
+
+### Step chaining
+
+The backend sorts steps by `step_order`. A later step can:
+
+- reuse the original flow input
+- consume the previous step's output
+- aggregate previous step outputs, preferably through targeted structured refs
+- fetch input with HTTP GET
+
+The flow graph endpoint and the web editor both expose this structure directly.
+
+In the editor's flow view the steps stand left to right in `step_order`, whatever they read, and the result comes after the last step. A step whose `input_source` is `tool` has a node of its own above it, which names the tool and its server, or "MCP tool" until the editor's tool list names them. The flow input and an HTTP source sit above the first step they feed; when a tool node holds that place, or they feed a tool node, they sit to the left of it. A tool node is marked, with the reason in Advanced mode, when the space's tools no longer include the tool or a run may not call it. In Advanced mode it lists up to three arguments, those that read other data first. An argument that reads an earlier step or the flow input is a dashed edge from that step or from the flow input to the tool node, at the argument's row in Advanced mode; the arguments the node does not list share one counted edge per source. Two steps are joined by an edge only when the later one reads the earlier.
+
+## Published runtime inputs and run contracts
+
+Published flows can expose two runtime input shapes to API consumers:
+
+1. **structured form fields** that become variables in steps
+2. **file inputs** for specific runtime-input-enabled steps
+
+The runtime API exposes this through:
+
+- `GET /api/v1/flows/{id}/run-contract/`
+
+That endpoint is the canonical way for a client to discover what a published flow expects before starting a run.
+
+SDK-specific idempotency helpers are covered in the <a href="/guides/flows-api-guide">Flow Runtime API Reference</a>.
+
+Runtime files are uploaded through step-scoped paths and passed to run creation in `step_inputs[step_id].file_ids`. A file id can be reused for multiple compatible steps in the same run. Orphan uploads can be deleted before run creation through `DELETE /api/v1/flows/{id}/runtime-files/{file_id}/`; after a file is attached to run input or output state, deletion returns HTTP 409 instead of mutating persisted execution history.
+
+The same run contract also tells clients whether the flow can pause for human review through `steps_requiring_review`, what final output shape to expect through `final_output`, and which runtime upload timeout policy to apply through `runtime_upload_policy`.
+
+Completed runs expose one closed `result.kind`. `inline_text` is exact complete
+text. If terminal text exceeds inline storage, `file_backed_text.preview` is
+only a bounded display prefix and `file_backed_text.file` identifies the
+current-attempt generated output to download through the authorized artifact
+endpoint only when `file.availability` is `available`. When it is
+`content_purged`, the complete text is unavailable and the artifact endpoint
+returns `410`. Clients must not treat the preview as complete text.
+
+A run can pause at `awaiting_review`. The runtime then exposes an active review checkpoint that a consumer app can edit, approve, reject, and resume. Initial execution still creates one run for the whole published flow; a failed run can later be retried, which creates a child run that reuses the completed steps and executes from the first unfinished step.
+
+After an edited JSON result is resumed, later steps that read the reviewed result receive the edited content they select. An AI step that reads it directly is also instructed which of the values it reads the reviewer changed or removed, and to keep them rather than restore them from other parts of its input; this is an instruction to the model, not a guarantee of what it writes. The instruction names only the source step, binding, selection and the path of each change inside the selected value, and only for the selections the step reads: never a value, never a replaced value, and a removed key only when the step's output contract declares it (otherwise only its container is named). Numbers are compared by value, so `100.0` sent back as `100` is not a change, and an approval without a change adds nothing. Too many changes for one step fail that step with `typed_io_input_too_large` before any model call, as does a run whose reviewed results exceed the read limit. Not told (unmeasured): a step that reads a speaker-naming result as text, section and summarize calls, speaker-naming calls, and a step that reads a later, transformed result.
+
+For audio-first workflows such as meeting transcript summaries or employee review notes, the intended runtime path is **completed upload first, then one published Flow run**:
+
+- record in the browser or pick an audio file
+- upload the completed file through the published Flow runtime contract
+- create one run with a stable `Idempotency-Key`
+- let the Flow steps handle transcription and final output generation
+
+The Flow runtime does **not** require browser-side streaming transcription for this pattern.
+
+### Recording in the run dialog
+
+When a user records audio in the run dialog:
+
+- The recorder shows how long the recording can still run. The limit comes from
+  the flow's longest recording and the audio input's file slots. A long
+  recording is split into parts, one file each, and a part starts before a file
+  reaches its size limit.
+- **Pause** (Swedish: Pausa) pauses the recording and **Resume** (Fortsätt)
+  continues it. Paused time is not recorded and does not count toward the
+  recording's length or its parts.
+- If live text is on, pausing turns it into a preview, and the recording is
+  transcribed after it ends. A long pause can end the live text; the recording
+  continues.
+- Each part is kept on the device while it records. If the page closes or
+  reloads during a recording, the dialog offers to continue it the next time it
+  opens, with the audio up to shortly before the page closed.
+
+### How form fields map to runtime payloads
+
+If a published flow exposes form fields, the client sends those values inside `input_payload_json` using the published field names as keys. The backend validates the values against the published field types and required flags.
+
+### JSON Schema contract references
+
+Step `input_contract` and `output_contract` use JSON Schema 2020-12. A contract
+is one self-contained document:
+
+- `$id` is not allowed anywhere in a contract.
+- `$schema` may be left out. If present, it must be exactly
+  `https://json-schema.org/draft/2020-12/schema`.
+- `$ref` and `$dynamicRef` must point to a schema inside the same contract:
+  `#`, a pointer such as `#/$defs/value`, or a local `$anchor` or
+  `$dynamicAnchor` such as `#value`. A pointer into other content, such as
+  `default` or `examples`, is not a schema and is refused.
+
+Saving, publishing and importing reject a contract that breaks
+these rules. The schema error names the step and the JSON pointer of the
+keyword.
+
+A contract that was saved before these rules and that a later save leaves
+unchanged, compared as JSON, does not stop that save, so a flow can still be
+renamed or edited elsewhere. Such a contract skips the rules above (no `$id`,
+the 2020-12 `$schema`, references inside the contract), but it is still checked
+against the 2020-12 metaschema, so a draft 7 contract that uses the array form
+of `items` is still refused. Changing the contract applies every rule to it.
+Publishing checks every contract.
+
+Remote references are never fetched. Validation opens no network connection and
+reads no file for a reference, a dialect, or a vocabulary. A contract saved
+before these rules keeps the draft its `$schema` names. Its references resolve
+only inside the contract, except that a reference to one of the JSON Schema
+metaschemas that ship with the server, such as
+`https://json-schema.org/draft/2020-12/schema`, resolves from the server's own
+copy. Saving such a reference is refused, unless the contract is a saved one
+left unchanged. If a stored contract has a reference that cannot be resolved, or
+cannot be evaluated at all, the step fails with `typed_io_contract_violation`.
+
+When a step runs, its input and its output are checked against their contracts
+in a separate checking process with a time limit, for an AI step's answer as
+for a `copy_input` value. The limit counts from when the check is asked, so
+time spent waiting for other checks on the same worker is part of it. A value
+that cannot be checked in time fails the step with
+`typed_io_contract_not_checked`; it was not found invalid. The same holds for
+the arguments of a tool call, checked against the tool's input schema. When an AI step's
+answer is checked against a contract and holds a number JSON does not allow
+(`NaN` or an infinity), the step fails with `typed_io_output_parse_failed`.
+
+### Binding references at publish
+
+Publish validates questions and source references against the persisted form,
+runtime input names, earlier steps, and their output contracts:
+
+- `{"{{ flow_input.<field> }}"}` accepts a declared form field. A declared field
+  can also be bare, such as `{"{{ case_id }}"}`, only when the runtime exposes
+  that safe alias. Bare `flow_input` and its primary input keys are valid
+  where the run supplies them (see the free-text rule below); undeclared names
+  and unknown `flow_input` keys are rejected.
+- In a valid publish graph, bare `datum`, `indata_text`, and `transkribering`
+  keep their runtime meanings. Form fields named `datum` or `indata_text` are
+  reached through `flow_input.datum` or `flow_input.indata_text`.
+  `transkribering` is a primary runtime input key, not a custom form field.
+- Free-text run input (`indata_text`, `indata_json`, `flow_input.text`,
+  `flow_input.json`, `flow_input.structured`) is what the run dialog's text box
+  supplies, and the box appears only when the run form collects free text. The
+  run dialog and the documented run contract supply only a flow's declared form
+  fields (and uploads), so publish refuses a question, prompt, output mapping,
+  or HTTP step URL and header that reads run text on a flow with form fields or
+  uploaded files. A version published earlier that reads it keeps running as
+  before.
+- Questions accept an earlier `step_N` reference or the exact trimmed earlier
+  display label as a bare expression. Labels represent complete step text, so
+  current, future, unknown, and dotted label paths are rejected. `source_refs`
+  accept the same prior numeric refs and exact labels.
+- Structured question paths such as
+  `step_1.output.structured.report_title` publish only when the earlier step's
+  `output_contract` proves every path segment. Missing contracts, unknown
+  fields, and traversal through scalar values are rejected before runtime.
+- Authoring lowers `plan_step_ref` to `step_N` before persisting a `FlowStep`.
+  `existing_step_ref` is edit identity only. Publish rejects either raw identity
+  token if it survives authoring as binding syntax.
+- `step_N` is the saved position of the step it names. An edit that adds,
+  moves or removes steps keeps every read of a kept step on the step it read.
+  The alias is written with that step's new position in questions, source
+  references and template bindings, and in an HTTP input or delivery at the URL,
+  the auth header name and username, the non-secret header values and the active
+  body template. The same places are checked: if the edit removes the step, or
+  moves it to where the reader cannot read it (after the reader; an HTTP
+  delivery may also read its own step's result), the edit is refused with
+  `flow_step_read_lost_producer` and nothing is written. A read that was already
+  invalid stays editable while it stays invalid; if the edit would make it name
+  a step the author never chose, the edit is refused with the same code.
+  In a template the alias is exactly `step_N` (ASCII digits, no leading zero);
+  any other spelling is no step and is refused. A source reference's number is
+  read as any decimal numeral, so `step_02` is
+  step 2; when its step moves, the edit writes it back as `step_N`, and it is
+  checked like any other read. Reads in a step's prompt (instructions) are
+  renumbered too, and publishing refuses a prompt read that names no earlier
+  step, declared field or runtime variable. Inactive configuration, such as a body template with mode `none`,
+  and text that only looks like a reference (a metadata key of a pass-through
+  step's output configuration) stay as saved. `föregående_steg` and `previous_step` mean the step
+  before and keep meaning position.
+
+Publish errors identify the exact location: question errors point to
+`input_bindings.question`, and source-reference errors point to the indexed
+`input_bindings.source_refs[i].step_ref`.
+
+For a JSON input using structured `source_refs`, a `field_path` can contain one
+`*` segment to combine lists from every section. The wildcard must select an
+array and be followed by an explicit path to an array in each element. For
+both arrays, the item schema must apply to every position; `prefixItems` is not
+supported. For example, `sektioner.*.underlag.krav.uppgifter` combines those lists
+in section order, preserving duplicates. The projected input mirrors only the path after
+`*`: `{"underlag": {"krav": {"uppgifter": [...]}}}`. Empty lists contribute no
+items, and zero sections produce an empty list. Missing, null, or non-array
+values cause the step to fail. Multiple wildcards, a trailing wildcard, and
+wildcards in text inputs are not supported.
+
+## Output modes and what they mean
+
+| `output_mode`     | What it is for                                    | Constraints                                                                          |
+| ----------------- | ------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| `pass_through`    | Standard LLM-backed generation                    | Historical name; the step still runs an LLM and returns the configured `output_type` |
+| `compose_text`    | Deterministic text assembly from resolved refs    | Requires `input_type=text`, `output_type=text`, and authored input bindings          |
+| `copy_input`      | Deterministic copy of the complete JSON input | Requires `input_type=json` and `output_type=json`; validates the output contract without changing JSON keys or values |
+| `http_post`       | Send the step output to an external HTTP endpoint | Requires valid authored HTTP config                                                  |
+| `transcribe_only` | Audio transcription                               | Requires `input_type=audio` and `output_type=text`                                   |
+| `render_verbatim` | Zero-LLM PDF/DOCX rendering from resolved text    | Requires `input_type=text` and `output_type=pdf` or `output_type=docx`               |
+| `template_fill`   | DOCX document assembly                            | Requires `output_type=docx`                                                          |
+
+### Process long material section by section
+
+For when to choose this mode and how to set it up in the flow editor, read
+[Process long material section by section](/docs/flows-long-material).
+
+A `pass_through` completion step can process material that exceeds its model's
+context window by setting:
+
+```json
+{ "input_config": { "text_processing": { "mode": "process_each_section" } } }
+```
+
+Set `output_type` to `json` and author an output contract containing one array of
+objects, such as `records`. Each section produces exactly one object using that
+array's item schema. The combined array preserves section order. This mode cannot
+be combined with `item_map` or `per_source` mapping.
+Assistants with knowledge retrieval configured are refused before model calls;
+knowledge retrieval with section processing is planned for a later release.
+
+Select exactly one file-backed previous-step material or one runtime file. A step
+that resolves multiple materials is refused before model calls; processing multiple
+materials in one step is planned for a later release. Sections cover the material's
+complete text, preserving whitespace and Unicode characters. Each reference to the
+material in the prompt or input template receives the current section, including
+when the material is referenced only in the prompt.
+The complete section must appear in the message content of every request that can
+be dispatched, including a capability fallback. This check ignores leading and
+trailing whitespace removed during request construction; interior whitespace and
+the manifest's exact ranges are preserved. A binding that includes only
+metadata is refused before any section runs.
+Line boundaries are preferred when practical; long lines may still split.
+
+Section sizes depend on the measured model request, including the rendered prompt,
+schema and output reserve, starting from the empty-section package. Conservative
+sizing bounds sections by both the model window and the request's resolved output
+allowance, which cannot exceed the model's declared maximum output. The allowance
+also accounts for the fixed prompt, any caller cap, and possible fallback requests.
+This leaves room for output proportional to the section's material; JSON framing,
+annotations, translation, reasoning and tokenizer differences can still make an
+answer exceed the cap. A response stopped by the output limit fails the step.
+The bounded search can choose smaller sections when token counts or the selected
+request package change; each accepted section has a measured fit.
+
+Each section request tells the model its section number and asks it to start
+new ids with `S<n>-`, so ids invented in different sections do not collide. This
+is guidance; the runtime does not rewrite ids. In section prompts,
+`{{ section_index }}` is the section's 1-based ordinal for any other use. This
+variable is unavailable in input bindings, ordinary steps and summarization.
+
+Calls run
+sequentially under the step's shared deadline, without passing earlier section
+responses into later calls. The existing mapped-call policy and structured-output
+size limit still apply; additional sections spend call, token and deadline budgets.
+A failed section fails the step, with completed and total
+section counts in the error details.
+
+The run contract lists these steps in `text_processing_steps`, including their
+array key and item schema. The step result's `section_manifest` records the full
+material hash, character and UTF-8 lengths, source material identity, and each
+section's core character range and output record index. Core ranges cover the
+complete material without overlap; optional context ranges do not own material
+characters.
+
+### Summarize long material into one record
+
+Set `input_config.text_processing.mode` to `summarize` when the step needs one
+answer over the complete material. It uses the same `pass_through` mode, JSON
+output contract, and single-material requirements as section processing. The
+terminal array contains exactly one object conforming to the array's item schema.
+Ask the assistant for concise records that preserve the facts needed for the final
+answer.
+
+A material that fits the measured request needs one call. Longer material first
+produces section records. If those records fit together, one further call combines
+them. Otherwise consecutive groups are combined sequentially, and the process
+repeats until one record remains. Each intermediate record uses the same item
+schema. One valid record completes the fold. If another round is needed, the
+current round must reduce both the number of records and their total UTF-8 JSON
+bytes.
+
+Section calls, fold calls, and capability fallbacks share the attempt deadline and
+the existing mapped-execution call and input-token limits. Summarization requires
+a finite call ceiling. When the token ceiling is unset, the finite call ceiling
+and model input capacity determine a finite aggregate token bound. Intermediate
+records remain subject to the structured-output size limit. Folding performs no
+knowledge retrieval. Records copy citations only when their parents carry them;
+otherwise they carry none. JSON section processing does not track citations, so
+summarization currently produces no citations.
+
+The attempt's `summarization` provenance retains the records reached on success,
+refusal, timeout, or failure, with their rounds, parent references, section indexes,
+and source material aliases. Before dispatch, provider-call receipts store lineage
+IDs, canonical input byte counts and hashes, and budget reservations. Progress
+reports completed and total groups within each round. An unfinished fold that
+cannot shrink or fit within its remaining aggregate limits stops with
+`flow_summarization_non_convergent`; the error details carry
+`summarization_rounds`, `summarization_records`, and `summarization_bytes`.
+
+### `compose_text`
+
+`compose_text` assembles final text from resolved input bindings without calling an LLM, RAG retrieval, or MCP tools, for example a source-section document report after semantic steps have already produced the section body, source label, source file id, and optional overview fields.
+
+Current validation rules are strict:
+
+- `input_type` must be `text`
+- `output_type` must be `text`
+- array `source_refs` require an `item_template` that references known structured fields
+- unknown template fields are rejected before runtime
+
+Use this when a later renderer needs deterministic text from already-structured facts, not another model rewrite.
+
+### `http_post`
+
+`http_post` sends a step output to an external HTTP endpoint using an authored HTTP configuration.
+
+The authored config is a typed object with:
+
+- `url`
+- `auth`
+- `timeout_seconds`
+- `body`
+- `custom_headers`
+- `response_format`
+
+Secret auth fields and secret custom headers are redacted in API responses as:
+
+```json
+{ "$secret": "stored" }
+```
+
+Send that sentinel back only when you want Eneo to keep the stored secret for an existing draft step. If the saved secret cannot be resolved during the draft HTTP test, the test response uses `HTTP_UNRESOLVED_STORED_SECRET`; re-enter and save the secret before testing again.
+
+Credentials are literal values. A bearer token, an API key, a basic-auth password, and a secret custom-header value are sent exactly as stored and are never filled from a step output, the run input, or a form field. A `{{ ... }}` reference in one of them is refused: when you create or update the step, when you publish the flow (Eneo reads the stored credential to check), and when a run starts, before any step runs. Put references in the URL, a header that is not secret, the basic-auth username, or the body instead. The draft HTTP test reports `HTTP_VARIABLE_RESOLUTION_FAILED` for a templated credential.
+
+The draft HTTP test endpoint returns a typed `request_preview` containing `method`, `url`, `headers`, and `body_preview` when Eneo can compile the request. Template interpolation failures return `HTTP_VARIABLE_RESOLUTION_FAILED` without a preview because there is no safe effective request to show.
+
+### `transcribe_only`
+
+`transcribe_only` is the built-in transcription mode for audio-to-text steps. Flows do not need transcription by default; transcription is effectively turned on only when a step uses this mode.
+
+Current validation rules are strict:
+
+- `input_type` must be `audio`
+- `output_type` must be `text`
+- if runtime input is enabled for that step, its runtime input format must also be `audio`
+
+This is the normal starting point for flows that ingest recorded meetings, interviews, or citizen-submitted audio.
+
+### `copy_input`
+
+Use **JSON without AI** to return the complete resolved JSON object or array as
+JSON output. The step preserves nested values, arrays, extra keys and Unicode;
+it does not call a completion model or normalize keys against the output schema.
+The assistant's prompt is not used: it is not resolved, selects no earlier
+material and does not count against the input byte ceiling.
+The input contract is checked when material is resolved. The existing inline
+output byte ceiling applies to the copied container, and then the output
+contract is checked directly against it. Both contract checks run in a separate
+checking process with a time limit chosen from measured checks of values at the
+default 8 MiB ceiling. The check takes longer for a larger value and for a contract
+with more work per item; a value that cannot be checked in time fails the step
+with `typed_io_contract_not_checked`, and a value that breaks the contract fails
+it with `typed_io_contract_violation`. Copying does not remove fields to make
+the value fit.
+
+The editor offers this mode for JSON material and selects JSON as its output.
+Deploy the database migration and a runtime that understands `copy_input` before
+saving or running such steps. Rolling back requires replacing or removing copy
+steps from drafts first; already published copy steps also need a compatible
+runtime.
+
+### `render_verbatim`
+
+`render_verbatim` is the built-in document renderer for text-to-PDF and text-to-DOCX final steps. It renders the resolved input text directly and does not call an LLM, RAG retrieval, or MCP tools.
+
+Current validation rules are strict:
+
+- `input_type` must be `text`
+- `output_type` must be `pdf` or `docx`
+- the step should read the body-writer step through `input_source=previous_step`
+
+Use this when a previous step has already written the final document body and the final step only needs to produce a downloadable artifact.
+
+### `template_fill`
+
+`template_fill` is the document-assembly mode for DOCX output.
+
+Current validation rules:
+
+- `output_type` must be `docx`
+- the step must point at a valid template asset or template file configuration before the flow can be published successfully
+- a placeholder bound to a structured field of an earlier step must read a required field of one type: the field's `type` is exactly one of `string`, `number`, `integer` or `boolean`, and the step's result and every object above the field have `type: object` and list the next key in `properties` and `required`. Every other keyword (`enum`, `minLength`, `pattern`, `allOf`, `anyOf`) is allowed, because it can only narrow a node that already has one type. A type list such as `["string", "null"]`, a missing `type` or a `$ref` on that path is refused at publish with a message naming the placeholder and the field. The fill step treats an empty string as a deliberate omission and stops the run on `null` or on a key the step did not write, so declare the field required with one type. A `string` field takes an empty string when there is nothing to say only if it accepts one (a `minLength` of 1, an `enum` or a `pattern` that excludes it means its step gives a valid value instead). A `number`, `integer` or `boolean` field has no empty value: its step always gives a valid value, and a deliberately blank template binding is the way to leave the placeholder empty
+
+Use this when a later step should produce a deterministic DOCX document rather than free-form text.
+
+Prefer an **accessibility-reviewed DOCX template asset** whenever a flow uses `template_fill` for a final document. This is especially important for sensitive care-data workflows. In practice that means the chosen template should already have the right heading structure, reading order, table semantics, and other accessibility properties before the flow is published.
+
+## Advanced step input templates ("Underlag till steget")
+
+The web editor exposes an advanced per-step input template labeled **“Underlag till steget”** / **“Underlag (avancerat)”**.
+
+Use this when the default material assembly is not enough and you want to control exactly what text a step receives.
+
+This feature does **not** replace the step's instructions. It changes the **material text** the model receives for that step.
+
+- **Instructions** tell the model what to do
+- **Underlag till steget** controls what text the model actually works on
+
+If you leave the advanced input template empty, the step uses its normal material based on `input_source`, form fields, runtime files, and previous outputs. If you override it, you can compose custom text with variables such as earlier step outputs.
+
+You can reference an earlier step's text by its trimmed display label, for example `{{ Collect intake }}` when the earlier step's `user_description` is `Collect intake`. Eneo exposes that bare label only when the canonical step-reference mapping resolves it to the same step. If the label collides with another step's `plan_step_ref` or `existing_step_ref`, the authored reference wins and the display label is unavailable. Authored refs remain analyzer and dependency identifiers; they are not bare-text interpolation aliases.
+
+### What the LLM sees
+
+| Without custom material                                                                              | With custom material                                                        |
+| ---------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| The step receives the default assembled material from flow input, previous outputs, and runtime data | The step receives the exact text you compose in the advanced input template |
+
+This is one of the most powerful Flow features because it lets you keep the same step sequence while changing the exact context sent into the model.
+
+## Knowledge, files, RAG, and citations
+
+Each step uses an underlying assistant configuration. In the current UI and runtime model, that means a step can carry:
+
+- attached files
+- knowledge sources such as collections, websites, or integration knowledge
+
+### RAG in flows
+
+When a step uses knowledge, the runtime records RAG provenance in the step-attempt provenance payload. The evidence and debug surfaces can then expose:
+
+- retrieval status
+- source documents
+- chunk references and scores
+- prompt-context inclusion summaries
+- citation sidecar data when citation mode is active
+
+An attempted lookup that finds no chunks is reported as `status = no_chunks`,
+with the `rag_retrieval_no_chunks` step diagnostic. This is different from a
+skipped lookup, a timeout, or a retrieval error. If the runtime has to shorten a
+long retrieval query, it adds `rag_retrieval_query_truncated` and records only the
+derivation strategy, truncation flag, and bounded query length; the diagnostic
+does not copy the query text.
+
+The default behavior is best effort: the step still calls its completion model
+without knowledge chunks after `no_chunks`, `timeout`, or `error`. To require
+knowledge retrieval for a step, publish this versioned output configuration:
+
+```json
+{
+  "retrieval_policy": {
+    "version": 1,
+    "mode": "fail_closed"
+  }
+}
+```
+
+Fail-closed mode stops the affected completion call before completion-model I/O
+when the retrieval service or knowledge is unavailable, the retrieval input is
+blank, the bounded query is truncated, or retrieval ends in `no_chunks`,
+`timeout`, or `error`. Earlier calls in multi-source or per-item execution may
+already have completed. The failed step and attempt retain the bounded RAG status
+and diagnostics, so operators can distinguish a no-match result from dependency
+failure. Use `{"version": 1, "mode": "best_effort"}` to state the default
+explicitly. Retrieval policy is supported only for the retrieval-plus-completion
+`pass_through` and `http_post` output modes. For `http_post`, fail-closed
+retrieval prevents both the delegated completion-model call and creation of the
+outbound delivery intent.
+
+### Citation mode
+
+A step can enable `output_config.citation_mode = inline_inref_sidecar`.
+
+Current validation allows that only on **LLM-backed text steps**. It is not supported for `transcribe_only`, `render_verbatim`, or `template_fill` steps.
+
+### Highlighted source segments in the UI
+
+The web app includes a knowledge trace viewer for flow runs. It can open the underlying source document and highlight the retrieved segments used during RAG, which makes review and explainability much easier.
+
+## Security classification and effect boundaries
+
+### Security classification inside a flow
+
+Flows evaluate step security classification from several inputs:
+
+- the space baseline classification
+- the classification implied by previous outputs
+- knowledge-source classifications
+- the classification of the MCP server of a tool the step reads its input from
+- any explicit output classification override
+
+"Previous outputs" covers everything a step reads from earlier steps: its input, its prompt, the bindings of a `template_fill` step, and the URL, headers, and body templates of an HTTP request. A `{{ ... }}` reference to an earlier step in any of these counts, so a step cannot pull in higher-classified material through a template that its own input does not name.
+
+A step whose input is the answer of an MCP tool counts the tool's server in two ways. The answer enters the step at the server's classification: the step's model must be cleared for it, and every later step that reads the step inherits it. The arguments are sent to the server, so the server's classification must be at least that of every earlier step the arguments read; a server without a classification adds no level and cannot receive data from a classified step. A server that no longer exists, or that the flow's space has not activated, has no level in this rule: publishing such a step is refused because the tool may not be used, not for its classification, and so is a run that has still to make the step's call.
+
+A run counts the server's level before its first step and compares it again before the call. If the level was raised, lowered or removed in between and the MCP decision still allows the tool, the step fails with `typed_io_tool_classification_changed` and nothing is sent; start the run again. A tool the decision no longer allows, for example because its server is now below the space's classification, is refused before that with `typed_io_tool_not_allowed`. The level the answer was counted at is kept on the step's `tool_answer` evidence edge (`server_classification_level`). A run that is taken up again after a review counts a tool step it has already completed at that kept level, whatever has happened to the server since (removed from the space, deleted, reclassified): the answer is already the step's stored input. Such a step is not asked about again, and what it sent is not compared with the server again.
+
+Current enforcement prevents a step from lowering the effective classification of its output. In practice, that means a flow cannot use an override to lower the classification below what the input material already implies.
+
+While the organization has security classifications turned off, none of these levels applies: a flow follows the same rule as the rest of the platform and no step is refused for its classification.
+
+When a save is refused for its classification, the response names the step, the level it must reach, what sets that level (a step it reads, the server of its tool, its knowledge sources or the space) and, when the step's model is what falls short, the space's models that would clear it.
+
+### Supported external effects
+
+Flow input may use HTTP GET, or the answer of one MCP tool through
+`input_source` `tool`. HTTP POST input, and MCP servers or tools on a step's
+assistant, are not supported in Flow authoring, published runtime
+definitions, or Flow packages. Standalone assistants and conversations retain their separately owned
+MCP behavior.
+
+Terminal HTTP POST output remains supported through the durable webhook outbox,
+with an **at-least-once sender contract**. Delivery can be duplicated after a
+timeout, connection loss, worker crash, or expired claim. Eneo sends the same
+opaque `Idempotency-Key` for retries of one Flow run, output step, and step
+attempt; this does not verify receiver idempotency. Receivers must retain and
+deduplicate that key for their required replay window.
+
+Eneo charges each of the five delivery attempts when the durable claim is made,
+before HTTP. HTTP `408` and `429`, `5xx`, and transport failures are
+bounded-retryable; other `4xx` responses are terminal. If the fifth claim
+expires with an unknown remote outcome, Eneo dead-letters the delivery and
+fails the run without a sixth POST.
+
+## Ownership and visibility
+
+### Authoring ownership
+
+Current authoring policy is intentionally narrow:
+
+- drafts are user-principal-owned
+- the assistant chat that edits a flow acts as the person in it
+- service keys are not supported for draft editing
+- tenant admins and space owners can override draft ownership according to the current authoring rules
+
+### Runtime principals
+
+Runs are principal-owned rather than draft-owned. A run can belong to:
+
+- a user principal
+- a service key principal
+
+That is what allows a service-backed application to keep working even if the employee who originally created the flow leaves the organization.
+
+## Access model
+
+![Flows access by lifecycle phase showing authoring requires user principal and published runtime supports both](/diagrams/flows-access-lifecycle.svg)
+
+_Authoring is user-principal-only. Published runtime supports both user principals and service keys._
+
+The cleanest way to think about Flow permissions is on **two axes**:
+
+1. **Lifecycle phase** — authoring vs published runtime
+2. **Principal type** — user-principal author/operator vs run owner vs service key
+
+That split is deliberate. A service key is a **runtime principal**, not a draft author.
+
+### Core rules
+
+- **Drafts are user-principal-owned.** Draft create, update, and delete, publish/unpublish, template management, flow-assistant authoring, and the flow authoring chat require a user principal. Reading a draft additionally allows an admin service key whose scope covers the flow.
+- **Published runtime is broader.** Published flows can be executed by a user principal or a service key, but runtime visibility still depends on who owns the run and who is a trusted operator.
+- **Own-run isolation matters.** Service keys are always own-run-only. They do not become cross-run space operators, even if the key is scoped to a space.
+- **Trusted operator roles use user principals.** In this context, trusted in-space operators means **space owner** and **space admin**. Tenant admin remains the tenant-wide trusted operator.
+- **Deleted flow history is view and export only.** Deleting a flow retires it. Its run list, run status and detail, step outputs, run graph, evidence, provider calls, evidence export, review history, transcript reads and run file links stay readable with the caller's current authorization (scope, membership, run ownership, service key and current space classification), and the history follows the flow's run-history retention rule. Evidence export follows the setting the flow was deleted with: a deleted flow cannot be edited, so a flow deleted with [evidence export](#evidence-export-is-the-flows-own-setting) off can never have its run evidence exported. Creating, cancelling, redispatching or retrying a run, review decisions, transcript corrections and regeneration, and runtime uploads answer 404 for a deleted flow; a run or upload that the delete overtakes is refused the same way.
+- **Deleting a flow cancels its unfinished runs.** The delete request does not wait for them. A maintenance sweep, every 60 seconds by default (`FLOW_RETIRED_RUN_DRAIN_INTERVAL_SECONDS`, a divisor of 60), cancels the deleted flow's queued, running and awaiting-review runs with the error code `flow_deleted`, cancels an open review checkpoint, and records the cancellation in the audit log with the system as actor. Each sweep cancels at most the 100 oldest such runs; the rest follow in later sweeps. Once cancelled, the runs are terminal and follow the run-history retention rule like any other finished run.
+- **Single-flow runtime lookups should use the published projection.** Runtime consumers should prefer `GET /api/v1/flows/{id}/published/` over the user-principal current-definition endpoint.
+
+<Callout type="info">
+  For machine integrations, service keys should discover published flows with{" "}
+  <code>GET /api/v1/flows/?space_id=...</code>, then fetch one flow's
+  runtime-safe projection with{" "}
+  <code>GET /api/v1/flows/{"{id}"}/published/</code>. Do <strong>not</strong>{" "}
+  treat <code>GET /api/v1/flows/{"{id}"}/</code> as a service-key discovery
+  endpoint; it serves the draft/current-definition view, and a non-admin service
+  key receives <code>403</code> with{" "}
+  <code>flow_service_key_admin_required</code>.
+</Callout>
+
+![Run visibility and evidence access showing four actor types with their access scope and evidence gating](/diagrams/flows-run-visibility.svg)
+
+_Once a run exists, what you can see depends on who you are. Evidence is additionally gated by policy or capability._
+
+### Quick access view
+
+| Surface family                           | User-principal draft author | User-principal run owner | Trusted in-space operator   | Tenant admin              | Service key                                                 |
+| ---------------------------------------- | --------------------------- | ------------------------ | --------------------------- | ------------------------- | ----------------------------------------------------------- |
+| Draft authoring                          | Yes                         | n/a                      | Yes, per authoring policy   | Yes                       | No                                                          |
+| Published runtime discovery              | Yes                         | Yes                      | Yes                         | Yes                       | Yes, published only in scoped space                         |
+| Create runs                              | Yes                         | Yes                      | Yes                         | Yes                       | Yes, published only                                         |
+| Read run status, step outputs, artifacts | Own runs                    | Own runs                 | In-scope runs               | Tenant-wide runs          | Own runs only                                               |
+| Evidence view / export                   | Own runs, policy-gated      | Own runs, policy-gated   | In-scope runs, policy-gated | Tenant-wide, policy-gated | Own runs only, explicit `flow_evidence` capability required |
+
+If you need the endpoint-by-endpoint version of this model, use the access matrix in the <a href="/guides/flows-api-guide#access-matrix">Flow Runtime API Reference</a>.
+
+## Evidence and classification-aware export
+
+Flows use a tiered evidence model rather than a binary debug/no-debug split.
+
+Authorized evidence is the deliberate forensic exception to functional rejection.
+It preserves the stored snapshot and reports `definition_integrity.status`,
+`expected_checksum`, and `current_checksum`. An `invalid` snapshot is evidence of
+corruption, not a trusted runtime definition; consumers must not execute or silently
+normalize it.
+
+| Tier            | Purpose                                                               |
+| --------------- | --------------------------------------------------------------------- |
+| Evidence view   | Inspect the rich run trace in the UI or API                           |
+| Redacted export | Standard support/compliance export                                    |
+| Raw export      | Full unredacted export for stricter debugging or compliance scenarios |
+
+### Evidence export is the flow's own setting
+
+Each flow decides whether its run evidence may be exported at all. The setting is `metadata_json.evidence_policy.allow_export`; in the editor it is **Nedladdning av bevisunderlag** (Evidence download) under **Grundinställningar** (Basic settings). It is off for every flow until someone turns it on.
+
+- **Off means nobody.** Both export tiers are refused with `403 flow_run_evidence_export_disabled` for everyone who could otherwise export: the run's owner, space owners and admins, tenant admins and service keys. A caller who may not export gets the ordinary refusal, whatever the setting is. The evidence view is not an export and is not affected.
+- **On means the usual rules decide.** Role, run ownership, service-key capability and the classification-3 rules below apply as before, and a redacted export still withholds verbatim passage text for a sensitive flow or for evidence held to classification 3.
+- **The flow's current value applies to all of its runs**, including runs made before the setting was changed. Turning it on opens export of older runs; turning it off closes it again.
+- **Anyone who may edit the flow may change it.** A published flow has to be unpublished before it can be edited, like for any other flow setting; the change applies as soon as it is saved. The flow's audit entry records the old and the new value.
+- **A deleted flow keeps the value it was deleted with.** Turn the setting on before deleting a flow whose evidence may be needed later; the delete dialog warns when it is off.
+- A flow imported from a package starts with export off.
+
+### What classification 3 changes
+
+The main tightening for classification 3 is on **raw export**; below a raw export, the evidence view and the redacted export also withhold verbatim passage text.
+
+A run's evidence is held to classification 3 when its space is at classification 3 or higher now, or when the run recorded classification 3 or higher for its evidence. A run records the highest classification of its steps before they run, at its start and at every resume or retry, and the record only rises: classifying the space lower afterwards does not lower it. A retry or a regenerated run that takes over another run's steps starts from that run's record. A run that produced evidence without a record, such as one made before runs recorded it, is held to classification 3, because its level is unknown. If none of its steps has completed, its next start or resume records the level as usual.
+
+Tenant flow settings can block raw export for:
+
+- space admins
+- user-principal run owners
+- service keys
+
+For sensitive workflows you can also declare governance metadata in `metadata_json.care_data_policy`, including:
+
+- `sensitive`
+- `approval_mode`
+- `pre_approval_visibility`
+
+For a sensitive workflow where final approval happens outside the Flow, typical values are:
+
+- `approval_mode = "single_reviewer_outside_flow"`
+- `pre_approval_visibility = "uploader_and_reviewers"`
+
+A sensitive flow has no export gate of its own: with `evidence_policy.allow_export = true` the usual rules decide who may export, and the redacted export still withholds verbatim passage text.
+
+Flow retention settings define eligibility, not authorization to delete:
+
+- Run-history policy resolves the first complete `{mode, days}` pair in Flow → Space → Organization order. `days` accepts `1..2555`; `mode` is `preserve` or `review_required`; no policy means there is no age threshold.
+- A Space or Flow either inherits its complete parent policy or replaces the complete pair. Parent values are defaults, not maximums, so one Flow can retain history longer than its Space.
+- Tenant `flow_settings.retention_policy.run_debug_evidence_days` independently defines when debug evidence can become eligible, and `flow_runtime_upload_abandonment_days` does the same for unbound runtime uploads.
+- `review_required` exposes matching terminal runs through a bounded, read-only queue that omits inputs and outputs. Reading it has no side effects.
+- Saving any policy never deletes, approves, schedules, or redacts Flow data. The daily shared retention worker does not mutate Flow-owned data.
+- The current settings surface has no Flow run-history purge action. A future purge must preview the exact scope, require confirmation and a reason, execute in bounded tenant-scoped batches, respect audit/webhook blockers, and leave an immutable audit receipt.
+
+Eligible Flow data remains stored until that separate purge workflow exists and an administrator explicitly completes it.
+
+Reusable runtime uploads that are still owned outside a completed run are not deleted by the run-history purge. If a workflow needs upload-library cleanup independent of run history, that needs a separate file-lifecycle policy.
+
+The operator-facing tenant settings seam is the preferred place for raw-export and debug-evidence governance, rather than hardcoding retention behavior into one specific Flow consumer. Whether a flow's evidence may be exported at all is the flow's own setting.
+
+The purpose is not to disable all evidence support. It is to keep normal inspection and redacted export practical while treating full raw export as the most sensitive surface.
+
+## Authoring surfaces
+
+Flows have two user-principal authoring surfaces:
+
+### Direct flow authoring
+
+The draft API under `/api/v1/flows/` covers:
+
+- create, list, get, update, delete
+- publish and unpublish
+- template asset upload and inspection
+- assistant-specific step configuration routes
+
+### Authoring chat
+
+A person can edit a draft from an ordinary assistant chat bound to the flow.
+The chat's loopback flow tools read the definition and change it through the
+same editor update, validation, permissions, classification and audit as the
+editor. The chat requires a user principal and edit mode in the editor; it is
+not a service-key authoring surface.
+
+**Suggestions.** The chat reads the same suggestions as the editor
+(`read_flow_suggestions`) when asked to make a flow simpler or cheaper, applies
+a fix only after the person agrees (`apply_flow_suggestions`, in edit mode),
+and checks every step it writes for the patterns the suggestions look for. See
+[Let the suggestions point out waste](/docs/flows-best-practices#let-the-suggestions-point-out-waste).
+
+**Model.** Each person chooses the chat's model in the chat header
+(`PATCH /api/v1/flows/{id}/authoring-chat/{session_id}/` with
+`completion_model_id` and `reasoning_effort`; null returns to the default). The
+model is checked like an assistant's model: it must be enabled in the flow's
+space, meet the space's security classification and support tool calling,
+otherwise the change is refused with `flow_authoring_model_not_in_space`,
+`flow_authoring_model_below_classification` or
+`flow_authoring_model_without_tools`. A chat whose person chose no model uses
+the organisation's default for flow chats (Admin > Flows, "Modell för
+flödesassistenten", `PATCH /api/v1/settings/flow-authoring-chat-policy`) where
+the space allows it, and the space's default among models that support tools
+otherwise. Opening the chat and every change bring its assistant in line, so a
+new default reaches existing chats the next time they are opened. The
+instructions belong to the core and cannot be configured.
+
+**Conversations.** The flow is the source of truth: the chat reads it with
+`read_flow` on every turn, and what changed lives in the flow's revisions and
+the audit log. A long conversation adds noise rather than value, and an old
+refusal could keep steering the model. So turning edit mode on after
+`FLOW_AUTHORING_CHAT_IDLE_MINUTES` (45 by default) without a question or a
+mode change starts a new conversation with the same assistant, and "Ny
+konversation" in the chat header starts one at any time
+(`POST .../authoring-chat/{session_id}/conversations/`). Turning edit mode off
+and on within the pause, viewing the flow and asking questions outside edit
+mode keep the current conversation. Earlier conversations are kept for
+traceability and audited when they end, but they are never answered or sent
+to the model again; the chat points only at its current one. The chat panel
+does not list earlier conversations: what they changed is in the flow and its
+history.
+
+## Practical takeaway
+
+Flows are best understood as a user-principal-owned draft workflow on top of a versioned runtime contract with evidence-aware execution. Once that model is clear, the API and UI make much more sense:
+
+- user principals own drafts
+- published versions define the runtime contract
+- users and service keys can own runs
+- review checkpoints, retries, evidence, RAG provenance, and classification rules govern how runs are inspected or corrected afterward

@@ -15,7 +15,7 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import Link from "@/lib/link";
 import { useFormatter, useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState, type Ref } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Table, type TableName } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
 import { TableFrame } from "@/components/composites/table-frame";
@@ -181,7 +181,7 @@ function SignInStoppedBanner({
       <Button label={t("integration_sources_attention_show_them")} size="sm" onClick={onShowThem} />
     ) : null;
   return (
-    <QuietBanner
+    <Banner
       ref={ref}
       // The focus target once "Show them" is gone (it hides itself).
       tabIndex={-1}

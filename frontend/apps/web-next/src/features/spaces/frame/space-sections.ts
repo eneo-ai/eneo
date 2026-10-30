@@ -8,6 +8,7 @@ export const SPACE_SECTION_IDS = [
   "overview",
   "assistants",
   "apps",
+  "flows",
   "knowledge",
   "skills",
   "services",
@@ -25,6 +26,14 @@ export type SpaceSection = {
 };
 
 type Can = (action: ResourcePermission, resource: SpaceResource) => boolean;
+
+/** What the space alone does not say: whether the tenant has flows for this user. */
+export type SpaceSectionOptions = {
+  /** The tenant's `flows_core` gate is on and the user may view flows. */
+  flows?: boolean;
+  /** The space's flows, once their list is read; the space itself does not carry them. */
+  flowCount?: number;
+};
 
 function isSectionId(value: string | undefined): value is SpaceSectionId {
   return (SPACE_SECTION_IDS as readonly string[]).includes(value ?? "");
@@ -44,8 +53,15 @@ export function ownKnowledgeCount(space: Space): number {
  * The tabs a user may see, gated exactly like the former space sidebar: the
  * organization space only has knowledge, skills, services and settings, and
  * every tab needs the matching read (or, for settings, edit) permission.
+ * Flows sit with the apps (the reference gates them on reading apps) and
+ * only appear when the tenant has them.
  */
-export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): SpaceSection[] {
+export function spaceSections(
+  space: Space,
+  can: Can,
+  routeId: SpaceRouteId,
+  options: SpaceSectionOptions = {}
+): SpaceSection[] {
   const base = `/spaces/${routeId}`;
   const isOrg = space.organization;
   const sections: SpaceSection[] = [];
@@ -60,6 +76,7 @@ export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): Sp
     );
   }
   if (!isOrg && can("read", "app")) add("apps", space.applications?.apps.count ?? 0);
+  if (!isOrg && can("read", "app") && options.flows) add("flows", options.flowCount);
   if (can("read", "website") || can("read", "collection")) {
     add("knowledge", ownKnowledgeCount(space));
   }
@@ -74,6 +91,12 @@ export type SpaceRoute =
   | { kind: "chat" }
   /** An assistant, app or group-chat editor: it owns the surface with its own header. */
   | { kind: "editor" }
+  /**
+   * A flow's page: its own header, the definition beside the flow's chat.
+   * From the `lg` breakpoint both fill the panel's height and scroll on
+   * their own; below it the page scrolls as a whole.
+   */
+  | { kind: "workspace" }
   | {
       kind: "page";
       /** The tab the route belongs to, or null for routes outside the tabs. */
@@ -99,6 +122,7 @@ function isEditorRoute(first: string | undefined, rest: readonly string[]): bool
 export function spaceRoute(segments: readonly string[]): SpaceRoute {
   const [first, ...rest] = segments;
   if (first === "chat") return { kind: "chat" };
+  if (first === "flows" && rest.length === 1) return { kind: "workspace" };
   if (isEditorRoute(first, rest)) return { kind: "editor" };
   // Group chats are edited from the assistants tab.
   if (first === "group-chats") return { kind: "page", section: "assistants", isSectionRoot: false };

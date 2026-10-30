@@ -1,0 +1,451 @@
+from __future__ import annotations
+
+import asyncio
+import hashlib
+import json
+import time
+from dataclasses import dataclass, replace
+from typing import Any, Awaitable, Callable, Protocol
+
+import httpx
+
+from eneo.audit.domain.outcome import Outcome
+from eneo.flows.domain.flow import FlowPersistedJsonObject
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdge,
+    FlowResolvedInputHttpResponseSource,
+    FlowResolvedInputJsonPath,
+    build_resolved_input_edge,
+    merge_resolved_input_edges,
+)
+from eneo.flows.flow_run_redaction import redact_string
+from eneo.flows.http_transport import (
+    EffectiveHttpRequest,
+    HttpMethod,
+    compile_http_config,
+    decrypt_authored_config,
+    parse_authored_http_config,
+    url_error_message,
+)
+from eneo.flows.http_transport.validator import validate_http_url
+from eneo.flows.runtime.http_audit import await_read_audit, unfinished_call_message
+from eneo.flows.variable_resolver import FlowVariableContext
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+
+
+class RuntimeHttpStep(Protocol):
+    @property
+    def step_order(self) -> int: ...
+
+    @property
+    def step_id(self) -> Any: ...
+
+    @property
+    def input_type(self) -> str: ...
+
+    @property
+    def input_source(self) -> str: ...
+
+    @property
+    def input_config(self) -> dict[str, Any] | None: ...
+
+    @property
+    def output_config(self) -> dict[str, Any] | None: ...
+
+    @property
+    def user_description(self) -> str | None: ...
+
+
+class RuntimeHttpRun(Protocol):
+    @property
+    def id(self) -> Any: ...
+
+    @property
+    def flow_id(self) -> Any: ...
+
+    @property
+    def tenant_id(self) -> Any: ...
+
+
+class ResolveTimeoutFn(Protocol):
+    def __call__(
+        self,
+        timeout_value: Any,
+        *,
+        step_order: int,
+        config_label: str,
+    ) -> float: ...
+
+
+class ReadResponseTextFn(Protocol):
+    def __call__(
+        self,
+        *,
+        response: httpx.Response,
+        step_order: int,
+        code: str,
+    ) -> str: ...
+
+
+SendHttpRequestFn = Callable[..., Awaitable[httpx.Response]]
+AuditHttpOutboundFn = Callable[..., Awaitable[None]]
+
+
+class WebhookDeliveryError(RuntimeError):
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class WebhookSendNotStartedError(RuntimeError):
+    """The job's send deadline passed before the request was sent, so nothing
+    reached the receiver."""
+
+
+@dataclass(frozen=True, slots=True)
+class FlowOutsideInputResolution:
+    """A step input that was read from outside the run: the response of an
+    HTTP GET or the answer of a tool."""
+
+    text: str
+    structured: dict[str, Any] | list[Any] | None
+    resolved_input_edges: tuple[FlowResolvedInputEdge, ...]
+
+
+@dataclass(frozen=True)
+class FlowHttpOrchestrationDeps:
+    encryption_service: Any
+    variable_resolver: Any
+    resolve_timeout_seconds: ResolveTimeoutFn
+    read_response_text: ReadResponseTextFn
+    send_http_request: SendHttpRequestFn
+    audit_http_outbound: AuditHttpOutboundFn
+
+
+def _compile_authored_http_request(
+    *,
+    raw_config: FlowPersistedJsonObject | None,
+    direction: str,
+    method: HttpMethod,
+    context: FlowPersistedJsonObject,
+    step_order: int,
+    config_label: str,
+    deps: FlowHttpOrchestrationDeps,
+) -> tuple[EffectiveHttpRequest, str | None]:
+    authored = parse_authored_http_config(
+        raw_config, step_order=step_order, config_label=config_label
+    )
+
+    decrypted = decrypt_authored_config(authored, deps.encryption_service)
+    effective_request = compile_http_config(
+        decrypted,
+        direction=direction,
+        method=method,
+        variables=context,
+        interpolate=deps.variable_resolver.interpolate,
+        interpolate_with_evidence=(
+            deps.variable_resolver.interpolate_with_evidence
+            if direction == "input"
+            else None
+        ),
+    )
+    timeout_seconds = deps.resolve_timeout_seconds(
+        decrypted.timeout_seconds,
+        step_order=step_order,
+        config_label=config_label,
+    )
+    return (
+        replace(
+            effective_request,
+            url=effective_request.url.strip(),
+            timeout=timeout_seconds,
+        ),
+        decrypted.response_format,
+    )
+
+
+async def resolve_http_input_source_text(
+    *,
+    step: RuntimeHttpStep,
+    run: RuntimeHttpRun,
+    context: FlowVariableContext,
+    deps: FlowHttpOrchestrationDeps,
+) -> FlowOutsideInputResolution:
+    if step.input_source != "http_get":
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: HTTP input orchestration only supports input_source 'http_get'.",
+            code=FlowApiErrorCode.TYPED_IO_INVALID_INPUT_SOURCE_COMBINATION.value,
+        )
+    method: HttpMethod = "GET"
+    effective_request, response_format = _compile_authored_http_request(
+        raw_config=step.input_config,
+        direction="input",
+        method=method,
+        context=context,
+        step_order=step.step_order,
+        config_label="input_config",
+        deps=deps,
+    )
+    url = effective_request.url
+    url_error = validate_http_url(url)
+    if url_error is not None:
+        raise TypedIOValidationException(
+            url_error_message(
+                step_order=step.step_order,
+                config_label="input_config",
+                url_error=url_error,
+            ),
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+        )
+    timeout_seconds = effective_request.timeout
+    headers = dict(effective_request.headers)
+    body_bytes = effective_request.body
+    json_body = effective_request.json_body
+
+    start_time = time.monotonic()
+    # Once the response has arrived, the audit records its status and the
+    # time it took to arrive.
+    status_code: int | None = None
+    response_ms: float | None = None
+
+    async def audit(outcome: Outcome, error_message: str | None = None) -> None:
+        await await_read_audit(
+            deps.audit_http_outbound(
+                run=run,
+                step=step,
+                url=url,
+                method=method,
+                call_type="http_input",
+                outcome=outcome,
+                error_message=error_message,
+                status_code=status_code,
+                duration_ms=(
+                    response_ms
+                    if response_ms is not None
+                    else (time.monotonic() - start_time) * 1000
+                ),
+            )
+        )
+
+    # Every ending after the request is sent is one audited outbound call: a
+    # typed one with its message, a cancelled one or one with an error that
+    # has no typed code with a fixed text.
+    try:
+        # Normalize before auditing so audit failures cannot chain raw credentials.
+        try:
+            response = await deps.send_http_request(
+                method=method,
+                url=url,
+                headers=headers,
+                timeout_seconds=timeout_seconds,
+                body_bytes=body_bytes,
+                json_body=json_body,
+            )
+        except httpx.TimeoutException:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: HTTP {method} input timed out after {timeout_seconds:g}s.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_TIMEOUT.value,
+            ) from None
+        except httpx.HTTPError:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: HTTP {method} input request failed.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_CONNECTION_ERROR.value,
+            ) from None
+        response_ms = (time.monotonic() - start_time) * 1000
+        status_code = response.status_code
+        if not response.is_success:
+            raise TypedIOValidationException(
+                f"Step {step.step_order}: HTTP {method} input returned status {response.status_code}.",
+                code=FlowApiErrorCode.TYPED_IO_HTTP_NON_SUCCESS.value,
+            )
+        response_text = deps.read_response_text(
+            response=response,
+            step_order=step.step_order,
+            code=FlowApiErrorCode.TYPED_IO_HTTP_RESPONSE_TOO_LARGE.value,
+        )
+        expects_json = (
+            step.input_type == "json" or str(response_format or "text") == "json"
+        )
+        parsed: Any = None
+        if expects_json:
+            try:
+                parsed = response.json()
+            except (ValueError, json.JSONDecodeError) as exc:
+                raise TypedIOValidationException(
+                    f"Step {step.step_order}: HTTP {method} input returned malformed JSON response.",
+                    code=FlowApiErrorCode.TYPED_IO_HTTP_MALFORMED_RESPONSE.value,
+                ) from exc
+    except TypedIOValidationException as exc:
+        await audit(Outcome.FAILURE, str(exc))
+        raise
+    except (asyncio.CancelledError, Exception) as exc:
+        # The request has gone out, or is on its way, once the send starts.
+        await audit(Outcome.FAILURE, unfinished_call_message(exc, request_sent=True))
+        raise
+    await audit(Outcome.SUCCESS)
+    if expects_json:
+        return FlowOutsideInputResolution(
+            text=json.dumps(parsed, ensure_ascii=False),
+            structured=parsed,
+            resolved_input_edges=merge_resolved_input_edges(
+                effective_request.resolved_input_edges,
+                (_http_response_edge(parsed),),
+            ),
+        )
+    return FlowOutsideInputResolution(
+        text=response_text,
+        structured=None,
+        resolved_input_edges=merge_resolved_input_edges(
+            effective_request.resolved_input_edges,
+            (_http_response_edge(response_text),),
+        ),
+    )
+
+
+def _http_response_edge(
+    selected_value: object,
+) -> FlowResolvedInputEdge:
+    return build_resolved_input_edge(
+        binding_ref="http.response",
+        source=FlowResolvedInputHttpResponseSource(
+            kind="http_response",
+            selector=FlowResolvedInputJsonPath(kind="json_path", path=()),
+        ),
+        selected_value=selected_value,
+    )
+
+
+async def deliver_webhook(
+    *,
+    step: RuntimeHttpStep,
+    text_payload: str,
+    run: RuntimeHttpRun,
+    context: dict[str, Any],
+    deps: FlowHttpOrchestrationDeps,
+    idempotency_key: str,
+    sends_end_at: float,
+) -> None:
+    """Send one webhook request. ``sends_end_at`` (event-loop clock) bounds the
+    send together with the step's own timeout; a send that cannot start before
+    it raises WebhookSendNotStartedError without contacting the receiver."""
+    if step.output_config is None:
+        return
+    try:
+        effective_request, _ = _compile_authored_http_request(
+            raw_config=step.output_config,
+            direction="output",
+            method="POST",
+            context=context,
+            step_order=step.step_order,
+            config_label="output_config",
+            deps=deps,
+        )
+    except TypedIOValidationException as exc:
+        raise BadRequestException(str(exc), code=exc.code) from exc
+    url = effective_request.url
+    url_error = validate_http_url(url)
+    if url_error is not None:
+        raise BadRequestException(
+            url_error_message(
+                step_order=step.step_order,
+                config_label="output_config",
+                url_error=url_error,
+            ),
+            code=FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value,
+        )
+    timeout_seconds = effective_request.timeout
+    headers = {
+        name: value
+        for name, value in effective_request.headers.items()
+        if name.lower() != "idempotency-key"
+    }
+    body_bytes = effective_request.body
+    json_body = effective_request.json_body
+    if body_bytes is None and json_body is None:
+        body_bytes = text_payload.encode("utf-8")
+    headers["Idempotency-Key"] = hashlib.sha256(
+        idempotency_key.encode("utf-8")
+    ).hexdigest()
+
+    timeout_seconds = min(
+        timeout_seconds, sends_end_at - asyncio.get_running_loop().time()
+    )
+    if timeout_seconds <= 0:
+        raise WebhookSendNotStartedError(
+            "The webhook delivery job ran out of time before the request was sent."
+        )
+    start_time = time.monotonic()
+    try:
+        # Normalize before auditing so audit failures cannot chain raw credentials.
+        try:
+            # httpx applies its timeout to each phase; this bounds the whole send.
+            async with asyncio.timeout(timeout_seconds):
+                response = await deps.send_http_request(
+                    method="POST",
+                    url=url,
+                    headers=headers,
+                    timeout_seconds=timeout_seconds,
+                    body_bytes=body_bytes,
+                    json_body=json_body,
+                    read_response_body=False,
+                )
+        except (httpx.TimeoutException, TimeoutError):
+            raise WebhookDeliveryError(
+                f"Webhook delivery timed out after {timeout_seconds:g}s."
+            ) from None
+        except httpx.HTTPError:
+            raise WebhookDeliveryError("Webhook delivery failed.") from None
+    except TypedIOValidationException as exc:
+        duration_ms = (time.monotonic() - start_time) * 1000
+        err_msg = redact_string(str(exc), key=None)
+        await deps.audit_http_outbound(
+            run=run,
+            step=step,
+            url=url,
+            method="POST",
+            call_type="webhook_delivery",
+            outcome=Outcome.FAILURE,
+            error_message=err_msg,
+            duration_ms=duration_ms,
+        )
+        raise BadRequestException(err_msg, code=exc.code) from exc
+    except WebhookDeliveryError as exc:
+        duration_ms = (time.monotonic() - start_time) * 1000
+        await deps.audit_http_outbound(
+            run=run,
+            step=step,
+            url=url,
+            method="POST",
+            call_type="webhook_delivery",
+            outcome=Outcome.FAILURE,
+            error_message=str(exc),
+            duration_ms=duration_ms,
+        )
+        raise
+
+    duration_ms = (time.monotonic() - start_time) * 1000
+    if not response.is_success:
+        err_msg = f"Webhook delivery returned status {response.status_code}."
+        await deps.audit_http_outbound(
+            run=run,
+            step=step,
+            url=url,
+            method="POST",
+            call_type="webhook_delivery",
+            outcome=Outcome.FAILURE,
+            error_message=err_msg,
+            status_code=response.status_code,
+            duration_ms=duration_ms,
+        )
+        raise WebhookDeliveryError(err_msg, status_code=response.status_code)
+    await deps.audit_http_outbound(
+        run=run,
+        step=step,
+        url=url,
+        method="POST",
+        call_type="webhook_delivery",
+        outcome=Outcome.SUCCESS,
+        status_code=response.status_code,
+        duration_ms=duration_ms,
+    )

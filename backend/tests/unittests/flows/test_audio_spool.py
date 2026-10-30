@@ -1,0 +1,423 @@
+import asyncio
+import hashlib
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+from uuid import uuid4
+
+import httpx
+import pytest
+
+from eneo.files import audio
+from eneo.files.file_service import FileDownload
+from eneo.files.transcriber import Transcriber
+from eneo.flows.runtime.service_transcription import (
+    RegistryFlowTranscriber,
+    ServiceFlowTranscriber,
+)
+from eneo.flows.runtime.transcription import FlowTranscribers
+from eneo.main.exceptions import TypedIOValidationException
+from tests.unit.files import test_audio
+from tests.unit.flows.runtime.test_remote_transcription import (
+    RecordingObserver,
+    make_transcriber,
+)
+from tests.unit.transcription_models.infrastructure.adapters.test_litellm_transcription import (
+    TRANSPORT,
+    _adapter,
+)
+from tests.unit.transcription_services.scripted_service import (
+    RESULT_BODY,
+    ScriptedService,
+    accepted,
+    status,
+)
+from tests.unittests.flows import audio_spool_test_support
+from tests.unittests.flows.test_flow_transcription import (
+    _SPEAKER_CHOICE,
+    _audio_file,
+    _build_executor,
+    _patch_run_input_payload,
+    _run,
+    _runtime_step,
+    _SpaceStub,
+    _state,
+)
+
+spool_contract = audio_spool_test_support.spool_contract
+recording = test_audio.recording
+ffmpeg = test_audio.ffmpeg
+
+
+@pytest.mark.parametrize(
+    "outcome", ["registry", "failure", "cancel", "diarize", "timestamp"]
+)
+async def test_audio_step_uses_download_and_removes_spool(
+    user, recording, ffmpeg, monkeypatch, outcome, spool_contract
+):
+    spool_contract.duration_seconds = None
+    source, _, temp_dir = recording
+    payload = source.read_bytes()
+    file = _audio_file(name="recording.wav", size=len(payload))
+    executor, flow_run_repo, space_repo, file_service, transcriber = _build_executor(
+        user, spool_contract=spool_contract
+    )
+    file_service.get_files_by_ids.return_value = [file]
+    file_service.get_file_content.side_effect = AssertionError("whole-file hydration")
+    model = SimpleNamespace(
+        id=uuid4(), name="whisper", model_name="whisper-1", can_access=True
+    )
+    space_repo.one.return_value = _SpaceStub([model], model)
+    paths = []
+    decodes = []
+    decode = audio._decode_audio
+    duration = AsyncMock(wraps=audio.measure_duration)
+    monkeypatch.setattr(audio, "measure_duration", duration)
+    download = spool_contract.downloads([file], payload=payload)
+    file_service.get_audio_download = download
+
+    async def count_decode(filepath, **kwargs):
+        download.assert_finished()
+        path = Path(filepath)
+        assert path.read_bytes() == payload
+        paths.append(path)
+        decodes.append("duration" if kwargs.get("writer") is None else "wav")
+        return await decode(filepath, **kwargs)
+
+    monkeypatch.setattr(audio, "_decode_audio", count_decode)
+
+    async def transcribe(spool, model, **kwargs):
+        download.assert_finished()
+        assert spool.path.read_bytes() == payload
+        assert spool.digest == hashlib.sha256(payload).hexdigest()
+        assert spool.byte_size == len(payload)
+        paths.append(spool.path)
+        if outcome == "failure":
+            raise TypedIOValidationException(
+                "typed failure", code="typed_io_transcription_failed"
+            )
+        asyncio.current_task().cancel()
+        await asyncio.sleep(0)
+
+    transcriber.transcribe = transcribe
+    observer = RecordingObserver()
+    provider = AsyncMock(return_value=SimpleNamespace(text="hello"))
+    monkeypatch.setattr(TRANSPORT, provider)
+    registry = Transcriber(file_service=file_service)
+    monkeypatch.setattr(registry, "_get_adapter", AsyncMock(return_value=_adapter()))
+    timed = {
+        **RESULT_BODY,
+        "text": "[00:00:00 - 00:00:01] hello",
+        "segments": [
+            {
+                "start": 0.0,
+                "end": 1.0,
+                "text": "hello",
+                "words": [{"word": "hello", "start": 0.0, "end": 0.5}],
+            }
+        ],
+        "alignment": "forced",
+    }
+    service = ScriptedService(
+        submit_responses=[accepted()],
+        status_responses=[status("completed")],
+        result_responses=[
+            httpx.Response(
+                200,
+                json={
+                    **(timed if outcome == "timestamp" else RESULT_BODY),
+                    "model": model.model_name,
+                },
+            )
+        ],
+    )
+    remote = make_transcriber(service)
+    if outcome == "registry":
+        executor.transcribers = FlowTranscribers(
+            model=RegistryFlowTranscriber(registry),
+            with_speaker_service=AsyncMock(side_effect=AssertionError("no service")),
+        )
+    elif outcome in {"diarize", "timestamp"}:
+        executor.transcribers = FlowTranscribers(
+            model=RegistryFlowTranscriber(registry),
+            with_speaker_service=AsyncMock(
+                return_value=ServiceFlowTranscriber(registry, remote)
+            ),
+        )
+    run = _run(user=user, payload={})
+    _patch_run_input_payload(flow_run_repo, run)
+
+    async def execute():
+        return await executor._resolve_step_input(
+            step=_runtime_step(),
+            context=executor.variable_resolver.build_context(
+                run.input_payload_json, []
+            ),
+            run=run,
+            prior_results=[],
+            state=_state(),
+            version_metadata={
+                "wizard": {
+                    "transcription_enabled": True,
+                    "transcription_model": {"id": str(model.id)},
+                    "transcription_diarization": outcome
+                    not in {"registry", "timestamp"},
+                    **(
+                        {}
+                        if outcome == "registry"
+                        else {"transcription_speaker_service": _SPEAKER_CHOICE}
+                    ),
+                }
+            },
+            requested_file_ids=[file.id],
+            transcription_call_observer=observer,
+        )
+
+    if outcome in {"registry", "diarize", "timestamp"}:
+        result = await execute()
+        if outcome == "diarize":
+            assert result.text == RESULT_BODY["text"]
+        else:
+            assert "hello" in result.text
+        if outcome == "timestamp":
+            assert result.transcription_metadata["word_timing"] == {"status": "done"}
+        assert decodes == ["wav"]
+        assert provider.await_count == 1
+    else:
+        error = (
+            asyncio.CancelledError
+            if outcome == "cancel"
+            else TypedIOValidationException
+        )
+        with pytest.raises(error):
+            await execute()
+    assert len(paths) == 1
+    assert not paths[0].exists()
+    assert list(temp_dir.iterdir()) == []
+    assert len(download.streams) == 1
+    assert duration.await_count == 0
+    if outcome in {"diarize", "timestamp"}:
+        assert observer.started_facts[-1].audio_seconds == 10
+        assert len(observer.started_facts) == 2
+        assert payload in service.requests[0].read()
+    file_service.get_file_content.assert_not_awaited()
+
+
+@pytest.mark.parametrize("interruption", ["failure", "cancel"])
+async def test_interrupted_download_closes_source_and_removes_partial_spool(
+    tmp_path, monkeypatch, interruption
+):
+    from eneo.flows.runtime.audio_spool import spool_audio
+
+    monkeypatch.setattr(audio.tempfile, "tempdir", str(tmp_path))
+    closed = []
+    started = asyncio.Event()
+
+    async def download(file_id):
+        async def chunks():
+            yield b"first chunk"
+            started.set()
+            if interruption == "failure":
+                raise OSError("download interrupted")
+            await asyncio.Future()
+
+        async def close():
+            closed.append(True)
+
+        return FileDownload(
+            file_id=file_id,
+            tenant_id=uuid4(),
+            chunks=chunks(),
+            content_length=1024,
+            media_type="audio/wav",
+            filename="a.wav",
+            sha256=b"",
+            content_range=None,
+            range_supported=True,
+            _close=close,
+        )
+
+    task = asyncio.create_task(spool_audio(uuid4(), open_audio_download=download))
+    await started.wait()
+    if interruption == "cancel":
+        task.cancel()
+    with pytest.raises(asyncio.CancelledError if interruption == "cancel" else OSError):
+        await task
+    assert closed == [True]
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_inline_payload_is_released_before_measurement(tmp_path, monkeypatch):
+    import weakref
+
+    from eneo.flows.runtime.audio_spool import spool_audio
+
+    class Payload:
+        data = b"inline audio"
+
+    retained = []
+    monkeypatch.setattr(audio.tempfile, "tempdir", str(tmp_path))
+
+    async def download(file_id):
+        payload = Payload()
+        retained.append(weakref.ref(payload))
+
+        async def chunks():
+            yield payload.data
+
+        async def close():
+            assert payload.data
+
+        return FileDownload(
+            file_id=file_id,
+            tenant_id=uuid4(),
+            chunks=chunks(),
+            content_length=len(payload.data),
+            media_type="audio/wav",
+            filename="a.wav",
+            sha256=b"",
+            content_range=None,
+            range_supported=True,
+            _close=close,
+        )
+
+    async def measure(filepath, *, limits=None):
+        assert retained[0]() is None
+        return 1.0
+
+    monkeypatch.setattr(audio, "measure_duration", measure)
+    spool = await spool_audio(uuid4(), open_audio_download=download)
+    try:
+        assert retained[0]() is None
+        assert spool.path.read_bytes() == Payload.data
+        assert await spool.measure_duration() == 1.0
+    finally:
+        await spool.aclose()
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_cancellation_finishes_duration_reader_before_removing_spool(
+    tmp_path, monkeypatch
+):
+    from eneo.flows.runtime.audio_spool import spool_audio
+    from tests.unittests.flows.audio_spool_test_support import AudioDownloads
+
+    monkeypatch.setattr(audio.tempfile, "tempdir", str(tmp_path))
+    started = asyncio.Event()
+    finished = []
+
+    async def measure(filepath, *, limits=None):
+        from pathlib import Path
+
+        started.set()
+        try:
+            await asyncio.Future()
+        finally:
+            assert Path(filepath).exists()
+            finished.append(True)
+
+    monkeypatch.setattr(audio, "measure_duration", measure)
+    file = _audio_file(name="recording.wav")
+    downloads = AudioDownloads([file])
+    spool = await spool_audio(file.id, open_audio_download=downloads)
+
+    async def transcribe():
+        try:
+            await spool.measure_duration()
+        finally:
+            await spool.aclose()
+
+    task = asyncio.create_task(transcribe())
+    await started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert finished == [True]
+    downloads.assert_finished()
+    assert list(tmp_path.iterdir()) == []
+
+
+@pytest.mark.parametrize("interruption", [None, "failure", "cancel"])
+async def test_verified_download_path_is_adopted_without_reading_chunks(
+    tmp_path, monkeypatch, interruption
+):
+    from eneo.flows.runtime.audio_spool import spool_audio
+
+    monkeypatch.setattr(audio.tempfile, "tempdir", str(tmp_path))
+    verified = tmp_path / "verified.audio"
+    verified.write_bytes(b"verified original")
+    inode = verified.stat().st_ino
+    closed = []
+
+    async def download(file_id):
+        async def chunks():
+            raise AssertionError("A verified spool must not be copied")
+            yield
+
+        async def close():
+            closed.append(True)
+            verified.unlink(missing_ok=True)
+            if interruption == "failure":
+                raise OSError("download close failed")
+            if interruption == "cancel":
+                asyncio.current_task().cancel()
+                await asyncio.sleep(0)
+
+        return FileDownload(
+            file_id=file_id,
+            tenant_id=uuid4(),
+            chunks=chunks(),
+            content_length=17,
+            media_type="audio/wav",
+            filename="a.wav",
+            sha256=b"v" * 32,
+            content_range=None,
+            range_supported=True,
+            _close=close,
+            verified_path=verified,
+        )
+
+    measure = AsyncMock(side_effect=AssertionError("Duration must be lazy"))
+    monkeypatch.setattr(audio, "measure_duration", measure)
+    if interruption is not None:
+        with pytest.raises(
+            OSError if interruption == "failure" else asyncio.CancelledError
+        ):
+            await spool_audio(uuid4(), open_audio_download=download)
+        assert closed == [True]
+        assert list(tmp_path.iterdir()) == []
+        return
+    spool = await spool_audio(uuid4(), open_audio_download=download)
+    try:
+        assert closed == [True]
+        assert spool.path.stat().st_ino == inode
+        assert spool.path.read_bytes() == b"verified original"
+        assert spool.digest == (b"v" * 32).hex()
+        assert list(tmp_path.iterdir()) == [spool.path]
+        measure.assert_not_awaited()
+    finally:
+        await spool.aclose()
+        await spool.aclose()
+    assert list(tmp_path.iterdir()) == []
+
+
+async def test_duration_is_lazy_and_cached(tmp_path, monkeypatch):
+    from eneo.flows.runtime.audio_spool import spool_audio
+    from tests.unittests.flows.audio_spool_test_support import AudioDownloads
+
+    monkeypatch.setattr(audio.tempfile, "tempdir", str(tmp_path))
+    measure = AsyncMock(return_value=12.5)
+    monkeypatch.setattr(audio, "measure_duration", measure)
+    file = _audio_file(name="recording.wav")
+    downloads = AudioDownloads([file])
+    spool = await spool_audio(file.id, open_audio_download=downloads)
+    try:
+        measure.assert_not_awaited()
+        assert await asyncio.gather(
+            spool.measure_duration(), spool.measure_duration()
+        ) == [12.5, 12.5]
+        assert await spool.measure_duration() == 12.5
+        measure.assert_awaited_once_with(str(spool.path), limits=None)
+    finally:
+        await spool.aclose()
+    downloads.assert_finished()

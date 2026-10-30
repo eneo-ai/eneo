@@ -71,8 +71,8 @@ async def test_conditional_download_authorizes_audits_and_closes(
     assert response.status_code == status
     service.get_original_download_no_auth.assert_awaited_once_with(
         file_id,
+        tenant_id=tenant_id,
         range_header="bytes=0-4" if ranged else None,
-        expected_tenant_id=tenant_id,
     )
     audit.log_async.assert_awaited_once()
     metadata = audit.log_async.call_args.kwargs["metadata"]

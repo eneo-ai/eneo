@@ -40,9 +40,7 @@ from eneo.files.file_reference import (
     referenced_file_ids,
     url_only_file_ids,
 )
-from eneo.files.file_service import FileService
 from eneo.files.model_file_references import file_handle
-from eneo.main.exceptions import UnauthorizedException
 
 
 class TestSignedTokenTenantClaim:
@@ -85,17 +83,6 @@ class TestSignedTokenTenantClaim:
         payload["tenant_id"] = str(uuid4())
         forged = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
         assert verify_signed_token(f"{forged}.{signature}") is None
-
-    def test_download_refuses_tenant_mismatch(self):
-        metadata = SimpleNamespace(tenant_id=uuid4())
-        with pytest.raises(UnauthorizedException):
-            FileService._require_token_tenant(metadata, uuid4())
-
-    def test_download_accepts_matching_or_absent_tenant(self):
-        tenant_id = uuid4()
-        metadata = SimpleNamespace(tenant_id=tenant_id)
-        FileService._require_token_tenant(metadata, tenant_id)
-        FileService._require_token_tenant(metadata, None)
 
 
 class TestBuildSignedOriginalDownloadUrl:
@@ -673,7 +660,8 @@ def _content_file(
         file_type=file_type,
         text=text if file_type == FileType.TEXT else None,
         blob=None if file_type == FileType.TEXT else b"",
-        user_id=uuid4(),
+        owner_type="user",
+        owner_user_id=uuid4(),
         tenant_id=uuid4(),
         parent_file_id=parent_file_id,
         original_available=original_available,

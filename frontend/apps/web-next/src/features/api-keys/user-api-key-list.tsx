@@ -3,7 +3,7 @@
 import { useTranslations } from "use-intl";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useId, useRef, useState, type ReactNode } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { EmptyState } from "@/components/composites/empty-state";
 import { SecretRevealDialog } from "@/components/composites/secret-reveal";
 import { Badge } from "@/components/ui/badge";
@@ -69,7 +69,7 @@ function ExpiringInView({ keys }: { keys: ApiKey[] }) {
   ].filter(Boolean);
   if (parts.length === 0) return null;
   return (
-    <QuietBanner
+    <Banner
       status={expired + urgent > 0 ? "error" : "warning"}
       title={`${parts.join(", ")} ${t("api_keys_expiring_in_view")}`}
     />

@@ -1,8 +1,10 @@
 import asyncio
 from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable, Sequence
-from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from contextlib import AbstractAsyncContextManager, AsyncExitStack, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
+from hashlib import sha256
+from pathlib import Path
 from secrets import token_hex
 from time import monotonic
 from uuid import UUID
@@ -35,6 +37,7 @@ from eneo.object_content.content import (
     verification_chunk_window,
 )
 from eneo.object_content.content_repository import (
+    ContentReadSnapshot,
     ObjectContentRepository,
     PreparedContent,
     ReadableContent,
@@ -60,6 +63,11 @@ from eneo.object_content.s3_object_store import (
 from eneo.object_content.store_binding import (
     ensure_store_binding_ready,
     require_store_generation,
+)
+from eneo.object_content.verified_spool import (
+    VerifiedSpool,
+    VerifiedSpoolIntegrityError,
+    settle_read_operation,
 )
 
 
@@ -100,6 +108,7 @@ class DetachedContentRead:
     media_type: str
     content_range: str | None
     _close: Callable[[], Awaitable[None]] = field(repr=False)
+    verified_path: Path | None = None
 
     async def aclose(self) -> None:
         await self._close()
@@ -124,7 +133,7 @@ async def detach_content_read(
                     error.__traceback__,
                 )
             )
-        return await asyncio.shield(exit_task)
+        return await settle_read_operation(exit_task)
 
     async def stream() -> AsyncGenerator[bytes, None]:
         try:
@@ -145,6 +154,7 @@ async def detach_content_read(
         media_type=opened.media_type,
         content_range=opened.content_range,
         _close=close,
+        verified_path=opened.verified_path,
     )
 
 
@@ -707,26 +717,15 @@ class ObjectContentService:
         grant: ContentReadGrant,
         *,
         range_header: str | None = None,
+        require_local_path: bool = False,
     ) -> AsyncGenerator[ContentRead]:
         for attempt in range(2):
-            async with self._database.session() as session, session.begin():
-                sources = await ObjectContentRepository(session).get_readable_sources(
-                    [grant]
-                )
-            source = sources[grant.content_id]
-            byte_range = (
-                None
-                if range_header is None
-                else ByteRange.parse(
-                    range_header,
-                    size_bytes=source.content.size_bytes,
-                )
-            )
             yielded = False
             try:
-                async with self._open_readable_source(
-                    source,
-                    byte_range=byte_range,
+                async with self._open_download(
+                    grant,
+                    range_header=range_header,
+                    require_local_path=require_local_path,
                 ) as opened:
                     yielded = True
                     yield opened
@@ -736,11 +735,83 @@ class ObjectContentService:
                     raise
 
     @asynccontextmanager
+    async def _open_download(
+        self,
+        grant: ContentReadGrant,
+        *,
+        range_header: str | None,
+        require_local_path: bool,
+    ) -> AsyncGenerator[ContentRead]:
+        async with AsyncExitStack() as resources:
+            spool: VerifiedSpool | None = None
+            source: ReadableContentSource | None = None
+            try:
+                async with ContentReadSnapshot.open(self._database) as snapshot:
+                    (
+                        source,
+                        physical_size,
+                        slice_capable,
+                    ) = await snapshot.repository.get_read_metadata(grant)
+                    byte_range = (
+                        None
+                        if range_header is None
+                        else ByteRange.parse(
+                            range_header, size_bytes=source.content.size_bytes
+                        )
+                    )
+                    if source.content.storage_kind is StorageKind.POSTGRES_INLINE:
+                        if slice_capable:
+                            assert physical_size is not None
+                            spool = await resources.enter_async_context(
+                                VerifiedSpool.open(
+                                    io_chunk_bytes=self._inline_store.io_chunk_bytes,
+                                )
+                            )
+                            await self._inline_store.verify_snapshot(
+                                snapshot.repository,
+                                source.content,
+                                physical_size_bytes=physical_size,
+                                spool=spool,
+                            )
+                        else:
+                            sources = await snapshot.repository.get_readable_sources(
+                                [grant]
+                            )
+                            source = sources[grant.content_id]
+            except VerifiedSpoolIntegrityError as error:
+                assert source is not None
+                if not await self._mark_backend_failure(
+                    source,
+                    ContentFailureCode.BACKEND_CORRUPT,
+                    observed_inline_sha256=error.observed_sha256,
+                ):
+                    raise _ContentPlacementChanged(
+                        "Content placement changed during the read; try again"
+                    ) from error
+                raise
+
+            if spool is not None:
+                async with spool.read(
+                    media_type=source.content.media_type,
+                    byte_range=byte_range,
+                    require_local_path=require_local_path,
+                ) as opened:
+                    yield opened
+            else:
+                async with self._open_readable_source(
+                    source,
+                    byte_range=byte_range,
+                    require_local_path=require_local_path,
+                ) as opened:
+                    yield opened
+
+    @asynccontextmanager
     async def _open_readable_source(
         self,
         source: ReadableContentSource,
         *,
         byte_range: ByteRange | None = None,
+        require_local_path: bool = False,
     ) -> AsyncGenerator[ContentRead]:
         content = source.content
         match content.storage_kind:
@@ -760,6 +831,7 @@ class ObjectContentService:
                     if not await self._mark_backend_failure(
                         source,
                         ContentFailureCode.BACKEND_CORRUPT,
+                        observed_inline_sha256=sha256(source.inline_payload).digest(),
                     ):
                         raise _ContentPlacementChanged(
                             "Content placement changed during the read; try again"
@@ -775,6 +847,7 @@ class ObjectContentService:
                         source,
                         lease=lease,
                         byte_range=byte_range,
+                        require_local_path=require_local_path,
                     ) as opened:
                         yield opened
 
@@ -785,6 +858,7 @@ class ObjectContentService:
         *,
         lease: ObjectStoreLease,
         byte_range: ByteRange | None,
+        require_local_path: bool = False,
     ) -> AsyncGenerator[ContentRead]:
         content = source.content
         descriptor = source.object_store_descriptor
@@ -818,6 +892,7 @@ class ObjectContentService:
                 ),
                 verification_chunk_count=descriptor.verification_chunk_count,
                 verification_chunk_sha256=verification_chunk_sha256,
+                require_local_path=require_local_path,
             ) as opened:
                 yield opened
         except (ValueError, ObjectContentStateError) as error:
@@ -1004,6 +1079,7 @@ class ObjectContentService:
         failure_code: ContentFailureCode,
         *,
         lease: ObjectStoreLease | None = None,
+        observed_inline_sha256: bytes | None = None,
     ) -> bool:
         async with self._database.session() as session, session.begin():
             if lease is not None:
@@ -1014,6 +1090,7 @@ class ObjectContentService:
                 content_id=source.content.content_id,
                 failure_code=failure_code,
                 observed_storage_kind=source.content.storage_kind,
+                observed_inline_sha256=observed_inline_sha256,
                 observed_object_key=(
                     source.object_store_descriptor.object_key
                     if source.object_store_descriptor is not None

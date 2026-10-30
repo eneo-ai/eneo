@@ -1,5 +1,7 @@
+import logging
 from collections.abc import Mapping, Sequence
 from datetime import datetime
+from enum import Enum
 from typing import TYPE_CHECKING, Optional, Union, cast
 from uuid import UUID
 
@@ -7,11 +9,27 @@ from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.api.assistant_models import AssistantType, KnowledgeMode
 from eneo.base.base_entity import Entity
 from eneo.completion_models.domain.completion_model import CompletionModel
-from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.domain.model_capacity import ModelCapacity
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionRequestPackage,
+    CompletionRequestPreflight,
+)
+from eneo.completion_models.infrastructure.completion_service import (
+    CompletionService,
+)
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    stored_request_model_kwargs,
+)
 from eneo.document_templates.domain import DocumentTemplateChoice
 from eneo.files.file_models import File, FileType
 from eneo.files.file_reference import url_only_attachment_ids
-from eneo.files.text import TextMimeTypes
+from eneo.files.mime_support import (
+    MimeSupport,
+    canonicalize_mime,
+    classify_mime,
+    supported_text_mimes,
+)
 from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.main.config import get_settings
 from eneo.main.exceptions import (
@@ -44,15 +62,25 @@ if TYPE_CHECKING:
         IntegrationKnowledge,
     )
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
+    from eneo.model_providers.domain.provider_call_observer import (
+        ProviderCallObserver,
+        ProviderCallReason,
+    )
     from eneo.rerank_models.domain.rerank_spec import RerankSpec
     from eneo.templates.assistant_template.assistant_template import AssistantTemplate
     from eneo.websites.domain.website import Website
 
 
 UNAUTHORIZED_EXCEPTION_MESSAGE = "Unauthorized. User has no permissions to access."
+logger = logging.getLogger(__name__)
 
 
 _KnowledgeItemList = Sequence[Union["Collection", "Website", "IntegrationKnowledge"]]
+
+
+class AssistantOrigin(str, Enum):
+    USER = "user"
+    FLOW_MANAGED = "flow_managed"
 
 
 class Assistant(Entity):
@@ -85,6 +113,9 @@ class Assistant(Entity):
         data_retention_days: Optional[int] = None,
         metadata_json: dict[str, object] | None = None,
         icon_id: Optional[UUID] = None,
+        hidden: bool = False,
+        origin: AssistantOrigin = AssistantOrigin.USER,
+        managing_flow_id: UUID | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         attachment_inline_text: Mapping[UUID, bool] | None = None,
         document_template: DocumentTemplateChoice | None = None,
@@ -134,6 +165,9 @@ class Assistant(Entity):
             document_template or DocumentTemplateChoice()
         )
         self.icon_id = icon_id
+        self.hidden = hidden
+        self.origin = origin
+        self.managing_flow_id = managing_flow_id
 
     def _validate_embedding_model(self, items: _KnowledgeItemList):
         embedding_model_id_set = set([item.embedding_model.id for item in items])
@@ -170,8 +204,8 @@ class Assistant(Entity):
         return self._completion_model
 
     @completion_model.setter
-    def completion_model(self, model: CompletionModel) -> None:
-        if not model.can_access:
+    def completion_model(self, model: CompletionModel | None) -> None:
+        if model is not None and not model.can_access:
             raise UnauthorizedException(UNAUTHORIZED_EXCEPTION_MESSAGE)
 
         self._completion_model = model
@@ -193,17 +227,20 @@ class Assistant(Entity):
 
     @staticmethod
     def validate_attachments(attachments: list[File]) -> None:
-        # Model-independent guardrail. The binding limit is the token budget
-        # (enforced in the service where the model is known); this only stops a
-        # pathological number of files. Lives here so all write paths, including
-        # template creation, share the same persisted attachment contract.
         settings = get_settings()
         max_files = settings.attachment_max_files
         if len(attachments) > max_files:
             raise BadRequestException(f"Too many attachments (max {max_files}).")
+
+        supported_text = frozenset(supported_text_mimes())
         for attachment in attachments:
             mimetype = attachment.mimetype or ""
-            if mimetype.split(";")[0].strip() not in TextMimeTypes.values():
+            state, reason = classify_mime(mimetype)
+            if state is MimeSupport.LEGACY_REJECTED:
+                raise BadRequestException(
+                    reason or "Attachments can only be text files"
+                )
+            if canonicalize_mime(mimetype) not in supported_text:
                 raise BadRequestException("Attachments can only be text files")
 
         max_size = settings.attachment_max_size_bytes
@@ -304,6 +341,25 @@ class Assistant(Entity):
     def has_mcp(self) -> bool:
         return bool(self.mcp_servers)
 
+    def _mcp_servers_for_completion(
+        self,
+        mcp_servers: Sequence["MCPServer"] | None = None,
+    ) -> list["MCPServer"]:
+        effective_mcp_servers = list(
+            self.mcp_servers if mcp_servers is None else mcp_servers
+        )
+        if self.has_knowledge():
+            if effective_mcp_servers:
+                logger.warning(
+                    "assistant_mcp_suppressed_due_to_knowledge",
+                    extra={
+                        "assistant_id": str(self.id),
+                        "mcp_server_count": len(effective_mcp_servers),
+                    },
+                )
+            return []
+        return effective_mcp_servers
+
     def knowledge_source_labels(self) -> list[str]:
         """Human-readable labels for the attached knowledge sources.
 
@@ -398,7 +454,7 @@ class Assistant(Entity):
         self,
         name: str | None = None,
         prompt: Prompt | None = None,
-        completion_model: CompletionModel | None = None,
+        completion_model: CompletionModel | None | NotProvided = NOT_PROVIDED,
         completion_model_kwargs: ModelKwargs | None = None,
         attachments: list[File] | None = None,
         attachment_inline_text: Mapping[UUID, bool] | None = None,
@@ -423,8 +479,8 @@ class Assistant(Entity):
         if prompt is not None:
             self.prompt = prompt
 
-        if completion_model is not None:
-            self.completion_model = completion_model  # type: ignore[assignment]
+        if is_provided(completion_model):
+            self.completion_model = completion_model
 
         if completion_model_kwargs is not None:
             self.completion_model_kwargs = completion_model_kwargs
@@ -479,6 +535,66 @@ class Assistant(Entity):
 
         return ""
 
+    def request_model_kwargs(
+        self,
+        model: CompletionModel,
+        *,
+        reasoning_effort: str | None | NotProvided = NOT_PROVIDED,
+    ) -> ModelKwargs:
+        """The stored model settings a request to `model` sends (see
+        `stored_request_model_kwargs`); the stored settings stay as saved.
+
+        `model` is the model the request goes to, which a policy may have
+        chosen instead of the stored one. A `reasoning_effort` the request
+        supplies itself (a policy's) replaces the stored effort after the
+        filtering, so the stored one is neither sent nor reported.
+        """
+        stored = self.completion_model_kwargs
+        if is_provided(reasoning_effort):
+            stored = stored.model_copy(update={"reasoning_effort": None})
+        sendable = stored_request_model_kwargs(
+            stored, model.supported_model_kwargs, completion_model_id=model.id
+        )
+        if is_provided(reasoning_effort):
+            sendable = sendable.model_copy(
+                update={"reasoning_effort": reasoning_effort}
+            )
+        return sendable
+
+    async def preflight_response_context(
+        self,
+        question: str,
+        completion_service: "CompletionService",
+        files: list[File] | None = None,
+        prompt_override: str | None = None,
+        version: int = 1,
+        *,
+        model_kwargs: ModelKwargs | None = None,
+        info_blob_chunks: list[InfoBlobChunkInDBWithScore] | None = None,
+        capability_fallback_prompt: str | None = None,
+        useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    ) -> CompletionRequestPreflight:
+        if self.completion_model is None:
+            raise NoModelSelectedException()
+        completion_model = cast("AICompletionModel", self.completion_model)
+        return await completion_service.preflight_request(
+            model=completion_model,
+            text_input=question,
+            files=files or [],
+            prompt=(
+                prompt_override
+                if prompt_override is not None
+                else self.get_prompt_text()
+            ),
+            prompt_files=self.attachments,
+            version=version,
+            model_kwargs=model_kwargs,
+            info_blob_chunks=info_blob_chunks,
+            capability_fallback_prompt=capability_fallback_prompt,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
+            inline_file_text=self.inline_file_text,
+        )
+
     async def get_response(
         self,
         question: str,
@@ -489,23 +605,44 @@ class Assistant(Entity):
         session: SessionInDB | None = None,
         stream: bool = False,
         extended_logging: bool = False,
+        prompt_override: str | None = None,
         prompt: str | None = None,
+        version: int = 1,
+        reject_context_over_limit: bool = False,
+        provider_call_observer: "ProviderCallObserver | None" = None,
+        provider_call_reason: "ProviderCallReason" = "initial",
+        useful_output_reserve_tokens: int | None = None,
+        prepared_request: CompletionRequestPackage | None = None,
+        file_reference_urls: dict[UUID, str] | None = None,
     ) -> "CompletionModelResponse":
         if self.completion_model is None:
             raise NoModelSelectedException()
 
         completion_model = cast("AICompletionModel", self.completion_model)
+        effective_prompt = (
+            prompt_override
+            if prompt_override is not None
+            else prompt or self.get_prompt_text()
+        )
         return await completion_service.get_response(
             model=completion_model,
             text_input=question,
             files=files or [],
-            prompt=prompt or self.get_prompt_text(),
+            prompt=effective_prompt,
             prompt_files=self.attachments,
             info_blob_chunks=info_blob_chunks or [],
             session=session,
             stream=stream,
             extended_logging=extended_logging,
             model_kwargs=model_kwargs,
+            version=version,
+            mcp_servers=self._mcp_servers_for_completion(),
+            reject_context_over_limit=reject_context_over_limit,
+            provider_call_observer=provider_call_observer,
+            provider_call_reason=provider_call_reason,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
+            prepared_request=prepared_request,
+            file_reference_urls=file_reference_urls,
             inline_file_text=self.inline_file_text,
         )
 
@@ -542,6 +679,12 @@ class Assistant(Entity):
         if effective_model is None:
             raise NoModelSelectedException()
 
+        context_window_tokens = effective_model.max_input_tokens
+        if version == 2:
+            context_window_tokens = ModelCapacity(
+                context_window_tokens, None
+            ).require_input_tokens()
+
         completion_model = cast("AICompletionModel", effective_model)
         completion_message_files = files or []
         prompt_files_for_completion = (
@@ -572,7 +715,7 @@ class Assistant(Entity):
                 collections=self.collections,
                 websites=self.websites,
                 integration_knowledge_list=self.integration_knowledge_list,
-                context_window_tokens=effective_model.max_input_tokens,
+                context_window_tokens=context_window_tokens,
                 version=version,
                 rerank=rerank,
             )
@@ -622,10 +765,12 @@ class Assistant(Entity):
             session=session,
             stream=stream,
             extended_logging=self.logging_enabled,
+            # An override is request-scoped and stays strict; stored settings
+            # send what the model accepts now.
             model_kwargs=(
                 model_kwargs_override
                 if model_kwargs_override is not None
-                else self.completion_model_kwargs
+                else self.request_model_kwargs(effective_model)
             ),
             version=version,
             mcp_servers=effective_mcp_servers,

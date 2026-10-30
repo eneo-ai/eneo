@@ -21,6 +21,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -58,19 +59,9 @@ def pre_unify_db(test_settings):
     psycopg2 connection plus a seed helper.
 
     Each test controls which collisions to introduce via the seed helper.
-    Teardown closes the connection without restoring schema — each invocation
-    re-normalizes at setup, and migration_isolation tests are run separately
-    from the default suite so lingering state doesn't affect other tests.
+    Teardown removes them and restores head.
     """
     cfg = _alembic_cfg(test_settings.sync_database_url)
-
-    # The DB may be at head (typical), at base (fresh container), or somewhere
-    # in between (previous test left it partway). Downgrade only works from a
-    # descendant of PRE_UNIFY_REVISION, so fall back to upgrade when it isn't.
-    try:
-        command.downgrade(cfg, PRE_UNIFY_REVISION)
-    except Exception:
-        command.upgrade(cfg, PRE_UNIFY_REVISION)
 
     conn = psycopg2.connect(
         host=test_settings.postgres_host,
@@ -81,28 +72,22 @@ def pre_unify_db(test_settings):
     )
     conn.autocommit = True
 
-    # The default setup_database seeds the test tenant with its own "Owner"
-    # role. That's a pre-existing collision against the template before any
-    # test runs, so clear any existing same-named roles first — each test
-    # controls which collisions (if any) to introduce.
-    _clear_template_named_roles(conn)
-
     # The preflight joins `roles` against `predefined_roles`. On develop that
     # table was populated at runtime by a startup seeder; the migration tests
     # don't run the app, so seed the three templates so the JOIN has rows
     # to match against.
-    _ensure_predefined_roles_seeded(conn)
+    with at_revision(cfg, PRE_UNIFY_REVISION):
+        _ensure_predefined_roles_seeded(conn)
 
-    def _seed(role_name: str) -> tuple[str, str]:
-        return _insert_tenant_and_colliding_role(conn, role_name=role_name)
+        def _seed(role_name: str) -> tuple[str, str]:
+            return _insert_tenant_and_colliding_role(conn, role_name=role_name)
 
-    try:
-        yield {"conn": conn, "cfg": cfg, "seed": _seed}
-    finally:
-        conn.close()
-        # Migration_isolation tests don't restore the shared fixture state;
-        # leave the DB at whatever revision the test ended on, and let the
-        # next fixture invocation downgrade/upgrade into the required shape.
+        try:
+            yield {"conn": conn, "cfg": cfg, "seed": _seed}
+        finally:
+            # A collision left behind would halt the upgrade to head on exit.
+            _clear_template_named_roles(conn)
+            conn.close()
 
 
 _PREDEFINED_TEMPLATES = (

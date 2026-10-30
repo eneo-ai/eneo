@@ -163,6 +163,26 @@ def request(url, payload=None, headers=None, raw=False):
         return body if raw else json.loads(body)
 
 
+def use_bundle_backend(services, backend_image, token):
+    # The e2e stack builds the backend image once and its worker roles run it
+    # by that local name, which no registry has; with --no-build every one of
+    # them must run the bundle's backend image instead.
+    local_image = services["e2e-backend"]["image"]
+    for service in services.values():
+        if service.get("image") != local_image:
+            continue
+        service.pop("build", None)
+        service["image"] = backend_image
+        service["networks"] = ["e2e", "tools"]
+        service["environment"].update(
+            {
+                "TOOL_RUNTIME_URL": "http://tool-runtime:3010",
+                "TOOL_RUNTIME_TOKEN": token,
+                "FILE_REFERENCE_BASE_URL": "http://e2e-backend:8000",
+            }
+        )
+
+
 def main():
     bundle = json.loads(Path(sys.argv[1]).read_text())
     token = secrets.token_hex(32)
@@ -185,10 +205,8 @@ def main():
     # runtime through a published port, which Docker does not map for an
     # internal network. The deployment contract test covers that isolation.
     config["networks"] = {"e2e": {}, "tools": {}}
+    use_bundle_backend(config["services"], bundle["images"]["backend"], token)
     backend = config["services"]["e2e-backend"]
-    backend.pop("build", None)
-    backend["image"] = bundle["images"]["backend"]
-    backend["networks"] = ["e2e", "tools"]
     # The e2e stack builds a runtime of its own; this test runs the bundle's.
     del config["services"]["e2e-tool-runtime"]
     backend["depends_on"]["tool-runtime"] = backend["depends_on"].pop(

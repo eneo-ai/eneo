@@ -45,6 +45,7 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
     is_bundled_server,
     is_capability_purpose,
 )
+from eneo.mcp_servers.domain.server_address import loggable_server_address
 from eneo.mcp_servers.infrastructure.client.mcp_client import (
     MCPClient,
     MCPClientError,
@@ -65,10 +66,10 @@ _ACTIVE_CAPABILITY_INDEX = "uq_mcp_servers_tenant_active_capability"
 class MCPServerCredentialTransportError(BadRequestException):
     """The saved server would send its credential to a plain-http address."""
 
-    code = "mcp_credential_requires_https"
-
     def __init__(self) -> None:
-        super().__init__(CREDENTIAL_TRANSPORT_REQUIREMENT)
+        super().__init__(
+            CREDENTIAL_TRANSPORT_REQUIREMENT, code="mcp_credential_requires_https"
+        )
 
 
 def _require_credential_transport(http_auth_type: str, http_url: str) -> None:
@@ -202,9 +203,10 @@ BUNDLED_TOOL_DESCRIPTIONS: dict[str, str] = {
         "export, from inline values or a CSV/XLSX file in the conversation."
     ),
     "file-analysis": (
-        "Answers questions about attached files in an isolated sandbox: CSV "
-        "and Excel files are inspected and queried with DuckDB. Files are "
-        "fetched through short-lived signed links."
+        "Answers questions about attached files in an isolated sandbox: CSV, "
+        "Excel and JSON Lines files are inspected and queried with DuckDB, and "
+        "JSON documents are read by path. Files are fetched through short-lived "
+        "signed links."
     ),
     "file-creation": (
         "Creates Word (DOCX), PDF and Excel (XLSX) files in an isolated "
@@ -1075,7 +1077,7 @@ class MCPServerService:
         """
         try:
             logger.info(
-                f"Testing connection to MCP server: {mcp_server.name} at {endpoint_url(mcp_server)}"
+                f"Testing connection to MCP server: {mcp_server.name} at {loggable_server_address(endpoint_url(mcp_server))}"
             )
 
             # Connect with shorter timeout for faster feedback during creation.
@@ -1100,9 +1102,9 @@ class MCPServerService:
         except MCPClientError as e:
             error_msg = str(e)
             if "Connection refused" in error_msg:
-                error_msg = f"Could not connect to {endpoint_url(mcp_server)}. Please verify the URL and that the server is running."
+                error_msg = f"Could not connect to {loggable_server_address(endpoint_url(mcp_server))}. Please verify the URL and that the server is running."
             elif "timed out" in error_msg.lower():
-                error_msg = f"Connection to {endpoint_url(mcp_server)} timed out. The server may be slow or unreachable."
+                error_msg = f"Connection to {loggable_server_address(endpoint_url(mcp_server))} timed out. The server may be slow or unreachable."
             logger.warning(f"Connection test failed for {mcp_server.name}: {e}")
             return [], ConnectionResult(success=False, error_message=error_msg)
 
@@ -1161,9 +1163,9 @@ class MCPServerService:
         except MCPClientError as e:
             error_msg = str(e)
             if "Connection refused" in error_msg:
-                error_msg = f"Could not connect to {endpoint_url(mcp_server)}. Please verify the URL and that the server is running."
+                error_msg = f"Could not connect to {loggable_server_address(endpoint_url(mcp_server))}. Please verify the URL and that the server is running."
             elif "timed out" in error_msg.lower():
-                error_msg = f"Connection to {endpoint_url(mcp_server)} timed out. The server may be slow or unreachable."
+                error_msg = f"Connection to {loggable_server_address(endpoint_url(mcp_server))} timed out. The server may be slow or unreachable."
             logger.warning(f"Failed to discover tools for {mcp_server.name}: {e}")
             return ToolSyncResult(
                 connection=ConnectionResult(success=False, error_message=error_msg)

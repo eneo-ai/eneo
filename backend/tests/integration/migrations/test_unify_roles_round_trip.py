@@ -30,6 +30,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from tests.integration.migrations.alembic_test_utils import at_revision
 
 pytestmark = [pytest.mark.integration, pytest.mark.migration_isolation]
 
@@ -62,40 +63,12 @@ def seed_default_models():
 _TEMPLATE_NAMES = ["Owner", "User", "AI Configurator"]
 
 
-def _clear_template_named_roles(conn) -> None:
-    """Remove roles whose names collide with templates.
-
-    Required because sibling migration tests (e.g. test_unify_roles_collision)
-    seed template-named custom roles and may leave the DB at PRE_UNIFY with
-    collisions present. The unify_roles preflight would halt re-upgrade on
-    those rows — clear them so this fixture can return the DB to a known
-    post-upgrade state regardless of predecessor state.
-    """
-    with conn.cursor() as cur:
-        cur.execute(
-            "SELECT to_regclass('predefined_roles'), to_regclass('users_roles')"
-        )
-        predefined_exists, users_roles_exists = cur.fetchone()
-
-        if users_roles_exists is not None:
-            cur.execute(
-                "DELETE FROM users_roles WHERE role_id IN ("
-                "SELECT id FROM roles WHERE name = ANY(%s))",
-                (_TEMPLATE_NAMES,),
-            )
-        cur.execute(
-            "DELETE FROM roles WHERE name = ANY(%s)",
-            (_TEMPLATE_NAMES,),
-        )
-
-
 @pytest.fixture
 def round_trip_db(test_settings):
     """Yield a psycopg2 connection with the DB normalized to the unify_roles
     revision so tests can drive downgrade/upgrade cycles from a known state.
 
-    Teardown leaves schema at whatever the test ended on — isolation from
-    other suites is the `migration_isolation` marker's job.
+    Teardown restores head.
     """
     cfg = _alembic_cfg(test_settings.sync_database_url)
 
@@ -108,18 +81,11 @@ def round_trip_db(test_settings):
     )
     conn.autocommit = True
 
-    # Clear collisions that sibling migration tests may have left behind, so
-    # the unify_roles preflight doesn't halt re-upgrade.
-    _clear_template_named_roles(conn)
-
-    # Normalize to unify_roles head. The DB may be at head, at base, or mid-
-    # way; upgrade is idempotent-ish (Alembic no-ops when already at head).
-    command.upgrade(cfg, UNIFY_REVISION)
-
-    try:
-        yield {"conn": conn, "cfg": cfg}
-    finally:
-        conn.close()
+    with at_revision(cfg, UNIFY_REVISION):
+        try:
+            yield {"conn": conn, "cfg": cfg}
+        finally:
+            conn.close()
 
 
 def _get_column_is_nullable(conn, table: str, column: str) -> bool:

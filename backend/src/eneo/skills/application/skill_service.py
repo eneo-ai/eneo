@@ -1160,7 +1160,7 @@ class SkillService:
         organisation: SkillRuntimeResolution,
         personal: SkillRuntimeResolution,
         model_route: str,
-        max_input_tokens: int,
+        max_input_tokens: int | None,
         supports_tool_calling: bool,
         prompt_files: Sequence[File],
     ) -> SkillTurnPlan:

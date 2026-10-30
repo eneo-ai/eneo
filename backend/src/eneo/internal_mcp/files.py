@@ -75,6 +75,11 @@ __all__ = [
 TABULAR_MIME_TYPES = frozenset(
     {CSV_MIME_TYPE, "text/tab-separated-values", XLSX_MIME_TYPE}
 )
+# JSON Lines, one record per line, is a table the same tools read. A JSON
+# document is a tree that query_json reads by its structure and by path, so it
+# never has to be paged through as text.
+JSON_LINES_MIME_TYPES = frozenset({"application/x-ndjson", "application/jsonl"})
+JSON_MIME_TYPES = frozenset({"application/json", "text/json"})
 
 
 def _text(message: str) -> list[TextContent]:
@@ -90,6 +95,13 @@ def _table_tools_offered(ctx: Context) -> bool:
 
 
 def _table_tools_redirect(file) -> list[TextContent]:
+    if file.mimetype in JSON_MIME_TYPES:
+        return _text(
+            f"'{file.name}' ({file.mimetype}) is a JSON document. Use query_json "
+            "with the same url: without a path for its structure, then with a "
+            "path for a value or a part of the tree; it reads the file itself. "
+            "Call read_file again with raw=true only if it could not read it."
+        )
     return _text(
         f"'{file.name}' ({file.mimetype}) is a table. Use inspect_table with the "
         "same url to see its sheets, columns, types and sample rows, and "
@@ -165,13 +177,13 @@ async def read_file(
     task (for example tabular or spreadsheet analysis tools, or tools that
     summarize files too large to read into context), prefer that tool and
     pass it the same url; if it fails or no such tool exists, use this one
-    rather than telling the user the file cannot be read. For a CSV, TSV or
-    Excel file, inspect_table and query_table, when available, describe and
-    query the file far better than its raw text, also when the user only asks
-    what the file contains; while they are available this tool points such a
-    file at them instead of returning its text. Set raw=true only when they
-    could not read the file: the extracted text is then returned as for any
-    other file.
+    rather than telling the user the file cannot be read. For a CSV, TSV,
+    Excel or JSON Lines file, inspect_table and query_table, and for a JSON
+    document query_json, when available, describe and query the file far
+    better than its raw text, also when the user only asks what the file
+    contains; while they are available this tool points such a file at them
+    instead of returning its text. Set raw=true only when they could not read
+    the file: the extracted text is then returned as for any other file.
     """
     try:
         file_id, payload = verify_reference_url(url)
@@ -187,7 +199,15 @@ async def read_file(
         except FileReferenceRejected as exc:
             return _text(str(exc))
 
-    if not raw and file.mimetype in TABULAR_MIME_TYPES and _table_tools_offered(ctx):
+    if (
+        not raw
+        and (
+            file.mimetype in TABULAR_MIME_TYPES
+            or file.mimetype in JSON_LINES_MIME_TYPES
+            or file.mimetype in JSON_MIME_TYPES
+        )
+        and _table_tools_offered(ctx)
+    ):
         logger.info("[FILES] read_file file=%s pointed at the table tools", file_id)
         return _table_tools_redirect(file)
 
@@ -202,9 +222,9 @@ async def read_file(
 
 
 _TABLE_TOOLS_SUFFIX = (
-    "\n\nAttached CSV, TSV and Excel files belong to inspect_table and "
-    "query_table, which read the file itself; for such a file this tool points "
-    "at them instead of returning its text, unless raw=true."
+    "\n\nAttached CSV, TSV, Excel, JSON Lines and JSON files belong to "
+    "inspect_table, query_table and query_json, which read the file itself; for such a file "
+    "this tool points at them instead of returning its text, unless raw=true."
 )
 
 

@@ -14,7 +14,7 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from eneo.database.tables.ai_models_table import ImageModels as ImageModelsDB
-    from eneo.users.user import UserInDB
+    from eneo.tenants.tenant import TenantInDB
 
 
 # Request vocabulary of the OpenAI Images API contract, which every provider
@@ -45,7 +45,8 @@ class ImageModelUsage:
 class ImageModel(AIModel):
     def __init__(
         self,
-        user: UserInDB,
+        *,
+        tenant: TenantInDB,
         id: UUID,
         created_at: datetime,
         updated_at: datetime,
@@ -72,7 +73,7 @@ class ImageModel(AIModel):
         used_by_mcp_servers: Optional[list[ImageModelUsage]] = None,
     ):
         super().__init__(
-            user=user,
+            tenant=tenant,
             id=id,
             created_at=created_at,
             updated_at=updated_at,
@@ -106,12 +107,12 @@ class ImageModel(AIModel):
     def create_from_db(
         cls,
         image_model_db: ImageModelsDB,
-        user: UserInDB,
+        tenant: TenantInDB,
         provider_name: Optional[str] = None,
         provider_type: Optional[str] = None,
     ) -> ImageModel:
         return cls(
-            user=user,
+            tenant=tenant,
             id=image_model_db.id,
             created_at=image_model_db.created_at,
             updated_at=image_model_db.updated_at,

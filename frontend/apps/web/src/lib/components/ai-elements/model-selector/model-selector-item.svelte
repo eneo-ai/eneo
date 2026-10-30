@@ -8,6 +8,8 @@
     /** Search/filter string for the command palette — include the model name and vendor. */
     value: string;
     selected?: boolean;
+    /** Listed but not selectable; the item's content should say why. */
+    disabled?: boolean;
     onSelect?: () => void;
     onHighlight?: () => void;
     class?: string;
@@ -17,6 +19,7 @@
   let {
     value,
     selected = false,
+    disabled = false,
     onSelect,
     onHighlight,
     class: className,
@@ -44,6 +47,7 @@
   bind:ref={itemRef}
   data-slot="model-selector-item"
   {value}
+  {disabled}
   data-checked={selected ? "true" : undefined}
   onSelect={() => {
     onSelect?.();

@@ -1,0 +1,126 @@
+# The data schema
+
+Use this page to understand ownership and invariants before changing Flow
+persistence. It is intentionally a hand-maintained map, not a copy of every
+SQLAlchemy column. The ORM and Alembic revisions remain authoritative.
+
+## Migration lineage
+
+The initial Flow schema and platform integration revisions are `202608201000`
+and `202608201100`. Later revisions extend these schemas and merge with
+platform migration heads; `202608201200` added tables for a conversational
+builder that `202610212200` drops again. The current lineage is in `backend/alembic/versions`; it is not limited to those
+initial revisions.
+
+Before an upgrade, check the database revision against that lineage. Follow the
+repository migration guidelines in `docs/CONTRIBUTING.md`: review generated
+revisions, test upgrade and downgrade behavior, and create a new revision rather
+than editing an applied one.
+
+## Core aggregates
+
+| Aggregate                   | Tables                                                                                                             | Ownership                                                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------- |
+| Draft and publication       | `flows`, `flow_steps`, `flow_versions`, `flow_template_assets`, `flow_resource_bindings`                           | Mutable authoring is separated from immutable published snapshots.                                               |
+| Execution and evidence      | `flow_runs`, `flow_step_results`, `flow_step_attempts`, `flow_step_attempt_resolved_inputs`, `flow_provider_calls` | A run executes one published version. Attempts and provider calls preserve evidence across retries and recovery. |
+| Runtime files               | `flow_runtime_uploaded_files`, `flow_run_step_input_files`, `flow_run_step_result_files`                           | File identity remains in the platform `files` table; Flow rows record tenant-scoped use and provenance.          |
+| Review                      | `flow_run_review_checkpoints`                                                                                      | Revisioned review state, actor attribution, edited payloads, and resume idempotency.                             |
+| Delivery                    | `flow_run_audit_outbox`, `flow_run_webhook_deliveries`                                                             | Transactional intents are written with lifecycle state and delivered asynchronously.                             |
+| Portability                 | `flow_package_imports`                                                                                             | Import state for validated `.eneopkg` archives. Imported definitions remain drafts.                              |
+| Suggestions                 | `flow_suggestion_dismissals`                                                                                       | Which of a flow's suggestions its editors hid, by fingerprint; deleted with the flow.                            |
+| Shared platform integration | `service_principals`, `provider_token_usages`                                                                      | Principal and token-usage records shared with non-Flow consumers.                                                |
+
+There are no partial-rerun operation or invalidation tables, no
+classification-retention policy tables, and no Flow retention tombstones in the
+final schema. Starting again means creating a new run; the attempt ledger remains
+because it is required for evidence, provider-call accounting, review, and
+terminalization.
+
+## Tenant and actor invariants
+
+- Every tenant-owned Flow query includes `tenant_id`.
+- Composite foreign keys pin child rows to the same tenant as their Flow, run,
+  checkpoint, file, or service principal.
+- A run records exactly one requesting principal shape: user or service
+  principal. Review checkpoints apply the same rule to requester and decider.
+- Runtime files must belong to the run's tenant and authorized principal before
+  they can be bound.
+
+These are database constraints as well as service-layer checks. Do not replace a
+composite ownership constraint with an application-only assertion.
+
+## Lifecycle integrity
+
+The schema enforces the invariants that must survive process crashes:
+
+- only one active review checkpoint exists for a run;
+- review transitions and resume requests use revision/idempotency keys;
+- dispatch fields form a bounded, generation-fenced retry record;
+- terminal audit and webhook intents are unique for their lifecycle generation;
+- attempt numbers are unique per run and step;
+- terminal runs keep their attempt and provider-call evidence until retention
+  removes the run.
+
+Repositories add row locking and compare-and-swap behavior around these
+constraints. Schema presence tests alone are not sufficient coverage; exercise
+the repository transition that depends on the constraint.
+
+## Retention
+
+Run-history retention resolves one complete policy in this order:
+
+1. Flow `flow_run_history_retention_mode` and `flow_run_history_retention_days`
+2. Space `flow_run_history_retention_mode` and `flow_run_history_retention_days`
+3. Organization `flow_run_history_retention_mode` and `flow_run_history_retention_days`
+
+At every level both columns are null (inherit) or both are present (replace the
+complete parent policy). The first complete policy wins. `preserve` marks age
+eligibility for an explicit purge; `review_required` additionally routes
+matching terminal runs to the read-only review queue. No policy means there is
+no run-history age threshold.
+
+These values never authorize scheduled deletion: the shared retention worker
+does not mutate Flow-owned data. The existing administrator settings API
+previews or explicitly purges eligible history while respecting legal holds,
+review requirements, and delivery blockers. See
+[Flow run-history retention](/guides/flows/retention-policy) for the purge and
+audit contract.
+
+Space `data_retention_days` remains the separate conversation/App policy and is
+not a Flow run-history fallback.
+
+## JSONB columns
+
+Flow JSONB columns are declared in
+`backend/src/eneo/database/tables/flow_tables.py`, plus `tenants.flow_settings`
+in `backend/src/eneo/database/tables/tenant_table.py`. A small test,
+`backend/tests/unittests/flows/test_flow_jsonb_columns.py`, compares the JSONB
+columns it discovers there with a reviewed list, so a new column fails it until
+someone reviews it. That is all it checks: parsing, schema versions, and
+corrupt-value behavior are decided in the modules that read and write each
+column, are not uniform, and are not enforced by the test.
+
+Several columns are parsed by a typed model in the module that reads or writes
+them: `flows.metadata_json` by `FlowMetadata`, `flow_versions.definition_json`
+by `PublishedFlowDefinition`, and `flow_step_attempt_resolved_inputs` edges by
+`FlowResolvedInputEdges`.
+Others are stored as plain dictionaries: the `flow_step_results` payload
+columns have no schema version, and `flow_step_transcript_words.words_json`
+is kept as `list[dict]`. Read the code that touches a column to see which
+applies.
+
+When adding or changing JSONB:
+
+1. define the Pydantic/domain model first and parse the column through it;
+2. decide whether old rows require a migration or versioned parser;
+3. test malformed, old-version, and tenant-boundary behavior;
+4. add the column to the reviewed list in that test together with those tests;
+5. update this map only when ownership or lifecycle meaning changes.
+
+## Source of truth
+
+- ORM: `backend/src/eneo/database/tables/flow_tables.py`
+- Migration lineage: `backend/alembic/versions/`
+- Initial core schema: `backend/alembic/versions/202608201000_create_final_flow_schema.py`
+- Initial core integration: `backend/alembic/versions/202608201100_integrate_final_flow_schema.py`
+- Migration behavior tests: `backend/tests/integration/migrations/test_final_flow_schema_migrations.py`

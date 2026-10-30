@@ -314,3 +314,21 @@ def test_info_blob_original_token_cannot_be_replayed_as_file_token():
         issued_at=now,
     )
     assert verify_info_blob_original_download_token(file_token) is None
+
+
+@pytest.mark.parametrize("purpose", ["processing", "file_original"])
+def test_verify_rejects_file_or_tenant_mismatch(purpose: str):
+    """A caller that names the file and tenant it serves binds the token to both."""
+    generate, verify, _, _ = GENERATORS[purpose]
+    file_id = uuid4()
+    tenant_id = uuid4()
+    token = generate(
+        file_id,
+        int(time.time()) + 60,
+        ContentDisposition.ATTACHMENT,
+        tenant_id,
+    )
+
+    assert verify(token, expected_file_id=file_id, expected_tenant_id=tenant_id)
+    assert verify(token, expected_file_id=uuid4(), expected_tenant_id=tenant_id) is None
+    assert verify(token, expected_file_id=file_id, expected_tenant_id=uuid4()) is None

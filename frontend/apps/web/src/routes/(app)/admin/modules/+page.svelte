@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import { resolve } from "$app/paths";
-  import type { ApiKeyV2, ModuleInstallation } from "@eneo/eneo-js";
+  import { EneoError, type ApiKeyV2, type ModuleInstallation } from "@eneo/eneo-js";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import CircleCheck from "@lucide/svelte/icons/circle-check";
   import LoaderCircle from "@lucide/svelte/icons/loader-circle";
@@ -26,9 +27,17 @@
 
   const eneo = getEneo();
   const UNBOUND_SERVICE_KEY = "__unbound__";
+  const SERVICE_KEY_PAGE_SIZE = 50;
 
   let installations = $state<ModuleInstallation[]>([]);
   let serviceKeys = $state<ApiKeyV2[]>([]);
+  let serviceKeyCursor = $state<string | null>(null);
+  let serviceKeySearchInput = $state("");
+  let appliedServiceKeySearch = "";
+  let serviceKeysLoading = $state(false);
+  let boundKeyLoading = $state(false);
+  let serviceKeyRequestId = 0;
+  let boundKeyRequestId = 0;
   let loading = $state(true);
   let saving = $state(false);
   let errorMessage = $state<string | null>(null);
@@ -60,34 +69,55 @@
     ];
   }
 
-  async function listCompatibleServiceKeys(): Promise<ApiKeyV2[]> {
-    // The backend owns the complete module-binding eligibility rule, including
-    // effective expiry and rotation-grace state.
-    const keys: ApiKeyV2[] = [];
-    const visitedCursors: string[] = [];
-    let cursor: string | null = null;
+  function mergeServiceKeys(current: ApiKeyV2[], incoming: ApiKeyV2[]): ApiKeyV2[] {
+    const byId = new SvelteMap(current.map((key) => [key.id, key]));
+    for (const key of incoming) byId.set(key.id, key);
+    return [...byId.values()];
+  }
 
-    do {
-      const page = await eneo.apiKeys.admin.list({
-        limit: 200,
-        eligible_for_module_binding: true,
-        ...(cursor && { cursor })
+  async function loadServiceKeys({
+    cursor = null,
+    append = false,
+    search = appliedServiceKeySearch
+  }: {
+    cursor?: string | null;
+    append?: boolean;
+    search?: string;
+  } = {}) {
+    const requestId = ++serviceKeyRequestId;
+    serviceKeysLoading = true;
+    errorMessage = null;
+    try {
+      const normalizedSearch = search.trim();
+      const page = await eneo.modules.listServiceKeys({
+        limit: SERVICE_KEY_PAGE_SIZE,
+        ...(cursor && { cursor }),
+        ...(normalizedSearch && { search: normalizedSearch })
       });
-      for (const key of page.items) {
-        if (!keys.some((existing) => existing.id === key.id)) {
-          keys.push(key);
-        }
-      }
+      if (requestId !== serviceKeyRequestId) return;
 
-      const nextCursor = page.next_cursor ?? null;
-      if (nextCursor && visitedCursors.includes(nextCursor)) {
-        throw new Error("API key pagination returned a repeated cursor.");
-      }
-      if (nextCursor) visitedCursors.push(nextCursor);
-      cursor = nextCursor;
-    } while (cursor);
+      const selected = serviceKeys.find((key) => key.id === serviceKeyId);
+      const retained = append ? serviceKeys : selected ? [selected] : [];
+      serviceKeys = mergeServiceKeys(retained, page.items);
+      appliedServiceKeySearch = normalizedSearch;
+      serviceKeyCursor = page.next_cursor ?? null;
+    } catch (error) {
+      if (requestId !== serviceKeyRequestId) return;
+      console.error(error);
+      errorMessage = getErrorMessage(error);
+    } finally {
+      if (requestId === serviceKeyRequestId) serviceKeysLoading = false;
+    }
+  }
 
-    return keys;
+  function searchServiceKeys() {
+    void loadServiceKeys({ search: serviceKeySearchInput });
+  }
+
+  function handleServiceKeySearchKeydown(event: KeyboardEvent) {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    searchServiceKeys();
   }
 
   async function refreshInstallations() {
@@ -104,12 +134,11 @@
     loading = true;
     errorMessage = null;
     try {
-      const [modulePage, compatibleServiceKeys] = await Promise.all([
+      const [modulePage] = await Promise.all([
         eneo.modules.list(),
-        listCompatibleServiceKeys()
+        loadServiceKeys({ search: "" })
       ]);
       installations = modulePage.items;
-      serviceKeys = compatibleServiceKeys;
     } catch (error) {
       console.error(error);
       errorMessage = getErrorMessage(error);
@@ -119,6 +148,8 @@
   }
 
   function resetForm() {
+    boundKeyRequestId += 1;
+    boundKeyLoading = false;
     moduleKey = "";
     redirectUrisInput = "";
     serviceKeyId = "";
@@ -126,17 +157,41 @@
     editingModuleKey = null;
   }
 
-  function editInstallation(installation: ModuleInstallation) {
+  async function editInstallation(installation: ModuleInstallation) {
+    const requestId = ++boundKeyRequestId;
     moduleKey = installation.module_key;
     redirectUrisInput = (installation.redirect_uris ?? []).join("\n");
     const boundKeyId = installation.service_key_id ?? "";
-    const boundKeyUsable = boundKeyId !== "" && serviceKeys.some((key) => key.id === boundKeyId);
-    // A bound key that fell out of the eligible list (revoked, expired,
-    // rotated) must not ride along silently into the next save.
-    serviceKeyId = boundKeyId === "" ? UNBOUND_SERVICE_KEY : boundKeyUsable ? boundKeyId : "";
-    boundKeyMissing = boundKeyId !== "" && !boundKeyUsable;
     editingModuleKey = installation.module_key;
     errorMessage = null;
+    boundKeyMissing = false;
+    boundKeyLoading = false;
+
+    if (boundKeyId === "") {
+      serviceKeyId = UNBOUND_SERVICE_KEY;
+    } else if (serviceKeys.some((key) => key.id === boundKeyId)) {
+      serviceKeyId = boundKeyId;
+    } else {
+      serviceKeyId = "";
+      boundKeyLoading = true;
+      try {
+        const boundKey = await eneo.modules.getServiceKey({ serviceKeyId: boundKeyId });
+        if (requestId !== boundKeyRequestId) return;
+        serviceKeys = mergeServiceKeys(serviceKeys, [boundKey]);
+        serviceKeyId = boundKey.id;
+      } catch (error) {
+        if (requestId !== boundKeyRequestId) return;
+        if (error instanceof EneoError && error.status === 404) {
+          // Missing, cross-tenant and no-longer-eligible keys intentionally share 404.
+          boundKeyMissing = true;
+        } else {
+          errorMessage = getErrorMessage(error);
+        }
+      } finally {
+        if (requestId === boundKeyRequestId) boundKeyLoading = false;
+      }
+    }
+
     document.getElementById("module-installation-form")?.scrollIntoView({
       behavior: "smooth",
       block: "start"
@@ -272,7 +327,7 @@
                         <Button
                           size="sm"
                           variant="outline"
-                          onclick={() => editInstallation(installation)}
+                          onclick={() => void editInstallation(installation)}
                         >
                           <Pencil />
                           {m.edit()}
@@ -330,7 +385,29 @@
 
           <Field.Field>
             <Field.Label for="service-key">{m.module_admin_service_key()}</Field.Label>
-            <Select.Root type="single" bind:value={serviceKeyId} disabled={saving}>
+            <div class="flex gap-2">
+              <Input
+                type="search"
+                bind:value={serviceKeySearchInput}
+                aria-label={`${m.module_admin_service_key()} ${m.search()}`}
+                placeholder={m.search()}
+                disabled={saving || serviceKeysLoading}
+                onkeydown={handleServiceKeySearchKeydown}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                disabled={saving || serviceKeysLoading}
+                onclick={searchServiceKeys}
+              >
+                {m.search()}
+              </Button>
+            </div>
+            <Select.Root
+              type="single"
+              bind:value={serviceKeyId}
+              disabled={saving || serviceKeysLoading || boundKeyLoading}
+            >
               <Select.Trigger
                 id="service-key"
                 class="w-full"
@@ -353,8 +430,24 @@
                 {/each}
               </Select.Content>
             </Select.Root>
+            {#if serviceKeyCursor}
+              <Button
+                type="button"
+                variant="outline"
+                class="self-start"
+                disabled={saving || serviceKeysLoading}
+                onclick={() =>
+                  void loadServiceKeys({
+                    cursor: serviceKeyCursor,
+                    append: true,
+                    search: appliedServiceKeySearch
+                  })}
+              >
+                {m.load_more()}
+              </Button>
+            {/if}
             <Field.Description>{m.module_admin_service_key_help()}</Field.Description>
-            {#if boundKeyMissing && !serviceKeyId}
+            {#if boundKeyMissing && !boundKeyLoading && !serviceKeyId}
               <Alert.Root variant="destructive" role="alert">
                 <CircleAlert />
                 <Alert.Description>{m.module_admin_bound_key_missing()}</Alert.Description>

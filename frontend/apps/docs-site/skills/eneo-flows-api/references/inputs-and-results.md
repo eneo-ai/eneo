@@ -1,0 +1,124 @@
+# Inputs and results
+
+The run contract is the client form schema and result preview. Fetch it for the published version the user is about to run.
+
+## Run-contract fields
+
+| Field                     | Consumer use                                                                                                                                                                     |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `published_flow_version`  | Send as `expected_flow_version` so stale forms fail explicitly.                                                                                                                  |
+| `form_fields`             | Render structured values placed inside `input_payload_json`.                                                                                                                     |
+| `steps_requiring_input`   | Render step-specific file controls and build `step_inputs`.                                                                                                                      |
+| `runtime_upload_policy`   | Derive upload timeouts from size within the published minimum and maximum.                                                                                                       |
+| `steps_requiring_review`  | Prepare review UI for the modes and output types that may pause.                                                                                                                 |
+| `aggregate_max_files`     | `0` means no runtime file steps. A positive value is the combined limit. `null` means at least one step is unbounded, so enforce per-step limits instead.                        |
+| `final_output`            | Prepare terminal rendering for payload, artifact, or outbound delivery.                                                                                                          |
+| `template_readiness`      | Explain a document-generation Flow that is not ready to run.                                                                                                                     |
+| `transcription`           | `null` unless the Flow transcribes recorded audio. `live` reports whether live text is available, and why not; `speaker_labels` reports whether a run may choose speaker labels. |
+| `security_classification` | The Space's classification: `name`, `description`, and `security_level`. Show it where users choose what to upload. `null` when the Space has none or classifications are off.   |
+
+Each item in `steps_requiring_input` reports `step_id`, order, label, description, whether input is required, input format, maximum files, maximum bytes per file, and accepted MIME types. Never infer these limits from the label or from a previous Flow version.
+
+Supported runtime file formats are determined by each returned step contract. Do not offer an image upload merely because a backend enum or old client type contains `image`; the published run contract and deployment documentation are authoritative.
+
+## Form values
+
+Form field types include text, number, date, select, multiselect, and list. Send values under their published names inside `input_payload_json`. An optional field left out or sent as `null` reads as its empty value (`""` for text, `[]` for list and multiselect, `null` for number, date, and select), so leaving it out and sending it empty are the same request.
+
+The server rejects these runtime-owned keys when a consumer sends them inside `input_payload_json`:
+
+- `expected_flow_version`
+- `file_ids`
+- `speaker_labels`
+- `step_inputs`
+- `transcript_regeneration`
+- `transkribering`
+
+The server validates required fields, dates, finite numbers, collection shapes, allowed options, and reserved payload keys. Treat validation failures as a form correction, not a run failure.
+
+## Speaker labels
+
+`transcription.speaker_labels` in the run contract has `selectable`, `required`, `default`, and `unavailable_reason`. When `selectable` is true, the create request may carry a top-level `speaker_labels` of `true` or `false`; omit it or send `null` to keep the Flow's `default`. `selectable` is false when the Flow has chosen no speaker identification service its Space can use, or when `required` is true because a step maps speakers to names. The service is stored in the Flow (the author's choice, or the organisation's default filled in when the draft was saved); nothing is chosen when a run starts.
+
+Sending `true` or `false` while `selectable` is false returns `422 flow_run_speaker_labels_not_selectable`. The choice is part of the logical request: a changed choice needs a new `Idempotency-Key`. Labelling speakers makes the run take longer.
+
+`unavailable_reason` says why the speaker labels the Flow asks for cannot be produced, or is `null`: `picked_unavailable` (the service the Flow's author chose is no longer usable in the Space; nothing replaces it) or `not_chosen` (a step requires labels and the author chose no service; Eneo does not publish a Flow in this state, so it is a safeguard). When `required` is true, do not collect a recording or create a run; a run created anyway fails its transcription step with `typed_io_speaker_service_unavailable`. When `required` is false, the run transcribes without speaker labels: tell the person and continue.
+
+## Step-bound uploads
+
+Upload before starting the run:
+
+```http
+POST /flows/{flow_id}/steps/{step_id}/runtime-files/
+Content-Type: multipart/form-data
+```
+
+The multipart field must be `upload_file`. Bind the result to the same logical step:
+
+```json
+{
+  "step_inputs": {
+    "<step-id>": {
+      "file_ids": ["<runtime-file-id>"]
+    }
+  }
+}
+```
+
+A file ID may be reused under multiple compatible step IDs when the same binary should feed multiple steps. Keep per-step file order stable between key derivation and run creation. Do not rely on file order to express business meaning; model semantic ordering in the published Flow.
+
+There is no chunked or resumable upload and no general mid-run file injection. An eligible failed-run child retry preserves the original inputs and file selections. To replace a file, upload it through the step-specific runtime-file endpoint and bind it in a new run's `step_inputs`. Human review can edit a permitted inline text or JSON output, not replace input files; see [review handling](review-evidence-and-retention.md).
+
+## Live text while recording
+
+When `transcription.live.available` is true, an app can show preview text while someone records. The preview never becomes the run's transcript: keep the recording, then upload it and create the run as usual. When it is false, `live.reason` is `transcription_disabled`, `transcription_service_mode`, `model_unavailable`, or `model_not_realtime`; record without a preview.
+
+1. Request a ticket for the audio step with `POST /flows/{flow_id}/steps/{step_id}/live-transcription-sessions/` (no body, `201`). It needs the same access as creating a run.
+2. Within 30 seconds, open a WebSocket to the returned `websocket_path`, resolved against the deployment origin, offering the subprotocols `eneo-live.v1` and `ticket.<ticket>`. A ticket opens one socket.
+3. After the `ready` event, send binary frames of mono 16-bit little-endian PCM at 16 kHz, 2 bytes to 64 KiB each with an even length, then the text frame `{"type": "stop"}`.
+4. Append the `text` of each `transcript.delta`. `transcript.done` carries the full preview text of that session; an `error` event carries `code`, `message`, and `retryable`. The socket closes after either.
+
+Each ticket starts a fresh session. While the recording runs, a `retryable` error may start a new session: keep the text already shown and append after it. After `stop`, never request a new ticket; keep the preview text you have and go on with the upload and run.
+
+The ticket request returns `409 flow_live_transcription_unavailable` with the reason in `context.reason` when live text is unavailable. Keep service keys and module tokens on the server. The socket checks only the ticket and the page's origin: it accepts the API's own host, an origin the operator allows, a loopback host, or a server-side client without an `Origin` header. So the backend can pass the ticket to its own browser when Eneo accepts that origin, or relay the socket when Eneo does not accept it or all traffic stays on the server. For the full protocol, limits, and both connection patterns, read "Show live text while recording" in the Integrating Flows guide, and for every socket code, "Live transcription socket codes" in the Flow error reference, both on docs.eneo.ai.
+
+## Closed final-result union
+
+On a completed run, `result` has exactly one `kind`:
+
+| Kind               | Meaning                                                  | Consumer action                                                         |
+| ------------------ | -------------------------------------------------------- | ----------------------------------------------------------------------- |
+| `inline_text`      | Complete text is inline.                                 | Render `text`.                                                          |
+| `file_backed_text` | Inline text is only a bounded preview.                   | If the file is available, request its signed URL for the complete text. |
+| `structured`       | Authored JSON value plus the historical output contract. | Validate/render `value` using that run's `output_contract`.             |
+| `artifact`         | One or more generated files.                             | Show metadata and request signed URLs on demand.                        |
+| `outbound_http`    | A Flow-authored terminal delivery succeeded.             | Render the delivery receipt; no destination or payload is exposed.      |
+
+Use an exhaustive branch. `result` is null before successful completion.
+
+Historical results belong to each run's `flow_version`. Do not interpret an old structured value with the currently published output contract.
+
+## Step outputs
+
+`GET .../steps/` returns a bare array, not a paginated envelope. Use it for intermediate state, diagnostics, step usage, and current-attempt output. Prefer the run-level `result` for the stable terminal result.
+
+Step status values are `pending`, `running`, `completed`, `failed`, and `cancelled`.
+
+If `output_payload_json.text_overflow` exists, inline `text` is only a preview and its generated file identifies the complete output. Transcription text is a step output, not a run-input field. When multiple steps have structured output, choose by step ID/order and domain purpose instead of taking the first structured object.
+
+## Artifact access
+
+Request authorization before bytes:
+
+```http
+POST /flows/{flow_id}/runs/{run_id}/artifacts/{file_id}/signed-url/
+
+{
+  "expires_in": 3600,
+  "content_disposition": "attachment"
+}
+```
+
+Then perform an unauthenticated `GET` to the returned URL. Do not attach the Eneo credential to storage/download origins. Treat the signed URL itself as a short-lived secret: do not persist it, expose it to analytics, or write it to normal application logs.
+
+Check file `availability` before showing download. `content_purged` means metadata remains but bytes do not; the signed-URL endpoint returns `410 flow_run_artifact_content_unavailable`. Never present a file-backed preview as the complete result.

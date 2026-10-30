@@ -27,7 +27,7 @@
   <div>
     <h3 class="text-sm font-medium">{m.instructions()}</h3>
     <pre
-      class="border-border bg-muted/30 mt-2 rounded-md border p-4 text-sm leading-6 whitespace-pre-wrap [overflow-wrap:anywhere]"><code
+      class="border-border bg-muted/30 mt-2 rounded-md border p-4 text-sm leading-6 [overflow-wrap:anywhere] whitespace-pre-wrap"><code
         >{preview.instructions}</code
       ></pre>
   </div>

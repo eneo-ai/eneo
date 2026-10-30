@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
 from eneo.completion_models.domain.skill_activation import (
     SkillActivationFallbackReason,
     SkillActivationRejectionReason,
@@ -101,6 +102,19 @@ def test_no_personal_bindings_is_empty():
 
     assert decision.status is PersonalSkillLayerStatus.EMPTY
     assert decision.reason is None
+
+
+def test_empty_personal_layer_needs_no_declared_model_capacity():
+    assert _assess(max_input_tokens=None).status is PersonalSkillLayerStatus.EMPTY
+
+
+def test_personal_layer_uses_the_shared_unknown_capacity_refusal():
+    with pytest.raises(UnknownModelCapacityError) as raised:
+        _assess(
+            personal=_resolution(_binding("Own guidance", position=0)),
+            max_input_tokens=None,
+        )
+    assert raised.value.missing_dimensions == ("max_input_tokens",)
 
 
 def test_an_admissible_personal_layer_is_applied():

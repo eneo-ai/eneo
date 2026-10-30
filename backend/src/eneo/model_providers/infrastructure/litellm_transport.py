@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 import socket
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Callable, NoReturn, cast
 
@@ -22,10 +23,16 @@ from litellm.exceptions import (
     UnsupportedParamsError,
 )
 
+from eneo.flows.runtime.step_deadline import (
+    current_step_deadline_scope,
+    mark_provider_request_in_flight,
+    require_step_budget,
+)
 from eneo.main.exceptions import (
     APIKeyNotConfiguredException,
     BadRequestException,
     OpenAIException,
+    ProviderCapabilityRejectedException,
     ProviderRejectedRequestException,
 )
 
@@ -178,6 +185,12 @@ _PROVIDER_RAISED: tuple[type[BaseException], ...] = (
     ConnectionError,
     TimeoutError,
 )
+_UNSUPPORTED_CAPABILITY_CODES = frozenset(
+    {
+        "unsupported_parameter",
+        "unsupported_value",
+    }
+)
 _FAILURE_TEXT: tuple[tuple[str, ProviderFailure], ...] = (
     ("cannot connect", PROVIDER_UNREACHABLE),
     ("connection refused", PROVIDER_UNREACHABLE),
@@ -209,7 +222,12 @@ def get_model_info(model: str) -> dict[str, object]:
 
 
 async def acompletion(**kwargs: Any) -> Any:
+    scope = current_step_deadline_scope()
+    if scope is not None:
+        require_step_budget(phase="provider request (not sent)")
+        kwargs["timeout"] = scope.deadline.remaining()
     call = cast(Callable[..., Any], getattr(litellm, "acompletion"))
+    mark_provider_request_in_flight(True)
     return await call(**kwargs)
 
 
@@ -347,8 +365,37 @@ def is_provider_unavailable_error(exc: BaseException) -> bool:
     return classify_provider_failure(exc).unavailable
 
 
+def provider_failure_for_code(code: str | None) -> ProviderFailure | None:
+    """The provider failure a public code names, or None for any other code.
+
+    For callers that decide on an error Eneo already typed: unlike
+    ``classify_provider_failure`` it never reads the message."""
+    return _FAILURES_BY_CODE.get(code) if code is not None else None
+
+
 def raise_provider_unavailable(exc: BaseException) -> NoReturn:
     raise classify_provider_failure(exc).to_exception() from exc
+
+
+def _provider_error_field(exc: BaseException, field: str) -> object:
+    value = getattr(exc, field, None)
+    if value is not None:
+        return value
+    body = getattr(exc, "body", None)
+    if not isinstance(body, Mapping):
+        return None
+    body_fields = cast(Mapping[object, object], body)
+    error = body_fields.get("error")
+    if isinstance(error, Mapping):
+        return cast(Mapping[object, object], error).get(field)
+    return body_fields.get(field)
+
+
+def _is_response_format_capability_rejection(exc: BaseException) -> bool:
+    return (
+        _provider_error_field(exc, "param") == "response_format"
+        and _provider_error_field(exc, "code") in _UNSUPPORTED_CAPABILITY_CODES
+    )
 
 
 def raise_public_litellm_error(
@@ -357,10 +404,26 @@ def raise_public_litellm_error(
     provider_type: str,
     is_unavailable: Callable[[BaseException], bool],
     raise_unavailable: Callable[[BaseException], NoReturn],
+    retry_without_capability_safe: bool = False,
 ) -> NoReturn:
     """Map provider exceptions to stable public errors without leaking details."""
     if isinstance(exc, (APIKeyNotConfiguredException, OpenAIException)):
         raise exc
+
+    if isinstance(exc, BadRequestError) and _is_response_format_capability_rejection(
+        exc
+    ):
+        raise ProviderCapabilityRejectedException(
+            INVALID_REQUEST_MESSAGE,
+            capability="response_format",
+            retry_without_capability_safe=retry_without_capability_safe,
+            code="provider_rejected_request",
+            details={
+                "reason": "provider_capability_rejected",
+                "capability": "response_format",
+                "retryable": False,
+            },
+        ) from exc
 
     if is_unavailable(exc):
         raise_unavailable(exc)

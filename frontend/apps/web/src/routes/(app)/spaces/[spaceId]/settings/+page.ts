@@ -5,13 +5,20 @@
 export const load = async (event) => {
   const { eneo, currentSpace } = await event.parent();
 
-  const [models, security, mcpServers] = await Promise.all([
+  const [models, security, mcpServers, speakerServices] = await Promise.all([
     eneo.models.list({ space: currentSpace }),
     eneo.securityClassifications.list(),
     // All purposes: the web-search provider flows through the same
     // admin -> space -> assistant inheritance chain as general servers and is
     // grouped separately in the settings UI.
-    eneo.mcpServers.listSettings()
+    eneo.mcpServers.listSettings(),
+    // An organisation connects at most 200 services (the backend's limit,
+    // one page), so a single page holds them all. A failure stays in the
+    // speaker identification row instead of taking the page down.
+    eneo.transcriptionServices
+      .listCatalogue({ limit: 200 })
+      .then((page) => page.items)
+      .catch(() => null)
   ]);
 
   // Filter to only tenant-enabled servers
@@ -34,6 +41,7 @@ export const load = async (event) => {
     models,
     classifications: security.security_classifications,
     isSecurityEnabled: security.security_enabled,
-    mcpServers: enabledMCPServers
+    mcpServers: enabledMCPServers,
+    speakerServices
   };
 };

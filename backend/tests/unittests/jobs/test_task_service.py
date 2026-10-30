@@ -7,7 +7,11 @@ import pytest
 from eneo.files.file_size_service import FileSizeService
 from eneo.jobs.job_models import Task
 from eneo.jobs.task_service import TaskService
-from eneo.main.exceptions import FileTooLargeException, InvalidFilenameException
+from eneo.main.exceptions import (
+    FileNotSupportedException,
+    FileTooLargeException,
+    InvalidFilenameException,
+)
 from eneo.object_content.content import StorageKind
 from eneo.object_content.deployment_policy import UploadAdmissionSnapshot
 from tests.fixtures import TEST_USER
@@ -170,6 +174,35 @@ async def test_queue_upload_file_preserves_file_on_success(
         object_store_revision=7,
     )
     assert remaining[0].name == str(call.kwargs["job_id"])
+
+
+def test_get_task_type_rejects_legacy_doc_with_advice():
+    with pytest.raises(FileNotSupportedException) as exc_info:
+        TaskService.get_task_type("application/msword")
+
+    message = str(exc_info.value)
+    assert ".doc" in message and ".docx" in message
+
+
+def test_get_task_type_rejects_legacy_ppt_with_advice():
+    with pytest.raises(FileNotSupportedException) as exc_info:
+        TaskService.get_task_type("application/vnd.ms-powerpoint")
+
+    message = str(exc_info.value)
+    assert ".ppt" in message and ".pptx" in message
+
+
+def test_get_task_type_unknown_mime_rejected():
+    with pytest.raises(FileNotSupportedException):
+        TaskService.get_task_type("application/x-novel")
+
+
+def test_get_task_type_text_returns_upload_task():
+    assert TaskService.get_task_type("text/plain") is Task.UPLOAD_FILE
+
+
+def test_get_task_type_audio_returns_transcription_task():
+    assert TaskService.get_task_type("audio/wav") is Task.TRANSCRIPTION
 
 
 async def test_queue_upload_file_sanitizes_filename_before_job_creation(

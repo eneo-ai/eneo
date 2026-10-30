@@ -7,7 +7,6 @@ from eneo.sessions.session import SessionInDB, SessionMetadataPublic
 from eneo.sessions.session_protocol import (
     to_session_metadata_paginated_response,
     to_session_public,
-    to_sessions_paginated_response,
 )
 from eneo.skills.domain.skill import (
     SkillActivationEvidenceV1,
@@ -19,15 +18,14 @@ from eneo.skills.domain.skill import (
 def test_no_limit():
     base_datetime = datetime.now()
     test_sessions = [
-        SessionInDB(
+        SessionMetadataPublic(
             id=uuid4(),
             name=f"test-{i}",
-            user_id=uuid4(),
             created_at=base_datetime - timedelta(days=i),
         )
         for i in range(10)
     ]
-    response = to_sessions_paginated_response(
+    response = to_session_metadata_paginated_response(
         sessions=test_sessions, total_count=len(test_sessions)
     )
     assert len(response.items) == len(test_sessions)
@@ -36,16 +34,15 @@ def test_no_limit():
 def test_pagination_forward_limit():
     base_datetime = datetime.now()
     test_sessions = [
-        SessionInDB(
+        SessionMetadataPublic(
             id=uuid4(),
             name=f"test-{i}",
-            user_id=uuid4(),
             created_at=base_datetime - timedelta(days=i),
         )
         for i in range(6)
     ]
     limit = 5
-    response = to_sessions_paginated_response(
+    response = to_session_metadata_paginated_response(
         sessions=test_sessions,
         limit=limit,
         total_count=len(test_sessions),
@@ -58,17 +55,16 @@ def test_pagination_forward_limit():
 def test_pagination_backward_limit():
     base_datetime = datetime.now()
     test_sessions = [
-        SessionInDB(
+        SessionMetadataPublic(
             id=uuid4(),
             name=f"test-{i}",
-            user_id=uuid4(),
             created_at=base_datetime - timedelta(days=i),
         )
         for i in range(6)
     ]
 
     limit = 5
-    response = to_sessions_paginated_response(
+    response = to_session_metadata_paginated_response(
         sessions=test_sessions,
         total_count=len(test_sessions),
         limit=limit,
@@ -84,17 +80,16 @@ def test_pagination_backward_limit():
 def test_limit_matches_session_count():
     base_datetime = datetime.now()
     test_sessions = [
-        SessionInDB(
+        SessionMetadataPublic(
             id=uuid4(),
             name=f"test-{i}",
-            user_id=uuid4(),
             created_at=base_datetime - timedelta(days=i),
         )
         for i in range(10)
     ]
 
     limit = len(test_sessions)
-    response = to_sessions_paginated_response(
+    response = to_session_metadata_paginated_response(
         sessions=test_sessions,
         total_count=len(test_sessions),
         limit=limit,
@@ -153,7 +148,18 @@ def test_question_public_omits_persisted_tool_result():
                 tool_call_id="call_1",
                 result="large upstream payload",
                 mcp_tool_name="server__tool",
-            )
+                structured_content={"temperature": 12},
+            ),
+            # A flow run started from the flow chat: its id draws the run card.
+            ToolCallInfo(
+                server_name="flows",
+                tool_name="run_flow",
+                tool_call_id="call_2",
+                result="run payload",
+                mcp_tool_name="flows__run_flow",
+                is_internal=True,
+                structured_content={"flow_id": "flow-1", "run_id": "run-1"},
+            ),
         ],
         skill_provenance=[skill_reference],
         skill_activation=SkillActivationEvidenceV1(
@@ -171,8 +177,16 @@ def test_question_public_omits_persisted_tool_result():
 
     public = to_question_public(question)
 
-    assert len(public.tool_calls) == 1
+    assert len(public.tool_calls) == 2
     assert public.tool_calls[0].result is None
+    # An external call's structured content is read lazily, as its text is;
+    # an own server's stays, so a card can be drawn from the history.
+    assert public.tool_calls[0].structured_content is None
+    assert public.tool_calls[1].result is None
+    assert public.tool_calls[1].structured_content == {
+        "flow_id": "flow-1",
+        "run_id": "run-1",
+    }
     assert question.tool_calls is not None
     assert question.tool_calls[0].result == "large upstream payload"
     assert public.skill_provenance == [skill_reference]

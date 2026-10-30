@@ -619,7 +619,8 @@ async def test_pending_derived_image_retries_before_context_validation(
             mimetype="text/plain",
             file_type=FileType.TEXT.value,
             tenant_id=admin_user.tenant_id,
-            user_id=admin_user.id,
+            owner_type="user",
+            owner_user_id=admin_user.id,
         )
         session.add(root)
         await session.flush()
@@ -628,7 +629,8 @@ async def test_pending_derived_image_retries_before_context_validation(
             mimetype="image/png",
             file_type=FileType.IMAGE.value,
             tenant_id=admin_user.tenant_id,
-            user_id=admin_user.id,
+            owner_type="user",
+            owner_user_id=admin_user.id,
             parent_file_id=root.id,
         )
         session.add(derived)

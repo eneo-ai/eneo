@@ -162,12 +162,17 @@ so direct File/Icon upload would not eliminate all staging.
 ## Product usage fence
 
 File deletion has a product-level fence before the object-content lifecycle
-starts. A bounded File-owned query counts four concrete relations:
+starts. A bounded File-owned query counts six concrete relations:
 
 - chat questions;
 - Assistant attachments;
 - App attachments;
-- App-run inputs.
+- App-run inputs;
+- flow template assets;
+- published flow versions that name the File (a template or an assistant
+  attachment). The File is protected while such a version exists;
+  unpublishing and run-history purge do not release it, and no automatic
+  version cleanup exists yet.
 
 The advisory preview uses a recursive read to include generated derivatives.
 The authoritative delete path locks the root and descendants

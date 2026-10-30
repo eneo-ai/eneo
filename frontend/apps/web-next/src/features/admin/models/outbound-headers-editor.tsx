@@ -9,9 +9,9 @@ import { useId, useRef } from "react";
 import { flushSync } from "react-dom";
 import { useTranslations } from "use-intl";
 import { Plus, Trash2 } from "lucide-react";
-import { QuietBanner } from "@/components/astryx/banner";
-import { Switch } from "@/components/astryx/switch";
-import { TextInput } from "@/components/astryx/text-input";
+import { Banner } from "@astryxdesign/core/Banner";
+import { Switch } from "@astryxdesign/core/Switch";
+import { TextInput } from "@astryxdesign/core/TextInput";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { LoadingState } from "@/components/composites/loading-state";
 import type { useFieldFocus } from "./provider-form-fields";
@@ -193,11 +193,7 @@ export function OutboundHeadersEditor({
       <FieldProblem id={id} problem={problem} />
       {!options ? (
         optionsError ? (
-          <QuietBanner
-            status="warning"
-            title={t("outbound_headers_options_failed")}
-            collapsible={false}
-          >
+          <Banner status="warning" title={t("outbound_headers_options_failed")} collapsible={false}>
             <div className="flex flex-col items-start gap-2">
               <Text>
                 {t(
@@ -208,7 +204,7 @@ export function OutboundHeadersEditor({
               </Text>
               <Button label={t("retry")} onClick={onRetry} isLoading={loading} isInterruptible />
             </div>
-          </QuietBanner>
+          </Banner>
         ) : (
           <LoadingState rows={1} />
         )
@@ -231,7 +227,7 @@ export function OutboundHeadersEditor({
                     onChange={(name) => update({ ...row, name })}
                     autoComplete="off"
                     isRequired
-                    className="min-w-0 flex-1"
+                    containerClassName="min-w-0 flex-1"
                     placeholder={t("outbound_headers_name_placeholder")}
                     status={
                       showErrors && !row.name.trim()
@@ -281,7 +277,7 @@ export function OutboundHeadersEditor({
                 />
                 {row.onMissing === "fallback" && storedPart(row, "fallback", label)}
                 {row.onMissing === "fail" && (
-                  <QuietBanner status="warning" title={t("outbound_headers_fail_warning")} />
+                  <Banner status="warning" title={t("outbound_headers_fail_warning")} />
                 )}
                 <Switch
                   label={t("outbound_headers_secret")}
@@ -310,7 +306,7 @@ export function OutboundHeadersEditor({
             </Text>
           )}
           {classification && (
-            <QuietBanner
+            <Banner
               status="info"
               title={t(
                 classification === "identifying"
@@ -320,7 +316,7 @@ export function OutboundHeadersEditor({
             />
           )}
           {(classification || rows.some((row) => row.secret)) && isUnencryptedRemote(endpoint) && (
-            <QuietBanner status="warning" title={t("outbound_headers_plain_http_warning")} />
+            <Banner status="warning" title={t("outbound_headers_plain_http_warning")} />
           )}
           {rows.length > 0 && (
             <Text type="supporting">{t("outbound_headers_blocked_operations_note")}</Text>

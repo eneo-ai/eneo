@@ -396,7 +396,8 @@ async def test_skill_policy_counts_other_owners_visible_derived_images(
             mimetype="text/plain",
             file_type=FileType.TEXT.value,
             tenant_id=admin_user.tenant_id,
-            user_id=owner.id,
+            owner_type="user",
+            owner_user_id=owner.id,
         )
         container.session().add(root)
         await container.session().flush()
@@ -405,7 +406,8 @@ async def test_skill_policy_counts_other_owners_visible_derived_images(
             mimetype="image/png",
             file_type=FileType.IMAGE.value,
             tenant_id=admin_user.tenant_id,
-            user_id=owner.id,
+            owner_type="user",
+            owner_user_id=owner.id,
             parent_file_id=root.id,
         )
         container.session().add(derived)

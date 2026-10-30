@@ -1,0 +1,315 @@
+from __future__ import annotations
+
+from typing import Any
+
+import httpx
+import pytest
+from cryptography.fernet import Fernet
+
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.http_transport.authored_config import (
+    SECRET_SENTINEL,
+    CustomHeader,
+    HttpAuthBearer,
+    HttpAuthNone,
+    HttpAuthoredConfig,
+    HttpBody,
+    HttpBodyMode,
+)
+from eneo.flows.http_transport.errors import HttpTransportError
+from eneo.flows.http_transport.test_action import execute_http_test
+from eneo.flows.variable_resolver import FlowVariableResolver
+from eneo.main.exceptions import BadRequestException, TypedIOValidationException
+from eneo.settings.encryption_service import EncryptionService
+
+
+@pytest.fixture
+def encryption_service():
+    return EncryptionService(Fernet.generate_key().decode())
+
+
+def _config(
+    *,
+    url: str = "https://example.org/api",
+    auth: HttpAuthBearer | HttpAuthNone | None = None,
+    body: HttpBody | None = None,
+    custom_headers: list[CustomHeader] | None = None,
+) -> HttpAuthoredConfig:
+    return HttpAuthoredConfig(
+        url=url,
+        auth=auth or HttpAuthNone(),
+        body=body or HttpBody(mode=HttpBodyMode.AUTO),
+        custom_headers=custom_headers or [],
+        timeout_seconds=30,
+    )
+
+
+def _interpolate(template: str, context: dict[str, Any]) -> str:
+    return FlowVariableResolver().interpolate(template, context)
+
+
+def _transport_interpolate(template: str, context: dict[str, Any]) -> str:
+    from eneo.flows.http_transport.errors import HttpTemplateInterpolationError
+
+    try:
+        return _interpolate(template, context)
+    except BadRequestException as exc:
+        raise HttpTemplateInterpolationError(str(exc)) from exc
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_interpolates_raw_context_before_send(
+    encryption_service,
+) -> None:
+    sent: dict[str, Any] = {}
+
+    async def _send_http_request(**kwargs: Any) -> httpx.Response:
+        sent.update(kwargs)
+        request = httpx.Request(method=kwargs["method"], url=kwargs["url"])
+        return httpx.Response(status_code=200, text="ok", request=request)
+
+    result = await execute_http_test(
+        config=_config(
+            url="https://example.org/events/{{name}}",
+            auth=HttpAuthBearer(token="sekret-token-123"),
+            custom_headers=[
+                CustomHeader(name="X-Case", value="{{flow_input.case_id}}"),
+            ],
+            body=HttpBody(
+                mode=HttpBodyMode.JSON_TEMPLATE,
+                template='{"message":"{{text}}"}',
+            ),
+        ),
+        direction="output",
+        method="POST",
+        test_variables={
+            "base_url": "https://example.org",
+            "name": "alex",
+            "flow_input": {"case_id": "CASE-1"},
+            "text": "hello",
+        },
+        interpolate=_interpolate,
+        send_http_request=_send_http_request,
+        encryption_service=encryption_service,
+        max_timeout=120,
+    )
+
+    assert result.success is True
+    assert sent["url"] == "https://example.org/events/alex"
+    assert sent["headers"]["Authorization"] == "Bearer sekret-token-123"
+    assert sent["headers"]["X-Case"] == "CASE-1"
+    assert sent["json_body"] == {"message": "hello"}
+    assert result.request_preview is not None
+    assert result.request_preview.model_dump() == {
+        "method": "POST",
+        "url": "https://example.org/events/alex",
+        "headers": {"Authorization": "[REDACTED]", "X-Case": "CASE-1"},
+        "body_preview": '{"message": "hello"}',
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_returns_typed_variable_failure() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise AssertionError("request should not be sent when interpolation fails")
+
+    result = await execute_http_test(
+        config=_config(url="https://example.org/{{missing}}"),
+        direction="output",
+        method="POST",
+        test_variables={},
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.VARIABLE_RESOLUTION_FAILED
+    assert result.error_message == "Variable resolution failed"
+    assert result.request_preview is None
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_rejects_invalid_credentials_with_typed_config_error(
+    encryption_service,
+) -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise AssertionError("request should not be sent with an invalid credential")
+
+    # Mutant: mislabel a literal-credential policy failure as interpolation.
+    with pytest.raises(TypedIOValidationException) as caught:
+        await execute_http_test(
+            config=_config(auth=HttpAuthBearer(token="{{ step_1.output.text }}")),
+            direction="output",
+            method="POST",
+            test_variables={"step_1": {"output": {"text": "classified"}}},
+            interpolate=_transport_interpolate,
+            send_http_request=_send_http_request,
+            encryption_service=encryption_service,
+            max_timeout=120,
+        )
+    assert caught.value.code == FlowApiErrorCode.TYPED_IO_HTTP_INVALID_CONFIG.value
+    assert "classified" not in str(caught.value)
+    assert "test-only-secret" not in str(caught.value)
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_rejects_unresolved_stored_secret() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise AssertionError("request should not be sent without the stored secret")
+
+    result = await execute_http_test(
+        config=_config(auth=HttpAuthBearer(token=SECRET_SENTINEL)),
+        direction="output",
+        method="POST",
+        test_variables={},
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.UNRESOLVED_STORED_SECRET
+    assert result.request_preview is None
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_reports_unresolved_secret_before_url_errors() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise AssertionError("request should not be sent without the stored secret")
+
+    result = await execute_http_test(
+        config=_config(url="", auth=HttpAuthBearer(token=SECRET_SENTINEL)),
+        direction="output",
+        method="POST",
+        test_variables={},
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.UNRESOLVED_STORED_SECRET
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_validates_effective_url_after_interpolation() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise AssertionError("request should not be sent when effective URL is invalid")
+
+    result = await execute_http_test(
+        config=_config(url="{{base_url}}/events"),
+        direction="output",
+        method="POST",
+        test_variables={"base_url": "not-a-url"},
+        interpolate=_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.INVALID_URL
+    assert result.request_preview is not None
+    assert result.request_preview.model_dump() == {
+        "method": "POST",
+        "url": "not-a-url/events",
+        "headers": {},
+        "body_preview": None,
+    }
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_returns_typed_failure_for_blocked_url() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise TypedIOValidationException(
+            "HTTP URL blocked by SSRF policy.",
+            code="typed_io_http_ssrf_blocked",
+        )
+
+    result = await execute_http_test(
+        config=_config(),
+        direction="output",
+        method="POST",
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.BLOCKED_URL
+    assert result.error_message == "URL blocked by network policy"
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_returns_typed_failure_for_oversized_response() -> None:
+    async def _send_http_request(**_kwargs: Any) -> httpx.Response:
+        raise TypedIOValidationException(
+            "HTTP response exceeded max inline text bytes.",
+            code="typed_io_http_response_too_large",
+        )
+
+    result = await execute_http_test(
+        config=_config(),
+        direction="output",
+        method="POST",
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.error_code == HttpTransportError.RESPONSE_TOO_LARGE
+    assert result.error_message == "HTTP response is too large to preview"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure_phase", ["compile", "send"])
+async def test_execute_http_test_reraises_unknown_typed_codes(failure_phase) -> None:
+    """An unmapped typed failure is a server defect; it must escape rather
+    than masquerade as a connection problem."""
+
+    async def _raise_unknown(**_kwargs):
+        raise TypedIOValidationException(
+            "internal invariant broke",
+            code="typed_io_http_something_new",
+        )
+
+    def _interpolate_or_raise(template: str, context: dict[str, object]) -> str:
+        if failure_phase == "compile":
+            raise TypedIOValidationException(
+                "internal invariant broke", code="typed_io_http_something_new"
+            )
+        return _transport_interpolate(template, context)
+
+    with pytest.raises(TypedIOValidationException):
+        await execute_http_test(
+            config=_config(url="https://example.org/data"),
+            direction="input",
+            method="GET",
+            test_variables={},
+            stored_config=None,
+            encryption_service=None,
+            interpolate=_interpolate_or_raise,
+            send_http_request=_raise_unknown,
+            max_timeout=120.0,
+        )
+
+
+@pytest.mark.asyncio
+async def test_execute_http_test_reports_a_redirect_as_a_status_error() -> None:
+    async def _send_http_request(**kwargs: Any) -> httpx.Response:
+        request = httpx.Request(method=kwargs["method"], url=kwargs["url"])
+        return httpx.Response(status_code=302, request=request)
+
+    result = await execute_http_test(
+        config=_config(),
+        direction="output",
+        method="POST",
+        interpolate=_transport_interpolate,
+        send_http_request=_send_http_request,
+        max_timeout=120,
+    )
+
+    assert result.success is False
+    assert result.status_code == 302
+    assert result.error_code == HttpTransportError.STATUS_ERROR

@@ -1,6 +1,6 @@
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Union, cast
+from typing import TYPE_CHECKING, TypeVar, Union, cast
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -20,6 +20,7 @@ from eneo.icons.icon_repo import IconRepository
 from eneo.main.datetime_utils import datetime_or_utc_min
 from eneo.main.exceptions import (
     BadRequestException,
+    ConflictException,
     NotFoundException,
     UnauthorizedException,
     UniqueException,
@@ -42,12 +43,15 @@ from eneo.spaces.space import SECURITY_CLASSIFICATION_EXCEPTION_MESSAGE, Space
 from eneo.spaces.space_applications_projection import SpaceApplicationsProjection
 from eneo.spaces.space_factory import SpaceFactory
 from eneo.spaces.space_repo import SpaceRepository
-from eneo.spaces.space_update import SpaceUpdate
+from eneo.spaces.space_update import LinkEdit, SpaceUpdate
 from eneo.transcription_models.application.transcription_model_crud_service import (
     TranscriptionModelCRUDService,
 )
 from eneo.transcription_models.domain.transcription_model_service import (
     TranscriptionModelService,
+)
+from eneo.transcription_services.repository import (
+    TranscriptionServiceConnectionRepository,
 )
 from eneo.user_groups.user_groups_repo import UserGroupsRepository
 from eneo.users.user import UserInDB
@@ -55,6 +59,7 @@ from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
     from eneo.actors import ActorManager
+    from eneo.actors.actors.space_actor import SpaceAccessFacts, SpaceActor
     from eneo.apps import App
     from eneo.assistants.assistant import Assistant
     from eneo.completion_models.domain.completion_model import CompletionModel
@@ -72,10 +77,44 @@ if TYPE_CHECKING:
     from eneo.transcription_models.domain.transcription_model import (
         TranscriptionModel,
     )
+    from eneo.transcription_services.models import TranscriptionServiceConnection
 
 
 def _empty_mcp_server_list() -> list["MCPServer"]:
     return []
+
+
+def _empty_connection_list() -> list["TranscriptionServiceConnection"]:
+    return []
+
+
+Item = TypeVar("Item")
+
+
+def _link_edit(
+    selected: list[Item] | None, shown: Iterable[UUID]
+) -> LinkEdit[Item] | None:
+    """The edit of one link list, scoped to the ids the space showed.
+
+    ``shown`` is the space's list as loaded for this request: the space factory
+    and the space repository own which stored entries it hides, so this reuses
+    their rule instead of restating it."""
+    if selected is None:
+        return None
+    return LinkEdit(tuple(selected), frozenset(shown))
+
+
+def _require_space_read(actor: "SpaceActor") -> None:
+    if not actor.can_read_space():
+        raise UnauthorizedException(
+            "You do not have permission to read this space.",
+            code="forbidden_action",
+            context={
+                "resource_type": "space",
+                "action": "read",
+                "auth_layer": "domain_policy",
+            },
+        )
 
 
 @dataclass(frozen=True)
@@ -93,6 +132,9 @@ class SpaceSecurityClassificationImpactAnalysis:
     )
     affected_mcp_servers: list[MCPServer] = field(
         default_factory=_empty_mcp_server_list
+    )
+    affected_transcription_services: list["TranscriptionServiceConnection"] = field(
+        default_factory=_empty_connection_list
     )
 
 
@@ -202,13 +244,13 @@ class SpaceService:
 
         space.transcription_models = transcription_models
 
-        # Set all tenant-enabled MCP servers for new spaces
+        # A new space offers the capabilities the tenant has a provider for.
+        # It has no general MCP server: its admin activates the ones it may use.
         import sqlalchemy as sa
 
         from eneo.database.tables.mcp_server_table import (
             MCPServers as MCPServersTable,
         )
-        from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 
         query = (
             sa.select(MCPServersTable)
@@ -218,7 +260,6 @@ class SpaceService:
         result = await self.repo.session.execute(query)
         servers_db = result.scalars().all()
 
-        # Convert to domain entities
         space.enabled_capabilities = sorted(
             {
                 purpose
@@ -226,27 +267,6 @@ class SpaceService:
                 if any(s.purpose == purpose for s in servers_db)
             }
         )
-        servers_db = [s for s in servers_db if not is_capability_purpose(s.purpose)]
-        space.mcp_servers = [
-            MCPServer(
-                id=server.id,
-                tenant_id=server.tenant_id,
-                name=server.name,
-                description=server.description,
-                http_url=server.http_url,
-                http_auth_type=server.http_auth_type,
-                http_auth_config_schema=server.http_auth_config_schema,
-                purpose=server.purpose,
-                is_enabled=server.is_enabled,
-                env_vars=server.env_vars,
-                tags=server.tags,
-                icon_url=server.icon_url,
-                documentation_url=server.documentation_url,
-                created_at=server.created_at,
-                updated_at=server.updated_at,
-            )
-            for server in servers_db
-        ]
 
         # Set admin
         admin = SpaceMember(
@@ -261,37 +281,42 @@ class SpaceService:
 
     async def get_space(self, id: UUID) -> Space:
         space = await self.repo.one(id)
-
-        actor = self._get_actor(space)
-        if not actor.can_read_space():
-            raise UnauthorizedException(
-                "You do not have permission to read this space.",
-                code="forbidden_action",
-                context={
-                    "resource_type": "space",
-                    "action": "read",
-                    "auth_layer": "domain_policy",
-                },
-            )
-
+        _require_space_read(self._get_actor(space))
         return space
+
+    async def get_space_access_facts(self, id: UUID) -> "SpaceAccessFacts":
+        """The facts ``get_space``'s caller decides their own permissions on,
+        with ``get_space``'s refusals, for a caller that needs nothing else of
+        the space: only the caller's membership and key scope are read, never
+        the space aggregate (``SpaceRepository.get_space_access_facts``)."""
+        access = await self.repo.get_space_access_facts(id)
+        _require_space_read(self.actor_manager.get_space_actor(access))
+        return access
+
+    async def get_transcription_space(self, actor: "SpaceActor") -> Space:
+        """The space ``actor`` acts in, as far as deciding which transcription
+        services it may use needs (``SpaceRepository.get_transcription_space``),
+        with ``get_space``'s refusal, decided on the facts the actor was built
+        from rather than read again."""
+        _require_space_read(actor)
+        assert actor.space.id is not None, "an actor's facts name their space"
+        return await self.repo.get_transcription_space(actor.space.id)
 
     async def get_applications_projection(
         self, id: UUID
     ) -> SpaceApplicationsProjection:
         projection = await self.repo.get_applications_projection(id)
-        actor = self.actor_manager.get_space_actor(projection.access)
-        if not actor.can_read_space():
-            raise UnauthorizedException(
-                "You do not have permission to read this space.",
-                code="forbidden_action",
-                context={
-                    "resource_type": "space",
-                    "action": "read",
-                    "auth_layer": "domain_policy",
-                },
-            )
+        _require_space_read(self.actor_manager.get_space_actor(projection.access))
         return projection
+
+    async def get_member_space_actors(self) -> list["SpaceActor"]:
+        """Actors for the readable spaces among those the user belongs to,
+        built from membership facts instead of loading each space."""
+        actors = [
+            self.actor_manager.get_space_actor(access)
+            for access in await self.repo.get_member_access_facts()
+        ]
+        return [actor for actor in actors if actor.can_read_space()]
 
     async def _validate_capability_markers(
         self,
@@ -319,18 +344,22 @@ class SpaceService:
         if space_security_classification is None:
             return
         from eneo.mcp_servers.application.capability_resolver import (
-            get_active_capability_servers,
+            active_capability_providers,
             meets_security_classification,
         )
 
-        for purpose in {
+        purposes = {
             server.purpose
             for server in mcp_servers
             if is_capability_purpose(server.purpose)
-        }:
-            providers = await get_active_capability_servers(
-                self.repo.session, self.user.tenant_id, purpose
-            )
+        }
+        if not purposes:
+            return
+        all_providers = await active_capability_providers(
+            self.repo.session, self.user.tenant_id, purposes
+        )
+        for purpose in purposes:
+            providers = [p for p in all_providers if p.purpose == purpose]
             if providers and not any(
                 meets_security_classification(provider, space_security_classification)
                 for provider in providers
@@ -345,6 +374,7 @@ class SpaceService:
         embedding_model_ids: list[UUID] | None = None,
         completion_model_ids: list[UUID] | None = None,
         transcription_model_ids: list[UUID] | None = None,
+        transcription_service_ids: list[UUID] | None = None,
         mcp_server_ids: list[UUID] | None = None,
         enabled_capabilities: list[CapabilityPurpose] | None = None,
         mcp_tools: list["MCPToolSetting"] | None = None,
@@ -377,10 +407,25 @@ class SpaceService:
                     classification_id
                 )
 
+        # A model already linked is kept as the space holds it: keeping a link
+        # grants no use, so it needs no access lookup, and one the tenant has
+        # since disabled, or that fell below the classification, stays linked.
+        # Only a new link goes through the access-checked lookup.
+        linked_completion = {m.id: m for m in space.linked_completion_models}
+        linked_embedding = {m.id: m for m in space.linked_embedding_models}
+        linked_transcription = {m.id: m for m in space.linked_transcription_models}
+        # Read before ``space.update``, which replaces ``space.mcp_servers``
+        # with the selection.
+        shown_mcp_servers = [server.id for server in space.mcp_servers]
+        shown_mcp_tools = [
+            tool.id for server in space.mcp_servers for tool in server.tools
+        ]
+
         completion_models: list["CompletionModel"] | None = None
         if completion_model_ids is not None:
             completion_models = [
-                await self.completion_model_crud_service.get_completion_model(
+                linked_completion.get(model_id)
+                or await self.completion_model_crud_service.get_completion_model(
                     model_id=model_id
                 )
                 for model_id in completion_model_ids
@@ -390,7 +435,7 @@ class SpaceService:
         if embedding_model_ids is not None:
             embedding_models = []
             for model_id in embedding_model_ids:
-                model = cast(
+                model = linked_embedding.get(model_id) or cast(
                     "EmbeddingModel | None",
                     await self.embedding_model_crud_service.get_embedding_model(
                         model_id
@@ -402,10 +447,30 @@ class SpaceService:
         transcription_models: list["TranscriptionModel"] | None = None
         if transcription_model_ids is not None:
             transcription_models = [
-                await self.transcription_model_crud_service.get_transcription_model(
+                linked_transcription.get(model_id)
+                or await self.transcription_model_crud_service.get_transcription_model(
                     model_id=model_id
                 )
                 for model_id in transcription_model_ids
+            ]
+
+        transcription_services: list["TranscriptionServiceConnection"] | None = None
+        if transcription_service_ids is not None:
+            linked_services = {c.id: c for c in space.linked_transcription_services}
+            new_service_ids = [
+                connection_id
+                for connection_id in transcription_service_ids
+                if connection_id not in linked_services
+            ]
+            found = {
+                connection.id: connection
+                for connection in await TranscriptionServiceConnectionRepository(
+                    self.repo.session, self.user.tenant_id
+                ).get_many(new_service_ids)
+            }
+            transcription_services = [
+                linked_services.get(connection_id) or found[connection_id]
+                for connection_id in transcription_service_ids
             ]
 
         mcp_servers: list["MCPServer"] | None = None
@@ -509,12 +574,17 @@ class SpaceService:
                 else space.security_classification,
             )
 
+        # Read before the update: the stored links follow the domain's rule.
+        changes_security_level = is_provided(
+            security_classification
+        ) and space.changes_security_level(space_security_classification)
         space.update(
             name=name,
             description=description,
             completion_models=completion_models,
             embedding_models=embedding_models,
             transcription_models=transcription_models,
+            transcription_services=transcription_services,
             mcp_servers=mcp_servers,
             security_classification=(
                 space_security_classification
@@ -530,7 +600,6 @@ class SpaceService:
         if mcp_tools is not None:
             mcp_tool_settings = [(tool.tool_id, tool.is_enabled) for tool in mcp_tools]
 
-        classification_changed = is_provided(security_classification)
         await self.repo.update_settings(
             id,
             SpaceUpdate(
@@ -541,23 +610,26 @@ class SpaceService:
                     if space.security_classification
                     else None
                 )
-                if classification_changed
+                if is_provided(security_classification)
                 else NOT_PROVIDED,
                 minimum_security_level=(
                     space.security_classification.security_level
-                    if classification_changed
+                    if changes_security_level
                     and space.security_classification
                     and space.security_classification.security_enabled
                     else None
                 ),
                 data_retention_days=data_retention_days,
                 icon_id=icon_id,
-                completion_model_ids=completion_model_ids,
-                embedding_model_ids=embedding_model_ids,
-                transcription_model_ids=transcription_model_ids,
-                mcp_server_ids=mcp_server_ids,
+                completion_models=_link_edit(completion_model_ids, linked_completion),
+                embedding_models=_link_edit(embedding_model_ids, linked_embedding),
+                transcription_models=_link_edit(
+                    transcription_model_ids, linked_transcription
+                ),
+                transcription_service_ids=transcription_service_ids,
+                mcp_servers=_link_edit(mcp_server_ids, shown_mcp_servers),
                 enabled_capabilities=enabled_capabilities,
-                mcp_tools=mcp_tool_settings,
+                mcp_tools=_link_edit(mcp_tool_settings, shown_mcp_tools),
             ),
         )
         await self.icon_repo.release_replaced(previous_icon_id, icon_id)
@@ -577,24 +649,27 @@ class SpaceService:
                 security_classification_id
             )
         )
-        current_completion_models = space.completion_models
-        current_embedding_models = space.embedding_models
-        current_transcription_models = space.transcription_models
+        # The linked lists: a model already below the classification is
+        # removed by the change too, so the preview names it.
+        current_completion_models = space.linked_completion_models
+        current_embedding_models = space.linked_embedding_models
+        current_transcription_models = space.linked_transcription_models
+        current_transcription_services = space.linked_transcription_services
         current_mcp_servers = space.mcp_servers
 
         remaining_completion_model_ids = [
             cm.id
-            for cm in space.completion_models
+            for cm in space.linked_completion_models
             if not security_classification.is_greater_than(cm.security_classification)
         ]
         remaining_embedding_model_ids = [
             em.id
-            for em in space.embedding_models
+            for em in space.linked_embedding_models
             if not security_classification.is_greater_than(em.security_classification)
         ]
         remaining_transcription_model_ids = [
             tm.id
-            for tm in space.transcription_models
+            for tm in space.linked_transcription_models
             if not security_classification.is_greater_than(tm.security_classification)
         ]
         remaining_mcp_server_ids = [
@@ -604,6 +679,11 @@ class SpaceService:
                 server.security_classification
             )
         ]
+        remaining_service_ids = {
+            c.id
+            for c in space.linked_transcription_services
+            if not security_classification.is_greater_than(c.security_classification)
+        }
 
         affected_completion_models: list["CompletionModel"] = [
             cm
@@ -622,6 +702,11 @@ class SpaceService:
         ]
         affected_mcp_servers: list["MCPServer"] = [
             s for s in current_mcp_servers if s.id not in remaining_mcp_server_ids
+        ]
+        affected_transcription_services = [
+            c
+            for c in current_transcription_services
+            if c.id not in remaining_service_ids
         ]
 
         affected_capabilities: list[CapabilityPurpose] = []
@@ -714,6 +799,7 @@ class SpaceService:
             affected_transcription_models=affected_transcription_models,
             affected_mcp_servers=affected_mcp_servers,
             affected_capabilities=affected_capabilities,
+            affected_transcription_services=affected_transcription_services,
             affected_assistant_ids=frozenset(a.id for a in affected_assistants),
             affected_group_chat_ids=frozenset(c.id for c in affected_group_chats),
             affected_app_ids=frozenset(a.id for a in affected_apps if a.id is not None),
@@ -741,6 +827,22 @@ class SpaceService:
         assert space.id is not None
         icon_ids = await self.icon_repo.lock_shown_in_space(space.id)
 
+        if await self.repo.has_flow_delete_blockers(space.id):
+            if await self.repo.has_active_legal_hold(space.id):
+                raise ConflictException(
+                    "A legal hold on Flow run history in this Space blocks its "
+                    "deletion. Release the hold first.",
+                    code="space_contains_legal_hold",
+                    context={"space_id": str(space.id)},
+                )
+            raise ConflictException(
+                "Space contains Flow history or Flow-owned draft resources. "
+                "Remove draft Flows first; spaces with Flow run history require "
+                "Flow data purge before deletion.",
+                code="space_contains_flow_delete_blockers",
+                context={"space_id": str(space.id)},
+            )
+
         await self._revoke_space_api_keys(space)
         await self.repo.delete(space.id)
 
@@ -766,12 +868,11 @@ class SpaceService:
                 extra={"space_id": str(space.id)},
             )
 
-        for assistant in space.assistants:
-            assert assistant.id is not None
+        for assistant_id in await self.repo.assistant_ids(space.id):
             try:
                 await self.api_key_scope_revoker.revoke_scope(
                     scope_type=ApiKeyScopeType.ASSISTANT,
-                    scope_id=assistant.id,
+                    scope_id=assistant_id,
                     reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
                     reason_text="Space deleted",
                 )
@@ -780,7 +881,7 @@ class SpaceService:
                     "Failed to revoke API keys for assistant in deleted space",
                     extra={
                         "space_id": str(space.id),
-                        "assistant_id": str(assistant.id),
+                        "assistant_id": str(assistant_id),
                     },
                 )
 
@@ -860,11 +961,6 @@ class SpaceService:
 
         # Revoke all API keys the removed user owns for this space and its resources
         if self.api_key_scope_revoker is not None:
-            assistant_ids: list[UUID] = []
-            for assistant in space.assistants:
-                assert assistant.id is not None
-                assistant_ids.append(assistant.id)
-
             app_ids: list[UUID] = []
             for app in space.apps:
                 assert app.id is not None
@@ -873,7 +969,7 @@ class SpaceService:
                 tenant_id=self.user.tenant_id,
                 owner_user_id=user_id,
                 space_id=id,
-                assistant_ids=assistant_ids,
+                assistant_ids=await self.repo.assistant_ids(id),
                 app_ids=app_ids,
                 reason_code=ApiKeyStateReasonCode.SCOPE_REMOVED,
                 reason_text=f"User removed from space {space.name}",

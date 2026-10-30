@@ -1,0 +1,2162 @@
+from __future__ import annotations
+
+import asyncio
+import contextlib
+import hashlib
+import json
+import logging
+import time
+from collections.abc import Mapping
+from dataclasses import dataclass, replace
+from typing import Any, Awaitable, Callable, Final, Literal, Protocol, Sequence, cast
+from uuid import UUID
+
+from eneo.ai_models.completion_models.completion_model import Completion, ModelKwargs
+from eneo.completion_models.domain.model_capacity import UnknownModelCapacityError
+from eneo.completion_models.domain.request_preflight import (
+    DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    CompletionOutputCapacityError,
+    CompletionRequestPackage,
+    CompletionRequestPreflight,
+)
+from eneo.completion_models.infrastructure.completion_service import CompletionService
+from eneo.completion_models.infrastructure.context_builder import (
+    ContextWindowExceededError,
+    count_tokens,
+)
+from eneo.completion_models.infrastructure.stream_collector import (
+    ProviderJsonWhitespaceAbort,
+)
+from eneo.completion_models.infrastructure.tenant_model_capabilities import (
+    get_supported_openai_params,
+    schema_response_format,
+    stored_request_model_kwargs,
+)
+from eneo.files.file_models import File
+from eneo.flows.citation_sidecar import (
+    CITATION_MODE_INLINE_INREF_SIDECAR,
+    CITATION_MODE_OFF,
+    build_citation_sidecar,
+    resolve_citation_mode,
+    strip_inline_reference_tags,
+)
+from eneo.flows.domain.flow import FlowRun, FlowStepResult, FlowStepResultStatus
+from eneo.flows.domain.mapped_execution_policy import SummarizationBudget
+from eneo.flows.domain.provider_call import DigestCallInput, SummarizationCallInput
+from eneo.flows.domain.rag_evidence import (
+    RAG_RETRIEVAL_FAIL_CLOSED_STATUSES,
+    build_step_result_citation_state,
+)
+from eneo.flows.domain.review_edit_references import reviewed_edit_prompt_block
+from eneo.flows.domain.runtime import (
+    RunExecutionState,
+    RuntimeStep,
+    StepDiagnostic,
+    StepExecutionOutput,
+    StepInputValue,
+)
+from eneo.flows.domain.runtime_invariant_exceptions import FlowRuntimeInvariantError
+from eneo.flows.domain.step_output import (
+    OUTPUT_TEXT_OVERFLOW_KEY,
+    RejectedCompletion,
+    StepMaterialIdentity,
+    StepOutputAbortedException,
+    StepOutputValidationException,
+    build_text_overflow_metadata,
+    sample_rejected_output,
+)
+from eneo.flows.domain.text_processing import SummarizationProvenance
+from eneo.flows.enums import (
+    FlowOutputMode,
+    FlowOutputType,
+    FlowStepPhase,
+    flow_output_mode_uses_completion_model,
+)
+from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.flow_capability_manifest import is_citation_capable_step
+from eneo.flows.flow_run_provenance import (
+    FlowResolvedInputEdge,
+    FlowResolvedInputEdgeIndexes,
+    MappedProviderCallProvenance,
+    merge_resolved_input_edges,
+)
+from eneo.flows.output_processing import schema_yields_top_level_object
+from eneo.flows.runtime.execution_heartbeat import (
+    FlowExecutionOwnershipLost,
+    execution_ownership_is_lost,
+)
+from eneo.flows.runtime.forwarding_capture import record_completed_model_call
+from eneo.flows.runtime.inherited_citations import (
+    build_inherited_citation_prompt_appendix,
+    collect_inherited_citation_context,
+    inherited_cited_sources,
+)
+from eneo.flows.runtime.output_formats import resolve_format_spec
+from eneo.flows.runtime.output_formats.base import (
+    append_output_format_instructions,
+    output_contract_instructions,
+)
+from eneo.flows.runtime.output_runtime import TypedOutputProcessingResult
+from eneo.flows.runtime.protocols import RuntimeAssistantProtocol
+from eneo.flows.runtime.run_cancellation import (
+    FlowStepCancelledError,
+    run_cancel_probe_scope,
+)
+from eneo.flows.runtime.step_deadline import (
+    StepDeadline,
+    record_step_phase,
+    settle_provider_request,
+)
+from eneo.flows.runtime.step_failure_evidence import (
+    attach_failure_evidence,
+    failure_evidence,
+    rejected_output_of,
+)
+from eneo.flows.runtime.step_input_resolution import (
+    RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE,
+    enforce_inline_input_cap,
+)
+from eneo.flows.runtime.step_input_validation import (
+    validate_input_contract,
+    validate_runtime_input_policy,
+)
+from eneo.flows.runtime.step_result_builder import build_step_input_payload
+from eneo.flows.runtime.structured_output_budget import ensure_structured_output_allowed
+from eneo.flows.variable_resolver import (
+    FlowVariableContext,
+    FlowVariableInterpolation,
+)
+from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
+from eneo.main.config import get_settings
+from eneo.main.exceptions import (
+    ProviderCapabilityRejectedException,
+    TypedIOValidationException,
+)
+from eneo.model_providers.domain.provider_call_observer import (
+    ProviderCallObserver,
+    ProviderCallReason,
+)
+
+
+def _string_key_dict(value: object) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    raw_dict = cast(dict[object, Any], value)
+    return {str(key): item for key, item in raw_dict.items()}
+
+
+logger = logging.getLogger(__name__)
+
+# Log the first failed cancel probe and then every Nth, so a database outage
+# leaves a trail without one line per tick for the rest of a long provider call.
+_CANCEL_WATCH_FAILURE_LOG_INTERVAL = 15
+_FILE_REFERENCE_REFRESH_MARGIN_SECONDS: Final[int] = 30
+LLM_TASK_CANCELLATION_GRACE_SECONDS: Final[float] = 2.0
+RAG_RETRIEVAL_QUERY_CHAR_LIMIT: Final[int] = 2048
+
+RagQueryDerivationStrategy = Literal[
+    "empty_input",
+    "input_text",
+    "step_description_only",
+    "step_description_with_input_excerpt",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class RagQueryDerivation:
+    query: str
+    strategy: RagQueryDerivationStrategy
+    input_truncated: bool
+
+    def to_metadata(self) -> dict[str, object]:
+        return {
+            "strategy": self.strategy,
+            "input_truncated": self.input_truncated,
+            "query_length": len(self.query),
+        }
+
+
+def derive_rag_retrieval_query(
+    *,
+    step: RuntimeStep,
+    input_text: str,
+) -> RagQueryDerivation:
+    input_body = input_text.strip()
+    if not input_body:
+        return RagQueryDerivation(
+            query="",
+            strategy="empty_input",
+            input_truncated=False,
+        )
+
+    step_description = (step.user_description or "").strip()
+    if not step_description:
+        query = input_body[:RAG_RETRIEVAL_QUERY_CHAR_LIMIT]
+        return RagQueryDerivation(
+            query=query,
+            strategy="input_text",
+            input_truncated=len(input_body) > len(query),
+        )
+
+    separator = "\n\nInput excerpt:\n"
+    available_for_input = (
+        RAG_RETRIEVAL_QUERY_CHAR_LIMIT - len(step_description) - len(separator)
+    )
+    if available_for_input <= 0:
+        query = step_description[:RAG_RETRIEVAL_QUERY_CHAR_LIMIT]
+        return RagQueryDerivation(
+            query=query,
+            strategy="step_description_only",
+            input_truncated=True,
+        )
+
+    input_excerpt = input_body[:available_for_input]
+    query = f"{step_description}{separator}{input_excerpt}"
+    return RagQueryDerivation(
+        query=query,
+        strategy="step_description_with_input_excerpt",
+        input_truncated=len(input_body) > len(input_excerpt),
+    )
+
+
+class VariableResolverProtocol(Protocol):
+    def build_context(
+        self,
+        flow_input: dict[str, Any] | None,
+        prior_results: list[FlowStepResult],
+        *,
+        current_step_order: int | None = None,
+        step_names_by_order: dict[int, str] | None = None,
+        step_ref_mapping: dict[str, int] | None = None,
+        current_step_input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]: ...
+
+    def interpolate(self, template: str, context: dict[str, Any]) -> str: ...
+
+    def build_context_with_evidence(
+        self,
+        flow_input: dict[str, Any] | None,
+        prior_results: list[FlowStepResult],
+        *,
+        current_step_order: int | None = None,
+        step_names_by_order: dict[int, str] | None = None,
+        step_ref_mapping: dict[str, int] | None = None,
+        current_step_input: dict[str, Any] | None = None,
+        resolved_file_text: Mapping[StepMaterialIdentity, str] | None = None,
+        input_config: dict[str, Any] | None = None,
+        section_index: int = 1,
+    ) -> FlowVariableContext: ...
+
+    def interpolate_with_evidence(
+        self,
+        template: str,
+        context: FlowVariableContext,
+        *,
+        binding_ref: str,
+    ) -> FlowVariableInterpolation: ...
+
+
+class LoadAssistantFn(Protocol):
+    def __call__(
+        self,
+        assistant_id: UUID,
+        state: RunExecutionState | None = None,
+        *,
+        snapshot: dict[str, Any] | None = None,
+    ) -> Awaitable[RuntimeAssistantProtocol]: ...
+
+
+class ResolveStepInputFn(Protocol):
+    def __call__(
+        self,
+        *,
+        step: RuntimeStep,
+        context: dict[str, Any],
+        run: FlowRun,
+        prior_results: list[FlowStepResult],
+        state: RunExecutionState,
+        version_metadata: dict[str, Any] | None,
+        requested_file_ids: Sequence[UUID],
+        transcription_call_observer: ProviderCallObserver | None,
+        prompt_template: str = "",
+        step_input_override: StepInputValue | None = None,
+    ) -> Awaitable[StepInputValue]: ...
+
+
+class RetrieveRagChunksFn(Protocol):
+    def __call__(
+        self,
+        *,
+        assistant: RuntimeAssistantProtocol,
+        question: str,
+        run_id: UUID,
+        step_order: int,
+    ) -> Awaitable[
+        tuple[
+            list[InfoBlobChunkInDBWithScore],
+            dict[str, Any] | None,
+            list[StepDiagnostic],
+        ]
+    ]: ...
+
+
+class ProcessTypedOutputFn(Protocol):
+    def __call__(
+        self,
+        *,
+        full_text: str,
+        step: RuntimeStep,
+        run: FlowRun,
+    ) -> Awaitable[TypedOutputProcessingResult]: ...
+
+
+class ApplyOutputCapFn(Protocol):
+    def __call__(
+        self,
+        *,
+        text: str,
+        run: FlowRun,
+        step: RuntimeStep,
+        existing_generated_file_id: UUID | None = None,
+    ) -> Awaitable[tuple[str, list[UUID]]]: ...
+
+
+class RunCancelledFn(Protocol):
+    def __call__(
+        self,
+        *,
+        run_id: UUID,
+        flow_id: UUID,
+        tenant_id: UUID,
+    ) -> Awaitable[bool]: ...
+
+
+class BuildProviderCallObserverFn(Protocol):
+    def __call__(
+        self,
+        mapped_call: MappedProviderCallProvenance | None,
+        resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes,
+        completion_model_id: UUID,
+        summarization_input: SummarizationCallInput | None = None,
+        summarization: SummarizationProvenance | None = None,
+        digest_call: DigestCallInput | None = None,
+    ) -> ProviderCallObserver: ...
+
+
+class BuildTranscriptionCallObserverFn(Protocol):
+    def __call__(self) -> ProviderCallObserver: ...
+
+
+@dataclass
+class PreparedStepExecution:
+    assistant: RuntimeAssistantProtocol
+    step_input: StepInputValue
+    effective_prompt: str
+    input_payload_for_result: dict[str, Any]
+    contract_validation: dict[str, Any] | None
+    diagnostics: list[StepDiagnostic]
+    llm_files: list[File]
+    resolved_input_edges: tuple[FlowResolvedInputEdge, ...] = ()
+    resolved_input_edge_indexes: FlowResolvedInputEdgeIndexes | None = None
+    completion_call: PreparedCompletionCall | None = None
+    summarization_input: SummarizationCallInput | None = None
+    summarization: SummarizationProvenance | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedCompletionCall:
+    question: str
+    effective_prompt: str
+    preferred_model_kwargs: ModelKwargs
+    preferred_model_parameters: dict[str, Any]
+    capability_fallback_model_kwargs: ModelKwargs | None
+    capability_fallback_model_parameters: dict[str, Any] | None
+    assistant_context_version: int
+    preferred_native_json_format: bool
+    capability_fallback_prompt: str | None = None
+    useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS
+    preflight: CompletionRequestPreflight | None = None
+    selected_package: CompletionRequestPackage | None = None
+
+
+@dataclass(frozen=True)
+class StepExecutionRuntimeDeps:
+    variable_resolver: VariableResolverProtocol
+    completion_service: CompletionService
+    load_assistant: LoadAssistantFn
+    resolve_step_input: ResolveStepInputFn
+    retrieve_rag_chunks: RetrieveRagChunksFn
+    process_typed_output: ProcessTypedOutputFn
+    apply_output_cap: ApplyOutputCapFn
+    max_inline_text_bytes: int
+    logger: logging.Logger | None = None
+    llm_request_timeout_seconds: float = 600
+    # The attempt's shared budget, started by the executor. None only for
+    # direct runtime use outside an attempt, where each provider wait
+    # starts its own budget from llm_request_timeout_seconds.
+    deadline: StepDeadline | None = None
+    run_cancelled: RunCancelledFn | None = None
+    run_cancel_poll_interval_seconds: float = 2.0
+    llm_task_cancellation_grace_seconds: float = LLM_TASK_CANCELLATION_GRACE_SECONDS
+    rag_retrieval_timeout_seconds: float = 30
+    build_provider_call_observer: BuildProviderCallObserverFn | None = None
+    build_transcription_call_observer: BuildTranscriptionCallObserverFn | None = None
+    mapped_call_context: MappedProviderCallProvenance | None = None
+    summarization_budget: SummarizationBudget | None = None
+    persist_summarization: (
+        Callable[[SummarizationProvenance], Awaitable[None]] | None
+    ) = None
+    # Set on the calls of a long-material digest; recorded on each call's receipt.
+    digest_call: DigestCallInput | None = None
+
+
+def _resolve_litellm_model_name(assistant: RuntimeAssistantProtocol) -> str | None:
+    completion_model = assistant.completion_model
+    if completion_model is None:
+        return None
+
+    explicit_name = getattr(completion_model, "litellm_model_name", None)
+    if isinstance(explicit_name, str) and explicit_name.strip():
+        return explicit_name.strip()
+
+    provider = completion_model.provider_type
+    name = completion_model.name
+    if provider and provider.strip() and name and name.strip():
+        return f"{provider.strip()}/{name.strip()}"
+    return None
+
+
+def detect_native_json_output_support(
+    assistant: RuntimeAssistantProtocol,
+) -> bool | None:
+    """
+    Return whether LiteLLM reports native response_format support for this model.
+
+    None means capability could not be determined, so callers should preserve the
+    previous optimistic behavior instead of tightening compatibility.
+    """
+    litellm_model_name = _resolve_litellm_model_name(assistant)
+    if not litellm_model_name:
+        return None
+
+    try:
+        supported = get_supported_openai_params(model=litellm_model_name)
+    except Exception:
+        logger.warning(
+            "Failed to detect native JSON output support for flow step execution.",
+            extra={"litellm_model_name": litellm_model_name},
+            exc_info=True,
+        )
+        return None
+
+    if not supported:
+        return None
+
+    return "response_format" in supported
+
+
+def json_mode_cache_key(assistant: RuntimeAssistantProtocol) -> str:
+    cm = assistant.completion_model
+    if cm is None:
+        return "unknown:unknown:none"
+    provider = cm.provider_type or "unknown"
+    name = cm.name or "unknown"
+    mid = str(cm.id) if cm.id else "none"
+    return f"{provider}:{name}:{mid}"
+
+
+@dataclass(frozen=True, slots=True)
+class JsonResponseFormatPlan:
+    response_format: dict[str, object] | None
+    fallback_call_possible: bool
+    strip_stored_response_format: bool
+
+
+def resolve_json_response_format_plan(
+    *,
+    step: RuntimeStep,
+    assistant: RuntimeAssistantProtocol,
+    state: RunExecutionState,
+) -> JsonResponseFormatPlan:
+    requested = resolve_format_spec(step.output_type).requests_structured_output(
+        step.output_contract
+    )
+    if not requested:
+        # Other output modes preserve authored response-format kwargs and the
+        # existing no-fallback behavior.
+        return JsonResponseFormatPlan(
+            response_format=None,
+            fallback_call_possible=False,
+            strip_stored_response_format=False,
+        )
+
+    cache_key = json_mode_cache_key(assistant)
+    cached_support = state.json_mode_supported.get(cache_key)
+    if cached_support is None:
+        detected_support = detect_native_json_output_support(assistant)
+        if detected_support is not None:
+            state.json_mode_supported[cache_key] = detected_support
+            cached_support = detected_support
+    response_format: dict[str, object] | None = None
+    if cached_support is not False:
+        model_route = _resolve_litellm_model_name(assistant)
+        completion_model = assistant.completion_model
+        if (
+            step.output_contract is not None
+            and model_route
+            and completion_model
+            and cache_key not in state.json_schema_rejected_models
+        ):
+            response_format = schema_response_format(
+                litellm_model=model_route,
+                provider_type=completion_model.provider_type or "",
+                schema=step.output_contract,
+                name="flow_step_output",
+            )
+        if response_format is None and (
+            step.output_contract is None
+            or schema_yields_top_level_object(step.output_contract)
+        ):
+            response_format = {"type": "json_object"}
+    stored_response_format_present = (
+        assistant.completion_model_kwargs.response_format is not None
+    )
+    return JsonResponseFormatPlan(
+        response_format=response_format,
+        fallback_call_possible=response_format is not None,
+        strip_stored_response_format=(
+            cached_support is False and stored_response_format_present
+        ),
+    )
+
+
+def attach_typed_failure_context(
+    exc: TypedIOValidationException,
+    *,
+    input_payload_for_result: dict[str, Any],
+    effective_prompt: str,
+    rejected_output: str | None = None,
+) -> TypedIOValidationException:
+    if exc.input_payload_json is None:
+        payload = dict(input_payload_for_result)
+        payload.setdefault("text", "")
+        payload.setdefault("source_text", payload.get("text", ""))
+        payload.setdefault("input_source", "")
+        payload.setdefault("used_question_binding", False)
+        exc.input_payload_json = payload
+    if exc.effective_prompt is None:
+        exc.effective_prompt = effective_prompt
+    if rejected_output is not None and rejected_output_of(exc) is None:
+        attach_failure_evidence(exc, rejected_output=rejected_output)
+    return exc
+
+
+def _context_window_source_hint(input_payload: dict[str, Any]) -> str:
+    runtime_input = _string_key_dict(input_payload.get("runtime_input"))
+    if not runtime_input:
+        return ""
+    files = runtime_input.get("files")
+    if not isinstance(files, list) or not files:
+        return ""
+    first_file = _string_key_dict(cast(list[object], files)[0])
+    if not first_file:
+        return ""
+    name = first_file.get("name")
+    if isinstance(name, str) and name.strip():
+        return f" for source '{name.strip()}'"
+    return ""
+
+
+def _typed_context_window_error(
+    exc: ContextWindowExceededError,
+    *,
+    step: RuntimeStep,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+    effective_prompt: str,
+) -> TypedIOValidationException:
+    source_hint = _context_window_source_hint(prepared.input_payload_for_result)
+    if deps.logger is not None:
+        deps.logger.warning(
+            "flow_executor.context_window_exceeded step_order=%d estimated_tokens=%d max_tokens=%d",
+            step.step_order,
+            exc.estimated_tokens,
+            exc.max_tokens,
+        )
+    return attach_typed_failure_context(
+        TypedIOValidationException(
+            f"Step {step.step_order}: packaged model input{source_hint} uses "
+            f"about {exc.estimated_tokens} tokens, exceeding the selected "
+            f"model window of {exc.max_tokens} tokens. Use a larger-context "
+            "model, split the document, or reduce the step input.",
+            code=FlowApiErrorCode.TYPED_IO_INPUT_EXCEEDS_MODEL_WINDOW.value,
+        ),
+        input_payload_for_result=prepared.input_payload_for_result,
+        effective_prompt=effective_prompt,
+    )
+
+
+def _typed_missing_capacity_error(
+    exc: UnknownModelCapacityError,
+    *,
+    step: RuntimeStep,
+    prepared: PreparedStepExecution,
+    effective_prompt: str,
+) -> TypedIOValidationException:
+    return attach_typed_failure_context(
+        TypedIOValidationException(
+            f"Step {step.step_order}: the selected model is missing token limits "
+            f"({', '.join(exc.missing_dimensions)}). Ask an administrator to configure both limits.",
+            code=FlowApiErrorCode.MODEL_CAPACITY_UNDECLARED.value,
+        ),
+        input_payload_for_result=prepared.input_payload_for_result,
+        effective_prompt=effective_prompt,
+    )
+
+
+async def call_assistant_with_timeout(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+    question: str,
+    model_kwargs: ModelKwargs,
+    info_blob_chunks: list[InfoBlobChunkInDBWithScore],
+    prompt_override: str,
+    version: int,
+    provider_call_reason: ProviderCallReason,
+    deadline: StepDeadline | None = None,
+    useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+    prepared_request: CompletionRequestPackage | None = None,
+    file_reference_urls: dict[UUID, str] | None = None,
+) -> Any:
+    # The request spends from the attempt's shared budget: the json-mode
+    # fallback retry, every mapped item and the phases before and after the
+    # call all count against the same deadline. A caller without one (direct
+    # runtime use) gets a budget for this wait only.
+    if deadline is None:
+        deadline = StepDeadline.start(deps.llm_request_timeout_seconds)
+
+    record_step_phase(FlowStepPhase.PROVIDER_REQUEST)
+    if deadline.expired():
+        if deps.logger is not None:
+            deps.logger.warning(
+                "flow_executor.step_timeout run_id=%s step_order=%d budget=%s "
+                "phase=provider_request_not_sent",
+                run.id,
+                step.step_order,
+                deadline.budget_seconds,
+            )
+        raise attach_typed_failure_context(
+            deadline.timeout_error(
+                step_order=step.step_order,
+                phase="provider request (not sent)",
+            ),
+            input_payload_for_result=prepared.input_payload_for_result,
+            effective_prompt=prompt_override,
+        )
+
+    if deps.summarization_budget is not None:
+        if prepared_request is None:
+            raise FlowRuntimeInvariantError("Summarization requires measured input.")
+        deps.summarization_budget.reserve(prepared_request.input_reserve.tokens)
+        if prepared.summarization_input is not None:
+            evidence = prepared.summarization_input
+            prepared.summarization_input = evidence.model_copy(
+                update={
+                    "reserved_calls": deps.summarization_budget.provider_calls,
+                    "reserved_input_tokens": deps.summarization_budget.input_tokens,
+                }
+            )
+    provider_call_observer: ProviderCallObserver | None = None
+    if deps.build_provider_call_observer is not None:
+        if prepared.resolved_input_edge_indexes is None:
+            raise FlowRuntimeInvariantError(
+                "Provider I/O cannot start before resolved input evidence is activated."
+            )
+        completion_model = prepared.assistant.completion_model
+        if completion_model is None:
+            raise FlowRuntimeInvariantError(
+                "Provider I/O requires a resolved completion model."
+            )
+        if prepared.summarization_input is None and deps.digest_call is not None:
+            provider_call_observer = deps.build_provider_call_observer(
+                deps.mapped_call_context,
+                prepared.resolved_input_edge_indexes,
+                completion_model.id,
+                digest_call=deps.digest_call,
+            )
+        elif prepared.summarization_input is None:
+            provider_call_observer = deps.build_provider_call_observer(
+                deps.mapped_call_context,
+                prepared.resolved_input_edge_indexes,
+                completion_model.id,
+            )
+        else:
+            provider_call_observer = deps.build_provider_call_observer(
+                deps.mapped_call_context,
+                prepared.resolved_input_edge_indexes,
+                completion_model.id,
+                prepared.summarization_input,
+                prepared.summarization,
+            )
+
+    if await execution_ownership_is_lost():
+        raise FlowExecutionOwnershipLost()
+
+    llm_task: asyncio.Task[Any] = asyncio.create_task(
+        prepared.assistant.get_response(
+            question=question,
+            completion_service=deps.completion_service,
+            model_kwargs=model_kwargs,
+            files=prepared.llm_files,
+            info_blob_chunks=info_blob_chunks,
+            stream=False,
+            prompt_override=prompt_override,
+            version=version,
+            reject_context_over_limit=True,
+            provider_call_observer=provider_call_observer,
+            provider_call_reason=provider_call_reason,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
+            prepared_request=prepared_request,
+            file_reference_urls=file_reference_urls,
+        )
+    )
+    state.in_flight_llm_task = llm_task
+
+    def _consume_abandoned_llm_task(task: asyncio.Task[Any]) -> None:
+        try:
+            task.result()
+        except asyncio.CancelledError:
+            return
+        except Exception:
+            if deps.logger is not None:
+                deps.logger.warning(
+                    "flow_executor.abandoned_llm_task_failed run_id=%s step_order=%d",
+                    run.id,
+                    step.step_order,
+                    exc_info=True,
+                )
+
+    async def _cancel_llm_task_with_grace() -> None:
+        if llm_task.done():
+            return
+        llm_task.cancel()
+        grace_seconds = max(0.0, deps.llm_task_cancellation_grace_seconds)
+        if grace_seconds <= 0:
+            settle_provider_request(known=False)
+            llm_task.add_done_callback(_consume_abandoned_llm_task)
+            return
+        try:
+            async with asyncio.timeout(grace_seconds):
+                await asyncio.shield(llm_task)
+        except asyncio.CancelledError:
+            return
+        except TimeoutError:
+            settle_provider_request(known=False)
+            llm_task.add_done_callback(_consume_abandoned_llm_task)
+        except Exception:
+            if deps.logger is not None:
+                deps.logger.warning(
+                    "flow_executor.llm_task_failed_after_cancel run_id=%s step_order=%d",
+                    run.id,
+                    step.step_order,
+                    exc_info=True,
+                )
+
+    async def _cancel_when_run_cancelled() -> bool:
+        if deps.run_cancelled is None:
+            return False
+        poll_interval = max(0.05, deps.run_cancel_poll_interval_seconds)
+        # A provider call can run for minutes, and this poll is the only thing
+        # that stops it when a user cancels. One failed probe — a reset
+        # connection, a busy pool — used to end the watch for the rest of the
+        # step, so the cancel was honoured only after the call finished on its
+        # own. Keep polling for as long as the call is in flight: that is
+        # already bounded by the step's own deadline, and giving up early is the
+        # defect. Only the logging is rate-limited.
+        consecutive_failures = 0
+        while not llm_task.done():
+            await asyncio.sleep(poll_interval)
+            try:
+                cancelled = await deps.run_cancelled(
+                    run_id=run.id,
+                    flow_id=run.flow_id,
+                    tenant_id=run.tenant_id,
+                )
+            except Exception:
+                consecutive_failures += 1
+                if deps.logger is not None and (
+                    consecutive_failures == 1
+                    or consecutive_failures % _CANCEL_WATCH_FAILURE_LOG_INTERVAL == 0
+                ):
+                    deps.logger.warning(
+                        "flow_executor.cancel_watch_failed run_id=%s step_order=%d "
+                        "consecutive_failures=%d",
+                        run.id,
+                        step.step_order,
+                        consecutive_failures,
+                        exc_info=True,
+                    )
+                continue
+            consecutive_failures = 0
+            if cancelled:
+                return True
+        return False
+
+    cancel_watcher = (
+        asyncio.create_task(_cancel_when_run_cancelled())
+        if deps.run_cancelled is not None
+        else None
+    )
+    try:
+        while True:
+            wait_timeout = deadline.remaining()
+            if wait_timeout <= 0:
+                await _cancel_llm_task_with_grace()
+                if deps.logger is not None:
+                    deps.logger.warning(
+                        "flow_executor.step_timeout run_id=%s step_order=%d budget=%s "
+                        "phase=provider_request",
+                        run.id,
+                        step.step_order,
+                        deadline.budget_seconds,
+                    )
+                raise attach_typed_failure_context(
+                    deadline.timeout_error(
+                        step_order=step.step_order,
+                        phase="provider request",
+                    ),
+                    input_payload_for_result=prepared.input_payload_for_result,
+                    effective_prompt=prompt_override,
+                )
+
+            wait_tasks: set[asyncio.Task[Any]] = {llm_task}
+            if cancel_watcher is not None:
+                wait_tasks.add(cancel_watcher)
+            done, _ = await asyncio.wait(
+                wait_tasks,
+                timeout=wait_timeout,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if not done:
+                await _cancel_llm_task_with_grace()
+                if deps.logger is not None:
+                    deps.logger.warning(
+                        "flow_executor.step_timeout run_id=%s step_order=%d budget=%s "
+                        "phase=provider_request",
+                        run.id,
+                        step.step_order,
+                        deadline.budget_seconds,
+                    )
+                raise attach_typed_failure_context(
+                    deadline.timeout_error(
+                        step_order=step.step_order,
+                        phase="provider request",
+                    ),
+                    input_payload_for_result=prepared.input_payload_for_result,
+                    effective_prompt=prompt_override,
+                )
+            if llm_task in done:
+                try:
+                    response = llm_task.result()
+                except UnknownModelCapacityError as exc:
+                    raise _typed_missing_capacity_error(
+                        exc,
+                        step=step,
+                        prepared=prepared,
+                        effective_prompt=prompt_override,
+                    ) from exc
+                except ContextWindowExceededError as exc:
+                    raise _typed_context_window_error(
+                        exc,
+                        step=step,
+                        prepared=prepared,
+                        deps=deps,
+                        effective_prompt=prompt_override,
+                    ) from exc
+                record_completed_model_call(
+                    edge_indexes=prepared.resolved_input_edge_indexes,
+                    output_text=_completion_output_text(response),
+                )
+                return response
+            if cancel_watcher is not None and cancel_watcher in done:
+                if cancel_watcher.result():
+                    await _cancel_llm_task_with_grace()
+                    raise FlowStepCancelledError(
+                        "Run was cancelled during step execution."
+                    )
+                cancel_watcher = None
+    except ProviderJsonWhitespaceAbort as exc:
+        raise attach_typed_failure_context(
+            StepOutputAbortedException(
+                rejected_output=sample_rejected_output(
+                    exc.raw_text, max_inline_bytes=deps.max_inline_text_bytes
+                )
+            ),
+            input_payload_for_result=prepared.input_payload_for_result,
+            effective_prompt=prompt_override,
+        ) from exc
+    except asyncio.CancelledError:
+        await _cancel_llm_task_with_grace()
+        raise
+    except TimeoutError as exc:
+        await _cancel_llm_task_with_grace()
+        if deps.logger is not None:
+            deps.logger.warning(
+                "flow_executor.llm_timeout run_id=%s step_order=%d timeout=%s",
+                run.id,
+                step.step_order,
+                deps.llm_request_timeout_seconds,
+            )
+        raise attach_typed_failure_context(
+            TypedIOValidationException(
+                f"Step {step.step_order}: LLM request exceeded "
+                f"{deps.llm_request_timeout_seconds:g}s timeout.",
+                code=FlowApiErrorCode.LLM_REQUEST_TIMEOUT.value,
+            ),
+            input_payload_for_result=prepared.input_payload_for_result,
+            effective_prompt=prompt_override,
+        ) from exc
+    finally:
+        if cancel_watcher is not None:
+            cancel_watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await cancel_watcher
+        if state.in_flight_llm_task is llm_task:
+            state.in_flight_llm_task = None
+
+
+def _completion_output_text(response: Any) -> str:
+    completion = getattr(response, "completion", None)
+    if isinstance(completion, str):
+        return completion
+    if isinstance(completion, Completion):
+        return completion.text or ""
+    return ""
+
+
+def build_output_payload(output: StepExecutionOutput) -> dict[str, Any]:
+    try:
+        ensure_structured_output_allowed(
+            output.structured_output,
+            ceiling_bytes=get_settings().flow_max_inline_text_bytes,
+        )
+    except TypedIOValidationException as exc:
+        if output.rag_metadata is not None:
+            attach_failure_evidence(exc, rag_metadata=output.rag_metadata)
+        raise
+    payload: dict[str, Any] = {
+        "text": output.persisted_text,
+    }
+    if output.structured_output is not None:
+        payload["structured"] = output.structured_output
+    if output.output_payload_extensions:
+        payload.update(output.output_payload_extensions)
+    if output.generated_file_ids:
+        payload[OUTPUT_TEXT_OVERFLOW_KEY] = build_text_overflow_metadata(
+            file_ids=output.generated_file_ids,
+            preview=output.persisted_text,
+            full_text=output.full_text,
+        )
+    return payload
+
+
+def effective_model_parameters(
+    assistant: RuntimeAssistantProtocol,
+    *,
+    model_kwargs: ModelKwargs | None = None,
+) -> dict[str, Any]:
+    selected_kwargs = (
+        model_kwargs if model_kwargs is not None else assistant.completion_model_kwargs
+    )
+    kwargs = selected_kwargs.model_dump(exclude_none=False)
+    completion_model = assistant.completion_model
+    parameter_semantics = {
+        key: {"mode": "configured" if kwargs.get(key) is not None else "model_default"}
+        for key in ("temperature", "top_p", "reasoning_effort", "verbosity")
+    }
+    return {
+        "model_id": str(completion_model.id)
+        if completion_model and completion_model.id
+        else None,
+        "model_name": completion_model.name if completion_model else None,
+        "provider": completion_model.provider_type if completion_model else None,
+        **kwargs,
+        "parameter_semantics": parameter_semantics,
+    }
+
+
+def apply_prompt_context_trace(
+    rag_metadata: dict[str, Any] | None,
+    *,
+    knowledge_trace: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(rag_metadata, dict) or knowledge_trace is None:
+        return rag_metadata
+
+    if hasattr(knowledge_trace, "model_dump"):
+        trace_payload = _string_key_dict(knowledge_trace.model_dump(mode="json"))
+    elif isinstance(knowledge_trace, dict):
+        trace_payload = _string_key_dict(cast(object, knowledge_trace))
+    else:
+        return rag_metadata
+
+    payload = dict(rag_metadata)
+    tracking = payload.get("tracking")
+    if not isinstance(tracking, dict):
+        tracking = {}
+    tracking = _string_key_dict(cast(object, tracking))
+    tracking["prompt_context_inclusion_tracked"] = True
+    tracking_note = tracking.get("note")
+    if not isinstance(tracking_note, str) or "citations" not in tracking_note:
+        tracking["note"] = (
+            "References record retrieved candidates and exact prompt inclusion. "
+            "Citations and material influence are not currently tracked."
+        )
+    payload["tracking"] = tracking
+
+    included_source_ids = [
+        str(source_id)
+        for source_id in cast(list[Any], trace_payload.get("included_source_ids", []))
+        if source_id is not None
+    ]
+    included_source_titles = list(
+        dict.fromkeys(
+            source_title.strip()
+            for group in cast(list[Any], trace_payload.get("included_groups", []))
+            if isinstance(group, dict)
+            and isinstance(
+                (
+                    source_title := _string_key_dict(cast(object, group)).get(
+                        "source_title"
+                    )
+                ),
+                str,
+            )
+            and source_title.strip()
+        )
+    )
+    payload["prompt_context"] = {
+        "tracked": True,
+        "version": trace_payload.get("version"),
+        "selection_basis": trace_payload.get("selection_basis"),
+        "raw_source_count": trace_payload.get("raw_source_count"),
+        "raw_chunk_count": trace_payload.get("raw_chunk_count"),
+        "included_source_count": trace_payload.get("included_source_count"),
+        "not_included_source_count": trace_payload.get("not_included_source_count"),
+        "included_chunk_count": trace_payload.get("included_chunk_count"),
+        "knowledge_tokens": trace_payload.get("knowledge_tokens"),
+        "truncated_by_token_budget": trace_payload.get("truncated_by_token_budget"),
+        "included_source_ids": included_source_ids,
+        "not_included_source_ids": cast(
+            list[Any], trace_payload.get("not_included_source_ids", [])
+        ),
+        "included_source_titles": included_source_titles,
+        "included_groups": cast(list[Any], trace_payload.get("included_groups", [])),
+    }
+
+    references = payload.get("references")
+    if isinstance(references, list):
+        normalized_references: list[Any] = []
+        included_source_ids_set = set(included_source_ids)
+        for reference in cast(list[Any], references):
+            if not isinstance(reference, dict):
+                normalized_references.append(reference)
+                continue
+            normalized_reference = _string_key_dict(cast(object, reference))
+            if str(normalized_reference.get("id")) in included_source_ids_set:
+                normalized_reference["usage_state"] = "inserted_into_prompt"
+            normalized_references.append(normalized_reference)
+        payload["references"] = normalized_references
+    return payload
+
+
+def requested_model_name(assistant: RuntimeAssistantProtocol) -> str | None:
+    completion_model = assistant.completion_model
+    if completion_model is None:
+        return None
+    return completion_model.name or None
+
+
+def citation_mode_for_step(step: RuntimeStep) -> str:
+    citation_mode = resolve_citation_mode(step.output_config)
+    if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
+        return citation_mode
+    try:
+        output_type = FlowOutputType(step.output_type)
+    except ValueError:
+        return CITATION_MODE_OFF
+    if output_type is not FlowOutputType.TEXT:
+        return CITATION_MODE_OFF
+    try:
+        output_mode = FlowOutputMode(step.output_mode)
+    except ValueError:
+        return citation_mode
+    if is_citation_capable_step(
+        output_type=output_type,
+        output_mode=output_mode,
+        output_config=step.output_config,
+    ):
+        return citation_mode
+    return CITATION_MODE_OFF
+
+
+def build_runtime_citation_sidecar(
+    *,
+    raw_completion_text: str,
+    rag_metadata: dict[str, Any] | None,
+    citation_mode: str,
+    inherited_context: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
+    if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR:
+        return None
+    references = (
+        rag_metadata.get("references") if isinstance(rag_metadata, dict) else None
+    )
+    prompt_context = (
+        rag_metadata.get("prompt_context") if isinstance(rag_metadata, dict) else None
+    )
+    prompt_context_dict = (
+        _string_key_dict(cast(object, prompt_context))
+        if isinstance(prompt_context, dict)
+        else None
+    )
+    inherited_context_dict = (
+        inherited_context if isinstance(inherited_context, dict) else None
+    )
+    included_source_ids = (
+        cast(list[str], prompt_context_dict.get("included_source_ids"))
+        if prompt_context_dict is not None
+        and isinstance(prompt_context_dict.get("included_source_ids"), list)
+        else None
+    )
+    inherited_references = (
+        cast(list[dict[str, Any]], inherited_context_dict.get("available_sources"))
+        if inherited_context_dict is not None
+        and isinstance(inherited_context_dict.get("available_sources"), list)
+        else None
+    )
+    inherited_source_ids = (
+        cast(list[str], inherited_context_dict.get("available_source_ids"))
+        if inherited_context_dict is not None
+        and isinstance(inherited_context_dict.get("available_source_ids"), list)
+        else None
+    )
+    return build_citation_sidecar(
+        raw_completion_text,
+        references=cast(list[dict[str, Any]], references)
+        if isinstance(references, list)
+        else None,
+        included_source_ids=included_source_ids,
+        inherited_references=inherited_references,
+        inherited_source_ids=inherited_source_ids,
+        citation_mode_requested=True,
+        upstream_grounded_step_orders=(
+            inherited_context_dict.get("upstream_step_orders")
+            if inherited_context_dict is not None
+            else None
+        ),
+        upstream_grounded_step_labels=(
+            inherited_context_dict.get("upstream_step_labels")
+            if inherited_context_dict is not None
+            else None
+        ),
+        raw_completion_text=raw_completion_text,
+    )
+
+
+def apply_citation_tracking(
+    rag_metadata: dict[str, Any] | None,
+    *,
+    citation_mode: str,
+) -> dict[str, Any] | None:
+    if citation_mode != CITATION_MODE_INLINE_INREF_SIDECAR or not isinstance(
+        rag_metadata, dict
+    ):
+        return rag_metadata
+    payload = dict(rag_metadata)
+    tracking = payload.get("tracking")
+    if not isinstance(tracking, dict):
+        tracking = {}
+    tracking = _string_key_dict(cast(object, tracking))
+    tracking["citation_tracked"] = True
+    tracking["note"] = (
+        "References record retrieved candidates, exact prompt inclusion, and explicit inline "
+        "citations when citation mode is enabled. Material influence is not currently tracked."
+    )
+    payload["tracking"] = tracking
+    return payload
+
+
+def infer_finish_reason(
+    *,
+    completion: Completion | str | Any,
+    tool_calls: list[dict[str, Any]] | None,
+) -> str | None:
+    if isinstance(completion, Completion):
+        if completion.finish_reason is not None:
+            return completion.finish_reason
+        if completion.stop:
+            return "stop"
+        if tool_calls:
+            return "tool_calls"
+    return None
+
+
+def execution_hash(
+    *,
+    run_id: UUID,
+    step_id: UUID,
+    prompt: str,
+    model_parameters: dict[str, Any],
+) -> str:
+    payload = json.dumps(
+        {
+            "run_id": str(run_id),
+            "step_id": str(step_id),
+            "prompt": prompt,
+            "model_parameters": model_parameters,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+async def prepare_step_execution(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    version_metadata: dict[str, Any] | None,
+    requested_file_ids: Sequence[UUID],
+    deps: StepExecutionRuntimeDeps,
+    step_input_override: StepInputValue | None = None,
+) -> PreparedStepExecution:
+    record_step_phase(FlowStepPhase.INPUT_RESOLUTION)
+    context_results = [
+        item
+        for item in state.prior_results
+        if item.status == FlowStepResultStatus.COMPLETED
+    ]
+    context = deps.variable_resolver.build_context_with_evidence(
+        run.input_payload_json,
+        context_results,
+        current_step_order=step.step_order,
+        step_names_by_order=state.step_names_by_order,
+        step_ref_mapping=state.step_ref_mapping,
+    )
+    assistant = await deps.load_assistant(
+        step.assistant_id, state, snapshot=step.assistant_snapshot
+    )
+    # A step that calls no completion model sends no prompt, so its assistant
+    # prompt is not resolved: it selects no earlier material, is not counted
+    # against the input limit and cannot fail the step on its references.
+    uses_completion_model = flow_output_mode_uses_completion_model(step.output_mode)
+    prompt_text = assistant.get_prompt_text() if uses_completion_model else ""
+    effective_prompt = ""
+    input_payload_for_result: dict[str, Any] = {
+        "text": "",
+        "source_text": "",
+        "input_source": step.input_source,
+        "used_question_binding": False,
+    }
+
+    # Input resolution can wait minutes on an external transcription job;
+    # publish the run's cancellation probe so that wait can be cut short.
+    async def run_cancelled() -> bool:
+        if deps.run_cancelled is None:
+            return False
+        return await deps.run_cancelled(
+            run_id=run.id, flow_id=run.flow_id, tenant_id=run.tenant_id
+        )
+
+    try:
+        with run_cancel_probe_scope(
+            run_cancelled if deps.run_cancelled is not None else None
+        ):
+            step_input = await deps.resolve_step_input(
+                step=step,
+                context=context,
+                run=run,
+                prior_results=state.prior_results,
+                state=state,
+                version_metadata=version_metadata,
+                requested_file_ids=requested_file_ids,
+                prompt_template=prompt_text,
+                step_input_override=step_input_override,
+                transcription_call_observer=(
+                    deps.build_transcription_call_observer()
+                    if deps.build_transcription_call_observer is not None
+                    else None
+                ),
+            )
+    except TypedIOValidationException as exc:
+        raise attach_typed_failure_context(
+            exc,
+            input_payload_for_result=input_payload_for_result,
+            effective_prompt=effective_prompt,
+        ) from exc
+
+    record_step_phase(FlowStepPhase.INPUT_RESOLUTION)
+    input_payload_for_result.update(
+        build_step_input_payload(
+            text=step_input.text,
+            source_text=step_input.source_text,
+            input_source=step_input.input_source,
+            used_question_binding=step_input.used_question_binding,
+            materials=step_input.materials,
+            max_inline_text_bytes=deps.max_inline_text_bytes,
+        )
+    )
+    if step_input.transcription_metadata is not None:
+        input_payload_for_result["transcription"] = step_input.transcription_metadata
+    if step_input.runtime_input_metadata is not None:
+        input_payload_for_result["runtime_input"] = step_input.runtime_input_metadata
+
+    if deps.logger is not None:
+        deps.logger.info(
+            "flow_executor.input_resolved run_id=%s step_order=%d has_model_files=%s has_structured=%s text_len=%d",
+            run.id,
+            step.step_order,
+            step_input.files is not None and len(step_input.files) > 0,
+            step_input.structured is not None,
+            len(step_input.text),
+        )
+
+    try:
+        policy = validate_runtime_input_policy(
+            step_order=step.step_order,
+            input_type=step.input_type,
+            input_source=step.input_source,
+            raw_extracted_text=step_input.raw_extracted_text,
+            files=step_input.files,
+        )
+    except TypedIOValidationException as exc:
+        raise attach_typed_failure_context(
+            exc,
+            input_payload_for_result=input_payload_for_result,
+            effective_prompt=effective_prompt,
+        ) from exc
+
+    prompt_interpolation = FlowVariableInterpolation(text="", edges=())
+    if uses_completion_model:
+        prompt_context = deps.variable_resolver.build_context_with_evidence(
+            run.input_payload_json,
+            context_results,
+            current_step_order=step.step_order,
+            step_names_by_order=state.step_names_by_order,
+            step_ref_mapping=state.step_ref_mapping,
+            current_step_input=step_input.runtime_input_metadata,
+            input_config=step.input_config,
+            resolved_file_text={
+                material.identity: material.text for material in step_input.materials
+            },
+        )
+        if prompt_text:
+            prompt_interpolation = deps.variable_resolver.interpolate_with_evidence(
+                prompt_text,
+                prompt_context,
+                binding_ref="assistant_prompt",
+            )
+        effective_prompt = append_output_format_instructions(
+            prompt_interpolation.text,
+            resolve_format_spec(step.output_type).prompt_instructions(
+                step.output_contract
+            ),
+        )
+    diagnostics = list(step_input.diagnostics)
+
+    try:
+        enforce_inline_input_cap(
+            step_order=step.step_order,
+            input_source=step_input.input_source,
+            text=effective_prompt + step_input.text,
+            max_inline_text_bytes=step_input.processing_ceiling_bytes
+            or deps.max_inline_text_bytes,
+        )
+        contract_validation = await validate_input_contract(
+            step_order=step.step_order,
+            input_type=step.input_type,
+            input_contract=step.input_contract,
+            text=step_input.text,
+            structured=step_input.structured,
+            binding_context=(
+                "input_bindings" if step_input.used_question_binding else None
+            ),
+        )
+    except TypedIOValidationException as exc:
+        if exc.contract_validation is not None:
+            input_payload_for_result["contract_validation"] = exc.contract_validation
+        raise attach_typed_failure_context(
+            exc,
+            input_payload_for_result=input_payload_for_result,
+            effective_prompt=effective_prompt,
+        ) from exc
+
+    if contract_validation is not None:
+        input_payload_for_result["contract_validation"] = contract_validation
+        if deps.logger is not None:
+            deps.logger.info(
+                "flow_executor.contract_validation run_id=%s step_order=%d input_type=%s input_source=%s schema_type_hint=%s parse_attempted=%s parse_succeeded=%s candidate_type=%s",
+                run.id,
+                step.step_order,
+                step.input_type,
+                step_input.input_source,
+                contract_validation["schema_type_hint"],
+                contract_validation["parse_attempted"],
+                contract_validation["parse_succeeded"],
+                contract_validation["candidate_type"],
+            )
+
+    llm_files: list[File] = []
+    if policy is not None and policy.channel == "files_only":
+        llm_files = step_input.files or []
+
+    return PreparedStepExecution(
+        assistant=assistant,
+        step_input=step_input,
+        effective_prompt=effective_prompt,
+        input_payload_for_result=input_payload_for_result,
+        contract_validation=contract_validation,
+        diagnostics=diagnostics,
+        llm_files=llm_files,
+        resolved_input_edges=merge_resolved_input_edges(
+            step_input.edges,
+            prompt_interpolation.edges,
+        ),
+    )
+
+
+def effective_completion_prompt(
+    *,
+    step: RuntimeStep,
+    state: RunExecutionState,
+    prepared: PreparedStepExecution,
+) -> str:
+    citation_mode = citation_mode_for_step(step)
+    inherited_citation_context = (
+        collect_inherited_citation_context(
+            step=step,
+            state=state,
+            prompt_template=prepared.assistant.get_prompt_text(),
+        )
+        if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
+        else None
+    )
+    prompt_override = prepared.effective_prompt
+    if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR:
+        inherited_appendix = build_inherited_citation_prompt_appendix(
+            inherited_citation_context or {}
+        )
+        if isinstance(inherited_appendix, str) and inherited_appendix.strip():
+            prompt_override = (
+                f"{prepared.effective_prompt}\n\n{inherited_appendix}"
+                if prepared.effective_prompt.strip()
+                else inherited_appendix
+            )
+    return prompt_override
+
+
+def build_prepared_completion_call(
+    *,
+    step: RuntimeStep,
+    state: RunExecutionState,
+    prepared: PreparedStepExecution,
+    useful_output_reserve_tokens: int = DEFAULT_USEFUL_OUTPUT_RESERVE_TOKENS,
+) -> PreparedCompletionCall:
+    """Freeze the provider-call inputs that activation persists and dispatch uses."""
+
+    original_kwargs = prepared.assistant.completion_model_kwargs
+    completion_model = prepared.assistant.completion_model
+    if completion_model is not None:
+        # Frozen once per step execution, so preflight and dispatch send the
+        # same settings and an omitted stored effort is logged once.
+        original_kwargs = stored_request_model_kwargs(
+            original_kwargs,
+            completion_model.supported_model_kwargs,
+            completion_model_id=completion_model.id,
+        )
+    preferred_kwargs = original_kwargs
+    response_format_plan = resolve_json_response_format_plan(
+        step=step,
+        assistant=prepared.assistant,
+        state=state,
+    )
+    native_json_format_attempted = response_format_plan.response_format is not None
+    fallback_call_possible = response_format_plan.fallback_call_possible
+    cache_key = json_mode_cache_key(prepared.assistant)
+    if native_json_format_attempted:
+        try:
+            preferred_kwargs = original_kwargs.model_copy(
+                update={"response_format": response_format_plan.response_format}
+            )
+        except Exception:
+            logger.warning(
+                "Failed to enable native JSON mode for flow step execution.",
+                extra={"step_order": step.step_order, "cache_key": cache_key},
+                exc_info=True,
+            )
+            state.json_mode_supported[cache_key] = False
+            native_json_format_attempted = False
+            fallback_call_possible = False
+    elif response_format_plan.strip_stored_response_format:
+        preferred_kwargs = original_kwargs.model_copy(update={"response_format": None})
+
+    fallback_kwargs = None
+    if fallback_call_possible and preferred_kwargs.response_format is not None:
+        fallback_kwargs = original_kwargs.model_copy(update={"response_format": None})
+
+    full_prompt = effective_completion_prompt(step=step, state=state, prepared=prepared)
+    prompt = full_prompt
+    if (
+        step.output_contract is not None
+        and preferred_kwargs.response_format is not None
+        and preferred_kwargs.response_format.get("type") == "json_schema"
+    ):
+        schema_suffix = "\n" + "\n".join(
+            output_contract_instructions(step.output_contract)
+        )
+        prompt = full_prompt.removesuffix(schema_suffix)
+    # After the schema strip, so the native prompt still drops the schema text.
+    reviewed_block = reviewed_edit_prompt_block(
+        step=step,
+        edges=prepared.resolved_input_edges,
+        reviewed=state.reviewed_results,
+    )
+    if reviewed_block is not None:
+        prompt = f"{prompt}\n\n{reviewed_block}" if prompt.strip() else reviewed_block
+        full_prompt = (
+            f"{full_prompt}\n\n{reviewed_block}"
+            if full_prompt.strip()
+            else reviewed_block
+        )
+
+    citation_mode = citation_mode_for_step(step)
+    return PreparedCompletionCall(
+        question=prepared.step_input.text,
+        effective_prompt=prompt,
+        capability_fallback_prompt=full_prompt if fallback_kwargs is not None else None,
+        preferred_model_kwargs=preferred_kwargs,
+        preferred_model_parameters=effective_model_parameters(
+            prepared.assistant,
+            model_kwargs=preferred_kwargs,
+        ),
+        capability_fallback_model_kwargs=fallback_kwargs,
+        capability_fallback_model_parameters=(
+            effective_model_parameters(
+                prepared.assistant,
+                model_kwargs=fallback_kwargs,
+            )
+            if fallback_kwargs is not None
+            else None
+        ),
+        assistant_context_version=(
+            2 if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR else 1
+        ),
+        preferred_native_json_format=native_json_format_attempted,
+        useful_output_reserve_tokens=useful_output_reserve_tokens,
+    )
+
+
+async def _refresh_completion_preflight(
+    *,
+    completion_call: PreparedCompletionCall,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+) -> PreparedCompletionCall:
+    preflight = completion_call.preflight
+    if (
+        preflight is None
+        or preflight.file_reference_urls_expires_at is None
+        or preflight.file_reference_urls_expires_at
+        > time.time() + _FILE_REFERENCE_REFRESH_MARGIN_SECONDS
+    ):
+        return completion_call
+    refreshed = await prepared.assistant.preflight_response_context(
+        question=completion_call.question,
+        completion_service=deps.completion_service,
+        files=prepared.llm_files,
+        prompt_override=completion_call.effective_prompt,
+        version=completion_call.assistant_context_version,
+        model_kwargs=completion_call.preferred_model_kwargs,
+        capability_fallback_prompt=completion_call.capability_fallback_prompt,
+        useful_output_reserve_tokens=completion_call.useful_output_reserve_tokens,
+    )
+    selected = (
+        refreshed.fallback
+        if completion_call.selected_package is preflight.fallback
+        and completion_call.selected_package is not preflight.preferred
+        else refreshed.selected_package or refreshed.preferred
+    )
+    completion_call = replace(
+        completion_call, preflight=refreshed, selected_package=selected
+    )
+    prepared.completion_call = completion_call
+    return completion_call
+
+
+async def preview_step_execution_context(
+    *,
+    step: RuntimeStep,
+    state: RunExecutionState,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+) -> int:
+    """Preflight provider packages without retrieval or provider/tool side effects."""
+    if any(
+        diagnostic.code == RUNTIME_INPUT_SOURCE_EMPTY_TEXT_DIAGNOSTIC_CODE
+        for diagnostic in prepared.diagnostics
+    ):
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: mapped input contains a source with no readable text.",
+            code=FlowApiErrorCode.TYPED_IO_EMPTY_EXTRACTION.value,
+        )
+    mcp_servers = getattr(prepared.assistant, "mcp_servers", [])
+    if mcp_servers:
+        raise TypedIOValidationException(
+            f"Step {step.step_order}: mapped preflight does not support mutable "
+            "external MCP tools; remove them from the published Flow assistant.",
+            code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+        )
+    completion_call = prepared.completion_call or build_prepared_completion_call(
+        step=step,
+        state=state,
+        prepared=prepared,
+    )
+    prompt_override = completion_call.effective_prompt
+    useful_output_reserve_tokens = completion_call.useful_output_reserve_tokens
+    try:
+        preview = await prepared.assistant.preflight_response_context(
+            question=completion_call.question,
+            completion_service=deps.completion_service,
+            files=prepared.llm_files,
+            prompt_override=prompt_override,
+            version=completion_call.assistant_context_version,
+            model_kwargs=completion_call.preferred_model_kwargs,
+            capability_fallback_prompt=completion_call.capability_fallback_prompt,
+            useful_output_reserve_tokens=useful_output_reserve_tokens,
+        )
+        if preview.refusal is not None:
+            if preview.refusal == "current_request_output_capacity_insufficient":
+                raise CompletionOutputCapacityError(
+                    input_reserve_tokens=min(
+                        package.input_reserve.tokens for package in preview.packages
+                    ),
+                    useful_output_reserve_tokens=useful_output_reserve_tokens,
+                    max_input_tokens=preview.capacity.require_input_tokens(),
+                    max_output_tokens=preview.capacity.require_output_tokens(),
+                )
+            raise ContextWindowExceededError(
+                estimated_tokens=min(
+                    package.input_reserve.tokens for package in preview.packages
+                ),
+                max_tokens=preview.capacity.input_allowance(
+                    output_reserve_tokens=useful_output_reserve_tokens,
+                    safety_tokens=0,
+                ),
+            )
+    except UnknownModelCapacityError as exc:
+        raise _typed_missing_capacity_error(
+            exc, step=step, prepared=prepared, effective_prompt=prompt_override
+        ) from exc
+    except ContextWindowExceededError as exc:
+        raise _typed_context_window_error(
+            exc,
+            step=step,
+            prepared=prepared,
+            deps=deps,
+            effective_prompt=prompt_override,
+        ) from exc
+    selected_package = preview.selected_package
+    assert selected_package is not None
+    prepared.completion_call = replace(
+        completion_call, preflight=preview, selected_package=selected_package
+    )
+    return preview.admission_input_reserve_tokens
+
+
+async def complete_step_execution(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+) -> StepExecutionOutput:
+    """Run the step and, on failure, carry retrieval evidence out with the error.
+
+    Attempt provenance is the only owner of verbatim passages. A step that
+    retrieved and then failed must still record what it retrieved, so the
+    captured evidence rides on the exception to the attempt writer.
+    """
+    captured_rag: dict[str, Any] = {}
+    try:
+        return await _complete_step_execution(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+            captured_rag=captured_rag,
+        )
+    except BaseException as exc:
+        # Also for a cancellation (the executor's backstop): what retrieval
+        # read before finalization was cut short is still evidence.
+        rag_metadata = captured_rag.get("rag")
+        if (
+            isinstance(rag_metadata, dict)
+            and failure_evidence(exc).rag_metadata is None
+        ):
+            attach_failure_evidence(
+                exc, rag_metadata=cast(dict[str, Any], rag_metadata)
+            )
+        raise
+
+
+async def _complete_step_execution(
+    *,
+    step: RuntimeStep,
+    run: FlowRun,
+    state: RunExecutionState,
+    prepared: PreparedStepExecution,
+    deps: StepExecutionRuntimeDeps,
+    captured_rag: dict[str, Any],
+) -> StepExecutionOutput:
+    diagnostics = list(prepared.diagnostics)
+    citation_mode = citation_mode_for_step(step)
+    completion_call = prepared.completion_call or build_prepared_completion_call(
+        step=step,
+        state=state,
+        prepared=prepared,
+    )
+    inherited_citation_context = (
+        collect_inherited_citation_context(
+            step=step,
+            state=state,
+            prompt_template=prepared.assistant.get_prompt_text(),
+        )
+        if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
+        else None
+    )
+
+    rag_query_derivation = derive_rag_retrieval_query(
+        step=step,
+        input_text=prepared.step_input.text,
+    )
+    record_step_phase(FlowStepPhase.RETRIEVAL)
+    if prepared.summarization_input is not None:
+        info_blob_chunks, rag_metadata, rag_diagnostics = [], None, []
+    else:
+        (
+            info_blob_chunks,
+            rag_metadata,
+            rag_diagnostics,
+        ) = await deps.retrieve_rag_chunks(
+            assistant=prepared.assistant,
+            question=rag_query_derivation.query,
+            run_id=run.id,
+            step_order=step.step_order,
+        )
+    diagnostics.extend(rag_diagnostics)
+    if rag_metadata is not None:
+        rag_metadata["query_derivation"] = rag_query_derivation.to_metadata()
+        if step.retrieval_policy is not None:
+            rag_metadata["retrieval_policy"] = step.retrieval_policy.model_dump(
+                mode="json"
+            )
+    captured_rag["rag"] = rag_metadata
+    if (
+        rag_query_derivation.input_truncated
+        and isinstance(rag_metadata, dict)
+        and rag_metadata.get("attempted") is True
+    ):
+        diagnostics.append(
+            StepDiagnostic(
+                code="rag_retrieval_query_truncated",
+                message=(
+                    f"Step {step.step_order}: knowledge retrieval query was truncated "
+                    f"to {RAG_RETRIEVAL_QUERY_CHAR_LIMIT} characters."
+                ),
+                severity="warning",
+            )
+        )
+
+    retrieval_status = (
+        rag_metadata.get("status") if isinstance(rag_metadata, dict) else None
+    )
+    fail_closed_reason = (
+        "query_truncated"
+        if rag_query_derivation.input_truncated
+        and isinstance(rag_metadata, dict)
+        and rag_metadata.get("attempted") is True
+        else retrieval_status
+    )
+    if (
+        step.retrieval_policy is not None
+        and step.retrieval_policy.mode == "fail_closed"
+        and (
+            fail_closed_reason == "query_truncated"
+            or fail_closed_reason in RAG_RETRIEVAL_FAIL_CLOSED_STATUSES
+        )
+    ):
+        diagnostics.append(
+            StepDiagnostic(
+                code="rag_retrieval_fail_closed",
+                message=(
+                    f"Step {step.step_order}: fail-closed knowledge retrieval policy "
+                    f"stopped this completion call after '{fail_closed_reason}'; "
+                    "provider I/O for this call was not started."
+                ),
+                severity="error",
+            )
+        )
+        failed_input_payload = dict(prepared.input_payload_for_result)
+        failed_input_payload["rag"] = build_step_result_citation_state(rag_metadata)
+        failed_input_payload["diagnostics"] = [
+            {
+                "code": diagnostic.code,
+                "message": diagnostic.message,
+                "severity": diagnostic.severity,
+            }
+            for diagnostic in diagnostics
+        ]
+        raise attach_typed_failure_context(
+            TypedIOValidationException(
+                f"Step {step.step_order}: required knowledge retrieval ended with "
+                f"'{fail_closed_reason}'; provider I/O for this completion call "
+                "was not started.",
+                code=FlowApiErrorCode.TYPED_IO_VALIDATION_FAILED.value,
+            ),
+            input_payload_for_result=failed_input_payload,
+            effective_prompt=completion_call.effective_prompt,
+        )
+
+    completion_call = await _refresh_completion_preflight(
+        completion_call=completion_call, prepared=prepared, deps=deps
+    )
+    cache_key = json_mode_cache_key(prepared.assistant)
+    use_capability_fallback = (
+        completion_call.capability_fallback_model_kwargs is not None
+        and (
+            state.json_mode_supported.get(cache_key) is False
+            or (
+                cache_key in state.json_schema_rejected_models
+                and completion_call.preferred_model_kwargs.response_format is not None
+                and completion_call.preferred_model_kwargs.response_format.get("type")
+                == "json_schema"
+            )
+        )
+    )
+    if completion_call.preflight is not None:
+        use_capability_fallback = use_capability_fallback or (
+            completion_call.selected_package is completion_call.preflight.fallback
+            and completion_call.selected_package
+            is not completion_call.preflight.preferred
+        )
+        if use_capability_fallback:
+            completion_call = replace(
+                completion_call, selected_package=completion_call.preflight.fallback
+            )
+            prepared.completion_call = completion_call
+    if use_capability_fallback:
+        selected_model_kwargs = completion_call.capability_fallback_model_kwargs
+        selected_model_parameters = completion_call.capability_fallback_model_parameters
+        assert selected_model_kwargs is not None
+        assert selected_model_parameters is not None
+    else:
+        selected_model_kwargs = completion_call.preferred_model_kwargs
+        selected_model_parameters = completion_call.preferred_model_parameters
+    actual_prompt = (
+        completion_call.capability_fallback_prompt or completion_call.effective_prompt
+        if use_capability_fallback
+        else completion_call.effective_prompt
+    )
+    native_json_format_attempted = (
+        completion_call.preferred_native_json_format and not use_capability_fallback
+    )
+    if deps.logger is not None:
+        deps.logger.info(
+            "flow_executor.llm_call run_id=%s step_order=%d timeout=%s "
+            "native_json_format_attempted=%s",
+            run.id,
+            step.step_order,
+            deps.llm_request_timeout_seconds,
+            native_json_format_attempted,
+        )
+    actual_model_parameters = selected_model_parameters
+    # One budget for this call and its capability fallback: the attempt's
+    # deadline when the executor started one, else a budget for this step
+    # execution only.
+    step_deadline = deps.deadline or StepDeadline.start(
+        deps.llm_request_timeout_seconds
+    )
+    try:
+        response = await call_assistant_with_timeout(
+            step=step,
+            run=run,
+            state=state,
+            prepared=prepared,
+            deps=deps,
+            question=completion_call.question,
+            model_kwargs=selected_model_kwargs,
+            info_blob_chunks=info_blob_chunks,
+            prompt_override=actual_prompt,
+            version=completion_call.assistant_context_version,
+            provider_call_reason=(
+                "capability_fallback" if use_capability_fallback else "initial"
+            ),
+            deadline=step_deadline,
+            useful_output_reserve_tokens=completion_call.useful_output_reserve_tokens,
+            # Retrieval arrives after preview until the runtime freezes it.
+            prepared_request=completion_call.selected_package
+            if not info_blob_chunks
+            else None,
+            file_reference_urls=(
+                completion_call.preflight.file_reference_urls
+                if completion_call.preflight is not None
+                else None
+            ),
+        )
+    except ProviderCapabilityRejectedException as model_exc:
+        if (
+            not use_capability_fallback
+            and completion_call.capability_fallback_model_kwargs is not None
+            and model_exc.capability == "response_format"
+            and model_exc.retry_without_capability_safe
+        ):
+            if (
+                selected_model_kwargs.response_format is not None
+                and selected_model_kwargs.response_format.get("type") == "json_schema"
+            ):
+                state.json_schema_rejected_models.add(cache_key)
+            else:
+                state.json_mode_supported[cache_key] = False
+            completion_call = await _refresh_completion_preflight(
+                completion_call=completion_call, prepared=prepared, deps=deps
+            )
+            fallback_kwargs = completion_call.capability_fallback_model_kwargs
+            assert fallback_kwargs is not None
+            fallback_model_parameters = (
+                completion_call.capability_fallback_model_parameters
+            )
+            assert fallback_model_parameters is not None
+            actual_model_parameters = fallback_model_parameters
+            actual_prompt = (
+                completion_call.capability_fallback_prompt
+                or completion_call.effective_prompt
+            )
+            if completion_call.preflight is not None:
+                completion_call = replace(
+                    completion_call, selected_package=completion_call.preflight.fallback
+                )
+                prepared.completion_call = completion_call
+            response = await call_assistant_with_timeout(
+                step=step,
+                run=run,
+                state=state,
+                prepared=prepared,
+                deps=deps,
+                question=completion_call.question,
+                model_kwargs=fallback_kwargs,
+                info_blob_chunks=info_blob_chunks,
+                prompt_override=actual_prompt,
+                version=completion_call.assistant_context_version,
+                provider_call_reason="capability_fallback",
+                deadline=step_deadline,
+                useful_output_reserve_tokens=completion_call.useful_output_reserve_tokens,
+                prepared_request=(
+                    completion_call.preflight.fallback
+                    if completion_call.preflight is not None and not info_blob_chunks
+                    else None
+                ),
+                file_reference_urls=(
+                    completion_call.preflight.file_reference_urls
+                    if completion_call.preflight is not None
+                    else None
+                ),
+            )
+        else:
+            raise
+
+    if deps.logger is not None:
+        deps.logger.info(
+            "flow_executor.llm_done run_id=%s step_order=%d tokens=%s",
+            run.id,
+            step.step_order,
+            response.total_token_count,
+        )
+
+    record_step_phase(FlowStepPhase.FINALIZATION)
+    completion = response.completion
+    rejected_completion = RejectedCompletion(
+        finish_reason=completion.finish_reason
+        if isinstance(completion, Completion)
+        else None,
+        provider_response_id=completion.provider_response_id
+        if isinstance(completion, Completion)
+        else None,
+        output=sample_rejected_output(
+            completion.raw_text,
+            max_inline_bytes=deps.max_inline_text_bytes,
+            observed_bytes=completion.raw_text_bytes,
+            sha256=completion.raw_text_sha256,
+        )
+        if isinstance(completion, Completion) and completion.finish_reason == "length"
+        else None,
+    )
+    if isinstance(completion, Completion) and completion.finish_reason == "length":
+        completion.raw_text = None
+        raise attach_typed_failure_context(
+            StepOutputValidationException(
+                TypedIOValidationException(
+                    f"Step {step.step_order}: model output was truncated (finish_reason=length).",
+                    code=FlowApiErrorCode.LLM_OUTPUT_TRUNCATED.value,
+                    context={"finish_reason": completion.finish_reason},
+                ),
+                rejected_completion=rejected_completion,
+            ),
+            input_payload_for_result=prepared.input_payload_for_result,
+            effective_prompt=actual_prompt,
+        )
+    if isinstance(completion, str):
+        raw_full_text = completion
+        tool_calls = None
+        reasoning_tokens = 0
+    else:
+        completion = (
+            completion
+            if isinstance(completion, Completion)
+            else Completion(text=str(completion))
+        )
+        raw_full_text = completion.text or ""
+        tool_calls = (
+            [tc.__dict__ for tc in completion.tool_calls_metadata]
+            if completion.tool_calls_metadata
+            else None
+        )
+        reasoning_tokens = completion.reasoning_token_count or 0
+
+    response_model_info = getattr(response, "model", None)
+    response_usage = getattr(response, "usage", None)
+    num_tokens_input = (
+        response_usage.prompt_tokens
+        if response_usage is not None and response_usage.prompt_tokens is not None
+        else response.total_token_count
+    )
+    num_tokens_output = (
+        response_usage.completion_tokens
+        if response_usage is not None and response_usage.completion_tokens is not None
+        else count_tokens(
+            raw_full_text, _resolve_litellm_model_name(prepared.assistant) or ""
+        )
+        + reasoning_tokens
+    )
+    rag_metadata = apply_prompt_context_trace(
+        rag_metadata,
+        knowledge_trace=getattr(response, "knowledge_trace", None),
+    )
+    rag_metadata = apply_citation_tracking(rag_metadata, citation_mode=citation_mode)
+    captured_rag["rag"] = rag_metadata
+    citation_sidecar = build_runtime_citation_sidecar(
+        raw_completion_text=raw_full_text,
+        rag_metadata=rag_metadata,
+        citation_mode=citation_mode,
+        inherited_context=inherited_citation_context,
+    )
+    full_text = (
+        strip_inline_reference_tags(raw_full_text)
+        if citation_mode == CITATION_MODE_INLINE_INREF_SIDECAR
+        else raw_full_text
+    )
+
+    if deps.logger is not None:
+        deps.logger.info(
+            "flow_executor.typed_output_processing run_id=%s step_order=%d output_type=%s",
+            run.id,
+            step.step_order,
+            step.output_type,
+        )
+    try:
+        typed_output = await deps.process_typed_output(
+            full_text=full_text,
+            step=step,
+            run=run,
+        )
+        ensure_structured_output_allowed(
+            typed_output.structured_output,
+            ceiling_bytes=deps.max_inline_text_bytes,
+        )
+    except TypedIOValidationException as exc:
+        raise attach_typed_failure_context(
+            StepOutputValidationException(exc, rejected_completion=rejected_completion),
+            input_payload_for_result=prepared.input_payload_for_result,
+            effective_prompt=actual_prompt,
+            rejected_output=full_text,
+        ) from exc
+
+    diagnostics.extend(typed_output.diagnostics)
+    structured_output = typed_output.structured_output
+    artifacts = typed_output.artifacts
+    full_text = typed_output.persisted_text(full_text)
+
+    if deps.logger is not None:
+        deps.logger.info(
+            "flow_executor.typed_output_done run_id=%s step_order=%d output_type=%s "
+            "full_text_len=%d has_structured=%s has_artifacts=%s",
+            run.id,
+            step.step_order,
+            step.output_type,
+            len(full_text),
+            structured_output is not None,
+            artifacts is not None and len(artifacts) > 0,
+        )
+
+    persisted_text, generated_file_ids = await deps.apply_output_cap(
+        text=full_text,
+        run=run,
+        step=step,
+    )
+    return StepExecutionOutput(
+        materials=prepared.step_input.materials,
+        max_inline_text_bytes=deps.max_inline_text_bytes,
+        input_text=prepared.step_input.text,
+        source_text=prepared.step_input.source_text,
+        input_source=prepared.step_input.input_source,
+        used_question_binding=prepared.step_input.used_question_binding,
+        full_text=full_text,
+        persisted_text=persisted_text,
+        generated_file_ids=generated_file_ids,
+        tool_calls_metadata=tool_calls,
+        num_tokens_input=num_tokens_input,
+        num_tokens_output=num_tokens_output,
+        effective_prompt=actual_prompt,
+        model_parameters_json=actual_model_parameters,
+        requested_model=requested_model_name(prepared.assistant),
+        response_model=getattr(response_model_info, "name", None),
+        provider=getattr(response_model_info, "provider_type", None),
+        finish_reason=infer_finish_reason(completion=completion, tool_calls=tool_calls),
+        provider_response_id=getattr(completion, "provider_response_id", None),
+        contract_validation=prepared.contract_validation,
+        structured_output=structured_output,
+        artifacts=artifacts,
+        diagnostics=diagnostics,
+        rag_metadata=rag_metadata,
+        transcription_metadata=prepared.step_input.transcription_metadata,
+        runtime_input_metadata=prepared.step_input.runtime_input_metadata,
+        citation_sidecar=citation_sidecar,
+        inherited_citation_sources=inherited_cited_sources(
+            citation_sidecar=citation_sidecar,
+            inherited_context=inherited_citation_context,
+        ),
+        raw_completion_text=(
+            raw_full_text
+            if citation_sidecar is not None
+            and bool(citation_sidecar.get("citation_observed"))
+            else None
+        ),
+    )

@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from eneo.authentication.auth_models import (
+    FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE,
+)
 from eneo.server.main import get_application
 
 
@@ -62,7 +65,30 @@ def test_api_key_schema_fields(openapi_spec: dict):
         assert field in props, f"Missing ApiKeyV2.{field} in schema"
 
 
-def test_api_key_list_uses_opaque_cursor_and_exposes_module_eligibility_filter(
+def test_resource_permissions_document_flow_runtime_review_levels(openapi_spec: dict):
+    schemas = openapi_spec.get("components", {}).get("schemas", {})
+    properties = schemas["ResourcePermissions"].get("properties", {})
+
+    flows_description = properties["flows"].get("description", "")
+    assert "published flows" in flows_description
+    assert "run contracts" in flows_description
+    assert "active human-review checkpoints" in flows_description
+    assert "create published-flow runs" in flows_description
+    assert (
+        "edit, approve, reject, or resume human-review checkpoints" in flows_description
+    )
+    assert "runs created by that same API key" in flows_description
+    assert "resource_permissions.flows >= read" in flows_description
+
+    evidence_description = properties["flow_evidence"].get("description", "")
+    assert FLOW_EVIDENCE_SERVICE_KEY_PERMISSION_RECIPE in evidence_description
+    assert "Personal keys (`pk_`) cannot set this field" in evidence_description
+    assert "`none` means this key has no fine-grained evidence grant" in (
+        evidence_description
+    )
+
+
+def test_api_key_list_uses_opaque_cursor_and_omits_module_eligibility_filter(
     openapi_spec: dict,
 ):
     paths = openapi_spec["paths"]
@@ -81,6 +107,4 @@ def test_api_key_list_uses_opaque_cursor_and_exposes_module_eligibility_filter(
         parameter["name"]: parameter
         for parameter in paths["/api/v1/admin/api-keys"]["get"]["parameters"]
     }
-    eligibility = admin_parameters["eligible_for_module_binding"]["schema"]
-    assert eligibility["type"] == "boolean"
-    assert eligibility["default"] is False
+    assert "eligible_for_module_binding" not in admin_parameters

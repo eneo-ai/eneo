@@ -18,16 +18,15 @@ from eneo.completion_models.presentation.completion_model_assembler import (
 )
 
 
-class MockUser:
+class MockTenant:
     def __init__(self):
         self.id = uuid4()
-        self.tenant_id = uuid4()
-        self.tenant = None
+        self.api_credentials = {}
 
 
 def _make_model():
     return CompletionModel(
-        user=MockUser(),
+        tenant=MockTenant(),
         id=uuid4(),
         created_at=datetime.now(),
         updated_at=datetime.now(),

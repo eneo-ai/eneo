@@ -1,5 +1,6 @@
 import logging
 from collections.abc import Mapping
+from collections.abc import Set as AbstractSet
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -88,13 +89,20 @@ from eneo.spaces.api.space_models import (
     UpdateSpaceMemberRequest,
     UpdateSpaceRequest,
 )
-from eneo.websites.presentation.website_models import WebsiteCreate, WebsitePublic
+from eneo.websites.presentation.website_models import (
+    CrawlRunPublic,
+    WebsiteCrawlProgress,
+    WebsiteCrawlProgressList,
+    WebsiteCreate,
+    WebsitePublic,
+)
 
 if TYPE_CHECKING:
     from eneo.integration.domain.entities.integration_knowledge import (
         IntegrationKnowledge,
     )
     from eneo.spaces.space import Space
+    from eneo.spaces.space_repo import StoredSpaceToolSetting
 
 logger = logging.getLogger(__name__)
 
@@ -120,6 +128,9 @@ _SPACE_OPERATION_ACCESS_REASON = (
     "SpaceService enforces membership and the requested space operation."
 )
 _INTEGRATION_KNOWLEDGE_ACCESS_REASON = "IntegrationKnowledgeService enforces the space actor's permission for this operation."
+_WEBSITE_CRAWL_PROGRESS_ACCESS_REASON = (
+    "WebsiteCrudService enforces the space actor's read permissions for this operation."
+)
 # A rename or delete answers at once while a sync holds the item.
 _SYNCING_RESPONSE = {
     409: {
@@ -142,6 +153,36 @@ ApiKeyRevokingContainer = Annotated[
     Container,
     Depends(get_container(with_user=True, transaction_scope="function")),
 ]
+
+
+def _mcp_tool_setting_changes(
+    old_settings: "Mapping[UUID, StoredSpaceToolSetting]",
+    new_settings: "Mapping[UUID, StoredSpaceToolSetting]",
+    kept_server_ids: AbstractSet[UUID],
+) -> dict[str, list[dict[str, object]]] | None:
+    """The space's stored tool switches that changed, each before and after
+    (null: no switch of its own); None when none did. Only the tools of a
+    server the space keeps count: the tools of a server switched on or off
+    come and go with it, and that is the server's change."""
+    old_entries: list[dict[str, object]] = []
+    new_entries: list[dict[str, object]] = []
+    settings = {**old_settings, **new_settings}
+    for tool_id, setting in sorted(
+        settings.items(), key=lambda item: (item[1].tool_name, str(item[0]))
+    ):
+        before, after = old_settings.get(tool_id), new_settings.get(tool_id)
+        if setting.mcp_server_id not in kept_server_ids:
+            continue
+        was_enabled = None if before is None else before.is_enabled
+        is_enabled = None if after is None else after.is_enabled
+        if was_enabled == is_enabled:
+            continue
+        entry = {"id": str(tool_id), "name": setting.tool_name}
+        old_entries.append({**entry, "is_enabled": was_enabled})
+        new_entries.append({**entry, "is_enabled": is_enabled})
+    if not new_entries:
+        return None
+    return {"old": old_entries, "new": new_entries}
 
 
 async def _space_response(container: Container, space: "Space") -> SpacePublic:
@@ -277,6 +318,8 @@ async def update_space(
     current_user = container.user()
 
     old_space = await service.get_space(id)
+    space_repo = container.space_repo()
+    old_tool_settings = await space_repo.get_stored_tool_settings(id)
 
     def _get_model_ids_or_none(models: list[ModelId] | None):
         if models is None:
@@ -312,6 +355,9 @@ async def update_space(
         transcription_model_ids=_get_model_ids_or_none(
             update_space_req.transcription_models
         ),
+        transcription_service_ids=_get_model_ids_or_none(
+            update_space_req.transcription_services
+        ),
         mcp_server_ids=_get_model_ids_or_none(update_space_req.mcp_servers),
         enabled_capabilities=update_space_req.enabled_capabilities,
         mcp_tools=update_space_req.mcp_tools,
@@ -341,59 +387,47 @@ async def update_space(
             "new": data_retention_days,
         }
 
-    # Track model changes using SET comparison (avoids false positives from ordering)
-    if "completion_models" in original_request:
-        old_model_set = {
-            (str(m.id), m.name) for m in (old_space.completion_models or [])
-        }
-        new_model_set = {(str(m.id), m.name) for m in (space.completion_models or [])}
-        if old_model_set != new_model_set:
-            changes["completion_models"] = {
-                "old": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (old_space.completion_models or [])
-                ],
-                "new": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (space.completion_models or [])
-                ],
-            }
+    # Track model-link changes as SET comparisons (avoids false positives from
+    # ordering) over every linked model, whether a model list or a
+    # classification change removed it, so each removal is audited.
+    for field, old_links, new_links in (
+        (
+            "completion_models",
+            old_space.linked_completion_models,
+            space.linked_completion_models,
+        ),
+        (
+            "embedding_models",
+            old_space.linked_embedding_models,
+            space.linked_embedding_models,
+        ),
+        (
+            "transcription_models",
+            old_space.linked_transcription_models,
+            space.linked_transcription_models,
+        ),
+        (
+            "transcription_services",
+            old_space.linked_transcription_services,
+            space.linked_transcription_services,
+        ),
+        ("mcp_servers", old_space.mcp_servers, space.mcp_servers),
+    ):
+        old_entries = [{"id": str(m.id), "name": m.name} for m in old_links]
+        new_entries = [{"id": str(m.id), "name": m.name} for m in new_links]
+        if {tuple(e.values()) for e in old_entries} != {
+            tuple(e.values()) for e in new_entries
+        }:
+            changes[field] = {"old": old_entries, "new": new_entries}
 
-    if "embedding_models" in original_request:
-        old_model_set = {
-            (str(m.id), m.name) for m in (old_space.embedding_models or [])
-        }
-        new_model_set = {(str(m.id), m.name) for m in (space.embedding_models or [])}
-        if old_model_set != new_model_set:
-            changes["embedding_models"] = {
-                "old": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (old_space.embedding_models or [])
-                ],
-                "new": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (space.embedding_models or [])
-                ],
-            }
-
-    if "transcription_models" in original_request:
-        old_model_set = {
-            (str(m.id), m.name) for m in (old_space.transcription_models or [])
-        }
-        new_model_set = {
-            (str(m.id), m.name) for m in (space.transcription_models or [])
-        }
-        if old_model_set != new_model_set:
-            changes["transcription_models"] = {
-                "old": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (old_space.transcription_models or [])
-                ],
-                "new": [
-                    {"id": str(m.id), "name": m.name}
-                    for m in (space.transcription_models or [])
-                ],
-            }
+    tool_settings = _mcp_tool_setting_changes(
+        old_tool_settings,
+        await space_repo.get_stored_tool_settings(id),
+        {server.id for server in old_space.mcp_servers}
+        & {server.id for server in space.mcp_servers},
+    )
+    if tool_settings is not None:
+        changes["mcp_tools"] = tool_settings
 
     if old_space.enabled_capabilities != space.enabled_capabilities:
         changes["enabled_capabilities"] = {
@@ -587,6 +621,7 @@ async def create_space_assistant(
         name=assistant_in.name,
         space_id=id,
         template_data=assistant_in.from_template,
+        hidden=assistant_in.hidden,
         enabled_capabilities=assistant_in.enabled_capabilities,
     )
 
@@ -834,6 +869,34 @@ async def create_space_groups(
     )
 
     return CollectionPublic.from_domain(created_collection)
+
+
+@router.get(
+    "/{id}/knowledge/websites/crawl-progress/",
+    response_model=WebsiteCrawlProgressList,
+    description="The running crawls of the websites a space shows, with each "
+    "website's latest crawl run. Websites that are not crawling are absent. "
+    "Cheap enough to poll while a crawl runs; the space itself is not loaded.",
+    responses=responses.get_responses([403, 404]),
+)
+@endpoint_access(
+    authentication=Authentication.USER,
+    authorization=Authorization.AUTHENTICATED,
+    reason=_WEBSITE_CRAWL_PROGRESS_ACCESS_REASON,
+)
+async def get_website_crawl_progress(
+    id: UUID,
+    container: Annotated[Container, Depends(get_container(with_user=True))],
+):
+    runs = await container.website_crud_service().get_crawl_progress(space_id=id)
+    return WebsiteCrawlProgressList(
+        items=[
+            WebsiteCrawlProgress(
+                website_id=run.website_id, latest_crawl=CrawlRunPublic.from_domain(run)
+            )
+            for run in runs
+        ]
+    )
 
 
 @router.post(

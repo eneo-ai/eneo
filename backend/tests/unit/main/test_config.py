@@ -15,6 +15,18 @@ def _with_worker_capacity(settings: Settings, **updates: int | None) -> Settings
     return settings.model_copy(update=updates)
 
 
+def test_frontend_sync_container_configuration_is_valid() -> None:
+    script = Path(__file__).parents[4] / "scripts/sync-frontend-with-backend.sh"
+    container_environment = dict(
+        re.findall(r"-e ([A-Z_]+)=([^\s\\]+)", script.read_text())
+    )
+    settings = Settings.model_validate(
+        {name.lower(): value for name, value in container_environment.items()}
+    )
+
+    assert settings.openapi_only_mode is True
+
+
 @pytest.mark.parametrize(
     "field,value",
     [

@@ -15,12 +15,13 @@
   import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
+  import { toastError } from "$lib/core/errors";
   import { invalidate } from "$app/navigation";
   import { untrack } from "svelte";
+  import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import type { Eneo, components } from "@eneo/eneo-js";
   import { builtinToolCatalogLabels } from "$lib/features/chat/internalToolLabels";
   import { formatBytes } from "$lib/core/formatting/formatBytes";
-  import { SvelteMap } from "svelte/reactivity";
 
   type MCPTool = components["schemas"]["MCPServerToolPublic"];
 
@@ -156,12 +157,19 @@
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to sync tools:", error);
+      toastError(error);
     } finally {
       syncing = false;
     }
   }
 
+  // Tool switches ignore input during their own save but stay focusable: a
+  // disabled one would drop keyboard focus.
+  const togglingToolIds = new SvelteSet<string>();
+
   async function toggleToolEnabled(tool: MCPTool) {
+    if (togglingToolIds.has(tool.id)) return;
+    togglingToolIds.add(tool.id);
     try {
       const updated = await eneoClient.mcpServers.updateTenantToolEnabled({
         tool_id: tool.id,
@@ -172,6 +180,9 @@
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to update tool:", error);
+      toastError(error);
+    } finally {
+      togglingToolIds.delete(tool.id);
     }
   }
 
@@ -184,17 +195,26 @@
     tools = tools.map((t) => (t.id === tool.id ? updated : t));
   }
 
+  // One toast for a bulk change: the failures of one batch share their cause.
+  function reportFailures(results: PromiseSettledResult<unknown>[]) {
+    const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
+    if (failures.length === 0) return;
+    console.error(`${failures.length} tools failed to update`);
+    toastError(
+      failures[0].reason,
+      failures.length === 1
+        ? m.mcp_tools_update_failed_singular()
+        : m.mcp_tools_update_failed_plural({ count: failures.length })
+    );
+  }
+
   async function enableAllTools() {
     const targets = tools.filter((t) => !t.is_enabled_by_default);
     if (targets.length === 0) return;
 
     bulkUpdating = true;
     try {
-      const results = await Promise.allSettled(targets.map((t) => updateToolEnabled(t, true)));
-      const failures = results.filter((r) => r.status === "rejected");
-      if (failures.length > 0) {
-        console.error(`${failures.length} tools failed to enable`);
-      }
+      reportFailures(await Promise.allSettled(targets.map((t) => updateToolEnabled(t, true))));
     } finally {
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
       bulkUpdating = false;
@@ -207,11 +227,7 @@
 
     bulkUpdating = true;
     try {
-      const results = await Promise.allSettled(targets.map((t) => updateToolEnabled(t, false)));
-      const failures = results.filter((r) => r.status === "rejected");
-      if (failures.length > 0) {
-        console.error(`${failures.length} tools failed to disable`);
-      }
+      reportFailures(await Promise.allSettled(targets.map((t) => updateToolEnabled(t, false))));
     } finally {
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
       bulkUpdating = false;
@@ -230,6 +246,7 @@
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to approve tool:", error);
+      toastError(error);
     } finally {
       reviewingToolId = null;
     }
@@ -247,6 +264,7 @@
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to reject tool:", error);
+      toastError(error);
     } finally {
       reviewingToolId = null;
     }
@@ -263,6 +281,7 @@
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to approve all:", error);
+      toastError(error);
     } finally {
       bulkUpdating = false;
     }
@@ -281,6 +300,7 @@
       await Promise.all([invalidate("spaces:data"), invalidate("admin:tools")]);
     } catch (error) {
       console.error("Failed to reject all:", error);
+      toastError(error);
     } finally {
       bulkUpdating = false;
     }
@@ -712,8 +732,9 @@
                     {/if}
                   </div>
                   <Switch
-                    checked={tool.is_enabled_by_default}
-                    onCheckedChange={() => toggleToolEnabled(tool)}
+                    bind:checked={() => tool.is_enabled_by_default, () => toggleToolEnabled(tool)}
+                    aria-busy={togglingToolIds.has(tool.id) ? "true" : undefined}
+                    class="aria-busy:opacity-60"
                     aria-label={m.mcp_activate_tool({ name: tool.name })}
                   />
                 </div>

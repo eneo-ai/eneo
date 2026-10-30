@@ -42,7 +42,13 @@ const policy: Schema<"DeploymentPolicyPublic"> = {
   },
   limits: [],
   capabilities: [
-    { target: "object_store", configured: true, selectable: true, readiness_code: "ready" }
+    {
+      target: "object_store",
+      configured: true,
+      selectable: true,
+      readiness_code: "ready",
+      maximum_bytes: null
+    }
   ]
 };
 

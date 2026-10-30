@@ -190,12 +190,28 @@ async def get_file(
     "/{id}/",
     status_code=204,
     response_class=Response,
-    description="Delete a file owned by the current user.",
+    description=(
+        "Delete a file owned by the current user. A file used by a chat, "
+        "Assistant, App, App run, flow template or published flow version "
+        "cannot be deleted until no retained use references it. A file is "
+        "protected while a flow version that names it exists; unpublishing "
+        "and run-history purge do not release it, and no automatic version "
+        "cleanup exists yet."
+    ),
     responses={
         204: {
             "description": "File deleted successfully. No response body is returned."
         },
-        **responses.get_responses([403, 404, 409]),
+        **responses.get_responses([403, 404]),
+        409: {
+            "model": GeneralError,
+            "description": (
+                "The file is still used (error code `file_in_use`); "
+                "`details.blockers` lists the uses, including `flow_version` "
+                "(with `details.flow_versions` naming at most ten flows and "
+                "version numbers) and `flow_template_asset`."
+            ),
+        },
     },
 )
 @endpoint_access(
@@ -249,7 +265,7 @@ async def delete_file(
     responses=responses.get_responses([403, 404]),
     description=(
         "Preview whether deleting this File would remove active chat, Assistant, "
-        "App, or App-run attachments."
+        "App, or App-run attachments, or a file a published flow version uses."
     ),
 )
 @endpoint_access(
@@ -390,7 +406,7 @@ def _validate_download_claims(
     try:
         expected_tenant_id = UUID(str(payload["tenant_id"]))
         content_disposition = ContentDisposition(str(payload["content_disposition"]))
-    except (KeyError, ValueError):
+    except (KeyError, TypeError, ValueError):
         raise AuthenticationException("Invalid token claims") from None
     return content_disposition, expected_tenant_id
 
@@ -451,6 +467,7 @@ def _range_not_satisfiable_response(exc: FileContentRangeError) -> JSONResponse:
         content=GeneralError(
             message=str(exc),
             eneo_error_code=ErrorCodes.BAD_REQUEST,
+            code=exc.code,
         ).model_dump(exclude_none=True, mode="json"),
     )
 
@@ -470,9 +487,7 @@ def _range_not_satisfiable_response(exc: FileContentRangeError) -> JSONResponse:
         206: {
             "description": "Successfully downloaded a partial content (range request)"
         },
-        400: {
-            "description": "Bad request - Invalid token or range requests not supported for this file type"  # noqa
-        },
+        400: {"description": "Bad request - Invalid token or malformed request"},
         401: {"description": "Unauthorized - Token is invalid or has expired"},
         403: {"description": "Unauthorized - Not authorized to view this file"},
         404: {"description": "File content not found or file does not exist"},
@@ -500,8 +515,8 @@ async def download_file_signed(
     try:
         download = await service.get_download_no_auth(
             id,
+            tenant_id=expected_tenant_id,
             range_header=range,
-            expected_tenant_id=expected_tenant_id,
         )
     except FileContentRangeError as exc:
         return Response(
@@ -522,7 +537,7 @@ async def download_file_signed(
     summary="Download the exact original file using a signed URL",
     responses={
         200: {"description": "Successfully downloaded the entire original file"},
-        206: {"description": "Successfully downloaded part of the original audio"},
+        206: {"description": "Successfully downloaded part of the original file"},
         304: {"description": "Access revalidated; original content is unchanged"},
         **responses.get_responses([400, 401, 403, 404, 409, 416, 503]),
     },
@@ -549,8 +564,8 @@ async def download_original_file_signed(
     try:
         download = await service.get_original_download_no_auth(
             id,
+            tenant_id=expected_tenant_id,
             range_header=range,
-            expected_tenant_id=expected_tenant_id,
         )
     except FileContentRangeError as exc:
         return _range_not_satisfiable_response(exc)

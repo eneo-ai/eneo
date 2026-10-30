@@ -3,8 +3,12 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from eneo.ai_models.completion_models.completion_model import (
+    TOKEN_LIMIT_UPDATE_SCHEMA,
+    refuse_blank_token_limit,
+)
 from eneo.authentication.auth_dependencies import get_current_active_user
 from eneo.authentication.endpoint_access import Authentication, endpoint_access
 from eneo.completion_models.domain.model_kwargs_capabilities import (
@@ -29,11 +33,12 @@ class TenantCompletionModelCreate(BaseModel):
     provider_id: UUID
     name: str
     display_name: str
-    max_input_tokens: int
-    max_output_tokens: int
+    max_input_tokens: int = Field(gt=0)
+    max_output_tokens: int = Field(gt=0)
     vision: bool = False
     reasoning: bool = False
     supports_tool_calling: bool = False
+    supports_strict_tool_schema: bool = False
     hosting: str = "swe"
     family: str = "openai"
     is_active: bool = True
@@ -48,14 +53,17 @@ class TenantCompletionModelCreate(BaseModel):
 
 
 class TenantCompletionModelUpdate(BaseModel):
+    model_config = ConfigDict(json_schema_extra=TOKEN_LIMIT_UPDATE_SCHEMA)
+
     name: str | None = None
     display_name: str | None = None
     description: str | None = None
-    max_input_tokens: int | None = None
-    max_output_tokens: int | None = None
+    max_input_tokens: int | None = Field(default=None, gt=0)
+    max_output_tokens: int | None = Field(default=None, gt=0)
     vision: bool | None = None
     reasoning: bool | None = None
     supports_tool_calling: bool | None = None
+    supports_strict_tool_schema: bool | None = None
     hosting: str | None = None
     open_source: bool | None = None
     stability: str | None = None
@@ -70,6 +78,13 @@ class TenantCompletionModelUpdate(BaseModel):
     # the caller's tenant.
     is_default: bool | None = None
     security_classification: ModelId | None = None
+
+    @field_validator("max_input_tokens", "max_output_tokens")
+    @classmethod
+    def _refuse_blank_token_limit(cls, value: int | None) -> int | None:
+        # Omitting a limit keeps it; null would leave the model unable to
+        # serve any request, so it is refused rather than stored.
+        return refuse_blank_token_limit(value)
 
 
 def _service(

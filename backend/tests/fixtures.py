@@ -11,6 +11,7 @@ from eneo.ai_models.embedding_models.embedding_model import (
 )
 from eneo.assistants.assistant import Assistant
 from eneo.collections.domain.collection import Collection
+from eneo.info_blobs.info_blob import InfoBlobChunkInDBWithScore
 from eneo.roles.permissions import Permission
 from eneo.roles.role import RoleInDB
 from eneo.tenants.tenant import TenantInDB
@@ -25,11 +26,15 @@ async def mint_v2_api_key(
     tenant_id: UUID,
     user_id: UUID,
     prefix: str = "test",
+    permission: str = "admin",
+    scope_type: str = "tenant",
+    scope_id: UUID | None = None,
 ) -> SimpleNamespace:
-    """Mint an active tenant-scoped admin API key in api_keys_v2.
+    """Mint an active user-owned API key in api_keys_v2, tenant-scoped admin
+    unless told otherwise.
 
     Stored with sha256 hash_version; the resolver accepts it and
-    auto-upgrades to HMAC on first use. Returns the plain key.
+    auto-upgrades to HMAC on first use. Returns the plain key and its id.
     """
     from eneo.authentication.auth_models import (
         ApiKeyHashVersion,
@@ -40,13 +45,13 @@ async def mint_v2_api_key(
     )
 
     plain_key = f"{prefix}_{secrets.token_hex(32)}"
-    await api_key_v2_repo.create(
+    created = await api_key_v2_repo.create(
         tenant_id=tenant_id,
         owner_user_id=user_id,
         created_by_user_id=user_id,
-        scope_type=ApiKeyScopeType.TENANT.value,
-        scope_id=None,
-        permission=ApiKeyPermission.ADMIN.value,
+        scope_type=ApiKeyScopeType(scope_type).value,
+        scope_id=scope_id,
+        permission=ApiKeyPermission(permission).value,
         key_type=ApiKeyType.SK.value,
         key_hash=hashlib.sha256(plain_key.encode()).hexdigest(),
         hash_version=ApiKeyHashVersion.SHA256.value,
@@ -56,7 +61,7 @@ async def mint_v2_api_key(
         description=None,
         state=ApiKeyState.ACTIVE.value,
     )
-    return SimpleNamespace(key=plain_key, truncated_key=plain_key[-4:])
+    return SimpleNamespace(key=plain_key, truncated_key=plain_key[-4:], id=created.id)
 
 
 TEST_EMBEDDING_MODEL = EmbeddingModelLegacy(
@@ -220,3 +225,27 @@ TEST_ASSISTANT = Assistant(
     attachments=[],
     published=False,
 )
+
+
+def retrieved_info_blob_chunk(
+    *,
+    info_blob_id: UUID,
+    chunk_no: int,
+    text: str,
+    score: float,
+    info_blob_title: str | None = None,
+) -> InfoBlobChunkInDBWithScore:
+    """A scored retrieval chunk built from the production model.
+
+    Validated construction, so a new required field on the model fails here
+    rather than silently leaving consumers with a partial double.
+    """
+    return InfoBlobChunkInDBWithScore(
+        id=uuid4(),
+        info_blob_id=info_blob_id,
+        info_blob_title=info_blob_title,
+        chunk_no=chunk_no,
+        text=text,
+        score=score,
+        tenant_id=TEST_TENANT.id,
+    )

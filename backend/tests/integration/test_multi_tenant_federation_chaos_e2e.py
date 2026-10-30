@@ -31,6 +31,25 @@ from eneo.database.tables.tenant_table import Tenants
 from eneo.tenants.tenant_repo import TenantRepository
 
 
+@pytest.fixture
+def override_runtime_settings(test_settings):
+    """Apply runtime settings changes through the global settings singleton."""
+    from eneo.main.config import get_settings, set_settings
+
+    original_settings = get_settings()
+
+    def _override(**updates):
+        nonlocal original_settings
+        updated = test_settings.model_copy(update=updates)
+        set_settings(updated)
+        return updated
+
+    try:
+        yield _override
+    finally:
+        set_settings(original_settings)
+
+
 async def _create_tenant(client: AsyncClient, super_api_key: str, name: str) -> dict:
     """Helper to create a test tenant via API."""
     payload = {
@@ -151,6 +170,7 @@ async def test_federation_config_drift_rejected_with_zero_grace(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify config drift detection with OIDC_REDIRECT_GRACE_PERIOD_SECONDS=0.
 
@@ -208,19 +228,10 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         lambda *_, **__: {"email": allowed_email},
     )
 
-    # Swap in a settings copy with the strict drift configuration.
-    # set_settings() is needed (rather than mutating test_settings directly)
-    # because FastAPI's Depends(get_settings) resolves from the _settings
-    # singleton, which other modules may have replaced earlier in the worker.
-    from eneo.main.config import set_settings
-
-    drift_settings = test_settings.model_copy(
-        update={
-            "oidc_redirect_grace_period_seconds": 0,
-            "strict_oidc_redirect_validation": True,
-        }
+    runtime_settings = override_runtime_settings(
+        oidc_redirect_grace_period_seconds=0,
+        strict_oidc_redirect_validation=True,
     )
-    set_settings(drift_settings)
 
     try:
         # Configure federation with origin A
@@ -269,7 +280,7 @@ async def test_federation_config_drift_rejected_with_zero_grace(
         )
 
     finally:
-        set_settings(test_settings)
+        _ = runtime_settings
 
 
 @pytest.mark.integration
@@ -284,6 +295,7 @@ async def test_federation_grace_period_allows_recent_config_change(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify grace period allows config changes within tolerance window.
 
@@ -510,6 +522,7 @@ async def test_tenant_deleted_during_oidc_flow_returns_404(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify graceful handling when tenant is deleted mid-OIDC flow.
 
@@ -616,6 +629,7 @@ async def test_state_token_tampering_rejected(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify tampered state tokens are rejected.
 
@@ -725,6 +739,7 @@ async def test_grace_period_boundary_exact_ttl_minus_grace(
     mock_transcription_models,
     test_settings,
     async_session,
+    override_runtime_settings,
 ):
     """Verify grace period boundary: config change exactly at (now - grace).
 
