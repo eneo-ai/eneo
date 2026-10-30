@@ -21,10 +21,12 @@ const navigate = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/navigate-to", () => ({ navigateTo: navigate }));
 // These features own polling/tour tests; this suite exercises the route and session boundary.
 vi.mock("@/features/jobs/use-jobs", () => ({
-  JobsProvider: ({ children }: { children: ReactNode }) => children
+  JobsProvider: ({ children }: { children: ReactNode }) => children,
+  useJobs: () => ({ trackJob: vi.fn() })
 }));
 vi.mock("@/features/whats-new/tour-provider", () => ({
-  TourProvider: ({ children }: { children: ReactNode }) => children
+  TourProvider: ({ children }: { children: ReactNode }) => children,
+  useTour: () => ({ running: false, start: vi.fn() })
 }));
 vi.mock("@/components/shell/notification-bells", () => ({ NotificationBells: () => null }));
 
@@ -94,6 +96,177 @@ beforeEach(() => {
     // Node's Request needs an absolute base; response/session middleware stays real.
     API_BASE: window.location.origin
   }));
+});
+
+it("opens the dashboard catalog with its title and existing app links", async () => {
+  replies.set("/api/v1/dashboard/", {
+    spaces: { items: [makeSpace({ apps: [{ id: "app-1", name: "Avtalsanalys" }] })] }
+  });
+  await renderRoute("/dashboard");
+  await screen.findByRole("heading", { name: messages.assistants, level: 1 });
+  await waitFor(() => expect(document.title).toBe(`${messages.assistants} · Eneo`));
+  expect(screen.getByRole("link", { name: /Avtalsanalys/ }).getAttribute("href")).toBe(
+    "/dashboard/app/app-1"
+  );
+});
+
+it("shows a failed dashboard load and recovers through the route retry", async () => {
+  replies.set(
+    "/api/v1/dashboard/",
+    new Response("Unavailable", { status: 500, headers: { [GENERATION]: "document-session" } })
+  );
+  await renderRoute("/dashboard");
+  await screen.findByRole("heading", { name: messages.something_went_wrong });
+  expect(screen.queryByRole("heading", { name: messages.page_not_found })).toBeNull();
+  replies.set("/api/v1/dashboard/", { spaces: { items: [] } });
+  fireEvent.click(screen.getByRole("button", { name: messages.try_again }));
+  await screen.findByRole("heading", { name: messages.assistants, level: 1 });
+});
+
+it.each(["", "/session-1"])(
+  "opens dashboard chat%s and preserves chat state when a session is saved",
+  async (suffix) => {
+    replies.set("/api/v1/assistants/assistant-1/", {
+      id: "assistant-1",
+      name: "Upphandlingsassistenten",
+      groups: [],
+      websites: [],
+      integration_knowledge_list: [],
+      mcp_servers: [],
+      enabled_capabilities: [],
+      available_capabilities: []
+    });
+    const { router } = await renderRoute(
+      `/dashboard/assistant-1${suffix}`,
+      undefined,
+      ({ queryClient }) => {
+        queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+      }
+    );
+    const button = await screen.findByRole("button", {
+      name: `Chat ${suffix ? "session-1" : "new"}: 0`
+    });
+    fireEvent.click(button);
+    await screen.findByRole("button", { name: "Chat saved-session: 1" });
+    expect(router.state.location.pathname).toBe("/dashboard/assistant-1/saved-session");
+    expect(
+      requestedPaths().filter((path) => path === "/api/v1/assistants/assistant-1/")
+    ).toHaveLength(1);
+    expect(document.title).toBe("Eneo");
+  }
+);
+
+it("rejects extra dashboard session segments without loading an assistant", async () => {
+  await renderRoute("/dashboard/assistant-1/session-1/extra");
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(requestedPaths().some((path) => path.startsWith("/api/v1/assistants/"))).toBe(false);
+});
+
+const dashboardApp = {
+  id: "app-1",
+  name: "Avtalsanalys",
+  input_fields: [],
+  completion_model: { id: "model-1", name: "Testmodell" }
+};
+
+it("clears an app's run input when navigating to a different app", async () => {
+  for (const id of ["app-1", "app-2"]) {
+    replies.set(`/api/v1/apps/${id}/`, {
+      ...dashboardApp,
+      id,
+      name: id,
+      input_fields: [{ type: "text-field" }]
+    });
+    replies.set(`/api/v1/apps/${id}/runs/`, { items: [] });
+  }
+  const { router } = await renderRoute("/dashboard/app/app-1");
+  const input = await screen.findByRole("textbox", { name: messages.enter_your_question_here });
+  fireEvent.change(input, { target: { value: "Fråga till första appen" } });
+  await act(() => router.navigate({ href: "/dashboard/app/app-2" }));
+  await screen.findByRole("heading", { name: "app-2", level: 1 });
+  expect(
+    screen.getByRole<HTMLTextAreaElement>("textbox", { name: messages.enter_your_question_here })
+      .value
+  ).toBe("");
+});
+
+it("opens a dashboard app and derives its tab from the URL without reloading its guard", async () => {
+  replies.set("/api/v1/apps/app-1/", dashboardApp);
+  replies.set("/api/v1/apps/app-1/runs/", { items: [] });
+  const { router } = await renderRoute(
+    "/dashboard/app/app-1?tab=results",
+    undefined,
+    ({ queryClient }) => {
+      queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+    }
+  );
+  await screen.findByRole("heading", { name: dashboardApp.name, level: 1 });
+  expect(screen.getByRole("tab", { name: messages.results }).getAttribute("aria-selected")).toBe(
+    "true"
+  );
+  expect(document.title).toBe("Avtalsanalys · Eneo");
+  await act(() => router.navigate({ href: "/dashboard/app/app-1?tab=run" }));
+  await waitFor(() =>
+    expect(screen.getByRole("tab", { name: messages.run }).getAttribute("aria-selected")).toBe(
+      "true"
+    )
+  );
+  expect(requestedPaths().filter((path) => path === "/api/v1/apps/app-1/")).toHaveLength(1);
+});
+
+it("opens a dashboard result with the app title and its back and new-run links", async () => {
+  setViewport("desktop");
+  replies.set("/api/v1/apps/app-1/", dashboardApp);
+  replies.set("/api/v1/app-runs/run-1/", {
+    id: "run-1",
+    status: "complete",
+    input: { text: "Avtalsfråga", files: [] },
+    output: "Svar på avtalsfrågan",
+    finished_at: "2026-10-30T08:00:00Z",
+    user: { id: "user-1", email: "test@example.se" },
+    skill_provenance: []
+  });
+  await renderRoute("/dashboard/app/app-1/results/run-1");
+  await screen.findByText("Svar på avtalsfrågan");
+  expect(document.title).toBe("Resultat från Avtalsanalys · Eneo");
+  expect(screen.getByRole("link", { name: messages.back }).getAttribute("href")).toBe(
+    "/dashboard/app/app-1"
+  );
+  expect(screen.getByRole("link", { name: messages.new_run }).getAttribute("href")).toBe(
+    "/dashboard/app/app-1"
+  );
+});
+
+it.each(["/dashboard/app/missing", "/dashboard/app/app-1/results/missing"])(
+  "maps a missing dashboard resource to not-found: %s",
+  async (path) => {
+    replies.set("/api/v1/apps/app-1/", dashboardApp);
+    replies.set("/api/v1/apps/missing/runs/", { items: [] });
+    for (const apiPath of ["/api/v1/apps/missing/", "/api/v1/app-runs/missing/"]) {
+      replies.set(
+        apiPath,
+        new Response("Missing", { status: 404, headers: { [GENERATION]: "document-session" } })
+      );
+    }
+    const { router } = await renderRoute(path);
+    await screen.findByRole("heading", { name: messages.page_not_found });
+    expect(router.state.matches.some((match) => match.status === "notFound")).toBe(true);
+  }
+);
+
+it("redirects disabled what's new through the existing root landing route", async () => {
+  const { router } = await renderRoute("/whats-new");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/spaces/personal/chat"));
+  expect(screen.queryByRole("heading", { name: messages.whats_new })).toBeNull();
+});
+
+it("opens enabled what's new using the shared settings and marker owners", async () => {
+  replies.set("/api/v1/settings/", { ...context.settings, whats_new_enabled: true });
+  replies.set("/api/v1/whats-new/seen/", { seen_version: "0.0.0" });
+  await renderRoute("/whats-new");
+  await screen.findByRole("heading", { name: messages.whats_new, level: 1 });
+  expect(document.title).toBe(`${messages.whats_new} · Eneo`);
+  expect(requestedPaths().filter((path) => path === "/api/v1/settings/")).toHaveLength(1);
 });
 
 afterEach(() => {

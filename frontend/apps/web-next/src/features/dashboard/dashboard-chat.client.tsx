@@ -2,7 +2,7 @@
 
 import { useQuery } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
 import type { ChatPartner } from "@/lib/chat/types";
 import {
   ChatPartnerError,
@@ -21,9 +21,7 @@ export function DashboardChat({
   sessionId: string | null;
 }) {
   const assistantQuery = useQuery({
-    queryKey: ["assistants", assistantId],
-    queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/assistants/{id}/", { params: { path: { id: assistantId } } })),
+    ...assistantQueryOptions(browserApi, assistantId),
     retry: retryPartnerQuery
   });
   const assistant = assistantQuery.data;
