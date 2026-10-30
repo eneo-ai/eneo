@@ -111,7 +111,8 @@ it.each([
     const owner = scope === "startup" ? "src/render-app.tsx" : "src/features/chat/chat-page.tsx";
     const files = {
       "package.json": '{"type":"module"}',
-      "index.html": `<script type="module" src="/${owner}"></script>`,
+      "index.html": '<script type="module" src="/src/render-app.tsx"></script>',
+      "src/render-app.tsx": 'document.body.onclick = () => import("./features/chat/chat-page");',
       [owner]: `import {start} from "/${dependency}"; start();`,
       [dependency]: 'export function start() { document.body.dataset.loaded = "yes"; }'
     };
@@ -126,7 +127,7 @@ it.each([
         plugins: [bundleReport()],
         logLevel: "silent"
       })
-    ).rejects.toThrow(/eager.*(?:startup|chat)/i);
+    ).rejects.toThrow(new RegExp(`eager.*${scope}`, "i"));
   } finally {
     await rm(root, { recursive: true, force: true });
   }

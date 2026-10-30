@@ -1,5 +1,12 @@
 import { expect, test } from "./csp";
-import { askChatQuestion, conversationLog, isChatStream, uniqueName } from "./helpers";
+import {
+  askChatQuestion,
+  conversationLog,
+  fetchChatStream,
+  isChatStream,
+  sessionResponseHeaders,
+  uniqueName
+} from "./helpers";
 
 const ANSWER =
   String.raw`## Formler och diagram
@@ -22,7 +29,7 @@ test(
     // Keep the real authenticated request and stream metadata. Replace only the
     // model's plain-text answer, as the activity tests enrich the same stream.
     await page.route(isChatStream, async (route) => {
-      const response = await route.fetch();
+      const response = await fetchChatStream(route);
       let inserted = false;
       const events = (await response.text()).split(/\r?\n\r?\n/).filter(Boolean);
       const body = events.flatMap((event) => {
@@ -37,6 +44,7 @@ test(
       await route.fulfill({
         status: response.status(),
         headers: {
+          ...sessionResponseHeaders(route),
           "content-type": "text/event-stream",
           "x-vercel-ai-ui-message-stream": "v1"
         },
