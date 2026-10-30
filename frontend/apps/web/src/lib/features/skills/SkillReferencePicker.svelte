@@ -154,198 +154,208 @@
 </script>
 
 {#snippet content()}
-  {#if selected}
-    <div class="border-border flex shrink-0 flex-col gap-3 border-b px-4 pt-3 pb-4">
-      <Button type="button" variant="ghost" size="sm" class="mr-auto" onclick={back}>
-        <ArrowLeft data-icon="inline-start" />{m.skills_reference_back()}
-      </Button>
-      <div class="flex flex-wrap items-center gap-2">
-        <h3
-          bind:this={previewHeading}
-          tabindex="-1"
-          id={`${id}-preview`}
-          class="min-w-0 text-base font-semibold wrap-anywhere outline-none"
-        >
-          {selected.label}
-        </h3>
-        {#if selected.revisionNumber !== undefined}<Badge variant="secondary"
-            >{m.organization_skills_version({ version: String(selected.revisionNumber) })}</Badge
-          >{/if}
-      </div>
-    </div>
-  {/if}
-  <div class="flex min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-contain p-4">
+  <!-- At desktop zoom, the preview and actions scroll together so neither can collapse. -->
+  <div class="flex min-h-0 flex-col overflow-y-auto overscroll-contain">
     {#if selected}
-      <section aria-labelledby={`${id}-preview`} class="flex min-w-0 flex-col gap-3">
-        {#if selected.description}
-          {#if selected.target.kind === "skill"}
-            <details class="text-sm">
-              <summary class="cursor-pointer py-1 font-medium"
-                >{m.skills_description_label()}</summary
-              >
-              <p class="mt-2 leading-relaxed whitespace-pre-wrap wrap-anywhere">
+      <div class="border-border flex shrink-0 flex-col gap-3 border-b px-4 pt-3 pb-4">
+        <Button type="button" variant="ghost" size="sm" class="mr-auto" onclick={back}>
+          <ArrowLeft data-icon="inline-start" />{m.skills_reference_back()}
+        </Button>
+        <div class="flex flex-wrap items-center gap-2">
+          <h3
+            bind:this={previewHeading}
+            tabindex="-1"
+            id={`${id}-preview`}
+            class="min-w-0 text-base font-semibold wrap-anywhere outline-none"
+          >
+            {selected.label}
+          </h3>
+          {#if selected.revisionNumber !== undefined}<Badge variant="secondary"
+              >{m.organization_skills_version({ version: String(selected.revisionNumber) })}</Badge
+            >{/if}
+        </div>
+      </div>
+    {/if}
+    <div
+      class="flex min-h-0 flex-col gap-3 overflow-x-hidden overflow-y-auto overscroll-contain p-4 [@media(max-height:30rem)]:shrink-0 [@media(max-height:30rem)]:overflow-visible"
+    >
+      {#if selected}
+        <section aria-labelledby={`${id}-preview`} class="flex min-w-0 flex-col gap-3">
+          {#if selected.description}
+            {#if selected.target.kind === "skill"}
+              <details class="text-sm">
+                <summary class="cursor-pointer py-1 font-medium"
+                  >{m.skills_description_label()}</summary
+                >
+                <p class="mt-2 leading-relaxed whitespace-pre-wrap wrap-anywhere">
+                  {selected.description}
+                </p>
+              </details>
+            {:else}<p class="text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">
                 {selected.description}
-              </p>
-            </details>
-          {:else}<p class="text-sm leading-relaxed whitespace-pre-wrap wrap-anywhere">
-              {selected.description}
-            </p>{/if}
-        {/if}
-        <p class="text-muted-foreground text-sm leading-relaxed">
-          {selected.target.kind === "skill"
-            ? m.skills_reference_fixed_version()
-            : m.skills_reference_tools_hint()}
-        </p>
-        {#if selected.target.kind === "skill"}
-          <h4 class="text-sm font-medium">{m.skills_instructions_label()}</h4>
-          {#if previewLoading}<p role="status">{m.loading()}</p>
-          {:else if previewError}<div role="alert">
-              <p>{m.skills_reference_preview_failed()}</p>
-              <p class="text-destructive">{previewError}</p>
-              <Button type="button" onclick={() => selected && select(selected)}>{m.retry()}</Button
+              </p>{/if}
+          {/if}
+          <p class="text-muted-foreground text-sm leading-relaxed">
+            {selected.target.kind === "skill"
+              ? m.skills_reference_fixed_version()
+              : m.skills_reference_tools_hint()}
+          </p>
+          {#if selected.target.kind === "skill"}
+            <h4 class="text-sm font-medium">{m.skills_instructions_label()}</h4>
+            {#if previewLoading}<p role="status">{m.loading()}</p>
+            {:else if previewError}<div role="alert">
+                <p>{m.skills_reference_preview_failed()}</p>
+                <p class="text-destructive">{previewError}</p>
+                <Button type="button" onclick={() => selected && select(selected)}
+                  >{m.retry()}</Button
+                >
+              </div>
+            {:else}<div
+                class="border-border border-b pb-4 text-base leading-7 whitespace-pre-wrap wrap-anywhere"
               >
-            </div>
-          {:else}<div
-              class="border-border border-b pb-4 text-base leading-7 whitespace-pre-wrap wrap-anywhere"
-            >
-              {readableInstructions(preview)}
-            </div>{/if}
-        {:else}
-          {#if selected.enabled === false}<p class="text-muted-foreground text-sm">
-              {m.skills_reference_off()}
-            </p>{/if}
-          <Button type="button" variant="outline" onclick={() => changeCategory("mcp", selected)}
-            >{m.skills_reference_tools()}<ChevronRight data-icon="inline-end" /></Button
-          >
-        {/if}
-        <details class="text-muted-foreground text-xs">
-          <summary class="cursor-pointer py-1">{m.skills_reference_details()}</summary><code
-            class="break-all">{referenceUri(selected.target)}</code
-          >
-        </details>
-      </section>
-    {:else}
-      <Tabs.Root value={category} onValueChange={(value) => changeCategory(value as Category)}>
-        <Tabs.List variant="line" class="min-h-11 w-full" aria-label={m.skills_reference_insert()}>
-          <Tabs.Trigger value="skills">{m.skills()}</Tabs.Trigger>
-          <Tabs.Trigger value="functions">{m.skills_reference_functions()}</Tabs.Trigger>
-          <Tabs.Trigger value="mcp">{m.skills_reference_mcps()}</Tabs.Trigger>
-        </Tabs.List>
-        <Tabs.Content value={category} class="mt-1 flex min-h-0 flex-col gap-3">
-          {#if server}
-            <Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              class="mr-auto"
-              onclick={() => changeCategory("mcp")}
-              ><ArrowLeft data-icon="inline-start" />{server.label}</Button
+                {readableInstructions(preview)}
+              </div>{/if}
+          {:else}
+            {#if selected.enabled === false}<p class="text-muted-foreground text-sm">
+                {m.skills_reference_off()}
+              </p>{/if}
+            <Button type="button" variant="outline" onclick={() => changeCategory("mcp", selected)}
+              >{m.skills_reference_tools()}<ChevronRight data-icon="inline-end" /></Button
             >
           {/if}
-          <Command.Root label={m.skills_reference_search()} shouldFilter={false}>
-            <Command.Input
-              name="reference-search"
-              autocomplete="off"
-              variant="field"
-              bind:ref={searchInput}
-              value={query.query}
-              aria-label={m.skills_reference_search()}
-              aria-controls={`${id}-results`}
-              placeholder={m.skills_reference_search()}
-              oninput={(event) => {
-                query.setQuery(event.currentTarget.value);
-                previewRequest?.abort();
-              }}
-            />
-            <Command.List
-              id={`${id}-results`}
-              class="max-h-64"
-              aria-label={m.skills_reference_insert()}
-              aria-busy={query.loading || query.loadingMore}
+          <details class="text-muted-foreground text-xs">
+            <summary class="cursor-pointer py-1">{m.skills_reference_details()}</summary><code
+              class="break-all">{referenceUri(selected.target)}</code
             >
-              {#if query.error}
-                <div class="flex flex-col gap-2 p-3">
-                  <p class="text-destructive" role="alert">{query.error}</p>
-                  <Button type="button" onclick={() => query.retry()}>{m.retry()}</Button>
-                </div>
-              {:else if query.loading}
-                <p class="text-muted-foreground p-4 text-sm" role="status">{m.loading()}</p>
-              {:else if query.items.length === 0}
-                <p class="text-muted-foreground p-4 text-sm" role="status">
-                  {m.skills_reference_empty()}
-                </p>
-              {:else}
-                <Command.Group>
-                  {#each query.items as item (item.id)}
-                    {@const Icon =
-                      item.target.kind === "function"
-                        ? getCapability(item.target.purpose)!.icon
-                        : item.target.kind === "skill"
-                          ? FileText
-                          : Plug}
-                    <Command.Item
-                      value={item.id}
-                      onSelect={() => select(item)}
-                      class="data-selected:bg-accent min-h-11 gap-3 px-2 py-2"
-                    >
-                      <Icon aria-hidden="true" class="text-muted-foreground" />
-                      <div class="flex min-w-0 flex-1 flex-col gap-0.5">
-                        <span class="line-clamp-2 font-medium wrap-anywhere">{item.label}</span>
-                        {#if item.description}<span
-                            class="text-muted-foreground line-clamp-2 text-xs leading-5 wrap-anywhere"
-                            >{item.description}</span
+          </details>
+        </section>
+      {:else}
+        <Tabs.Root value={category} onValueChange={(value) => changeCategory(value as Category)}>
+          <Tabs.List
+            variant="line"
+            class="min-h-11 w-full"
+            aria-label={m.skills_reference_insert()}
+          >
+            <Tabs.Trigger value="skills">{m.skills()}</Tabs.Trigger>
+            <Tabs.Trigger value="functions">{m.skills_reference_functions()}</Tabs.Trigger>
+            <Tabs.Trigger value="mcp">{m.skills_reference_mcps()}</Tabs.Trigger>
+          </Tabs.List>
+          <Tabs.Content value={category} class="mt-1 flex min-h-0 flex-col gap-3">
+            {#if server}
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                class="mr-auto"
+                onclick={() => changeCategory("mcp")}
+                ><ArrowLeft data-icon="inline-start" />{server.label}</Button
+              >
+            {/if}
+            <Command.Root label={m.skills_reference_search()} shouldFilter={false}>
+              <Command.Input
+                name="reference-search"
+                autocomplete="off"
+                variant="field"
+                bind:ref={searchInput}
+                value={query.query}
+                aria-label={m.skills_reference_search()}
+                aria-controls={`${id}-results`}
+                placeholder={m.skills_reference_search()}
+                oninput={(event) => {
+                  query.setQuery(event.currentTarget.value);
+                  previewRequest?.abort();
+                }}
+              />
+              <Command.List
+                id={`${id}-results`}
+                class="max-h-64"
+                aria-label={m.skills_reference_insert()}
+                aria-busy={query.loading || query.loadingMore}
+              >
+                {#if query.error}
+                  <div class="flex flex-col gap-2 p-3">
+                    <p class="text-destructive" role="alert">{query.error}</p>
+                    <Button type="button" onclick={() => query.retry()}>{m.retry()}</Button>
+                  </div>
+                {:else if query.loading}
+                  <p class="text-muted-foreground p-4 text-sm" role="status">{m.loading()}</p>
+                {:else if query.items.length === 0}
+                  <p class="text-muted-foreground p-4 text-sm" role="status">
+                    {m.skills_reference_empty()}
+                  </p>
+                {:else}
+                  <Command.Group>
+                    {#each query.items as item (item.id)}
+                      {@const Icon =
+                        item.target.kind === "function"
+                          ? getCapability(item.target.purpose)!.icon
+                          : item.target.kind === "skill"
+                            ? FileText
+                            : Plug}
+                      <Command.Item
+                        value={item.id}
+                        onSelect={() => select(item)}
+                        class="data-selected:bg-accent min-h-11 gap-3 px-2 py-2"
+                      >
+                        <Icon aria-hidden="true" class="text-muted-foreground" />
+                        <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <span class="line-clamp-2 font-medium wrap-anywhere">{item.label}</span>
+                          {#if item.description}<span
+                              class="text-muted-foreground line-clamp-2 text-xs leading-5 wrap-anywhere"
+                              >{item.description}</span
+                            >{/if}
+                          {#if item.enabled === false}<span class="text-muted-foreground text-xs"
+                              >{m.skills_reference_off()}</span
+                            >{/if}
+                        </div>
+                        {#if item.revisionNumber !== undefined}<span
+                            class="text-muted-foreground shrink-0 text-xs"
+                            >{m.skills_reference_version_short({
+                              version: item.revisionNumber
+                            })}</span
                           >{/if}
-                        {#if item.enabled === false}<span class="text-muted-foreground text-xs"
-                            >{m.skills_reference_off()}</span
-                          >{/if}
-                      </div>
-                      {#if item.revisionNumber !== undefined}<span
-                          class="text-muted-foreground shrink-0 text-xs"
-                          >{m.skills_reference_version_short({
-                            version: item.revisionNumber
-                          })}</span
-                        >{/if}
-                      {#if item.target.kind === "skill" || item.target.kind === "mcp_server"}<ChevronRight
-                          aria-hidden="true"
-                          class="text-muted-foreground"
-                        />{/if}
-                    </Command.Item>
-                  {/each}
-                </Command.Group>
-              {/if}
-            </Command.List>
-          </Command.Root>
-          {#if query.hasMore}<Button
-              type="button"
-              variant="ghost"
-              size="sm"
-              onclick={() => query.loadMore()}
-              aria-busy={query.loadingMore}
-              >{query.loadingMore ? m.loading() : m.load_more()}</Button
-            >{/if}
-          <p class="text-muted-foreground text-xs leading-5">
-            {category === "skills" ? m.skills_reference_scope() : m.skills_reference_tools_hint()}
-          </p>
-        </Tabs.Content>
-      </Tabs.Root>
-    {/if}
-  </div>
-  <div class="border-border flex shrink-0 flex-wrap justify-end gap-2 border-t p-3">
-    {#if selection.reference}<Button
-        type="button"
-        variant="ghost"
-        class="mr-auto"
-        onclick={onRemove}>{m.skills_reference_remove()}</Button
-      >{/if}
-    <Button type="button" variant="outline" onclick={onClose}>{m.cancel()}</Button>
-    {#if selected}<Button
-        type="button"
-        disabled={previewLoading || !!previewError}
-        onclick={() => selected && onSelect(selected)}
-        >{selected.target.kind === "mcp_server"
-          ? m.skills_reference_whole_mcp()
-          : m.skills_reference_insert()}</Button
-      >{/if}
+                        {#if item.target.kind === "skill" || item.target.kind === "mcp_server"}<ChevronRight
+                            aria-hidden="true"
+                            class="text-muted-foreground"
+                          />{/if}
+                      </Command.Item>
+                    {/each}
+                  </Command.Group>
+                {/if}
+              </Command.List>
+            </Command.Root>
+            {#if query.hasMore}<Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                onclick={() => query.loadMore()}
+                aria-busy={query.loadingMore}
+                >{query.loadingMore ? m.loading() : m.load_more()}</Button
+              >{/if}
+            <p class="text-muted-foreground text-xs leading-5">
+              {category === "skills" ? m.skills_reference_scope() : m.skills_reference_tools_hint()}
+            </p>
+          </Tabs.Content>
+        </Tabs.Root>
+      {/if}
+    </div>
+    <div class="border-border flex shrink-0 flex-wrap justify-end gap-2 border-t p-3">
+      {#if selection.reference}<Button
+          type="button"
+          variant="ghost"
+          class="mr-auto"
+          onclick={onRemove}>{m.skills_reference_remove()}</Button
+        >{/if}
+      <Button type="button" variant="outline" onclick={onClose}>{m.cancel()}</Button>
+      {#if selected}<Button
+          type="button"
+          disabled={previewLoading || !!previewError}
+          onclick={() => selected && onSelect(selected)}
+          >{selected.target.kind === "mcp_server"
+            ? m.skills_reference_whole_mcp()
+            : m.skills_reference_insert()}</Button
+        >{/if}
+    </div>
   </div>
 {/snippet}
 

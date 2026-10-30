@@ -442,7 +442,11 @@ for (const colorScheme of ["light", "dark"] as const) {
 
     test("Skills: create, saved detail and a long reference preview", async ({ page }) => {
       test.setTimeout(90_000);
-      const name = uniqueName(`E2E A11y Skill ${colorScheme}`);
+      const name =
+        `${uniqueName(`E2E A11y Skill ${colorScheme}`)} ${"Detailed communication guide ".repeat(8)}`.slice(
+          0,
+          200
+        );
       const description = "A writing guide with detailed editorial requirements. ".repeat(18);
       const instructions =
         "# Writing guide\n\nWrite clearly. Check facts and explain unfamiliar words.\n\n".repeat(
@@ -492,6 +496,44 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expect(insert).toBeInViewport();
       expect(await header.boundingBox()).toEqual(before.header);
       expect(await insert.boundingBox()).toEqual(before.insert);
+
+      // CSS viewport equivalents of desktop zoom, followed by narrow reflow.
+      for (const viewport of [
+        { width: 640, height: 400 },
+        { width: 320, height: 200 },
+        { width: 320, height: 800 }
+      ]) {
+        await page.setViewportSize(viewport);
+        const instructionsHeading = dialog.getByRole("heading", {
+          name: /^(Instruktioner|Instructions)$/
+        });
+        const readingArea = await instructionsHeading.evaluate((element) => {
+          let scrollArea = element.parentElement;
+          while (scrollArea && getComputedStyle(scrollArea).overflowY !== "auto") {
+            scrollArea = scrollArea.parentElement;
+          }
+          if (!scrollArea) throw new Error("Missing scroll area for reference instructions");
+          const style = getComputedStyle(scrollArea);
+          return {
+            height:
+              scrollArea.clientHeight -
+              parseFloat(style.paddingTop) -
+              parseFloat(style.paddingBottom),
+            lineHeight: parseFloat(getComputedStyle(element).lineHeight)
+          };
+        });
+        expect(readingArea.height).toBeGreaterThanOrEqual(readingArea.lineHeight);
+        await instructionsHeading.scrollIntoViewIfNeeded();
+        await expect(instructionsHeading).toBeInViewport();
+        await dialog
+          .locator("summary", { hasText: /^(Tekniska detaljer|Technical details)$/ })
+          .focus();
+        await insert.focus();
+        await expect(insert).toBeInViewport();
+        expect(await dialog.evaluate((element) => element.scrollWidth > element.clientWidth)).toBe(
+          false
+        );
+      }
       await page.keyboard.press("Escape");
       await expect(dialog).not.toBeVisible();
       await expect(
