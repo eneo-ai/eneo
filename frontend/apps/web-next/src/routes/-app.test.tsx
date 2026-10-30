@@ -78,15 +78,23 @@ beforeEach(() => {
         buildSessionUrl
       }: Required<Pick<ComponentProps<typeof ChatPage>, "sessionId" | "buildSessionUrl">>) => {
         const [answers, setAnswers] = useState(0);
+        const [draft, setDraft] = useState("");
         return (
-          <button
-            onClick={() => {
-              setAnswers((count) => count + 1);
-              replaceUrl(buildSessionUrl("saved-session"));
-            }}
-          >
-            Chat {sessionId ?? "new"}: {answers}
-          </button>
+          <>
+            <input
+              aria-label="Draft"
+              value={draft}
+              onChange={(event) => setDraft(event.target.value)}
+            />
+            <button
+              onClick={() => {
+                setAnswers((count) => count + 1);
+                replaceUrl(buildSessionUrl("saved-session"));
+              }}
+            >
+              Chat {sessionId ?? "new"}: {answers}
+            </button>
+          </>
         );
       }
     };
@@ -155,6 +163,29 @@ it.each(["", "/session-1"])(
     expect(document.title).toBe("Eneo");
   }
 );
+
+it("clears the draft when switching to another cached dashboard assistant", async () => {
+  const { router } = await renderRoute("/dashboard/assistant-1", undefined, ({ queryClient }) => {
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+    for (const id of ["assistant-1", "assistant-2"]) {
+      queryClient.setQueryData(["assistants", id], {
+        id,
+        name: id,
+        groups: [],
+        websites: [],
+        integration_knowledge_list: [],
+        mcp_servers: [],
+        enabled_capabilities: [],
+        available_capabilities: []
+      });
+    }
+  });
+  const draft = await screen.findByRole("textbox", { name: "Draft" });
+  fireEvent.change(draft, { target: { value: "Question for the first assistant" } });
+  await act(() => router.navigate({ href: "/dashboard/assistant-2" }));
+  expect(screen.getByRole<HTMLInputElement>("textbox", { name: "Draft" }).value).toBe("");
+  expect(requestedPaths().some((path) => path.startsWith("/api/v1/assistants/"))).toBe(false);
+});
 
 it("rejects extra dashboard session segments without loading an assistant", async () => {
   await renderRoute("/dashboard/assistant-1/session-1/extra");
