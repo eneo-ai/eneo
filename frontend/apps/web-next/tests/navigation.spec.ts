@@ -1,5 +1,12 @@
 import { expect, test } from "./csp";
-import { askChatQuestion, isChatStream, MOCK_REPLY, uniqueName } from "./helpers";
+import {
+  askChatQuestion,
+  fetchChatStream,
+  isChatStream,
+  MOCK_REPLY,
+  sessionResponseHeaders,
+  uniqueName
+} from "./helpers";
 
 test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
   test.skip(!process.env.E2E_BASE_URL, "The in-app blocker is owned by the Vite router.");
@@ -13,7 +20,8 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
     await name.fill(uniqueName("Unsaved Skill"));
     const draft = await name.inputValue();
     const unloading = page.waitForEvent("dialog");
-    const reload = page.reload().catch(() => null);
+    // A cancelled navigation has no load event for Playwright's reload to await.
+    const reload = page.evaluate(() => window.location.reload());
     const warning = await unloading;
     expect(warning.type()).toBe("beforeunload");
     await warning.dismiss();
@@ -29,7 +37,9 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
     await expect(page).toHaveURL(/\/skills\/new$/);
     await expect(name).toHaveValue(draft);
 
-    const catalogue = page.getByRole("main").getByRole("link", { name: "Skills", exact: true });
+    const catalogue = page
+      .getByLabel(/^(Ytans innehåll|Space sections)$/)
+      .getByRole("link", { name: "Skills", exact: true });
     await catalogue.focus();
     await catalogue.press("Enter");
     await expect(dialog).toBeVisible();
@@ -52,30 +62,43 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
       mimetype: "text/markdown",
       size: 24
     };
-    // The mock model has no document tool. Add only its generated-file metadata;
+    // The mock model has no document tool. Add its generated-file stream part;
     // the conversation and session still come from the backend's real stream.
     await page.route(isChatStream, async (route) => {
-      const response = await route.fetch();
+      const response = await fetchChatStream(route);
       const events = (await response.text()).split(/\r?\n\r?\n/).filter((event) => event.trim());
       const finish = events.findIndex((event) => /"type":\s*"finish"/.test(event));
       expect(finish).toBeGreaterThanOrEqual(0);
       events.splice(
         finish,
         0,
-        `data: ${JSON.stringify({ type: "message-metadata", messageMetadata: { generatedFiles: [file] } })}`
+        `data: ${JSON.stringify({
+          type: "file",
+          url: new URL(`/api/v1/files/${file.id}/download/?token=fixture`, page.url()).href,
+          mediaType: file.mimetype,
+          filename: file.name,
+          providerMetadata: { eneo: { ...file, tool_call_id: null } }
+        })}`
       );
       await route.fulfill({
         response,
-        headers: { "content-type": "text/event-stream", "x-vercel-ai-ui-message-stream": "v1" },
+        headers: {
+          ...sessionResponseHeaders(route),
+          "content-type": "text/event-stream",
+          "x-vercel-ai-ui-message-stream": "v1"
+        },
         body: events.map((event) => `${event}\n\n`).join("")
       });
     });
     const original = `/api/v1/files/${file.id}/original/download/?token=fixture`;
     await page.route(`**/api/v1/files/${file.id}/original/signed-url/`, (route) =>
-      route.fulfill({ json: { url: new URL(original, page.url()).href } })
+      route.fulfill({
+        headers: sessionResponseHeaders(route),
+        json: { url: new URL(original, page.url()).href }
+      })
     );
     await page.route(`**/api/v1/files/${file.id}/original/download/**`, (route) =>
-      route.fulfill({ contentType: "text/markdown", body: "# Navigation\n\nOriginal.\n" })
+      route.fulfill({ contentType: "text/markdown", body: "Original.\n" })
     );
     let refuseSave = true;
     await page.route(`**/api/v1/conversations/*/documents/${file.id}/versions/`, (route) => {
@@ -84,6 +107,7 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
         refuseSave
           ? { status: 503, json: { message: "Unavailable" } }
           : {
+              headers: sessionResponseHeaders(route),
               json: {
                 ...file,
                 id: "22222222-2222-4222-8222-222222222222",
