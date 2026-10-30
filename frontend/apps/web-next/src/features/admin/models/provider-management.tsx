@@ -15,6 +15,17 @@ import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
+import { OutboundHeadersEditor } from "./outbound-headers-editor";
+import { OutboundHeadersPreview } from "./outbound-headers-preview";
+import {
+  firstHeaderProblem,
+  headersPayload,
+  rowsFromHeaders,
+  secretsKeptFromStorage,
+  supportsOutboundHeaders
+} from "./outbound-headers";
+import { blockingError } from "@/components/composites/query-state";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { KeyExpiryField } from "./key-expiry-field";
 import {
   comparableEndpoint,
@@ -28,7 +39,8 @@ import {
   providerCapabilitiesQueryOptions,
   providerDisplayName,
   providerFields,
-  updateProvider
+  updateProvider,
+  outboundHeaderOptionsQueryOptions
 } from "./model-providers";
 import { MODELS_KEY } from "./models";
 import { ProviderField, providerFieldProblem, useFieldFocus } from "./provider-form-fields";
@@ -66,6 +78,7 @@ function ProviderEditForm({
   provider,
   takenName,
   keyRefusal,
+  formRefusal,
   onSubmit
 }: {
   id: string;
@@ -74,11 +87,23 @@ function ProviderEditForm({
   takenName: TakenName | null;
   /** A key (or its absence) the save was refused for. */
   keyRefusal: KeyRefusal | null;
+  formRefusal: { message: string } | null;
   onSubmit: (body: ModelProviderUpdate) => void;
 }) {
   const t = useTranslations();
   const capabilities = useQuery(providerCapabilitiesQueryOptions(browserApi));
   const focus = useFieldFocus();
+  const headerOptions = useQuery(outboundHeaderOptionsQueryOptions(browserApi));
+  const [headerRows, setHeaderRows] = useState(() => rowsFromHeaders(provider.outbound_headers));
+  const [savedHeaders] = useState(() => JSON.stringify(headersPayload(headerRows)));
+  const canEditHeaders = supportsOutboundHeaders(
+    headerOptions.data ?? null,
+    provider.provider_type
+  );
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (formRefusal) errorRef.current?.focus();
+  }, [formRefusal]);
   const keyLabelId = useId();
   const changeKeyRef = useRef<HTMLButtonElement>(null);
   const [name, setName] = useState(provider.name);
@@ -96,6 +121,13 @@ function ProviderEditForm({
     comparableEndpoint(configToStrings(provider.config).endpoint ?? "")
   );
   const endpointChanged = comparableEndpoint(configValues.endpoint ?? "") !== seededEndpoint;
+  const keptSecrets = endpointChanged ? secretsKeptFromStorage(headerRows) : [];
+  const endpointHeaderProblem =
+    keptSecrets.length > 0
+      ? t("provider_endpoint_change_requires_secret_headers", { names: keptSecrets.join(", ") })
+      : undefined;
+  const headersDirty =
+    endpointChanged || JSON.stringify(headersPayload(headerRows)) !== savedHeaders;
   const keyRequiredForEndpointChange = Boolean(provider.masked_api_key) && endpointChanged;
   // A refused key opens the field when it was not on screen (a save that sent none).
   const openedByRefusal = keyRefusal !== null && keyRefusal.at !== dismissedRefusal;
@@ -152,7 +184,9 @@ function ProviderEditForm({
       showKeyInput && looksLikeMaskedApiKey(apiKey) ? NEW_KEY_FIELD.name : null,
       ...configFields.map((field) =>
         providerFieldProblem(field, configValues[field.name] ?? "", "")
-      )
+      ),
+      canEditHeaders ? firstHeaderProblem(headerRows, headerOptions.data ?? null) : null,
+      endpointHeaderProblem && headerRows[0] ? `${headerRows[0].key}:name` : null
     ].find((problem) => problem !== null);
     if (firstProblem) {
       // Rendered before focus moves, so the field is read with its error.
@@ -165,6 +199,7 @@ function ProviderEditForm({
       is_active: isActive,
       // Always sent: null removes a date the admin cleared.
       key_expires_on: keyExpiresOn,
+      ...(canEditHeaders ? { outbound_headers: headersPayload(headerRows) } : {}),
       ...(showKeyInput ? { credentials: { api_key: apiKey.trim() } } : {}),
       ...(configFields.length > 0
         ? {
@@ -178,6 +213,11 @@ function ProviderEditForm({
 
   return (
     <form id={id} onSubmit={submit} noValidate>
+      {formRefusal && (
+        <div ref={errorRef} tabIndex={-1} {...fieldProblemProps(id, formRefusal.message)}>
+          <FieldProblem id={id} problem={formRefusal.message} />
+        </div>
+      )}
       <FormLayout defaultOptionality="optional">
         <TextInput
           ref={focus.ref("name")}
@@ -265,6 +305,25 @@ function ProviderEditForm({
             ))}
           </fieldset>
         )}
+        <OutboundHeadersEditor
+          providerType={provider.provider_type}
+          options={headerOptions.data ?? null}
+          optionsError={blockingError(headerOptions)}
+          loading={headerOptions.isFetching}
+          onRetry={() => {
+            void headerOptions.refetch();
+          }}
+          rows={headerRows}
+          onChange={setHeaderRows}
+          focus={focus}
+          endpoint={configValues.endpoint}
+          editing
+          showErrors={submitted}
+          endpointProblem={endpointHeaderProblem}
+        />
+        {canEditHeaders && (
+          <OutboundHeadersPreview providerId={provider.id} hasUnsavedChanges={headersDirty} />
+        )}
       </FormLayout>
     </form>
   );
@@ -292,6 +351,7 @@ export function ProviderEditDialog({
   useReturnFocus(open, noTrigger);
   const [takenName, setTakenName] = useState<TakenName | null>(null);
   const [keyRefusal, setKeyRefusal] = useState<KeyRefusal | null>(null);
+  const [formRefusal, setFormRefusal] = useState<{ message: string } | null>(null);
 
   const save = useMutation({
     mutationFn: (body: ModelProviderUpdate) => updateProvider(browserApi, provider.id, body),
@@ -301,6 +361,7 @@ export function ProviderEditDialog({
       toast.success(t("provider_updated_success"));
       setTakenName(null);
       setKeyRefusal(null);
+      setFormRefusal(null);
       onOpenChange(false);
     },
     // A taken name is shown at the name field and a refused key at the key
@@ -308,6 +369,9 @@ export function ProviderEditDialog({
     onError: (error, body) => {
       if (isProviderNameTaken(error)) {
         setTakenName({ name: body.name ?? "", at: Date.now() });
+      } else if (isProviderUpdateRefused(error) && body.outbound_headers !== undefined) {
+        // GeneralError has no field path; preserve the server message without attributing it to a key or header row.
+        setFormRefusal({ message: error.message });
       } else if (isProviderUpdateRefused(error)) {
         const sent = body.credentials?.api_key;
         setKeyRefusal({
@@ -326,6 +390,7 @@ export function ProviderEditDialog({
     if (!next) {
       setTakenName(null);
       setKeyRefusal(null);
+      setFormRefusal(null);
     }
     onOpenChange(next);
   }
@@ -356,6 +421,7 @@ export function ProviderEditDialog({
                 provider={provider}
                 takenName={takenName}
                 keyRefusal={keyRefusal}
+                formRefusal={formRefusal}
                 onSubmit={(body) => {
                   if (!save.isPending) save.mutate(body);
                 }}

@@ -48,7 +48,8 @@ export function isSearchable(value: string): boolean {
 
 export type UsersQueryParams = {
   page: number;
-  stateFilter: StateFilter;
+  stateFilter?: StateFilter;
+  pageSize?: number;
   roleId?: string;
   /** E-mail search, already trimmed; empty string means "no search". */
   search: string;
@@ -79,7 +80,7 @@ export function adminUsersQueryOptions(api: EneoClient, params: UsersQueryParams
           params: {
             query: {
               page: params.page,
-              page_size: USERS_PAGE_SIZE,
+              page_size: params.pageSize ?? USERS_PAGE_SIZE,
               search_email: searched(params.search),
               search_name: searched(params.searchName ?? ""),
               state_filter: params.stateFilter,

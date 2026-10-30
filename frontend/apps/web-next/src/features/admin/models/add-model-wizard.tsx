@@ -17,10 +17,21 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { OutboundHeadersEditor } from "./outbound-headers-editor";
+import {
+  firstHeaderProblem,
+  headersPayload,
+  supportsOutboundHeaders,
+  type HeaderRow
+} from "./outbound-headers";
+import { blockingError } from "@/components/composites/query-state";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { KeyExpiryField } from "./key-expiry-field";
 import { ModelCatalogStep } from "./model-catalog-step";
 import {
   createProvider,
+  outboundHeaderOptionsQueryOptions,
+  isProviderUpdateRefused,
   FAVORITES_KEY,
   favoriteProvidersQueryOptions,
   isProviderNameTaken,
@@ -114,6 +125,13 @@ export function AddModelWizard({
     setFavoritesMut.mutate(next);
   }
 
+  const headerOptions = useQuery({
+    ...outboundHeaderOptionsQueryOptions(browserApi),
+    enabled: open
+  });
+  const [headerRows, setHeaderRows] = useState<HeaderRow[]>([]);
+  const [formRefusal, setFormRefusal] = useState<string | null>(null);
+  const formErrorRef = useRef<HTMLDivElement>(null);
   const [step, setStep] = useState<Step>("provider");
   const [mode, setMode] = useState<"existing" | "new">("new");
   const [existingId, setExistingId] = useState("");
@@ -146,6 +164,8 @@ export function AddModelWizard({
     setFieldValues({});
     setFieldConfirmations({});
     setKeyExpiresOn(null);
+    setHeaderRows([]);
+    setFormRefusal(null);
     setCredentialsSubmitted(false);
     setExistingSubmitted(false);
     setTakenName(null);
@@ -163,6 +183,7 @@ export function AddModelWizard({
     if (open) reset();
   }
 
+  const canEditHeaders = supportsOutboundHeaders(headerOptions.data ?? null, providerType);
   const fields = caps ? providerFields(caps, providerType) : [];
   // An empty name falls back to the type's own.
   const newProviderName = providerName.trim() || providerDisplayName(providerType);
@@ -182,12 +203,15 @@ export function AddModelWizard({
         provider_type: providerType,
         credentials,
         config,
-        key_expires_on: keyExpiresOn
+        key_expires_on: keyExpiresOn,
+        ...(canEditHeaders ? { outbound_headers: headersPayload(headerRows) } : {})
       });
     },
     onSuccess: (provider) => {
       void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
       setFieldValues({});
+      setHeaderRows([]);
+      setFormRefusal(null);
       setFieldConfirmations({});
       setCredentialsSubmitted(false);
       setProviderId(provider.id);
@@ -199,6 +223,11 @@ export function AddModelWizard({
     // A taken name is shown at the name field; the toast's generic text
     // would speak of a model.
     onError: (error) => {
+      if (canEditHeaders && isProviderUpdateRefused(error)) {
+        flushSync(() => setFormRefusal(error.message));
+        formErrorRef.current?.focus();
+        return;
+      }
       if (!isProviderNameTaken(error)) {
         toastApiError(error, t);
         return;
@@ -211,15 +240,17 @@ export function AddModelWizard({
   function submitCredentials(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     if (createProviderMut.isPending) return;
-    const firstProblem = fields
-      .map((field) =>
-        providerFieldProblem(
-          field,
-          fieldValues[field.name] ?? "",
-          fieldConfirmations[field.name] ?? ""
+    const firstProblem =
+      fields
+        .map((field) =>
+          providerFieldProblem(
+            field,
+            fieldValues[field.name] ?? "",
+            fieldConfirmations[field.name] ?? ""
+          )
         )
-      )
-      .find((problem) => problem !== null);
+        .find((problem) => problem !== null) ??
+      (canEditHeaders ? firstHeaderProblem(headerRows, headerOptions.data ?? null) : null);
     if (firstProblem) {
       // Rendered before focus moves, so the field is read with its error.
       flushSync(() => setCredentialsSubmitted(true));
@@ -372,6 +403,8 @@ export function AddModelWizard({
             onSelect={(type) => {
               if (type !== providerType) {
                 setFieldValues({});
+                setHeaderRows([]);
+                setFormRefusal(null);
                 setFieldConfirmations({});
                 setKeyExpiresOn(null);
               }
@@ -404,6 +437,15 @@ export function AddModelWizard({
           </div>
         </div>
         <form id={credentialsFormId} onSubmit={submitCredentials} noValidate>
+          {formRefusal && (
+            <div
+              ref={formErrorRef}
+              tabIndex={-1}
+              {...fieldProblemProps(credentialsFormId, formRefusal)}
+            >
+              <FieldProblem id={credentialsFormId} problem={formRefusal} />
+            </div>
+          )}
           <FormLayout defaultOptionality="optional">
             <TextInput
               ref={focus.ref("name")}
@@ -437,6 +479,20 @@ export function AddModelWizard({
               />
             ))}
             <KeyExpiryField value={keyExpiresOn} onChange={setKeyExpiresOn} />
+            <OutboundHeadersEditor
+              providerType={providerType}
+              options={headerOptions.data ?? null}
+              optionsError={blockingError(headerOptions)}
+              loading={headerOptions.isFetching}
+              onRetry={() => {
+                void headerOptions.refetch();
+              }}
+              rows={headerRows}
+              onChange={setHeaderRows}
+              focus={focus}
+              endpoint={fieldValues.endpoint}
+              showErrors={credentialsSubmitted}
+            />
           </FormLayout>
         </form>
       </div>,
