@@ -59,8 +59,10 @@ def test_typed_references_keep_exact_identity_and_unicode_text():
         McpToolInstructionReference(server_id=SERVER, tool_name="räkna/procent%20"),
     ]
     assert all(text[ref.start : ref.end] == ref.text for ref in references)
-    assert render_instruction_references(text) == (
-        f"Skriv ✨ med [Klartext] (Skill {SKILL}, revision {REVISION}).\n"
+    assert render_instruction_references(
+        text, skill_identities={REVISION: "Skill: Klartext (klartext, revision 1)"}
+    ) == (
+        "Skriv ✨ med [Klartext] (Skill: Klartext (klartext, revision 1)).\n"
         f"Hämta [Aktuellt datum] (MCP {SERVER}; unavailable for this turn), "
         "[Sök] (Function web_search; unavailable for this turn) och "
         f"[Beräkna] (MCP {SERVER}, tool räkna/procent%20; unavailable for this turn)."
@@ -83,7 +85,7 @@ def test_typed_references_keep_exact_identity_and_unicode_text():
 )
 def test_examples_and_ordinary_text_do_not_activate_references(text: str):
     assert parse_instruction_references(text) == ()
-    assert render_instruction_references(text) == text
+    assert render_instruction_references(text, skill_identities={}) == text
 
 
 def test_fences_and_inline_code_end_at_their_matching_delimiter():
