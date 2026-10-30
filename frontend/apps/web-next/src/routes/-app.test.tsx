@@ -485,14 +485,31 @@ it.each(["apps", "assistants", "group-chats"] as const)(
   }
 );
 
-it("redirects a help assistant before mounting its space editor or warming the optional guide", async () => {
-  replies.set("/api/v1/spaces/space-1/", makeSpace());
-  replies.set("/api/v1/assistants/help/", { id: "help", name: "Guide", is_help_assistant: true });
-  const { router } = await renderRoute("/spaces/space-1/assistants/help/edit");
-  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/help-assistants"));
-  expect(screen.queryByRole("textbox", { name: "Editor help" })).toBeNull();
-  expect(requestedPaths()).not.toContain("/api/v1/help-assistants/availability");
-});
+it.each([
+  { admin: true, destination: "/admin/help-assistants" },
+  { admin: false, destination: "/spaces/personal/chat" }
+])(
+  "redirects a help assistant through destination access (admin=$admin)",
+  async ({ admin, destination }) => {
+    replies.set("/api/v1/users/me/", testAppContext({ permissions: admin ? ["admin"] : [] }).user);
+    replies.set("/api/v1/spaces/space-1/", makeSpace());
+    replies.set("/api/v1/assistants/help/", { id: "help", name: "Guide", is_help_assistant: true });
+    replies.set("/api/v1/admin/help-assistants/roles/", { items: [] });
+    replies.set("/api/v1/admin/help-assistants/templates/", { items: [] });
+    const { router } = await renderRoute("/spaces/space-1/assistants/help/edit");
+    await waitFor(() => expect(router.state.location.pathname).toBe(destination));
+    expect(screen.queryByRole("textbox", { name: "Editor help" })).toBeNull();
+    expect(requestedPaths()).not.toContain("/api/v1/help-assistants/availability");
+    if (admin) {
+      await screen.findByRole("heading", {
+        name: messages.admin_help_assistants_page_title,
+        level: 1
+      });
+    } else {
+      expect(requestedPaths()).not.toContain("/api/v1/admin/help-assistants/roles/");
+    }
+  }
+);
 
 it.each([
   ["apps/missing", "/api/v1/apps/missing/"],
