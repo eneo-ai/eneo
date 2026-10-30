@@ -34,6 +34,25 @@ beforeAll(async () => {
 }, 30_000);
 
 describe("globals.css", () => {
+  // selector → declarations of every rule in a layer, optionally only those under one @media.
+  const declarationsOf = (layerName: string, inMedia?: string) => {
+    const found = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkAtRules("layer", (layer: AtRule) => {
+      if (layer.params !== layerName) return;
+      layer.walkRules((rule: Rule) => {
+        const media = rule.parent?.type === "atrule" ? (rule.parent as AtRule) : undefined;
+        if ((media?.name === "media" ? media.params : undefined) !== inMedia) return;
+        const selector = rule.selector.replace(/\s+/g, " ");
+        const declarations = found.get(selector) ?? {};
+        rule.walkDecls((decl) => {
+          declarations[decl.prop] = decl.value;
+        });
+        found.set(selector, declarations);
+      });
+    });
+    return found;
+  };
+
   it("scans Streamdown's build so its markdown classes are emitted", async () => {
     // Only the @source lines, with automatic detection off: app code cannot
     // mask a broken path. Without them numbered lists in chat answers render
@@ -173,6 +192,39 @@ describe("globals.css", () => {
     expect(components.get(".page-bar-title")).toMatchObject({
       opacity: "0",
       "animation-timeline": "scroll(nearest block)"
+    });
+  });
+
+  it("keeps text fields at 16 px on touch (no iOS zoom on focus) and controls from double-tap zoom", () => {
+    // Text fields, not checkboxes, radios or buttons; select and textarea too.
+    const fields = [...declarationsOf("components", "(pointer: coarse)").entries()].filter(
+      ([, declarations]) => declarations["font-size"] === "max(1rem, 16px)"
+    );
+    expect(fields).toHaveLength(1);
+    const selector = fields[0]![0];
+    expect(selector).toMatch(/^input:not\(/);
+    for (const kind of ["checkbox", "radio", "range", "file", "hidden", "button", "submit"]) {
+      expect(selector).toContain(`[type="${kind}"]`);
+    }
+    expect(selector).toMatch(/, select, textarea$/);
+
+    // Below Astryx (astryx-base), so a control with its own touch-action keeps it.
+    const defaults = [...declarationsOf("base").entries()].filter(
+      ([, declarations]) => declarations["touch-action"] === "manipulation"
+    );
+    expect(defaults).toHaveLength(1);
+    for (const control of ["a", "button", "input", "textarea", '[role="tab"]']) {
+      expect(defaults[0]![0].split(", ")).toContain(control);
+    }
+  });
+
+  it("pads a page outside the shell by 1rem (or --page-pad) and the hardware's insets, whichever is larger", () => {
+    const padSafe = declarationsOf("utilities").get(".p-safe");
+    expect(padSafe).toEqual({
+      "padding-top": "max(var(--page-pad, 1rem), env(safe-area-inset-top, 0px))",
+      "padding-right": "max(var(--page-pad, 1rem), env(safe-area-inset-right, 0px))",
+      "padding-bottom": "max(var(--page-pad, 1rem), env(safe-area-inset-bottom, 0px))",
+      "padding-left": "max(var(--page-pad, 1rem), env(safe-area-inset-left, 0px))"
     });
   });
 

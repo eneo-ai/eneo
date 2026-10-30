@@ -20,14 +20,15 @@ export class RootErrorBoundary extends Component<{ children: ReactNode }, { fail
         lang="en"
         style={{
           display: "flex",
-          minHeight: "100vh",
+          minHeight: "100svh",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "center",
           gap: "1rem",
           fontFamily: "system-ui, sans-serif",
           textAlign: "center",
-          padding: "2rem"
+          padding:
+            "max(2rem, env(safe-area-inset-top, 0px)) max(2rem, env(safe-area-inset-right, 0px)) max(2rem, env(safe-area-inset-bottom, 0px)) max(2rem, env(safe-area-inset-left, 0px))"
         }}
       >
         <title>Eneo</title>

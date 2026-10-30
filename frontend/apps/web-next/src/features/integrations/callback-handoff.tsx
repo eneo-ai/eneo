@@ -90,7 +90,7 @@ export function CallbackHandoff() {
   }, []);
 
   return (
-    <main className="flex min-h-svh flex-col items-center justify-center gap-2 p-8 text-center">
+    <main className="p-safe flex min-h-svh flex-col items-center justify-center gap-2 text-center [--page-pad:2rem]">
       {view.status === "error" ? (
         <>
           <h1 className="text-xl font-semibold">{t("authentication_failed")}</h1>

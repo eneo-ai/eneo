@@ -1134,3 +1134,67 @@
     }
   }
 }
+
+/*
+ * 14c. Touch defaults for the controls of a page.
+ *    - A text field under 16 px makes iOS Safari zoom into it on focus and
+ *      stay zoomed, with the layout cropped. The touch type scale (section
+ *      14, 15 px) is below that, so on a coarse pointer a field keeps 16 px
+ *      (more with a larger root size) whatever it is given. Checkboxes, radios
+ *      and buttons are not text fields and keep theirs.
+ *    - touch-action: manipulation: a quick second tap on a control (a
+ *      stepper, the like on an answer) is two taps, not a double-tap zoom.
+ *      It sits in `base`, below Astryx, so a control that sets its own
+ *      touch-action (a slider thumb, a drag handle) keeps it.
+ */
+@layer base {
+  a,
+  button,
+  summary,
+  label,
+  input,
+  select,
+  textarea,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"] {
+    touch-action: manipulation;
+  }
+}
+
+/*
+ *    - A page outside the shell (sign-in, an integration's callback, a 404
+ *      without the menu) is padded by `p-safe`: --page-pad (1rem unless the
+ *      page sets it) at least, and the hardware's insets where those are
+ *      larger, so a standalone app (the manifest) keeps the heading clear of
+ *      the Dynamic Island and the home indicator when the page outgrows the
+ *      screen. Inside the shell its frame pads (components/shell/app-shell.tsx).
+ */
+@utility p-safe {
+  padding-top: max(var(--page-pad, 1rem), env(safe-area-inset-top, 0px));
+  padding-right: max(var(--page-pad, 1rem), env(safe-area-inset-right, 0px));
+  padding-bottom: max(var(--page-pad, 1rem), env(safe-area-inset-bottom, 0px));
+  padding-left: max(var(--page-pad, 1rem), env(safe-area-inset-left, 0px));
+}
+
+@layer components {
+  @media (pointer: coarse) {
+    input:not(
+      [type="checkbox"],
+      [type="radio"],
+      [type="range"],
+      [type="file"],
+      [type="color"],
+      [type="hidden"],
+      [type="image"],
+      [type="button"],
+      [type="submit"],
+      [type="reset"]
+    ),
+    select,
+    textarea {
+      font-size: max(1rem, 16px);
+    }
+  }
+}

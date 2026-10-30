@@ -26,7 +26,7 @@ export function PublicPage({
 }) {
   const t = useTranslations();
   return (
-    <main className="bg-secondary flex min-h-svh flex-col items-center justify-center gap-6 p-4">
+    <main className="bg-secondary p-safe flex min-h-svh flex-col items-center justify-center gap-6">
       <EneoWordMark className="h-8 w-auto" />
       <Card
         padding={6}
