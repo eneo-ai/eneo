@@ -172,7 +172,7 @@ function ReasoningSegmentedControl({
             aria-pressed={selected}
             onClick={() => onChange(segment.value)}
             className={cn(
-              "border-l px-3 py-1.5 text-sm transition-colors first:border-l-0",
+              "border-l px-3 py-1.5 text-sm transition-colors first:border-l-0 pointer-coarse:py-3",
               selected
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-muted"

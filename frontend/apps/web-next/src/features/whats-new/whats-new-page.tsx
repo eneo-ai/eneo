@@ -126,7 +126,7 @@ export function WhatsNewPage({ title }: { title: string }) {
                   type="button"
                   aria-pressed={release.version === selectedVersion}
                   onClick={() => selectRelease(release)}
-                  className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors"
+                  className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors pointer-coarse:min-h-11"
                 >
                   {release.version}
                   {!release.date && <span className="text-xs">{t("whats_new_upcoming")}</span>}
@@ -301,7 +301,7 @@ function FilterButton({
       type="button"
       aria-pressed={selected}
       onClick={onClick}
-      className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+      className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground rounded-full border px-3 py-1 text-xs font-medium transition-colors pointer-coarse:py-3"
     >
       {children}
     </button>

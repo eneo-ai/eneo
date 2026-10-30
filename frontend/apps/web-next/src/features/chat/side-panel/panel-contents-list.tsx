@@ -49,7 +49,7 @@ export const FILTER_FROM = 8;
 const ALL_TYPES = "__all__";
 
 const ROW_CLASS =
-  "focus-visible:outline-ring hover:bg-ax-hover flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-ax-inner px-2 text-start focus-visible:outline-2 focus-visible:-outline-offset-2";
+  "focus-visible:outline-ring hover:bg-ax-hover flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-ax-inner px-2 pointer-coarse:h-11 text-start focus-visible:outline-2 focus-visible:-outline-offset-2";
 const CURRENT_CLASS = "bg-ax-accent-muted hover:bg-ax-accent-muted";
 
 function Row({
