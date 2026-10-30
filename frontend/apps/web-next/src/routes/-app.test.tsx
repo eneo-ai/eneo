@@ -1468,3 +1468,119 @@ it("returns a signed-out account visit to login with its destination preserved",
   await waitFor(() => expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Faccount"));
   expect(document.getElementById("main-content")).toBeNull();
 });
+
+it.each(["/admin/users", "/admin/usage/users/missing", "/admin/roles"])(
+  "denies an admin page before reading its data: %s",
+  async (path) => {
+    const { router } = await renderRoute(path);
+    expect(router.state.location.pathname).toBe("/spaces/personal/chat");
+    expect(
+      requestedPaths().some((entry) => /\/admin\/|\/token-usage\/|\/roles\//.test(entry))
+    ).toBe(false);
+  }
+);
+
+it("opens the admin users table with the feature's URL filters and one session read", async () => {
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/admin/users/", {
+    items: [
+      {
+        ...context.user,
+        id: "listed-user",
+        username: "Anna Lind",
+        email: "anna@example.test",
+        state: "active",
+        roles: [],
+        user_groups: []
+      }
+    ],
+    metadata: {
+      page: 2,
+      page_size: 100,
+      total_pages: 2,
+      total_count: 101,
+      counts: { active: 101, inactive: 0 },
+      has_next: false,
+      has_previous: true
+    }
+  });
+  replies.set("/api/v1/roles/", { roles: { items: [] }, predefined_roles: { items: [] } });
+  replies.set("/api/v1/admin/password-policy", { max_age_days: null });
+  await renderRoute("/admin/users?page=2&search=anna&role_id=role-1");
+  const table = await screen.findByRole("table", { name: messages.active_users });
+  expect(table.textContent).toContain("anna@example.test");
+  const requests = fetcher.mock.calls.map(
+    ([input]) => new URL(input instanceof Request ? input.url : String(input), window.location.href)
+  );
+  const users = requests.find((url) => url.pathname === "/api/v1/admin/users/");
+  expect(users?.searchParams.get("page")).toBe("2");
+  expect(users?.searchParams.get("search_email")).toBe("anna");
+  expect(users?.searchParams.get("role_id")).toBe("role-1");
+  expect(requestedPaths().filter((path) => path === "/api/v1/users/me/")).toHaveLength(1);
+  expect(document.title).toBe(`${messages.users} · Eneo`);
+});
+
+it("warms admin usage independently when a storage-spaces request fails", async () => {
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  const totals = {
+    total_token_usage: 1500,
+    total_input_token_usage: 1200,
+    total_output_token_usage: 300,
+    models: []
+  };
+  const storage = { total_used: 600, personal_used: 200, shared_used: 400, limit: 1000 };
+  replies.set("/api/v1/token-usage/", totals);
+  replies.set("/api/v1/storage/", storage);
+  replies.set("/api/v1/storage/spaces/", new Response("Unavailable", { status: 500 }));
+  const { router, queryClient } = await createRouteRouter("/admin/usage");
+  await router.load();
+  const { browserApi } = await import("@/lib/api/browser");
+  const { tokenUsageQueryOptions, storageQueryOptions, storageSpacesQueryOptions } =
+    await import("@/features/admin/usage/usage");
+  await waitFor(() =>
+    expect(queryClient.getQueryData(tokenUsageQueryOptions(browserApi).queryKey)).toEqual(totals)
+  );
+  expect(queryClient.getQueryData(storageQueryOptions(browserApi).queryKey)).toEqual(storage);
+  await waitFor(() =>
+    expect(queryClient.getQueryState(storageSpacesQueryOptions(browserApi).queryKey)?.status).toBe(
+      "error"
+    )
+  );
+  expect(router.state.matches.every((match) => match.status === "success")).toBe(true);
+});
+
+it.each([404, 500])("keeps a user usage %s in the correct route boundary", async (status) => {
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/token-usage/users/missing/summary", new Response("Unavailable", { status }));
+  replies.set("/api/v1/token-usage/users/missing", {
+    total_token_usage: 0,
+    total_input_token_usage: 0,
+    total_output_token_usage: 0,
+    models: []
+  });
+  await renderRoute("/admin/usage/users/missing?from=2026-09-01&to=2026-09-30");
+  await screen.findByRole("heading", {
+    name: status === 404 ? messages.page_not_found : messages.something_went_wrong
+  });
+});
+
+it("only reads data while preloading admin users and usage", async () => {
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/admin/users/", { items: [] });
+  replies.set("/api/v1/roles/", { roles: { items: [] }, predefined_roles: { items: [] } });
+  replies.set("/api/v1/admin/password-policy", { max_age_days: null });
+  replies.set("/api/v1/token-usage/", { models: [] });
+  replies.set("/api/v1/storage/", {});
+  replies.set("/api/v1/storage/spaces/", { items: [] });
+  const { router } = await createRouteRouter();
+  await router.load();
+  await router.preloadRoute({ to: "/admin/users" });
+  await router.preloadRoute({ to: "/admin/usage" });
+  await waitFor(() => expect(requestedPaths()).toContain("/api/v1/storage/spaces/"));
+  expect(
+    fetcher.mock.calls.every(
+      ([input, init]) =>
+        (input instanceof Request ? input.method : (init?.method ?? "GET")) === "GET"
+    )
+  ).toBe(true);
+});

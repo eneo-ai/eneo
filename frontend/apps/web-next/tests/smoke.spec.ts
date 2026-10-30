@@ -15,7 +15,7 @@ test("account shows the change-password card", { tag: "@vite" }, async ({ page }
   await expect(page.locator('input[autocomplete="new-password"]').first()).toBeVisible();
 });
 
-test("admin usage has a per-user tab", async ({ page }) => {
+test("admin usage has a per-user tab", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/admin/usage");
   await expect(page.getByRole("tab", { name: /användare/i })).toBeVisible();
 });
@@ -31,7 +31,7 @@ test("admin models has a migration-history tab", async ({ page }) => {
   await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
 });
 
-test("admin api-keys exposes the tenant policy + filters", async ({ page }) => {
+test("admin api-keys exposes the tenant policy + filters", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/admin/api-keys");
   await expect(page.getByRole("button", { name: /organisationspolicy/i })).toBeVisible();
 });
