@@ -6,6 +6,7 @@ import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { renderInApp } from "@/test/render";
+import { chatComposer, typeIntoComposer } from "@/test/composer";
 import { ChatView, type ActivityState } from "./chat-view";
 
 type Part = EneoUIMessage["parts"][number];
@@ -130,9 +131,7 @@ it("a live answer shows its duration and time once it finishes, and earlier answ
   expect(within(answers()[0]!).getByRole("button", { name: /Plan/ }).textContent).not.toContain(
     "Plan v2"
   );
-  const field = screen.getByRole("textbox", { name: /Meddelande till/ });
-  field.textContent = "Ny fråga";
-  fireEvent.input(field);
+  typeIntoComposer(chatComposer(), "Ny fråga");
   fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
   await settle();
   const c = probe.controller!;

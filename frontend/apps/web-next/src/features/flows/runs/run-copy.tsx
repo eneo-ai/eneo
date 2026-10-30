@@ -27,7 +27,7 @@ export function CopyButton({ label, value }: { label: string; value: unknown }) 
       variant="ghost"
       size="sm"
       onClick={async () => {
-        if (!(await copy(copyText(value)))) toast.error(t("chat_copy_failed"));
+        if (!(await copy(copyText(value)))) toast.error(t("copy_failed"));
       }}
     />
   );

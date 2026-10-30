@@ -53,7 +53,7 @@ function DebugExport({ evidence, runId }: { evidence: RunEvidence; runId: string
           label={isCopied ? t("copied") : t("flow_run_extras_debug_copy")}
           icon={isCopied ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
           onClick={async () => {
-            if (!(await copy(text()))) toast.error(t("chat_copy_failed"));
+            if (!(await copy(text()))) toast.error(t("copy_failed"));
           }}
         />
         <Button

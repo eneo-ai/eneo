@@ -54,7 +54,7 @@ export function ResourceCollection({
       {phone !== false ? (
         <div className="flex flex-col gap-3 md:hidden">
           <ResourceLayoutContext value="rows">
-            <List hasDividers edgeCompensation="inline">
+            <List hasDividers edge="outset">
               {children}
             </List>
           </ResourceLayoutContext>

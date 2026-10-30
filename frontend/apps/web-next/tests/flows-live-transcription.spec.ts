@@ -23,11 +23,11 @@ test(
       (response) => new URL(response.url()).pathname === "/flows/pcm16-worklet.js"
     );
     await dialog.getByRole("button", { name: "Spela in", exact: true }).click();
-    const module = await worklet;
-    expect(module.status()).toBe(200);
-    expect(module.headers()["content-type"]).toMatch(/javascript/);
-    expect(module.headers()["x-content-type-options"]).toBe("nosniff");
-    expect(module.headers()["cache-control"]).toBe("no-cache");
+    const workletResponse = await worklet;
+    expect(workletResponse.status()).toBe(200);
+    expect(workletResponse.headers()["content-type"]).toMatch(/javascript/);
+    expect(workletResponse.headers()["x-content-type-options"]).toBe("nosniff");
+    expect(workletResponse.headers()["cache-control"]).toBe("no-cache");
     await expect(
       dialog.getByText("E2E live transcription: mikrofonen fungerar.", { exact: true })
     ).toBeVisible({ timeout: 20_000 });
@@ -52,5 +52,10 @@ test(
     const missing = await page.request.get("/flows/missing-worklet.js");
     expect(missing.status()).toBe(404);
     expect(missing.headers()["content-type"]).not.toMatch(/text\/html/);
+    const contentUrl = new URL("/flows/pcm16-worklet.js", page.url());
+    contentUrl.hostname = "127.0.0.1";
+    const isolated = await page.request.get(contentUrl.toString());
+    expect(isolated.status()).toBe(404);
+    expect(isolated.headers()["content-type"]).not.toMatch(/javascript|text\/html/);
   }
 );

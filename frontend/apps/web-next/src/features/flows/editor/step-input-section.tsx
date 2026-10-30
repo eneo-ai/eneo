@@ -122,7 +122,6 @@ function UploadMimeTypes({
       <TextInput
         label={t("flow_runtime_input_mimetypes_custom")}
         description={t("flow_runtime_input_mimetypes_custom_description")}
-        placeholder="application/pdf, audio/mpeg"
         value={draft.text}
         onChange={(text) => {
           const items = [

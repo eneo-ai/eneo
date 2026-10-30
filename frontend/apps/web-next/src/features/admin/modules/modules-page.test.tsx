@@ -1,8 +1,9 @@
 // @vitest-environment jsdom
 import { fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import messages from "@/lib/i18n/messages/sv.json";
 
 const api = vi.hoisted(() => ({
   installations: [] as object[],
@@ -23,8 +24,10 @@ vi.mock("@/lib/api/toast", () => ({ toastApiError }));
 
 import { ModulesPage } from "./modules-page";
 
+beforeEach(() => {
+  vi.resetAllMocks();
+});
 afterEach(() => {
-  vi.clearAllMocks();
   vi.restoreAllMocks();
   api.installations = [];
 });
@@ -88,7 +91,7 @@ it("tells screen readers the installed modules are loading", () => {
   api.GET.mockImplementationOnce(() => new Promise(() => {}));
   renderInApp(<ModulesPage title="Moduler" />);
 
-  const label = screen.getByText("Laddar...");
+  const label = screen.getByText(messages.loading);
   const region = label.closest<HTMLElement>('[role="status"]');
   expect(region).not.toBeNull();
   expect(region!.getAttribute("aria-busy")).toBe("true");
@@ -121,7 +124,7 @@ it("shows a failed read as an error only, and keeps its focused retry busy while
   await waitFor(() => expect(retry.getAttribute("aria-busy")).toBe("true"));
   expect(retry.isConnected).toBe(true);
   expect(document.activeElement).toBe(retry);
-  expect(screen.queryByText("Laddar...")).toBeNull();
+  expect(screen.queryByText(messages.loading)).toBeNull();
 });
 
 it.each([

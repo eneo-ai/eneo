@@ -123,7 +123,7 @@ export function AttentionSection() {
       <Heading level={2} id={id} className="text-lg">
         {t("admin_attention_title")}
       </Heading>
-      <List hasDividers edgeCompensation="inline">
+      <List hasDividers edge="outset">
         {rows.map((row) => (
           <ListItem
             key={row.key}

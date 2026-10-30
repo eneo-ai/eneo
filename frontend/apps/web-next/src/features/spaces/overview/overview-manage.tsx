@@ -29,7 +29,7 @@ export function OverviewManage() {
 
   return (
     <OverviewSection id={id} title={t("space_manage")}>
-      <List hasDividers edgeCompensation="inline">
+      <List hasDividers edge="outset">
         {manage.map((section) => {
           const Icon = ICONS[section.id];
           return (

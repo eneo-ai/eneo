@@ -600,7 +600,7 @@ function MembershipSection({
         </span>
       </h3>
       <div className="@container/rows">
-        <List hasDividers edgeCompensation="inline" aria-labelledby={id}>
+        <List hasDividers edge="outset" aria-labelledby={id}>
           {children}
         </List>
       </div>
@@ -682,7 +682,7 @@ function RoleSheet({
           <List
             header={t("role")}
             hasDividers
-            edgeCompensation="inline"
+            edge="outset"
             aria-busy={updateRole.isPending || undefined}
           >
             {space.available_roles.map((available) => {

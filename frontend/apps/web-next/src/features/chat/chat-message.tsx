@@ -524,7 +524,7 @@ function AnswerSources({
     <div className="border-ax-border flex flex-col gap-1 border-t pt-2">
       <List
         density="balanced"
-        edgeCompensation="inline"
+        edge="outset"
         header={
           <span className="text-ax-text-secondary text-[13px] font-semibold">
             {t("chat_sources_label")}

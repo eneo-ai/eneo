@@ -53,7 +53,7 @@ import {
 } from "@/features/capabilities/capabilities";
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
 import { parseRetentionDays } from "@/features/spaces/retention-days";
-import { invalidateSpaces, invalidateSpacesList, type Space } from "@/features/spaces/space";
+import { invalidateSpacesList, type Space } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
 import {

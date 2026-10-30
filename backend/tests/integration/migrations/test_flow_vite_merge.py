@@ -7,6 +7,7 @@ import pytest
 
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from tests.integration.migrations.alembic_test_utils import (
     at_revision,
     current_revisions,
@@ -29,13 +30,14 @@ def seed_default_models():
 def test_fresh_database_and_each_parent_reach_combined_schema(test_settings, start):
     cfg = Config(str(Path(__file__).parents[3] / "alembic.ini"))
     cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
+    head = ScriptDirectory.from_config(cfg).get_current_head()
 
     with at_revision(cfg, start):
         command.upgrade(cfg, "head")
         with psycopg2.connect(
             test_settings.sync_database_url.replace("+psycopg2", "")
         ) as conn:
-            assert current_revisions(conn) == {"202610301500"}
+            assert current_revisions(conn) == {head}
             with conn.cursor() as cursor:
                 cursor.execute(
                     "SELECT data_type FROM information_schema.columns "

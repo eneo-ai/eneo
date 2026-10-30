@@ -11,7 +11,13 @@ import { eneoTheme } from "@/theme/eneo";
 // Astryx's own component strings (aria labels, pagination, close buttons…).
 // English ships built in; Swedish comes from Astryx's catalog, keyed by our
 // use-intl locale code.
-const ASTRYX_MESSAGES: MessagesByLocale = { sv: astryxSv };
+const ASTRYX_MESSAGES: MessagesByLocale = {
+  sv: {
+    ...astryxSv,
+    // Astryx 0.7.3 omits this Swedish entry; reuse its existing busy-state wording.
+    "@astryx.switch.loading": astryxSv["@astryx.button.loading"]
+  }
+};
 
 /**
  * next/link for Astryx links. Astryx passes the target as both `href` and

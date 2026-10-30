@@ -400,7 +400,7 @@ function AreaRows({ className }: { className?: string }) {
       <Heading level={2} id={id} className="text-lg">
         {t("admin_areas_title")}
       </Heading>
-      <List hasDividers edgeCompensation="inline">
+      <List hasDividers edge="outset">
         <AreaRow
           href="/admin/users"
           icon={Users}

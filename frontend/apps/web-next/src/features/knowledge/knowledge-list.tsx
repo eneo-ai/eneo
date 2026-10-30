@@ -55,7 +55,7 @@ export function KnowledgeRows({ items, name, empty }: RowsProps) {
   const t = useTranslations();
   if (items.length === 0) return empty ?? null;
   return (
-    <List hasDividers edgeCompensation="inline" {...name}>
+    <List hasDividers edge="outset" {...name}>
       {items.map(({ row, actions }) => {
         const { updatedAt } = row;
         const meta = [

@@ -57,6 +57,7 @@ export function BrowserSessionBoundary({ children }: { children: ReactNode }) {
     <>
       {session.status === "bound" && session.checkError !== undefined && (
         <Banner
+          role="alert"
           status="error"
           container="section"
           title={t("session_check_failed")}

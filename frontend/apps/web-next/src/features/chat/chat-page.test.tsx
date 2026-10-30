@@ -3,7 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { composerValue, typeIntoComposer } from "@/test/composer";
+import { composerValue } from "@/test/composer";
 import { renderInApp } from "@/test/render";
 import { setRoute } from "@/test/navigation";
 import { observedElements, reportResize, setViewport } from "@/test/setup-dom";

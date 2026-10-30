@@ -118,7 +118,7 @@ function Starters({ onPick }: { onPick: (prompt: string) => void }) {
           {t("chat_try_asking")}
         </h2>
       </div>
-      <List hasDividers edgeCompensation="inline">
+      <List hasDividers edge="outset">
         {STARTERS.map((starter) => {
           const text = STARTER_TEXT[starter.key];
           const Icon = starter.icon;
@@ -164,7 +164,7 @@ function QuickAssistants() {
           {t("chat_show_all_assistants")}
         </Link>
       </div>
-      <List hasDividers edgeCompensation="inline">
+      <List hasDividers edge="outset">
         {assistants.map((assistant) => (
           <ListItem
             key={assistant.id}

@@ -4,7 +4,6 @@ import { createRef, useState, type Ref } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { typeIntoComposer } from "@/test/composer";
 import { renderInApp } from "@/test/render";
 import { Composer, type ComposerHandle } from "./composer";
 import { useAttachments } from "./use-attachments";

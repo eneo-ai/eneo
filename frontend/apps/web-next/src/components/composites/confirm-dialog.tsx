@@ -54,7 +54,8 @@ type ConfirmSurfaceProps = {
  * focus, and Cancel waits.
  *
  * Mounted in <body> on first open and kept after it closes, so Astryx can
- * close it and return focus; the content only exists while open.
+ * close it and return focus. The native closed dialog also keeps its content;
+ * removing a focused action before close races the page's focus rescue.
  */
 function ConfirmSurface({
   open,
@@ -116,43 +117,38 @@ function ConfirmSurface({
       // Escape closes; a click on the backdrop never does.
       purpose="form"
       role="alertdialog"
-      // Only while open: a closed dialog has no title or description to point at.
-      aria-labelledby={open ? titleId : undefined}
-      aria-describedby={open ? descriptionId : undefined}
+      aria-labelledby={titleId}
+      aria-describedby={descriptionId}
       width={440}
     >
       <Layout
         height="auto"
         content={
-          open ? (
-            <LayoutContent>
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-2">
-                  <Heading level={2} id={titleId}>
-                    {title}
-                  </Heading>
-                  <Text type="body" color="secondary" as="p" id={descriptionId}>
-                    {description}
-                  </Text>
-                </div>
-                {children}
+          <LayoutContent>
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-2">
+                <Heading level={2} id={titleId}>
+                  {title}
+                </Heading>
+                <Text type="body" color="secondary" as="p" id={descriptionId}>
+                  {description}
+                </Text>
               </div>
-            </LayoutContent>
-          ) : null
+              {children}
+            </div>
+          </LayoutContent>
         }
         footer={
-          open ? (
-            <LayoutFooter>
-              <Stack
-                direction={isSmallScreen ? "vertical" : "horizontal"}
-                gap={2}
-                hAlign={isSmallScreen ? "stretch" : "end"}
-                wrap={isSmallScreen ? "nowrap" : "wrap"}
-              >
-                {isSmallScreen ? [action, cancel] : [cancel, action]}
-              </Stack>
-            </LayoutFooter>
-          ) : null
+          <LayoutFooter>
+            <Stack
+              direction={isSmallScreen ? "vertical" : "horizontal"}
+              gap={2}
+              hAlign={isSmallScreen ? "stretch" : "end"}
+              wrap={isSmallScreen ? "nowrap" : "wrap"}
+            >
+              {isSmallScreen ? [action, cancel] : [cancel, action]}
+            </Stack>
+          </LayoutFooter>
         }
       />
     </Dialog>,

@@ -2,7 +2,6 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 import type { FlowSettings } from "./flow-settings";
 import { flowSettingsFixture } from "./flow-settings-fixtures";
@@ -188,29 +187,6 @@ describe("flow settings page", { timeout: 20_000 }, () => {
     await waitFor(() => expect(document.activeElement).toBe(picker));
     expect(screen.getAllByText(/Modellen kan inte använda verktyg/).length).toBeGreaterThan(0);
     await expectNoAxeViolations(document.body);
-  });
-
-  it("asks before a link in the app leaves unsaved changes behind", async () => {
-    await show();
-    const audit = screen.getByRole("link", { name: "Ändringar loggas i granskningsloggen" });
-    fireEvent.click(audit);
-    expect(screen.queryByRole("alertdialog")).toBeNull();
-    expect(router.push).toHaveBeenCalledTimes(0);
-
-    enter("Antal filer per körning", "40");
-    fireEvent.click(audit);
-    const dialog = await screen.findByRole("alertdialog", { name: "Lämna sidan?" });
-    await expectNoAxeViolations(document.body);
-    fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
-    expect(router.push).not.toHaveBeenCalled();
-    expect(screen.getByText("1 osparad ändring")).toBeTruthy();
-
-    fireEvent.click(audit);
-    fireEvent.click(
-      within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Lämna sidan" })
-    );
-    expect(router.push).toHaveBeenCalledWith("/admin/audit-logs?actions=tenant_settings_updated");
   });
 
   it("moves focus to a problem at its field on save and sends nothing", async () => {

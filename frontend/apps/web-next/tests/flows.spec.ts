@@ -42,7 +42,7 @@ test(
     await page.evaluate(() => history.back());
     const leave = page.getByRole("alertdialog");
     await expect(leave).toBeVisible();
-    await leave.getByRole("button", { name: /Stanna/ }).click();
+    await leave.getByRole("button", { name: "Avbryt", exact: true }).click();
     await expect(page.getByRole("textbox", { name: /^Egen text till steget/ })).toHaveValue(
       "Det manuella flödet fungerar."
     );
@@ -57,6 +57,10 @@ test(
       .withTags(WCAG_22_AA_TAGS)
       .analyze();
     expect(axe.violations).toEqual([]);
+    await page.screenshot({
+      path: test.info().outputPath("manual-flow-editor-mobile.png"),
+      fullPage: true
+    });
     await page.getByRole("button", { name: "Spara steget", exact: true }).click();
     await expect(page.getByText("Steget är sparat.", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Alla steg", exact: true }).click();
@@ -85,6 +89,11 @@ test(
       page.getByText("Det manuella flödet fungerar.", { exact: true }).first()
     ).toBeVisible({ timeout: 60_000 });
     await page.goto(`${flowUrl}?tab=runs`);
+    await expect(page.getByRole("link", { name: runName, exact: true })).toBeVisible();
+    await page.screenshot({
+      path: test.info().outputPath("flow-run-history-desktop.png"),
+      fullPage: true
+    });
     await page.getByRole("link", { name: runName, exact: true }).click();
     await expect(page).toHaveURL(runUrl);
   }
