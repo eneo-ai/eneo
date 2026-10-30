@@ -68,6 +68,15 @@ test(
       fullPage: true
     });
     await page.getByRole("button", { name: "Spara steget", exact: true }).click();
+    const ownText = page.getByRole("textbox", { name: /^Egen text till steget/ });
+    await expect(ownText).toHaveAttribute("aria-invalid", "true");
+    await expect(ownText).toBeFocused();
+    await expect(page.getByText(/^Steget tar emot filer när flödet körs, men/)).toBeVisible();
+    await ownText.fill("Det manuella flödet fungerar.\n");
+    await page.getByRole("button", { name: "Infoga variabel", exact: true }).click();
+    await page.getByText("Text från uppladdade filer", { exact: true }).click();
+    await expect(ownText).toHaveValue("Det manuella flödet fungerar.\n{{step_input.text}}");
+    await page.getByRole("button", { name: "Spara steget", exact: true }).click();
     await expect(page.getByText("Steget är sparat.", { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Alla steg", exact: true }).click();
     await expect(page).toHaveURL(flowUrl);
@@ -91,9 +100,9 @@ test(
     await expect(page).toHaveURL(/\/runs\/[^/?]+$/);
     const runUrl = page.url();
     await expect(page.getByRole("heading", { name: runName, exact: true })).toBeVisible();
-    await expect(
-      page.getByText("Det manuella flödet fungerar.", { exact: true }).first()
-    ).toBeVisible({ timeout: 60_000 });
+    await expect(page.getByText(/Det manuella flödet fungerar\./).first()).toBeVisible({
+      timeout: 60_000
+    });
     await page.goto(`${flowUrl}?tab=runs`);
     await expect(page.getByRole("link", { name: runName, exact: true })).toBeVisible();
     await page.screenshot({

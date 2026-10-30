@@ -9171,7 +9171,7 @@
   "flow_validation_msg_transcribe_only_violation": "Steget är begränsat till transkribering och kan inte ha andra inställningar.",
   "flow_validation_msg_audio_transcription_required": "För att ta emot ljud måste transkribering vara påslagen.",
   "flow_validation_msg_audio_transcription_model_required": "Välj en transkriberingsmodell för att kunna ta emot ljud.",
-  "flow_validation_msg_input_binding_runtime_input_unused": "Steget tar emot filer när flödet körs, men stegets egen text under Underlag tar inte med dem. Lägg in ”Det uppladdade underlaget” med Infoga från flödet, eller ta bort den egna texten.",
+  "flow_validation_msg_input_binding_runtime_input_unused": "Steget tar emot filer när flödet körs, men stegets egen text tar inte med dem. Välj Infoga variabel och Text från uppladdade filer, eller ta bort den egna texten.",
   "flow_validation_msg_flow_step_invalid": "Stegets inställningar går inte att spara i sin nuvarande kombination. Den tekniska beskrivningen visar detaljerna.",
   "flow_validation_msg_input_contract_inapplicable": "Ett indatakontrakt kan inte användas med stegets nuvarande inställningar. Ta bort det under Kontrakt och integrationer i Avancerad.",
   "flow_validation_msg_input_contract_source_mismatch": "Stegets indatakontrakt stämmer inte med resultatet från steget som det läser. Rätta något av kontrakten under Kontrakt och integrationer i Avancerad.",

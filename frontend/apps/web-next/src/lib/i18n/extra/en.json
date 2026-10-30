@@ -3669,7 +3669,7 @@
   "flow_validation_msg_transcribe_only_violation": "This step is limited to transcription and cannot carry other settings.",
   "flow_validation_msg_audio_transcription_required": "To accept audio, transcription must be turned on.",
   "flow_validation_msg_audio_transcription_model_required": "Choose a transcription model to accept audio.",
-  "flow_validation_msg_input_binding_runtime_input_unused": "The step accepts files when the flow runs, but its own text under Material leaves them out. Add “The uploaded material” with Insert from the flow, or remove the own text.",
+  "flow_validation_msg_input_binding_runtime_input_unused": "The step accepts files when the flow runs, but its own text leaves them out. Choose Insert variable and Text from uploaded files, or remove the own text.",
   "flow_validation_msg_flow_step_invalid": "The step's settings cannot be saved in their current combination. The technical details show the specifics.",
   "flow_validation_msg_input_contract_inapplicable": "An input contract cannot be used with the step's current settings. Remove it under Contracts and integrations in Advanced.",
   "flow_validation_msg_input_contract_source_mismatch": "The step's input contract does not match the result of the step it reads. Fix one of the contracts under Contracts and integrations in Advanced.",

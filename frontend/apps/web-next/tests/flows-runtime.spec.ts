@@ -29,12 +29,29 @@ test(
         response.url().endsWith(`/steps/${flow.stepId}/runtime-files/`) &&
         response.request().method() === "POST"
     );
+    // Chromium can evict the inspector body for this large POST. Observe the
+    // real XHR response in the page without intercepting or replacing transport.
+    const uploadedSize = page.evaluate(
+      (path) =>
+        new Promise<number>((resolve) => {
+          const send = XMLHttpRequest.prototype.send;
+          XMLHttpRequest.prototype.send = function (body) {
+            this.addEventListener("load", () => {
+              if (new URL(this.responseURL).pathname !== path) return;
+              XMLHttpRequest.prototype.send = send;
+              resolve((JSON.parse(this.responseText) as { size: number }).size);
+            });
+            send.call(this, body);
+          };
+        }),
+      `/api/v1/flows/${flow.flowId}/steps/${flow.stepId}/runtime-files/`
+    );
     await dialog
       .locator('input[type="file"]')
       .setInputFiles({ name: "large.wav", mimeType: "audio/wav", buffer: wav });
     const response = await uploaded;
     expect(response.status()).toBe(201);
-    expect(((await response.json()) as Schema<"FilePublic">).size).toBe(wav.length);
+    expect(await uploadedSize).toBe(wav.length);
     expect(new URL(response.url()).origin).toBe(new URL(page.url()).origin);
     await dialog.getByRole("button", { name: "Granska", exact: true }).click();
     await dialog.getByRole("button", { name: "Starta körningen", exact: true }).click();

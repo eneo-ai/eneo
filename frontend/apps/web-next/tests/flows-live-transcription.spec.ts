@@ -17,7 +17,7 @@ test(
     await page.getByRole("button", { name: "Kör flödet", exact: true }).click();
     const dialog = page.getByRole("dialog");
     await expect(
-      dialog.getByRole("switch", { name: "Visa text medan du spelar in", exact: true })
+      dialog.getByRole("checkbox", { name: "Visa text medan du spelar in", exact: true })
     ).toBeChecked();
     const worklet = page.waitForResponse(
       (response) => new URL(response.url()).pathname === "/flows/pcm16-worklet.js"
