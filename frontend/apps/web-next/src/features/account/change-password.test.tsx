@@ -72,14 +72,16 @@ describe("ChangePasswordCard", () => {
       const toggle = toggles[index]!;
       fireEvent.click(toggle);
       expect(input.type).toBe("text");
-      expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      // The name says what a press does next; it is not also a pressed toggle.
+      expect(toggle.hasAttribute("aria-pressed")).toBe(false);
+      expect(toggle.getAttribute("aria-label") ?? toggle.textContent).toMatch(/Dölj lösenord/);
       expect(input.value).toBe("unchanged-value");
       inputs
         .filter((other) => other !== input)
         .forEach((other) => expect(other.type).toBe("password"));
       fireEvent.click(toggle);
       expect(input.type).toBe("password");
-      expect(toggle.getAttribute("aria-pressed")).toBe("false");
+      expect(toggle.hasAttribute("aria-pressed")).toBe(false);
     });
     expect(api.POST).not.toHaveBeenCalled();
   });

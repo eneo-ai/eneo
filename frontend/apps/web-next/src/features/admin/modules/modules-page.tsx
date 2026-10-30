@@ -90,7 +90,7 @@ export function ModulesPage({ title }: { title: string }) {
     setServiceKeyId(selected.selection);
     setBoundKeyMissing(selected.missing);
     setEditingModuleKey(installation.module_key);
-    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    formRef.current?.scrollIntoView({ block: "start" });
   }
 
   // Problems show at their fields on submit, and focus moves to the first.

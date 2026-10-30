@@ -20,7 +20,6 @@ export function PasswordInput(props: Omit<TextInputProps, "type">) {
         variant="ghost"
         size="sm"
         isDisabled={props.isDisabled}
-        aria-pressed={visible}
         onClick={() => setVisible(!visible)}
         className="self-end"
       />

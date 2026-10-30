@@ -313,7 +313,7 @@ export function ContextUsageBar({
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-[11px] leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-[11px] leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
       >
         <span className="sr-only">{t("context_usage")}: </span>
         <div

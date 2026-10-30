@@ -191,7 +191,7 @@ async function spotlight(
     signal.addEventListener("abort", abort, { once: true });
     window.addEventListener("keyup", navigate);
     try {
-      element.scrollIntoView({ block: "center", behavior: "smooth" });
+      element.scrollIntoView({ block: "center" });
       tour.drive();
     } catch (error) {
       reject(error);

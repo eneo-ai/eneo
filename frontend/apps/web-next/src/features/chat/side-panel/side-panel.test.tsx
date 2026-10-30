@@ -172,6 +172,10 @@ describe("SidePanel as a cover (an interactive view that cannot sit beside)", ()
     layOut(800);
     const cover = screen.getByRole("complementary");
     expect(cover.className).toContain("fixed");
+    // It escapes the shell frame, which pads for the notch and the home indicator.
+    for (const side of ["top", "right", "bottom", "left"]) {
+      expect(cover.className).toContain(`env(safe-area-inset-${side},0px)`);
+    }
     expect(cover.contains(document.activeElement)).toBe(true);
   });
 });
