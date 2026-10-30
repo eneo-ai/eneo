@@ -19200,16 +19200,8 @@ export interface components {
     PartialAssistantUpdatePublic: {
       /** Name */
       name?: string | null;
-      /**
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
-      /**
-       * Logging Enabled
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Logging Enabled */
       logging_enabled?: boolean | null;
       /** Enabled Capabilities */
       enabled_capabilities?:
@@ -19238,10 +19230,6 @@ export interface components {
        * @description This field is deprecated and will be ignored
        */
       guardrail?: components["schemas"]["AssistantGuard"] | null;
-      /**
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
       completion_model?: components["schemas"]["ModelId"] | null;
       /** @description Which document template the file-creation capability renders with: the organisation's default, a selected template, or Eneo's built-in. */
       document_template?: components["schemas"]["DocumentTemplateChoicePublic"] | null;
