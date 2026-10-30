@@ -13,7 +13,7 @@ import {
   type AnyRouter,
   type ParsedLocation
 } from "@tanstack/react-router";
-import { useMemo, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useSyncExternalStore } from "react";
 import type * as Seam from "./navigation";
 import { stringifySearch } from "./router/search";
 
@@ -146,6 +146,12 @@ export const useLeaveConfirmation: typeof Seam.useLeaveConfirmation = (active) =
     withResolver: true,
     enableBeforeUnload: active
   });
+  // Saving can clear dirty state or replace a keyed editor while its dialog is open.
+  // Cancel that outstanding decision so native Back restores the current address.
+  useEffect(() => {
+    if (!active) blocker.reset?.();
+  }, [active, blocker.reset]);
+  useEffect(() => () => blocker.reset?.(), [blocker.reset]);
   return {
     blocked: blocker.status === "blocked",
     leave: () => blocker.proceed?.(),
