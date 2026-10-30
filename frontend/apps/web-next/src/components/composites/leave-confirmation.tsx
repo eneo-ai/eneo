@@ -7,7 +7,7 @@ import { ConfirmDialogControlled } from "./confirm-dialog";
 /** Shares the unsaved-edit decision across manual-save editors. */
 export function LeaveConfirmation({ active, onLeave }: { active: boolean; onLeave?: () => void }) {
   const t = useTranslations();
-  const { blocked, leave, stay } = useLeaveConfirmation(active);
+  const { blocked, leave, stay } = useLeaveConfirmation(active, onLeave);
   return (
     <ConfirmDialogControlled
       open={blocked}
@@ -17,10 +17,7 @@ export function LeaveConfirmation({ active, onLeave }: { active: boolean; onLeav
       title={t("unsaved_navigation_title")}
       description={t("unsaved_navigation_description")}
       confirmLabel={t("unsaved_navigation_leave")}
-      onConfirm={() => {
-        onLeave?.();
-        leave();
-      }}
+      onConfirm={leave}
     />
   );
 }

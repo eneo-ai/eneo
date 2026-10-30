@@ -22,10 +22,13 @@ export type LeaveConfirmationState = {
 };
 
 /** During Next coexistence, keep its existing reload/tab-close protection. */
-export function useLeaveConfirmation(active: boolean): LeaveConfirmationState {
+export const useLeaveConfirmation: (
+  active: boolean,
+  onLeave?: () => void
+) => LeaveConfirmationState = (active) => {
   useBeforeUnloadWarning(active);
   return { blocked: false, leave() {}, stay() {} };
-}
+};
 
 export type NavigateOptions = {
   /** `false` keeps the scroll position; by default the page scrolls to the top. */
