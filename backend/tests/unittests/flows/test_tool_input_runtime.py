@@ -638,7 +638,7 @@ async def test_a_run_whose_tool_is_allowed_and_unchanged_passes_the_preflight(
 
 
 def _level(level: int) -> SimpleNamespace:
-    return SimpleNamespace(security_level=level)
+    return SimpleNamespace(id=uuid4(), security_level=level)
 
 
 _PASSED = {"status": "skipped", "reason": "step_already_claimed"}

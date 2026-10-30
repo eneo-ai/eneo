@@ -329,7 +329,7 @@ async def test_delete_space_assistant_member(setup: Setup):
 
 
 async def test_delete_that_matched_no_row_is_not_found(setup: Setup):
-    setup.service.repo.delete.return_value = False
+    setup.service.repo.delete.side_effect = NotFoundException()
 
     with pytest.raises(NotFoundException):
         await setup.service.delete_assistant(TEST_UUID)
@@ -1326,7 +1326,6 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         {"data_retention_days": None},
         {"metadata_json": {}},
         {"icon_id": uuid4()},
-        {"skill_binding_intents": []},
         {"document_template": DocumentTemplateChoice(mode="builtin")},
         {"rerank_model_id": uuid4()},
         {"rerank_model_id": None},
@@ -1372,8 +1371,8 @@ async def test_own_personal_chat_skills_need_personal_skills_whatever_else_is_he
     )
 
     with pytest.raises(UnauthorizedException, match="Own Skills permission"):
-        await setup.service.update_assistant(
-            assistant_id=TEST_UUID, skill_binding_intents=[]
+        await _update_assistant(
+            setup.service, assistant_id=TEST_UUID, skill_binding_intents=[]
         )
 
     assistant.update.assert_not_called()

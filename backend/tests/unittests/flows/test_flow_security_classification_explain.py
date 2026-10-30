@@ -30,7 +30,7 @@ TOOL_WRITE_DOWN = "flow_step_tool_arguments_classification_write_down"
 
 
 def _classification(level: int):
-    return SimpleNamespace(security_level=level)
+    return SimpleNamespace(id=uuid4(), security_level=level)
 
 
 def _model(level: int | None, *, can_access: bool = True):

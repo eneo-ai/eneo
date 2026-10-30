@@ -171,7 +171,10 @@ def _adapter(base_url: str) -> TenantModelAdapter:
     adapter.litellm_model = "openai/gpt-5.4"
     adapter.provider_type = "openai"
     adapter.model = SimpleNamespace(
-        name="gpt-5.4", supports_tool_calling=True, token_limit=128000
+        name="gpt-5.4",
+        supports_tool_calling=True,
+        token_limit=128000,
+        max_output_tokens=32768,
     )
     adapter._prepare_kwargs = Mock(  # type: ignore[method-assign]
         return_value={

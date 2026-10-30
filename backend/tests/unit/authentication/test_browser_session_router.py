@@ -302,6 +302,10 @@ def _contract(response: Response) -> tuple[int, object, dict[str, str]]:
     body = response.json()
     if isinstance(body, dict):
         body.pop("request_id", None)
+        if response.status_code == 500:
+            error_id = body.pop("error_id")
+            assert isinstance(error_id, str) and len(error_id) == 8
+            assert all(char in "0123456789abcdef" for char in error_id)
     volatile = {"x-correlation-id", "x-trace-id", "date", "content-length"}
     headers = {k: v for k, v in response.headers.items() if k not in volatile}
     return response.status_code, body, headers

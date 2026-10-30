@@ -184,7 +184,7 @@ def test_correlation_header_names_the_id_in_the_login_logs(
         for target in (
             "eneo.server.middleware.trace_id.current_trace_id",
             "eneo.server.middleware.request_context._current_trace_id",
-            "eneo.server.main.current_trace_id",
+            "eneo.server.exception_handlers.current_trace_id",
         ):
             monkeypatch.setattr(target, lambda: None)
     login_endpoint.service.login.side_effect = (
