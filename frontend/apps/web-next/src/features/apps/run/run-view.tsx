@@ -81,17 +81,18 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
   }
 
   return (
-    <div className="flex w-full flex-1 flex-col items-center justify-center p-4">
-      <div className="border-border bg-card flex w-full max-w-[64ch] flex-col gap-4 rounded-xl border p-4 shadow-lg">
-        <div className="flex flex-col items-center gap-3 pt-2">
-          <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-2xl">
+    <div className="flex w-full flex-1 flex-col items-center justify-center p-4 max-md:p-0">
+      <div className="border-border bg-card flex w-full max-w-[64ch] flex-col gap-4 rounded-xl border p-4 shadow-lg max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:p-0 max-md:shadow-none">
+        <div className="flex flex-col items-center gap-3 pt-2 max-md:pt-0">
+          {/* On a phone the page's own heading names the app: the icon and the second name give the field its width back. */}
+          <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-2xl max-md:hidden">
             {icon ? (
               <img src={icon} alt="" className="size-full object-cover" />
             ) : (
               <AppWindow className="size-8" />
             )}
           </span>
-          <h2 className="text-center text-2xl font-extrabold">{app.name}</h2>
+          <h2 className="text-center text-2xl font-extrabold max-md:hidden">{app.name}</h2>
           {app.description && (
             <p className="text-muted-foreground max-w-[50ch] text-center text-sm">
               {app.description}
@@ -105,7 +106,7 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
               id="app-run-inputs"
               role="group"
               aria-label={t("input")}
-              className="bg-muted/40 flex min-h-[12rem] w-full flex-col items-center justify-center gap-4 rounded-lg border p-6"
+              className="bg-muted/40 flex min-h-[12rem] w-full flex-col items-center justify-center gap-4 rounded-lg border p-6 max-md:border-0 max-md:bg-transparent max-md:p-0"
               {...fieldProblemProps("app-run-inputs", inputProblem)}
             >
               <AppInputs app={app} inputs={inputs} />

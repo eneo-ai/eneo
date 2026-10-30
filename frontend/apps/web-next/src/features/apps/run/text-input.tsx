@@ -21,7 +21,7 @@ export function TextInput({
         value={value}
         rows={4}
         placeholder={description || t("enter_text_here")}
-        className="bg-background max-h-[40dvh] resize-none rounded-2xl px-6 py-3 text-base shadow-sm"
+        className="bg-background max-h-[40dvh] resize-none rounded-2xl px-6 py-3 text-base shadow-sm max-md:rounded-lg max-md:px-3"
         onChange={(event) => onChange(event.target.value)}
       />
     </div>

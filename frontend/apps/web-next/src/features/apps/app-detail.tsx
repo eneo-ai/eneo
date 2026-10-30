@@ -58,7 +58,8 @@ export function AppDetail({ appId }: { appId: string }) {
           <TabsTrigger value="run">{t("run")}</TabsTrigger>
           <TabsTrigger value="results">{t("results")}</TabsTrigger>
         </TabsList>
-        <TabsContent value="run" className="pt-4">
+        {/* Kept mounted: a peek at Resultat must not throw away the typed text and delete the uploaded files. */}
+        <TabsContent value="run" forceMount className="pt-4 data-[state=inactive]:hidden">
           <RunView app={app} resultHref={resultHref} />
         </TabsContent>
         <TabsContent value="results" className="pt-4">

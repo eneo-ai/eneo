@@ -18,11 +18,19 @@ it("follows external same-route tab changes and falls back for an unknown tab", 
     queryClient,
     route: "/spaces/space-1/apps/app-1"
   });
-  expect(screen.getByRole("tabpanel").textContent).toBe("Körvy");
+  // The run panel stays mounted behind Resultat, so name the one that is shown.
+  const shown = () => {
+    const [panel, ...more] = screen
+      .getAllByRole("tabpanel")
+      .filter((candidate) => candidate.getAttribute("data-state") === "active");
+    expect(more).toEqual([]);
+    return panel!;
+  };
+  expect(shown().textContent).toBe("Körvy");
   setRoute("/spaces/space-1/apps/app-1?tab=results");
   rerender(<AppDetail appId="app-1" />);
-  expect(screen.getByRole("tabpanel").textContent).toBe("Resultatvy");
+  expect(shown().textContent).toBe("Resultatvy");
   setRoute("/spaces/space-1/apps/app-1?tab=unknown");
   rerender(<AppDetail appId="app-1" />);
-  expect(screen.getByRole("tabpanel").textContent).toBe("Körvy");
+  expect(shown().textContent).toBe("Körvy");
 });
