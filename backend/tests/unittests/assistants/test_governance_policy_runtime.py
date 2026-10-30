@@ -3,7 +3,7 @@ import copy
 from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 from uuid import uuid4
 
 import pytest
@@ -793,12 +793,15 @@ def _personal_default_update_subject(effective_config):
 async def test_update_assistant_omitted_model_is_not_a_model_change():
     """An omitted completion model must not be read as a model update."""
     service, effective_config_service, assistant, _ = _personal_default_update_subject(
-        SimpleNamespace(
+        EffectiveConfig(
             models_enforced=True,
             available_models=[TEST_MODEL_GPT4],
+            locked_model=None,
+            policy_default_model=None,
             mcp_enforced=False,
             available_mcp_servers=[],
             prompt_enforced=False,
+            enforced_prompt_text=None,
         )
     )
 
@@ -806,15 +809,18 @@ async def test_update_assistant_omitted_model_is_not_a_model_change():
 
     assistant.update.assert_called_once()
     assert assistant.update.call_args.kwargs["completion_model"] is NOT_PROVIDED
-    effective_config_service.resolve_for.assert_not_awaited()
+    effective_config_service.resolve_for.assert_awaited_once_with(
+        assistant, space_is_personal=True
+    )
 
 
 async def test_update_assistant_allows_allowed_model_change():
     service, effective_config_service, assistant, space = (
         _personal_default_update_subject(
-            SimpleNamespace(
+            EffectiveConfig(
                 models_enforced=True,
                 available_models=[TEST_MODEL_GPT4],
+                locked_model=None,
                 policy_default_model=None,
                 mcp_enforced=False,
                 available_mcp_servers=[],
@@ -836,21 +842,25 @@ async def test_update_assistant_allows_allowed_model_change():
 
     assistant.update.assert_called_once()
     assert assistant.update.call_args.kwargs["completion_model"] is TEST_MODEL_GPT4
-    effective_config_service.resolve_for.assert_awaited_once_with(
-        assistant, space_is_personal=True
-    )
+    assert effective_config_service.resolve_for.await_args_list == [
+        call(assistant, space_is_personal=True),
+        call(assistant, space_is_personal=True),
+    ]
 
 
 async def test_update_assistant_rejects_disallowed_model_change():
     """A real requested model change must still be governed."""
     disallowed_model_id = uuid4()
     service, effective_config_service, assistant, _ = _personal_default_update_subject(
-        SimpleNamespace(
+        EffectiveConfig(
             models_enforced=True,
             available_models=[TEST_MODEL_GPT4],
+            locked_model=None,
+            policy_default_model=None,
             mcp_enforced=False,
             available_mcp_servers=[],
             prompt_enforced=False,
+            enforced_prompt_text=None,
             governance_skill_resolution=SkillRuntimeResolution(eligible=(), blocked=()),
         )
     )
@@ -866,17 +876,19 @@ async def test_update_assistant_rejects_disallowed_model_change():
         )
 
     assistant.update.assert_not_called()
-    effective_config_service.resolve_for.assert_awaited_once_with(
-        assistant, space_is_personal=True
-    )
+    assert effective_config_service.resolve_for.await_args_list == [
+        call(assistant, space_is_personal=True),
+        call(assistant, space_is_personal=True),
+    ]
 
 
-async def test_update_assistant_explicit_none_clears_model_with_one_policy_lookup():
-    """Explicit None clears the model and validates the resulting runtime once."""
+async def test_update_assistant_explicit_none_clears_model():
+    """Explicit None clears the model and validates the resulting runtime."""
     service, effective_config_service, assistant, _ = _personal_default_update_subject(
-        SimpleNamespace(
+        EffectiveConfig(
             models_enforced=True,
             available_models=[TEST_MODEL_GPT4],
+            locked_model=None,
             policy_default_model=None,
             mcp_enforced=False,
             available_mcp_servers=[],
@@ -894,9 +906,10 @@ async def test_update_assistant_explicit_none_clears_model_with_one_policy_looku
 
     assistant.update.assert_called_once()
     assert assistant.update.call_args.kwargs["completion_model"] is None
-    effective_config_service.resolve_for.assert_awaited_once_with(
-        assistant, space_is_personal=True
-    )
+    assert effective_config_service.resolve_for.await_args_list == [
+        call(assistant, space_is_personal=True),
+        call(assistant, space_is_personal=True),
+    ]
 
 
 async def test_update_guard_rejects_prompt_change_when_prompt_enforced():

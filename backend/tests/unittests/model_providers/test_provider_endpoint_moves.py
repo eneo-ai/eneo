@@ -165,6 +165,8 @@ async def test_only_settings_this_provider_sends_count_as_a_move(
 ):
     provider = _provider(endpoint="https://gateway.invalid/v1")
     provider.provider_type = provider_type
+    if provider_type == "azure":
+        provider.config["deployment_name"] = "test-deployment"
     provider.config[field] = "before"
     service, repository = _service(provider)
 
@@ -250,12 +252,13 @@ async def test_provider_endpoint_change_keeps_token_limits(move):
         session = MagicMock()
         session.execute = AsyncMock(side_effect=db.execute)
         repository = ModelProviderRepository(session, tenant_id)
+        encryption = EncryptionService(Fernet.generate_key().decode())
         provider = ModelProvider(
             id=provider_id,
             tenant_id=tenant_id,
             name="Test",
             provider_type="openai",
-            credentials={},
+            credentials={"api_key": encryption.encrypt("test-key-for-old-endpoint")},
             config={"endpoint": "https://old.invalid/v1"},
             is_active=True,
             outbound_headers=[],
@@ -264,11 +267,10 @@ async def test_provider_endpoint_change_keeps_token_limits(move):
         )
         repository.get_by_id = AsyncMock(return_value=provider)
         repository.update = AsyncMock(return_value=provider)
-        service = ModelProviderService(
-            repository=repository, encryption=EncryptionService(None)
-        )
+        service = ModelProviderService(repository=repository, encryption=encryption)
         await service.update(
             provider_id,
+            credentials={"api_key": "test-key-for-new-endpoint"} if move else None,
             config={
                 "endpoint": "https://new.invalid/v1"
                 if move
