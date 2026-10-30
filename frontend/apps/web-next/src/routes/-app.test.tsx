@@ -5,7 +5,6 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createTranslator } from "use-intl";
 import {
   Profiler,
-  useEffect,
   useState,
   type ComponentProps,
   type ProfilerOnRenderCallback,
@@ -46,7 +45,7 @@ function EditorDraft({ id }: { id: string }) {
   );
 }
 
-beforeEach(() => {
+beforeEach(async () => {
   vi.resetModules();
   vi.clearAllMocks();
   // The router scrolls the main panel; jsdom has no element scrolling implementation.
@@ -125,6 +124,8 @@ beforeEach(() => {
     // Node's Request needs an absolute base; response/session middleware stays real.
     API_BASE: window.location.origin
   }));
+  // Transform the app graph during fixture setup, outside each behavior assertion's timeout.
+  await import("@/router");
 });
 
 it.each(["assistants", "apps", "services"] as const)(
@@ -758,33 +759,14 @@ it.each([
 );
 
 it("keeps the space frame mounted when switching from overview to members", async () => {
-  const mounts = vi.fn();
-  const unmounts = vi.fn();
-  vi.doMock("@/features/spaces/frame/space-frame", async (importOriginal) => {
-    const { SpaceFrame } =
-      await importOriginal<typeof import("@/features/spaces/frame/space-frame")>();
-    return {
-      SpaceFrame: ({ children }: { children: ReactNode }) => {
-        useEffect(() => {
-          mounts();
-          return unmounts;
-        }, []);
-        return <SpaceFrame>{children}</SpaceFrame>;
-      }
-    };
-  });
+  setViewport("desktop");
   replies.set("/api/v1/spaces/space-1/", makeSpace());
-  try {
-    const { router } = await renderRoute("/spaces/space-1/overview");
-    await waitFor(() => expect(mounts).toHaveBeenCalledTimes(1));
-    await act(() => router.navigate({ href: "/spaces/space-1/members" }));
-    await screen.findByRole("heading", { name: messages.members });
-    await waitFor(() => expect(document.title).toBe(`${messages.members} · Upphandling · Eneo`));
-    expect(mounts).toHaveBeenCalledTimes(1);
-    expect(unmounts).not.toHaveBeenCalled();
-  } finally {
-    vi.doUnmock("@/features/spaces/frame/space-frame");
-  }
+  const { router } = await renderRoute("/spaces/space-1/overview");
+  const heading = await screen.findByRole("heading", { name: "Upphandling", level: 1 });
+  await act(() => router.navigate({ href: "/spaces/space-1/members" }));
+  await screen.findByRole("heading", { name: messages.members });
+  await waitFor(() => expect(document.title).toBe(`${messages.members} · Upphandling · Eneo`));
+  expect(screen.getByRole("heading", { name: "Upphandling", level: 1 })).toBe(heading);
 });
 
 it("preserves chat state when its saved session updates the URL without another space read", async () => {

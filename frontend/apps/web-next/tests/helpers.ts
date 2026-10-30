@@ -134,12 +134,20 @@ export function apiPath(path: string): string {
 
 /** A same-origin write returning the created resource's id; load an app page first. */
 export async function apiPost(page: Page, path: string, data: object): Promise<string> {
-  const response = await page.request.post(apiPath(path), {
-    data,
-    headers: { origin: new URL(page.url()).origin }
-  });
-  expect(response.ok(), await response.text()).toBe(true);
-  return ((await response.json()) as { id: string }).id;
+  // Cookie-authenticated writes require the browser's same-origin fetch metadata.
+  const response = await page.evaluate(
+    async ({ url, data }) => {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify(data)
+      });
+      return { ok: response.ok, body: await response.text() };
+    },
+    { url: apiPath(path), data }
+  );
+  expect(response.ok, response.body).toBe(true);
+  return (JSON.parse(response.body) as { id: string }).id;
 }
 
 /**
