@@ -471,35 +471,37 @@ for (const colorScheme of ["light", "dark"] as const) {
       }
     });
 
-    test("space overview, knowledge and websites, and the create-collection dialog", async ({
-      page
-    }) => {
-      const name = uniqueName(`E2E A11y Space ${colorScheme}`);
-      const space = await createSpace(page, name);
+    test(
+      "space overview, knowledge and websites, and the create-collection dialog",
+      { tag: "@vite" },
+      async ({ page }) => {
+        const name = uniqueName(`E2E A11y Space ${colorScheme}`);
+        const space = await createSpace(page, name);
 
-      await scan(page, `${space}/overview`, async () => {
-        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-      });
-      await scan(page, `${space}/knowledge`, async () => {
-        await expect(
-          page.getByRole("heading", { level: 2, name: /^(Kunskap|Knowledge)$/ })
-        ).toBeVisible();
-      });
-      await scan(page, `${space}/knowledge?tab=websites`, async () => {
-        await expect(
-          page.getByRole("tab", { name: /^(Webbplatser|Websites)$/, selected: true })
-        ).toBeVisible();
-        const panel = page.getByRole("tabpanel");
-        // A new space has no websites: the empty state (a list shows a table).
-        await expect(
-          panel.getByRole("heading", { level: 3 }).or(panel.getByRole("table")).first()
-        ).toBeVisible();
-      });
+        await scan(page, `${space}/overview`, async () => {
+          await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+        });
+        await scan(page, `${space}/knowledge`, async () => {
+          await expect(
+            page.getByRole("heading", { level: 2, name: /^(Kunskap|Knowledge)$/ })
+          ).toBeVisible();
+        });
+        await scan(page, `${space}/knowledge?tab=websites`, async () => {
+          await expect(
+            page.getByRole("tab", { name: /^(Webbplatser|Websites)$/, selected: true })
+          ).toBeVisible();
+          const panel = page.getByRole("tabpanel");
+          // A new space has no websites: the empty state (a list shows a table).
+          await expect(
+            panel.getByRole("heading", { level: 3 }).or(panel.getByRole("table")).first()
+          ).toBeVisible();
+        });
 
-      await page.goto(`${space}/knowledge`);
-      await openCreateCollectionDialog(page);
-      await expectNoAxeViolations(page);
-    });
+        await page.goto(`${space}/knowledge`);
+        await openCreateCollectionDialog(page);
+        await expectNoAxeViolations(page);
+      }
+    );
 
     test(
       "Skills: create, saved detail and a long reference preview",
@@ -606,7 +608,28 @@ for (const colorScheme of ["light", "dark"] as const) {
       }
     );
 
-    test("collection detail", async ({ page }) => {
+    test("website detail and indexed content", { tag: "@vite" }, async ({ page }) => {
+      await page.goto("/spaces/list");
+      const spaceId = await apiPost(page, "/spaces/", {
+        name: uniqueName(`E2E Website ${colorScheme}`)
+      });
+      const websiteId = await apiPost(page, `/spaces/${spaceId}/knowledge/websites/`, {
+        url: "https://example.org/e2e",
+        name: "E2E webbplats",
+        crawl_type: "crawl",
+        update_interval: "never",
+        download_files: false
+      });
+      await scan(page, `/spaces/${spaceId}/knowledge/websites/${websiteId}`, async () => {
+        await expect(page.getByRole("heading", { level: 1, name: "E2E webbplats" })).toBeVisible();
+        await expect(page.getByRole("tabpanel", { name: "Indexeringar" })).toBeVisible();
+      });
+      await page.getByRole("tab", { name: "Indexerat innehåll" }).click();
+      await expect(page.getByRole("tabpanel", { name: "Indexerat innehåll" })).toBeVisible();
+      await expectNoAxeViolations(page);
+    });
+
+    test("collection detail", { tag: "@vite" }, async ({ page }) => {
       // A new space gets the organisation's embedding model (e2e/seed.py),
       // which a collection needs.
       const space = await createSpace(page, uniqueName(`E2E A11y Collection ${colorScheme}`));
@@ -750,7 +773,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         });
 
-        test("a space, and the organisation space", async ({ page }) => {
+        test("a space, and the organisation space", { tag: "@vite" }, async ({ page }) => {
           const name = uniqueName(`E2E A11y Touch Space ${colorScheme}`);
           const space = await createSpace(page, name);
           await scan(page, `${space}/overview`, async () => {
@@ -986,7 +1009,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("space overview and knowledge", async ({ page }) => {
+  test("space overview and knowledge", { tag: "@vite" }, async ({ page }) => {
     const name = uniqueName("E2E Reflow Space");
     const space = await createSpace(page, name);
 

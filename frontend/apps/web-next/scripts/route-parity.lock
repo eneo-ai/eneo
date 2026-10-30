@@ -18,6 +18,12 @@ bbb6affc0c3481700ac409ef976231746d3325bf  (app)/spaces/[spaceId]/apps/page.tsx
 d7eaec737d6ff9dd660bc05cc0b4419988fcfd2f  (app)/spaces/[spaceId]/assistants/page.tsx
 36410d4987933616f071e65308dd27357a0b8da6  (app)/spaces/[spaceId]/chat/page.tsx
 4478ac2717ce9bf5462a1cee157a50056d88e2d3  (app)/spaces/[spaceId]/group-chats/[groupChatId]/edit/page.tsx
+f81cb3f15a4560ffa726a1c722d199bebb909d4f  (app)/spaces/[spaceId]/knowledge/collections/[collectionId]/page.tsx
+f4aa7f61fa7180df91f1fe8d75445686197b06de  (app)/spaces/[spaceId]/knowledge/integrations/[integrationKnowledgeId]/page.tsx
+57c3f5c00c14e8ff914995b2836886b504e4122b  (app)/spaces/[spaceId]/knowledge/integrations/page.tsx
+c995f75d590ce104227c84cb7162b253f9540604  (app)/spaces/[spaceId]/knowledge/integrations/wrapper/[wrapperId]/page.tsx
+efdde76d0694c73098107fca317939df73cf785b  (app)/spaces/[spaceId]/knowledge/page.tsx
+08c4665cf354206fb76be45cb9a7bb7309ea5e09  (app)/spaces/[spaceId]/knowledge/websites/[websiteId]/page.tsx
 49d1147631ae6eae3ef98046b1f406fcdf99280d  (app)/spaces/[spaceId]/layout.tsx
 5936eca91ea3175aaff8c5816681c8455e942a96  (app)/spaces/[spaceId]/members/page.tsx
 f6acd48eb96fb6e7eaa99dd98953d153a24bae75  (app)/spaces/[spaceId]/overview/page.tsx

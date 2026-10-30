@@ -14,7 +14,16 @@ import {
 import type { ChatPage } from "@/features/chat/chat-page";
 import messages from "@/lib/i18n/messages/sv.json";
 import { testAppContext } from "@/test/render";
-import { makeSpace } from "@/features/spaces/testing/space-fixture";
+import {
+  makeCollection,
+  makeIntegration,
+  makeSpace,
+  makeWebsite
+} from "@/features/spaces/testing/space-fixture";
+import type { ItemDetail } from "@/features/knowledge/integrations/item-detail.client";
+import type { WrapperDetail } from "@/features/knowledge/integrations/wrapper-detail.client";
+import type { KnowledgePage } from "@/features/knowledge/knowledge-page";
+import type { WebsiteDetail } from "@/features/knowledge/detail/website-detail.client";
 import { setViewport } from "@/test/setup-dom";
 
 const navigate = vi.hoisted(() => vi.fn());
@@ -80,6 +89,34 @@ beforeEach(() => {
   vi.stubGlobal("fetch", fetcher);
   vi.doMock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
   vi.doMock("@/lib/link", () => import("@/lib/link.tanstack"));
+  // Knowledge feature tests own rendering; these expose the route's loaded data and runtime props.
+  vi.doMock("@/features/knowledge/integrations/item-detail.client", () => ({
+    ItemDetail: ({ itemId, loaded }: ComponentProps<typeof ItemDetail>) => (
+      <section aria-label={`Item ${itemId}`}>
+        <pre>{JSON.stringify(loaded.items)}</pre>
+      </section>
+    )
+  }));
+  vi.doMock("@/features/knowledge/integrations/wrapper-detail.client", () => ({
+    WrapperDetail: ({ wrapperId, loaded }: ComponentProps<typeof WrapperDetail>) => (
+      <section aria-label={`Wrapper ${wrapperId}`}>
+        <pre>{JSON.stringify(loaded.items)}</pre>
+      </section>
+    )
+  }));
+  vi.doMock("@/features/knowledge/knowledge-page", () => ({
+    KnowledgePage: ({ integrationRequestFormUrl }: ComponentProps<typeof KnowledgePage>) => (
+      <h1>{integrationRequestFormUrl ?? "Knowledge hub"}</h1>
+    )
+  }));
+  vi.doMock("@/features/knowledge/detail/website-detail.client", () => ({
+    WebsiteDetail: ({
+      websiteId,
+      integrationRequestFormUrl
+    }: ComponentProps<typeof WebsiteDetail>) => (
+      <section aria-label={`Website ${websiteId}`}>{integrationRequestFormUrl}</section>
+    )
+  }));
   // Editor fields have feature tests; here their local state exposes the route's identity boundary.
   vi.doMock("@/features/apps/editor/app-editor", () => ({
     AppEditor: ({ appId }: { appId: string }) => <EditorDraft id={appId} />
@@ -125,6 +162,234 @@ beforeEach(() => {
     // Node's Request needs an absolute base; response/session middleware stays real.
     API_BASE: window.location.origin
   }));
+});
+
+it("opens the knowledge hub and passes the operator's runtime integration form URL", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  const { runtimeConfig, setRuntimeConfig } = await import("@/lib/runtime-config");
+  await renderRoute("/spaces/space-1/knowledge", undefined, () => {
+    setRuntimeConfig({
+      ...runtimeConfig(),
+      request_integration_form_url: "https://forms.example.test/request"
+    });
+  });
+  await screen.findByRole("heading", { name: "https://forms.example.test/request" });
+  expect(document.title).toBe(`${messages.knowledge} · Upphandling · Eneo`);
+});
+
+it("redirects the integration index to the knowledge tab", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  const { router } = await renderRoute("/spaces/space-1/knowledge/integrations");
+  expect(router.state.location.pathname).toBe("/spaces/space-1/knowledge");
+  expect(router.state.location.search).toEqual({ tab: "integrations" });
+  await screen.findByRole("heading", { name: "Knowledge hub" });
+});
+
+it("loads a standalone integration and its title from one space request", async () => {
+  const item = makeIntegration({ id: "item-1", name: "Avtal" });
+  replies.set("/api/v1/spaces/space-1/", makeSpace({ integrations: [item] }));
+  const { router } = await renderRoute(
+    "/spaces/space-1/knowledge/integrations/item-1",
+    undefined,
+    ({ queryClient }) => {
+      queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+    }
+  );
+  const view = await screen.findByRole("region", { name: "Item item-1" });
+  expect(JSON.parse(view.textContent!)).toEqual([item]);
+  expect(document.title).toBe("Avtal · Upphandling · Eneo");
+  await act(() =>
+    router.navigate({ href: "/spaces/space-1/knowledge/integrations/item-1?tab=activity" })
+  );
+  expect(screen.getByRole("region", { name: "Item item-1" })).toBe(view);
+  expect(requestedPaths().filter((path) => path === "/api/v1/spaces/space-1/")).toHaveLength(1);
+});
+
+it.each([
+  ["skipped", "problems"],
+  ["activity", "activity"],
+  ["unknown", undefined],
+  ["content&tab=activity", undefined]
+])(
+  "redirects a wrapped SharePoint item with tab=%s through the shared parser",
+  async (tab, expectedTab) => {
+    const item = makeIntegration({
+      id: "item-1",
+      wrapper_id: "wrapper-1",
+      wrapper_name: "Byggnad"
+    });
+    replies.set("/api/v1/spaces/space-1/", makeSpace({ integrations: [item] }));
+    const { router } = await renderRoute(
+      `/spaces/space-1/knowledge/integrations/item-1?tab=${tab}`,
+      undefined,
+      ({ queryClient }) => {
+        queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+      }
+    );
+    expect(router.state.location.pathname).toBe(
+      "/spaces/space-1/knowledge/integrations/wrapper/wrapper-1"
+    );
+    expect(router.state.location.search).toEqual({
+      folder: "item-1",
+      ...(expectedTab && { tab: expectedTab })
+    });
+    const view = await screen.findByRole("region", { name: "Wrapper wrapper-1" });
+    expect(JSON.parse(view.textContent!)).toEqual([item]);
+    expect(document.title).toBe("Byggnad · Upphandling · Eneo");
+    expect(requestedPaths().filter((path) => path === "/api/v1/spaces/space-1/")).toHaveLength(1);
+  }
+);
+
+it.each(["missing", "foreign", "wrapper/missing", "wrapper/foreign"])(
+  "does not open unknown or foreign integration sources: %s",
+  async (path) => {
+    replies.set(
+      "/api/v1/spaces/space-1/",
+      makeSpace({
+        integrations: [
+          makeIntegration({ id: "owned", wrapper_id: "owned" }),
+          makeIntegration({ id: "foreign", wrapper_id: "foreign", space_id: "space-2" })
+        ]
+      })
+    );
+    await renderRoute(`/spaces/space-1/knowledge/integrations/${path}`);
+    await screen.findByRole("heading", { name: messages.page_not_found });
+    expect(requestedPaths()).toContain("/api/v1/spaces/space-1/");
+  }
+);
+
+it("excludes shared items from a wrapper and uses the space alias in source links", async () => {
+  const owned = makeIntegration({
+    id: "owned",
+    wrapper_id: "wrapper-1",
+    wrapper_name: "Egen källa"
+  });
+  replies.set(
+    "/api/v1/spaces/type/personal/",
+    makeSpace({
+      integrations: [
+        owned,
+        makeIntegration({ id: "foreign", wrapper_id: "wrapper-1", space_id: "space-2" })
+      ],
+      overrides: { personal: true }
+    })
+  );
+  const { router } = await renderRoute("/spaces/personal/knowledge/integrations/owned");
+  expect(router.state.location.pathname).toBe(
+    "/spaces/personal/knowledge/integrations/wrapper/wrapper-1"
+  );
+  const view = await screen.findByRole("region", { name: "Wrapper wrapper-1" });
+  expect(JSON.parse(view.textContent!)).toEqual([owned]);
+  expect(document.title).toBe(`Egen källa · ${messages.personal} · Eneo`);
+});
+
+it.each([
+  { source: "item-1", status: 404 },
+  { source: "wrapper/wrapper-1", status: 404 },
+  { source: "item-1", status: 500 },
+  { source: "wrapper/wrapper-1", status: 500 }
+])(
+  "preserves the space's $status failure for $source without another request",
+  async ({ source, status }) => {
+    replies.set("/api/v1/spaces/missing/", new Response(null, { status }));
+    await renderRoute(`/spaces/missing/knowledge/integrations/${source}`);
+    await screen.findByRole("heading", {
+      name: status === 404 ? messages.page_not_found : messages.something_went_wrong
+    });
+    expect(requestedPaths().filter((path) => path === "/api/v1/spaces/missing/")).toHaveLength(1);
+  }
+);
+
+it("checks integration ownership against the parent's refreshed space on a return visit", async () => {
+  const item = makeIntegration({ id: "item-1", name: "Old source" });
+  replies.set("/api/v1/spaces/space-1/", makeSpace({ integrations: [item] }));
+  const href = "/spaces/space-1/knowledge/integrations/item-1";
+  const { router, queryClient } = await renderRoute(href, undefined, ({ queryClient }) => {
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+  });
+  await screen.findByRole("region", { name: "Item item-1" });
+  await act(() => router.navigate({ href: "/account" }));
+  let release!: (space: ReturnType<typeof makeSpace>) => void;
+  replies.set(
+    "/api/v1/spaces/space-1/",
+    new Promise((resolve) => {
+      release = resolve;
+    })
+  );
+  await queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"], refetchType: "none" });
+  let navigation!: Promise<void>;
+  try {
+    await act(async () => {
+      navigation = router.navigate({ href });
+    });
+    expect(screen.queryByRole("region", { name: "Item item-1" })).toBeNull();
+  } finally {
+    await act(async () => {
+      release(makeSpace({ integrations: [makeIntegration({ ...item, space_id: "space-2" })] }));
+      await navigation;
+    });
+  }
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(screen.queryByRole("region", { name: "Item item-1" })).toBeNull();
+});
+
+it("opens a collection with its prefetched files and resource title", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set("/api/v1/groups/collection-1/", makeCollection({ permissions: ["read"] }));
+  replies.set("/api/v1/groups/collection-1/info-blobs/", { items: [] });
+  const { queryClient } = await renderRoute("/spaces/space-1/knowledge/collections/collection-1");
+  await screen.findByRole("heading", { name: "Upphandlingspolicy", level: 1 });
+  expect(queryClient.getQueryData(["collections", "collection-1", "info-blobs"])).toEqual([]);
+  expect(document.title).toBe("Upphandlingspolicy · Upphandling · Eneo");
+});
+
+it("opens a website with both paginated lists cached and the runtime form URL", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set(
+    "/api/v1/websites/website-1/",
+    makeWebsite({ url: "https://example.test", name: null })
+  );
+  replies.set("/api/v1/websites/website-1/runs/latest/", null);
+  const page = { items: [], next_cursor: null, total_count: 0 };
+  replies.set("/api/v1/websites/website-1/runs/", page);
+  replies.set("/api/v1/websites/website-1/info-blobs/page/", page);
+  const { runtimeConfig, setRuntimeConfig } = await import("@/lib/runtime-config");
+  const { queryClient } = await renderRoute(
+    "/spaces/space-1/knowledge/websites/website-1",
+    undefined,
+    () => {
+      setRuntimeConfig({
+        ...runtimeConfig(),
+        request_integration_form_url: "https://forms.example.test/request"
+      });
+    }
+  );
+  const view = await screen.findByRole("region", { name: "Website website-1" });
+  expect(view.textContent).toBe("https://forms.example.test/request");
+  expect(document.title).toBe("example.test · Upphandling · Eneo");
+  expect(queryClient.getQueryData(["websites", "website-1", "crawl-runs", "latest"])).toBeNull();
+  for (const key of [
+    ["crawl-runs", "pages"],
+    ["info-blobs", "pages"]
+  ])
+    expect(queryClient.getQueryData(["websites", "website-1", ...key])).toMatchObject({
+      pages: [page]
+    });
+});
+
+it.each([
+  ["collections/missing", "/api/v1/groups/missing/"],
+  ["websites/missing", "/api/v1/websites/missing/"]
+])("does not open a missing knowledge resource: %s", async (path, apiPath) => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set(apiPath, new Response(null, { status: 404 }));
+  replies.set("/api/v1/groups/missing/info-blobs/", { items: [] });
+  replies.set("/api/v1/websites/missing/runs/latest/", null);
+  replies.set("/api/v1/websites/missing/runs/", { items: [] });
+  replies.set("/api/v1/websites/missing/info-blobs/page/", { items: [] });
+  await renderRoute(`/spaces/space-1/knowledge/${path}`);
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(requestedPaths()).toContain(apiPath);
 });
 
 it.each(["assistants", "apps", "services"] as const)(

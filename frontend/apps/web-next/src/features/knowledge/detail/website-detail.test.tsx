@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -36,6 +36,8 @@ const state = vi.hoisted(() => ({
   history: [] as Run[],
   olderHistory: [] as Run[],
   historyTotal: 0,
+  historyError: false,
+  latestError: false,
   blobTitle: "lou.html",
   requests: [] as string[]
 }));
@@ -60,6 +62,14 @@ vi.mock("@/lib/api/browser", () => ({
     GET: (path: string, options?: { params?: { query?: { cursor?: string | null } } }) => {
       const cursor = options?.params?.query?.cursor ?? null;
       state.requests.push(`${path}${cursor ? `?cursor=${cursor}` : ""}`);
+      if (
+        (path === "/api/v1/websites/{id}/runs/" && cursor && state.historyError) ||
+        (path === "/api/v1/websites/{id}/runs/latest/" && state.latestError)
+      )
+        return Promise.resolve({
+          error: { detail: "unavailable" },
+          response: new Response(null, { status: state.latestError ? 404 : 503 })
+        });
       const data =
         path === "/api/v1/websites/{id}/"
           ? makeWebsite()
@@ -99,6 +109,9 @@ afterEach(() => {
   cleanup();
   setRuns(run());
   state.blobTitle = "lou.html";
+  state.historyError = false;
+  state.latestError = false;
+  vi.useRealTimers();
   state.requests = [];
   post.mockReset();
 });
@@ -242,6 +255,44 @@ describe("WebsiteDetail", () => {
     );
     expect(state.requests).toContain("/api/v1/websites/{id}/runs/?cursor=older");
     expect(screen.queryByRole("button", { name: /Visa äldre genomsökningar/ })).toBeNull();
+  });
+
+  it("keeps loaded crawl rows and retries a failed next page in place", async () => {
+    setRuns(run(), [run({ id: "older", created_at: "2026-09-20T08:00:00Z" })]);
+    state.historyError = true;
+    renderInApp(<WebsiteDetail websiteId="website-1" />);
+    const table = await screen.findByRole("table", { name: "Indexeringar" });
+    fireEvent.click(screen.getByRole("button", { name: "Visa äldre genomsökningar (1/2)" }));
+    const retry = await screen.findByRole("button", { name: /^Försök igen/ });
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    state.historyError = false;
+    fireEvent.click(retry);
+    await waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(3));
+    expect(screen.queryByRole("button", { name: /^Försök igen/ })).toBeNull();
+    expect(
+      state.requests.filter((path) => path === "/api/v1/websites/{id}/runs/?cursor=older")
+    ).toHaveLength(2);
+  });
+
+  it("stops polling after the latest crawl becomes unavailable", async () => {
+    setRuns(run({ phase: "running", outcome: null, status: "in progress", finished_at: null }));
+    const { queryClient } = renderInApp(<WebsiteDetail websiteId="website-1" />);
+    await screen.findByRole("button", { name: "Stoppa" });
+    vi.useFakeTimers();
+    state.latestError = true;
+    await act(() =>
+      queryClient.invalidateQueries({
+        queryKey: ["websites", "website-1", "crawl-runs", "latest"],
+        exact: true
+      })
+    );
+    const count = state.requests.filter(
+      (path) => path === "/api/v1/websites/{id}/runs/latest/"
+    ).length;
+    await act(() => vi.advanceTimersByTimeAsync(10_000));
+    expect(
+      state.requests.filter((path) => path === "/api/v1/websites/{id}/runs/latest/")
+    ).toHaveLength(count);
   });
 
   it("says above the content when the latest finished run had failures", async () => {

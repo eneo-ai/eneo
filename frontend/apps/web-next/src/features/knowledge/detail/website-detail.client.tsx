@@ -16,10 +16,12 @@ import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
+import { LoadMore } from "@/components/composites/query-state";
 import { useClientTimeText } from "@/components/composites/client-time";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { flattenPages } from "@/lib/api/pagination";
+import { pollWhile } from "@/lib/api/query";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { BlobTable } from "@/features/knowledge/blobs";
@@ -161,30 +163,6 @@ function CrawlRunControls({
   );
 }
 
-/** "Visa fler (x/y)" under a paged list, toasting when a page could not be read. */
-function LoadMoreButton({
-  label,
-  loading,
-  onLoad
-}: {
-  label: string;
-  loading: boolean;
-  onLoad: () => void;
-}) {
-  return (
-    <div className="flex justify-center">
-      <AstryxButton
-        label={label}
-        isLoading={loading}
-        isInterruptible
-        onClick={() => {
-          if (!loading) onLoad();
-        }}
-      />
-    </div>
-  );
-}
-
 /** The latest finished run had problems: say so above the content, with links to them. */
 function ContentIssuesBanner({
   run,
@@ -233,10 +211,11 @@ export function WebsiteDetail({
   // user can start one).
   const { data: latest } = useQuery({
     ...websiteLatestRunQueryOptions(browserApi, websiteId),
-    refetchInterval: (query) =>
-      query.state.data && isActiveCrawlRun(query.state.data)
-        ? ACTIVE_CRAWL_REFRESH_MS
-        : IDLE_RUNS_REFRESH_MS
+    refetchInterval: pollWhile<CrawlRun | null>(
+      (run) => !!run && isActiveCrawlRun(run),
+      ACTIVE_CRAWL_REFRESH_MS,
+      IDLE_RUNS_REFRESH_MS
+    )
   });
   const runPages = useSuspenseInfiniteQuery(websiteCrawlRunsQueryOptions(browserApi, websiteId));
   const blobPages = useSuspenseInfiniteQuery(websiteBlobPagesQueryOptions(browserApi, websiteId));
@@ -276,15 +255,6 @@ export function WebsiteDetail({
   const latestCompletedRun = runs.find((run) => !isActiveCrawlRun(run));
   const onRerun = !readonly && !activeRun ? () => setStartOpen(true) : undefined;
   const websiteDisplay = website.name ? `${website.name} (${website.url})` : website.url;
-
-  function loadMore(
-    fetchNextPage: () => Promise<{ isError: boolean }>,
-    failedKey: "website_crawl_history_load_more_failed" | "website_indexed_content_load_more_failed"
-  ) {
-    void fetchNextPage().then((result) => {
-      if (result.isError) toast.error(t(failedKey));
-    });
-  }
 
   function showFailures(next: RunSelection) {
     setSelection(next);
@@ -339,18 +309,13 @@ export function WebsiteDetail({
           {tab === "crawls" ? (
             <>
               <CrawlRunsTable runs={runs} onRerun={onRerun} />
-              {runPages.hasNextPage ? (
-                <LoadMoreButton
-                  label={t("website_crawl_history_load_more", {
-                    current: runs.length,
-                    total: runTotal
-                  })}
-                  loading={runPages.isFetchingNextPage}
-                  onLoad={() =>
-                    loadMore(runPages.fetchNextPage, "website_crawl_history_load_more_failed")
-                  }
-                />
-              ) : null}
+              <LoadMore
+                label={t("website_crawl_history_load_more", {
+                  current: runs.length,
+                  total: runTotal
+                })}
+                query={runPages}
+              />
             </>
           ) : (
             <>
@@ -358,18 +323,13 @@ export function WebsiteDetail({
                 <ContentIssuesBanner run={latestCompletedRun} onShowFailures={showFailures} />
               ) : null}
               <BlobTable blobs={blobs} canEdit={false} labelledBy={tabId("blobs")} />
-              {blobPages.hasNextPage ? (
-                <LoadMoreButton
-                  label={t("website_indexed_content_load_more", {
-                    current: blobs.length,
-                    total: blobTotal
-                  })}
-                  loading={blobPages.isFetchingNextPage}
-                  onLoad={() =>
-                    loadMore(blobPages.fetchNextPage, "website_indexed_content_load_more_failed")
-                  }
-                />
-              ) : null}
+              <LoadMore
+                label={t("website_indexed_content_load_more", {
+                  current: blobs.length,
+                  total: blobTotal
+                })}
+                query={blobPages}
+              />
             </>
           )}
         </div>
