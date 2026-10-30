@@ -6,6 +6,7 @@ import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
+import { VStack } from "@astryxdesign/core/VStack";
 import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -106,7 +107,7 @@ function UploadMimeTypes({
   const [draft, setDraft] = useState({ signature, text: custom.join(", ") });
   if (draft.signature !== signature) setDraft({ signature, text: custom.join(", ") });
   return (
-    <div className="flex flex-col gap-3 sm:col-span-2">
+    <VStack gap={3} className="sm:col-span-2">
       <CheckboxList
         label={t("flow_runtime_input_mimetypes_label")}
         description={t("flow_runtime_input_mimetypes_hint")}
@@ -139,18 +140,17 @@ function UploadMimeTypes({
         autoComplete="off"
         isOptional
       />
-      <div>
-        <Button
-          label={t("flow_runtime_input_mimetypes_reset")}
-          variant="ghost"
-          size="sm"
-          onClick={() => {
-            setDraft({ signature: "[]", text: "" });
-            onChange([]);
-          }}
-        />
-      </div>
-    </div>
+      <Button
+        label={t("flow_runtime_input_mimetypes_reset")}
+        variant="ghost"
+        size="sm"
+        className="self-start"
+        onClick={() => {
+          setDraft({ signature: "[]", text: "" });
+          onChange([]);
+        }}
+      />
+    </VStack>
   );
 }
 
