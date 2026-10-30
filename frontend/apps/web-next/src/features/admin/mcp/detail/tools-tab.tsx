@@ -54,7 +54,7 @@ function RiskChip({ tool }: { tool: McpServerTool }) {
             "gap-1 font-normal",
             risk === "write"
               ? "border-warning/30 bg-warning/15 text-warning"
-              : "border-success/30 bg-success/15 text-success"
+              : "border-success/30 bg-ax-success-muted text-ax-success"
           )}
         >
           {risk === "write" ? (
@@ -107,11 +107,7 @@ function ActiveToolRow({
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   return (
-    <Collapsible
-      open={open}
-      onOpenChange={setOpen}
-      className={cn("border-border rounded-lg border", !tool.is_enabled_by_default && "opacity-60")}
-    >
+    <Collapsible open={open} onOpenChange={setOpen} className="border-border rounded-lg border">
       <div className="flex items-center gap-3 p-3">
         <CollapsibleTrigger className="flex min-w-0 flex-1 items-center gap-2 text-left">
           <ChevronRight
@@ -175,7 +171,7 @@ function PendingToolRow({
                 {t("mcp_change_changed")}
               </Badge>
             ) : (
-              <Badge className="border-success/30 bg-success/15 text-success gap-1 font-normal">
+              <Badge className="border-success/30 bg-ax-success-muted text-ax-success gap-1 font-normal">
                 {t("mcp_change_new")}
               </Badge>
             )}

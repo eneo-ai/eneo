@@ -129,7 +129,7 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
             </div>
           </>
         ) : (
-          <div className="bg-muted/40 flex min-h-[12rem] w-full items-center justify-center rounded-lg border p-6 opacity-60">
+          <div className="bg-muted/40 flex min-h-[12rem] w-full items-center justify-center rounded-lg border p-6">
             <p className="text-muted-foreground max-w-[50ch] text-center text-sm">
               {t("no_completion_model_description")}
             </p>

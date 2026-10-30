@@ -130,7 +130,7 @@ export function CredentialsTab({ server }: { server: McpServer }) {
           <div className="flex flex-wrap items-center gap-3">
             {server.has_credentials ? (
               <>
-                <Badge className="border-success/30 bg-success/15 text-success gap-1 font-normal">
+                <Badge className="border-success/30 bg-ax-success-muted text-ax-success gap-1 font-normal">
                   <KeyRound className="size-3" aria-hidden="true" />
                   {t("mcp_token_configured")}
                 </Badge>

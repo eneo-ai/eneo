@@ -215,7 +215,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                           <div className="flex items-center gap-1">
                             <button
                               type="button"
-                              className="text-muted-foreground hover:text-foreground hover:bg-accent rounded px-2 py-1 text-[10px] font-medium disabled:pointer-events-none disabled:opacity-40"
+                              className="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-ring rounded px-2 py-1 text-xs font-medium focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:min-h-11 pointer-coarse:px-3"
                               disabled={enabledCount === tools.length}
                               onClick={() => tools.forEach((tool) => toggleMcpTool(tool.id, true))}
                             >
@@ -226,7 +226,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                             </span>
                             <button
                               type="button"
-                              className="text-muted-foreground hover:text-foreground hover:bg-accent rounded px-2 py-1 text-[10px] font-medium disabled:pointer-events-none disabled:opacity-40"
+                              className="text-muted-foreground hover:text-foreground hover:bg-accent focus-visible:outline-ring rounded px-2 py-1 text-xs font-medium focus-visible:outline-2 disabled:pointer-events-none disabled:opacity-40 pointer-coarse:min-h-11 pointer-coarse:px-3"
                               disabled={enabledCount === 0}
                               onClick={() => tools.forEach((tool) => toggleMcpTool(tool.id, false))}
                             >
@@ -240,7 +240,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                             return (
                               <label
                                 key={tool.id}
-                                className={`hover:bg-accent flex items-center gap-3 px-3 py-2 ${toolEnabled ? "" : "opacity-50"}`}
+                                className="hover:bg-accent flex items-center gap-3 px-3 py-2"
                               >
                                 <span className="min-w-0 flex-1">
                                   <span className="block truncate font-mono text-xs font-medium">

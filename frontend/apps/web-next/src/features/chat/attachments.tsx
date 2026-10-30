@@ -67,7 +67,7 @@ function DownloadPreviewLink({ url }: { url: string }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="bg-primary text-primary-foreground hover:bg-primary/90 focus-visible:outline-ring inline-flex min-h-9 items-center gap-2 rounded-md px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+      className="bg-primary text-primary-foreground hover:bg-ax-hover-overlay focus-visible:outline-ring inline-flex min-h-9 items-center gap-2 rounded-md px-4 py-2 text-sm font-medium focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
     >
       <Download aria-hidden="true" className="size-4" />
       {t("download")}
