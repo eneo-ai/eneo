@@ -679,7 +679,7 @@ def test_references_identify_the_exact_helper_section_despite_labels_and_shared_
         base_instructions="", bindings=[root, other_root]
     ).prompt
 
-    for helper, identity in [(first, "Skill 2"), (second, "Skill 4")]:
+    for helper, identity in [(first, "ref-2"), (second, "ref-4")]:
         assert f"### Skill: Klartext (klartext, revision 1) [{identity}]\n" in prompt
         assert f"({identity})" in prompt
         assert str(helper.skill_revision_id) not in prompt

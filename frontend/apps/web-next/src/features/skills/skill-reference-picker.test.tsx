@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ReferenceCandidate, ReferenceCatalog } from "@eneo/skill-instructions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { SkillReferencePicker } from "./skill-reference-picker";
 import { SkillInstructionEditor } from "./skill-instruction-editor";
 
@@ -32,23 +33,27 @@ afterEach(cleanup);
 describe("instruction references", () => {
   it("handles Escape inside an inline picker before it reaches the enclosing form", async () => {
     const onClose = vi.fn();
-    const outerKeyDown = vi.fn();
+    const closeForm = vi.fn();
     renderInApp(
-      <div onKeyDown={outerKeyDown}>
-        <SkillReferencePicker
-          inline
-          catalog={catalog()}
-          selection={{ documentVersion: 0, from: 0, to: 0 }}
-          onSelect={vi.fn()}
-          onClose={onClose}
-          onRemove={vi.fn()}
-        />
-      </div>
+      <Dialog open onOpenChange={closeForm}>
+        <DialogContent>
+          <DialogTitle>Skapa Skill</DialogTitle>
+          <SkillReferencePicker
+            inline
+            catalog={catalog()}
+            selection={{ documentVersion: 0, from: 0, to: 0 }}
+            onSelect={vi.fn()}
+            onClose={onClose}
+            onRemove={vi.fn()}
+          />
+        </DialogContent>
+      </Dialog>
     );
     const input = await screen.findByRole("textbox", { name: "Sök referens" });
     fireEvent.keyDown(input, { key: "Escape" });
     expect(onClose).toHaveBeenCalledOnce();
-    expect(outerKeyDown).not.toHaveBeenCalled();
+    expect(closeForm).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Skapa Skill" })).toBeTruthy();
   });
   it("reviews the pinned Skill, recovers a failed preview, and supports keyboard selection", async () => {
     const preview = vi
