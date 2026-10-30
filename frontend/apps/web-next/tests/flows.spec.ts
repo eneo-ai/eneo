@@ -100,6 +100,7 @@ test(
       mimeType: "text/plain",
       buffer: Buffer.from("Testunderlag")
     });
+    await expect(run.getByText("Uppladdad, 12 B", { exact: true })).toBeVisible();
     const runName = uniqueName("Manuell körning");
     await run.getByRole("textbox", { name: /^Namn på körningen/ }).fill(runName);
     await run.getByRole("button", { name: "Granska", exact: true }).click();

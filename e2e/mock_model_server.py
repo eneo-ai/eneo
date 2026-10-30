@@ -41,6 +41,12 @@ TIMING_JOBS: dict[str, dict] = {}
 TIMING_JOBS_LOCK = threading.Lock()
 
 
+def _clock(seconds: float) -> str:
+    hours, remainder = divmod(int(seconds), 3600)
+    minutes, secs = divmod(remainder, 60)
+    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
+
+
 def _timed_transcript(content_type: str, body: bytes) -> dict:
     """Echo the model's words with deterministic timings for the native service API."""
     form = BytesParser(policy=policy.default).parsebytes(
@@ -69,7 +75,10 @@ def _timed_transcript(content_type: str, body: bytes) -> dict:
         ]
         segment["speaker"] = None
     return {
-        "text": "\n".join(segment["text"] for segment in segments),
+        "text": "\n".join(
+            f"[{_clock(segment['start'])} - {_clock(segment['end'])}] {segment['text']}"
+            for segment in segments
+        ),
         "segments": segments,
         "model": fields["model"],
         "language": fields["language"],
