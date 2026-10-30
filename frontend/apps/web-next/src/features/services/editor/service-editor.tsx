@@ -393,7 +393,7 @@ export function ServiceEditor({ service }: { service: Service }) {
               id="service-json-schema"
               value={output.value.schema}
               rows={12}
-              className="font-mono text-sm"
+              className="font-mono text-base pointer-fine:text-sm"
               aria-invalid={schemaProblem ? true : undefined}
               onChange={(event) => {
                 const schema = event.target.value;

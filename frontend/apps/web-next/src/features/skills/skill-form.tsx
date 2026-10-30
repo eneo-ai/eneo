@@ -194,7 +194,7 @@ export function SkillForm(props: Props) {
                 id={`${id}-instructions`}
                 value={instructions}
                 rows={props.mode === "create" ? 8 : 12}
-                className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
+                className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-base pointer-fine:text-sm"
                 required
                 disabled={busy}
                 {...fieldProblemProps(`${id}-instructions`, instructionsProblem)}
