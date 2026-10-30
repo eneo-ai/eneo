@@ -304,11 +304,19 @@ the answer text (the text part may still be open).
 ### `data-error` (eneo, transient)
 
 ```json
-{ "type": "data-error", "transient": true, "data": { "code": 503 } }
+{
+  "type": "data-error",
+  "transient": true,
+  "data": { "code": 503, "reason": "provider_unavailable" }
+}
 ```
 
-Numeric Eneo error code for the UI's message lookup. Always immediately
-followed by `error`.
+The numeric completion error code may be an HTTP status or an Eneo code.
+Optional `reason` preserves the public provider failure identifier already used
+by v2, such as `provider_timeout` or `stream_error`. The UI localizes a known
+reason before falling back to its numeric-code mapping; it never guesses the
+reason from provider text. Older frames without a reason remain valid. Always
+immediately followed by `error`.
 
 ## Ids
 

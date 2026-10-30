@@ -45,6 +45,7 @@ export function loginDiagnosticMessageKey(diagnostics: LoginDiagnostics): string
   const code = diagnostics.detailCode ?? diagnostics.message ?? diagnostics.info;
   if (code && OIDC_FORBIDDEN_CODES.has(code)) return "oidc_error_forbidden";
   if (code && OIDC_UNAUTHORIZED_CODES.has(code)) return "oidc_error_unauthorized";
+  if (code === "invalid_login_attempt") return "oidc_error_attempt_rejected";
   return "oidc_error_generic";
 }
 

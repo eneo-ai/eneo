@@ -29,7 +29,7 @@ import { invalidateConversationLists } from "@/lib/api/conversations";
 import { describeChatFailure } from "@/lib/chat/chat-error";
 import { displayPartnerName } from "@/lib/chat/partner-name";
 import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport";
-import type { AnswerRating, ChatPartner, EneoUIMessage } from "@/lib/chat/types";
+import type { AnswerRating, ChatPartner, EneoDataParts, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
@@ -235,8 +235,8 @@ function ConversationView({
   const sessionIdRef = useRef<string | null>(initialSessionId);
   const [sessionId, setSessionId] = useState<string | null>(initialSessionId);
   const [liveAnswering, setLiveAnswering] = useState<{ id: string; handle: string } | null>(null);
-  const [streamErrorCode, setStreamErrorCode] = useState<number | null>(null);
-  const streamErrorCodeRef = useRef<number | null>(null);
+  const [streamError, setStreamError] = useState<EneoDataParts["error"] | null>(null);
+  const streamErrorRef = useRef<EneoDataParts["error"] | null>(null);
   const streamStartedRef = useRef(false);
   // The question on its way: its text and the attachments it took from the
   // composer, put back if it fails before the answer starts.
@@ -333,8 +333,8 @@ function ConversationView({
           setLiveAnswering(part.data.answering_assistant ?? null);
         }
         if (part.type === "data-error") {
-          streamErrorCodeRef.current = part.data.code ?? null;
-          setStreamErrorCode(part.data.code ?? null);
+          streamErrorRef.current = part.data;
+          setStreamError(part.data);
         }
         if (
           part.type === "data-tool-approval" &&
@@ -366,7 +366,7 @@ function ConversationView({
           if (pending) releasePreviews(pending.attachments);
           return;
         }
-        announce(describeChatFailure(failure, streamErrorCodeRef.current, t).message);
+        announce(describeChatFailure(failure, streamErrorRef.current, t).message);
         if (!pending || streamStartedRef.current) return;
         // Failed before the answer started: the question goes back to the
         // composer, attachments included. A first question takes the view back
@@ -713,8 +713,8 @@ function ConversationView({
   /** Issues the request for a question whose files are all on the server. */
   function issue(text: string, files: SentFiles, request: SendRequest) {
     clearError();
-    setStreamErrorCode(null);
-    streamErrorCodeRef.current = null;
+    setStreamError(null);
+    streamErrorRef.current = null;
     streamStartedRef.current = false;
     // Previews of an earlier question that never started are no longer needed.
     if (pendingSendRef.current) releasePreviews(pendingSendRef.current.attachments);
@@ -842,7 +842,7 @@ function ConversationView({
     if (deciding && activityOpen) closeActivity();
   }, [deciding, activityOpen, closeActivity]);
 
-  const failure = error ? describeChatFailure(error, streamErrorCode, t) : null;
+  const failure = error ? describeChatFailure(error, streamError, t) : null;
 
   const partnerName = displayPartnerName(partner, t);
   const assistantIdentity = { id: partner.id, name: partnerName, iconId: partner.iconId };

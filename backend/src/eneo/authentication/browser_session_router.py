@@ -12,7 +12,8 @@ import hmac
 import re
 import secrets
 from collections.abc import Callable, Coroutine
-from typing import Annotated, Any
+from dataclasses import dataclass
+from typing import Annotated, Any, cast
 from urllib.parse import urlencode
 
 import jwt
@@ -195,11 +196,19 @@ async def get_browser_session(
 
 
 def _federation_failure(
-    detail_code: str, correlation: str | None = None
+    detail_code: str,
+    correlation: str | None = None,
+    *,
+    next_path: str | None = None,
+    raw_detail: str | None = None,
 ) -> RedirectResponse:
     query = {"message": "oidc_callback_failed", "detailCode": detail_code}
     if correlation:
         query["correlation"] = correlation[:1000]
+    if next_path is not None:
+        query["next"] = safe_next_path(next_path)
+    if raw_detail:
+        query["rawDetail"] = raw_detail[:1000]
     return RedirectResponse(
         "/login?" + urlencode(query),
         status_code=303,
@@ -208,12 +217,21 @@ def _federation_failure(
 
 
 def _http_federation_failure(
-    status_code: int, correlation: str | None = None
+    status_code: int,
+    correlation: str | None = None,
+    *,
+    next_path: str | None = None,
+    raw_detail: str | None = None,
 ) -> RedirectResponse:
     code = {403: "access_denied", 401: "unauthorized"}.get(
         status_code, f"http_{status_code}"
     )
-    return _federation_failure(code, correlation)
+    return _federation_failure(
+        code,
+        correlation,
+        next_path=next_path,
+        raw_detail=raw_detail if status_code not in (401, 403) else None,
+    )
 
 
 @router.get(
@@ -288,6 +306,12 @@ async def initiate_browser_federation(
     return _federation_failure("redirect_uri_not_registered")
 
 
+@dataclass
+class _CallbackFailure:
+    next_path: str | None = None
+    public_detail: str | None = None
+
+
 class _BrowserCallbackRoute(APIRoute):
     """Clear the transaction on every callback outcome, including commit failure.
 
@@ -299,6 +323,8 @@ class _BrowserCallbackRoute(APIRoute):
         # FastAPI commits function-scoped dependencies outside get_route_handler.
         # Finish the callback at the ASGI boundary, after that commit succeeds.
         settings = get_settings()
+        diagnostics = _CallbackFailure()
+        scope.setdefault("state", {})["browser_callback_failure"] = diagnostics
         cleanup = Response()
         clear_transaction_cookie(cleanup, settings=settings)
         started = False
@@ -312,7 +338,10 @@ class _BrowserCallbackRoute(APIRoute):
                     # Domain/HTTP exceptions may already have been handled by
                     # the application's exception handlers, including at commit.
                     failure = _http_federation_failure(
-                        message["status"], headers.get("X-Correlation-ID")
+                        message["status"],
+                        headers.get("X-Correlation-ID"),
+                        next_path=diagnostics.next_path,
+                        raw_detail=diagnostics.public_detail,
                     )
                     message = {
                         "type": "http.response.start",
@@ -346,9 +375,9 @@ class _BrowserCallbackRoute(APIRoute):
                     "correlation_id": correlation,
                 },
             )
-            await _federation_failure("http_500", correlation)(
-                scope, receive, send_callback
-            )
+            await _federation_failure(
+                "http_500", correlation, next_path=diagnostics.next_path
+            )(scope, receive, send_callback)
 
 
 callback_router = APIRouter(route_class=_BrowserCallbackRoute)
@@ -391,7 +420,7 @@ async def complete_browser_federation(
 ) -> Response:
     settings = get_settings()
     transaction = transaction_cookie(request, settings)
-    if not transaction or not state:
+    if not state:
         return _federation_failure("invalid_login_attempt")
     try:
         payload = jwt.decode(
@@ -400,7 +429,15 @@ async def complete_browser_federation(
             algorithms=["HS256"],
             options={"require": ["exp", "frontend_state"]},
         )
+    except jwt.ExpiredSignatureError:
+        return _federation_failure(
+            "invalid_login_attempt",
+            ensure_correlation_id(),
+            raw_detail="Authorization session expired. Please try logging in again.",
+        )
     except jwt.InvalidTokenError:
+        return _federation_failure("invalid_login_attempt")
+    if not transaction:
         return _federation_failure("invalid_login_attempt")
     binding = payload.get("frontend_state")
     if not isinstance(binding, str):
@@ -414,11 +451,21 @@ async def complete_browser_federation(
         )
     ):
         return _federation_failure("invalid_login_attempt")
+    diagnostics = cast(_CallbackFailure, request.state.browser_callback_failure)
+    diagnostics.next_path = safe_next_path(next_path)
     if error is not None:
-        return _federation_failure("identity_provider_error")
+        return _federation_failure(
+            "identity_provider_error", next_path=diagnostics.next_path
+        )
     if not code:
-        return _federation_failure("no_code_received")
-    token = await auth_callback(CallbackRequest(code=code, state=state), container)
-    response = RedirectResponse(safe_next_path(next_path), status_code=303)
+        return _federation_failure("no_code_received", next_path=diagnostics.next_path)
+    try:
+        token = await auth_callback(CallbackRequest(code=code, state=state), container)
+    except HTTPException as exc:
+        diagnostics.public_detail = exc.detail
+        # The function-scoped transaction must roll back before the ASGI owner
+        # turns the public HTTP failure into a redirect.
+        raise
+    response = RedirectResponse(diagnostics.next_path, status_code=303)
     set_session_cookie(response, token["access_token"], settings=settings)
     return response

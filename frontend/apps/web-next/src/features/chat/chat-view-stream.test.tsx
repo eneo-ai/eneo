@@ -14,7 +14,8 @@ import { ChatView, type ActivityState } from "./chat-view";
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   sent: [] as { text: string; body: unknown }[],
-  mode: "fail" as "fail" | "refused" | "json" | "answer" | "hold" | "approval" | "approval-break",
+  mode: "fail" as
+    "fail" | "refused" | "json" | "answer" | "hold" | "approval" | "approval-break" | "provider",
   titled: [] as string[],
   rated: [] as { path: string; params: unknown; body: unknown }[],
   /** While set, the files upload waits for the test to finish it. */
@@ -71,6 +72,16 @@ vi.mock("@/lib/chat/transport", () => ({
             abortSignal?.addEventListener("abort", () =>
               controller.error(new DOMException("Aborted", "AbortError"))
             );
+          }
+        });
+      }
+      if (spies.mode === "provider") {
+        const { loadFixtures } = await import("@/lib/chat/contract-fixtures");
+        const fixture = loadFixtures().find((item) => item.name === "backend-error")!;
+        return new ReadableStream({
+          start(controller) {
+            for (const chunk of fixture.events) controller.enqueue(chunk);
+            controller.close();
           }
         });
       }
@@ -429,6 +440,24 @@ describe("ChatView when generation fails", () => {
         .map((item) => item.textContent)
     ).toEqual(["HTTP-status 401", "Not authenticated", "Spårnings-ID: trace-1"]);
     await expectNoAxeViolations(document.body);
+  });
+
+  it("shows and announces the provider reason, preserves partial text, and clears it on retry", async () => {
+    spies.mode = "provider";
+    renderInApp(<Harness />);
+    ask("Vilken gräns gäller?");
+    const message =
+      "AI-leverantören har driftstörningar och kunde inte svara. Felet ligger hos leverantören, inte i Eneo. Försök igen om en stund eller välj en annan modell.";
+    expect(await screen.findByText(message)).toBeTruthy();
+    expect(spies.announce).toHaveBeenCalledWith(message);
+    expect(screen.getByText("Partial")).toBeTruthy();
+    expect(spies.sent).toHaveLength(1);
+    spies.mode = "fail";
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
+    expect(screen.queryByText(message)).toBeNull();
+    expect(spies.announce).toHaveBeenLastCalledWith("Något gick fel. Försök igen.");
+    expect(spies.sent).toHaveLength(2);
   });
 
   it("never shows a JSON error body", async () => {

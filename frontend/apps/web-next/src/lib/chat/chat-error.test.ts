@@ -35,8 +35,33 @@ describe("describeChatFailure", () => {
     const refused = new EneoApiError("Quota exceeded", { status: 403, code: 9008 });
     expect(describeChatFailure(refused, null, t).message).toBe("eneo_error_9008");
     // The stream's data-error code wins over the response's code.
-    expect(describeChatFailure(refused, 9033, t).message).toBe("eneo_error_9033");
-    expect(describeChatFailure(new Error("boom"), 9024, t).message).toBe("eneo_error_9024");
+    expect(describeChatFailure(refused, { code: 9033 }, t).message).toBe("eneo_error_9033");
+    expect(describeChatFailure(new Error("boom"), { code: 9024 }, t).message).toBe(
+      "eneo_error_9024"
+    );
+  });
+
+  it("uses the same provider and quota reasons for HTTP and JSON failures", () => {
+    for (const [reason, key] of [
+      ["provider_timeout", "provider_failure_timeout"],
+      ["tenant_quota_exceeded", "job_failure_tenant_quota_exceeded"],
+      ["user_quota_exceeded", "job_failure_user_quota_exceeded"]
+    ]) {
+      const error = new EneoApiError("Refused", { status: 503, code: 9008, reason });
+      expect(describeChatFailure(error, null, t).message).toBe(key);
+      const json = new Error(
+        JSON.stringify({ message: "Refused", eneo_error_code: 9008, code: reason })
+      );
+      expect(describeChatFailure(json, null, t).message).toBe(key);
+    }
+  });
+
+  it("keeps an unknown reason behind details and falls back to the numeric code", () => {
+    const error = new EneoApiError("Refused", { status: 503, code: 9010, reason: "future_reason" });
+    expect(describeChatFailure(error, null, t).message).toBe("eneo_error_9010");
+    expect(describeChatFailure(error, null, t).details).toContain(
+      "chat_error_detail_code 9010 (future_reason)"
+    );
   });
 
   it("keeps status, code, the backend's message and the support references as details", () => {

@@ -18,6 +18,7 @@ vi.mock("@/lib/toast", () => ({ toast }));
 import { AddModelWizard } from "./add-model-wizard";
 import {
   CAPABILITIES_KEY,
+  OUTBOUND_HEADER_OPTIONS_KEY,
   FAVORITES_KEY,
   type ModelProvider,
   PROVIDERS_KEY
@@ -125,6 +126,11 @@ function renderWizard({
   const queryClient = testQueryClient();
   if (providersLoaded) queryClient.setQueryData(PROVIDERS_KEY, [existing]);
   queryClient.setQueryData(CAPABILITIES_KEY, caps);
+  queryClient.setQueryData(OUTBOUND_HEADER_OPTIONS_KEY, {
+    dynamic_values: [],
+    supported_provider_types: ["hosted_vllm"],
+    max_headers: 10
+  });
   queryClient.setQueryData(FAVORITES_KEY, []);
   queryClient.setQueryData(MODELS_KEY, {
     completion_models: models,
@@ -584,5 +590,53 @@ describe("the add-model wizard's catalog", () => {
 
     await act(async () => {});
     expect(within(dialog).getByText("2 modeller valda")).toBeTruthy();
+  });
+});
+
+it("creates supported providers with validated headers and keeps rejected input for retry", async () => {
+  const { dialog } = renderWizard({
+    caps: {
+      providers: {
+        hosted_vllm: {
+          modes: ["completion"],
+          models: {},
+          fields: [{ name: "endpoint", required: true, secret: false, in: "config" }]
+        }
+      },
+      default_fields: []
+    }
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till vLLM" }));
+  fireEvent.change(field(/^Endpoint-URL/), { target: { value: "https://gateway.example/v1" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till header" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+  expect(api.POST).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(field(/^Headernamn/));
+  fireEvent.change(field(/^Headernamn/), { target: { value: "X-Region" } });
+  fireEvent.change(field(/^Värde/), { target: { value: "north" } });
+  api.POST.mockResolvedValueOnce({
+    error: { message: "Header is reserved", eneo_error_code: 9007 },
+    response: new Response("{}", { status: 400 })
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+  const error = await within(dialog).findByText("Header is reserved");
+  expect(document.activeElement?.getAttribute("aria-describedby")).toContain(error.id);
+  expect(field(/^Värde/).value).toBe("north");
+  fireEvent.change(field(/^Headernamn/), { target: { value: "X-Custom-Region" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+  expect(api.POST.mock.calls[1]![1].body).toMatchObject({
+    provider_type: "hosted_vllm",
+    config: { endpoint: "https://gateway.example/v1" },
+    outbound_headers: [
+      {
+        name: "X-Custom-Region",
+        value: "north",
+        secret: false,
+        encoding: "percent",
+        on_missing: "omit",
+        fallback: null
+      }
+    ]
   });
 });

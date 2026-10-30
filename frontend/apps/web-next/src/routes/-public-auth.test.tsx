@@ -289,6 +289,21 @@ it("retries the callback's remembered tenant or clears it to choose another orga
   expect(navigate).not.toHaveBeenCalled();
 });
 
+it("starts and remembers the sole eligible tenant once", async () => {
+  replies.set("/api/v1/auth/federation-status", {
+    has_multi_tenant_federation: true,
+    tenant_count: 3
+  });
+  replies.set("/api/v1/auth/tenants", { tenants: [{ slug: "first", name: "First" }] });
+  await route("/login?next=%2Fadmin");
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      "/api/v1/auth/browser/initiate?tenant=first&next=%2Fadmin"
+    )
+  );
+  expect(sessionStorage.getItem("eneo-last-tenant-slug")).toBe("first");
+});
+
 it("does not auto-select the sole tenant after a callback failure", async () => {
   replies.set("/api/v1/auth/federation-status", { has_multi_tenant_federation: true });
   replies.set("/api/v1/auth/tenants", { tenants: [{ slug: "first", name: "First" }] });

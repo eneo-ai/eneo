@@ -1,13 +1,14 @@
 "use client";
 
 import { cn } from "@/lib/utils";
+import { sanitizeImageSrc, sanitizeLinkHref } from "@/lib/safe-url";
 import { toast } from "@/lib/toast";
 import { cjk } from "@streamdown/cjk";
 import { createCodePlugin } from "@streamdown/code";
 import type { ComponentProps, ComponentType } from "react";
 import { useTranslations } from "use-intl";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useSyncExternalStore } from "react";
-import { CodeBlock, Streamdown, type CustomRendererProps } from "streamdown";
+import { CodeBlock, Streamdown, type CustomRendererProps, type UrlTransform } from "streamdown";
 import { answerRehypePlugins, answerRemarkPlugins } from "./answer-markdown";
 import { katexStore, mathPlugin, mayContainMath } from "./math";
 import "./message.css";
@@ -17,7 +18,16 @@ import {
   useStreamdownTranslations
 } from "./markdown-components";
 
-export type MessageResponseProps = ComponentProps<typeof Streamdown>;
+export type MessageResponseProps = Omit<ComponentProps<typeof Streamdown>, "urlTransform">;
+
+// Streamdown sanitizes HTML; content URL schemes follow the app's shared policy.
+const sanitizeMarkdownUrl: UrlTransform = (url, key, node) => {
+  // The default image component renders this sentinel as an inert loading placeholder.
+  if (key === "src" && node.tagName === "img" && url === "streamdown:incomplete-image") {
+    return url;
+  }
+  return key === "src" ? sanitizeImageSrc(url) : sanitizeLinkHref(url);
+};
 
 /**
  * Typography of assistant answers (and quoted source snippets): the app's
@@ -143,6 +153,7 @@ export const MessageResponse = memo(
         remarkPlugins={remark}
         rehypePlugins={rehype}
         components={mergedComponents}
+        urlTransform={sanitizeMarkdownUrl}
         translations={translations}
         {...props}
       />

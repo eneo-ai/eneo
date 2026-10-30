@@ -1,4 +1,11 @@
-import { EneoApiError, errorReferenceLines, getErrorMessageForCode } from "@/lib/api/errors";
+import {
+  EneoApiError,
+  errorReferenceLines,
+  getErrorMessageForCode,
+  getErrorMessageForReason
+} from "@/lib/api/errors";
+
+import type { EneoDataParts } from "./types";
 
 type Translate = (key: string, values?: Record<string, string | number>) => string;
 
@@ -23,7 +30,9 @@ const DETAIL_MAX_LENGTH = 300;
  * JSON body can arrive as an error message. Pull the message and code out of
  * it; anything unparseable stays as it is.
  */
-function parseJsonMessage(text: string): { message?: string; code?: number } | null {
+function parseJsonMessage(
+  text: string
+): { message?: string; code?: number; reason?: string } | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith("{")) return null;
   try {
@@ -42,7 +51,8 @@ function parseJsonMessage(text: string): { message?: string; code?: number } | n
             ? ((detail as Record<string, unknown>).message as string)
             : undefined;
     const code = typeof record.eneo_error_code === "number" ? record.eneo_error_code : undefined;
-    return { message, code };
+    const reason = typeof record.code === "string" ? record.code : undefined;
+    return { message, code, reason };
   } catch {
     return null;
   }
@@ -83,7 +93,7 @@ function sentenceForStatus(status: number, t: Translate): string {
 
 /**
  * One human sentence for any failed question, never the backend's raw JSON.
- * Resolution: a known backend error code (from the stream's `data-error`
+ * Resolution: a public provider/quota reason, then a known backend error code (from the stream's `data-error`
  * part, the refused response, or a JSON error text) → its catalog sentence;
  * a refused response → a sentence for its HTTP status; a lost connection or
  * broken stream → "connection lost"; anything else → the generic sentence.
@@ -91,22 +101,24 @@ function sentenceForStatus(status: number, t: Translate): string {
  */
 export function describeChatFailure(
   error: unknown,
-  streamErrorCode: number | null | undefined,
+  streamError: EneoDataParts["error"] | null | undefined,
   t: Translate
 ): ChatFailure {
   if (error instanceof EneoApiError) {
-    const code = streamErrorCode ?? error.code;
+    const code = streamError?.code ?? error.code;
+    const reason = streamError?.reason ?? error.reason;
     const details = [t("chat_error_detail_status", { status: error.status })];
     if (code !== undefined && code !== null) {
-      details.push(
-        t("chat_error_detail_code", { code: error.reason ? `${code} (${error.reason})` : code })
-      );
+      details.push(t("chat_error_detail_code", { code: reason ? `${code} (${reason})` : code }));
     }
     const backendMessage = parseJsonMessage(error.message)?.message ?? error.message;
     if (backendMessage) details.push(truncate(backendMessage));
     details.push(...errorReferenceLines(error, t));
     return {
-      message: getErrorMessageForCode(code, t) ?? sentenceForStatus(error.status, t),
+      message:
+        getErrorMessageForReason(reason, t) ??
+        getErrorMessageForCode(code, t) ??
+        sentenceForStatus(error.status, t),
       details
     };
   }
@@ -114,16 +126,18 @@ export function describeChatFailure(
   const rawMessage =
     error instanceof Error ? error.message : typeof error === "string" ? error : "";
   const parsed = parseJsonMessage(rawMessage);
-  const code = streamErrorCode ?? parsed?.code ?? null;
+  const code = streamError?.code ?? parsed?.code ?? null;
+  const reason = streamError?.reason ?? parsed?.reason;
   const details: string[] = [];
-  if (code !== null) details.push(t("chat_error_detail_code", { code }));
+  if (code !== null)
+    details.push(t("chat_error_detail_code", { code: reason ? `${code} (${reason})` : code }));
   const backendMessage = parsed ? parsed.message : rawMessage;
   if (backendMessage) {
     const name = error instanceof Error && error.name !== "Error" ? `${error.name}: ` : "";
     details.push(truncate(`${name}${backendMessage}`));
   }
 
-  const mapped = getErrorMessageForCode(code, t);
+  const mapped = getErrorMessageForReason(reason, t) ?? getErrorMessageForCode(code, t);
   if (mapped) return { message: mapped, details };
   if (isConnectionFailure(error)) return { message: t("chat_error_connection_lost"), details };
   return { message: t("request_failed"), details };
