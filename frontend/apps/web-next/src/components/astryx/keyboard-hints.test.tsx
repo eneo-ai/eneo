@@ -4,6 +4,7 @@ import { expect, it } from "vitest";
 import { renderInApp } from "@/test/render";
 import { KEYBOARD } from "./keyboard-hints";
 import { createStaticSource } from "@astryxdesign/core/Typeahead";
+import { PasswordInput } from "./password-input";
 import { TextInput } from "./text-input";
 import { Typeahead } from "./typeahead";
 
@@ -78,6 +79,16 @@ it("sets the preset on a Typeahead's input, which Astryx does not do from props"
   );
   expect(attributes(screen.getByRole("combobox", { name: /E-post/ }))).toMatchObject({
     inputmode: "email",
+    autocapitalize: "none",
+    autocorrect: "off",
+    spellcheck: "false"
+  });
+});
+
+it("keeps a revealed password as typed: no capital, auto-correction or spell-check marks", () => {
+  renderInApp(<PasswordInput label="Lösenord" value="" onChange={() => {}} />);
+  fireEvent.click(screen.getByRole("button", { name: /visa lösenord/i }));
+  expect(attributes(screen.getByLabelText("Lösenord"))).toMatchObject({
     autocapitalize: "none",
     autocorrect: "off",
     spellcheck: "false"

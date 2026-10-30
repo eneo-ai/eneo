@@ -1,6 +1,7 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
@@ -254,6 +255,7 @@ export function ModulesPage({ title }: { title: string }) {
               required
               disabled={editingModuleKey !== null || saving}
               autoComplete="off"
+              {...KEYBOARD.identifier}
               placeholder={t("module_admin_module_key_placeholder")}
               {...fieldProblemProps("module-key", shown(moduleKeyProblem), "module-key-help")}
             />
@@ -267,6 +269,8 @@ export function ModulesPage({ title }: { title: string }) {
             <Textarea
               ref={redirectUrisRef}
               id="redirect-uris"
+              {...KEYBOARD.identifier}
+              inputMode="url"
               value={redirectUrisInput}
               onChange={(event) => setRedirectUrisInput(event.target.value)}
               required

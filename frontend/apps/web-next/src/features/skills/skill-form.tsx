@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "use-intl";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import type { ReferenceCatalog } from "@eneo/skill-instructions";
 import { SkillInstructionEditor } from "./skill-instruction-editor";
 import { useEffect, useId, useState, type SubmitEvent } from "react";
@@ -220,6 +221,7 @@ export function SkillForm(props: Props) {
                   value={slug}
                   maxLength={64}
                   autoComplete="off"
+                  {...KEYBOARD.identifier}
                   required
                   disabled={busy}
                   {...fieldProblemProps(`${id}-slug`, slugProblem)}

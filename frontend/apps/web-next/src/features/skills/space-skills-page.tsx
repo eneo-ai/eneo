@@ -1,6 +1,7 @@
 "use client";
 
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
@@ -201,6 +202,7 @@ export function SpaceSkillsPage() {
             <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
             <Input
               type="search"
+              {...KEYBOARD.search}
               className="pl-9"
               value={searchInput}
               placeholder={t("skills_library_search_placeholder")}

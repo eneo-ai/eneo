@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -249,6 +250,7 @@ export function SharePointAppConfigDialog({
               <Input
                 ref={clientIdRef}
                 id="sp-client-id"
+                {...KEYBOARD.identifier}
                 value={clientId}
                 onChange={(event) => setClientId(event.target.value)}
                 {...fieldProblemProps("sp-client-id", shown(clientIdProblem))}
@@ -275,6 +277,7 @@ export function SharePointAppConfigDialog({
               <Input
                 ref={tenantDomainRef}
                 id="sp-tenant-domain"
+                {...KEYBOARD.identifier}
                 placeholder={t("sharepoint_tenant_domain_placeholder")}
                 value={tenantDomain}
                 onChange={(event) => setTenantDomain(event.target.value)}

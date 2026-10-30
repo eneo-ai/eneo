@@ -1,6 +1,7 @@
 "use client";
 
 import { useNow, useTranslations } from "use-intl";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Button } from "@astryxdesign/core/Button";
 import { useInfiniteQuery } from "@tanstack/react-query";
@@ -307,6 +308,7 @@ export function UserApiKeyList({
           placeholder={t("api_keys_search_placeholder")}
           description={t("api_keys_search_loaded_hint")}
           width="100%"
+          {...KEYBOARD.search}
         />
       )}
 
