@@ -1,6 +1,6 @@
 "use client";
 
-import type { Locale, ReleaseEntry } from "@eneo/whats-new";
+import { UNRELEASED, type Locale, type ReleaseEntry } from "@eneo/whats-new";
 import { useLocale, useTranslations } from "next-intl";
 import { usePathname, useRouter } from "next/navigation";
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
@@ -53,7 +53,10 @@ export function TourProvider({ children }: { children: React.ReactNode }) {
             next: t("whats_new_tour_next"),
             previous: t("whats_new_tour_previous"),
             progress: t("whats_new_tour_progress", { current: "{current}", total: "{total}" }),
-            version: t("whats_new_tour_version", { version })
+            version:
+              version === UNRELEASED
+                ? t("whats_new_upcoming")
+                : t("whats_new_tour_version", { version })
           },
           (href) => {
             expectedPath.current = new URL(href, window.location.href).pathname;

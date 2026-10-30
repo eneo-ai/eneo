@@ -14,6 +14,7 @@ from eneo.database.tables.assistant_table import (
 from eneo.database.tables.mcp_server_table import MCPServers as MCPServersTable
 from eneo.database.tables.mcp_server_table import (
     MCPServerTools,
+    MCPServerToolSettings,
     MCPServerUserGroups,
     SpacesMCPServers,
     SpacesMCPServerTools,
@@ -46,17 +47,47 @@ def backing_model_options() -> list[Any]:
     ]
 
 
+async def apply_tenant_tool_settings(
+    session: "AsyncSession", servers: list[MCPServer]
+) -> list[MCPServer]:
+    """Give each server's tools the enablement its own tenant has set.
+
+    A tenant setting overrides the tool's default, so readiness and the tool
+    list match what activation and capability resolution use.
+    """
+    tool_ids = [tool.id for server in servers for tool in server.tools]
+    if not tool_ids:
+        return servers
+    rows = await session.execute(
+        sa.select(
+            MCPServerToolSettings.tenant_id,
+            MCPServerToolSettings.mcp_server_tool_id,
+            MCPServerToolSettings.is_enabled,
+        ).where(MCPServerToolSettings.mcp_server_tool_id.in_(tool_ids))
+    )
+    enabled = {
+        (tenant_id, tool_id): is_enabled for tenant_id, tool_id, is_enabled in rows
+    }
+    for server in servers:
+        for tool in server.tools:
+            tool.enabled_override = enabled.get((server.tenant_id, tool.id))
+    return servers
+
+
 class MCPServerRepoImpl(
     BaseRepoImpl[MCPServer, MCPServersTable, MCPServerMapper],
     MCPServerRepository,
 ):
     def __init__(self, session: "AsyncSession", mapper: MCPServerMapper):
         super().__init__(session=session, model=MCPServersTable, mapper=mapper)
-        # Audience groups and the backing image model are part of the
-        # provider's identity for resolution, so every single-row read
-        # carries them.
+        # Repository reads provide the tools required by readiness and the
+        # classifications required by provider selection and API responses.
         self._options = [
+            selectinload(self._db_model.tools),
             selectinload(self._db_model.user_groups),
+            selectinload(self._db_model.security_classification).selectinload(
+                SecurityClassificationDBModel.tenant
+            ),
             *backing_model_options(),
         ]
 
@@ -76,6 +107,15 @@ class MCPServerRepoImpl(
                     ]
                 )
             )
+
+    @override
+    async def one_or_none(
+        self, id: UUID | None = None, **filters: object
+    ) -> MCPServer | None:
+        server = await super().one_or_none(id=id, **filters)
+        if server is not None:
+            await apply_tenant_tool_settings(self.session, [server])
+        return server
 
     @override
     async def add(self, obj: MCPServer) -> MCPServer:
@@ -126,7 +166,9 @@ class MCPServerRepoImpl(
         if not records:
             return []
 
-        return self.mapper.to_entities(records)
+        return await apply_tenant_tool_settings(
+            self.session, self.mapper.to_entities(records)
+        )
 
     async def query(
         self, tags: list[str] | None = None, **filters: object
@@ -153,7 +195,9 @@ class MCPServerRepoImpl(
         if not records:
             return []
 
-        return self.mapper.to_entities(records)
+        return await apply_tenant_tool_settings(
+            self.session, self.mapper.to_entities(records)
+        )
 
     @override
     async def query_by_tenant(self, tenant_id: UUID) -> list[MCPServer]:
@@ -161,14 +205,7 @@ class MCPServerRepoImpl(
         query = (
             select(self._db_model)
             .where(self._db_model.tenant_id == tenant_id)
-            .options(
-                selectinload(self._db_model.tools),
-                selectinload(self._db_model.user_groups),
-                selectinload(self._db_model.security_classification).selectinload(
-                    SecurityClassificationDBModel.tenant
-                ),
-                *backing_model_options(),
-            )
+            .options(*self._options)
             .order_by(self._db_model.created_at, self._db_model.id)
         )
         result = await self.session.scalars(query)
@@ -176,4 +213,6 @@ class MCPServerRepoImpl(
         if not records:
             return []
 
-        return self.mapper.to_entities(records)
+        return await apply_tenant_tool_settings(
+            self.session, self.mapper.to_entities(records)
+        )

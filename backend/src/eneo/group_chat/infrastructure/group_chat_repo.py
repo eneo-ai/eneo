@@ -47,21 +47,9 @@ class GroupChatRepository:
                 },
             )
 
-    async def update(
-        self,
-        chat_id: UUID,
-        space_id: UUID,
-        *,
-        name: str | None = None,
-        allow_mentions: bool | None = None,
-        show_response_label: bool | None = None,
-        published: bool | None = None,
-        insight_enabled: bool | None = None,
-        metadata_json: dict[str, object] | None | NotProvided = NOT_PROVIDED,
-        icon_id: UUID | None | NotProvided = NOT_PROVIDED,
-        members: dict[UUID, str | None] | None = None,
-    ) -> None:
-        if members is not None:
+    async def lock(self, chat_id: UUID, space_id: UUID, *, members: bool) -> None:
+        """Lock the chat row; for a member change, lock its Space before it."""
+        if members:
             # Assistant moves lock source/destination Spaces first. Take that
             # same lock before checking seats so a moved member cannot be
             # reinserted into its former Space by a concurrent replacement.
@@ -82,6 +70,22 @@ class GroupChatRepository:
         )
         if found is None:
             raise NotFoundException("Group chat not found")
+
+    async def update(
+        self,
+        chat_id: UUID,
+        space_id: UUID,
+        *,
+        name: str | None = None,
+        allow_mentions: bool | None = None,
+        show_response_label: bool | None = None,
+        published: bool | None = None,
+        insight_enabled: bool | None = None,
+        metadata_json: dict[str, object] | None | NotProvided = NOT_PROVIDED,
+        icon_id: UUID | None | NotProvided = NOT_PROVIDED,
+        members: dict[UUID, str | None] | None = None,
+    ) -> None:
+        await self.lock(chat_id, space_id, members=members is not None)
         values: dict[str, object] = {
             key: value
             for key, value in {
@@ -127,10 +131,13 @@ class GroupChatRepository:
                 members,
             )
 
-    async def delete(self, chat_id: UUID, space_id: UUID) -> None:
-        await self.session.execute(
-            sa.delete(GroupChatsTable).where(
+    async def delete(self, chat_id: UUID, space_id: UUID) -> UUID | None:
+        """Delete the chat; returns the icon the deleted row showed."""
+        return await self.session.scalar(
+            sa.delete(GroupChatsTable)
+            .where(
                 GroupChatsTable.id == chat_id,
                 GroupChatsTable.space_id == space_id,
             )
+            .returning(GroupChatsTable.icon_id)
         )

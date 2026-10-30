@@ -40,6 +40,7 @@ from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.files.file_models import ContentDisposition, FilePublic
 from eneo.info_blobs.info_blob import InfoBlobAskAssistantPublic, InfoBlobMetadata
 from eneo.main.logging import get_logger
+from eneo.server.protocol.sse import ClosingEventSourceResponse, closing
 
 if TYPE_CHECKING:
     from eneo.ai_models.completion_models.completion_model import ToolCallMetadata
@@ -521,10 +522,16 @@ def to_ui_message_stream_response(
     """version=3 streaming response: AI SDK UI Message Stream over SSE."""
 
     async def event_stream():
-        async for chunk in _ui_message_chunks(response, base_url):
-            yield _event(chunk)
+        async with closing(
+            _ui_message_chunks(response, base_url), "ui message stream"
+        ) as chunks:
+            async for chunk in chunks:
+                yield _event(chunk)
         yield ServerSentEvent("[DONE]")
 
-    return EventSourceResponse(
-        event_stream(), ping=15, headers=dict(UI_MESSAGE_STREAM_HEADERS)
+    return ClosingEventSourceResponse(
+        event_stream(),
+        ping=15,
+        headers=dict(UI_MESSAGE_STREAM_HEADERS),
+        closes=[response.answer],
     )

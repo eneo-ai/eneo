@@ -347,7 +347,7 @@
           ></textarea>
         </Settings.Row>
 
-        {#if data.supportsDirectSkills && $currentSpace.hasPermission("read", "skill")}
+        {#if data.supportsDirectSkills && data.canUseSkills}
           <div id="skills" class="scroll-mt-20">
             <Settings.Row
               title={m.skills()}

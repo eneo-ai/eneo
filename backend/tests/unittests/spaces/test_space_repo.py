@@ -7,7 +7,76 @@ from uuid import uuid4
 import pytest
 from sqlalchemy.dialects import postgresql
 
+from eneo.database.tables.mcp_server_table import MCPServerTools, SpacesMCPServerTools
+from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
 from eneo.spaces.space_repo import SpaceRepository
+
+
+@pytest.mark.parametrize(
+    "default,tenant,space,assistant,expected",
+    [
+        (False, True, None, True, True),
+        (True, False, True, True, None),
+        (True, None, False, True, None),
+        (False, None, True, True, True),
+        (True, None, None, False, False),
+        (True, None, None, None, False),
+    ],
+)
+def test_assistant_tool_policy_preserves_catalog_default(
+    default, tenant, space, assistant, expected
+):
+    server = MCPServer(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        name="source",
+        http_url="https://example.test/mcp",
+    )
+    row = MCPServerTools(
+        id=uuid4(), mcp_server_id=server.id, name="tool", is_enabled_by_default=default
+    )
+
+    SpaceRepository._project_assistant_mcp_server_tools(
+        mcp_servers=[server],
+        tools_db=[row],
+        tenant_tool_settings={} if tenant is None else {row.id: tenant},
+        space_tool_overrides={} if space is None else {row.id: space},
+        assistant_tool_overrides={} if assistant is None else {row.id: assistant},
+    )
+
+    if expected is None:
+        assert server.tools == []
+    else:
+        (tool,) = server.tools
+        assert tool.is_enabled is expected
+        assert tool.is_enabled_by_default is default
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_space_tool_policy_preserves_catalog_default(repo, session, enabled):
+    server = MCPServer(
+        id=uuid4(),
+        tenant_id=uuid4(),
+        name="source",
+        http_url="https://example.test/mcp",
+    )
+    row = MCPServerTools(
+        id=uuid4(),
+        mcp_server_id=server.id,
+        name="tool",
+        is_enabled_by_default=not enabled,
+    )
+    space_id = uuid4()
+    override = SpacesMCPServerTools(
+        space_id=space_id, mcp_server_tool_id=row.id, is_enabled=enabled
+    )
+    session.execute.side_effect = [_scalars([row]), _scalars([]), _scalars([override])]
+
+    await repo._load_mcp_server_tools_with_overrides(space_id, [server])
+
+    (tool,) = server.tools
+    assert tool.is_enabled is enabled
+    assert tool.is_enabled_by_default is not enabled
 
 
 @pytest.fixture

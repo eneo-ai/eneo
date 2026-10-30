@@ -338,7 +338,7 @@ value and a comment.
     | `JWT_SECRET` | empty | Token signing key (32+ chars). Generate: `openssl rand -hex 32` |
     | `URL_SIGNING_KEY` | empty | URL signing key. Generate: `openssl rand -hex 32` |
     | `PUBLIC_ORIGIN` | empty | External URL, e.g. `https://eneo.example.com`. Used to build the OIDC redirect URI `{PUBLIC_ORIGIN}/login/callback` |
-    | `FILE_REFERENCE_BASE_URL` | unset (falls back to `PUBLIC_ORIGIN`) | Base URL written into the signed file links handed to MCP tools. Set it when MCP servers reach the backend on another host than browsers do. See [Signed file references](#signed-file-references). |
+    | `FILE_REFERENCE_BASE_URL` | `http://backend:8000` in the reference `docker-compose.yml`; unset elsewhere (falls back to `PUBLIC_ORIGIN`) | Base URL written into the signed file links handed to MCP tools and the bundled tool runtime. With the reference Compose file, set it in the deployment `.env`, not in `env_backend.env`. See [Signed file references](#signed-file-references). |
     | `API_PREFIX` | `/api/v1` | Prefix for all API routes |
     | `API_KEY_HEADER_NAME` | `X-API-Key` | Header that carries API keys (including `ENEO_SUPER_API_KEY`) |
 
@@ -595,10 +595,11 @@ signed link instead of its content:
 {FILE_REFERENCE_BASE_URL}/api/v1/files/{file_id}/original/download/?token=...
 ```
 
-Both Eneo's built-in file tool and external MCP servers receive the same
-link. The built-in tool verifies the token locally and never makes an HTTP
-request. An external MCP server redeems the link over HTTP, so **the Eneo
-backend must be reachable from the network where that MCP server runs**.
+Eneo's built-in file tool, the bundled tool runtime and external MCP servers
+receive the same link. The built-in file tool verifies the token locally and
+never makes an HTTP request. The tool runtime and external MCP servers redeem
+the link over HTTP, so **the Eneo backend must be reachable at
+`FILE_REFERENCE_BASE_URL` from the network where they run**.
 This is independent of where the file bytes live: originals stored in
 PostgreSQL and originals stored in object storage are served through the
 same endpoint.
@@ -631,9 +632,9 @@ Choose `FILE_REFERENCE_BASE_URL` by where the MCP servers run:
 
 | MCP servers run                              | `FILE_REFERENCE_BASE_URL`                                                                                       | Notes                                                                                                                                                                                                                              |
 | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Nowhere, or only Eneo's built-in tools       | leave unset                                                                                                     | Built-in tools never fetch the link. `PUBLIC_ORIGIN` is used and is not contacted.                                                                                                                                                 |
-| On the same private network as the backend   | an internal address the servers can resolve, e.g. `http://eneo-backend:8000` or `https://eneo.intra.example.se` | Plain `http` and internal hostnames are allowed. The address only needs to resolve from the MCP servers' network; browsers never see it.                                                                                           |
-| On the internet, outside the private network | the public origin, e.g. `https://eneo.example.com`                                                              | The backend must be reachable from the internet on the `/api/v1/files/*/original/download/` route. If the deployment is otherwise private, this is the one route that needs to be exposed, and only signed requests succeed on it. |
+| Nowhere, or only Eneo's built-in tools       | keep the reference default `http://backend:8000`                                                                | The bundled tool runtime downloads attachments for file analysis from the backend over the internal `tool_runtime_net`. Without the reference Compose file, an unset value uses `PUBLIC_ORIGIN`, which the built-in file tool never contacts. |
+| On the same private network as the backend   | an internal address the servers can resolve, e.g. `http://eneo-backend:8000` or `https://eneo.intra.example.se` | Plain `http` and internal hostnames are allowed. The address must resolve from the MCP servers' network and from the bundled tool runtime; browsers never see it. `TOOL_RUNTIME_FILE_ORIGINS` follows the value. |
+| On the internet, outside the private network | the public origin, e.g. `https://eneo.example.com`                                                              | The backend must be reachable from the internet on the `/api/v1/files/*/original/download/` route. If the deployment is otherwise private, this is the one route that needs to be exposed, and only signed requests succeed on it. Eneo uses one base URL for every recipient, and the bundled tool runtime has no internet access, so its file analysis cannot download from a public origin. |
 
 On a private network with no route from the MCP server to the backend, the
 tool call fails. The model is told the link is valid, so it reports that the
@@ -889,7 +890,10 @@ Manage AI provider credentials per tenant using the sysadmin API.
 
 ### Crawler Settings API
 
-Configure crawling behavior per tenant.
+Configure crawling behavior per tenant. From 2.3 the endpoint rejects unknown
+keys with `422`, including the settings of the retired crawl feeder and tenant
+semaphore (`tenant_worker_concurrency_limit`, `crawl_feeder_*` and similar).
+Values stored earlier for those keys are ignored.
 
 <Tabs items={['Set Settings', 'Get Settings', 'Reset to Defaults']}>
   <Tabs.Tab>
@@ -984,6 +988,51 @@ key or a tenant ID. The container side is covered in
 | HTTP to HTTPS redirect broken         | Missing Traefik label                                   | Ensure `traefik.enable=true` label on traefik service                                          |
 | 502 Bad Gateway                       | Domain not replaced in docker-compose.yml               | Replace `your-domain.com` in all 4 locations                                                   |
 | SCIM provisioning returns 404         | Reverse proxy does not forward `/scim`                  | Route `/scim/*` to the backend (see [Reverse Proxy Requirements](#reverse-proxy-requirements)) |
+
+### Database Shared Memory Errors
+
+**Symptom:** some requests fail with HTTP 500, and the database log shows
+`could not resize shared memory segment ... No space left on device`. The disk
+is not full: PostgreSQL ran out of `/dev/shm`, a small memory area inside the
+container. Docker and Podman limit it to 64 MB unless the service sets
+`shm_size`.
+
+PostgreSQL uses it for queries it runs in parallel, and each database
+connection that has run such a query keeps a small part of it for as long as
+the connection lives. With many pooled connections and large queries, 64 MB is
+too little.
+
+**Fix:** set `shm_size: 1gb` on the `db` service, as the reference
+`docker-compose.yml` does, and recreate the container:
+
+```bash
+docker compose up -d db
+```
+
+The value is an upper limit, not memory reserved up front. Recreating the
+container briefly interrupts Eneo; the data stays in its volume. Set
+`stop_grace_period: 2m` on the service too, as the reference file does: with
+the default 10 seconds, a busy database can be killed before its shutdown
+checkpoint finishes and then needs crash recovery when it starts.
+
+**Until you can recreate the container**, stop PostgreSQL from running queries
+in parallel. This takes effect without a restart and makes large queries
+slower:
+
+```bash
+docker compose exec db psql -U postgres -d eneo -c "ALTER SYSTEM SET max_parallel_workers_per_gather = 0;"
+docker compose exec db psql -U postgres -d eneo -c "SELECT pg_reload_conf();"
+```
+
+If the errors continue, restart the backend so that its database connections
+reconnect with the new setting.
+
+Undo it after raising `shm_size`:
+
+```bash
+docker compose exec db psql -U postgres -d eneo -c "ALTER SYSTEM RESET max_parallel_workers_per_gather;"
+docker compose exec db psql -U postgres -d eneo -c "SELECT pg_reload_conf();"
+```
 
 ### Debug Mode
 
@@ -1184,6 +1233,11 @@ Follow the [File and Icon storage upgrade
 checklist](/guides/file-icon-storage-upgrade#before-you-start). Keep the API
 closed until the new migration and same-release worker are ready.
 
+For the upgrade to 2.3, also stop every backend and worker replica before
+`db-init` and start the new versions together. The new crawler's lifecycle,
+its migrations and the old Scrapy worker cannot run side by side. Returning to
+2.2 requires restoring the backup taken in the next step.
+
 ### Take the stopped-writer recovery point
 
 After the drain is verified and every old writer is stopped, create the database
@@ -1198,6 +1252,10 @@ remain stopped and label both artifacts as one recovery point. Inline-only
 content needs no second backup artifact.
 
 ### Pull and deploy
+
+Run these commands with the new release's `docker-compose.yml` in place.
+`crawler-worker` exists from 2.3, so Compose rejects it with the 2.2 file; with
+the 2.3 file and no running container, stopping it does nothing.
 
 For PostgreSQL-inline content or an external endpoint:
 
@@ -1287,6 +1345,19 @@ remains readable while the worker waits or is stopped. See [Upgrade File & Icon
 Storage](/guides/file-icon-storage-upgrade) for capacity examples, realistic
 duration, state queries, pause behavior, rollback, and cleanup.
 
+### Release search data from earlier versions
+
+Upgrading from 2.2 or from 2.3.0-rc.3 or earlier: those releases kept the
+chunks and embeddings of every replaced document version. They count toward
+the storage quota and are never searched. Once the new version runs, remove
+them once with
+[Free Space Held by Earlier Versions](/guides/free-space-earlier-versions).
+Eneo stays available while it runs, and it can be stopped and run again.
+
+If you maintain your own Compose file, also give the `db` service
+`shm_size: 1gb` and `stop_grace_period: 2m`, as the reference file does; see
+[Database Shared Memory Errors](#database-shared-memory-errors).
+
 ### Clean up old images
 
 ```bash
@@ -1332,9 +1403,12 @@ The reference `docker-compose.yml` sets a fixed `container_name` on every
 service, so `docker compose up --scale ...` is refused. To run more than one
 backend or worker replica, define additional services without `container_name`
 (or run the images under an orchestrator) and place the backend replicas behind
-your load balancer. Additional workers are safe: crawl admission and leases live in PostgreSQL, so
-extra `crawler-worker` replicas only add capacity. Set
-`CRAWL_JOB_CONCURRENCY_LIMIT` to the aggregate crawl capacity when you scale them.
+your load balancer. Additional workers are safe. Crawls run only on
+`crawler-worker` services, each with its own `/tmp`. `WORKER_MAX_JOBS` applies
+per process, while `CRAWL_JOB_CONCURRENCY_LIMIT` and
+`CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` cap running crawls across all crawler
+workers. Set `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` to the same value on the
+backend and every worker.
 
 ---
 

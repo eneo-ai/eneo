@@ -709,7 +709,7 @@ async def test_same_build_metadata_fallback_worker_and_failure_after_cleanup(
             )
             assert await icons.get_legacy_primary(icon.id) is None
             assert await icons.get(icon.id) is None
-            await icons.delete_unused(icon.id, tenant_id=original.tenant_id)
+            assert await icons.delete_if_unreferenced(icon.id)
             status = await read_file_icon_backfill_status(session, settings)
             assert status.state.value == "complete" and status.legacy_cleaned
         assert (await worker.run_once()).state.value == "complete"

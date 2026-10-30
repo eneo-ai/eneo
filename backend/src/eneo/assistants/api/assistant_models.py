@@ -49,6 +49,7 @@ from eneo.mcp_servers.domain.capabilities import (
 from eneo.prompts.api.prompt_models import PromptCreate, PromptPublic
 from eneo.questions.question import UseTools
 from eneo.sessions.session import SessionInDB
+from eneo.skills.domain.skill import MAX_SKILL_ATTACHMENT_LIMIT
 from eneo.skills.presentation.skill_models import AssistantSkillBindingInput
 from eneo.users.user import UserSparse
 from eneo.websites.presentation.website_models import WebsitePublic
@@ -343,7 +344,9 @@ class AssistantUpdatePublic(AssistantCreatePublic):
             "classification. Set to null to search in vector order only."
         ),
     )
-    skill_bindings: Optional[list[AssistantSkillBindingInput]] = None
+    skill_bindings: Optional[list[AssistantSkillBindingInput]] = Field(
+        default=None, max_length=MAX_SKILL_ATTACHMENT_LIMIT
+    )
 
 
 class AssistantCreate(AssistantBase):

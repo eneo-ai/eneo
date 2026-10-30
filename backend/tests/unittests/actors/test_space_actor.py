@@ -1547,6 +1547,80 @@ def test_skill_actions_require_tenant_skill_permission(
 
 
 # ---------------------------------------------------------------------------
+# personal_skills: own Skills in your own personal space, nothing else
+# ---------------------------------------------------------------------------
+
+
+def test_personal_skills_permits_every_skill_action_in_own_personal_space():
+    user = MockUser(
+        id=72,
+        role="owner",
+        permissions={Permission.PERSONAL_CHAT, Permission.PERSONAL_SKILLS},
+    )
+    space = MockSpace(user_id=user.id, personal=True, id="personal-own-skills")
+
+    assert _skill_actions(_actor(user, space)) == _ALL_SKILL_ACTIONS
+
+
+@pytest.mark.parametrize(
+    ("permissions", "can_use"),
+    [
+        ({Permission.PERSONAL_CHAT, Permission.PERSONAL_SKILLS}, False),
+        ({Permission.PERSONAL_SKILLS, Permission.SKILLS}, True),
+    ],
+)
+def test_attaching_skills_in_own_personal_space_needs_use_skills(
+    permissions: set[Permission], can_use: bool
+):
+    user = MockUser(id=76, role="owner", permissions=permissions)
+    space = MockSpace(user_id=user.id, personal=True, id="personal-attach-skills")
+
+    actor = _actor(user, space)
+
+    assert actor.can_read_skills()
+    assert actor.can_use_skills() is can_use
+
+
+@pytest.mark.parametrize(
+    ("space_kind", "role"),
+    [
+        ("shared", MockSpaceRole.EDITOR),
+        ("shared", MockSpaceRole.ADMIN),
+        ("organization", MockSpaceRole.ADMIN),
+    ],
+)
+def test_personal_skills_grants_nothing_outside_personal_spaces(
+    space_kind: str, role: str
+):
+    user = MockUser(
+        id=73,
+        role=role,
+        permissions={Permission.PERSONAL_SKILLS, Permission.ADMIN}
+        if space_kind == "organization"
+        else {Permission.PERSONAL_SKILLS},
+    )
+    space = MockSpace(
+        user_id=None,
+        personal=False,
+        tenant_space_id="org-1" if space_kind == "shared" else None,
+        id=f"{space_kind}-personal-skills-only",
+        members={user.id: user},
+    )
+
+    assert _skill_actions(_actor(user, space)) == _NO_SKILL_ACTIONS
+
+
+def test_personal_skills_grants_nothing_in_another_users_personal_space():
+    other = MockUser(id=75, permissions={Permission.PERSONAL_SKILLS})
+    space = MockSpace(user_id=74, personal=True, id="someone-elses-personal")
+
+    actor = _actor(other, space)
+
+    assert _skill_actions(actor) == _NO_SKILL_ACTIONS
+    assert not actor.tenant_permits(SpaceAction.READ, SpaceResourceType.SKILL)
+
+
+# ---------------------------------------------------------------------------
 # API keys never reach outside their own tenant
 # ---------------------------------------------------------------------------
 

@@ -3,6 +3,10 @@ from uuid import uuid4
 
 import pytest
 
+from tests.integration.fixtures.transaction_boundary import (
+    request_at_transaction_boundary,
+)
+
 
 @pytest.fixture
 async def admin_token(db_container, patch_auth_service_jwt, admin_user):
@@ -208,3 +212,48 @@ async def test_restore_rejects_a_revision_that_changed_after_preview(
     assert current_response.json()["current_revision_id"] == concurrent_revision_id
     assert history_response.status_code == 200, history_response.text
     assert history_response.json()["total_count"] == 3
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "organization", [False, True], ids=["personal", "organization"]
+)
+async def test_skill_and_revision_are_committed_before_success_response(
+    app, client, admin_token, organization
+):
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    if organization:
+        path = "/api/v1/skills/organization/"
+    else:
+        space = await client.get("/api/v1/spaces/type/personal/", headers=headers)
+        assert space.status_code == 200, space.text
+        path = f"/api/v1/spaces/{space.json()['id']}/skills/"
+    content = {
+        "display_name": "Immediately available",
+        "description": "The detail page can read a saved Skill immediately.",
+        "instructions": "Write clearly.",
+    }
+    created = await request_at_transaction_boundary(
+        app,
+        method="POST",
+        path=path,
+        payload={"slug": f"immediate-{uuid4().hex[:8]}", **content},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    skill_path = f"{path}{created.json()['id']}/"
+    detail = await client.get(skill_path, headers=headers)
+    assert detail.status_code == 200, detail.text
+
+    revised = await request_at_transaction_boundary(
+        app,
+        method="POST",
+        path=f"{skill_path}revisions/",
+        payload={**content, "instructions": "Write clear, short sentences."},
+        headers=headers,
+    )
+    assert revised.status_code == 201, revised.text
+    history = await client.get(f"{skill_path}revisions/", headers=headers)
+    assert history.status_code == 200, history.text
+    assert history.json()["items"][0]["id"] == revised.json()["id"]

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { RotateCcw } from "@lucide/svelte";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import { IconQuestionMark } from "@eneo/icons/question-mark";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { useId } from "bits-ui";

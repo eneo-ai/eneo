@@ -60,7 +60,10 @@ const UNLOCALIZED_BY_DESIGN = new Map<number, string>([
   [9047, "OBJECT_STORE_NOT_SELECTABLE — object content deployment"],
   [9021, "CRAWL_ALREADY_RUNNING — crawler"],
   [9032, "PROVIDER_NOT_FOUND — model providers"],
-  [9041, "PROVIDER_REJECTED_REQUEST — message quotes the provider"]
+  [9041, "PROVIDER_REJECTED_REQUEST — message quotes the provider"],
+
+  // Localized from its details instead of one message per code.
+  [9080, "PERSONAL_SKILLS_REJECTED — personalChatSkills.ts shows the copy for details.reason"]
 ]);
 
 function backendErrorCodes(): number[] {

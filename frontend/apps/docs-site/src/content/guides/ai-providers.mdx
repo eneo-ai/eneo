@@ -54,14 +54,14 @@ For Azure OpenAI the model name in the route is the **deployment name**, not the
 
 Eneo uses LiteLLM's built-in model registry to determine which providers and models are available. This means:
 
-1. **If a provider exists in LiteLLM** — it shows up automatically in Eneo's Admin UI when adding models. No code changes needed.
+1. **If LiteLLM can route a provider** — it shows up automatically in Eneo's Admin UI when adding models. No code changes needed. LiteLLM's price list also groups some models under names that are not provider types, such as `bedrock_converse` or `vertex_ai-language-models`. Those models are listed under the provider that serves them (`bedrock`, `vertex_ai`), or left out when LiteLLM names none. Provider types that need an interactive sign-in in a browser (`github_copilot`, `chatgpt`) are not offered. Creating a provider of a type LiteLLM cannot route, or of one of those sign-in types, fails with a validation error; existing providers of such a type can still be edited and deactivated.
 
 2. **If a provider is missing from LiteLLM** — you can still connect it using any provider type that speaks the OpenAI protocol. For example, use **`hosted_vllm`**, **`openai`**, or **`ollama`** and point it at your endpoint. The only requirement is that the server exposes an OpenAI-compatible API (`/v1/chat/completions`, `/v1/embeddings`).
 
 3. **Want a provider to appear with its own name and model list?** Send a PR to the [LiteLLM project](https://github.com/BerriAI/litellm) to add it to their model registry. Once merged, it will automatically appear in Eneo with its models listed.
 
 <Callout type="info">
-  The Admin UI fetches capabilities from LiteLLM's model registry on load, including supported models, context windows, and feature flags (vision, tool use, reasoning). This data is always up to date with your installed LiteLLM version.
+  The Admin UI fetches capabilities from LiteLLM's model registry on load, including supported models, context windows, and feature flags (vision, tool use, reasoning). The backend Docker image sets `LITELLM_LOCAL_MODEL_COST_MAP=True`, so this is the catalog bundled with the installed LiteLLM version: it changes when Eneo upgrades LiteLLM, and the backend does not download it from GitHub at startup. Set the same variable if you run the backend outside the image.
 </Callout>
 
 ---
@@ -283,7 +283,7 @@ Changes are recorded as `model_provider_headers_updated`, with secret values mas
 
 - A request a user makes, such as a chat message or a search, uses that user's attributes.
 - A file upload is processed with the attributes of the user who uploaded it.
-- A website crawl, whether started by hand or on schedule, uses the attributes of the website's owner. If the crawl feeder is turned off (`CRAWL_FEEDER_ENABLED=false`), a crawl started by hand uses the attributes of the user who started it.
+- A scheduled website crawl uses the attributes of the website's owner. A crawl started by hand uses the attributes of the user who started it.
 - A [SharePoint integration](/guides/sharepoint-integration) connected as a tenant app is not tied to a person, so a synchronisation triggered by a SharePoint webhook uses the attributes of the tenant's oldest administrator: the earliest-created active or invited user with the admin permission.
 
 ### When changes take effect

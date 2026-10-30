@@ -37,6 +37,7 @@ from eneo.main.exceptions import (
 )
 from eneo.main.models import NOT_PROVIDED, ModelId
 from eneo.prompts.api.prompt_models import PromptCreate
+from eneo.roles.permissions import Permission
 from eneo.skills.domain.skill import (
     AssistantSkillBindingReplacement,
     SkillBindingIntent,
@@ -328,7 +329,7 @@ async def test_delete_space_assistant_member(setup: Setup):
 
 
 async def test_delete_that_matched_no_row_is_not_found(setup: Setup):
-    setup.service.repo.delete.return_value = False
+    setup.service.repo.delete.return_value = None
 
     with pytest.raises(NotFoundException):
         await setup.service.delete_assistant(TEST_UUID)
@@ -384,9 +385,7 @@ async def test_delete_flow_managed_assistants_has_every_deletion_effect(
         assistant_id,
         other_id,
     }
-    service.icon_repo.delete_unused.assert_awaited_once_with(
-        icon_id, tenant_id=service.user.tenant_id
-    )
+    service.icon_repo.delete_if_unreferenced.assert_awaited_once_with(icon_id)
 
 
 async def test_update_assistant_completion_model_not_in_space(setup: Setup):
@@ -1325,7 +1324,6 @@ async def test_personal_chat_cannot_store_unsupported_reasoning_effort(
         {"data_retention_days": None},
         {"metadata_json": {}},
         {"icon_id": uuid4()},
-        {"skill_binding_intents": []},
         {"document_template": DocumentTemplateChoice(mode="builtin")},
         {"rerank_model_id": uuid4()},
         {"rerank_model_id": None},
@@ -1344,6 +1342,38 @@ async def test_personal_chat_cannot_change_extended_default_assistant_fields(
 
     assistant.update.assert_not_called()
     setup.service.repo.apply_update.assert_not_awaited()
+
+
+@pytest.mark.parametrize("can_manage_assistants", [False, True])
+async def test_own_personal_chat_skills_need_personal_skills_whatever_else_is_held(
+    setup: Setup, can_manage_assistants: bool
+):
+    assistant, _ = configure_personal_default_assistant(
+        setup, can_manage_assistants=can_manage_assistants
+    )
+    [role] = TEST_USER.roles
+    setup.service.user = TEST_USER.model_copy(
+        update={
+            "roles": [
+                role.model_copy(
+                    update={
+                        "permissions": [
+                            permission
+                            for permission in role.permissions
+                            if permission is not Permission.PERSONAL_SKILLS
+                        ]
+                    }
+                )
+            ]
+        }
+    )
+
+    with pytest.raises(UnauthorizedException, match="Own Skills permission"):
+        await _update_assistant(
+            setup.service, assistant_id=TEST_UUID, skill_binding_intents=[]
+        )
+
+    assistant.update.assert_not_called()
 
 
 async def test_assistant_managers_can_edit_extended_personal_default_fields(

@@ -243,6 +243,94 @@ class CheckWhatsNewTests(_RepoCase):
         self.assert_rejected(data, "unexpected keys ['pr']")
 
 
+class UnreleasedBlockTests(_RepoCase):
+    def notes(self, *releases: dict) -> dict:
+        return {"releases": list(releases)}
+
+    def upcoming(self, **extra: object) -> dict:
+        return {"version": "next", "entries": [ENTRY], **extra}
+
+    def released(self, version: str = "2.2.0", date: str | None = "2026-10-07") -> dict:
+        release: dict = {"version": version, "entries": [ENTRY]}
+        if date:
+            release["date"] = date
+        return release
+
+    def test_accepts_next_above_the_released_history(self) -> None:
+        result = self.run_check(self.make_repo(self.notes(self.upcoming(), self.released())))
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_next_must_come_first_and_stay_undated(self) -> None:
+        self.assert_rejected(
+            self.notes(self.released(), self.upcoming()), "release next: must be the first block"
+        )
+        self.assert_rejected(
+            self.notes(self.upcoming(date="2026-11-01")), "unreleased notes have no date"
+        )
+
+    def test_rejects_other_words_for_unreleased(self) -> None:
+        for version in ["Next", "unreleased", "2.4", "latest"]:
+            with self.subTest(version=version):
+                self.assert_rejected(
+                    self.notes({"version": version, "entries": [ENTRY]}), "or 'next'"
+                )
+
+    def test_develop_keeps_unreleased_notes_only_in_next(self) -> None:
+        for branch in ["develop", "refs/heads/develop"]:
+            with self.subTest(branch=branch):
+                accepted = self.run_check(
+                    self.make_repo(self.notes(self.upcoming(), self.released())),
+                    "--branch", branch,
+                )
+                self.assertEqual(accepted.returncode, 0, accepted.stdout)
+                root = self.make_repo(
+                    self.notes(self.upcoming(), self.released("2.3.0", None), self.released())
+                )
+                rejected = self.run_check(root, "--branch", branch)
+                self.assertEqual(rejected.returncode, 1, rejected.stdout)
+                self.assertIn("release 2.3.0 has no date; on develop", rejected.stdout)
+
+    def test_release_branches_have_no_next_and_nothing_from_a_later_line(self) -> None:
+        cases = [
+            (self.notes(self.upcoming(), self.released()), "release/v2.2", "cannot carry 'next'"),
+            (self.notes(self.released("2.3.0", None)), "release/v2.2", "newer than release/v2.2"),
+            (self.notes(self.released("2.3.0-rc.1", None)), "release/v2.2", "newer than"),
+            (self.notes(self.released("2.10.0", None)), "release/v2.9", "newer than"),
+        ]
+        for data, branch, fragment in cases:
+            with self.subTest(branch=branch, data=data):
+                result = self.run_check(self.make_repo(data), "--branch", branch)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(fragment, result.stdout)
+        for data, branch in [
+            (self.notes(self.released("2.3.0", None), self.released()), "release/v2.3"),
+            (self.notes(self.released("2.3.1", None), self.released()), "release/v2.3"),
+            (self.notes(self.released()), "release/v2.3"),
+            (self.notes(self.upcoming(), self.released("2.3.0", None)), "feature/anything"),
+        ]:
+            with self.subTest(branch=branch, data=data):
+                result = self.run_check(self.make_repo(data), "--branch", branch)
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_no_tag_ships_next(self) -> None:
+        for tag in ["v2.3.0-rc.1", "v2.3.0"]:
+            with self.subTest(tag=tag):
+                data = self.notes(self.upcoming(), self.released("2.3.0", "2026-11-01"))
+                result = self.run_check(self.make_repo(data), "--release-tag", tag)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("would ship the 'next' block", result.stdout)
+
+    def test_reads_release_branches_whose_schema_predates_next(self) -> None:
+        root = self.make_repo(self.notes(self.released("2.3.0", None), self.released()))
+        schema_path = root / "frontend" / "packages" / "whats-new" / "releases.schema.json"
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        pattern = schema["$defs"].pop("releaseVersion")["pattern"]
+        schema["$defs"]["release"]["properties"]["version"] = {"type": "string", "pattern": pattern}
+        schema_path.write_text(json.dumps(schema), encoding="utf-8")
+        result = self.run_check(root, "--branch", "release/v2.3")
+        self.assertEqual(result.returncode, 0, result.stdout)
+
+
 class ReleaseTagTests(_RepoCase):
     def releases(self, version: str, date: str | None = None) -> dict:
         release = {"version": version, "entries": [ENTRY]}

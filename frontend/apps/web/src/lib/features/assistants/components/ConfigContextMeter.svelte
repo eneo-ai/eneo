@@ -1,6 +1,6 @@
 <script lang="ts">
   import { intlLocale } from "$lib/core/formatting/dateTime";
-  import { TriangleAlert } from "@lucide/svelte";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import ContextMeterFill from "$lib/components/ContextMeterFill.svelte";
   import { getEneo } from "$lib/core/Eneo";
   import { m } from "$lib/paraglide/messages";

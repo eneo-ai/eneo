@@ -38,6 +38,7 @@ from eneo.security_classifications.domain.entities.security_classification impor
     SecurityClassification,
 )
 from eneo.sessions.session import SessionInDB
+from eneo.skills.domain.personal_chat_skill_layers import plan_personal_chat_turn
 from eneo.skills.domain.skill import (
     SkillRuntimePolicy,
     SkillRuntimeResolution,
@@ -226,6 +227,11 @@ def turn(monkeypatch: pytest.MonkeyPatch) -> TurnFixture:
         return_value=SkillRuntimeResolution(eligible=(), blocked=())
     )
     skills.create_turn_plan = AsyncMock(side_effect=plan)
+    skills.create_personal_chat_turn_plan = AsyncMock(
+        side_effect=lambda **kwargs: plan_personal_chat_turn(
+            **kwargs, policy=policy, holds_permission=True
+        )
+    )
     space_repo = Mock()
     space_repo.get_space_by_assistant = AsyncMock(return_value=space)
     files = Mock()

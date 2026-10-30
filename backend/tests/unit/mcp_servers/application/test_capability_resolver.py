@@ -13,7 +13,6 @@ from eneo.mcp_servers.application.capability_resolver import (
     meets_security_classification,
     resolve_capability_servers,
     select_provider_for_user,
-    usable_capability_tools,
 )
 from eneo.mcp_servers.domain.entities.mcp_server import (
     AUDIENCE_EVERYONE,
@@ -108,22 +107,6 @@ def _tool(*, enabled=True, removed=False, approved=True) -> MCPServerTool:
     )
 
 
-class TestUsableCapabilityTools:
-    def test_filters_disabled_removed_and_unapproved(self):
-        usable = _tool()
-        server = _server(
-            "web_search",
-            tools=[
-                usable,
-                _tool(enabled=False),
-                _tool(removed=True),
-                _tool(approved=False),
-            ],
-        )
-
-        assert usable_capability_tools(server) == [usable]
-
-
 def _scalars(records):
     result = MagicMock()
     result.all.return_value = records
@@ -153,20 +136,23 @@ class TestActiveCapabilityProviders:
         on_tool, off_tool = server.tools
         session = AsyncMock()
         session.scalars.return_value = _scalars([object()])
-        execute_result = AsyncMock()
-        execute_result.all = lambda: [(on_tool.id, False), (off_tool.id, True)]
-        session.execute.return_value = execute_result
+        session.execute.return_value = [
+            (server.tenant_id, on_tool.id, False),
+            (server.tenant_id, off_tool.id, True),
+        ]
         monkeypatch.setattr(
             capability_resolver.MCPServerMapper, "to_entity", lambda record: server
         )
 
         resolved = await active_capability_providers(
-            session, uuid4(), purposes=("web_search",)
+            session, server.tenant_id, purposes=("web_search",)
         )
 
         assert resolved == [server]
-        assert on_tool.is_enabled_by_default is False
-        assert off_tool.is_enabled_by_default is True
+        assert on_tool.is_enabled is False
+        assert off_tool.is_enabled is True
+        assert on_tool.is_enabled_by_default is True
+        assert off_tool.is_enabled_by_default is False
 
 
 class TestSelectProviderForUser:
@@ -548,7 +534,7 @@ class TestBackingModel:
         assert not meets_security_classification(provider, _classification(2))
         assert meets_security_classification(provider, _classification(1))
 
-    async def test_query_loads_the_backing_model(self, monkeypatch):
+    async def test_query_loads_what_resolution_reads(self, monkeypatch):
         session = AsyncMock()
         session.scalars.return_value = MagicMock(all=lambda: [])
 
@@ -558,7 +544,13 @@ class TestBackingModel:
 
         query = session.scalars.await_args.args[0]
         loaded = [str(getattr(opt, "path", "")) for opt in query._with_options]
-        assert any("image_model" in path for path in loaded)
+        for relationship in (
+            "tools",
+            "user_groups",
+            "security_classification",
+            "image_model",
+        ):
+            assert any(relationship in path for path in loaded), relationship
 
     async def test_disabled_backing_model_is_silently_unavailable(self, monkeypatch):
         purpose = "image_generation"
@@ -657,8 +649,13 @@ class _ProviderSession:
         return _scalars([p for p in self.providers if f"'{p.purpose}'" in compiled])
 
     async def execute(self, statement):
-        rows = list(self.tool_settings.items())
-        return MagicMock(all=lambda: rows)
+        # The tool-settings read: one row per setting, in the tool's own tenant.
+        return [
+            (provider.tenant_id, tool.id, self.tool_settings[tool.id])
+            for provider in self.providers
+            for tool in provider.tools
+            if tool.id in self.tool_settings
+        ]
 
 
 @pytest.fixture

@@ -18,6 +18,7 @@
   import ChatReasoningSelect from "../switcher/ChatReasoningSelect.svelte";
   import ChatKnowledge from "./ChatKnowledge.svelte";
   import ChatMcpServers from "./ChatMcpServers.svelte";
+  import ChatSkills from "./ChatSkills.svelte";
   import { getSpacesManager } from "$lib/features/spaces/SpacesManager";
   import { getChatService } from "../../ChatService.svelte";
   import { effectiveKnowledgeMode, internalMcpServerNames } from "../../internalMcpAvailability";
@@ -32,7 +33,9 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { SvelteSet } from "svelte/reactivity";
-  import { TextQuote, TriangleAlert, X } from "@lucide/svelte";
+  import TextQuote from "@lucide/svelte/icons/text-quote";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import X from "@lucide/svelte/icons/x";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { isCapabilityPurpose } from "$lib/features/mcp/capabilities";
   import { modelSupportsToolCalling } from "$lib/features/mcp/readiness";
@@ -689,6 +692,11 @@
           onSelectionChange={persistMcpServerSelection}
           bind:autoAcceptTools
         />
+      {/if}
+
+      {#if showModelSelect}
+        <!-- Saves to the default assistant through the same SpacesManager as the model picker. -->
+        <ChatSkills />
       {/if}
     </PromptInput.Tools>
 

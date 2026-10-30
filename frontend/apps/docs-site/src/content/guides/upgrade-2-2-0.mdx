@@ -16,6 +16,13 @@ import { Callout } from "nextra/components";
 For the rest of the procedure (backups, draining work, File and Icon storage),
 follow [Updating Eneo](/guides/deployment#updating-eneo).
 
+<Callout type="info">
+  **Known issue, fixed in 2.3.** Eneo 2.2 keeps the search data of every
+  replaced version, which fills the storage quota over time. After upgrading to
+  2.3, remove it once with [Free Space Held by Earlier
+  Versions](/guides/free-space-earlier-versions).
+</Callout>
+
 ---
 
 ## Environment variables

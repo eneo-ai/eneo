@@ -1,7 +1,9 @@
 <script lang="ts">
   import { intlLocale } from "$lib/core/formatting/dateTime";
   import type { CompletionModel } from "@eneo/eneo-js";
-  import { Brain, Eye, Wrench } from "@lucide/svelte";
+  import Brain from "@lucide/svelte/icons/brain";
+  import Eye from "@lucide/svelte/icons/eye";
+  import Wrench from "@lucide/svelte/icons/wrench";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { formatCostPerMillionTokens } from "$lib/features/ai-models/formatModelStats";
   import { m } from "$lib/paraglide/messages";

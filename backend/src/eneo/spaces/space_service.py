@@ -382,11 +382,20 @@ class SpaceService:
         data_retention_days: Union[int, None, NotProvided] = NOT_PROVIDED,
         icon_id: Union[UUID, None, NotProvided] = NOT_PROVIDED,
     ) -> Space:
+        if is_provided(icon_id):
+            await self.repo.lock(id)
         space = await self.get_space(id)
         actor = self._get_actor(space)
 
         if not actor.can_edit_space():
             raise UnauthorizedException("User does not have permission to edit space")
+        previous_icon_id = space.icon_id
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
 
         space_security_classification = None
         if is_provided(security_classification):
@@ -623,6 +632,7 @@ class SpaceService:
                 mcp_tools=_link_edit(mcp_tool_settings, shown_mcp_tools),
             ),
         )
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
         return await self.get_space(id)
 
     async def security_classification_impact_analysis(
@@ -796,6 +806,13 @@ class SpaceService:
             affected_service_ids=frozenset(s.id for s in affected_services),
         )
 
+    async def delete_personal_space(self, user: UserInDB):
+        space = await self.repo.get_personal_space(user.id)
+
+        if space is not None:
+            assert space.id is not None
+            await self._delete_with_icons(space)
+
     async def delete_space(self, id: UUID):
         space = await self.get_space(id)
         actor = self._get_actor(space)
@@ -803,8 +820,12 @@ class SpaceService:
         if not actor.can_delete_space():
             raise UnauthorizedException("User does not have permission to delete space")
 
-        icon_id = space.icon_id
+        await self._delete_with_icons(space)
+
+    async def _delete_with_icons(self, space: Space) -> None:
+        """Delete the space; its resources cascade, so their icons are released here."""
         assert space.id is not None
+        icon_ids = await self.icon_repo.lock_shown_in_space(space.id)
 
         if await self.repo.has_flow_delete_blockers(space.id):
             if await self.repo.has_active_legal_hold(space.id):
@@ -825,8 +846,8 @@ class SpaceService:
         await self._revoke_space_api_keys(space)
         await self.repo.delete(space.id)
 
-        if icon_id:
-            await self.icon_repo.delete_unused(icon_id, tenant_id=self.user.tenant_id)
+        for icon_id in icon_ids:
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def _revoke_space_api_keys(self, space: Space) -> None:
         if self.api_key_scope_revoker is None:

@@ -3,6 +3,8 @@ keeping only the administrator's per-tool decisions from the persisted rows."""
 
 from uuid import uuid4
 
+import pytest
+
 from eneo.internal_mcp.builtin_tools import with_live_builtin_tools
 from eneo.mcp_servers.domain.entities.mcp_server import MCPServer, MCPServerTool
 
@@ -57,6 +59,21 @@ async def test_live_tool_without_a_persisted_row_is_exposed_enabled():
 
     assert [tool.name for tool in tools] == ["generate_image"]
     assert tools[0].is_enabled_by_default is True
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+async def test_live_builtin_tools_keep_tenant_override_separate_from_default(enabled):
+    server = _server(http_auth_type="internal", purpose="image_generation", tools=[])
+    server.tools = [
+        _stale_generate_image(
+            server.id, is_enabled_by_default=not enabled, enabled_override=enabled
+        )
+    ]
+
+    (tool,) = await with_live_builtin_tools(server)
+
+    assert tool.is_enabled is enabled
+    assert tool.is_enabled_by_default is not enabled
 
 
 async def test_external_provider_keeps_its_persisted_tools():

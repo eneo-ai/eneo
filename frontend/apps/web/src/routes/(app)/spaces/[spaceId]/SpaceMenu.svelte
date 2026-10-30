@@ -37,7 +37,7 @@
   import { getAppContext } from "$lib/core/AppContext";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { BookOpenCheck } from "@lucide/svelte";
+  import BookOpenCheck from "@lucide/svelte/icons/book-open-check";
 
   export let space: SpaceMenuContext;
 

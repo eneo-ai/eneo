@@ -6666,7 +6666,7 @@ export interface paths {
     post?: never;
     /**
      * Delete icon
-     * @description Delete an icon by ID. Requires authentication and ownership.
+     * @description Delete an icon of the caller's tenant that no assistant, app, space or group chat shows. Remove the icon from its resource with that resource's update first; an icon still in use is refused with 409 (`eneo_error_code` 9075).
      */
     delete: operations["delete_icon_api_v1_icons__id___delete"];
     options?: never;
@@ -14075,6 +14075,9 @@ export interface components {
     AssistantSkillConfigurationPublic: {
       /** Bindings */
       bindings: components["schemas"]["AssistantSkillBindingSummary"][];
+      /** Organisation Bindings */
+      organisation_bindings?: components["schemas"]["AssistantSkillBindingSummary"][];
+      personal_layer?: components["schemas"]["PersonalChatSkillLayerPublic"] | null;
       runtime: components["schemas"]["AssistantSkillRuntimeSummary"] | null;
     };
     /** AssistantSkillRuntimeSummary */
@@ -14885,7 +14888,11 @@ export interface components {
        * Format: uuid
        */
       session_id: string;
-      skill_activation: components["schemas"]["SkillActivationEvidenceV1"] | null;
+      /** Skill Activation */
+      skill_activation:
+        | components["schemas"]["SkillActivationEvidenceV1"]
+        | components["schemas"]["SkillActivationEvidenceV2"]
+        | null;
     };
     /**
      * ClassificationCause
@@ -17364,7 +17371,10 @@ export interface components {
       | 9066
       | 9067
       | 9069
-      | 9070;
+      | 9070
+      | 9075
+      | 9076
+      | 9080;
     /** EvidenceArtifactAvailabilitySummary */
     EvidenceArtifactAvailabilitySummary: {
       /** Artifact Count */
@@ -34574,6 +34584,7 @@ export interface components {
       | "assistants"
       | "skills"
       | "skills_management"
+      | "personal_skills"
       | "personal_chat"
       | "group_chats"
       | "apps"
@@ -34636,6 +34647,56 @@ export interface components {
        */
       expected_published_revision_id: string;
     };
+    /**
+     * PersonalChatSkillLayerPublic
+     * @description Whether the person's own Skills run in their personal chat, and why not.
+     */
+    PersonalChatSkillLayerPublic: {
+      /** Detail */
+      detail:
+        | components["schemas"]["SkillActivationFallbackReason"]
+        | components["schemas"]["SkillActivationRejectionReason"]
+        | null;
+      reason: components["schemas"]["PersonalSkillLayerReason"] | null;
+      status: components["schemas"]["PersonalSkillLayerStatus"];
+    };
+    /**
+     * PersonalSkillLayerEvidence
+     * @description What happened to the personal chat's own Skills on one turn.
+     */
+    PersonalSkillLayerEvidence: {
+      /** Detail */
+      detail?:
+        | components["schemas"]["SkillActivationFallbackReason"]
+        | components["schemas"]["SkillActivationRejectionReason"]
+        | null;
+      reason?: components["schemas"]["PersonalSkillLayerReason"] | null;
+      /** References */
+      references: components["schemas"]["SkillActivationReference"][];
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: "applied" | "suspended";
+    };
+    /**
+     * PersonalSkillLayerReason
+     * @description Why a personal layer is suspended; the first failing check wins.
+     * @enum {string}
+     */
+    PersonalSkillLayerReason:
+      | "permission_missing"
+      | "attachment_limit_exceeded"
+      | "model_context_exceeded"
+      | "on_demand_unavailable"
+      | "personal_skill_does_not_fit"
+      | "organisation_skill_crowded_out";
+    /**
+     * PersonalSkillLayerStatus
+     * @description Whether the personal chat's own Skills run (see personal_chat_skill_layers).
+     * @enum {string}
+     */
+    PersonalSkillLayerStatus: "empty" | "applied" | "suspended";
     /**
      * PolicyActor
      * @enum {string}
@@ -37176,10 +37237,7 @@ export interface components {
       /** Url */
       url: string;
     };
-    /**
-     * SkillActivationEvidenceV1
-     * @description Strict, versioned, body-free facts retained with one Question.
-     */
+    /** SkillActivationEvidenceV1 */
     SkillActivationEvidenceV1: {
       /**
        * Accepted
@@ -37236,6 +37294,68 @@ export interface components {
        * @constant
        */
       version?: 1;
+    };
+    /**
+     * SkillActivationEvidenceV2
+     * @description V1 plus the personal layer; written only for turns that have one.
+     */
+    SkillActivationEvidenceV2: {
+      /**
+       * Accepted
+       * @default []
+       */
+      accepted?: string[];
+      /**
+       * Activation Rounds
+       * @default 0
+       */
+      activation_rounds?: number;
+      /** Available */
+      available: components["schemas"]["SkillActivationReference"][];
+      /** Blocked */
+      blocked: components["schemas"]["SkillActivationReference"][];
+      effective_mode: components["schemas"]["SkillTurnEffectiveMode"];
+      fallback_reason?: components["schemas"]["SkillActivationFallbackReason"] | null;
+      /** Initially Active */
+      initially_active: string[];
+      personal_layer: components["schemas"]["PersonalSkillLayerEvidence"];
+      /**
+       * Rejected
+       * @default []
+       */
+      rejected?: components["schemas"]["SkillActivationRejection"][];
+      /**
+       * Repeated
+       * @default []
+       */
+      repeated?: string[];
+      /**
+       * Selected Model Id
+       * Format: uuid
+       */
+      selected_model_id: string;
+      /** Selected Model Route */
+      selected_model_route: string;
+      /**
+       * Selection Latency Ms
+       * @default 0
+       */
+      selection_latency_ms?: number;
+      /** Skill Context Token Limit */
+      skill_context_token_limit: number;
+      /** Skill Context Tokens */
+      skill_context_tokens: number;
+      /**
+       * Token Count Source
+       * @enum {string}
+       */
+      token_count_source: "litellm" | "fallback_estimate";
+      /**
+       * Version
+       * @default 2
+       * @constant
+       */
+      version?: 2;
     };
     /**
      * SkillActivationFallbackReason
@@ -67228,6 +67348,15 @@ export interface operations {
           "application/json": components["schemas"]["GeneralError"];
         };
       };
+      /** @description Forbidden */
+      403: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
       /** @description Request Entity Too Large */
       413: {
         headers: {
@@ -67333,12 +67462,32 @@ export interface operations {
         };
         content?: never;
       };
-      /** @description Not found */
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Not Found */
       404: {
         headers: {
           [name: string]: unknown;
         };
-        content?: never;
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Conflict */
+      409: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
       };
       /** @description Validation Error */
       422: {

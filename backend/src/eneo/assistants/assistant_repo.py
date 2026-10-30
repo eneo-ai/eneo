@@ -1108,12 +1108,15 @@ class AssistantRepository:
                         )
                     )
 
-    async def delete(self, assistant_id: UUID, space_id: UUID) -> bool:
-        """Delete one assistant of the space; False when no row matched.
+    async def delete(
+        self, assistant_id: UUID, space_id: UUID
+    ) -> sa.Row[tuple[UUID | None]] | None:
+        """Delete one assistant of the space; None when no row matched, else
+        the row's ``icon_id``: the icon it showed, read under the delete.
 
         Never the default assistant, nor one a flow manages (its flow deletes
         it): no row matches then, as when the assistant is gone or moved."""
-        deleted = await self.session.scalar(
+        result = await self.session.execute(
             sa.delete(Assistants)
             .where(
                 Assistants.id == assistant_id,
@@ -1121,9 +1124,9 @@ class AssistantRepository:
                 Assistants.is_default.is_(False),
                 Assistants.origin != AssistantOrigin.FLOW_MANAGED.value,
             )
-            .returning(Assistants.id)
+            .returning(Assistants.icon_id)
         )
-        return deleted is not None
+        return result.one_or_none()
 
     async def move(
         self, assistant_id: UUID, source_space_id: UUID, target_space_id: UUID

@@ -255,6 +255,7 @@ class TestPermissionSemantics:
             "assistants",
             "skills",
             "skills_management",
+            "personal_skills",
             "personal_chat",
             "group_chats",
             "apps",
@@ -331,6 +332,7 @@ class TestRoleTemplates:
         assert "assistants" in user
         assert "skills" not in user
         assert "skills_management" not in user
+        assert "personal_skills" not in user
         assert "shared_spaces" in user
         assert "collections" in user
         assert "admin" not in user
@@ -344,6 +346,7 @@ class TestRoleTemplates:
         assert "assistants" in ai
         assert "skills" not in ai
         assert "skills_management" not in ai
+        assert "personal_skills" not in ai
         assert "shared_spaces" in ai
         assert "flows_trace" in ai
         assert "admin" not in ai

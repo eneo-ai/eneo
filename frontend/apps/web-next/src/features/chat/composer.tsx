@@ -323,6 +323,8 @@ export type ComposerProps = {
   knowledge?: KnowledgeOrigin[];
   /** Verktyg pill: the popover with a switch per capability and MCP server. */
   tools?: ReactNode;
+  /** Personal chat: the Skills pill beside Verktyg. */
+  skills?: ReactNode;
   /** Group chats: @-mention picker. */
   mention?: ReactNode;
   /** Personal assistant: model picker on the right. */
@@ -416,6 +418,7 @@ export function Composer({
   onOpenFileDialog,
   knowledge = [],
   tools,
+  skills,
   mention,
   modelSelector,
   partnerToken,
@@ -519,6 +522,7 @@ export function Composer({
               )}
               <KnowledgePill knowledge={knowledge} />
               {tools}
+              {skills}
               {mention}
               {footerActions}
             </div>

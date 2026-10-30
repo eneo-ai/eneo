@@ -208,18 +208,19 @@ update interval to re-enable it.
 ### Crawler Limits
 
 Crawl limits are not set per website. They are deployment defaults from
-`env_backend.env` that a system administrator can override per tenant.
+`env_backend.env` that a system administrator can override per tenant, except
+`CRAWL_EMBEDDING_CONCURRENCY` and `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT`, which
+apply to the whole deployment.
 
-| Setting                              | Default            | Purpose                                           |
-| ------------------------------------ | ------------------ | ------------------------------------------------- |
-| `CRAWL_MAX_LENGTH`                   | 36000 s (10 hours) | Maximum duration of one crawl                     |
-| `CLOSESPIDER_ITEMCOUNT`              | 20000              | Maximum combined pages and linked files per crawl |
-| `DOWNLOAD_MAX_SIZE`                  | 10485760 (10 MB)   | Maximum size of a downloaded file                 |
-| `OBEY_ROBOTS`                        | `true`             | Respect `robots.txt`                              |
-| `CRAWL_PAGE_BATCH_SIZE`              | 100                | Pages committed per database write                |
-| `CRAWL_EMBEDDING_CONCURRENCY`        | 3                  | Parallel embedding calls per crawl                |
-| `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` | 4                  | Concurrent crawl jobs per tenant                  |
-| `CRAWL_JOB_CONCURRENCY_LIMIT`        | `WORKER_MAX_JOBS`  | Concurrent crawl jobs across the whole deployment |
+| Setting                              | Default            | Purpose                                            |
+| ------------------------------------ | ------------------ | -------------------------------------------------- |
+| `CRAWL_MAX_LENGTH`                   | 36000 s (10 hours) | Maximum duration of one crawl                      |
+| `CLOSESPIDER_ITEMCOUNT`              | 20000              | Maximum pages and linked files per crawl           |
+| `DOWNLOAD_MAX_SIZE`                  | 10485760 (10 MB)   | Maximum size of a downloaded file                  |
+| `OBEY_ROBOTS`                        | `true`             | Respect `robots.txt`                               |
+| `CRAWL_PAGE_BATCH_SIZE`              | 100                | Pages committed per database write                 |
+| `CRAWL_EMBEDDING_CONCURRENCY`        | 3                  | Parallel embedding calls per crawl                 |
+| `CRAWL_JOB_TENANT_CONCURRENCY_LIMIT` | 4                  | Concurrent crawl jobs per tenant (deployment-wide) |
 
 Per-tenant overrides are stored on the tenant and read by the worker at the
 start of every crawl:
@@ -371,6 +372,13 @@ Upload the document again with the same title. Eneo builds the replacement
 first and makes it searchable only when its text and embeddings are complete.
 If processing fails, the previous version remains available.
 
+The previous version keeps its text, so citations in earlier answers stay
+readable. Its chunks and embeddings are removed, because only the current
+version is searched. Recrawled web pages work the same way: an unchanged page
+keeps its version, and a changed page replaces only its own previous version.
+
+![A recrawl finds one changed page. In one transaction Eneo marks version 1 as replaced, adds version 2 with its chunks and removes version 1's chunks. Version 2 is searched; version 1 keeps its text, title, URL and original for citations. If any step fails, the page rolls back and version 1 stays active with its chunks.](/diagrams/replaced-version-search-data.svg)
+
 ### Delete Documents
 
 1. Click the document
@@ -379,6 +387,20 @@ If processing fails, the previous version remains available.
 
 Deleting a document removes its text and all of its chunks and embeddings.
 Deleting a collection or website removes every document in it.
+
+### Free Space Held by Earlier Versions
+
+Eneo 2.2.0 up to and including 2.3.0-rc.3 kept the chunks and embeddings of
+every replaced version. Nothing searched them, but they counted toward the
+storage quota and took database space. On websites that are recrawled often,
+they can fill the quota so that changed pages are no longer saved (crawl
+problems show `TENANT_QUOTA_EXCEEDED`).
+
+Current releases remove this data when they replace a version. Remove what
+earlier releases left behind once, with the guide
+[Free Space Held by Earlier Versions](/guides/free-space-earlier-versions).
+Eneo keeps running while it works, and the text, originals and citations of
+earlier versions stay.
 
 ---
 
@@ -394,12 +416,9 @@ settings in `env_backend.env` control throughput:
 # Concurrent jobs per worker process (default 15)
 WORKER_MAX_JOBS=15
 
-# Concurrent crawl jobs per tenant (default 4); a single-tenant deployment
-# can raise it to the deployment-wide limit
+# Concurrent crawl jobs per tenant (default 4). Use the same value on the
+# backend and every worker.
 CRAWL_JOB_TENANT_CONCURRENCY_LIMIT=4
-
-# Concurrent crawl jobs across all crawler workers (defaults to WORKER_MAX_JOBS)
-# CRAWL_JOB_CONCURRENCY_LIMIT=15
 ```
 
 Every API and worker process owns its own database pool, so size PostgreSQL
@@ -452,8 +471,9 @@ docker compose restart worker
 **Check error messages:**
 
 ```bash
-docker compose logs worker crawler | grep -i crawl
-curl -s https://your-eneo-instance.com/api/healthz/crawler
+docker compose logs worker crawler-worker | grep -i crawl
+curl -s https://your-eneo-instance.com/api/healthz/crawler \
+  -H "X-API-Key: $ENEO_SUPER_API_KEY"
 ```
 
 **Common issues:**
@@ -468,6 +488,22 @@ curl -s https://your-eneo-instance.com/api/healthz/crawler
 - Use a sitemap crawl or a more specific start URL
 - Raise the tenant's page or time limit through the sysadmin API
 - Change the website's update interval to re-enable it
+
+### Changed Pages Are Not Saved
+
+**Symptom:** crawls finish, but the crawl problems list `TENANT_QUOTA_EXCEEDED`
+and Eneo keeps answering from older page content.
+
+**Solution:**
+
+1. Run the one-time cleanup in
+   [Free Space Held by Earlier Versions](/guides/free-space-earlier-versions).
+   On installations upgraded from 2.2, replaced versions often hold much of the
+   quota.
+2. If the quota is still full, remove websites or documents that are no longer
+   needed, or crawl less often where that is enough.
+3. Raise the tenant quota only after checking free disk space: each byte of
+   quota also needs room for indexes and embeddings on disk.
 
 ### Poor Retrieval Quality
 

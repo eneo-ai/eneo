@@ -14,17 +14,15 @@
   import { formatSkillUsage, removalAnnouncement } from "$lib/features/skills/skillUsage";
   import { getErrorMessage } from "$lib/core/errors";
   import { m } from "$lib/paraglide/messages";
-  import {
-    Info,
-    LoaderCircle,
-    Plus,
-    RefreshCw,
-    Search,
-    ShieldAlert,
-    Trash2,
-    X,
-    BookOpenCheck
-  } from "@lucide/svelte";
+  import Info from "@lucide/svelte/icons/info";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import Plus from "@lucide/svelte/icons/plus";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import Search from "@lucide/svelte/icons/search";
+  import ShieldAlert from "@lucide/svelte/icons/shield-alert";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import X from "@lucide/svelte/icons/x";
+  import BookOpenCheck from "@lucide/svelte/icons/book-open-check";
   import { untrack } from "svelte";
   import { SvelteURLSearchParams } from "svelte/reactivity";
 

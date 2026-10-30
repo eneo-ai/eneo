@@ -15,6 +15,10 @@ class Permission(str, Enum):
     ASSISTANTS = "assistants"
     SKILLS = "skills"
     SKILLS_MANAGEMENT = "skills_management"
+    # Skills in your own personal space and in your personal chat only,
+    # decoupled from SKILLS and SKILLS_MANAGEMENT the way PERSONAL_CHAT is
+    # decoupled from ASSISTANTS.
+    PERSONAL_SKILLS = "personal_skills"
     PERSONAL_CHAT = "personal_chat"
     GROUP_CHATS = "group_chats"
     APPS = "apps"

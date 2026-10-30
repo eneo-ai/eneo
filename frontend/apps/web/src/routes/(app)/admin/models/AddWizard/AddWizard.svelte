@@ -33,7 +33,8 @@
   import { getErrorMessage, toastError } from "$lib/core/errors";
   import * as Dialog from "$lib/components/ui/dialog/index.js";
   import { Button } from "$lib/components/ui/button/index.js";
-  import { LoaderCircle, TriangleAlert } from "@lucide/svelte";
+  import LoaderCircle from "@lucide/svelte/icons/loader-circle";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
 
   import StepProvider from "./StepProvider.svelte";
   import StepCredentials from "./StepCredentials.svelte";

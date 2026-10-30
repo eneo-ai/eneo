@@ -311,6 +311,8 @@ _STUB_ID = "00000000-0000-0000-0000-000000000001"
 _CREATION_ENDPOINTS: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/v1/assistants/", {"name": "x", "space_id": _STUB_ID}),
     ("POST", "/api/v1/spaces/", {"name": "x"}),
+    # An icon records its uploader, which a service key does not have.
+    ("POST", "/api/v1/icons/", None),
     (
         "POST",
         "/api/v1/spaces/{space_id}/applications/assistants/",

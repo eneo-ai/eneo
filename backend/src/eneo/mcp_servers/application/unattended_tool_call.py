@@ -34,9 +34,9 @@ if TYPE_CHECKING:
 EXCHANGE_STOP_GRACE_SECONDS = 1.0
 
 # An exchange is told to stop this many times, each with an equal share of
-# the grace. One time is not enough while it connects: the client answers
-# that cancellation by asking the server why the connect failed, a request
-# the server can keep open for as long as it likes, and the next one ends it.
+# the grace. One time may not be enough: a stage of the exchange can go on
+# through a cancellation (the close that follows a cancelled call runs under
+# it), and the next one ends it.
 _STOP_ATTEMPTS = 2
 
 # An exchange that was let go is still a running task; its name tells it apart
@@ -68,8 +68,9 @@ async def _stop(exchange: asyncio.Task[MCPToolAnswer]) -> None:
 
     A caller that is cancelled while it waits here still tells the exchange
     every time and waits each share out: left after the first time, the
-    exchange would stay on the client's question for as long as the server
-    likes. The caller's own cancellation is raised when this is done.
+    exchange would stay in a stage that went on through it for as long as
+    the server likes. The caller's own cancellation is raised when this is
+    done.
     """
     loop = asyncio.get_running_loop()
     cancelled = False
@@ -138,10 +139,10 @@ class UnattendedToolCaller:
             terminate_session_on_close=False,
             http_client_factory=http_client_factory,
         )
-        # A task of its own: the client closes on the task that connected,
-        # and it answers a cancellation during connect or close with a failed
-        # connect or a finished close. The caller's cancellation is therefore
-        # taken here, at this task's own wait, where nothing can rewrite it.
+        # A task of its own: the caller's cancellation is taken here, at this
+        # task's own wait, where nothing can rewrite it, and the exchange is
+        # then told to stop whatever it had reached, the connection closed
+        # with it.
         exchange = asyncio.create_task(
             _exchange(client, tool_name, arguments), name=EXCHANGE_TASK_NAME
         )
@@ -158,7 +159,7 @@ class UnattendedToolCaller:
                 f"Tool call failed: no answer within {timeout_seconds}s"
             )
         if exchange.cancelled():
-            # Nobody here stopped it: the SDK's transport cancels the task it
-            # runs in when a request of its own fails.
+            # Nobody here stopped it, and the caller was not cancelled: an
+            # exchange cancelled by whatever it ran is a failed call.
             raise MCPClientError("Tool call failed: the request to the server failed")
         return exchange.result()

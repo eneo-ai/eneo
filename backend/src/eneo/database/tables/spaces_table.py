@@ -1,7 +1,7 @@
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import CheckConstraint, ForeignKey, Index, String
+from sqlalchemy import CheckConstraint, ForeignKey, Index, String, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from eneo.data_retention.constants import MAX_RETENTION_DAYS, MIN_RETENTION_DAYS
@@ -157,6 +157,11 @@ class Spaces(BasePublic):
             "tenant_id",
             "id",
             unique=True,
+        ),
+        Index(
+            "ix_spaces_icon_id",
+            "icon_id",
+            postgresql_where=text("icon_id IS NOT NULL"),
         ),
     )
 

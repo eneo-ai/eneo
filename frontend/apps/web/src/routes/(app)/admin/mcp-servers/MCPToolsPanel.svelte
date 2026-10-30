@@ -6,7 +6,13 @@
   import { Button } from "$lib/components/ui/button/index.js";
   import { Switch } from "$lib/components/ui/switch/index.js";
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { RefreshCw, TriangleAlert, Trash2, Check, Pencil, X, ShieldAlert } from "@lucide/svelte";
+  import RefreshCw from "@lucide/svelte/icons/refresh-cw";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import Trash2 from "@lucide/svelte/icons/trash-2";
+  import Check from "@lucide/svelte/icons/check";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import X from "@lucide/svelte/icons/x";
+  import ShieldAlert from "@lucide/svelte/icons/shield-alert";
   import { m } from "$lib/paraglide/messages";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { toastError } from "$lib/core/errors";

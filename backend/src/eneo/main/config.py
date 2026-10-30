@@ -335,6 +335,14 @@ class Settings(BaseSettings):
     # Upper bound for one rerank call to a provider, starting with the
     # registration-time connection test.
     rerank_request_timeout_seconds: int = 10
+    # Model responses with tool calls that one chat turn may make before the
+    # model must answer from what it gathered. Parallel calls in one response
+    # count once.
+    max_tool_rounds: int = Field(default=40, gt=0)
+    # Upper bound for each wait on a completion provider: connecting, the
+    # response, and in a stream each next chunk. A slow model that keeps
+    # streaming is never cut off; a provider that stops answering is.
+    completion_request_timeout_seconds: float = Field(default=600, gt=0)
     mcp_tool_output_max_chars: int = 32768
     # Decoded size cap for a single MCP image content block; larger images
     # are dropped before they can be persisted as generated files.

@@ -24,30 +24,28 @@
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
   import { createCopyState } from "$lib/core/helpers/clipboard.svelte";
   import { m } from "$lib/paraglide/messages";
-  import {
-    Key,
-    Shield,
-    Settings2,
-    ChevronRight,
-    ChevronLeft,
-    Check,
-    CircleAlert,
-    Globe,
-    Lock,
-    Building2,
-    MessageSquare,
-    AppWindow,
-    Info,
-    Eye,
-    Pencil,
-    ShieldCheck,
-    Sparkles,
-    Copy,
-    CircleCheck,
-    Ban,
-    Link2,
-    Workflow
-  } from "@lucide/svelte";
+  import Key from "@lucide/svelte/icons/key";
+  import Shield from "@lucide/svelte/icons/shield";
+  import Settings2 from "@lucide/svelte/icons/settings-2";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import ChevronLeft from "@lucide/svelte/icons/chevron-left";
+  import Check from "@lucide/svelte/icons/check";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
+  import Globe from "@lucide/svelte/icons/globe";
+  import Lock from "@lucide/svelte/icons/lock";
+  import Building2 from "@lucide/svelte/icons/building-2";
+  import MessageSquare from "@lucide/svelte/icons/message-square";
+  import AppWindow from "@lucide/svelte/icons/app-window";
+  import Info from "@lucide/svelte/icons/info";
+  import Eye from "@lucide/svelte/icons/eye";
+  import Pencil from "@lucide/svelte/icons/pencil";
+  import ShieldCheck from "@lucide/svelte/icons/shield-check";
+  import Sparkles from "@lucide/svelte/icons/sparkles";
+  import Copy from "@lucide/svelte/icons/copy";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import Ban from "@lucide/svelte/icons/ban";
+  import Link2 from "@lucide/svelte/icons/link-2";
+  import Workflow from "@lucide/svelte/icons/workflow";
   import { fly, fade } from "svelte/transition";
   import { cubicOut } from "svelte/easing";
   import ScopeResourceSelector from "$lib/features/api-keys/ScopeResourceSelector.svelte";

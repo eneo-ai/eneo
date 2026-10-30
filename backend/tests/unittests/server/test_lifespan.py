@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from types import SimpleNamespace
 from typing import Any
@@ -458,3 +459,45 @@ async def test_a_later_startup_failure_closes_only_the_database_it_opened(
         await lifespan_module.startup()
     with pytest.raises(Exception, match="not initialized"):
         manager.create_session()
+
+
+@pytest.mark.asyncio
+async def test_shutdown_drains_streamed_turns_before_closing_what_they_use(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The drains run while the loopback internal-MCP servers still answer,
+    so a connection host attached to one can end gracefully, and before the
+    database pool and HTTP clients close."""
+    settings = SimpleNamespace(openapi_only_mode=False)
+    monkeypatch.setattr(lifespan_module, "get_settings", lambda: settings)
+    order: list[str] = []
+
+    def step(name: str) -> AsyncMock:
+        return AsyncMock(side_effect=lambda *a, **k: order.append(name))
+
+    @asynccontextmanager
+    async def internal_mcp() -> AsyncIterator[None]:
+        order.append("internal-mcp up")
+        yield
+        order.append("internal-mcp down")
+
+    monkeypatch.setattr(lifespan_module, "startup", step("startup"))
+    monkeypatch.setattr(lifespan_module, "internal_mcp_lifespan", internal_mcp)
+    monkeypatch.setattr(lifespan_module, "drain_background_saves", step("saves"))
+    monkeypatch.setattr(lifespan_module, "drain_connection_hosts", step("mcp"))
+    monkeypatch.setattr(lifespan_module.object_content_runtime, "stop", step("objects"))
+    monkeypatch.setattr(lifespan_module.sessionmanager, "close", step("db"))
+    monkeypatch.setattr(lifespan_module.aiohttp_client, "stop", step("http"))
+    monkeypatch.setattr(lifespan_module.job_manager, "close", step("jobs"))
+    monkeypatch.setattr(lifespan_module.websocket_manager, "shutdown", step("ws"))
+    monkeypatch.setattr(lifespan_module.redis_clients, "stop", step("redis"))
+
+    async with lifespan_module.lifespan(MagicMock()):
+        order.append("serving")
+
+    assert order[:3] == ["startup", "internal-mcp up", "serving"]
+    assert order.index("saves") < order.index("internal-mcp down")
+    assert order.index("mcp") < order.index("internal-mcp down")
+    assert order.index("saves") < order.index("db")
+    assert order.index("mcp") < order.index("db")
+    assert order.index("mcp") < order.index("http")

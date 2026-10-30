@@ -5,6 +5,8 @@ import { SKILL_CATALOG_PAGE_SIZE, emptySkillCatalogPage } from "$lib/features/sk
 import { load } from "./+page";
 
 const READ_SKILL_PERMISSION: ResourcePermission = "read";
+const USE_SKILLS_USER = { roles: [{ permissions: ["skills"] }] };
+const OWN_SKILLS_ONLY_USER = { roles: [{ permissions: ["personal_chat", "personal_skills"] }] };
 
 describe("App edit loader", () => {
   test("loads Skill bindings for an App reader", async () => {
@@ -17,6 +19,7 @@ describe("App edit loader", () => {
       depends: vi.fn(),
       params: { appId },
       parent: vi.fn().mockResolvedValue({
+        user: USE_SKILLS_USER,
         currentSpace: {
           id: "space-1",
           organization: false,
@@ -57,6 +60,7 @@ describe("App edit loader", () => {
       depends: vi.fn(),
       params: { appId },
       parent: vi.fn().mockResolvedValue({
+        user: USE_SKILLS_USER,
         currentSpace: {
           id: "space-1",
           organization: false,
@@ -77,6 +81,36 @@ describe("App edit loader", () => {
 
     expect(result.skills).toEqual(emptySkillBindingCatalogPage());
     expect(result.skillBindings).toEqual([]);
+    expect(list).not.toHaveBeenCalled();
+    expect(listCatalogue).not.toHaveBeenCalled();
+    expect(listAppBindings).not.toHaveBeenCalled();
+  });
+
+  test("hides Skills when the user has Own Skills but not Use Skills", async () => {
+    const list = vi.fn();
+    const listCatalogue = vi.fn();
+    const listAppBindings = vi.fn();
+    const event = {
+      depends: vi.fn(),
+      params: { appId: "app-1" },
+      parent: vi.fn().mockResolvedValue({
+        user: OWN_SKILLS_ONLY_USER,
+        currentSpace: {
+          id: "personal-space",
+          personal: true,
+          organization: false,
+          skill_permissions: [READ_SKILL_PERMISSION]
+        },
+        eneo: {
+          apps: { get: vi.fn().mockResolvedValue({ id: "app-1" }) },
+          skills: { list, catalogue: { list: listCatalogue }, listAppBindings }
+        }
+      })
+    };
+
+    const result = await load(event as never);
+
+    expect(result.canUseSkills).toBe(false);
     expect(list).not.toHaveBeenCalled();
     expect(listCatalogue).not.toHaveBeenCalled();
     expect(listAppBindings).not.toHaveBeenCalled();

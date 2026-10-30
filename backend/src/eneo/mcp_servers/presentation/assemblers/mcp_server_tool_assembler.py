@@ -21,7 +21,8 @@ class MCPServerToolAssembler:
             input_schema=tool.input_schema,
             meta=tool.meta,
             ui_resource_sha256=tool.ui_resource_sha256,
-            is_enabled_by_default=tool.is_enabled_by_default,
+            # Preserve the public field name; it carries effective enablement.
+            is_enabled_by_default=tool.is_enabled,
             pending_description=tool.pending_description,
             pending_input_schema=tool.pending_input_schema,
             pending_meta=tool.pending_meta,

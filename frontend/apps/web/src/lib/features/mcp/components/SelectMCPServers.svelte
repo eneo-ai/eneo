@@ -13,7 +13,10 @@
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
   import { m } from "$lib/paraglide/messages";
   import { localizeHref } from "$lib/paraglide/runtime";
-  import { ChevronRight, LockKeyhole, Server, TriangleAlert } from "@lucide/svelte";
+  import ChevronRight from "@lucide/svelte/icons/chevron-right";
+  import LockKeyhole from "@lucide/svelte/icons/lock-keyhole";
+  import Server from "@lucide/svelte/icons/server";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { SvelteMap, SvelteSet } from "svelte/reactivity";
   import {
     sanitizeMcpSelection,

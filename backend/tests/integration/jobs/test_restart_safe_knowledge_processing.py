@@ -633,6 +633,64 @@ async def test_heartbeat_does_not_touch_failed_job(db_container, monkeypatch) ->
     assert await _job_updated_at(job_id) == failed_at
 
 
+@pytest.mark.parametrize("replace_cancellation", [False, True])
+async def test_heartbeat_stops_when_database_cleanup_consumes_cancellation(
+    db_container, monkeypatch, replace_cancellation: bool
+) -> None:
+    monkeypatch.setattr(upload_tasks, "KNOWLEDGE_HEARTBEAT_INTERVAL_SECONDS", 0.01)
+    job_id = uuid4()
+    async with db_container() as setup:
+        setup.session().add(
+            Jobs(
+                id=job_id,
+                user_id=setup.user().id,
+                task=Task.UPLOAD_FILE.value,
+                status=Status.IN_PROGRESS.value,
+            )
+        )
+
+    update_started = asyncio.Event()
+    original_touch_job = JobRepository.touch_job
+    cancellation_consumed = False
+
+    async def interrupted_update(self: JobRepository, touched_job_id: UUID) -> bool:
+        nonlocal cancellation_consumed
+        live = await original_touch_job(self, touched_job_id)
+        update_started.set()
+        try:
+            await asyncio.Event().wait()
+        except asyncio.CancelledError:
+            if cancellation_consumed:
+                raise
+            cancellation_consumed = True
+            if replace_cancellation:
+                raise RuntimeError(
+                    "database cleanup failed during cancellation"
+                ) from None
+        return live
+
+    monkeypatch.setattr(JobRepository, "touch_job", interrupted_update)
+
+    async def finish_upload() -> None:
+        container = Container(session=providers.Object(SessionProxy()))
+        async with upload_tasks._knowledge_heartbeat(container, job_id):
+            await asyncio.wait_for(update_started.wait(), timeout=5)
+
+    # Exiting the scope cancels and joins the heartbeat. Even if a database
+    # operation consumes that cancellation, it must not start another update.
+    upload = asyncio.create_task(finish_upload())
+    try:
+        done, _ = await asyncio.wait({upload}, timeout=5)
+        assert upload in done, "the cancelled heartbeat kept the upload alive"
+        await upload
+    finally:
+        upload.cancel()
+        await asyncio.wait_for(
+            asyncio.gather(upload, return_exceptions=True), timeout=5
+        )
+    assert cancellation_consumed
+
+
 @pytest.mark.parametrize("reaped_before_cancel", [False, True])
 async def test_cancelled_upload_uses_guarded_failure_and_reraises(
     db_container,
@@ -765,7 +823,7 @@ async def test_cancelled_upload_uses_guarded_failure_and_reraises(
     else:
         task.cancel()
         with pytest.raises(asyncio.CancelledError):
-            await task
+            await asyncio.wait_for(task, timeout=5)
     assert compute_cancelled.is_set()
 
     async with sessionmanager.session() as session, session.begin():

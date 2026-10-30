@@ -58,6 +58,7 @@ def _build_assistant_service_with_mocks(
         add_mcp_server=AsyncMock(),
     )
     service.user = SimpleNamespace(tenant_id=uuid4())
+    service.skill_service = SimpleNamespace(ensure_runtime_policy=AsyncMock())
     service.effective_config_service = None
     service._validate_attachments_fit = AsyncMock()
     return service, assistant_id, session

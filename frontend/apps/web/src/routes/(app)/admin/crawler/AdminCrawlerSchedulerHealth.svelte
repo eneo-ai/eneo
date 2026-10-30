@@ -1,7 +1,10 @@
 <script lang="ts">
   import { formatDate, formatDateTime, formatTime } from "$lib/core/formatting/dateTime";
   import type { AdminCrawlerSchedulerHealth } from "@eneo/eneo-js";
-  import { CircleCheck, CircleQuestionMark, CircleX, TriangleAlert } from "@lucide/svelte";
+  import CircleCheck from "@lucide/svelte/icons/circle-check";
+  import CircleQuestionMark from "@lucide/svelte/icons/circle-question-mark";
+  import CircleX from "@lucide/svelte/icons/circle-x";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import { Badge } from "$lib/components/ui/badge/index.js";
   import { m } from "$lib/paraglide/messages";
 

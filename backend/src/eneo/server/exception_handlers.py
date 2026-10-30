@@ -15,6 +15,7 @@ from eneo.files.file_models import (
     FileInUseError,
     FileOriginalNotFoundError,
 )
+from eneo.icons.icon import IconInUseError, IconNotAttachableError
 from eneo.info_blobs.info_blob import InfoBlobOriginalUnavailableError
 from eneo.integration.domain.repositories.integration_knowledge_repo import (
     IntegrationKnowledgeSyncingError,
@@ -74,6 +75,7 @@ from eneo.object_content.object_store_connection import (
     ObjectStoreProbeUnavailable,
 )
 from eneo.skills.domain.skill import (
+    PersonalSkillLayerRejectedError,
     PublishedSkillDeletionError,
     SkillBlockedForBindingError,
     SkillExecutionBlockConflictError,
@@ -369,6 +371,8 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
     ObjectContentBusyError: (409, None, ErrorCodes.RESOURCE_NOT_READY),
     FileInUseError: (409, None, ErrorCodes.FILE_IN_USE),
     FileOriginalNotFoundError: (404, None, ErrorCodes.FILE_ORIGINAL_NOT_FOUND),
+    IconInUseError: (409, None, ErrorCodes.ICON_IN_USE),
+    IconNotAttachableError: (400, None, ErrorCodes.ICON_NOT_ATTACHABLE),
     InfoBlobOriginalUnavailableError: (
         404,
         None,
@@ -476,6 +480,11 @@ DOMAIN_EXCEPTION_MAP: dict[type[Exception], tuple[int, str | None, ErrorCodes]] 
         "This execution block changed after you reviewed it. "
         "Reload the Skill before unblocking.",
         ErrorCodes.SKILL_EXECUTION_BLOCK_CONFLICT,
+    ),
+    PersonalSkillLayerRejectedError: (
+        400,
+        None,
+        ErrorCodes.PERSONAL_SKILLS_REJECTED,
     ),
     SkillRuntimePolicyChangedError: (
         409,

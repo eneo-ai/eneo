@@ -142,7 +142,7 @@ class AppService:
             base_instructions=base_instructions,
         )
 
-    async def _lock_app_for_context_validation(self, app_id: UUID) -> App:
+    async def _lock_app(self, app_id: UUID) -> App:
         app = await self.repo.get_for_update(app_id)
         if app is None:
             raise NotFoundException()
@@ -430,8 +430,15 @@ class AppService:
             or prompt_text is not None
             or skill_references is not None
         )
-        if requires_context_validation:
-            app = await self._lock_app_for_context_validation(app_id)
+        if requires_context_validation or is_provided(icon_id):
+            app = await self._lock_app(app_id)
+        previous_icon_id = app.icon_id
+        await self.icon_repo.ensure_attachable(
+            previous_icon_id,
+            icon_id,
+            tenant_id=self.user.tenant_id,
+            user_id=self.user.id,
+        )
 
         completion_model = None
         if completion_model_id is not None:
@@ -528,6 +535,7 @@ class AppService:
             )
 
         app_in_db = await self.repo.update(app)
+        await self.icon_repo.release_replaced(previous_icon_id, icon_id)
 
         # TODO: Review how we get the permissions to the presentation layer
         permissions = actor.get_app_permissions()
@@ -549,9 +557,6 @@ class AppService:
                 },
             )
 
-        app = space.get_app(app_id=app_id)
-        icon_id = app.icon_id
-
         if self.api_key_scope_revoker is not None:
             try:
                 await self.api_key_scope_revoker.revoke_scope(
@@ -566,10 +571,10 @@ class AppService:
                     extra={"app_id": str(app_id)},
                 )
 
-        await self.repo.delete(app_id)
+        icon_id = await self.repo.delete(app_id)
 
         if icon_id:
-            await self.icon_repo.delete_unused(icon_id, tenant_id=self.user.tenant_id)
+            await self.icon_repo.delete_if_unreferenced(icon_id)
 
     async def _get_runnable_app(self, app_id: UUID) -> App:
         space = await self.space_repo.get_space_by_app(app_id=app_id)
@@ -694,7 +699,7 @@ class AppService:
             )
 
         if publish:
-            app = await self._lock_app_for_context_validation(app_id)
+            app = await self._lock_app(app_id)
             composition = await self._compose_app_prompt(app)
             await self._validate_configured_context(app=app, composition=composition)
 

@@ -86,6 +86,11 @@ def test_other_providers_use_bearer() -> None:
     assert auth_headers_for("berget", "tok") == {"Authorization": "Bearer tok"}
 
 
+def test_an_empty_key_yields_no_auth_header() -> None:
+    assert auth_headers_for("hosted_vllm", "") == {}
+    assert auth_headers_for("openai", "") == {}
+
+
 def test_endpoint_normalization_handles_v1_suffix() -> None:
     """Users may paste either ``https://api.example.com`` or ``…/v1`` and we
     must avoid producing ``/v1/v1/models`` either way."""

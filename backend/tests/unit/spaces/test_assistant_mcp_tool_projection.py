@@ -149,13 +149,19 @@ def test_the_space_view_and_the_assistant_view_follow_the_one_switch_rule(
         for own_switch in ({row.id: True}, {})
     )
 
-    # None: the space does not list the tool at all.
-    assert [tool.is_enabled_by_default for tool in for_space.tools] == (
+    # None: the space does not list the tool at all. The switches decide what
+    # the view shows (is_enabled); the persisted default is never rewritten.
+    assert [tool.is_enabled for tool in for_space.tools] == (
         [] if shown_in_space is None else [shown_in_space]
     )
-    assert [tool.is_enabled_by_default for tool in for_assistant.tools] == (
+    assert [tool.is_enabled for tool in for_assistant.tools] == (
         [True] if offered else []
     )
-    assert [tool.is_enabled_by_default for tool in before_its_own_switch.tools] == (
+    assert [tool.is_enabled for tool in before_its_own_switch.tools] == (
         [False] if offered else []
+    )
+    assert all(
+        tool.is_enabled_by_default is enabled_by_default
+        for view in (for_space, for_assistant, before_its_own_switch)
+        for tool in view.tools
     )

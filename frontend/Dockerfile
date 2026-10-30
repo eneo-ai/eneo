@@ -6,17 +6,31 @@ FROM node:22.23.4-bookworm-slim AS builder
 COPY --from=oven/bun:1.4.4-slim /usr/local/bin/bun /usr/local/bin/bun
 
 WORKDIR /app
+# Bun validates every workspace member under --frozen-lockfile, so each
+# member's manifest must be present; nothing else is needed to install. Keep
+# source and release identity out of the expensive dependency layer.
+COPY package.json bun.lock ./
+COPY apps/web/package.json apps/web/package.json
+COPY apps/web-next/package.json apps/web-next/package.json
+COPY apps/docs-site/package.json apps/docs-site/package.json
+COPY packages/eneo-js/package.json packages/eneo-js/package.json
+COPY packages/eslint-plugin/package.json packages/eslint-plugin/package.json
+COPY packages/markdown-math/package.json packages/markdown-math/package.json
+COPY packages/ui/package.json packages/ui/package.json
+COPY packages/whats-new/package.json packages/whats-new/package.json
+# The root package.json "patchedDependencies" are applied during install.
+COPY patches ./patches
+# The two workspace prepare hooks need app source. Run them below, after COPY.
+RUN bun install --frozen-lockfile --ignore-scripts
+
+COPY . .
 ARG APP_VERSION=0.0.0-dev
 ARG APP_REVISION=unknown
 ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
-COPY . .
-
-# Install dependencies with Bun (uses frozen lockfile)
-RUN bun install --frozen-lockfile
-
+ENV NODE_OPTIONS=--max-old-space-size=8192
+RUN bun run --filter @eneo/ui prepare && bun run --filter @eneo/web prepare
 # This image ships apps/web; web-next has its own Dockerfile and build context.
-# Match frontend CI's heap budget for adapter-node bundling.
-RUN bun run --filter @eneo/ui build && NODE_OPTIONS=--max-old-space-size=8192 bun run --filter @eneo/web build
+RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 
 # Stage 2: Production runtime using Node.js
 # Required ENV vars, see README.md

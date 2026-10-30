@@ -25,7 +25,7 @@
   import { imageQualityLabel, imageSizeLabel } from "$lib/features/ai-models/imageModelOptions";
   import { resolve } from "$app/paths";
   import { untrack, tick } from "svelte";
-  import { CircleAlert } from "@lucide/svelte";
+  import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import AddWizard from "../models/AddWizard/AddWizard.svelte";
   import { writable } from "svelte/store";
   import { readinessMessage } from "$lib/features/mcp/readiness";

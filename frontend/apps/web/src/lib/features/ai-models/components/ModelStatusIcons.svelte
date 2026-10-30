@@ -84,7 +84,12 @@
 
 <script lang="ts">
   import * as Tooltip from "$lib/components/ui/tooltip/index.js";
-  import { TriangleAlert, Brain, Eye, Wrench, Clock, AudioLines } from "@lucide/svelte";
+  import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
+  import Brain from "@lucide/svelte/icons/brain";
+  import Eye from "@lucide/svelte/icons/eye";
+  import Wrench from "@lucide/svelte/icons/wrench";
+  import Clock from "@lucide/svelte/icons/clock";
+  import AudioLines from "@lucide/svelte/icons/audio-lines";
   import ModelCostBadge from "./ModelCostBadge.svelte";
 
   export let model: AnyModel;

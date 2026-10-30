@@ -45,7 +45,7 @@ dependencies = [
     "websockets>=14,<18",  # asyncio client of the live transcription relay
     "sentry-sdk[fastapi]==2.8.0",
     "greenlet>=3.2.2,<4",
-    "litellm==1.104.2",
+    "litellm==1.104.7",
     "openai>=2.44.0,<3",  # Base exception type shared by LiteLLM/provider errors
     "jsonschema>=4.26,<5",  # Native export contract validation
     "mcp>=1.30.0,<2", # Model Context Protocol SDK for MCP server integration

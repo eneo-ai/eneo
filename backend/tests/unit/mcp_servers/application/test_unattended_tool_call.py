@@ -10,7 +10,6 @@ import time
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
-import httpx
 import pytest
 from cryptography.fernet import Fernet
 from fastapi import Request
@@ -96,6 +95,10 @@ def _exchanges_still_running() -> int:
         task.get_name() == EXCHANGE_TASK_NAME and not task.done()
         for task in asyncio.all_tasks()
     )
+
+
+def _connections_still_open() -> int:
+    return sum(not task.done() for task in mcp_client._connection_hosts)
 
 
 async def _stopped_as_too_large(url: str) -> float:
@@ -541,72 +544,58 @@ async def test_closing_sends_nothing_that_a_server_could_leave_unanswered() -> N
     assert still_running == 0
 
 
-async def test_an_exchange_stopped_while_it_connects_stops_asking_the_server() -> None:
-    # Kills the mutant that tells an exchange to stop once. This server never
-    # answers an initialize: the budget ends during connect, the client then
-    # asks the server why the connect failed, and that request is held too.
-    # Stopped once, the exchange stays on that request for as long as the
-    # server likes, with the connection and the credential. Also kills the
-    # mutant that asks that question with an HTTP client of its own instead
-    # of one the caller's factory builds (an unattended call then reaches an
-    # address nobody vetted).
+async def test_an_exchange_stopped_while_it_connects_leaves_no_connection_behind() -> (
+    None
+):
+    # Kills the mutant that lets the connection a stopped exchange was opening
+    # finish on its own. This server never answers an initialize: the budget
+    # ends during connect, and the exchange ends at once, as the client does
+    # not ask a server why a connect it was stopped in failed. Left to itself,
+    # the connection would stay on the handshake, with the credential, until
+    # the client's own disconnect deadline; it must go with the exchange.
     app = one_tool_app(
         lambda request_id: tool_result(request_id, _text("never asked")),
         before_initialize=lambda: app.state.shutting_down.wait(),
     )
-    sent_through_the_factory: list[str] = []
-
-    class Recording(SdkHttpClientFactory):
-        def __call__(
-            self, *, headers: dict[str, str], timeout: httpx.Timeout
-        ) -> httpx.AsyncClient:
-            client = super().__call__(headers=headers, timeout=timeout)
-
-            async def note(request: httpx.Request) -> None:
-                sent_through_the_factory.append(json.loads(request.content)["method"])
-
-            client.event_hooks["request"].append(note)
-            return client
 
     async with serve_test_app(app) as url:
         started = time.monotonic()
         with pytest.raises(MCPToolCallTimedOut, match="within 1s"):
-            await _call(url, timeout=1, http_client_factory=Recording())
+            await _call(url, timeout=1)
         elapsed = time.monotonic() - started
         still_running = _exchanges_still_running()
+        async with asyncio.timeout(EXCHANGE_STOP_GRACE_SECONDS):
+            while _connections_still_open():
+                await asyncio.sleep(0.01)
 
     assert elapsed < ONE_SECOND_BUDGET_ENDS_BY
     assert still_running == 0
-    assert sent_through_the_factory == app.state.requests == ["initialize"] * 2
-    assert app.state.requests == ["initialize", "initialize"]
+    assert app.state.requests == ["initialize"]
 
 
 async def test_an_exchange_that_does_not_stop_when_told_is_let_go_and_ends_alone(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Kills the mutant that waits for a stopped exchange as long as it takes,
-    # the one that reports a budget that ended during connect as "could not
-    # connect", and the one that lets go without reading how the exchange
-    # ended (asyncio then reports an exception that nobody retrieved). The
-    # client's question about the failed connect stands in for anything in an
-    # exchange that goes on through every cancellation.
+    # and the one that lets go without reading how the exchange ended (asyncio
+    # then reports an exception that nobody retrieved). A close that goes on
+    # through every cancellation stands in for anything in an exchange that
+    # does.
     loop = asyncio.get_running_loop()
     goes_on_for = 3 * EXCHANGE_STOP_GRACE_SECONDS
+    close = MCPClient.disconnect
 
-    async def question_that_does_not_stop(*_: object, **__: object) -> str:
+    async def close_that_does_not_stop(client: MCPClient) -> None:
         ends = loop.time() + goes_on_for
         while (left := ends - loop.time()) > 0:
             try:
                 await asyncio.sleep(left)
             except asyncio.CancelledError:
                 continue
-        return "asked too late"
+        await close(client)
 
-    monkeypatch.setattr(mcp_client, "_diagnose_http", question_that_does_not_stop)
-    app = one_tool_app(
-        lambda request_id: tool_result(request_id, _text("never asked")),
-        before_initialize=lambda: app.state.shutting_down.wait(),
-    )
+    monkeypatch.setattr(MCPClient, "disconnect", close_that_does_not_stop)
+    app = one_tool_app(lambda request_id: tool_result(request_id, _text("ok")))
     unretrieved: list[object] = []
     handler = loop.get_exception_handler()
     loop.set_exception_handler(lambda _, context: unretrieved.append(context))
@@ -635,37 +624,46 @@ async def test_an_exchange_that_does_not_stop_when_told_is_let_go_and_ends_alone
     "cancelled", ["after-the-budget", "a-second-time", "twice-in-a-row"]
 )
 async def test_a_caller_cancelled_while_it_stops_the_exchange_still_stops_it(
-    cancelled: str,
+    cancelled: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Kills the mutants whose stop ends at a cancellation of the caller, or
-    # goes on without waiting its share out. This server never answers an
-    # initialize, so an exchange that was told to stop once goes on to the
-    # client's question about the failed connect, and would stay on it, with
-    # the connection and the credential, as long as the server likes. The
-    # caller is cancelled while that question is out (after its budget ended,
-    # or for a second time), or twice in a row, the second time before the
-    # exchange has got as far as the question.
-    app = one_tool_app(
-        lambda request_id: tool_result(request_id, _text("never asked")),
-        before_initialize=lambda: app.state.shutting_down.wait(),
-    )
+    # goes on without waiting its share out. This server never answers the
+    # call, and the close that follows the cancelled call is held until it is
+    # cancelled in turn: an exchange that was told to stop once would stay in
+    # it, with the connection and the credential, as long as the server
+    # likes. The caller is cancelled while the exchange is in that close
+    # (after its budget ended, or for a second time), or twice in a row, the
+    # second time before the exchange has got as far as the close.
+    in_the_call = asyncio.Event()
+    closing = asyncio.Event()
+    close = MCPClient.disconnect
 
-    async def initializes(count: int) -> None:
-        while app.state.requests != ["initialize"] * count:
-            await asyncio.sleep(0.01)
+    async def held_call(_: object) -> Response:
+        in_the_call.set()
+        return await unanswered(app)
+
+    async def close_held_until_cancelled(client: MCPClient) -> None:
+        closing.set()
+        try:
+            await app.state.shutting_down.wait()
+        except asyncio.CancelledError:
+            await close(client)
+            raise
+
+    monkeypatch.setattr(MCPClient, "disconnect", close_held_until_cancelled)
+    app = one_tool_app(held_call)
 
     async with serve_test_app(app) as url:
         caller = asyncio.create_task(
             _call(url, timeout=1 if cancelled == "after-the-budget" else 5)
         )
         if cancelled != "after-the-budget":
-            await asyncio.wait_for(initializes(1), timeout=3)
+            await asyncio.wait_for(in_the_call.wait(), timeout=3)
             caller.cancel()
         if cancelled == "twice-in-a-row":
             await asyncio.sleep(0)
         else:
-            # The second initialize is the client's question.
-            await asyncio.wait_for(initializes(2), timeout=3)
+            await asyncio.wait_for(closing.wait(), timeout=3)
         caller.cancel()
         await asyncio.wait({caller}, timeout=ONE_SECOND_BUDGET_ENDS_BY)
         still_running = _exchanges_still_running()

@@ -239,6 +239,15 @@ class MCPToolCatalogStagingTimeout(RuntimeError):
     """A runtime catalog observation could not acquire its bounded DB window."""
 
 
+class MCPServerToolsNotLoaded(RuntimeError):
+    """A server read without its tools was asked for them.
+
+    An unloaded relationship is not an empty one: read as empty, a ready
+    provider reports that it has no approved tools, the proxy offers none and
+    a governance policy finds no tool to disable.
+    """
+
+
 class MCPServerTool(Entity):
     """Domain entity for MCP server tool."""
 
@@ -262,6 +271,7 @@ class MCPServerTool(Entity):
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
         updated_at: Optional[datetime] = None,
+        enabled_override: bool | None = None,
     ):
         super().__init__(id=id, created_at=created_at, updated_at=updated_at)
         self.mcp_server_id = mcp_server_id
@@ -274,12 +284,21 @@ class MCPServerTool(Entity):
         # SHA-256 of the MCP App view HTML approved with this definition.
         self.ui_resource_sha256 = ui_resource_sha256
         self.is_enabled_by_default = is_enabled_by_default
+        # Read-side tenant/space/assistant policy; never persisted as the default.
+        self.enabled_override = enabled_override
         self.pending_description = pending_description
         self.pending_input_schema = pending_input_schema
         self.pending_meta = pending_meta
         self.pending_ui_resource_sha256 = pending_ui_resource_sha256
         self.requires_approval = requires_approval
         self.removed_from_remote = removed_from_remote
+
+    @property
+    def is_enabled(self) -> bool:
+        """Effective enablement in the context this tool was read for."""
+        if self.enabled_override is not None:
+            return self.enabled_override
+        return self.is_enabled_by_default
 
     @classmethod
     def pending_discovery(
@@ -390,7 +409,9 @@ class MCPServer(Entity):
         icon_url: Optional[str] = None,
         documentation_url: Optional[str] = None,
         tools: Optional[list[MCPServerTool]] = None,
+        tools_loaded: bool = True,
         security_classification: Optional["SecurityClassification"] = None,
+        security_classification_id: Optional[UUID] = None,
         is_internal: bool = False,
         id: Optional[UUID] = None,
         created_at: Optional[datetime] = None,
@@ -421,8 +442,52 @@ class MCPServer(Entity):
         self.tags = tags
         self.icon_url = icon_url
         self.documentation_url = documentation_url
-        self.tools = tools or []
-        self.security_classification = security_classification
+        # None when the row was read without its tools relationship.
+        self._tools: list[MCPServerTool] | None = (
+            (tools or []) if tools_loaded else None
+        )
+        self._security_classification = security_classification
+        # The row's column, kept when the relationship was not read, so an
+        # update never writes back a classification it did not load.
+        self._security_classification_id = security_classification_id
+        if security_classification_id is None and security_classification is not None:
+            self._security_classification_id = security_classification.id
+
+    @property
+    def tools(self) -> list[MCPServerTool]:
+        """Loaded or explicitly assigned tools; never an implicit empty list."""
+        if self._tools is None:
+            raise MCPServerToolsNotLoaded(
+                f"MCP server {self.id} was read without its tools"
+            )
+        return self._tools
+
+    @tools.setter
+    def tools(self, tools: list[MCPServerTool]) -> None:
+        self._tools = tools
+
+    @property
+    def tools_loaded(self) -> bool:
+        return self._tools is not None
+
+    @property
+    def security_classification(self) -> "SecurityClassification | None":
+        return self._security_classification
+
+    @property
+    def security_classification_id(self) -> UUID | None:
+        if self._security_classification is not None:
+            return self._security_classification.id
+        return self._security_classification_id
+
+    @security_classification.setter
+    def security_classification(
+        self, security_classification: "SecurityClassification | None"
+    ) -> None:
+        self._security_classification = security_classification
+        self._security_classification_id = (
+            security_classification.id if security_classification is not None else None
+        )
 
     @property
     def is_internal(self) -> bool:
@@ -486,15 +551,27 @@ class MCPServer(Entity):
         return None
 
     @property
+    def usable_tools(self) -> list[MCPServerTool]:
+        """Approved, enabled, present tools for readiness and activation.
+
+        A never-approved tool has no active description or schema yet.
+        """
+        return [
+            tool
+            for tool in self.tools
+            if tool.is_enabled
+            and not tool.removed_from_remote
+            and (tool.description is not None or tool.input_schema is not None)
+        ]
+
+    @property
     def readiness_reason(self) -> str | None:
+        # Read before the model check, so a server read without its tools
+        # fails even when its model would block it anyway.
+        usable_tools = self.usable_tools
         if self.backing_model_blocker:
             return self.backing_model_blocker
-        if not any(
-            t.is_enabled_by_default
-            and not t.removed_from_remote
-            and (t.description is not None or t.input_schema is not None)
-            for t in self.tools
-        ):
+        if not usable_tools:
             return "no_approved_tools"
         return None
 

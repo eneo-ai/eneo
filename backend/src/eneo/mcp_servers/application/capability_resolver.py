@@ -23,9 +23,6 @@ from sqlalchemy.orm import selectinload
 from eneo.database.tables.mcp_server_table import (
     MCPServers as MCPServersTable,
 )
-from eneo.database.tables.mcp_server_table import (
-    MCPServerToolSettings,
-)
 from eneo.database.tables.security_classifications_table import (
     SecurityClassification as SecurityClassificationDBModel,
 )
@@ -39,31 +36,17 @@ from eneo.mcp_servers.domain.entities.mcp_server import (
 )
 from eneo.mcp_servers.infrastructure.mappers.mcp_server_mapper import MCPServerMapper
 from eneo.mcp_servers.infrastructure.repo_impl.mcp_server_repo_impl import (
+    apply_tenant_tool_settings,
     backing_model_options,
 )
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from eneo.mcp_servers.domain.entities.mcp_server import (
-        MCPServer,
-        MCPServerTool,
-    )
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.security_classifications.domain.entities.security_classification import (
         SecurityClassification,
     )
-
-
-def usable_capability_tools(server: "MCPServer") -> list["MCPServerTool"]:
-    """Tools the proxy would actually expose: enabled, still on the remote,
-    and with an admin-approved definition."""
-    return [
-        tool
-        for tool in server.tools
-        if tool.is_enabled_by_default
-        and not tool.removed_from_remote
-        and (tool.description is not None or tool.input_schema is not None)
-    ]
 
 
 async def active_capability_providers(
@@ -74,11 +57,10 @@ async def active_capability_providers(
     """Return every active provider for any of ``purposes`` in the tenant.
 
     One flat list in creation order: callers pick per purpose, so a purpose
-    never sees another purpose's providers. Tools carry the tenant-level
-    enablement overlay so downstream consumers (the MCP proxy, usability
-    checks) see effective enablement. Audience groups, security
-    classification and the backing model (built-in providers) are loaded for
-    resolution.
+    never sees another purpose's providers. Read as the server repository
+    reads, so the tools carry the tenant's tool settings and audience groups,
+    security classification and backing model (built-in providers) are loaded
+    for resolution.
     """
     query = (
         sa.select(MCPServersTable)
@@ -100,26 +82,16 @@ async def active_capability_providers(
     records = (await session.scalars(query)).all()
     if not records:
         return []
+    return await apply_tenant_tool_settings(
+        session, [MCPServerMapper.to_entity(record) for record in records]
+    )
 
-    servers = [MCPServerMapper.to_entity(record) for record in records]
 
-    tool_ids = [tool.id for server in servers for tool in server.tools]
-    if tool_ids:
-        settings_stmt = sa.select(
-            MCPServerToolSettings.mcp_server_tool_id,
-            MCPServerToolSettings.is_enabled,
-        ).where(
-            MCPServerToolSettings.tenant_id == tenant_id,
-            MCPServerToolSettings.mcp_server_tool_id.in_(tool_ids),
-        )
-        settings_rows = (await session.execute(settings_stmt)).all()
-        tenant_settings = {tool_id: enabled for tool_id, enabled in settings_rows}
-        for server in servers:
-            for tool in server.tools:
-                if tool.id in tenant_settings:
-                    tool.is_enabled_by_default = tenant_settings[tool.id]
-
-    return servers
+async def get_active_capability_servers(
+    session: "AsyncSession", tenant_id: UUID, purpose: str
+) -> list["MCPServer"]:
+    """Return every active provider for ``purpose`` in the tenant."""
+    return await active_capability_providers(session, tenant_id, (purpose,))
 
 
 def select_provider_for_user(
@@ -238,7 +210,7 @@ async def resolve_capability_servers(
             if (
                 provider is not None
                 and provider.is_backing_model_available
-                and usable_capability_tools(provider)
+                and provider.usable_tools
                 and meets_security_classification(
                     provider, space_security_classification
                 )

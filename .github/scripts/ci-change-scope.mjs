@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
-import assert from "node:assert/strict";
 import fs from "node:fs";
+import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const outputNames = [
   "full",
@@ -19,31 +20,87 @@ const outputNames = [
   "docker_web_next",
 ];
 
-if (process.argv.includes("--self-test")) {
-  runSelfTest();
-  process.exit(0);
+const dockerImages = [
+  { image: "backend", context: "./backend", file: "./backend/Dockerfile" },
+  { image: "frontend", context: "./frontend", file: "./frontend/Dockerfile" },
+  { image: "web-next", context: "./frontend", file: "./frontend/apps/web-next/Dockerfile" },
+  { image: "devcontainer", context: "./.devcontainer", file: "./.devcontainer/Dockerfile" },
+];
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  const eventName = process.env.GITHUB_EVENT_NAME || "pull_request";
+  let files = [];
+  try {
+    if (process.argv.includes("--github-event")) {
+      const event = JSON.parse(fs.readFileSync(process.env.GITHUB_EVENT_PATH, "utf8"));
+      const base = eventName === "pull_request"
+        ? event.pull_request?.base?.sha : event.merge_group?.base_sha;
+      if (["pull_request", "merge_group"].includes(eventName)) {
+        files = changedFiles(base, process.env.GITHUB_SHA);
+      }
+    } else {
+      const filesPath = getArgValue("--files");
+      files = filesPath ? fs.readFileSync(filesPath, "utf8").split("\n") : process.argv.slice(2);
+    }
+  } catch (error) {
+    console.error(`::warning::Cannot determine changed files; running full CI. ${error.message}`);
+  }
+  const plan = planCi(files, eventName);
+  writeOutputs(plan);
+  if (process.env.GITHUB_STEP_SUMMARY) {
+    const jobs = Object.entries(plan.expected_jobs).filter(([, required]) => required).map(([job]) => job);
+    fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+      `## CI scope\n\nEvent: \`${eventName}\`; ${plan.full ? "full validation" : `${files.length} changed paths`}.\n\n`
+      + `Required jobs: ${jobs.map((job) => `\`${job}\``).join(", ")}.\n\n`
+      + `Docker images: ${plan.docker_matrix.include.map(({ image }) => image).join(", ") || "none"}.\n`);
+  }
 }
 
-try {
-  const filesPath = getArgValue("--files");
-  const files = filesPath
-    ? fs.readFileSync(filesPath, "utf8").split("\n")
-    : process.argv.slice(2).filter((arg) => !arg.startsWith("--"));
-
-  writeOutputs(classify(files));
-} catch (error) {
-  console.error(`::warning::Failed to classify changed files. Running full CI. ${error.message}`);
-  writeOutputs(allTrue());
+export function changedFiles(base, head, cwd = process.cwd()) {
+  // Never substitute HEAD^: a queue candidate can include several PRs.
+  if (![base, head].every((sha) => typeof sha === "string" && /^[0-9a-f]{40}$/.test(sha))) {
+    throw new Error("A valid base and head SHA are required for scoped CI");
+  }
+  return execFileSync("git", ["diff", "--no-renames", "--name-only", "-z", base, head, "--"], {
+    cwd, encoding: "utf8", timeout: 30_000, maxBuffer: 4 * 1024 * 1024,
+  }).split("\0").filter(Boolean);
 }
 
-function classify(rawFiles) {
+export function planCi(files, eventName) {
+  // Reusable workflows inherit the caller's event. Pushes, tags and manual
+  // publication always validate everything, even when their diff is narrow.
+  const scope = ["pull_request", "merge_group"].includes(eventName) ? classify(files) : allTrue();
+  const images = dockerImages.filter(({ image }) => scope[`docker_${image.replaceAll("-", "_")}`]);
+  return {
+    ...scope,
+    docker: images.length > 0,
+    docker_matrix: { include: images },
+    expected_jobs: {
+      changes: true,
+      security: true,
+      "user-facing": eventName === "pull_request",
+      "backend-quality": scope.backend,
+      "backend-tests": scope.backend,
+      frontend: scope.frontend,
+      "frontend-e2e": scope.frontend_e2e,
+      "frontend-web-next": scope.web_next,
+      "frontend-web-next-e2e": scope.web_next_e2e,
+      "schema-drift": scope.schema,
+      "docker-builds": images.length > 0,
+    },
+  };
+}
+
+export function classify(rawFiles) {
   const files = normalizeFiles(rawFiles);
 
   if (files.length === 0) {
     return allTrue();
   }
 
-  const full = files.some(isFullCiFile);
+  // New or unrecognised runtime/configuration paths must not silently lose
+  // coverage when merge candidates are scoped. Documentation alone is safe.
+  const full = files.some((file) => isFullCiFile(file) || !isKnownScopeFile(file));
   // Both Python consumers and the web package validate this shared contract.
   const whatsNewContract = files.some((file) => [
     "frontend/packages/whats-new/version-order.cases.json",
@@ -89,9 +146,16 @@ function classify(rawFiles) {
   };
 }
 
+function isKnownScopeFile(file) {
+  return isBackendFile(file) || file.startsWith("frontend/")
+    || isScriptTestFile(file) || isE2eFile(file)
+    || file.startsWith(".devcontainer/") || /\.mdx?$/i.test(file);
+}
+
 function isFullCiFile(file) {
   return file.startsWith(".github/workflows/")
-    || file === ".github/scripts/ci-change-scope.mjs"
+    || file.startsWith(".github/actions/")
+    || file.startsWith(".github/scripts/ci-")
     || file === ".pre-commit-config.yaml"
     || file === "Taskfile.yml"
     || file === ".gitignore"
@@ -150,6 +214,9 @@ function writeOutputs(scope) {
   for (const name of outputNames) {
     console.log(`${name}=${scope[name] ? "true" : "false"}`);
   }
+  console.log(`docker=${scope.docker}`);
+  console.log(`docker_matrix=${JSON.stringify(scope.docker_matrix)}`);
+  console.log(`expected_jobs=${JSON.stringify(scope.expected_jobs)}`);
 }
 
 function getArgValue(name) {
@@ -165,99 +232,4 @@ function getArgValue(name) {
   }
 
   return value;
-}
-
-function runSelfTest() {
-  assert.deepEqual(
-    classify(["frontend/apps/docs-site/src/content/contributing/project-roadmap.mdx"]),
-    {
-      full: false,
-      backend: false,
-      frontend: false,
-      frontend_e2e: false,
-      schema: false,
-      scripts: false,
-      route_metadata: false,
-      docker_backend: false,
-      docker_frontend: false,
-      docker_devcontainer: false,
-      web_next: false,
-      web_next_e2e: false,
-      docker_web_next: false,
-    },
-    "docs-site-only changes should not run expensive app/backend CI",
-  );
-
-  assert.equal(classify(["backend/src/eneo/server/main.py"]).backend, true);
-  assert.equal(classify(["backend/src/eneo/server/main.py"]).frontend_e2e, true);
-  assert.equal(classify(["backend/src/eneo/server/main.py"]).schema, true);
-  assert.equal(classify(["backend/src/eneo/server/main.py"]).route_metadata, true);
-  assert.equal(classify(["backend/src/eneo/server/main.py"]).docker_backend, true);
-  assert.equal(classify(["backend/src/eneo/server/main.py"]).scripts, false);
-  assert.equal(
-    classify(["backend/src/eneo/roles/permissions.py"]).scripts,
-    true,
-    "permission changes must check the What's new vocabulary against the backend",
-  );
-
-  assert.equal(classify(["scripts/backend_test_shard.py"]).backend, true);
-  assert.equal(classify(["tool-runtime/src/tools/documents/control.ts"]).backend, true);
-  assert.equal(classify(["scripts/backend_test_shard.py"]).scripts, true);
-
-  assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).frontend, true);
-  assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).frontend_e2e, true);
-  assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).docker_frontend, true);
-  assert.equal(classify(["frontend/apps/web/src/routes/+page.svelte"]).schema, false);
-  // Each app's own files run only that app; shared workspace files run both.
-  const svelteScope = classify(["frontend/apps/web/src/routes/+page.svelte"]);
-  assert.equal(svelteScope.web_next, false);
-  assert.equal(svelteScope.web_next_e2e, false);
-  assert.equal(svelteScope.docker_web_next, false);
-  const webNextScope = classify(["frontend/apps/web-next/src/app/(public)/login/page.tsx"]);
-  assert.equal(webNextScope.web_next, true);
-  assert.equal(webNextScope.web_next_e2e, true);
-  assert.equal(webNextScope.docker_web_next, true);
-  assert.equal(webNextScope.frontend, false);
-  assert.equal(webNextScope.frontend_e2e, false);
-  assert.equal(webNextScope.docker_frontend, false);
-  for (const shared of ["frontend/bun.lock", "frontend/packages/whats-new/src/index.ts", "frontend/patches/x.patch"]) {
-    const sharedScope = classify([shared]);
-    assert.equal(sharedScope.frontend, true, `${shared} runs the Svelte app`);
-    assert.equal(sharedScope.web_next, true, `${shared} runs the Next app`);
-  }
-  // Both apps consume the API: a backend change exercises both E2E suites.
-  assert.equal(classify(["backend/src/eneo/server/main.py"]).web_next_e2e, true);
-  assert.equal(classify(["backend/src/eneo/server/main.py"]).web_next, false);
-
-  assert.equal(classify(["frontend/knip.json"]).frontend, true);
-  assert.equal(classify(["frontend/knip.json"]).frontend_e2e, true);
-  assert.equal(classify(["frontend/packages/eneo-js/src/types/schema.d.ts"]).schema, true);
-  assert.equal(classify([".github/scripts/project-intake.mjs"]).scripts, true);
-  assert.equal(classify(["scripts/check_whats_new.py"]).frontend, true);
-  assert.equal(classify(["scripts/check_whats_new.py"]).scripts, true);
-  for (const name of ["version-order.cases.json", "releases.schema.json"]) {
-    const contractScope = classify([`frontend/packages/whats-new/${name}`]);
-    assert.equal(contractScope.backend, true);
-    assert.equal(contractScope.frontend, true);
-    assert.equal(contractScope.scripts, true);
-  }
-  assert.equal(classify(["e2e/mock_model_server.py"]).frontend_e2e, true);
-  assert.equal(classify([".devcontainer/Dockerfile"]).docker_devcontainer, true);
-
-  const fullScope = classify([".github/workflows/ci.yml"]);
-  for (const name of outputNames) {
-    assert.equal(fullScope[name], true, `CI workflow changes should enable ${name}`);
-  }
-
-  const docsWorkflowScope = classify([".github/workflows/deploy_docs.yml"]);
-  for (const name of outputNames) {
-    assert.equal(docsWorkflowScope[name], true, `workflow changes should enable ${name}`);
-  }
-
-  const emptyScope = classify([]);
-  for (const name of outputNames) {
-    assert.equal(emptyScope[name], true, `empty change lists should fail open for ${name}`);
-  }
-
-  console.log("ci-change-scope self-test passed");
 }

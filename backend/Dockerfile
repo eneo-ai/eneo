@@ -49,10 +49,14 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /tiktoken /tiktoken
 COPY --from=builder /app /app
 
-# Set PATH to use venv and environment variables
+# Set PATH to use venv and environment variables.
+# LITELLM_LOCAL_MODEL_COST_MAP keeps LiteLLM on the model and price catalog
+# bundled with the pinned version; otherwise every start fetches it from
+# LiteLLM's GitHub main branch.
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
-    TIKTOKEN_CACHE_DIR=/tiktoken
+    TIKTOKEN_CACHE_DIR=/tiktoken \
+    LITELLM_LOCAL_MODEL_COST_MAP=True
 
 # OTel service version — pass --build-arg OTEL_SERVICE_VERSION=<version> at
 # build time so it surfaces as resource.service.version in every log line and
