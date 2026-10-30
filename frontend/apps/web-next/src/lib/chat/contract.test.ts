@@ -112,7 +112,8 @@ describe.each(fixtures)("$name", (fixture) => {
       expect(chat.error?.message).toBe(fixture.ui.error!.message);
       expect(errors.map((error) => error.message)).toEqual([fixture.ui.error!.message]);
       expect(data.find((part) => part.type === "data-error")?.data).toEqual({
-        code: fixture.ui.error!.code
+        code: fixture.ui.error!.code,
+        reason: fixture.ui.error!.reason
       });
     });
   }

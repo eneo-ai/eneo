@@ -859,7 +859,7 @@ async def test_error_chunk():
     error = next(c for c in chunks if c["type"] == "error")
     assert error["errorText"] == "Model exploded"
     data_error = next(c for c in chunks if c["type"] == "data-error")
-    assert data_error["data"]["code"] == 9024
+    assert data_error["data"] == {"code": 9024}
     # The text block still closes and the stream finishes cleanly.
     assert [c["type"] for c in chunks[-2:]] == ["text-end", "finish"]
 

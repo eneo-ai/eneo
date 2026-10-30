@@ -475,7 +475,14 @@ async def _ui_message_chunks(
         elif response_type == ResponseType.ERROR:
             yield {
                 "type": "data-error",
-                "data": {"code": completion.error_code},
+                "data": {
+                    "code": completion.error_code,
+                    **(
+                        {"reason": completion.error_reason}
+                        if completion.error_reason
+                        else {}
+                    ),
+                },
                 "transient": True,
             }
             yield {"type": "error", "errorText": completion.error or ""}

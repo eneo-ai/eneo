@@ -151,7 +151,7 @@ export type EneoDataParts = {
   "mcp-tool-references": { mcp_tool_references: Schema<"McpToolReferencePublic">[] };
   "token-usage": TokenUsageData;
   "tool-approval": ToolApprovalData;
-  error: { code?: number | null };
+  error: { code?: number | null; reason?: string | null };
 };
 
 /** A rating of one answer: 1 good, -1 bad, null not rated. */
