@@ -1102,6 +1102,7 @@ class Container(containers.DeclarativeContainer):
         TenantFederationService,
         tenant_repo=tenant_repo,
         encryption_service=encryption_service,
+        audit_service=audit_service,
     )
     flow_run_retention_policy_service = providers.Factory(
         FlowRunRetentionPolicyService,
