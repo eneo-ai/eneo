@@ -565,6 +565,59 @@ build served by FastAPI. Never loosen the policy.
 - Astryx's own strings (aria labels, pagination, …) come from its Swedish
   catalog through the provider; don't translate them yourself.
 
+## Phones and tablets (the responsive contract)
+
+Every screen works from a 320 px phone to a 1366 px iPad held sideways, with a
+finger and with a mouse, and a test keeps it that way. Build a new screen from
+what is here before writing layout of your own.
+
+**Tiers.** Phone below `md` (768 px), tablet from `md`, side navigation from
+`lg` (1024 px); `short:` is a viewport under 30rem tall (a phone turned
+sideways: a browser's own bars leave about 280 px, a keyboard leaves 50 to
+150). A touch pointer (`pointer-coarse:`) gets 44 px targets; a mouse does not.
+
+**Use these, do not rebuild them.**
+
+| Need                                           | Use                                                                                                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A pushed screen's header and back link         | `PageBar` (below `lg`); its parent label names where it returns                                                                                   |
+| The one primary action of a screen             | `DockedActions` (docked below `md`, in the header from `md`)                                                                                      |
+| A list of resources                            | `ResourceCollection` / `ResourceCard` (rows on a phone, cards from `md`)                                                                          |
+| Settings                                       | `SettingsGroup` / `SettingsRow`, `PageHeader`                                                                                                     |
+| A page outside the shell (sign-in, a callback) | `p-safe` (clears the notch and the home indicator)                                                                                                |
+| A search, e-mail or user-name field            | `{...KEYBOARD.search}` / `.email` / `.identifier` from `@/components/astryx/keyboard-hints`                                                       |
+| A dialog                                       | `Dialog` from `@/components/ui/dialog`: it is capped at `100dvh - 2rem`, and one with a text field hangs from the top on touch. No `max-h-[90vh]` |
+| Typed-name confirmation                        | `ConfirmDialog` / `confirmationMatches`                                                                                                           |
+| A wide table                                   | `ScrollableArea` with a name, or rows on a phone; never a bare `overflow-x-auto`                                                                  |
+
+**Do not.**
+
+- Use `vh`, `h-screen`, a `min-h-[3xx px]` or reveal anything only on hover
+  (lint rejects them). `hover:` already shows while a finger is down.
+- Dim text with `opacity-*` or build a colour pair of your own: use the
+  tokens (the contrast test cannot see alpha).
+- Add `env(safe-area-inset-*)` inside a page. The shell frame, `DockedActions`,
+  the side panel, the toaster and the space members sheet own it.
+- Let Return send: Return adds a line, Ctrl or Cmd+Enter sends (the chat's
+  rule, `prompt-guide` too). The search key closes the keyboard.
+- Confirm a copy with a toast over a docked composer: confirm at the button.
+- Make a visible target smaller than 44 px on touch, or two targets overlap.
+
+**The check.** `tests/responsive-contract.spec.ts` opens every route of
+`tests/responsive-routes.ts` at seven phone and tablet sizes with touch and
+fails on a sideways scroll, a target under 44 px, a target outside the screen,
+two on top of each other and text cut off sideways. A route missing from the
+list fails a unit test (`src/test/responsive-routes.test.ts`), so a new screen
+cannot ship unchecked: add its route, with a way to open it. What is already
+wrong is in `tests/responsive-contract.baseline.json`; it only shrinks (a
+violation that is not there fails, and so does an entry that no longer occurs).
+Run it with `CONTRACT_VIEWPORTS=390x844 CONTRACT_ROUTES='^/spaces' bun run test:e2e tests/responsive-contract.spec.ts`.
+
+**By hand, once a feature is done.** Open it on a phone (a real one, or the
+iOS Simulator over https: Safari does not load a plain `http://localhost` app
+under the production CSP) with the keyboard open, turned sideways, offline,
+and with the text size at 130 %.
+
 ## Verify
 
 - `bun run check` — route typegen and `tsc`.
