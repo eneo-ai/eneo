@@ -36,8 +36,14 @@ test(
     await page
       .getByRole("textbox", { name: /^Egen text till steget/ })
       .fill("Det manuella flödet fungerar.");
-    await page.getByRole("switch", { name: /^Ta emot filer/ }).check();
-    await page.getByRole("checkbox", { name: "TXT", exact: true }).check();
+    const uploads = page.getByRole("switch", { name: /^Ta emot filer/ });
+    await uploads.focus();
+    await page.keyboard.press("Space");
+    await expect(uploads).toBeChecked();
+    const txt = page.getByRole("checkbox", { name: "TXT", exact: true });
+    await txt.focus();
+    await page.keyboard.press("Space");
+    await expect(txt).toBeChecked();
 
     await page.evaluate(() => history.back());
     const leave = page.getByRole("alertdialog");
@@ -47,7 +53,7 @@ test(
       "Det manuella flödet fungerar."
     );
 
-    await page.setViewportSize({ width: 390, height: 844 });
+    await page.setViewportSize({ width: 320, height: 844 });
     await expect
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true);

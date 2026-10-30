@@ -68,11 +68,16 @@ test(
       headers: { Range: "bytes=0-43" }
     });
     expect([401, 403]).toContain(invalid.status());
+    await expect
+      .poll(() => audio.evaluate((element: HTMLAudioElement) => element.readyState))
+      .toBeGreaterThanOrEqual(1);
     await audio.evaluate((element: HTMLAudioElement) => {
       element.currentTime = 7;
     });
     await expect
-      .poll(() => audio.evaluate((element: HTMLAudioElement) => element.currentTime))
-      .toBeGreaterThanOrEqual(7);
+      .poll(() =>
+        audio.evaluate((element: HTMLAudioElement) => !element.seeking && element.currentTime >= 7)
+      )
+      .toBe(true);
   }
 );
