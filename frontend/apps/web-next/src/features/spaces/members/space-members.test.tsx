@@ -285,3 +285,40 @@ describe("members on a tablet", () => {
     expect(roles).toEqual(["Redigerare", "Visare", "Visare"]);
   });
 });
+
+describe("members across 768 px (a phone turned)", () => {
+  const title = () => screen.getByRole("heading", { name: "Medlemmar" });
+
+  it("moves focus from a member control that went with its layout to the title, both ways", async () => {
+    state.space = spaceWithMembers();
+    setViewport("phone");
+    renderInApp(<SpaceMembers />);
+
+    const row = screen.getByRole("button", { name: /^erik\.johansson@example\.com/ });
+    act(() => row.focus());
+    expect(document.activeElement).toBe(row);
+    act(() => setViewport("tablet-portrait"));
+    await waitFor(() => expect(document.activeElement).toBe(title()));
+    expect(screen.queryByRole("button", { name: /^erik\.johansson@example\.com/ })).toBeNull();
+
+    const role = screen.getAllByRole("combobox", { name: "Roll" })[0]!;
+    act(() => role.focus());
+    expect(document.activeElement).toBe(role);
+    act(() => setViewport("phone"));
+    await waitFor(() => expect(document.activeElement).toBe(title()));
+    expect(screen.queryByRole("combobox", { name: "Roll" })).toBeNull();
+  });
+
+  it("leaves focus alone when it was on a control that stays", async () => {
+    state.space = spaceWithMembers();
+    setViewport("phone");
+    renderInApp(<SpaceMembers />);
+
+    // The add buttons are one element in both layouts (DockedActions).
+    const add = screen.getAllByRole("button", { name: "Lägg till medlem" })[0]!;
+    act(() => add.focus());
+    act(() => setViewport("tablet-portrait"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(document.activeElement).toBe(add);
+  });
+});

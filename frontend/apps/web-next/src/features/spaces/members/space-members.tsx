@@ -9,7 +9,7 @@ import { List, ListItem } from "@astryxdesign/core/List";
 import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, Trash2, UserPlus, Users, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { DockedActions } from "@/components/shell/docked-actions";
 import {
@@ -42,6 +42,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
 import { userGroupsQueryOptions } from "@/features/admin/user-groups/user-groups";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
@@ -821,6 +822,24 @@ export function SpaceMembers() {
   const phone = useMediaMatch(PHONE_QUERY);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
+  // Crossing 768 px (a phone turned) replaces the member controls with the
+  // other layout's. A control that had the focus goes with them, and focus
+  // goes to the title (WCAG 2.4.3). The rescue moves focus only if it was
+  // lost, so a button elsewhere keeps it.
+  const controls = useRef<HTMLDivElement>(null);
+  const focusWasInControls = useRef(false);
+  const rescue = useFocusRescue();
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      focusWasInControls.current = !!controls.current?.contains(event.target as Node);
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+  useEffect(() => {
+    if (focusWasInControls.current) rescue(() => headingRef.current);
+  }, [phone, rescue]);
+
   const editors = space.members.items.filter(
     (member) => member.role === "admin" || member.role === "editor"
   );
@@ -848,54 +867,56 @@ export function SpaceMembers() {
           }
         />
 
-        {phone !== false ? (
-          <div className="md:hidden">
-            <PhoneMembers />
-          </div>
-        ) : null}
-        {phone !== true ? (
-          <div className="flex flex-col gap-8 max-md:hidden">
-            <SettingsGroup title={t("current_members")}>
-              <SettingsRow
-                title={t("admins_editors")}
-                description={t("admins_editors_description")}
-              >
-                <div className="flex flex-col">
-                  {editors.map((member) => (
-                    <MemberRow key={member.id} member={member} />
-                  ))}
-                </div>
-              </SettingsRow>
-              {viewerRoleAvailable && (
-                <SettingsRow title={t("viewers")} description={t("viewers_description")}>
+        <div ref={controls} className="contents">
+          {phone !== false ? (
+            <div className="md:hidden">
+              <PhoneMembers />
+            </div>
+          ) : null}
+          {phone !== true ? (
+            <div className="flex flex-col gap-8 max-md:hidden">
+              <SettingsGroup title={t("current_members")}>
+                <SettingsRow
+                  title={t("admins_editors")}
+                  description={t("admins_editors_description")}
+                >
                   <div className="flex flex-col">
-                    {viewers.length === 0 ? (
+                    {editors.map((member) => (
+                      <MemberRow key={member.id} member={member} />
+                    ))}
+                  </div>
+                </SettingsRow>
+                {viewerRoleAvailable && (
+                  <SettingsRow title={t("viewers")} description={t("viewers_description")}>
+                    <div className="flex flex-col">
+                      {viewers.length === 0 ? (
+                        <p className="text-muted-foreground py-3 text-sm">
+                          {t("no_viewers_in_space")}
+                        </p>
+                      ) : (
+                        viewers.map((member) => <MemberRow key={member.id} member={member} />)
+                      )}
+                    </div>
+                  </SettingsRow>
+                )}
+              </SettingsGroup>
+
+              <SettingsGroup title={t("group_members")}>
+                <SettingsRow title={t("user_groups")} description={t("user_groups_description")}>
+                  <div className="flex flex-col">
+                    {groupMembers.length === 0 ? (
                       <p className="text-muted-foreground py-3 text-sm">
-                        {t("no_viewers_in_space")}
+                        {t("no_group_members_in_space")}
                       </p>
                     ) : (
-                      viewers.map((member) => <MemberRow key={member.id} member={member} />)
+                      groupMembers.map((group) => <GroupMemberRow key={group.id} group={group} />)
                     )}
                   </div>
                 </SettingsRow>
-              )}
-            </SettingsGroup>
-
-            <SettingsGroup title={t("group_members")}>
-              <SettingsRow title={t("user_groups")} description={t("user_groups_description")}>
-                <div className="flex flex-col">
-                  {groupMembers.length === 0 ? (
-                    <p className="text-muted-foreground py-3 text-sm">
-                      {t("no_group_members_in_space")}
-                    </p>
-                  ) : (
-                    groupMembers.map((group) => <GroupMemberRow key={group.id} group={group} />)
-                  )}
-                </div>
-              </SettingsRow>
-            </SettingsGroup>
-          </div>
-        ) : null}
+              </SettingsGroup>
+            </div>
+          ) : null}
+        </div>
       </div>
     </RemovalFocusScope>
   );
