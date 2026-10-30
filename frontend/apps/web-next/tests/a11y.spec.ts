@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
+import type { FederationView } from "../src/features/admin/federation/federation";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "../src/components/shell/side-nav-preference";
 import { assertDocumented, WCAG_22_AA_TAGS } from "../src/test/wcag";
 import { expect, test } from "./csp";
@@ -723,6 +724,43 @@ for (const colorScheme of ["light", "dark"] as const) {
           page.getByRole("heading", { level: 1, name: /^(Användare|Users)$/ })
         ).toBeVisible();
         await expect(page.getByRole("main").getByText(/^\d+ (användare|users?)$/)).toBeVisible();
+      });
+    });
+
+    test("admin federation", { tag: "@vite" }, async ({ page }) => {
+      test.skip(!process.env.E2E_BASE_URL, "Federation administration has a Vite-only route.");
+      // A configured IdP is a UI fixture; this scan never contacts an IdP or saves credentials.
+      await page.route("**/api/v1/runtime-config", async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          json: { ...(await response.json()), federation_enabled: true }
+        });
+      });
+      const view: FederationView = {
+        configured: true,
+        provider: "Example IdP",
+        discovery_endpoint: "https://idp.example/.well-known/openid-configuration",
+        issuer: "https://idp.example",
+        client_id: "e2e-client",
+        client_secret_set: true,
+        encryption_status: "encrypted",
+        allowed_domains: ["example.org"],
+        redirect_uris: ["https://eneo.example/login/callback"],
+        scopes: ["openid", "email", "profile"],
+        token_endpoint_auth_method: "client_secret_post",
+        revision: "e2e-revision"
+      };
+      await page.route("**/api/v1/admin/federation", (route) => route.fulfill({ json: view }));
+      await scan(page, "/admin/federation", async () => {
+        await expect(
+          page.getByRole("heading", { level: 1, name: "Inloggning (SSO)" })
+        ).toBeVisible();
+        await expect(page.getByLabel("Klient-ID", { exact: true })).toHaveValue("e2e-client");
+        await expect(
+          page.getByRole("link", { name: "Inloggning (SSO)", exact: true })
+        ).toBeVisible();
+        await expect(page).toHaveTitle("Inloggning (SSO) · Eneo");
       });
     });
 

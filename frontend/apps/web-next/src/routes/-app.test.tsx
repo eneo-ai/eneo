@@ -38,6 +38,9 @@ vi.mock("@/features/whats-new/tour-provider", () => ({
   useTour: () => ({ running: false, start: vi.fn() })
 }));
 vi.mock("@/components/shell/notification-bells", () => ({ NotificationBells: () => null }));
+vi.mock("@/features/admin/federation/federation-page", () => ({
+  FederationPage: () => <h1>{messages.federation_admin_title}</h1>
+}));
 
 const GENERATION = "Eneo-Session-Generation";
 const context = testAppContext({ settings: { whats_new_enabled: false } });
@@ -1592,4 +1595,53 @@ it("only reads data while preloading admin users and usage", async () => {
         (input instanceof Request ? input.method : (init?.method ?? "GET")) === "GET"
     )
   ).toBe(true);
+});
+
+it("opens enabled federation administration with its navigation and title", async () => {
+  setViewport(1280);
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/admin/federation", {});
+  const { runtimeConfig, setRuntimeConfig } = await import("@/lib/runtime-config");
+  await renderRoute("/admin/federation", undefined, () => {
+    setRuntimeConfig({ ...runtimeConfig(), federation_enabled: true });
+  });
+  await screen.findByRole("heading", { level: 1, name: messages.federation_admin_title });
+  expect(document.title).toBe(`${messages.federation_admin_title} · Eneo`);
+  expect(
+    screen.getByRole("link", { name: messages.federation_admin_nav }).getAttribute("href")
+  ).toBe("/admin/federation");
+  expect(requestedPaths()).toContain("/api/v1/admin/federation");
+});
+
+it("hides disabled federation administration and rejects its URL before the API read", async () => {
+  setViewport(1280);
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  const { router } = await renderRoute("/admin/federation");
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(true);
+  expect(screen.queryByRole("link", { name: messages.federation_admin_nav })).toBeNull();
+  expect(requestedPaths()).not.toContain("/api/v1/admin/federation");
+});
+
+it("keeps federation administration behind the existing admin guard", async () => {
+  const { runtimeConfig, setRuntimeConfig } = await import("@/lib/runtime-config");
+  const { router } = await renderRoute("/admin/federation", undefined, () => {
+    setRuntimeConfig({ ...runtimeConfig(), federation_enabled: true });
+  });
+  await waitFor(() => expect(router.state.location.pathname).toBe("/spaces/personal/chat"));
+  expect(requestedPaths()).not.toContain("/api/v1/admin/federation");
+});
+
+it("preloads federation with GET requests without waiting for its optional data", async () => {
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/admin/federation", new Promise(() => {}));
+  const { router } = await createRouteRouter();
+  const { runtimeConfig, setRuntimeConfig } = await import("@/lib/runtime-config");
+  setRuntimeConfig({ ...runtimeConfig(), federation_enabled: true });
+  fetcher.mockClear();
+  await router.preloadRoute({ to: "/admin/federation" });
+  await waitFor(() => expect(requestedPaths()).toContain("/api/v1/admin/federation"));
+  for (const [input, init] of fetcher.mock.calls) {
+    expect(input instanceof Request ? input.method : (init?.method ?? "GET")).toBe("GET");
+  }
 });

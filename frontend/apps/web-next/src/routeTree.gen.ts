@@ -34,6 +34,7 @@ import { Route as AppAdminIndexRouteImport } from "./routes/_app/admin/index"
 import { Route as AppAdminApiKeysRouteImport } from "./routes/_app/admin/api-keys"
 import { Route as AppAdminAuditLogsRouteImport } from "./routes/_app/admin/audit-logs"
 import { Route as AppAdminCrawlerRouteImport } from "./routes/_app/admin/crawler"
+import { Route as AppAdminFederationRouteImport } from "./routes/_app/admin/federation"
 import { Route as AppAdminIntegrationsRouteImport } from "./routes/_app/admin/integrations"
 import { Route as AppAdminModelsRouteImport } from "./routes/_app/admin/models"
 import { Route as AppAdminModulesRouteImport } from "./routes/_app/admin/modules"
@@ -204,6 +205,11 @@ const AppAdminAuditLogsRoute = AppAdminAuditLogsRouteImport.update({
 const AppAdminCrawlerRoute = AppAdminCrawlerRouteImport.update({
   id: "/crawler",
   path: "/crawler",
+  getParentRoute: () => AppAdminRouteRoute,
+} as any)
+const AppAdminFederationRoute = AppAdminFederationRouteImport.update({
+  id: "/federation",
+  path: "/federation",
   getParentRoute: () => AppAdminRouteRoute,
 } as any)
 const AppAdminIntegrationsRoute = AppAdminIntegrationsRouteImport.update({
@@ -494,6 +500,7 @@ export interface FileRoutesByFullPath {
   "/admin/api-keys": typeof AppAdminApiKeysRoute
   "/admin/audit-logs": typeof AppAdminAuditLogsRoute
   "/admin/crawler": typeof AppAdminCrawlerRoute
+  "/admin/federation": typeof AppAdminFederationRoute
   "/admin/integrations": typeof AppAdminIntegrationsRoute
   "/admin/models": typeof AppAdminModelsRoute
   "/admin/modules": typeof AppAdminModulesRoute
@@ -565,6 +572,7 @@ export interface FileRoutesByTo {
   "/admin/api-keys": typeof AppAdminApiKeysRoute
   "/admin/audit-logs": typeof AppAdminAuditLogsRoute
   "/admin/crawler": typeof AppAdminCrawlerRoute
+  "/admin/federation": typeof AppAdminFederationRoute
   "/admin/integrations": typeof AppAdminIntegrationsRoute
   "/admin/models": typeof AppAdminModelsRoute
   "/admin/modules": typeof AppAdminModulesRoute
@@ -639,6 +647,7 @@ export interface FileRoutesById {
   "/_app/admin/api-keys": typeof AppAdminApiKeysRoute
   "/_app/admin/audit-logs": typeof AppAdminAuditLogsRoute
   "/_app/admin/crawler": typeof AppAdminCrawlerRoute
+  "/_app/admin/federation": typeof AppAdminFederationRoute
   "/_app/admin/integrations": typeof AppAdminIntegrationsRoute
   "/_app/admin/models": typeof AppAdminModelsRoute
   "/_app/admin/modules": typeof AppAdminModulesRoute
@@ -714,6 +723,7 @@ export interface FileRouteTypes {
     | "/admin/api-keys"
     | "/admin/audit-logs"
     | "/admin/crawler"
+    | "/admin/federation"
     | "/admin/integrations"
     | "/admin/models"
     | "/admin/modules"
@@ -785,6 +795,7 @@ export interface FileRouteTypes {
     | "/admin/api-keys"
     | "/admin/audit-logs"
     | "/admin/crawler"
+    | "/admin/federation"
     | "/admin/integrations"
     | "/admin/models"
     | "/admin/modules"
@@ -858,6 +869,7 @@ export interface FileRouteTypes {
     | "/_app/admin/api-keys"
     | "/_app/admin/audit-logs"
     | "/_app/admin/crawler"
+    | "/_app/admin/federation"
     | "/_app/admin/integrations"
     | "/_app/admin/models"
     | "/_app/admin/modules"
@@ -1099,6 +1111,13 @@ declare module "@tanstack/react-router" {
       path: "/crawler"
       fullPath: "/admin/crawler"
       preLoaderRoute: typeof AppAdminCrawlerRouteImport
+      parentRoute: typeof AppAdminRouteRoute
+    }
+    "/_app/admin/federation": {
+      id: "/_app/admin/federation"
+      path: "/federation"
+      fullPath: "/admin/federation"
+      preLoaderRoute: typeof AppAdminFederationRouteImport
       parentRoute: typeof AppAdminRouteRoute
     }
     "/_app/admin/integrations": {
@@ -1437,6 +1456,7 @@ interface AppAdminRouteRouteChildren {
   AppAdminApiKeysRoute: typeof AppAdminApiKeysRoute
   AppAdminAuditLogsRoute: typeof AppAdminAuditLogsRoute
   AppAdminCrawlerRoute: typeof AppAdminCrawlerRoute
+  AppAdminFederationRoute: typeof AppAdminFederationRoute
   AppAdminIntegrationsRoute: typeof AppAdminIntegrationsRoute
   AppAdminModelsRoute: typeof AppAdminModelsRoute
   AppAdminModulesRoute: typeof AppAdminModulesRoute
@@ -1459,6 +1479,7 @@ const AppAdminRouteRouteChildren: AppAdminRouteRouteChildren = {
   AppAdminApiKeysRoute: AppAdminApiKeysRoute,
   AppAdminAuditLogsRoute: AppAdminAuditLogsRoute,
   AppAdminCrawlerRoute: AppAdminCrawlerRoute,
+  AppAdminFederationRoute: AppAdminFederationRoute,
   AppAdminIntegrationsRoute: AppAdminIntegrationsRoute,
   AppAdminModelsRoute: AppAdminModelsRoute,
   AppAdminModulesRoute: AppAdminModulesRoute,

@@ -93,12 +93,15 @@ function seededClient() {
   return queryClient;
 }
 
-function renderPalette(permissions: Permission[] = []) {
+function renderPalette(permissions: Permission[] = [], federation = false) {
   const onCreateSpace = vi.fn();
   const onOpenChange = vi.fn();
   renderInApp(
     <ShellCommandPalette isOpen onOpenChange={onOpenChange} onCreateSpace={onCreateSpace} />,
-    { queryClient: seededClient(), appContext: testAppContext({ permissions }) }
+    {
+      queryClient: seededClient(),
+      appContext: testAppContext({ permissions, featureFlags: { federation } })
+    }
   );
   return { onCreateSpace, onOpenChange };
 }
@@ -226,6 +229,21 @@ describe("ShellCommandPalette", () => {
     fireEvent.keyDown(combobox, { key: "ArrowDown" });
     fireEvent.keyDown(combobox, { key: "Enter" });
     expect(router.push).toHaveBeenCalledWith("/dashboard/a1?tab=chat");
+  });
+
+  it("offers federation administration when the deployment enables it", async () => {
+    renderPalette(["admin"], true);
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("SSO");
+    fireEvent.click(await screen.findByRole("option", { name: /Administration.*Inloggning.*SSO/ }));
+    expect(router.push).toHaveBeenCalledWith("/admin/federation");
+  });
+
+  it("hides federation administration when the deployment disables it", async () => {
+    renderPalette(["admin"]);
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("SSO");
+    expect(screen.queryByRole("option", { name: /Administration.*Inloggning.*SSO/ })).toBeNull();
   });
 
   it("offers Skapa yta and admin pages to those allowed", async () => {
