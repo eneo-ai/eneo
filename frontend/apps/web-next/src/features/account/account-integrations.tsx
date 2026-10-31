@@ -121,7 +121,7 @@ export function AccountIntegrations() {
         {(items) =>
           items.length === 0 ? (
             <EmptyState
-              title={t("integrations")}
+              title={t("no_integrations_available")}
               description={t("no_integrations_enabled")}
               actions={
                 can("admin") ? (

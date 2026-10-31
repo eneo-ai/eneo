@@ -260,7 +260,7 @@ export function ApiKeys() {
           can("api_keys") ? (
             <CreateApiKeyDialog
               idPrefix="account"
-              trigger={<Button label={t("api_keys_create_short")} />}
+              trigger={<Button variant="primary" label={t("api_keys_create")} />}
               onCreated={secrets.reveal(t("api_keys_created_title"))}
             />
           ) : (

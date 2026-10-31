@@ -206,8 +206,8 @@ export function ChangePasswordCard() {
 
   return (
     <SettingsGroup title={t("change_password")} tour="account-password">
+      {/* No title of its own: the group's says the same. */}
       <SettingsRow
-        title={t("change_password")}
         description={
           capability.source === "eneo"
             ? t("password_settings_description")
