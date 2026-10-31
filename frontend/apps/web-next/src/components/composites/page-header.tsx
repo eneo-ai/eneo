@@ -77,11 +77,16 @@ export function PageHeader({
   className
 }: PageHeaderProps) {
   const actionSlot = actions ?? children;
+  // A pushed screen's page bar says the same ("‹ Administration"): it replaces the trail
+  // below 1024 px, or below 768 px on a space's pages.
 
   return (
     <div data-tour={tour} className={cn("flex flex-col gap-2", className)}>
       {breadcrumbs && breadcrumbs.length > 0 ? (
-        <Breadcrumbs variant="supporting">
+        <Breadcrumbs
+          variant="supporting"
+          className="group-has-[[data-own-mobile-header]]/shell:max-lg:hidden max-md:group-has-[[data-own-phone-header]]/shell:hidden"
+        >
           {breadcrumbs.map((crumb, index) => (
             <BreadcrumbItem
               key={`${index}-${crumb.href ?? crumb.label}`}
