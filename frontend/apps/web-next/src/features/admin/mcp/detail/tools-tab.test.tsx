@@ -250,3 +250,26 @@ it("loads new view facts when the pending content changes for the same tool", as
   expect(await screen.findByText(domain)).toBeTruthy();
   expect(screen.queryByText("https://first.example")).toBeNull();
 });
+
+it.each([null, "A newly discovered tool"])(
+  "shows an unapproved discovery as new (description: %s)",
+  async (description) => {
+    api.GET.mockResolvedValue(
+      ok({
+        items: [
+          tool({
+            description: null,
+            input_schema: null,
+            pending_description: description,
+            pending_input_schema: { type: "object" },
+            requires_approval: true
+          })
+        ]
+      })
+    );
+    renderInApp(<ToolsTab server={server} />);
+    expect(await screen.findByText("Ny", { exact: true })).toBeTruthy();
+    expect(screen.queryByText("Ändrad", { exact: true })).toBeNull();
+    if (description) expect(screen.getByText(description)).toBeTruthy();
+  }
+);

@@ -170,18 +170,16 @@ function PendingToolRow({
   onReject: () => void;
 }) {
   const t = useTranslations();
+  // The backend's reject operation identifies never-approved discoveries by
+  // their absent approved description and schema (pending values do not count).
+  const isNew = tool.description == null && tool.input_schema == null;
   const descriptionChanged =
-    tool.pending_description != null && tool.pending_description !== tool.description;
-  const schemaChanged =
-    tool.pending_input_schema != null &&
-    JSON.stringify(tool.pending_input_schema) !== JSON.stringify(tool.input_schema);
+    !isNew && tool.pending_description != null && tool.pending_description !== tool.description;
+  const description = isNew ? tool.pending_description : tool.description;
   const pendingView =
     !tool.removed_from_remote &&
     Boolean(tool.pending_ui_resource_sha256) &&
     tool.pending_ui_resource_sha256 !== tool.ui_resource_sha256;
-  const changed =
-    !tool.removed_from_remote &&
-    (descriptionChanged || schemaChanged || (pendingView && Boolean(tool.ui_resource_sha256)));
   return (
     <li className="border-warning/30 bg-warning/10 rounded-lg border p-3">
       <div className="flex items-start gap-3">
@@ -193,7 +191,7 @@ function PendingToolRow({
                 <Trash2 className="size-3" aria-hidden="true" />
                 {t("removed_from_server")}
               </span>
-            ) : changed ? (
+            ) : !isNew ? (
               <Badge className="border-warning/30 bg-warning/15 text-warning gap-1 font-normal">
                 {t("mcp_change_changed")}
               </Badge>
@@ -222,14 +220,14 @@ function PendingToolRow({
               </div>
             </div>
           ) : (
-            tool.description && (
+            description && (
               <p
                 className={cn(
                   "text-muted-foreground mt-1 text-xs leading-snug",
                   tool.removed_from_remote && "line-through"
                 )}
               >
-                {tool.description}
+                {description}
               </p>
             )
           )}
