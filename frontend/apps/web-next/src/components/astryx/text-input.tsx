@@ -1,10 +1,15 @@
 "use client";
 
 import { useMergedRefs } from "@astryxdesign/core/hooks";
-import { TextInput as AstryxTextInput, type TextInputProps } from "@astryxdesign/core/TextInput";
-import { useLayoutEffect, useRef } from "react";
+import {
+  TextInput as AstryxTextInput,
+  type TextInputProps as AstryxTextInputProps
+} from "@astryxdesign/core/TextInput";
+import { type InputHTMLAttributes, useLayoutEffect, useRef } from "react";
 
-export type { TextInputProps };
+// Astryx forwards native input props but omits maxLength from its public type.
+export type TextInputProps = AstryxTextInputProps &
+  Pick<InputHTMLAttributes<HTMLInputElement>, "maxLength">;
 
 /**
  * Astryx TextInput whose `aria-describedby` works. Astryx 0.6.4 sets the
