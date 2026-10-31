@@ -154,3 +154,62 @@ it.each([false, true])(
     );
   }
 );
+
+it("does not restore old provenance when manual A returns while assistant save B is held", async () => {
+  const assistant = {
+    id: "helper",
+    name: "Helper",
+    completion_model: models[0],
+    completion_model_kwargs: {},
+    prompt: { text: "Original A", description: "Restored original marker" },
+    attachments: []
+  } as unknown as Assistant;
+  let release!: () => void;
+  const held = new Promise((resolve) => {
+    release = () =>
+      resolve({
+        data: { ...assistant, prompt: { text: "Manual B", description: "" } },
+        response: new Response("{}")
+      });
+  });
+  api.POST.mockImplementation((path, init) => {
+    if (path.endsWith("/preflight"))
+      return Promise.resolve({
+        data: { file_tokens: 0, prompt_tokens: 0 },
+        response: new Response("{}")
+      });
+    if (init.body.prompt.text === "Manual B") return held;
+    return Promise.resolve({
+      data: { ...assistant, prompt: init.body.prompt },
+      response: new Response("{}")
+    });
+  });
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(["assistants", "helper"], assistant);
+  renderInApp(<HelpAssistantEditor assistantId="helper" helperKind="prompt_guide" />, {
+    queryClient
+  });
+  const field = screen.getByRole("textbox", { name: "Prompt" });
+  fireEvent.change(field, { target: { value: "Manual B" } });
+  fireEvent.blur(field);
+  await waitFor(() =>
+    expect(api.POST).toHaveBeenCalledWith(
+      "/api/v1/assistants/{id}/",
+      expect.objectContaining({ body: { prompt: { text: "Manual B", description: "" } } })
+    )
+  );
+  try {
+    fireEvent.change(field, { target: { value: "Original A" } });
+    fireEvent.blur(field);
+    release();
+    await waitFor(() =>
+      expect(
+        api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/")
+      ).toHaveLength(2)
+    );
+    const writes = api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/");
+    expect(writes[1][1].body).toEqual({ prompt: { text: "Original A", description: "" } });
+  } finally {
+    release();
+  }
+});

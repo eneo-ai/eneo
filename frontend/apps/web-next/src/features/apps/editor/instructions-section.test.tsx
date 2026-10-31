@@ -10,7 +10,8 @@ const update = vi.hoisted(() => vi.fn<(body: unknown) => Promise<unknown>>().moc
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("./use-app", () => ({
-  useUpdateApp: () => useMutation({ mutationFn: (body: unknown) => update(body) })
+  useUpdateApp: () =>
+    useMutation({ scope: { id: "app:app" }, mutationFn: (body: unknown) => update(body) })
 }));
 afterEach(() => {
   cleanup();
@@ -75,4 +76,35 @@ it("deduplicates untouched text and omits description from ordinary app edits", 
   fireEvent.change(field, { target: { value: "Manual app body" } });
   fireEvent.blur(field);
   await waitFor(() => expect(update).toHaveBeenCalledWith({ prompt: { text: "Manual app body" } }));
+});
+
+it("does not restore old provenance when manual A returns while save B is held", async () => {
+  let release!: () => void;
+  const held = new Promise<unknown>((resolve) => {
+    release = () => resolve({});
+  });
+  update.mockImplementationOnce(() => held).mockResolvedValue({});
+  renderInApp(
+    <InstructionsSection
+      app={
+        {
+          id: "app",
+          prompt: { text: "Original A", description: "Restored original marker" }
+        } as unknown as App
+      }
+    />
+  );
+  const field = screen.getByRole("textbox", { name: "Prompt" });
+  fireEvent.change(field, { target: { value: "Manual B" } });
+  fireEvent.blur(field);
+  await waitFor(() => expect(update).toHaveBeenCalledWith({ prompt: { text: "Manual B" } }));
+  try {
+    fireEvent.change(field, { target: { value: "Original A" } });
+    fireEvent.blur(field);
+    release();
+    await waitFor(() => expect(update).toHaveBeenCalledTimes(2));
+    expect(update).toHaveBeenNthCalledWith(2, { prompt: { text: "Original A" } });
+  } finally {
+    release();
+  }
 });
