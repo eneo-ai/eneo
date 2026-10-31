@@ -877,7 +877,8 @@ export function RunRecorder({
         />
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3">
+      {/* On a phone each control is the width of the screen, and the clock is read first. */}
+      <div className="flex flex-wrap items-center gap-3 max-md:[&>button]:w-full">
         {phase === "idle" || phase === "starting" ? (
           <Button
             ref={startButton}
@@ -917,7 +918,7 @@ export function RunRecorder({
           </span>
         ) : null}
         {running ? (
-          <span className="text-ax-text flex items-center gap-2 text-sm">
+          <span className="text-ax-text flex items-center gap-2 text-sm max-md:order-first max-md:w-full max-md:justify-center max-md:text-xl">
             <span className="font-medium">
               {phase === "recording"
                 ? t("flow_transcript_rec_recording")

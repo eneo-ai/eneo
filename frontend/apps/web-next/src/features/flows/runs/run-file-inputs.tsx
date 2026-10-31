@@ -5,9 +5,10 @@ import { FileInput } from "@astryxdesign/core/FileInput";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
+import { Fragment } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { formatBytes } from "@/lib/format";
-import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { HANDHELD_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { UploadRetryHint } from "./recording/upload-retry-hint";
 import type { InputProblem, UploadEntry } from "./run-contract";
 import { inputLimitsText } from "./run-format";
@@ -16,6 +17,11 @@ import type { RuntimeInput } from "./runs-api";
 /** The id of the element around a step's files, for "go to the problem". */
 export function inputAnchorId(formId: string, stepId: string): string {
   return `${formId}-input-${stepId}`;
+}
+
+/** The id of the element around a step's file field, for "go to the problem" with the files. */
+export function inputFileAnchorId(formId: string, stepId: string): string {
+  return `${inputAnchorId(formId, stepId)}-files`;
 }
 
 export function inputLabel(input: RuntimeInput, t: ReturnType<typeof useTranslations>): string {
@@ -136,7 +142,8 @@ function UploadRow({
  * The files one step takes: a drop zone with "Välj filer", what the step
  * accepts, and each picked file with its upload state and a way to take it
  * off. A step whose audio files may be the parts of one recording offers
- * that choice once it has more than one.
+ * that choice once it has more than one. On a phone the recorder comes above
+ * the file field, which is a compact field.
  */
 export function RunFileInput({
   formId,
@@ -167,13 +174,16 @@ export function RunFileInput({
   const t = useTranslations();
   const locale = useLocale();
   const coarse = useMediaMatch("(pointer: coarse)");
+  // A phone held in a hand: the microphone is the way in a phone has and a desktop lacks, so
+  // recording comes first, and a picked file is a field, not a drop zone with nothing to drop.
+  const handheld = useMediaMatch(HANDHELD_QUERY);
   const label = inputLabel(input, t);
   const limits = inputLimitsText(input, t, locale);
   const description = [input.description?.trim(), limits].filter(Boolean).join(" ");
   const multiple = input.max_files == null || input.max_files > 1;
 
-  return (
-    <div id={inputAnchorId(formId, input.step_id)} className="flex flex-col gap-2">
+  const fileField = (
+    <div key="files" id={inputFileAnchorId(formId, input.step_id)}>
       <FileInput
         label={label}
         description={description || undefined}
@@ -184,7 +194,7 @@ export function RunFileInput({
         }}
         accept={(input.accepted_mimetypes ?? []).join(",") || undefined}
         isMultiple={multiple}
-        mode="dropzone"
+        mode={handheld ? "input" : "dropzone"}
         placeholder={
           // A touch screen has nothing to drag a file from.
           multiple
@@ -196,7 +206,20 @@ export function RunFileInput({
         width="100%"
         {...(input.required ? { isRequired: true } : { isOptional: true })}
       />
-      {recorder}
+    </div>
+  );
+  // Keyed: where a phone's width crosses 768 px (a tablet's split view) the recorder moves and
+  // does not end a recording.
+  const recording = recorder ? <Fragment key="recorder">{recorder}</Fragment> : null;
+
+  return (
+    <div
+      id={inputAnchorId(formId, input.step_id)}
+      role="group"
+      aria-label={label}
+      className="flex flex-col gap-2"
+    >
+      {handheld ? [recording, fileField] : [fileField, recording]}
       {entries.length > 0 ? (
         <ul aria-label={t("flow_runs_input_files_label", { input: label })} className="m-0 p-0">
           {entries.map((entry) => (

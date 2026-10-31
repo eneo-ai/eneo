@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Suspense } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -31,6 +31,10 @@ const api = vi.hoisted(() => ({
         },
         response: new Response()
       };
+    }
+    if (path === "/api/v1/flows/{id}/run-contract/") {
+      const { makeContract: contract } = await import("./runs/run-fixtures");
+      return { data: contract(), response: new Response() };
     }
     return { data: undefined, response: new Response() };
   }),
@@ -117,6 +121,55 @@ describe("FlowPage on a phone", () => {
     renderPhonePage();
     fireEvent.click(await screen.findByRole("button", { name: "Kör flödet" }));
     expect(await screen.findByRole("dialog", { name: "Kör Medborgarbrev" })).toBeTruthy();
+  });
+
+  it("is still the lean page, with its start form and what was typed in it, when the phone is turned", async () => {
+    renderPhonePage();
+    fireEvent.click(await screen.findByRole("button", { name: "Kör flödet" }));
+    const dialog = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
+    const name = await within(dialog).findByLabelText(/^Namn på körningen/);
+    fireEvent.change(name, { target: { value: "Budgetmötet" } });
+
+    // Sideways it is 844 px wide, but it is a phone still: nothing is swapped, nothing remounts.
+    act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
+    expect(screen.getByRole("dialog", { name: "Kör Medborgarbrev" })).toBe(dialog);
+    expect(within(dialog).getByLabelText(/^Namn på körningen/)).toBe(name);
+    expect((name as HTMLInputElement).value).toBe("Budgetmötet");
+    expect(screen.getByRole("group", { name: "Åtgärder för flödet" })).toBeTruthy();
+    expect(screen.queryByRole("tab", { hidden: true })).toBeNull();
+  });
+
+  it("keeps the start form, and what was typed in it, when a tablet is split down to a phone's width", async () => {
+    setViewport("tablet-portrait");
+    const flow = makeFlow({
+      published_version: 2,
+      permissions: flowPermissions({ can_edit: true, can_run: true, can_view_runs: true })
+    });
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(flowKeys.flow(flow.id), flow);
+    queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
+    renderInApp(
+      <Suspense>
+        <FlowPage flowId={flow.id} />
+      </Suspense>,
+      { queryClient, appContext: testAppContext({ permissions: ["flows_view", "flows_run"] }) }
+    );
+    // The workspace, with its tabs.
+    await screen.findByRole("heading", { level: 1, name: "Medborgarbrev" });
+    expect(screen.getAllByRole("tab").length).toBeGreaterThan(0);
+    fireEvent.click(screen.getByRole("button", { name: "Kör flödet" }));
+    const dialog = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
+    fireEvent.change(await within(dialog).findByLabelText(/^Namn på körningen/), {
+      target: { value: "Budgetmötet" }
+    });
+
+    act(() => setViewport({ width: 600, height: 900, pointer: "coarse" }));
+    // The lean page takes the workspace's place; the form stays, as does what was typed.
+    expect(await screen.findByRole("group", { name: "Åtgärder för flödet" })).toBeTruthy();
+    expect(screen.getByRole("dialog", { name: "Kör Medborgarbrev" })).toBe(dialog);
+    expect((within(dialog).getByLabelText(/^Namn på körningen/) as HTMLInputElement).value).toBe(
+      "Budgetmötet"
+    );
   });
 
   it("says a flow that is not published cannot be run, and does not offer to", async () => {

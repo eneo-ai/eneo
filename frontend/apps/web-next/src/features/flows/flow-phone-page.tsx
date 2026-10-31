@@ -2,37 +2,28 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
-import { useAnnounce } from "@astryxdesign/core/hooks";
-import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { Play } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { PageBar } from "@/components/shell/page-bar";
 import { browserApi } from "@/lib/api/browser";
-import { useRouter } from "@/lib/navigation";
 import { useSpace } from "@/features/spaces/use-space";
 import { flowQueryOptions } from "./flows-api";
 import { flowKindLine } from "./flows-rows";
-import { runKeys } from "./runs/runs-api";
-import { FlowRunsList, runHref } from "./runs/runs-list";
-import { rememberStartedRun } from "./runs/runs-optimistic";
-import { StartRunDialog } from "./runs/start-run-dialog";
+import { FlowRunsList } from "./runs/runs-list";
 
 /**
  * A flow on a phone (version 1: run it and read its runs; building one is for
  * a computer): its name, what it is for, what it takes and gives, its runs
- * and "Kör flödet" docked under the thumb. The definition and the flow's chat
- * are not here: nothing offers to edit.
+ * and "Kör flödet" docked under the thumb (the form it opens is the flow
+ * page's). The definition and the flow's chat are not here: nothing offers to
+ * edit.
  */
-export function FlowPhonePage({ flowId }: { flowId: string }) {
+export function FlowPhonePage({ flowId, onStart }: { flowId: string; onStart: () => void }) {
   const t = useTranslations();
-  const announce = useAnnounce();
-  const router = useRouter();
-  const queryClient = useQueryClient();
   const { routeId } = useSpace();
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
-  const [starting, setStarting] = useState(false);
   const isPublished = flow.published_version != null;
   const canRun = isPublished && flow.permissions.can_run;
   const kind = flowKindLine(flow, t);
@@ -65,30 +56,14 @@ export function FlowPhonePage({ flowId }: { flowId: string }) {
         ) : null}
       </div>
       {canRun ? (
-        <>
-          <DockedActions label={t("flow_phone_actions")}>
-            <Button
-              label={t("flow_runs_start")}
-              variant="primary"
-              icon={<Play aria-hidden="true" />}
-              onClick={() => setStarting(true)}
-            />
-          </DockedActions>
-          <StartRunDialog
-            flow={flow}
-            open={starting}
-            onOpenChange={setStarting}
-            onStarted={(run) => {
-              setStarting(false);
-              // The runs list shows the run at once, before it is read again.
-              rememberStartedRun(queryClient, flow.id, run);
-              void queryClient.invalidateQueries({ queryKey: runKeys.list(flow.id) });
-              announce(t("flow_runs_started"));
-              // The run's own page follows it while it moves.
-              router.push(runHref(routeId, flow.id, run.id));
-            }}
+        <DockedActions label={t("flow_phone_actions")}>
+          <Button
+            label={t("flow_runs_start")}
+            variant="primary"
+            icon={<Play aria-hidden="true" />}
+            onClick={onStart}
           />
-        </>
+        </DockedActions>
       ) : null}
     </div>
   );

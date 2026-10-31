@@ -432,6 +432,80 @@ describe("StartRunDialog on a phone", () => {
     expect(within(dialog).queryByText(/dra hit/)).toBeNull();
   });
 
+  describe("an audio step", () => {
+    const audio = {
+      ...contract,
+      steps_requiring_input: [
+        makeInput({
+          label: "Ljud",
+          input_format: "audio",
+          accepted_mimetypes: ["audio/wav"]
+        })
+      ]
+    };
+    /** Whether `first` comes before `second` in the document. */
+    const before = (first: Element, second: Element) =>
+      Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const pieces = (dialog: HTMLElement) => ({
+      recording: within(dialog).getByText(messages.flow_transcript_rec_heading),
+      file: dialog.querySelector<HTMLInputElement>("input[type=file]")!,
+      name: within(dialog).getByLabelText(/^Namn på körningen/)
+    });
+
+    it("puts recording first and the run's name last on a phone", async () => {
+      setViewport("phone");
+      const { dialog } = await openDialog(audio);
+      const { recording, file, name } = pieces(dialog);
+      expect(before(recording, file)).toBe(true);
+      expect(before(file, name)).toBe(true);
+    });
+
+    it("keeps recording first when the phone is held sideways", async () => {
+      setViewport({ width: 844, height: 390, pointer: "coarse" });
+      const { dialog } = await openDialog(audio);
+      const { recording, file, name } = pieces(dialog);
+      expect(before(recording, file)).toBe(true);
+      expect(before(file, name)).toBe(true);
+    });
+
+    it("names the step's recording and file together, for a screen reader", async () => {
+      const { dialog } = await openDialog(audio);
+      const group = within(dialog).getByRole("group", { name: /^Ljud/ });
+      const { recording, file } = pieces(dialog);
+      expect(group.contains(recording)).toBe(true);
+      expect(group.contains(file)).toBe(true);
+    });
+
+    it("keeps the run's name first and the file above the recording for a mouse", async () => {
+      const { dialog } = await openDialog(audio);
+      const { recording, file, name } = pieces(dialog);
+      expect(before(name, file)).toBe(true);
+      expect(before(file, recording)).toBe(true);
+    });
+
+    it("keeps the file above the recording on a narrow window with a mouse", async () => {
+      setViewport({ width: 600, height: 800, pointer: "fine" });
+      const { dialog } = await openDialog(audio);
+      const { recording, file, name } = pieces(dialog);
+      expect(before(name, file)).toBe(true);
+      expect(before(file, recording)).toBe(true);
+    });
+  });
+
+  it("keeps the whole screen when the phone is held sideways, where it is as short as ever", async () => {
+    const standard = (await openDialog()).dialog.className;
+    cleanup();
+
+    setViewport({ width: 844, height: 390, pointer: "coarse" });
+    const { dialog } = await openDialog();
+    expect(dialog.className).not.toBe(standard);
+    cleanup();
+
+    // A tablet held upright is tall: its dialog stays the centred one.
+    setViewport("tablet-portrait");
+    expect((await openDialog()).dialog.className).toBe(standard);
+  });
+
   it("keeps the dialog, its row of buttons and the drag wording for a mouse", async () => {
     const { dialog } = await openDialog();
     const next = button(dialog, "Granska");

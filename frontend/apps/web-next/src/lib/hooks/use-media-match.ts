@@ -13,6 +13,15 @@ export const PHONE_QUERY = `not all and ${MEDIA.md}`;
  */
 export const MOBILE_QUERY = `not all and ${MEDIA.lg}`;
 
+/**
+ * A phone in a hand, held either way: touched, and either narrower than a phone (below 768 px) or
+ * as short as one held sideways (a phone turned is 844 px wide and under 430 px tall; an iPad is
+ * 1024 px or more wide when it is short with its keyboard up). Turning it does not change which
+ * it is, so a screen built for a phone stays one and keeps what is open on it.
+ */
+export const HANDHELD_QUERY =
+  "(pointer: coarse) and (width < 48rem), (pointer: coarse) and (height < 31.25rem) and (width < 64rem)";
+
 /** Match the current viewport immediately and follow changes.
  * Astryx's useMediaQuery returns false until its effect measures the viewport.
  */
