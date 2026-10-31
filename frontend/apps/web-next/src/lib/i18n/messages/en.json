@@ -7034,5 +7034,14 @@
   "api_keys_no_search_matches": "No matching API keys",
   "api_keys_notifications_reminder_days_label": "Reminder days",
   "api_keys_notifications_reminder_days_description": "Enter the number of days before expiry, separated by commas.",
-  "api_keys_notifications_add_day": "Add {days} days"
+  "api_keys_notifications_add_day": "Add {days} days",
+  "insights_period_change": "{percent} compared with the previous period",
+  "insights_chart_metric": "Activity metric",
+  "insights_chart_grouping": "Group activity",
+  "insights_earlier_days": "Earlier days",
+  "insights_later_days": "Later days",
+  "insights_first_activity_in_period": "First recorded activity in the selected period: {date}.",
+  "insights_token_usage_link": "View token usage",
+  "insights_question_details": "Question details",
+  "insights_logged_json": "Logged record as JSON"
 }

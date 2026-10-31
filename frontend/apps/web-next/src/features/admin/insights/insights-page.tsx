@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import Link from "@/lib/link";
 import { useFormatter, useTranslations } from "use-intl";
@@ -8,63 +8,152 @@ import { lazy, Suspense, useMemo, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
-import { Card } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { Card } from "@astryxdesign/core/Card";
+import { Button } from "@astryxdesign/core/Button";
+import { Switch } from "@/components/astryx/switch";
+import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
+import { insightRangeOfDays, type InsightRange } from "@/features/insights/insights-range";
+import { tokenUsageQueryOptions } from "@/features/admin/usage/usage";
+import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import {
   type InsightsRange,
   assistantActivityRows,
   insightActivityQueryOptions,
   insightAggregatedQueryOptions,
-  insightCountsQueryOptions,
   insightMetadataQueryOptions,
-  isoFromDateInput,
-  localDate,
+  insightPeriod,
+  previousInsightRange,
+  periodTotals,
+  insightTrend,
   tenantAssistantsQueryOptions
 } from "@/features/admin/insights/insights";
 
-const PRESET_DAYS = [7, 30, 90] as const;
 const CHART_HEIGHT = 320;
-// recharts loads with the first chart, once its series has arrived.
 const UsageAreaChart = lazy(() =>
   import("./usage-area-chart").then((module) => ({ default: module.UsageAreaChart }))
 );
 
-function presetRange(days: number): InsightsRange {
-  const end = new Date();
-  const start = new Date();
-  start.setDate(start.getDate() - days);
-  return { start: start.toISOString(), end: end.toISOString() };
-}
-
-/** The window of equal length immediately preceding `range` (for comparison). */
-function priorRange(range: InsightsRange): InsightsRange {
-  const start = new Date(range.start).getTime();
-  const end = new Date(range.end).getTime();
-  const duration = end - start;
-  return { start: new Date(start - duration).toISOString(), end: range.start };
-}
-
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  children
+}: {
+  label: string;
+  value: string;
+  children?: React.ReactNode;
+}) {
   return (
-    <Card className="flex flex-col gap-1 p-6">
-      <span className="text-muted-foreground text-sm">{label}</span>
-      <span className="text-3xl font-semibold tabular-nums">{value}</span>
+    <Card className="flex flex-row flex-wrap items-baseline justify-between gap-x-3 gap-y-1 p-4 sm:flex-col sm:items-start sm:justify-start sm:p-6">
+      <span className="text-ax-text-secondary text-sm">{label}</span>
+      <span className="text-2xl font-semibold tabular-nums sm:text-3xl">{value}</span>
+      {children}
     </Card>
   );
 }
 
-function UsageChart({ range }: { range: InsightsRange }) {
-  const query = useQuery(insightAggregatedQueryOptions(browserApi, range));
+function PercentageDelta({ current, previous }: { current: number; previous: number }) {
+  const t = useTranslations();
+  const format = useFormatter();
+  const percent = insightTrend(current, previous);
   return (
-    <QueryStateBoundary query={query} rows={1} height={CHART_HEIGHT}>
-      {(data) => (
-        <Suspense fallback={<LoadingState rows={1} height={CHART_HEIGHT} />}>
-          <UsageAreaChart data={data} />
-        </Suspense>
-      )}
+    <span className="text-ax-text-secondary text-sm">
+      {percent === null
+        ? t("compare_new_activity_tooltip")
+        : t("insights_period_change", {
+            percent: format.number(percent / 100, { style: "percent", signDisplay: "exceptZero" })
+          })}
+    </span>
+  );
+}
+
+function PeriodOverview({ range, compare }: { range: InsightRange; compare: boolean }) {
+  const t = useTranslations();
+  const format = useFormatter();
+  const query = useQuery(insightAggregatedQueryOptions(browserApi, insightPeriod(range)));
+  const previous = useQuery({
+    ...insightAggregatedQueryOptions(browserApi, insightPeriod(previousInsightRange(range))),
+    enabled: compare
+  });
+  return (
+    <QueryStateBoundary query={query} rows={3} height={CHART_HEIGHT}>
+      {(data) => {
+        const totals = periodTotals(data);
+        const prior = compare && previous.data ? periodTotals(previous.data) : null;
+        return (
+          <>
+            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {(
+                [
+                  ["assistants", "assistants_created"],
+                  ["sessions", "conversations_started"],
+                  ["questions", "questions_asked"]
+                ] as const
+              ).map(([metric, label]) => (
+                <Stat key={metric} label={t(label)} value={format.number(totals[metric])}>
+                  {prior ? (
+                    <PercentageDelta current={totals[metric]} previous={prior[metric]} />
+                  ) : null}
+                </Stat>
+              ))}
+            </div>
+            {compare ? (
+              <QueryStateBoundary query={previous} rows={1}>
+                {() => null}
+              </QueryStateBoundary>
+            ) : null}
+            <Card className="flex min-w-0 flex-col gap-4 p-4 sm:p-6">
+              <h2 className="font-semibold">{t("assistant_usage")}</h2>
+              <Suspense fallback={<LoadingState rows={1} height={CHART_HEIGHT} />}>
+                <UsageAreaChart key={`${range.start}|${range.end}`} data={data} range={range} />
+              </Suspense>
+            </Card>
+          </>
+        );
+      }}
     </QueryStateBoundary>
+  );
+}
+
+function TokensCard({ range }: { range: InsightRange }) {
+  const t = useTranslations();
+  const format = useFormatter();
+  const query = useQuery(
+    tokenUsageQueryOptions(browserApi, {
+      startTime: insightPeriod(range).start,
+      endTime: insightPeriod(range).end
+    })
+  );
+  return (
+    <Card className="flex flex-col gap-3 p-4 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h2 className="font-semibold">{t("tokens")}</h2>
+        <Link
+          className="text-ax-text-accent underline underline-offset-4"
+          href={`/admin/usage?tab=tokens&from=${range.start}&to=${range.end}`}
+        >
+          {t("insights_token_usage_link")}
+        </Link>
+      </div>
+      <QueryStateBoundary query={query} rows={1}>
+        {(data) => (
+          <dl className="grid gap-4 sm:grid-cols-3">
+            {(
+              [
+                ["total_token_usage", "usage_total_tokens"],
+                ["total_input_token_usage", "input_tokens"],
+                ["total_output_token_usage", "output_tokens"]
+              ] as const
+            ).map(([key, label]) => (
+              <div key={key}>
+                <dt className="text-ax-text-secondary text-sm">{t(label)}</dt>
+                <dd className="text-2xl font-semibold tabular-nums">{format.number(data[key])}</dd>
+              </div>
+            ))}
+          </dl>
+        )}
+      </QueryStateBoundary>
+    </Card>
   );
 }
 
@@ -81,23 +170,14 @@ function Delta({ current, prior }: { current: number; prior?: number }) {
   );
 }
 
-function presetLabel(days: (typeof PRESET_DAYS)[number], t: (key: string) => string): string {
-  switch (days) {
-    case 7:
-      return t("audit_last_7_days");
-    case 30:
-      return t("audit_last_30_days");
-    case 90:
-      return t("audit_last_90_days");
-  }
-}
-
-function ActivityCards({ range, compare }: { range: InsightsRange; compare: boolean }) {
+function ActivityCards({ range, compare }: { range: InsightRange; compare: boolean }) {
   const t = useTranslations();
   const format = useFormatter();
-  const { data, isPending } = useQuery(insightActivityQueryOptions(browserApi, range));
+  const { data, isPending } = useQuery(
+    insightActivityQueryOptions(browserApi, insightPeriod(range))
+  );
   const prior = useQuery({
-    ...insightActivityQueryOptions(browserApi, priorRange(range)),
+    ...insightActivityQueryOptions(browserApi, insightPeriod(previousInsightRange(range))),
     enabled: compare
   });
   if (isPending) return <LoadingState rows={1} height={96} />;
@@ -182,12 +262,13 @@ function AssistantActivityRows({
                 {t("sessions")}
               </p>
             </div>
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/admin/insights/assistant/${row.assistantId}`}>
-                <ExternalLink className="size-4" />
-                {t("details")}
-              </Link>
-            </Button>
+            <Button
+              variant="secondary"
+              size="sm"
+              href={`/admin/insights/assistant/${row.assistantId}`}
+              label={t("details")}
+              icon={<ExternalLink className="size-4" aria-hidden="true" />}
+            />
           </div>
         ))}
       </div>
@@ -195,101 +276,28 @@ function AssistantActivityRows({
   );
 }
 
-/**
- * Organization insights: headline totals, a usage time-series over a selectable
- * window (conversations / questions / assistants per day), and active-assistant
- * / active-user activity for the same window.
- */
+/** Organization activity over whole viewer-local days. */
 export function InsightsPage() {
   const t = useTranslations();
-  const format = useFormatter();
-  const { data: counts } = useSuspenseQuery(insightCountsQueryOptions(browserApi));
-  const [range, setRange] = useState<InsightsRange>(() => presetRange(30));
-  const [activePreset, setActivePreset] = useState<(typeof PRESET_DAYS)[number] | null>(30);
+  const { can } = useAppContext();
+  const [range, setRange] = useState<InsightRange>(() => insightRangeOfDays(30));
   const [compare, setCompare] = useState(false);
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+    <div className="mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-6">
       <PageHeader title={t("insights")} />
-
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <Stat label={t("assistants")} value={format.number(counts.assistants)} />
-        <Stat label={t("sessions")} value={format.number(counts.sessions)} />
-        <Stat label={t("questions")} value={format.number(counts.questions)} />
-      </div>
-
-      <Card className="flex flex-col gap-4 p-6">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div className="flex flex-col gap-0.5">
-            <h2 className="font-semibold">{t("assistant_usage")}</h2>
-            <p className="text-muted-foreground text-sm">{t("assistant_usage_description")}</p>
-          </div>
-          <div className="flex flex-wrap items-end gap-3">
-            <div className="flex gap-1" role="group" aria-label={t("timeframe")}>
-              {PRESET_DAYS.map((preset) => (
-                <Button
-                  key={preset}
-                  size="sm"
-                  variant={activePreset === preset ? "default" : "outline"}
-                  aria-pressed={activePreset === preset}
-                  onClick={() => {
-                    setActivePreset(preset);
-                    setRange(presetRange(preset));
-                  }}
-                >
-                  {presetLabel(preset, t)}
-                </Button>
-              ))}
-            </div>
-            <label className="flex flex-col gap-1 text-xs">
-              {t("from")}
-              <Input
-                type="date"
-                className="h-8 w-36"
-                value={localDate(range.start)}
-                onChange={(event) => {
-                  if (!event.target.value) return;
-                  setActivePreset(null);
-                  setRange((current) => ({
-                    ...current,
-                    start: isoFromDateInput(event.target.value, "start")
-                  }));
-                }}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-xs">
-              {t("to")}
-              <Input
-                type="date"
-                className="h-8 w-36"
-                value={localDate(range.end)}
-                onChange={(event) => {
-                  if (!event.target.value) return;
-                  setActivePreset(null);
-                  setRange((current) => ({
-                    ...current,
-                    end: isoFromDateInput(event.target.value, "end")
-                  }));
-                }}
-              />
-            </label>
-            <Button
-              size="sm"
-              variant={compare ? "default" : "outline"}
-              aria-pressed={compare}
-              onClick={() => setCompare((value) => !value)}
-            >
-              {t("compare")}
-            </Button>
-          </div>
+      <Card className="flex flex-wrap items-end gap-4 p-4 sm:p-6">
+        <div className="min-w-0 flex-1">
+          <InsightsRangePicker value={range} onChange={setRange} />
         </div>
-        <UsageChart range={range} />
+        <Switch label={t("compare")} value={compare} onChange={setCompare} />
       </Card>
-
+      <PeriodOverview range={range} compare={compare} />
+      {can("admin") ? <TokensCard range={range} /> : null}
       <div className="flex flex-col gap-3">
         <h2 className="font-semibold">{t("insights_assistant_activity")}</h2>
         <ActivityCards range={range} compare={compare} />
-        <AssistantActivityList range={range} />
+        <AssistantActivityList range={insightPeriod(range)} />
       </div>
     </div>
   );
