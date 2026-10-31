@@ -85,17 +85,29 @@ describe("AuditFilterBar", () => {
     await expectNoAxeViolations(container);
   });
 
-  it("pins the per-user view: a user chip, no action filter and the search explains why it waits", () => {
+  it("keeps search, action chips and the action filter available with an actor", async () => {
     const onChange = vi.fn();
     renderInApp(
       <AuditFilterBar
-        filters={{ ...DEFAULT_AUDIT_FILTERS, userId: "u1", userLabel: "anna.lind@example.se" }}
+        filters={{
+          ...filtered,
+          search: "invoice",
+          userId: "u1",
+          userLabel: "anna.lind@example.se"
+        }}
         onChange={onChange}
       />
     );
     const chips = screen.getByRole("list", { name: "Filter" });
     expect(within(chips).getByText("anna.lind@example.se")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Sök" }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("textbox", { name: "Sök" }).getAttribute("aria-disabled")).not.toBe(
+      "true"
+    );
+    expect(within(chips).getByText("Användare skapad")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Filter (4)" }));
+    const dialog = await screen.findByRole("dialog", { name: "Filter" });
+    expect(within(dialog).getByRole("button", { name: /Åtgärd/ })).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Klar" }));
 
     fireEvent.click(within(chips).getByRole("button", { name: "Ta bort anna.lind@example.se" }));
     expect(onChange).toHaveBeenLastCalledWith({ userId: undefined, userLabel: undefined });
@@ -121,6 +133,20 @@ describe("AuditFilterBar", () => {
 
     fireEvent.click(within(dialog).getByRole("button", { name: "Klar" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Filter" })).toBeNull());
+  });
+
+  it("picks an actor without replacing the action, date or text filters", async () => {
+    const onChange = vi.fn();
+    renderInApp(
+      <AuditFilterBar filters={{ ...filtered, search: "invoice" }} onChange={onChange} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Filter (3)" }));
+    const dialog = await screen.findByRole("dialog", { name: "Filter" });
+    fireEvent.change(within(dialog).getByRole("combobox", { name: "Användare" }), {
+      target: { value: "anna" }
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "anna.lind@example.se" }));
+    expect(onChange).toHaveBeenLastCalledWith({ userId: "u1", userLabel: "anna.lind@example.se" });
   });
 
   it("opens the fields in a bottom sheet on a phone", async () => {

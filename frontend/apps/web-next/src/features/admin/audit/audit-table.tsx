@@ -14,6 +14,30 @@ import { Button } from "@/components/ui/button";
 import { useCopy } from "@/lib/hooks/use-copy";
 import { actionLabel, type AuditLog } from "./audit";
 
+function Actor({ log, fullId = false }: { log: AuditLog; fullId?: boolean }) {
+  const t = useTranslations();
+  const actor = log.metadata.actor;
+  const metadata =
+    actor !== null && typeof actor === "object" && !Array.isArray(actor) ? actor : null;
+  const name =
+    metadata && "name" in metadata && typeof metadata.name === "string" ? metadata.name.trim() : "";
+  const email =
+    metadata && "email" in metadata && typeof metadata.email === "string"
+      ? metadata.email.trim()
+      : "";
+  return (
+    <span className="flex min-w-0 flex-col gap-0.5 text-sm break-words">
+      <span>{name || email || t(`audit_actor_${log.actor_type}`)}</span>
+      {email && name ? <span className="text-ax-text-secondary text-xs">{email}</span> : null}
+      {log.actor_id && (fullId || (!name && !email)) ? (
+        <span className="text-ax-text-secondary font-mono text-xs">
+          {fullId ? log.actor_id : log.actor_id.slice(0, 8)}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
 /**
  * The audit log as a table that keeps every column on a phone (decision 9):
  * it scrolls sideways in its own named region with the event pinned, and the
@@ -76,14 +100,7 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
         key: "actor",
         header: t("audit_actor"),
         width: pixel(168),
-        renderCell: (log) => (
-          <span className="text-sm">
-            <span className="text-ax-text-secondary">{t(`audit_actor_${log.actor_type}`)}</span>
-            {log.actor_id ? (
-              <span className="ms-1 font-mono text-xs">{log.actor_id.slice(0, 8)}</span>
-            ) : null}
-          </span>
-        )
+        renderCell: (log) => <Actor log={log} />
       },
       {
         key: "outcome",
@@ -178,12 +195,12 @@ function AuditDetails({ log }: { log: AuditLog }) {
             />
           </dd>
         </div>
-        {/* What kind of actor, with its id: a system event has none. */}
-        <Field
-          label={t("audit_actor")}
-          value={t(`audit_actor_${log.actor_type}`) + (log.actor_id ? ` · ${log.actor_id}` : "")}
-          mono
-        />
+        <div>
+          <dt className="text-muted-foreground text-xs">{t("audit_actor")}</dt>
+          <dd>
+            <Actor log={log} fullId />
+          </dd>
+        </div>
         <Field label={t("audit_entity")} value={`${log.entity_type} · ${log.entity_id}`} mono />
         <Field
           label={t("audit_ip_address")}

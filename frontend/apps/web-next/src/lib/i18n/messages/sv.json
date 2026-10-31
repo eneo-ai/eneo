@@ -2710,7 +2710,7 @@
   "audit_retention_months": "månader",
   "audit_retention_cutoff": "Loggar äldre än {date} raderas automatiskt vid daglig rensning kl. 02:00 UTC.",
   "audit_retention_warning_title": "Varning: Kortare gallringsperiod",
-  "audit_retention_warning_desc": "Loggar äldre än {date} raderas vid nästa rensning (imorgon kl. 02:00 UTC). Tidigare raderade loggar kan inte återställas.",
+  "audit_retention_warning_desc": "Loggar äldre än {date} raderas vid nästa dagliga rensning. Tidigare raderade loggar kan inte återställas.",
   "audit_retention_info_title": "Längre gallringsperiod",
   "audit_retention_info_desc": "Fler loggar kommer att bevaras framåt. Obs: Tidigare raderade loggar kan inte återställas.",
   "audit_just_now": "Nyss",
@@ -7034,5 +7034,10 @@
   "api_keys_no_search_matches": "Inga matchande API-nycklar",
   "api_keys_notifications_reminder_days_label": "Påminnelsedagar",
   "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
-  "api_keys_notifications_add_day": "Lägg till {days} dagar"
+  "api_keys_notifications_add_day": "Lägg till {days} dagar",
+  "audit_config_saved": "Konfigurationen är sparad.",
+  "audit_config_partial_save": "Konfigurationen sparades delvis",
+  "audit_config_save_failed": "Det gick inte att spara konfigurationen",
+  "audit_config_server_unknown": "Serverläget kunde inte läsas om. Dina ändringar finns kvar.",
+  "audit_config_reload_server": "Läs in serverläget"
 }

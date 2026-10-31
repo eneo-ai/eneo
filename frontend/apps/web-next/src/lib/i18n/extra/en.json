@@ -1791,5 +1791,11 @@
   "api_keys_notifications_days_validation": "Enter positive whole numbers separated by commas, within your organization's limit.",
   "api_keys_notifications_reminder_days_label": "Reminder days",
   "api_keys_notifications_reminder_days_description": "Enter the number of days before expiry, separated by commas.",
-  "api_keys_notifications_add_day": "Add {days} days"
+  "api_keys_notifications_add_day": "Add {days} days",
+  "audit_retention_warning_desc": "Logs older than {date} will be deleted during the next daily cleanup. Previously deleted logs cannot be recovered.",
+  "audit_config_saved": "The configuration has been saved.",
+  "audit_config_partial_save": "The configuration was partially saved",
+  "audit_config_save_failed": "The configuration could not be saved",
+  "audit_config_server_unknown": "The server state could not be reloaded. Your changes are preserved.",
+  "audit_config_reload_server": "Reload server state"
 }
