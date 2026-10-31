@@ -188,7 +188,7 @@ it("blocks close immediately when saving starts, before mutation observers rende
     target: { value: "Saving note" }
   });
   fireEvent.click(screen.getByRole("button", { name: "Spara ändringar" }));
-  fireEvent.click(screen.getByRole("button", { name: "Stäng", exact: true }));
+  fireEvent.click(screen.getByRole("button", { name: "Stäng" }));
   await waitFor(() => expect(api.PATCH).toHaveBeenCalled());
   try {
     expect(onOpenChange).not.toHaveBeenCalled();
