@@ -23,6 +23,7 @@ import {
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
@@ -72,6 +73,7 @@ import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
+import { chatDraftOwner, useChatDraft } from "./use-chat-draft";
 
 const NO_MENTION = "__none__";
 /** The current time as ISO 8601 (the timestamp of a question sent now). */
@@ -207,7 +209,7 @@ function ConversationView({
   layout
 }: ChatViewProps) {
   const t = useTranslations();
-  const { can } = useAppContext();
+  const { can, user, tenant } = useAppContext();
   const queryClient = useQueryClient();
   // A file sent earlier in this conversation is attached again as it is,
   // without another upload. The uploads come from the messages, set up below.
@@ -227,7 +229,12 @@ function ConversationView({
   useSyncExternalStore(timings.subscribe, timings.getVersion);
   const toolChoices = useToolChoices(partner);
 
-  const [input, setInput] = useState("");
+  const [input, setInput] = useChatDraft(
+    chatDraftOwner(tenant.id, user.id),
+    `${partner.type}:${partner.id}:${initialSessionId ?? "new"}`
+  );
+  // A closed tab loses the draft; a reload also loses unsent attachments.
+  useBeforeUnloadWarning(input.trim() !== "" || attachments.attachments.length > 0);
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
@@ -549,7 +556,7 @@ function ConversationView({
         setInput((current) => (current.trim() ? `${current}\n${text}` : text));
         dockTextareaRef.current?.focus();
       }),
-    [panel]
+    [panel, setInput]
   );
 
   const preflight = usePreflight({
@@ -967,7 +974,8 @@ function ConversationView({
           <StartState
             partner={partner}
             onPickStarter={(prompt) => {
-              setInput(prompt);
+              // A starter never replaces what was already typed.
+              setInput((current) => (current.trim() ? current : prompt));
               startTextarea()?.focus();
             }}
             composer={
