@@ -11,14 +11,8 @@
  ],
  "ipad-landscape|/account/integrations": [],
  "ipad-landscape|/account/password": [],
- "ipad-landscape|/admin": [
-  "small a:/admin/audit-logs",
-  "small a:/admin/crawler",
-  "small a:/admin/usage",
-  "small a:/admin/users"
- ],
+ "ipad-landscape|/admin": [],
  "ipad-landscape|/admin/api-keys": [
-  "outside button:fler åtgärder för kontrollny",
   "small button[radio]:",
   "small input[combobox]:"
  ],
@@ -42,18 +36,9 @@
  "ipad-landscape|/admin/settings": [],
  "ipad-landscape|/admin/skills": [],
  "ipad-landscape|/admin/storage": [
-  "small input:",
-  "small select:enhet för gräns för kunskaps",
-  "small select:enhet för gräns för sessions",
-  "small select:enhet för gräns för transkri",
-  "small select:objektlagringpostgresql"
+  "small input:"
  ],
- "ipad-landscape|/admin/templates": [
-  "small a:/admin/audit-logs",
-  "small a:/admin/crawler",
-  "small a:/admin/usage",
-  "small a:/admin/users"
- ],
+ "ipad-landscape|/admin/templates": [],
  "ipad-landscape|/admin/tools": [
   "small button:anslut en extern mcp-server"
  ],
@@ -116,9 +101,7 @@
   "outside a:farozonfarozon"
  ],
  "ipad-landscape|/spaces/$/skills": [],
- "ipad-landscape|/spaces/$/skills/new": [
-  "small a:/spaces/$/skills"
- ],
+ "ipad-landscape|/spaces/$/skills/new": [],
  "ipad-landscape|/spaces/list": [],
  "ipad-landscape|/whats-new": [
   "small a:alla versionsnyheter på docs",
@@ -135,14 +118,8 @@
  ],
  "ipad-portrait|/account/integrations": [],
  "ipad-portrait|/account/password": [],
- "ipad-portrait|/admin": [
-  "small a:/admin/audit-logs",
-  "small a:/admin/crawler",
-  "small a:/admin/usage",
-  "small a:/admin/users"
- ],
+ "ipad-portrait|/admin": [],
  "ipad-portrait|/admin/api-keys": [
-  "outside button:fler åtgärder för kontrollny",
   "small button[radio]:",
   "small input[combobox]:"
  ],
@@ -166,18 +143,9 @@
  "ipad-portrait|/admin/settings": [],
  "ipad-portrait|/admin/skills": [],
  "ipad-portrait|/admin/storage": [
-  "small input:",
-  "small select:enhet för gräns för kunskaps",
-  "small select:enhet för gräns för sessions",
-  "small select:enhet för gräns för transkri",
-  "small select:objektlagringpostgresql"
+  "small input:"
  ],
- "ipad-portrait|/admin/templates": [
-  "small a:/admin/audit-logs",
-  "small a:/admin/crawler",
-  "small a:/admin/usage",
-  "small a:/admin/users"
- ],
+ "ipad-portrait|/admin/templates": [],
  "ipad-portrait|/admin/tools": [
   "small button:anslut en extern mcp-server"
  ],
@@ -242,9 +210,7 @@
   "outside a:farozonfarozon"
  ],
  "ipad-portrait|/spaces/$/skills": [],
- "ipad-portrait|/spaces/$/skills/new": [
-  "small a:/spaces/$/skills"
- ],
+ "ipad-portrait|/spaces/$/skills/new": [],
  "ipad-portrait|/spaces/list": [],
  "ipad-portrait|/whats-new": [
   "small a:alla versionsnyheter på docs",
@@ -273,7 +239,6 @@
  ],
  "phone-320|/admin/api-keys": [
   "outside a:/admin/users",
-  "outside button:fler åtgärder för kontrollny",
   "outside button[tab]:alla statusar",
   "outside button[tab]:utgången",
   "small button[radio]:",
@@ -303,11 +268,7 @@
  "phone-320|/admin/settings": [],
  "phone-320|/admin/skills": [],
  "phone-320|/admin/storage": [
-  "small input:",
-  "small select:enhet för gräns för kunskaps",
-  "small select:enhet för gräns för sessions",
-  "small select:enhet för gräns för transkri",
-  "small select:objektlagringpostgresql"
+  "small input:"
  ],
  "phone-320|/admin/templates": [
   "small a:/"
@@ -399,9 +360,7 @@
   "outside button[tab]:återkalladåterkallad"
  ],
  "phone-320|/spaces/$/skills": [],
- "phone-320|/spaces/$/skills/new": [
-  "small a:/spaces/$/skills"
- ],
+ "phone-320|/spaces/$/skills/new": [],
  "phone-320|/spaces/list": [
   "small a:/"
  ],
@@ -424,7 +383,6 @@
  "phone-390|/account/password": [],
  "phone-390|/admin": [],
  "phone-390|/admin/api-keys": [
-  "outside button:fler åtgärder för kontrollny",
   "small button[radio]:",
   "small input[combobox]:"
  ],
@@ -450,11 +408,7 @@
  "phone-390|/admin/settings": [],
  "phone-390|/admin/skills": [],
  "phone-390|/admin/storage": [
-  "small input:",
-  "small select:enhet för gräns för kunskaps",
-  "small select:enhet för gräns för sessions",
-  "small select:enhet för gräns för transkri",
-  "small select:objektlagringpostgresql"
+  "small input:"
  ],
  "phone-390|/admin/templates": [],
  "phone-390|/admin/tools": [
@@ -522,9 +476,7 @@
   "outside button[tab]:utgångenutgången"
  ],
  "phone-390|/spaces/$/skills": [],
- "phone-390|/spaces/$/skills/new": [
-  "small a:/spaces/$/skills"
- ],
+ "phone-390|/spaces/$/skills/new": [],
  "phone-390|/spaces/list": [],
  "phone-390|/whats-new": [
   "small a:alla versionsnyheter på docs",
@@ -543,7 +495,6 @@
  "phone-landscape|/account/password": [],
  "phone-landscape|/admin": [],
  "phone-landscape|/admin/api-keys": [
-  "outside button:fler åtgärder för kontrollny",
   "small button[radio]:",
   "small input[combobox]:"
  ],
@@ -569,11 +520,7 @@
  "phone-landscape|/admin/settings": [],
  "phone-landscape|/admin/skills": [],
  "phone-landscape|/admin/storage": [
-  "small input:",
-  "small select:enhet för gräns för kunskaps",
-  "small select:enhet för gräns för sessions",
-  "small select:enhet för gräns för transkri",
-  "small select:objektlagringpostgresql"
+  "small input:"
  ],
  "phone-landscape|/admin/templates": [],
  "phone-landscape|/admin/tools": [
@@ -633,10 +580,7 @@
   "outside a:funktionerfunktioner"
  ],
  "phone-landscape|/spaces/$/skills": [],
- "phone-landscape|/spaces/$/skills/new": [
-  "overlap input: x button:skapa skill",
-  "small a:/spaces/$/skills"
- ],
+ "phone-landscape|/spaces/$/skills/new": [],
  "phone-landscape|/spaces/list": [],
  "phone-landscape|/whats-new": [
   "small a:alla versionsnyheter på docs",
