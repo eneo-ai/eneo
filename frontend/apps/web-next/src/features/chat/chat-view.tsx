@@ -753,6 +753,9 @@ function ConversationView({
     };
 
     timings.markSent();
+    // The log is not live (aria-live off), so a screen reader hears nothing between
+    // pressing Send and the finished answer unless this says that one is coming.
+    announce(t("chat_announce_generating"));
     const send = () => sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
     // A model or reasoning switch made in the composer is saved on the
     // assistant; the backend answers with what is stored, so that save lands first.

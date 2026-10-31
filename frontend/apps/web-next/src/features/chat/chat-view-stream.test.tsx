@@ -215,7 +215,11 @@ describe("ChatView streaming an answer", () => {
     expect(await within(log).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
     expect(within(log).getByText("Claude Haiku 4.5")).toBeTruthy();
     await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret är klart"));
-    expect(spies.announce).toHaveBeenCalledTimes(1);
+    // That an answer is coming when the question goes, and once when it is done.
+    expect(spies.announce.mock.calls.map(([text]) => text)).toEqual([
+      "Assistenten skriver ett svar",
+      "Svaret är klart"
+    ]);
     expect(onSessionCreated).toHaveBeenCalledWith("session-1");
     await waitFor(() => expect(onTitle).toHaveBeenCalledWith("Gräns för direktupphandling"));
     expect(spies.titled).toEqual(["session-1"]);
