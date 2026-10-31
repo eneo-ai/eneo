@@ -87,12 +87,6 @@ function UserSummary({
           </div>
         </div>
         <UsageBadge level={usageIntensity(user.total_tokens, range)} />
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">{t("username")}</dt>
-          <dd className="truncate">{user.username}</dd>
-          <dt className="text-muted-foreground">{t("email")}</dt>
-          <dd className="truncate">{user.email}</dd>
-        </dl>
       </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -243,10 +237,10 @@ function ModelBreakdownTable({
             <TableHead>{t("model")}</TableHead>
             <TableHead>{t("provider")}</TableHead>
             <TableHead className="text-right">{t("requests")}</TableHead>
-            <TableHead className="text-right">{t("input_tokens")}</TableHead>
-            <TableHead className="text-right">{t("output_tokens")}</TableHead>
-            <TableHead className="text-right">{t("total_tokens")}</TableHead>
-            <TableHead className="text-right">{t("estimated_cost")}</TableHead>
+            <TableHead className="text-right whitespace-normal">{t("input_tokens")}</TableHead>
+            <TableHead className="text-right whitespace-normal">{t("output_tokens")}</TableHead>
+            <TableHead className="text-right whitespace-normal">{t("total_tokens")}</TableHead>
+            <TableHead className="text-right whitespace-normal">{t("estimated_cost")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

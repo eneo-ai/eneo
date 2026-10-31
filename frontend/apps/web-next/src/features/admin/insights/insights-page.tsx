@@ -48,9 +48,9 @@ function priorRange(range: InsightsRange): InsightsRange {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <Card className="flex flex-col gap-1 p-6">
+    <Card className="flex flex-row flex-wrap items-baseline justify-between gap-x-3 gap-y-1 p-4 sm:flex-col sm:items-start sm:justify-start sm:p-6">
       <span className="text-muted-foreground text-sm">{label}</span>
-      <span className="text-3xl font-semibold tabular-nums">{value}</span>
+      <span className="text-2xl font-semibold tabular-nums sm:text-3xl">{value}</span>
     </Card>
   );
 }

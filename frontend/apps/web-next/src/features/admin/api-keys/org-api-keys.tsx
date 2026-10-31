@@ -593,7 +593,6 @@ function KeyTable({
           <TableHead>{t("api_keys_admin_rate_limit")}</TableHead>
           <TableHead>{t("api_keys_last_used")}</TableHead>
           <TableHead>{t("api_keys_expires")}</TableHead>
-          <TableHead className="w-14 min-w-14" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -601,21 +600,34 @@ function KeyTable({
           const scopeName = apiKey.scope_id ? scopeNames.get(apiKey.scope_id) : undefined;
           return (
             <TableRow key={apiKey.id}>
+              {/* The menu sits beside the name, which starts the row, so it is in view
+                  wherever the wide table is scrolled: a pinned end column would cover
+                  the owner links on a phone. */}
               <TableCell>
-                <div className="flex flex-col gap-1">
-                  <span className="font-medium">{apiKey.name}</span>
-                  <code className="text-muted-foreground font-mono text-xs">
-                    {apiKey.key_prefix}…{apiKey.key_suffix}
-                  </code>
-                  {apiKey.search_match_reasons?.length ? (
-                    <span className="flex flex-wrap gap-1">
-                      {apiKey.search_match_reasons.map((reason) => (
-                        <Badge key={reason} variant="outline">
-                          {t(MATCH_REASON_LABEL[reason] ?? "api_keys_admin_match_reason_text")}
-                        </Badge>
-                      ))}
-                    </span>
-                  ) : null}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex min-w-0 flex-col gap-1">
+                    <span className="font-medium">{apiKey.name}</span>
+                    <code className="text-muted-foreground font-mono text-xs">
+                      {apiKey.key_prefix}…{apiKey.key_suffix}
+                    </code>
+                    {apiKey.search_match_reasons?.length ? (
+                      <span className="flex flex-wrap gap-1">
+                        {apiKey.search_match_reasons.map((reason) => (
+                          <Badge key={reason} variant="outline">
+                            {t(MATCH_REASON_LABEL[reason] ?? "api_keys_admin_match_reason_text")}
+                          </Badge>
+                        ))}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="shrink-0">
+                    <ApiKeyActions
+                      apiKey={apiKey}
+                      mode="admin"
+                      scopeName={scopeName}
+                      onRotated={onRotated}
+                    />
+                  </div>
                 </div>
               </TableCell>
               <TableCell className="text-sm">
@@ -658,14 +670,6 @@ function KeyTable({
               </TableCell>
               <TableCell className="text-muted-foreground text-sm">
                 {apiKey.expires_at ? formatApiKeyDate(apiKey.expires_at) : t("api_keys_never")}
-              </TableCell>
-              <TableCell className="text-end">
-                <ApiKeyActions
-                  apiKey={apiKey}
-                  mode="admin"
-                  scopeName={scopeName}
-                  onRotated={onRotated}
-                />
               </TableCell>
             </TableRow>
           );

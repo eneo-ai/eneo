@@ -207,7 +207,7 @@ describe("UsagePage", () => {
     expect(apiState.calls.filter((call) => call.path === "/api/v1/token-usage/")).toHaveLength(1);
 
     fireEvent.change(screen.getByLabelText("Från"), { target: { value: "2026-09-01" } });
-    fireEvent.change(screen.getByLabelText("till"), { target: { value: "2026-09-16" } });
+    fireEvent.change(screen.getByLabelText("Till"), { target: { value: "2026-09-16" } });
     await waitFor(() =>
       expect(apiState.calls.at(-1)).toEqual({
         path: "/api/v1/token-usage/",

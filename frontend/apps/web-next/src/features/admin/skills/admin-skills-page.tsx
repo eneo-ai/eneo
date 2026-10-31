@@ -75,8 +75,11 @@ export function AdminSkillsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <PageHeader title={t("admin_skills_title")} tour="admin-skills" />
-      <p className="text-muted-foreground max-w-3xl text-sm">{t("admin_skills_subtitle")}</p>
+      <PageHeader
+        title={t("admin_skills_title")}
+        description={t("admin_skills_subtitle")}
+        tour="admin-skills"
+      />
       {/* The model projection is optional: the editor says so when it is missing. */}
       <QueryStateBoundary query={policy} rows={4}>
         {(initialPolicy) =>
@@ -205,7 +208,7 @@ function PolicyEditor({
       title={t("skills_runtime_policy_title")}
       description={t("skills_runtime_policy_description")}
       headerEnd={
-        <Badge variant={policy.selective_activation_enabled ? "default" : "outline"}>
+        <Badge variant={policy.selective_activation_enabled ? "secondary" : "outline"}>
           {t(
             policy.selective_activation_enabled
               ? "admin_skills_runtime_summary_on"

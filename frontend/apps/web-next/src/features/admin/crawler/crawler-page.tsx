@@ -553,7 +553,7 @@ export function CrawlerPage() {
               placeholder={t("admin_crawler_search_hint")}
               value={searchInput}
               onChange={setSearchInput}
-              width="18rem"
+              width="17rem"
             />
             {view !== "active" && !isSchedule ? (
               <Selector

@@ -259,9 +259,12 @@ describe("AdminOverviewPage", () => {
         "Granskningsloggarna visas först efter en motiverad åtkomstsession."
       )
     ).toBeTruthy();
+    // One route to the access session: the card's own link.
     expect(
-      within(audit).getByRole("link", { name: "Öppna granskningsloggarna" }).getAttribute("href")
-    ).toBe("/admin/audit-logs");
+      within(audit)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+    ).toEqual(["/admin/audit-logs"]);
     expect(within(audit).queryByRole("button", { name: "Försök igen" })).toBeNull();
     // Any other failure gets the generic error with retry.
     cleanup();

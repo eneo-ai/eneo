@@ -69,6 +69,14 @@ function openRowMenu(name: string) {
 }
 
 describe("PromptLibraryPage", () => {
+  it("offers one create button when the library is empty", async () => {
+    api.GET.mockImplementation(() => ok({ items: [] }));
+    renderInApp(<PromptLibraryPage />);
+
+    expect(await screen.findByRole("button", { name: "Skapa första prompten" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Ny prompt" })).toBeNull();
+  });
+
   it("names the prompt table by the page title, newest change first", async () => {
     const { container } = renderInApp(<PromptLibraryPage />);
 

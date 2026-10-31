@@ -58,9 +58,14 @@ function ModelTable({
   // Fixed layout: every column but "Modell" has a set width, so the model
   // column takes what is left and long ids truncate instead of widening the
   // table. Below the min width the table scrolls inside its own region.
-  // Each set width is also a min width (AGENTS.md → Tables).
+  // Each set width is also a min width (AGENTS.md → Tables). Without the
+  // security column the table fits an iPad held upright (770 px).
   return (
-    <Table aria-labelledby={labelledBy} hasHover className="min-w-212 table-fixed">
+    <Table
+      aria-labelledby={labelledBy}
+      hasHover
+      className={securityEnabled ? "min-w-212 table-fixed" : "min-w-180 table-fixed"}
+    >
       <TableHeader>
         <TableRow className="bg-ax-sunken [&>th]:text-xs">
           <TableHeaderCell scope="col" className="w-18 min-w-18">

@@ -33,9 +33,9 @@ export function PolicySection({
       aria-describedby={`section-${id}-summary`}
       className="bg-card overflow-hidden rounded-xl border"
     >
-      <header className="flex items-start gap-4 border-b p-5">
+      <header className="flex items-start gap-4 border-b p-4 sm:p-5">
         <div
-          className="bg-muted text-foreground flex size-10 shrink-0 items-center justify-center rounded-lg"
+          className="bg-muted text-foreground flex size-10 shrink-0 items-center justify-center rounded-lg max-sm:hidden"
           aria-hidden="true"
         >
           {icon}
@@ -52,7 +52,7 @@ export function PolicySection({
           <p className="text-muted-foreground mt-1 text-sm">{description}</p>
         </div>
       </header>
-      <div className="space-y-4 p-5">{children}</div>
+      <div className="space-y-4 p-4 sm:p-5">{children}</div>
     </section>
   );
 }

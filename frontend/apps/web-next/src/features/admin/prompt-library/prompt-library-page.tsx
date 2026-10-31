@@ -267,7 +267,7 @@ export function PromptLibraryPage() {
         description={t("governance_prompts_intro")}
         headingId={headingId}
         headingRef={headingRef}
-        actions={createButton}
+        actions={list.data?.length ? createButton : undefined}
       />
       <QueryStateBoundary query={list} rows={4}>
         {(items) =>

@@ -58,7 +58,7 @@ export function ByteLimitField({
           disabled={disabled}
           aria-label={t("storage_limit_unit", { limit: label })}
           aria-describedby={`${id}-description`}
-          className="bg-background border-input focus-visible:ring-ring h-9 rounded-md border px-2 text-sm focus-visible:ring-2 focus-visible:outline-none"
+          className="bg-background border-input focus-visible:ring-ring h-9 rounded-md border px-2 text-base focus-visible:ring-2 focus-visible:outline-none pointer-coarse:min-h-11 md:pointer-fine:text-sm"
         >
           {units.map((candidate) => (
             <option key={candidate} value={candidate}>

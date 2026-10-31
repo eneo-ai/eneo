@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleAlert, Database, HardDrive, Info } from "lucide-react";
+import { ChevronDown, CircleAlert, Database, HardDrive, Info } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -241,6 +241,10 @@ export function StorageOverview({
             aria-controls="storage-inventory-details"
             onClick={() => setDetailsOpen((open) => !open)}
           >
+            <ChevronDown
+              className={detailsOpen ? "size-4 rotate-180" : "size-4"}
+              aria-hidden="true"
+            />
             {detailsOpen ? t("storage_inventory_hide_details") : t("storage_inventory_caption")}
           </Button>
           {detailsOpen && (
