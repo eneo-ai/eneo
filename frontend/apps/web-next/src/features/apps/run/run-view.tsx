@@ -106,7 +106,7 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
               id="app-run-inputs"
               role="group"
               aria-label={t("input")}
-              className="bg-muted/40 flex min-h-[12rem] w-full flex-col items-center justify-center gap-4 rounded-lg border p-6 max-md:border-0 max-md:bg-transparent max-md:p-0"
+              className="bg-muted/40 flex min-h-[12rem] w-full flex-col items-center justify-center gap-4 rounded-lg border p-6 max-md:min-h-0 max-md:border-0 max-md:bg-transparent max-md:p-0"
               {...fieldProblemProps("app-run-inputs", inputProblem)}
             >
               <AppInputs app={app} inputs={inputs} />

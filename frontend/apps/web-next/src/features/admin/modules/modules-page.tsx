@@ -301,7 +301,7 @@ export function ModulesPage({ title }: { title: string }) {
               }}
               required
               disabled={saving || loading}
-              className="bg-background border-input focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:outline-none"
+              className="bg-background border-input focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:outline-none pointer-coarse:min-h-11"
             >
               <option value="" disabled>
                 {t("module_admin_service_key_placeholder")}

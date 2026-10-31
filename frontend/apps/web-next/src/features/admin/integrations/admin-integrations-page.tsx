@@ -95,7 +95,7 @@ function SharePointAdminSection() {
         </h2>
         <p className="text-ax-text-secondary text-sm">{t("sharepoint_health_row_description")}</p>
       </div>
-      <Card className="flex flex-wrap items-center justify-between gap-2 p-4">
+      <Card className="flex flex-row flex-wrap items-center justify-between gap-2 p-4">
         <div className="flex flex-col">
           <span className="font-medium">SharePoint</span>
           <span className="text-muted-foreground text-xs">

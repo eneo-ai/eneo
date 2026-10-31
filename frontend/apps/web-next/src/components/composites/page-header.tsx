@@ -48,7 +48,8 @@ export type PageHeaderProps = {
 };
 
 /** Astryx draws the crumb link 25 px tall; a thumb needs the full touch size. */
-export const CRUMB_TOUCH = "pointer-coarse:[&>a]:min-h-11 pointer-coarse:[&>a]:min-w-11";
+export const CRUMB_TOUCH =
+  "pointer-coarse:[&>a]:min-h-11 pointer-coarse:[&>a]:min-w-11 pointer-coarse:[&>a]:justify-center";
 
 /**
  * Page title block: optional breadcrumbs, h1 (or h2), optional description
@@ -109,7 +110,7 @@ export function PageHeader({
             {title}
           </Heading>
           {description ? (
-            <Text as="p" type="body" color="secondary">
+            <Text as="p" type="body" color="secondary" className="max-w-prose">
               {description}
             </Text>
           ) : null}
