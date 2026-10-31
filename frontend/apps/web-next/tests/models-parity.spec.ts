@@ -21,6 +21,8 @@ const source: CompletionModelAdmin = {
   is_locked: false,
   is_deprecated: false,
   deprecation_date: "2099-01-01",
+  token_limit: 128000,
+  supported_model_kwargs: {},
   max_input_tokens: 128000,
   max_output_tokens: 4096,
   vision: true,
