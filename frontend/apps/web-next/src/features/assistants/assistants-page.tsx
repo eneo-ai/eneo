@@ -11,7 +11,7 @@ import { ResourceCollection } from "@/components/composites/resource-tile";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
-import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
+import { ResourceFilterInput, useFilterShown } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
 import { ChatAppActionScope } from "./actions";
 import { spaceChatItems, type ChatAppItem } from "./assistants";
@@ -62,6 +62,7 @@ export function AssistantsPage() {
   const [filter, setFilter] = useState("");
 
   const items = spaceChatItems(space, collator.compare);
+  const filterShown = useFilterShown(items.length);
   const filteredItems = filterSpaceResources(items, filter);
   const showStatus = !space.personal;
   const groupByStatus = can("publish", "assistant");
@@ -94,13 +95,15 @@ export function AssistantsPage() {
             />
           ) : (
             <>
-              <ResourceFilterInput
-                value={filter}
-                onChange={setFilter}
-                label={t("space_filter_assistants_label")}
-                placeholder={t("filter_assistants_placeholder")}
-                resultCount={filteredItems.length}
-              />
+              {filterShown ? (
+                <ResourceFilterInput
+                  value={filter}
+                  onChange={setFilter}
+                  label={t("space_filter_assistants_label")}
+                  placeholder={t("filter_assistants_placeholder")}
+                  resultCount={filteredItems.length}
+                />
+              ) : null}
               {filteredItems.length === 0 ? (
                 <EmptyState
                   icon={<SearchX />}
