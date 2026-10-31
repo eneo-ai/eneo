@@ -55,6 +55,7 @@ export function OrganizationSkillAdoption({
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
   const search = useDebouncedValue(searchInput.trim());
+  const selectionPending = searchInput.trim() !== search;
   const [kind, setKind] = useState<KindFilter>("all");
   const [drift, setDrift] = useState<DriftFilter>("all");
   const [selected, setSelected] = useState<Resource[]>([]);
@@ -112,6 +113,7 @@ export function OrganizationSkillAdoption({
   }
 
   function toggle(resource: Resource, checked: boolean) {
+    if (selectionPending) return;
     setSelected((current) =>
       checked
         ? [
@@ -475,6 +477,7 @@ export function OrganizationSkillAdoption({
                           <input
                             type="checkbox"
                             className="accent-primary size-4"
+                            disabled={selectionPending}
                             aria-label={t("organization_skills_adoption_select_shown", {
                               count: String(Math.min(items.length, SELECTION_LIMIT))
                             })}
@@ -486,11 +489,12 @@ export function OrganizationSkillAdoption({
                                   selected.some((row) => resourceKey(row) === resourceKey(item))
                                 )
                             }
-                            onChange={(event) =>
-                              setSelected(
-                                event.target.checked ? items.slice(0, SELECTION_LIMIT) : []
-                              )
-                            }
+                            onChange={(event) => {
+                              if (!selectionPending)
+                                setSelected(
+                                  event.target.checked ? items.slice(0, SELECTION_LIMIT) : []
+                                );
+                            }}
                           />
                         </th>
                         <th className="p-3">{t("organization_skills_adoption_resource_column")}</th>
@@ -515,8 +519,11 @@ export function OrganizationSkillAdoption({
                                 (row) => resourceKey(row) === resourceKey(resource)
                               )}
                               disabled={
-                                selected.length >= SELECTION_LIMIT &&
-                                !selected.some((row) => resourceKey(row) === resourceKey(resource))
+                                selectionPending ||
+                                (selected.length >= SELECTION_LIMIT &&
+                                  !selected.some(
+                                    (row) => resourceKey(row) === resourceKey(resource)
+                                  ))
                               }
                               onChange={(event) => toggle(resource, event.target.checked)}
                             />

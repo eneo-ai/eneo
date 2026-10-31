@@ -108,6 +108,26 @@ function show() {
 }
 
 describe("organisation Skill bindings", () => {
+  it("prevents old rows being selected while a new search is waiting to commit", async () => {
+    get.mockImplementation((path: string, options: { params?: { query?: { query?: string } } }) =>
+      path.endsWith("/adoption/")
+        ? ok(options.params?.query?.query ? { ...page, items: [app] } : page)
+        : ok({ revision_id: "rev-2" })
+    );
+    show();
+    await screen.findByText("Review app");
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Review" } });
+    const previous = screen.getAllByRole("checkbox", {
+      name: "organization_skills_adoption_select_resource"
+    })[0] as HTMLInputElement;
+    expect(previous.disabled).toBe(true);
+    fireEvent.click(previous);
+    await waitFor(() => expect(screen.queryByText("Research", { selector: "a" })).toBeNull());
+    expect(
+      screen.queryByRole("button", { name: "organization_skills_adoption_detach_selected" })
+    ).toBeNull();
+  });
+
   it("hides and resets drift when the Skill becomes unpublished", async () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     const renderSkill = (value: typeof skill) => (
