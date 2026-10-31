@@ -127,13 +127,19 @@ export function AppEditor({ appId }: { appId: string }) {
       summary: summary.retention(app.data_retention_days),
       node: <SecuritySection app={app} />
     },
-    {
-      id: "api-keys",
-      label: t("api_keys"),
-      icon: KeyRound,
-      group: modelAndAccess,
-      node: <ResourceApiKeysSection scopeType="app" scopeId={app.id} resourceName={app.name} />
-    },
+    ...((app.permissions ?? []).includes("edit")
+      ? [
+          {
+            id: "api-keys",
+            label: t("api_keys"),
+            icon: KeyRound,
+            group: modelAndAccess,
+            node: (
+              <ResourceApiKeysSection scopeType="app" scopeId={app.id} resourceName={app.name} />
+            )
+          }
+        ]
+      : []),
     ...((app.permissions ?? []).includes("publish")
       ? [
           {
