@@ -45,18 +45,20 @@ export type AdminNavGroup = {
  * templates only when the tenant uses templates, modules only with the
  * modules permission, flows only when the tenant has them switched on
  * (`settings.flows_enabled`, whatever the admin's own flow permissions; the
- * admin layout admits admins only). No
- * group exceeds seven items, so none needs to collapse. The admin layout
- * still redirects non-admins.
+ * admin layout admits admins only), federation only when enabled by the
+ * deployment. No group exceeds seven items, so none needs to collapse.
+ * The admin layout still redirects non-admins.
  */
 export function adminNavGroups({
   usingTemplates,
   canManageModules,
-  flowsEnabled = false
+  flowsEnabled = false,
+  federationEnabled = false
 }: {
   usingTemplates: boolean;
   canManageModules: boolean;
   flowsEnabled?: boolean;
+  federationEnabled?: boolean;
 }): AdminNavGroup[] {
   return [
     {
@@ -73,6 +75,9 @@ export function adminNavGroups({
       labelKey: "admin_section_governance",
       items: [
         { href: "/admin/personal-assistant", icon: User, labelKey: "governance_title" },
+        ...(usingTemplates
+          ? [{ href: "/admin/templates", icon: LayoutTemplate, labelKey: "templates" }]
+          : []),
         { href: "/admin/prompt-library", icon: Library, labelKey: "governance_tab_prompts" },
         { href: "/admin/skills", icon: SlidersHorizontal, labelKey: "admin_skills_nav_label" },
         ...(flowsEnabled
@@ -92,6 +97,9 @@ export function adminNavGroups({
       items: [
         { href: "/admin/models", icon: Cpu, labelKey: "models" },
         { href: "/admin/integrations", icon: Plug, labelKey: "integrations" },
+        ...(federationEnabled
+          ? [{ href: "/admin/federation", icon: KeyRound, labelKey: "federation_admin_nav" }]
+          : []),
         ...(canManageModules
           ? [{ href: "/admin/modules", icon: Blocks, labelKey: "module_admin_title" }]
           : []),
@@ -106,10 +114,8 @@ export function adminNavGroups({
       labelKey: "admin_section_organisation",
       items: [
         { href: "/admin/users", icon: Users, labelKey: "users" },
+        { href: "/admin/user-groups", icon: Users, labelKey: "user_groups" },
         { href: "/admin/roles", icon: UserCheck, labelKey: "roles" },
-        ...(usingTemplates
-          ? [{ href: "/admin/templates", icon: LayoutTemplate, labelKey: "templates" }]
-          : []),
         {
           href: "/admin/help-assistants",
           icon: LifeBuoy,

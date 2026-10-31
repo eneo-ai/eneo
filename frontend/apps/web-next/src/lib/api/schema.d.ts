@@ -34250,15 +34250,7 @@ export interface components {
     PartialAssistantUpdatePublic: {
       /** Attachments */
       attachments?: components["schemas"]["AssistantAttachmentInput"][] | null;
-      /**
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
       completion_model?: components["schemas"]["ModelId"] | null;
-      /**
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
       completion_model_kwargs?: components["schemas"]["ModelKwargs"] | null;
       /**
        * Data Retention Days
@@ -34312,11 +34304,7 @@ export interface components {
       integration_knowledge_list?: components["schemas"]["ModelId"][] | null;
       /** @description How attached knowledge reaches the model: 'tool' exposes it as a searchable MCP tool the model calls on demand; 'inject' retrieves on every turn and packs results into the prompt. */
       knowledge_mode?: components["schemas"]["KnowledgeMode"] | null;
-      /**
-       * Logging Enabled
-       * @deprecated
-       * @description This field is deprecated and will be ignored
-       */
+      /** Logging Enabled */
       logging_enabled?: boolean | null;
       /** Mcp Servers */
       mcp_servers?: components["schemas"]["ModelId"][] | null;

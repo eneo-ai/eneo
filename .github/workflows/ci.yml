@@ -392,7 +392,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: frontend
@@ -646,7 +646,7 @@ jobs:
           tests/smoke.spec.ts tests/a11y.spec.ts tests/chat.spec.ts tests/space-members.spec.ts
           tests/account.spec.ts tests/space-knowledge.spec.ts tests/knowledge-tables.spec.ts tests/navigation.spec.ts
           tests/flows.spec.ts tests/flows-runtime.spec.ts tests/flows-live-transcription.spec.ts
-          tests/answer-presentation.spec.ts
+          tests/admin-providers.spec.ts tests/answer-presentation.spec.ts tests/admin-content.spec.ts
           --grep 'csp\.spec\.ts|web-app\.spec\.ts|@vite'
 
       - name: Capture E2E stack diagnostics

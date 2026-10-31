@@ -1,7 +1,10 @@
 import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTs from "eslint-config-next/typescript";
+import tseslint from "typescript-eslint";
+import react from "eslint-plugin-react";
+import reactHooks from "eslint-plugin-react-hooks";
+import importPlugin from "eslint-plugin-import";
 import jsxA11y from "eslint-plugin-jsx-a11y";
+import globals from "globals";
 import eneo from "@eneo/eslint-plugin";
 
 const generatedAndVendored = [
@@ -64,8 +67,33 @@ const frameworkSeamImports = [
 ];
 
 const eslintConfig = defineConfig([
-  ...nextVitals,
-  ...nextTs,
+  react.configs.flat.recommended,
+  reactHooks.configs.flat.recommended,
+  ...tseslint.configs.recommended,
+  {
+    plugins: { import: importPlugin, "jsx-a11y": jsxA11y },
+    languageOptions: {
+      globals: { ...globals.browser, ...globals.node }
+    },
+    settings: { react: { version: "detect" } },
+    // Preserve the existing React/TypeScript policy while changing the preset owner.
+    // Source TSX receives the stricter accessibility policy below.
+    rules: {
+      "import/no-anonymous-default-export": "warn",
+      "react/no-unknown-property": "off",
+      "react/react-in-jsx-scope": "off",
+      "react/prop-types": "off",
+      "react/jsx-no-target-blank": "off",
+      "@typescript-eslint/no-unused-vars": "warn",
+      "@typescript-eslint/no-unused-expressions": "warn",
+      "jsx-a11y/alt-text": ["warn", { elements: ["img"], img: ["Image"] }],
+      "jsx-a11y/aria-props": "warn",
+      "jsx-a11y/aria-proptypes": "warn",
+      "jsx-a11y/aria-unsupported-elements": "warn",
+      "jsx-a11y/role-has-required-aria-props": "warn",
+      "jsx-a11y/role-supports-aria-props": "warn"
+    }
+  },
   {
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/lib/navigation.ts", "src/**/*.test.{ts,tsx}", "src/test/**"],
@@ -85,9 +113,8 @@ const eslintConfig = defineConfig([
       eneo
     }
   },
-  // Override default ignores of eslint-config-next.
   globalIgnores([
-    // Default ignores of eslint-config-next:
+    // Frozen Next output remains until its routes and build are removed.
     ".next/**",
     "out/**",
     "build/**",
@@ -151,10 +178,8 @@ const eslintConfig = defineConfig([
   },
   {
     // Accessibility: WCAG 2.2 AA, see ACCESSIBILITY.md. eslint-plugin-jsx-a11y's
-    // strict set plus two rules it leaves out. eslint-config-next already
-    // registers the `jsx-a11y` plugin (same package, pinned in package.json);
-    // registering it again is a "Cannot redefine plugin" error, so only the
-    // rules are taken from the plugin's config.
+    // strict set plus two rules it leaves out. Plugin registration is shared
+    // above; this block owns the stricter policy for shipped UI.
     //
     // Existing violations are baselined in eslint-suppressions.json and new ones
     // fail `bun run lint`. Fix, don't suppress; after fixing a baselined
@@ -163,7 +188,7 @@ const eslintConfig = defineConfig([
     ignores: notShippedUi,
     settings: {
       "jsx-a11y": {
-        // Astryx `as="…"` renders that element; next/image and next/link are
+        // Astryx `as="…"` renders that element; Image and Link wrappers are
         // checked like <img> and <a>.
         polymorphicPropName: "as",
         components: { Image: "img", Link: "a" }

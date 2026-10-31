@@ -4,6 +4,7 @@ from uuid import UUID
 
 import sqlalchemy as sa
 from pydantic import EmailStr
+from sqlalchemy.dialects import postgresql
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
@@ -110,6 +111,41 @@ class UsersRepository:
             .where(Users.deleted_at.is_(None))
         )
         return await self.session.scalar(query)
+
+    async def get_or_create_system_user_id_for_tenant(self, tenant_id: UUID) -> UUID:
+        """Create a missing helper owner within the caller's transaction."""
+        system_user_id = await self.get_system_user_id_for_tenant(tenant_id)
+        if system_user_id is not None:
+            return system_user_id
+
+        query = (
+            postgresql.insert(Users)
+            .values(
+                tenant_id=tenant_id,
+                email=f"system+{tenant_id}@eneo.local",
+                username=f"system+{tenant_id}",
+                email_verified=False,
+                password=None,
+                salt=None,
+                is_active=False,
+                state=UserState.INACTIVE.value,
+                is_system_user=True,
+                used_tokens=0,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[Users.email],
+                index_where=Users.deleted_at.is_(None),
+            )
+            .returning(Users.id)
+        )
+        system_user_id = await self.session.scalar(query)
+        if system_user_id is None:
+            # A concurrent installer may have committed this identity while
+            # the insert waited. Re-read only a system owner in this tenant.
+            system_user_id = await self.get_system_user_id_for_tenant(tenant_id)
+        if system_user_id is None:
+            raise UniqueException("The tenant system-user identity is already in use.")
+        return system_user_id
 
     async def get_user_by_email(
         self, email: EmailStr, with_deleted: bool = False

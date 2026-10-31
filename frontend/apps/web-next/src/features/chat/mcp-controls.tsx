@@ -275,8 +275,6 @@ export function ChatTools({
                     <li key={server.id} className={ROW_CLASS}>
                       <span aria-hidden="true" className={ROW_ICON_CLASS}>
                         {server.icon_url ? (
-                          // Backend-served MCP icon URL.
-                          // eslint-disable-next-line @next/next/no-img-element
                           <img src={server.icon_url} alt="" className="size-full object-cover" />
                         ) : (
                           server.name.charAt(0).toUpperCase()

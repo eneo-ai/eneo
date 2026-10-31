@@ -11,6 +11,7 @@ export type AppContextData = {
   federationStatus: Schema<"FederationStatusResponse">;
   limits: Schema<"Limits">;
   featureFlags: {
+    federation: boolean;
     /** The tenant enables Flows and the current user may view them. */
     flows: boolean;
   };

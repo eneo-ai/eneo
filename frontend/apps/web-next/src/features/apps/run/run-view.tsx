@@ -86,8 +86,6 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
         <div className="flex flex-col items-center gap-3 pt-2">
           <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-2xl">
             {icon ? (
-              // Auth-proxied backend upload; next/image cannot optimize it.
-              // eslint-disable-next-line @next/next/no-img-element
               <img src={icon} alt="" className="size-full object-cover" />
             ) : (
               <AppWindow className="size-8" />

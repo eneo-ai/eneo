@@ -617,6 +617,10 @@ production build shows these violations. Never loosen the policy.
   under the fixture from `tests/csp.ts` (CI: "Frontend E2E (web-next)"): it
   fails a test on a CSP violation, and its `goto` and `reload` wait until the
   page has hydrated, since a click on server HTML before that goes nowhere.
+  Successful authenticated API fixtures use `sessionResponseHeaders(route)`
+  from `tests/helpers.ts` to preserve the requesting document's session.
+  Vite-only cases also need `test.skip(!process.env.E2E_BASE_URL, reason)`:
+  `@vite` selects the Vite subset but does not exclude a case from Next's run.
 - Check new UI in light and dark mode, with the keyboard, and at phone width
   (the full manual protocol is in ACCESSIBILITY.md).
 

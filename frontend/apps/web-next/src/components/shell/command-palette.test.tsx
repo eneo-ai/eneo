@@ -93,7 +93,10 @@ function seededClient() {
   return queryClient;
 }
 
-function renderPalette(permissions: Permission[] = [], { flowsEnabled = false } = {}) {
+function renderPalette(
+  permissions: Permission[] = [],
+  { flowsEnabled = false, federation = false } = {}
+) {
   const onCreateSpace = vi.fn();
   const onOpenChange = vi.fn();
   renderInApp(
@@ -103,7 +106,7 @@ function renderPalette(permissions: Permission[] = [], { flowsEnabled = false } 
       appContext: testAppContext({
         permissions,
         settings: { flows_enabled: flowsEnabled },
-        featureFlags: { flows: false }
+        featureFlags: { flows: false, federation }
       })
     }
   );
@@ -233,6 +236,21 @@ describe("ShellCommandPalette", () => {
     fireEvent.keyDown(combobox, { key: "ArrowDown" });
     fireEvent.keyDown(combobox, { key: "Enter" });
     expect(router.push).toHaveBeenCalledWith("/dashboard/a1?tab=chat");
+  });
+
+  it("offers federation administration when the deployment enables it", async () => {
+    renderPalette(["admin"], { federation: true });
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("SSO");
+    fireEvent.click(await screen.findByRole("option", { name: /Administration.*Inloggning.*SSO/ }));
+    expect(router.push).toHaveBeenCalledWith("/admin/federation");
+  });
+
+  it("hides federation administration when the deployment disables it", async () => {
+    renderPalette(["admin"]);
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("SSO");
+    expect(screen.queryByRole("option", { name: /Administration.*Inloggning.*SSO/ })).toBeNull();
   });
 
   it("offers Skapa yta and admin pages to those allowed", async () => {

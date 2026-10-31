@@ -21,7 +21,9 @@ export const VITE_ONLY = new Map([
   ["/spaces/$/*", "Space-layout not-found splat (P4 gate pages)."],
   ["/logout", "Replaces the Next logout route handler."],
   ["/module-login", "Replaces the Next module-login route handler."],
-  ["/login/switch-organisation", "Replaces the Next organisation-switch route handler."]
+  ["/login/switch-organisation", "Replaces the Next organisation-switch route handler."],
+  ["/admin/federation", "Federation administration is exposed only in Vite."],
+  ["/admin/user-groups", "Ports Svelte user-group administration, which had no Next page."]
 ]);
 
 export function blobHash(bytes) {

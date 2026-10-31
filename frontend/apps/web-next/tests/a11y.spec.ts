@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
+import type { FederationView } from "../src/features/admin/federation/federation";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "../src/components/shell/side-nav-preference";
 import { assertDocumented, WCAG_22_AA_TAGS } from "../src/test/wcag";
 import { expect, test } from "./csp";
@@ -14,6 +15,7 @@ import {
   createSpace,
   MOCK_REPLY,
   openCreateCollectionDialog,
+  sessionResponseHeaders,
   spaceWithWork,
   uniqueName
 } from "./helpers";
@@ -768,7 +770,70 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin models", async ({ page }) => {
+    test("admin user groups", { tag: "@vite" }, async ({ page }) => {
+      test.skip(!process.env.E2E_BASE_URL, "User-group administration has a Vite-only route.");
+      await scan(page, "/admin/user-groups", async () => {
+        await expect(
+          page.getByRole("heading", { level: 1, name: /^(Användargrupper|User Groups)$/ })
+        ).toBeVisible();
+        await expect(page).toHaveTitle(/^(Användargrupper|User Groups) · Eneo$/);
+        const create = page
+          .getByRole("button", { name: /^(Skapa användargrupp|Create user group)$/ })
+          .first();
+        await create.focus();
+        await page.keyboard.press("Enter");
+        const dialog = page.getByRole("dialog", {
+          name: /^(Skapa en ny användargrupp|Create a new user group)$/
+        });
+        await expect(dialog).toBeVisible();
+        await expect(dialog.getByRole("textbox", { name: /Gruppnamn|Group name/ })).toBeVisible();
+        await expectNoAxeViolations(page);
+        await page.keyboard.press("Escape");
+        await expect(dialog).toBeHidden();
+        await expect(create).toBeFocused();
+      });
+    });
+
+    test("admin federation", { tag: "@vite" }, async ({ page }) => {
+      test.skip(!process.env.E2E_BASE_URL, "Federation administration has a Vite-only route.");
+      // A configured IdP is a UI fixture; this scan never contacts an IdP or saves credentials.
+      await page.route("**/api/v1/runtime-config", async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({
+          response,
+          json: { ...(await response.json()), federation_enabled: true }
+        });
+      });
+      const view: FederationView = {
+        configured: true,
+        provider: "Example IdP",
+        discovery_endpoint: "https://idp.example/.well-known/openid-configuration",
+        issuer: "https://idp.example",
+        client_id: "e2e-client",
+        client_secret_set: true,
+        encryption_status: "encrypted",
+        allowed_domains: ["example.org"],
+        redirect_uris: ["https://eneo.example/login/callback"],
+        scopes: ["openid", "email", "profile"],
+        token_endpoint_auth_method: "client_secret_post",
+        revision: "e2e-revision"
+      };
+      await page.route("**/api/v1/admin/federation", (route) =>
+        route.fulfill({ headers: sessionResponseHeaders(route), json: view })
+      );
+      await scan(page, "/admin/federation", async () => {
+        await expect(
+          page.getByRole("heading", { level: 1, name: "Inloggning (SSO)" })
+        ).toBeVisible();
+        await expect(page.getByRole("textbox", { name: /^Klient-ID\b/ })).toHaveValue("e2e-client");
+        await expect(
+          page.getByRole("link", { name: "Inloggning (SSO)", exact: true })
+        ).toBeVisible();
+        await expect(page).toHaveTitle("Inloggning (SSO) · Eneo");
+      });
+    });
+
+    test("admin models", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/admin/models", async () => {
         await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
         // The seeded provider's model table (e2e/seed.py).
@@ -776,7 +841,7 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin integrations", async ({ page }) => {
+    test("admin integrations", { tag: "@vite" }, async ({ page }) => {
       await scan(page, "/admin/integrations", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Integrationer|Integrations)$/ })
@@ -954,7 +1019,7 @@ for (const colorScheme of ["light", "dark"] as const) {
           });
         });
 
-        test("admin overview and models", async ({ page }) => {
+        test("admin overview and models", { tag: "@vite" }, async ({ page }) => {
           await scan(page, "/admin", async () => {
             await expect(
               page.getByRole("heading", { level: 1, name: /^(Översikt|Overview)$/ })
@@ -1146,7 +1211,7 @@ test.describe("reflow at 320 px (1.4.10)", () => {
     await expectNoSidewaysPageScroll(page);
   });
 
-  test("admin models", async ({ page }) => {
+  test("admin models", { tag: "@vite" }, async ({ page }) => {
     await page.goto("/admin/models");
     await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
     // A phone lists a provider's models as rows (decision 31).

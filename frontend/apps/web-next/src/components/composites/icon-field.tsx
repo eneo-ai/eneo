@@ -86,8 +86,6 @@ export function IconField({
         {busy ? (
           <Spinner />
         ) : icon ? (
-          // Auth-proxied backend upload; next/image cannot optimize it.
-          // eslint-disable-next-line @next/next/no-img-element
           <img src={icon} alt="" className="size-full object-cover" />
         ) : (
           <ImagePlus className="size-6" />

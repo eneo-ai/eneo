@@ -70,8 +70,6 @@ export function EntityAvatar({
       )}
     >
       {src ? (
-        // Backend-served upload behind the auth proxy; next/image cannot optimize it.
-        // eslint-disable-next-line @next/next/no-img-element
         <img src={src} alt="" className="size-full object-cover" />
       ) : (
         (icon ?? entityInitials(name))

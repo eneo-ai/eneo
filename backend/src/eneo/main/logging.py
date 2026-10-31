@@ -180,6 +180,9 @@ for logger_name in sqlalchemy_loggers:
 
 # noqa Copied from https://dev.to/taikedz/simple-python-logging-and-a-digression-on-dependencies-trust-and-copypasting-code-229o
 class SimpleLogger(logging.Logger):
+    # Logger creates this cache, but its type stub does not expose it.
+    _cache: dict[int, bool]
+
     FORMAT_STRING = "%(asctime)s | %(levelname)s | %(name)s : %(message)s"
     ERROR = logging.ERROR
     WARN = logging.WARN
@@ -221,14 +224,12 @@ class SimpleLogger(logging.Logger):
         for filepath in file_list:
             _add_stream(logging.FileHandler, filename=filepath)
 
+    @override
     def setLevel(self, level: int | str) -> None:
         super().setLevel(level)
-        # Not registered with logging's manager, so its cache clearing never
-        # reaches this logger: an enabled-level answer cached before the change
-        # (CPython keeps it in the instance's ``_cache``) would outlive it.
-        cache = self.__dict__.get("_cache")
-        if isinstance(cache, dict):
-            cache.clear()
+        # These loggers are constructed outside the logging manager's registry,
+        # so its level-change invalidation does not reach their cached decisions.
+        self._cache.clear()
 
 
 def get_logger(module_name: str):

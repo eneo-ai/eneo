@@ -16,6 +16,7 @@ export type AppContextEnv = {
   links: AppContextData["links"];
   frontendVersion: string;
   backendVersion: string;
+  federationEnabled?: boolean;
 };
 
 const session = sessionQueries(browserApi);
@@ -48,7 +49,10 @@ export function QueryAppContextProvider({
       settings,
       federationStatus,
       limits,
-      featureFlags: { flows: flowsAvailable(settings, user) },
+      featureFlags: {
+        federation: env.federationEnabled ?? false,
+        flows: flowsAvailable(settings, user)
+      },
       links: env.links,
       versions: { frontend: env.frontendVersion, backend: env.backendVersion }
     }),

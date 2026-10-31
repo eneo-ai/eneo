@@ -40,6 +40,9 @@ vi.mock("@/features/whats-new/tour-provider", () => ({
   useTour: () => ({ running: false, start: vi.fn() })
 }));
 vi.mock("@/components/shell/notification-bells", () => ({ NotificationBells: () => null }));
+vi.mock("@/features/admin/federation/federation-page", () => ({
+  FederationPage: () => <h1>{messages.federation_admin_title}</h1>
+}));
 
 const GENERATION = "Eneo-Session-Generation";
 const context = testAppContext({ settings: { whats_new_enabled: false } });
@@ -500,14 +503,31 @@ it.each(["apps", "assistants", "group-chats"] as const)(
   }
 );
 
-it("redirects a help assistant before mounting its space editor or warming the optional guide", async () => {
-  replies.set("/api/v1/spaces/space-1/", makeSpace());
-  replies.set("/api/v1/assistants/help/", { id: "help", name: "Guide", is_help_assistant: true });
-  const { router } = await renderRoute("/spaces/space-1/assistants/help/edit");
-  await waitFor(() => expect(router.state.location.pathname).toBe("/admin/help-assistants"));
-  expect(screen.queryByRole("textbox", { name: "Editor help" })).toBeNull();
-  expect(requestedPaths()).not.toContain("/api/v1/help-assistants/availability");
-});
+it.each([
+  { admin: true, destination: "/admin/help-assistants" },
+  { admin: false, destination: "/spaces/personal/chat" }
+])(
+  "redirects a help assistant through destination access (admin=$admin)",
+  async ({ admin, destination }) => {
+    replies.set("/api/v1/users/me/", testAppContext({ permissions: admin ? ["admin"] : [] }).user);
+    replies.set("/api/v1/spaces/space-1/", makeSpace());
+    replies.set("/api/v1/assistants/help/", { id: "help", name: "Guide", is_help_assistant: true });
+    replies.set("/api/v1/admin/help-assistants/roles/", { items: [] });
+    replies.set("/api/v1/admin/help-assistants/templates/", { items: [] });
+    const { router } = await renderRoute("/spaces/space-1/assistants/help/edit");
+    await waitFor(() => expect(router.state.location.pathname).toBe(destination));
+    expect(screen.queryByRole("textbox", { name: "Editor help" })).toBeNull();
+    expect(requestedPaths()).not.toContain("/api/v1/help-assistants/availability");
+    if (admin) {
+      await screen.findByRole("heading", {
+        name: messages.admin_help_assistants_page_title,
+        level: 1
+      });
+    } else {
+      expect(requestedPaths()).not.toContain("/api/v1/admin/help-assistants/roles/");
+    }
+  }
+);
 
 it.each([
   ["apps/missing", "/api/v1/apps/missing/"],
@@ -1578,18 +1598,21 @@ it("loads the Flows list using the personal space's real id", async () => {
   expect(request?.searchParams.get("space_id")).toBe("space-1");
 });
 
-it.each(["/admin/users", "/admin/usage/users/missing", "/admin/roles", "/admin/flow-settings"])(
-  "denies an admin page before reading its data: %s",
-  async (path) => {
-    const { router } = await renderRoute(path);
-    expect(router.state.location.pathname).toBe("/spaces/personal/chat");
-    expect(
-      requestedPaths().some((entry) =>
-        /\/admin\/|\/token-usage\/|\/roles\/|\/settings\/flow-/.test(entry)
-      )
-    ).toBe(false);
-  }
-);
+it.each([
+  "/admin/users",
+  "/admin/user-groups",
+  "/admin/usage/users/missing",
+  "/admin/roles",
+  "/admin/flow-settings"
+])("denies an admin page before reading its data: %s", async (path) => {
+  const { router } = await renderRoute(path);
+  expect(router.state.location.pathname).toBe("/spaces/personal/chat");
+  expect(
+    requestedPaths().some((entry) =>
+      /\/admin\/|\/token-usage\/|\/roles\/|\/user-groups\/|\/settings\/flow-/.test(entry)
+    )
+  ).toBe(false);
+});
 
 function serveFlowSettings() {
   const enabled = testAppContext({ permissions: ["admin"], settings: { flows_enabled: true } });
@@ -1667,6 +1690,27 @@ it.each([
   await screen.findByLabelText("Antal filer per körning");
   expect(router.state.location.pathname).toBe("/admin/flow-settings");
   expect(router.state.location.hash).toBe(hash);
+});
+
+it("opens admin user groups with its title and one current admin link", async () => {
+  setViewport("desktop");
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/user-groups/", {
+    items: [{ id: "group-1", name: "Kommunikation", users: [] }],
+    count: 1
+  });
+  await renderRoute("/admin/user-groups", undefined, ({ queryClient }) => {
+    queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+  });
+  const table = await screen.findByRole("table", { name: messages.user_groups });
+  expect(table.textContent).toContain("Kommunikation");
+  expect(document.title).toBe(`${messages.user_groups} · Eneo`);
+  const link = screen.getByRole("link", { name: messages.user_groups });
+  expect(link.getAttribute("href")).toBe("/admin/user-groups");
+  expect(link.getAttribute("aria-current")).toBe("page");
+  const navigation = screen.getByRole("navigation", { name: "Administration" });
+  expect(navigation.querySelectorAll('[aria-current="page"]')).toHaveLength(1);
+  expect(requestedPaths().filter((path) => path === "/api/v1/user-groups/")).toHaveLength(1);
 });
 
 it("opens the admin users table with the feature's URL filters and one session read", async () => {
@@ -1772,4 +1816,53 @@ it("only reads data while preloading admin users and usage", async () => {
         (input instanceof Request ? input.method : (init?.method ?? "GET")) === "GET"
     )
   ).toBe(true);
+});
+
+it("opens enabled federation administration with its navigation and title", async () => {
+  setViewport("desktop");
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/admin/federation", {});
+  const { runtimeConfig, setRuntimeConfig } = await import("@/lib/runtime-config");
+  await renderRoute("/admin/federation", undefined, () => {
+    setRuntimeConfig({ ...runtimeConfig(), federation_enabled: true });
+  });
+  await screen.findByRole("heading", { level: 1, name: messages.federation_admin_title });
+  expect(document.title).toBe(`${messages.federation_admin_title} · Eneo`);
+  expect(
+    screen.getByRole("link", { name: messages.federation_admin_nav }).getAttribute("href")
+  ).toBe("/admin/federation");
+  expect(requestedPaths()).toContain("/api/v1/admin/federation");
+});
+
+it("hides disabled federation administration and rejects its URL before the API read", async () => {
+  setViewport("desktop");
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  const { router } = await renderRoute("/admin/federation");
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(true);
+  expect(screen.queryByRole("link", { name: messages.federation_admin_nav })).toBeNull();
+  expect(requestedPaths()).not.toContain("/api/v1/admin/federation");
+});
+
+it("keeps federation administration behind the existing admin guard", async () => {
+  const { runtimeConfig, setRuntimeConfig } = await import("@/lib/runtime-config");
+  const { router } = await renderRoute("/admin/federation", undefined, () => {
+    setRuntimeConfig({ ...runtimeConfig(), federation_enabled: true });
+  });
+  await waitFor(() => expect(router.state.location.pathname).toBe("/spaces/personal/chat"));
+  expect(requestedPaths()).not.toContain("/api/v1/admin/federation");
+});
+
+it("preloads federation with GET requests without waiting for its optional data", async () => {
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/admin/federation", new Promise(() => {}));
+  const { router } = await createRouteRouter();
+  const { runtimeConfig, setRuntimeConfig } = await import("@/lib/runtime-config");
+  setRuntimeConfig({ ...runtimeConfig(), federation_enabled: true });
+  fetcher.mockClear();
+  await router.preloadRoute({ to: "/admin/federation" });
+  await waitFor(() => expect(requestedPaths()).toContain("/api/v1/admin/federation"));
+  for (const [input, init] of fetcher.mock.calls) {
+    expect(input instanceof Request ? input.method : (init?.method ?? "GET")).toBe("GET");
+  }
 });
