@@ -83,7 +83,10 @@ describe("PromptLibraryPage", () => {
     );
     renderInApp(<PromptLibraryPage />);
 
-    expect(await screen.findByRole("button", { name: "Ny prompt" })).toBeTruthy();
+    // The failure has to be on screen before the button is judged: it is there while loading.
+    await screen.findByRole("button", { name: "Försök igen" });
+    fireEvent.click(screen.getByRole("button", { name: "Ny prompt" }));
+    expect(await screen.findByRole("dialog", { name: "Ny prompt" })).toBeTruthy();
   });
 
   it("names the prompt table by the page title, newest change first", async () => {
