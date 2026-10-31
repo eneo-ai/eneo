@@ -7,7 +7,10 @@ import type { Page } from "@playwright/test";
  * loading state and whatever data the stack holds do not make a violation look
  * new on every run.
  */
-export type Violation = { kind: "small" | "outside" | "overlap" | "clipped"; key: string };
+export type Violation = {
+  kind: "small" | "outside" | "overlap" | "clipped" | "zoom";
+  key: string;
+};
 
 export type PageMeasure = {
   /** Page and panel scroll sideways by this many px (0 = fine). */
@@ -58,7 +61,7 @@ export function measure(page: Page): Promise<PageMeasure> {
     };
     const controls =
       "a[href], button, [role=button], [role=tab], [role=menuitem], [role=option], [role=switch], [role=checkbox], [role=radio], input:not([type=hidden]), select, textarea, summary";
-    const violations: { kind: "small" | "outside" | "overlap" | "clipped"; key: string }[] = [];
+    const violations: Violation[] = [];
     const targets: { element: Element; box: DOMRect }[] = [];
     // A text field is tapped anywhere in its frame, not only on the <input>
     // inside it: Astryx draws the 44 px frame around a 23 px input.
@@ -112,6 +115,16 @@ export function measure(page: Page): Promise<PageMeasure> {
       }
       if (!inline && (tapWidth < minTarget - 0.5 || tapHeight < minTarget - 0.5))
         violations.push({ kind: "small", key: name(element) });
+      // iPhone Safari zooms into a field under 16 px when it takes focus, and the
+      // page stays zoomed. (iPadOS does not, so the check is for phone widths.)
+      if (
+        width < 768 &&
+        element.matches(
+          "input:not([type=checkbox], [type=radio], [type=file], [type=range], [type=color], [type=button], [type=submit]), textarea, select"
+        ) &&
+        parseFloat(getComputedStyle(element).fontSize) < 16
+      )
+        violations.push({ kind: "zoom", key: name(element) });
       targets.push({ element: area, box });
     }
     for (let i = 0; i < targets.length; i++) {
