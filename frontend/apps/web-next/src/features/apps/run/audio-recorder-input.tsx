@@ -252,7 +252,7 @@ export function AudioRecorderInput({
       };
       const disconnected = () => {
         if (captureRef.current !== capture || capture.phase !== "recording") return;
-        setWarning(t("recording_device_disconnected"));
+        setWarning(t("app_recording_device_disconnected"));
         stopRecording();
       };
       const failed = (event: Event) => {

@@ -9592,5 +9592,6 @@
   "insights_logged_json": "Loggad information som JSON",
   "audit_config_reload_server": "Läs in serverläget",
   "audit_config_partial_save": "Konfigurationen sparades delvis",
-  "insights_earlier_days": "Tidigare dagar"
+  "insights_earlier_days": "Tidigare dagar",
+  "app_recording_device_disconnected": "Inspelningen stoppades eftersom mikrofonen kopplades bort."
 }

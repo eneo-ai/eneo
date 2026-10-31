@@ -9592,5 +9592,6 @@
   "insights_logged_json": "Logged record as JSON",
   "audit_config_reload_server": "Reload server state",
   "audit_config_partial_save": "The configuration was partially saved",
-  "insights_earlier_days": "Earlier days"
+  "insights_earlier_days": "Earlier days",
+  "app_recording_device_disconnected": "Recording stopped because the microphone disconnected."
 }

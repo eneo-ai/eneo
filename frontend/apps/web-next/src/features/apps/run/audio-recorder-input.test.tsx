@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
+import messages from "@/lib/i18n/messages/sv.json";
 import type { InputField } from "../apps";
 import { AudioRecorderInput } from "./audio-recorder-input";
 
@@ -196,7 +197,7 @@ it.each(["inactive", "ended", "error"])(
     expect(
       within(container).getByText(
         eventName === "error"
-          ? "Inspelningen stoppades på grund av ett fel. Du kan ladda ner det som fångades."
+          ? messages.recording_saved_after_error
           : "Inspelningen stoppades eftersom mikrofonen kopplades bort."
       )
     ).toBeTruthy();
@@ -233,11 +234,7 @@ it("waits for the browser's final chunk after an already inactive recorder fails
   fireEvent.click(
     within(await screen.findByRole("alertdialog")).getByRole("button", { name: "Kassera" })
   );
-  expect(
-    within(container).queryByText(
-      "Inspelningen stoppades på grund av ett fel. Du kan ladda ner det som fångades."
-    )
-  ).toBeNull();
+  expect(within(container).queryByText(messages.recording_saved_after_error)).toBeNull();
 });
 
 it("stops a stalled capture even without animation frames and retains nonempty chunks", async () => {
@@ -252,11 +249,7 @@ it("stops a stalled capture even without animation frames and retains nonempty c
   await act(async () => vi.advanceTimersByTime(15_000));
   act(() => Recorder.instances[0]!.data(""));
   await act(async () => vi.advanceTimersByTime(5_001));
-  expect(
-    within(container).getByText(
-      "Inspelningen stoppades eftersom ingen ljuddata togs emot på ett tag. Du kan ladda ner det som fångades."
-    )
-  ).toBeTruthy();
+  expect(within(container).getByText(messages.recording_stalled)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Spara som fil" }));
   expect((saveBlob.mock.calls[0]![0] as File).size).toBe(5);
   expect(stopTrack).toHaveBeenCalledTimes(1);
@@ -283,24 +276,12 @@ it("does not offer recovery of audio that was never captured before disconnect",
 });
 
 it.each([
-  [
-    "NotAllowedError",
-    "Mikrofonåtkomst blockerades. Kontrollera webbläsarens eller systemets behörigheter.",
-    1
-  ],
+  ["NotAllowedError", messages.recording_error_permission, 1],
   ["NotFoundError", "Ingen mikrofon hittades. Anslut en mikrofon och försök igen.", 2],
-  [
-    "NotReadableError",
-    "Mikrofonen är upptagen eller kan inte läsas. Stäng andra appar och försök igen.",
-    1
-  ],
-  [
-    "OverconstrainedError",
-    "Mikrofonens inställningar kunde inte uppfyllas. Försök igen eller välj en annan ingång.",
-    2
-  ],
-  ["SecurityError", "Mikrofonåtkomst kräver en säker anslutning (HTTPS).", 1],
-  ["NotSupportedError", "Mikrofoninspelning stöds inte i den här webbläsaren.", 1]
+  ["NotReadableError", messages.recording_error_not_readable, 1],
+  ["OverconstrainedError", messages.recording_error_overconstrained, 2],
+  ["SecurityError", messages.recording_error_security, 1],
+  ["NotSupportedError", messages.recording_error_not_supported, 1]
 ])(
   "explains %s and exposes technical diagnostics without retrying blocked access",
   async (name, message, calls) => {
@@ -382,9 +363,7 @@ it("explains unsupported microphone APIs before requesting access", async () => 
   vi.stubGlobal("MediaRecorder", undefined);
   show();
   fireEvent.click(screen.getByRole("button", { name: "Starta inspelning" }));
-  expect(
-    await screen.findByText("Mikrofoninspelning stöds inte i den här webbläsaren.")
-  ).toBeTruthy();
+  expect(await screen.findByText(messages.recording_error_not_supported)).toBeTruthy();
   expect(getUserMedia).not.toHaveBeenCalled();
 });
 
