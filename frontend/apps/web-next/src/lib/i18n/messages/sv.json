@@ -7040,5 +7040,7 @@
   "account_integrations_enable_in_admin": "Aktivera integrationer",
   "space_assistants_actions": "Assistenter, åtgärder",
   "api_keys_admin_more_filters": "Fler filter",
-  "chat_announce_generating": "Assistenten skriver ett svar"
+  "chat_announce_generating": "Assistenten skriver ett svar",
+  "upload_dropzone_prompt_touch": "Välj filer att ladda upp",
+  "drop_files_here_touch": "Bifoga filer från din enhet"
 }

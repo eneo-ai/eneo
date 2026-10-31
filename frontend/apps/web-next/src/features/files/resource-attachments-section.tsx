@@ -41,6 +41,7 @@ import { toastApiError } from "@/lib/api/toast";
 import type { Schema } from "@/lib/api/models";
 import { formatBytes } from "@/lib/format";
 import { matchesSearch } from "@/lib/search";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 
 type Attachment = Schema<"FilePublic"> | Schema<"AssistantAttachmentPublic">;
@@ -257,6 +258,8 @@ export function ResourceAttachmentsSection({
   onSave: (attachments: Schema<"AssistantAttachmentInput">[]) => Promise<unknown>;
 }) {
   const t = useTranslations();
+  // Dragging a file onto the page needs a mouse: a touch screen is told to choose files.
+  const coarse = useMediaMatch("(pointer: coarse)");
   const locale = useLocale();
   const format = useFormatter();
   const autosave = useAutosave("attachments");
@@ -507,7 +510,11 @@ export function ResourceAttachmentsSection({
               <UploadCloud aria-hidden="true" className="text-muted-foreground size-5" />
             </span>
             <p className="text-sm font-medium">
-              {uploading ? t("uploading") : t("drop_files_here")}
+              {uploading
+                ? t("uploading")
+                : coarse
+                  ? t("drop_files_here_touch")
+                  : t("drop_files_here")}
             </p>
             <Button
               type="button"

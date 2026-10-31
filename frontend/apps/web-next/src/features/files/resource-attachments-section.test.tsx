@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
+import { DESKTOP_VIEWPORT, PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import { ResourceAttachmentsSection } from "./resource-attachments-section";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -62,4 +63,17 @@ it("adopts a read mode changed in the other frontend before the next save", asyn
   view.rerender(<ResourceAttachmentsSection {...props} attachments={[first, second]} />);
   fireEvent.click(screen.getByRole("button", { name: "Ta bort Second.txt" }));
   await waitFor(() => expect(save).toHaveBeenCalledWith([{ id: "first", inline_text: false }]));
+});
+
+it("says 'drop files here' for a mouse and 'attach files from your device' for a touch screen", () => {
+  const props = { attachments: [], allowedAttachments: restrictions, description: "Files" };
+  setViewport(DESKTOP_VIEWPORT);
+  const view = renderInApp(<ResourceAttachmentsSection {...props} onSave={vi.fn()} />);
+  expect(screen.getByText("Släpp filer här")).toBeTruthy();
+  view.unmount();
+
+  setViewport(PHONE_VIEWPORT);
+  renderInApp(<ResourceAttachmentsSection {...props} onSave={vi.fn()} />);
+  expect(screen.getByText("Bifoga filer från din enhet")).toBeTruthy();
+  expect(screen.queryByText("Släpp filer här")).toBeNull();
 });

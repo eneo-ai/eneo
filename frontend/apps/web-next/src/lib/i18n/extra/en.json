@@ -1801,5 +1801,7 @@
   "account_integrations_enable_in_admin": "Enable integrations",
   "space_assistants_actions": "Assistants, actions",
   "api_keys_admin_more_filters": "More filters",
-  "chat_announce_generating": "The assistant is writing a reply"
+  "chat_announce_generating": "The assistant is writing a reply",
+  "upload_dropzone_prompt_touch": "Choose files to upload",
+  "drop_files_here_touch": "Attach files from your device"
 }
