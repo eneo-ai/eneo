@@ -412,7 +412,7 @@ describe("KnowledgePage", () => {
     expect(screen.getAllByText("2 källor uppdateras inte")).toHaveLength(1);
     expect(screen.getAllByRole("radio", { name: /^Alla/ })).toHaveLength(1);
     expect(screen.getAllByRole("textbox", { name: "Filtrera integrationer" })).toHaveLength(1);
-    const second = screen.getByRole("table", { name: "text-embedding-3" });
+    const second = screen.getByRole("table", { name: "Text Embedding 3" });
     expect(within(second).getByText("2 600")).toBeTruthy();
 
     // "Show them" filters every group and goes away; focus stays on the notice.
@@ -423,14 +423,14 @@ describe("KnowledgePage", () => {
     expect(screen.queryByRole("button", { name: "Visa dem" })).toBeNull();
     await waitFor(() => expect(document.activeElement).toBe(notice));
     expect(names(screen.getByRole("table", { name: "multilingual-e5-large" }))).toEqual(["Avtal"]);
-    expect(names(screen.getByRole("table", { name: "text-embedding-3" }))).toEqual(["Bygglov"]);
+    expect(names(screen.getByRole("table", { name: "Text Embedding 3" }))).toEqual(["Bygglov"]);
 
     // The search spans the groups; a group it empties is left out.
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera integrationer" }), {
       target: { value: "bygg" }
     });
     expect(screen.queryByRole("table", { name: "multilingual-e5-large" })).toBeNull();
-    expect(names(screen.getByRole("table", { name: "text-embedding-3" }))).toEqual(["Bygglov"]);
+    expect(names(screen.getByRole("table", { name: "Text Embedding 3" }))).toEqual(["Bygglov"]);
     await expectNoAxeViolations(document.body);
   });
 
@@ -591,7 +591,7 @@ describe("KnowledgePage", () => {
       }),
       "integrations"
     );
-    expect(screen.getByRole("heading", { level: 3, name: "text-embedding-3" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: "Text Embedding 3" })).toBeTruthy();
 
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera integrationer" }), {
       target: { value: "ekonomi" }
@@ -693,7 +693,12 @@ describe("KnowledgePage", () => {
   });
 
   it("names each embedding model's table by its heading", () => {
-    const other = { id: "embed-2", name: "text-embedding-3" };
+    const other = {
+      id: "embed-2",
+      name: "text-embedding-3",
+      nickname: "Sökmodell",
+      provider_name: "Berget"
+    };
     show(
       makeSpace({
         websites: [
@@ -703,7 +708,7 @@ describe("KnowledgePage", () => {
         overrides: {
           embedding_models: [
             { id: "embed-1", name: "multilingual-e5-large", nickname: null, is_deprecated: false },
-            { ...other, nickname: null, is_deprecated: false }
+            { ...other, is_deprecated: false }
           ]
         }
       }),
@@ -712,7 +717,7 @@ describe("KnowledgePage", () => {
 
     // Each group's "select all" checkbox is told apart by its table's name.
     const first = screen.getByRole("table", { name: "multilingual-e5-large" });
-    const second = screen.getByRole("table", { name: "text-embedding-3" });
+    const second = screen.getByRole("table", { name: "Sökmodell (Berget)" });
     expect(within(first).getByRole("checkbox", { name: "Markera alla rader" })).toBeTruthy();
     expect(within(second).getByRole("link", { name: "Intranätet" })).toBeTruthy();
   });
@@ -1135,7 +1140,13 @@ describe("Kunskap on a phone", () => {
           makeCollection({
             id: "c2",
             name: "Arkiv",
-            embedding_model: { id: "embed-2", name: "text-embedding-3" }
+            embedding_model: {
+              id: "embed-2",
+              name: "text-embedding-3",
+              nickname: "Arkivmodell",
+              provider_name: "Berget",
+              is_org_enabled: false
+            }
           })
         ]
       })
@@ -1146,7 +1157,9 @@ describe("Kunskap on a phone", () => {
       })
     ).toBeTruthy();
     expect(
-      within(screen.getByRole("list", { name: /^text-embedding-3/ })).getByRole("link", {
+      within(
+        screen.getByRole("list", { name: "Arkivmodell (Berget) (Inaktiverad av administratör)" })
+      ).getByRole("link", {
         name: /^Arkiv/
       })
     ).toBeTruthy();

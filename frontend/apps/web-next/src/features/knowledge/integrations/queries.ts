@@ -84,9 +84,10 @@ export function sharepointTreeQueryOptions(
 ) {
   return queryOptions({
     queryKey: ["integrations", "sharepoint-tree", args],
-    queryFn: (): Promise<SharePointTree> =>
+    queryFn: ({ signal }): Promise<SharePointTree> =>
       unwrap(
         api.GET("/api/v1/integrations/{user_integration_id}/sharepoint/tree/", {
+          signal,
           params: {
             path: { user_integration_id: args.userIntegrationId },
             query: {
@@ -95,6 +96,38 @@ export function sharepointTreeQueryOptions(
               drive_id: args.driveId,
               folder_id: args.folderId,
               folder_path: args.folderPath
+            }
+          }
+        })
+      )
+  });
+}
+
+export function sharepointSearchQueryOptions(
+  api: EneoClient,
+  args: {
+    userIntegrationId: string;
+    spaceId: string;
+    siteId?: string;
+    driveId?: string;
+    q: string;
+    filters: string[];
+  }
+) {
+  return queryOptions({
+    queryKey: ["integrations", "sharepoint-search", args],
+    queryFn: ({ signal }) =>
+      unwrap(
+        api.GET("/api/v1/integrations/{user_integration_id}/sharepoint/search/", {
+          signal,
+          params: {
+            path: { user_integration_id: args.userIntegrationId },
+            query: {
+              space_id: args.spaceId,
+              site_id: args.siteId,
+              drive_id: args.driveId,
+              q: args.q,
+              filter: args.filters
             }
           }
         })

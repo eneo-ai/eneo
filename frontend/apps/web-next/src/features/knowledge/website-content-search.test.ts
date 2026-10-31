@@ -44,3 +44,7 @@ describe("website content URLs", () => {
     });
   });
 });
+
+it("keeps the Problems tab in a reloadable website URL", () => {
+  expect(readWebsiteContentSearch(new URLSearchParams("tab=problems")).tab).toBe("problems");
+});

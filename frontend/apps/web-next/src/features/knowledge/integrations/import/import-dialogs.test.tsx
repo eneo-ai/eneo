@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
@@ -22,7 +22,7 @@ vi.mock("@/features/spaces/use-space", async () => {
   return { useSpace: () => useSpaceFromQuery(() => space.current as Space) };
 });
 
-import { makeSpace } from "@/features/spaces/testing/space-fixture";
+import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
 import type { UserIntegration } from "../queries";
 import { pendingImports, resetPendingImports } from "../import-completion";
 import { ConfluenceImportDialog } from "./confluence-import";
@@ -279,9 +279,16 @@ it("SharePoint: tells how many imports failed when only some were queued", async
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Importera" }));
 
-  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-  expect(toast.warning).toHaveBeenCalledWith("1 av 2 importer köades. 1 misslyckades.");
+  expect(await within(dialog).findByRole("heading", { name: "Import köad" })).toBeTruthy();
+  expect(within(dialog).getByText("1 objekt kunde inte köas.")).toBeTruthy();
+  expect(within(dialog).getByText("Rutiner: Mappen finns inte")).toBeTruthy();
+  expect(within(dialog).getByRole("link", { name: "Visa importen" }).getAttribute("href")).toBe(
+    "/spaces/space-1/knowledge/integrations/ik-1"
+  );
+  expect(onOpenChange).not.toHaveBeenCalled();
   expect(toast.error).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getAllByRole("button", { name: "Stäng" }).at(-1)!);
+  expect(onOpenChange).toHaveBeenCalledWith(false);
 });
 
 it("SharePoint: shows why a batch could not start at all, and lets the import be tried again", async () => {
@@ -448,4 +455,93 @@ it("Confluence and SharePoint: the source search ignores a trailing space", asyn
   });
   expect(within(sites).getByRole("button", { name: "Ekonomi" })).toBeTruthy();
   expect(within(sites).queryByRole("button", { name: "Intranätet" })).toBeNull();
+});
+
+it("SharePoint: links a queued batch to the wrapper returned by the refreshed space", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation((path: string) =>
+    ok(
+      path.endsWith("/preview/")
+        ? { items: [{ key: "site", type: "site", name: "Intranätet", url: "https://sp/intra" }] }
+        : { items: [], current_path: "/", drive_id: "drive" }
+    )
+  );
+  api.POST.mockImplementation(() => {
+    space.current = makeSpace({
+      integrations: [makeIntegration({ id: "ik-1", wrapper_id: "wrapper-1" })]
+    });
+    return ok({
+      created_count: 1,
+      failed_count: 0,
+      items: [{ index: 0, name: "Intranätet", status: "created", integration_knowledge_id: "ik-1" }]
+    });
+  });
+  renderInApp(
+    <SharePointImportDialog
+      open
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("sharepoint")}
+    />
+  );
+  fireEvent.click(await screen.findByRole("button", { name: "Intranätet" }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Importera hela webbplatsen" }));
+  fireEvent.click(screen.getByRole("button", { name: "Importera" }));
+  await waitFor(() =>
+    expect(screen.getByRole("link", { name: "Visa importen" }).getAttribute("href")).toBe(
+      "/spaces/space-1/knowledge/integrations/wrapper/wrapper-1"
+    )
+  );
+});
+
+it("SharePoint: a late completed import cannot replace a reopened form or submit twice", async () => {
+  space.current = makeSpace();
+  api.GET.mockImplementation((path: string) =>
+    ok(
+      path.endsWith("/preview/")
+        ? { items: [{ key: "site", type: "site", name: "Intranätet", url: "https://sp/intra" }] }
+        : { items: [], current_path: "/", drive_id: "drive" }
+    )
+  );
+  let finish!: () => void;
+  api.POST.mockReturnValue(
+    new Promise((resolve) => {
+      finish = () =>
+        resolve({
+          data: {
+            created_count: 1,
+            failed_count: 0,
+            items: [
+              { index: 0, name: "Intranätet", status: "created", integration_knowledge_id: "ik-1" }
+            ]
+          },
+          response: new Response("{}")
+        });
+    })
+  );
+  const dialog = (open: boolean) => (
+    <SharePointImportDialog
+      open={open}
+      onOpenChange={() => {}}
+      onBack={() => {}}
+      integration={integration("sharepoint")}
+    />
+  );
+  const { rerender } = renderInApp(dialog(true));
+  fireEvent.click(await screen.findByRole("button", { name: "Intranätet" }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Importera hela webbplatsen" }));
+  fireEvent.click(screen.getByRole("button", { name: "Importera" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+  rerender(dialog(false));
+  rerender(dialog(true));
+  fireEvent.click(await screen.findByRole("button", { name: "Intranätet" }));
+  fireEvent.click(await screen.findByRole("checkbox", { name: "Importera hela webbplatsen" }));
+  fireEvent.click(screen.getByRole("button", { name: "Importerar..." }));
+  expect(api.POST).toHaveBeenCalledTimes(1);
+  await act(async () => {
+    finish();
+  });
+  await screen.findByRole("button", { name: "Importera" });
+  expect(screen.queryByRole("heading", { name: "Import köad" })).toBeNull();
+  expect(screen.getByRole("checkbox", { name: "Importera hela webbplatsen" })).toBeTruthy();
 });
