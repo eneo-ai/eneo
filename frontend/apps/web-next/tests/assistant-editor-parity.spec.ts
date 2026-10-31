@@ -184,7 +184,7 @@ test("explains model-specific settings and governed startup defaults", async ({ 
   const editor = `${space}/assistants/${assistant.id}/edit`;
   await page.goto(`${editor}?section=ai`);
   await expect(page.getByRole("combobox", { name: "Modellbeteende" })).toBeDisabled();
-  await expect(page.getByText(/modellspecifika parametrar/i)).toBeVisible();
+  await expect(page.locator("#assistant-model-behaviour-note")).toBeVisible();
   await expect(page.getByLabel("Top P")).toHaveAttribute("aria-describedby", /help/);
   await page.goto(`${editor}?section=mcp`);
   await expect(page.getByText("Webbsökning", { exact: true })).toBeVisible();

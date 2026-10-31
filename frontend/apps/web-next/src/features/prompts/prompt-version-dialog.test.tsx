@@ -151,3 +151,15 @@ it("clears a historical selection when the parent resource changes", async () =>
     (screen.getByRole("button", { name: "Återställ denna version" }) as HTMLButtonElement).disabled
   ).toBe(true);
 });
+
+it("names the dialog when opened after its parent was mounted closed", async () => {
+  const props = {
+    resource: { type: "assistant" as const, id: "assistant" },
+    onOpenChange: vi.fn(),
+    onUseVersion: vi.fn()
+  };
+  const view = renderInApp(<PromptVersionDialog {...props} open={false} />);
+  view.rerender(<PromptVersionDialog {...props} open />);
+  await screen.findByText("Current text");
+  expect(screen.getByRole("dialog", { name: "Prompthistorik" })).toBeTruthy();
+});

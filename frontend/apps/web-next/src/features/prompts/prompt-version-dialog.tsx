@@ -52,6 +52,7 @@ async function fetchPromptVersions(resource: PromptResource, signal: AbortSignal
 
 /** The dialog persists; its resource-scoped history/draft is discarded when it closes. */
 export function PromptVersionDialog(props: Props) {
+  const t = useTranslations();
   const leave = useRef<LeaveConfirmationHandle>(null);
   function changeOpen(next: boolean) {
     if (next) props.onOpenChange(true);
@@ -61,6 +62,7 @@ export function PromptVersionDialog(props: Props) {
   return (
     <Dialog
       isOpen={props.open}
+      aria-label={t("prompt_history")}
       onOpenChange={changeOpen}
       purpose="form"
       width={840}
