@@ -12,8 +12,8 @@ const catalog = vi.hoisted(() =>
   ["a", "b", "c"].map((id) => ({
     id,
     name: id,
-    token_limit: 1000,
-    supports_tool_calling: true,
+    token_limit: id === "b" ? 4000 : id === "c" ? 2000 : 1000,
+    supports_tool_calling: id !== "b",
     supported_model_kwargs: { temperature: { supported: true } }
   }))
 );
@@ -41,6 +41,10 @@ function show(assistant = initial, meter = false) {
         <output>
           {draft.modelId}:{draft.kwargs.temperature}:{String(draft.confirmed)}:
           {draft.effectiveModel?.id}
+        </output>
+        <output data-testid="effective-model">
+          {draft.toolModel?.id}:{String(draft.toolModel?.supports_tool_calling)}:
+          {draft.effectiveModel?.token_limit}
         </output>
         <button onClick={() => draft.changeModel("b")}>B</button>
         <button onClick={() => void draft.persist(draft.modelId, draft.kwargs)}>Retry model</button>
@@ -127,3 +131,31 @@ it("uses the governance-locked model for material even when the stored pick diff
   } as unknown as Assistant);
   expect(screen.getByText("a:1:true:c")).toBeTruthy();
 });
+
+it.each([
+  [true, "c:true:2000", "text-warning"],
+  [false, "b:false:4000", "text-muted-foreground"]
+])(
+  "uses the allowed policy model for capability and window (default=%s)",
+  async (withDefault, expected, tone) => {
+    api.POST.mockResolvedValue({
+      data: { file_tokens: 0, prompt_tokens: 1800, context_reserve_tokens: 0 },
+      response: new Response("{}")
+    });
+    show(
+      {
+        ...initial,
+        effective_config: {
+          models_enforced: true,
+          available_models: [catalog[1], catalog[2]],
+          default_model: withDefault ? catalog[2] : null,
+          locked_model: null
+        }
+      } as unknown as Assistant,
+      true
+    );
+    expect(screen.getByTestId("effective-model").textContent).toBe(expected);
+    const budget = await screen.findByRole("button", { name: /Kontextbudget:/ });
+    expect(budget.className).toContain(tone);
+  }
+);
