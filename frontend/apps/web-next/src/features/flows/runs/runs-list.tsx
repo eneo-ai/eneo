@@ -262,6 +262,9 @@ export function FlowRunsList({
     runs.dataUpdatedAt
   );
   const items = shown.items;
+  // A phone with nothing to filter yet (no runs, none being searched for) has no use for the
+  // three controls: they would be most of its screen. A search that finds nothing keeps them.
+  const showFilters = !phone || items.length > 0 || search !== "" || status !== null || mine;
 
   // Announces each run that moved on since the last answer; comparing with
   // what was seen makes a repeated pass over the same answer a no-op.
@@ -393,32 +396,34 @@ export function FlowRunsList({
       >
         {t("flow_runs_heading")}
       </Heading>
-      <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
-        <TextInput
-          label={t("flow_run_journey_search")}
-          description={t("flow_run_journey_search_hint")}
-          size="sm"
-          width={280}
-          startIcon={Search}
-          value={searchInput}
-          onChange={setSearchInput}
-        />
-        <Selector
-          label={t("flow_run_extras_status_filter")}
-          size="sm"
-          width={240}
-          value={status ?? ANY_STATUS}
-          onChange={(value) => setStatus(value === ANY_STATUS ? null : (value as RunStatusValue))}
-          options={[
-            { value: ANY_STATUS, label: `${t("flow_run_extras_status_any")}${countText(total)}` },
-            ...FLOW_RUN_STATUS_FILTER_ORDER.map((value) => ({
-              value,
-              label: `${t(runStatusView(value).labelKey)}${countText(counts?.[value])}`
-            }))
-          ]}
-        />
-        <CheckboxInput label={t("flow_runs_only_mine")} value={mine} onChange={setMine} />
-      </div>
+      {showFilters ? (
+        <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
+          <TextInput
+            label={t("flow_run_journey_search")}
+            description={t("flow_run_journey_search_hint")}
+            size="sm"
+            width={280}
+            startIcon={Search}
+            value={searchInput}
+            onChange={setSearchInput}
+          />
+          <Selector
+            label={t("flow_run_extras_status_filter")}
+            size="sm"
+            width={240}
+            value={status ?? ANY_STATUS}
+            onChange={(value) => setStatus(value === ANY_STATUS ? null : (value as RunStatusValue))}
+            options={[
+              { value: ANY_STATUS, label: `${t("flow_run_extras_status_any")}${countText(total)}` },
+              ...FLOW_RUN_STATUS_FILTER_ORDER.map((value) => ({
+                value,
+                label: `${t(runStatusView(value).labelKey)}${countText(counts?.[value])}`
+              }))
+            ]}
+          />
+          <CheckboxInput label={t("flow_runs_only_mine")} value={mine} onChange={setMine} />
+        </div>
+      ) : null}
       {runs.isPending ? (
         <LoadingState rows={3} label={t("flow_runs_loading")} />
       ) : runs.isError ? (

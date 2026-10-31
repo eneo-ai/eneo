@@ -639,7 +639,19 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 ) : null}
               </>
             ) : null}
-            {summary ? (
+            {summary && phone ? (
+              run?.evidence_access.can_read_evidence ? (
+                <FoldSection title={t("flow_run_extras_trace_heading")}>
+                  <RunTrace
+                    flow={flow}
+                    summary={summary}
+                    steps={stepViews}
+                    access={run.evidence_access}
+                    headingHidden
+                  />
+                </FoldSection>
+              ) : null
+            ) : summary ? (
               <RunTrace
                 flow={flow}
                 summary={summary}

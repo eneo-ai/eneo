@@ -610,6 +610,25 @@ describe("FlowRunsList on a phone", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("leaves out the filters while there is nothing to filter, and keeps them for a search that finds nothing", async () => {
+    setViewport("phone");
+    answerList([]);
+    withRun();
+    expect(await screen.findByText(messages.flow_runs_empty_title)).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: /Sök körningar/ })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: messages.flow_runs_only_mine })).toBeNull();
+    cleanup();
+
+    answerList([makeRunSummary({ id: "run-1" })]);
+    withRun();
+    const search = await screen.findByRole("textbox", { name: /Sök körningar/ });
+    // Searching for something that is not there leaves an empty list: the field stays.
+    answerList([]);
+    fireEvent.change(search, { target: { value: "finns inte" } });
+    await screen.findByText(/finns inte/);
+    expect(screen.getByRole("textbox", { name: /Sök körningar/ })).toBeTruthy();
+  });
+
   it("keeps the table on a tablet", async () => {
     setViewport("tablet-portrait");
     answerList([makeRunSummary({ id: "run-f", status: "failed" })]);

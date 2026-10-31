@@ -1668,7 +1668,8 @@ describe("FlowRunPage on a phone", () => {
     const steps = screen.getByRole("button", { name: messages.flow_runs_steps_heading });
     const input = screen.getByRole("button", { name: messages.flow_runs_input_heading });
     const usage = screen.getByRole("button", { name: messages.flow_runs_usage_heading });
-    for (const folded of [steps, input, usage]) {
+    const trace = screen.getByRole("button", { name: messages.flow_run_extras_trace_heading });
+    for (const folded of [steps, input, usage, trace]) {
       expect(folded.getAttribute("aria-expanded")).toBe("false");
     }
 
