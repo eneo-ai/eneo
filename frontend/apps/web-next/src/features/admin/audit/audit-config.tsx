@@ -337,7 +337,7 @@ export function AuditConfig() {
                       label={categoryLabel(t, category.category)}
                       isLabelHidden
                       value={category.enabled}
-                      isDisabled={busy}
+                      isDisabled={busy || !baselineKnown}
                       onChange={(enabled) => toggleCategory(category.category, enabled)}
                     />
                   </div>
@@ -354,7 +354,7 @@ export function AuditConfig() {
                                   ? t(`audit_action_${item.action}_description`)
                                   : undefined
                               }
-                              isDisabled={busy}
+                              isDisabled={busy || !baselineKnown}
                               onChange={(enabled) => toggleAction(item, enabled)}
                             />
                             {!item.enabled ? (

@@ -241,6 +241,52 @@ describe("AuditConfig", () => {
     expect(enabled("Användare borttagen")).toBe("true");
   });
 
+  it.each(["category", "action"] as const)(
+    "freezes the %s control after a committed write loses its response until reconciliation succeeds",
+    async (control) => {
+      await open();
+      fireEvent.click(screen.getByRole("button", { name: "Expandera alla" }));
+      const category = screen.getByRole("checkbox", { name: "Administratörsåtgärder" });
+      const action = screen.getByRole("checkbox", { name: "Användare skapad" });
+      fireEvent.click(action);
+      api.PATCH.mockImplementationOnce(() => {
+        actions = actions.map((item) =>
+          item.action === "user_created" ? { ...item, enabled: false } : item
+        );
+        return Promise.reject(failure());
+      });
+      failRefresh = true;
+      save();
+      await screen.findByText("Det gick inte att spara konfigurationen");
+      const warnsBeforeUnload = () => {
+        const event = new Event("beforeunload", { cancelable: true });
+        window.dispatchEvent(event);
+        return event.defaultPrevented;
+      };
+      expect(warnsBeforeUnload()).toBe(true);
+
+      act(() => (control === "category" ? category : action).click());
+      expect(enabled("Administratörsåtgärder")).toBe("true");
+      expect(enabled("Användare skapad")).toBe("false");
+      expect(screen.getByText("Du har osparade ändringar")).toBeTruthy();
+      expect(warnsBeforeUnload()).toBe(true);
+      for (const checkbox of screen.getAllByRole("checkbox")) {
+        expect(checkbox).toHaveProperty("disabled", true);
+      }
+      expect(api.PATCH).toHaveBeenCalledTimes(1);
+
+      failRefresh = false;
+      fireEvent.click(screen.getByRole("button", { name: "Läs in serverläget" }));
+      await waitFor(() => expect(action).toHaveProperty("disabled", false));
+      expect(category).toHaveProperty("disabled", false);
+      expect(enabled("Användare skapad")).toBe("false");
+      act(() => action.click());
+      expect(enabled("Användare skapad")).toBe("true");
+      expect(screen.getByText("Du har osparade ändringar")).toBeTruthy();
+      expect(warnsBeforeUnload()).toBe(true);
+    }
+  );
+
   it("uses server-normalized action values without leaving a false unsaved state", async () => {
     await open();
     normalize = true;
