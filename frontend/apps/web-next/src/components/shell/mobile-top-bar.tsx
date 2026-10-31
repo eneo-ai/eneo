@@ -14,6 +14,9 @@ import { useShell } from "./shell-context";
 /**
  * Phones and iPads held upright: menu, Eneo, search (the ⌘K palette), the
  * notification bells and "Ny konversation", 56 px high with 44 px targets.
+ * With text enlarged to about 125% or more (the bar is then narrower than
+ * 22 rem) the bells and "Ny konversation" leave it: their rem-sized buttons
+ * no longer fit and pushed the page sideways. Both stay in the drawer.
  * It gives way to a page's own header (`OWN_MOBILE_HEADER`: the chat's, a
  * PageBar) in CSS, in the frame's `group/shell`.
  */
@@ -21,7 +24,7 @@ export function MobileTopBar() {
   const t = useTranslations();
   const { openPalette } = useShell();
   return (
-    <header className="bg-ax-surface border-ax-border flex h-14 shrink-0 items-center gap-1 border-b px-1.5 group-has-[[data-own-mobile-header]]/shell:hidden max-md:group-has-[[data-own-phone-header]]/shell:hidden lg:hidden">
+    <header className="bg-ax-surface border-ax-border @container/topbar flex h-14 shrink-0 items-center gap-1 border-b px-1.5 group-has-[[data-own-mobile-header]]/shell:hidden max-md:group-has-[[data-own-phone-header]]/shell:hidden lg:hidden">
       {/* Astryx measures the layout after mount; reserve the toggle's space
           so the logo stays in place. */}
       <span className="flex size-11 shrink-0 items-center justify-center">
@@ -47,7 +50,7 @@ export function MobileTopBar() {
         onClick={() => openPalette()}
         className="size-11"
       />
-      <div className="flex items-center">
+      <div className="flex items-center @max-[22rem]/topbar:hidden">
         <NotificationBells />
       </div>
       <Button
@@ -57,7 +60,7 @@ export function MobileTopBar() {
         isIconOnly
         icon={<Icon icon={SquarePen} />}
         label={t("new_conversation")}
-        className="size-11"
+        className="size-11 @max-[22rem]/topbar:hidden"
       />
     </header>
   );
