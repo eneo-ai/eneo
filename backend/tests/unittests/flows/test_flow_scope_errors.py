@@ -378,6 +378,7 @@ async def test_flow_runtime_endpoints_reject_scope_mismatch(monkeypatch):
     run = _run(flow_id=flow_id, tenant_id=uuid4())
     run_service = AsyncMock()
     run_service.list_run_statuses.return_value = [run]
+    run_service.usage_for_listed_runs.return_value = {}
     run_service.count_run_statuses.return_value = dict.fromkeys(FlowRunStatus, 0)
     run_service.get_run_detail_with_result_files_and_usage.return_value = (
         SimpleNamespace(
@@ -998,6 +999,7 @@ async def test_tenant_scoped_user_api_key_loads_space_membership_check(monkeypat
 
     run_service = AsyncMock()
     run_service.list_run_statuses.return_value = [run]
+    run_service.usage_for_listed_runs.return_value = {}
     run_service.count_run_statuses.return_value = dict.fromkeys(FlowRunStatus, 0)
     container.flow_run_service.return_value = run_service
 
@@ -1119,6 +1121,7 @@ async def test_space_scoped_api_key_matching_space_succeeds(monkeypatch):
 
     run_service = AsyncMock()
     run_service.list_run_statuses.return_value = [run]
+    run_service.usage_for_listed_runs.return_value = {}
     run_service.count_run_statuses.return_value = dict.fromkeys(FlowRunStatus, 0)
     container.flow_run_service.return_value = run_service
 
