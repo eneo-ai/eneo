@@ -34,7 +34,6 @@ import { unwrap } from "@/lib/api/errors";
 import { pollWhile } from "@/lib/api/query";
 import { toastApiError } from "@/lib/api/toast";
 import { daysSince } from "@/lib/format";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { toast } from "@/lib/toast";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { ClientTime } from "@/components/composites/client-time";
@@ -97,10 +96,9 @@ function WebsiteStatusCell({
  */
 function WebsiteSyncedCell({ website }: { website: Website }) {
   const t = useTranslations();
-  const hydrated = useHydrated();
   const syncedAt = websiteSyncedAt(website);
   if (!syncedAt) return "—";
-  const isStale = hydrated && daysSince(syncedAt) >= STALE_SYNC_DAYS;
+  const isStale = daysSince(syncedAt) >= STALE_SYNC_DAYS;
   return (
     <span className="flex flex-col items-start gap-0.5">
       <ClientTime value={syncedAt} format="date" />

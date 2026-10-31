@@ -6,13 +6,7 @@ import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { setRoute } from "@/test/navigation";
-import {
-  noopShell,
-  renderInApp,
-  renderToHtml,
-  testAppContext,
-  testQueryClient
-} from "@/test/render";
+import { noopShell, renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import type { NavVariant } from "./routes";
 import { DesktopSideNav } from "./side-nav";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
@@ -355,13 +349,16 @@ describe("DesktopSideNav (main)", () => {
     expect(document.activeElement).toBe(toggle);
   });
 
-  it("renders the stored preference on the server, so the nav does not jump", () => {
-    // What the server layout sends when the cookie says "collapsed".
-    const html = renderToHtml(<DesktopSideNav variant="main" navId="side-nav" defaultCollapsed />, {
-      queryClient: seededClient()
-    });
-    expect(html).toContain('aria-label="Fäll ut sidomenyn"');
-    expect(html).not.toContain("Fäll ihop sidomenyn");
+  it("renders the stored preference on first mount", () => {
+    // The route reads the stored cookie before mounting the nav.
+    const { container } = renderInApp(
+      <DesktopSideNav variant="main" navId="side-nav" defaultCollapsed />,
+      {
+        queryClient: seededClient()
+      }
+    );
+    expect(container.innerHTML).toContain('aria-label="Fäll ut sidomenyn"');
+    expect(container.innerHTML).not.toContain("Fäll ihop sidomenyn");
   });
 });
 

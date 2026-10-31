@@ -1,11 +1,8 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Drives the real web-next UI (session-cookie auth) against a running backend.
-// Locally: start the backend (uvicorn :8123) + `bun run dev` (:3100), seed the
-// default user, then `bun run test:e2e`. In CI (ci.yml "Frontend E2E
-// (web-next)") the isolated docker stack serves the backend and the workflow
-// builds the app first, so the webServer only starts the production server.
-const PORT = process.env.E2E_PORT ?? "3100";
+// Tests use FastAPI's browser session. Set E2E_BASE_URL for a production build;
+// local development starts Vite with its same-origin backend proxy.
+const PORT = process.env.E2E_PORT ?? "3101";
 const EXTERNAL_BASE_URL = process.env.E2E_BASE_URL;
 
 export const STORAGE_STATE = "playwright/.auth/user.json";
@@ -33,14 +30,11 @@ export default defineConfig({
     baseURL: EXTERNAL_BASE_URL || `http://localhost:${PORT}`,
     trace: "on-first-retry"
   },
-  // Locally, reuse an already-running dev server (or start one). In CI, serve
-  // the build from the "Build web-next for E2E" step; ENEO_BACKEND_URL and
-  // SESSION_SECRET come from the job environment.
-  // E2E_BASE_URL points to an already-running Vite dev server or FastAPI build.
+  // Production CI supplies FastAPI's URL; local runs reuse or start Vite.
   webServer: EXTERNAL_BASE_URL
     ? undefined
     : {
-        command: process.env.CI ? `bun run start --port ${PORT}` : "bun run dev",
+        command: `bun run dev --port ${PORT}`,
         url: `http://localhost:${PORT}/login`,
         reuseExistingServer: !process.env.CI,
         timeout: 120_000

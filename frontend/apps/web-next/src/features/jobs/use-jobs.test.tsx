@@ -33,6 +33,14 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
 }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
+// Transport authentication has separate coverage in upload-session.test.tsx.
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  createApiEventSource: (url: string) => new EventSource(url),
+  onBrowserApiRequest: async ({ request }: { request: Request }) => request,
+  onRawRefusal: async () => {}
+}));
+
 const job = { id: "job-1", name: "Avtal.pdf", status: "in progress" } as Job;
 const api = vi.hoisted(() => ({
   items: [] as Job[],

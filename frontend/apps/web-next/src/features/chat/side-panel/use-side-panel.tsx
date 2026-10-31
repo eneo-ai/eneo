@@ -25,11 +25,7 @@ export function SidePanelProvider({ children }: { children: ReactNode }) {
  */
 export function useSidePanel(): SidePanelStore | null {
   const store = use(SidePanelContext);
-  useSyncExternalStore(
-    store?.subscribe ?? noSubscription,
-    store?.getVersion ?? zero,
-    store?.getVersion ?? zero
-  );
+  useSyncExternalStore(store?.subscribe ?? noSubscription, store?.getVersion ?? zero);
   return store;
 }
 

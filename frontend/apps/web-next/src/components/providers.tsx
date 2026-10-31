@@ -7,10 +7,6 @@ import { AstryxProvider } from "@/components/providers/astryx-provider";
 import { NonceProvider } from "@/components/providers/nonce";
 import { TooltipProvider } from "@/components/ui/tooltip";
 
-// Keep the shell's hydration in the provider bundle. A direct server import
-// can make Next assign this shared boundary to a page's client chunk instead.
-export { HydrationBoundary } from "@tanstack/react-query";
-
 export function Providers({
   nonce,
   children
@@ -19,8 +15,7 @@ export function Providers({
   nonce: string | undefined;
   children: React.ReactNode;
 }) {
-  // getQueryClient (not useState): a stable client that survives suspense
-  // re-renders without being recreated, per the TanStack SSR guide.
+  // The same cache serves the router and mounted query readers.
   const queryClient = getQueryClient();
 
   return (

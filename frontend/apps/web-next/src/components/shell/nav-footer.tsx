@@ -25,7 +25,7 @@ function OrganizationItem() {
   );
 }
 
-/** A plain anchor to another site, in a new tab (SideNavItem's own link is next/link). */
+/** A plain anchor to another site, in a new tab (SideNavItem's own link uses the app router). */
 function ExternalNavLink({ children, ...props }: ComponentProps<"a">) {
   return (
     <a {...props} target="_blank" rel="noopener noreferrer">

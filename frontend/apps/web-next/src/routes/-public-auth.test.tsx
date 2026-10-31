@@ -7,6 +7,8 @@ import { createTranslator } from "use-intl";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 
+vi.unmock("@/lib/link");
+
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/navigate-to", () => ({ navigateTo: navigate }));
 const GENERATION = "Eneo-Session-Generation";
@@ -52,10 +54,8 @@ beforeEach(async () => {
     });
   });
   vi.stubGlobal("fetch", fetcher);
-  vi.doMock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
-  vi.doMock("@/lib/link", () => import("@/lib/link.tanstack"));
   vi.doMock("@/lib/api/base", async () => ({
-    ...(await import("@/lib/api/base.vite")),
+    ...(await vi.importActual<typeof import("@/lib/api/base")>("@/lib/api/base")),
     API_BASE: window.location.origin
   }));
   // Loading the app's route modules is fixture setup, before the timed auth behavior.

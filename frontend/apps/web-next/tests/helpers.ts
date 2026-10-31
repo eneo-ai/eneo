@@ -39,14 +39,10 @@ export function collectAssetFailures(page: Page) {
 }
 
 /**
- * The chat stream request in either build: Next's /api/chat proxy, or the
- * backend's v3 conversations endpoint the Vite build calls directly.
+ * The backend conversation stream used by the app.
  */
 export function isChatStream(url: URL): boolean {
-  return (
-    url.pathname === "/api/chat" ||
-    (url.pathname === "/api/v1/conversations/" && url.searchParams.get("version") === "3")
-  );
+  return url.pathname === "/api/v1/conversations/" && url.searchParams.get("version") === "3";
 }
 
 /**
@@ -55,19 +51,16 @@ export function isChatStream(url: URL): boolean {
  * ordinary page requests still exercise the browser session cookie.
  */
 export async function fetchChatStream(route: Route) {
-  let headers: Record<string, string> | undefined;
-  if (process.env.E2E_BASE_URL) {
-    const request = route.request();
-    const login = await request
-      .frame()
-      .page()
-      .request.post(new URL("/api/v1/users/login/token/", request.url()).href, {
-        form: E2E_CREDENTIALS
-      });
-    expect(login.status(), "Stream fixture authentication").toBe(200);
-    const token: components["schemas"]["AccessToken"] = await login.json();
-    headers = { ...request.headers(), authorization: `Bearer ${token.access_token}` };
-  }
+  const request = route.request();
+  const login = await request
+    .frame()
+    .page()
+    .request.post(new URL("/api/v1/users/login/token/", request.url()).href, {
+      form: E2E_CREDENTIALS
+    });
+  expect(login.status(), "Stream fixture authentication").toBe(200);
+  const token: components["schemas"]["AccessToken"] = await login.json();
+  const headers = { ...request.headers(), authorization: `Bearer ${token.access_token}` };
   const response = await route.fetch({ headers });
   expect(response.status(), "Stream fixture response").toBe(200);
   return response;
@@ -75,7 +68,6 @@ export async function fetchChatStream(route: Route) {
 
 /** A successful API fixture belongs to the document that requested it. */
 export function sessionResponseHeaders(route: Route): Record<string, string> {
-  if (!process.env.E2E_BASE_URL) return {};
   const generation = route.request().headers()["eneo-session-generation"];
   if (!generation) throw new Error("Fixture request must identify its browser session");
   return { "Eneo-Session-Generation": generation };
@@ -185,9 +177,9 @@ export async function openCreateCollectionDialog(page: Page) {
   return dialog;
 }
 
-/** Test API requests use the same transport as the selected app build. */
+/** Test API requests go directly to FastAPI. */
 export function apiPath(path: string): string {
-  return `${process.env.E2E_BASE_URL ? "" : "/api/eneo"}/api/v1${path}`;
+  return `/api/v1${path}`;
 }
 
 /** A same-origin write returning the created resource's id; load an app page first. */
@@ -199,9 +191,9 @@ export async function apiPost(page: Page, path: string, data: object): Promise<s
 export async function apiPostJson<T>(page: Page, path: string, data: object): Promise<T> {
   // Cookie-authenticated writes require the browser's same-origin fetch metadata.
   const response = await page.evaluate(
-    async ({ url, data, browserSession }) => {
+    async ({ url, data }) => {
       const headers = new Headers({ "content-type": "application/json" });
-      if (browserSession) {
+      {
         const session = await fetch("/api/v1/auth/session/");
         const generation = session.headers.get("Eneo-Session-Generation");
         if (session.status !== 204 || !generation)
@@ -215,7 +207,7 @@ export async function apiPostJson<T>(page: Page, path: string, data: object): Pr
       });
       return { ok: response.ok, body: await response.text() };
     },
-    { url: apiPath(path), data, browserSession: Boolean(process.env.E2E_BASE_URL) }
+    { url: apiPath(path), data }
   );
   expect(response.ok, response.body).toBe(true);
   return JSON.parse(response.body) as T;

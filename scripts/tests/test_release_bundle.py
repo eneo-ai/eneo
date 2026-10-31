@@ -204,8 +204,8 @@ vm.runInNewContext(process.argv[1], {
             c: release.REGISTRY + c + "@sha256:" + "b" * 64 for c in release.COMPONENTS
         }
         result = release.bundle("2.3.0", "a" * 40, images)
-        self.assertEqual(len(result["images"]), 4)
-        self.assertIn("web-next", result["images"])
+        self.assertEqual(set(result["images"]), {"backend", "frontend", "tool-runtime"})
+        self.assertNotIn("web-next", result["images"])
         for bad in [{}, {**images, "backend": release.REGISTRY + "backend:latest"}]:
             with self.assertRaises(ValueError):
                 release.bundle("2.3.0", "a" * 40, bad)
@@ -420,7 +420,7 @@ class ComposeTests(unittest.TestCase):
                 "docker-compose.web-next.yml",
             ):
                 shutil.copy(ROOT / "docs/deployment" / name, root / name)
-            for name in ("backend", "frontend", "db", "web_next"):
+            for name in ("backend", "frontend", "db"):
                 (root / f"env_{name}.env").write_text("")
             images = {
                 c: release.REGISTRY + c + "@sha256:" + "b" * 64
@@ -462,20 +462,30 @@ class ComposeTests(unittest.TestCase):
             self.assertEqual(
                 omitted["services"]["backend"]["environment"]["TOOL_RUNTIME_URL"], ""
             )
-            # The beta overlay adds nothing until its profile is enabled, and
-            # then runs the bundle's web-next image against the same backend.
+            # Only opting into the overlay enables the backend-served Vite host.
+            self.assertNotIn("WEB_APP_ENABLED", services["backend"]["environment"])
             env["WEB_NEXT_HOST"] = "beta.example.com"
-            self.assertNotIn(
-                "web-next", config("docker-compose.web-next.yml")["services"]
-            )
+            beta = config("docker-compose.web-next.yml")["services"]
+            self.assertNotIn("web-next", beta)
+            self.assertEqual(beta["frontend"], services["frontend"])
+            backend = beta["backend"]
+            self.assertEqual(backend["image"], images["backend"])
+            for flag in ("WEB_APP_ENABLED", "BROWSER_SESSION_ENABLED"):
+                self.assertEqual(backend["environment"][flag], "true")
+            labels = backend["labels"]
+            rule = "Host(`beta.example.com`) && !(Path(`/internal-mcp`) || PathPrefix(`/internal-mcp/`))"
+            for router in ("eneo-web-next", "eneo-web-next-secure"):
+                self.assertEqual(labels[f"traefik.http.routers.{router}.rule"], rule)
+                self.assertEqual(labels[f"traefik.http.routers.{router}.service"], "eneo-backend-svc")
+                self.assertEqual(labels[f"traefik.http.routers.{router}.priority"], "20")
+            self.assertEqual(labels["traefik.http.routers.eneo-web-next.entrypoints"], "web")
+            self.assertEqual(labels["traefik.http.routers.eneo-web-next.middlewares"], "redirect-to-https")
+            self.assertEqual(labels["traefik.http.routers.eneo-web-next-secure.entrypoints"], "websecure")
+            self.assertEqual(labels["traefik.http.routers.eneo-web-next-secure.tls"], "true")
+            self.assertEqual(labels["traefik.http.routers.eneo-web-next-secure.tls.certresolver"], "letsencrypt")
             env["COMPOSE_PROFILES"] = "web-next"
-            beta = config("docker-compose.web-next.yml")["services"]["web-next"]
+            self.assertEqual(config("docker-compose.web-next.yml")["services"], beta)
             del env["COMPOSE_PROFILES"]
-            self.assertEqual(beta["image"], images["web-next"])
-            self.assertEqual(
-                beta["environment"]["ENEO_BACKEND_URL"], "http://backend:8000"
-            )
-            self.assertIn("backend", beta["depends_on"])
             env["FILE_REFERENCE_BASE_URL"] = "http://custom-backend:8000"
             custom = config()["services"]
             self.assertEqual(

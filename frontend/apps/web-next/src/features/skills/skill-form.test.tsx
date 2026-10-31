@@ -4,6 +4,8 @@ import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { SkillForm } from "./skill-form";
 
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+
 afterEach(cleanup);
 
 it("focuses the empty name field with its problem when an empty form is submitted", () => {

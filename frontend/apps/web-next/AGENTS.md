@@ -4,7 +4,7 @@ Rules for humans and AI agents working in `frontend/apps/web-next`. The repo
 root [AGENTS.md](../../../AGENTS.md) still applies (documentation and release
 changes).
 
-This app is the optional React/Next.js beta with Astryx. SvelteKit remains the
+This app is the optional React/Vite beta with Astryx. SvelteKit remains the
 primary frontend and the default for frontend development; work here must be
 explicitly intended for the beta. See
 [the frontend development policy](../../../AGENTS.md#frontend-development).
@@ -15,9 +15,8 @@ The UI rules below apply to web-next.
 On `feat/web-next-vite` and its slice branches, the target is a Vite SPA with
 TanStack Router and Query; FastAPI is the only server. Build framework-neutral
 React in `src/features`, `src/components` and `src/lib`, with routes in
-`src/routes`. The existing `src/app` layer is frozen until removal; integrate
-existing responsive changes and make only the wiring changes required by the
-migration. SvelteKit in `apps/web` is the production behaviour reference and
+`src/routes`. Next.js, its server routes and its standalone image are removed.
+Do not reintroduce `src/app`, Next imports or a frontend auth server. SvelteKit in `apps/web` is the production behaviour reference and
 must not be changed by migration slices.
 
 Follow the migration epic `eneo-web-next-vite-ded5` in Beads from the
@@ -234,27 +233,16 @@ settings uses the layout without `phone` and keeps one page on every width.
   `Theme`, Astryx's own strings in the active locale and the app's link
   (`@/lib/link`) for Astryx links. Don't add another app-wide `Theme`; a nested `<Theme>` for one region
   is fine.
-- **Contexts above the page hold still.** The page is its own Suspense
-  boundary and hydrates after the shell. A context provided above it (root
-  layout, `(app)` layout, the shell) that changes before the page has
-  hydrated — data arriving, a value flipped after hydration — makes React
-  throw the page's server HTML away and render it again. Keep such a
-  context's value to what doesn't change (actions); let the component that
-  shows changing data read it itself (a query, or a store it subscribes to,
-  as `useJobActivity` does).
-- **Colour mode**: next-themes owns it (the profile menu's `ThemeSubMenu` calls
-  `setTheme`). Its
-  nonce'd blocking script sets `.light`/`.dark` and `data-theme` on `<html>`
-  before first paint, and `globals.css` (section 5) pins `color-scheme` to that
-  class. Astryx stays on `mode="system"`: a context above the page that changes
-  right after hydration makes React client-render a page it has not revealed
-  yet (`astryx-provider.tsx`). For other client-only values use `useHydrated()`
-  (`src/lib/hooks/use-hydrated.ts`) instead of effect + setState, below the
-  page's providers.
+- **Colour mode**: next-themes owns the preference (the profile menu's
+  `ThemeSubMenu` calls `setTheme`). The nonce-bearing script in `index.html`
+  sets `.light`/`.dark` and `data-theme` on `<html>` before React starts.
+  `globals.css` pins `color-scheme` to that class, and Astryx stays on
+  `mode="system"` so its tokens follow the same setting. Browser values are
+  available on the first render; do not add hydration gates.
 - **Background jobs** (`src/features/jobs/`): the backend publishes every job
   status change after commit (`eneo/jobs/job_events.py`) and streams them per
   user as server-sent events; `job-events.ts` receives them through the
-  `/api/jobs/events` proxy (one EventSource per tab, browser reconnect, a
+  `/api/v1/jobs/events/` endpoint (one EventSource per tab, browser reconnect, a
   30 s retry after a refusal) and writes each update into the `["jobs"]`
   cache. `JobsProvider` still polls `GET /jobs` as the safety net (30 s while
   the feed is open; 2 s while it is down and something runs or was just
@@ -274,23 +262,21 @@ settings uses the layout without `phone` and keeps one page on every width.
   Source Serif 4 stays loaded as `font-voice` so the answer voice can be flipped
   back with one class. Type scale 14px / 1.2.
 - **App shell** (`src/components/shell/`): Astryx `SideNav` (collapsed state in
-  the `eneo_sidenav_collapsed` cookie, read by the layout), an admin mode under
+  the `eneo_sidenav_collapsed` cookie, read on first mount), an admin mode under
   `/admin`, Astryx `MobileNav` below 1024px (phones and an iPad held upright;
   markup that follows the shell uses `lg:`, not `md:`) and the ⌘K
   `CommandPalette`. A page header that replaces the phone top bar (the chat
   header, a pushed screen's `PageBar` with its back link) spreads
   `OWN_MOBILE_HEADER` and the top bar hides in CSS while it is on the page,
-  from the server render on. A space is pushed on phones only (decision 24:
+  from its first render. A space is pushed on phones only (decision 24:
   tablets show it with breadcrumbs under the top bar): its bar is
   `PageBar until="md"`, which spreads `OWN_PHONE_HEADER` instead. The chat
   header opens the drawer with
   `window.dispatchEvent(new CustomEvent(OPEN_NAV_EVENT))`
-  (`src/components/shell/routes.ts`). Keep state that changes after
-  hydration out of contexts above the page: React replaces a page it has not
-  hydrated yet with its loading state when such a context changes.
-- **Phones and tablets**: the root layout's `viewport` runs the page edge to
-  edge (`viewportFit: "cover"`), lets the Android keyboard resize the layout
-  (`interactiveWidget: "resizes-content"`) and colours the status bar with the
+  (`src/components/shell/routes.ts`).
+- **Phones and tablets**: `index.html` runs the page edge to
+  edge (`viewport-fit=cover`), lets the Android keyboard resize the layout
+  (`interactive-widget=resizes-content`) and colours the status bar with the
   surface token (`ThemeColor` follows an explicit Tema). Each safe-area inset
   has one owner: the shell frame pads the top and sides, `main#main-content`
   the bottom, the drawer's panel pads itself (`globals.css` section 14), and
@@ -308,8 +294,7 @@ settings uses the layout without `phone` and keeps one page on every width.
   many columns as the page has room for. A list row with a link is one
   target (globals.css 12b); put controls in its end slot.
 - **Navigation and links**: app code imports `@/lib/navigation` and
-  `@/lib/link`, never `next/navigation` or `next/link` (lint error; `src/app`
-  excepted until it is ported to the Vite build, which swaps both modules).
+  `@/lib/link`, which own the TanStack adapters. Next imports are lint errors.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
   `sonner` elsewhere). Errors and warnings don't time out; every toast has a
   close button; success and info close after 6 s. Sonner's stylesheet is
@@ -319,10 +304,9 @@ settings uses the layout without `phone` and keeps one page on every width.
 
 ## Routing (Vite)
 
-The Vite build (`bun run build:vite`) routes with TanStack Router:
+The Vite build (`bun run build`) routes with TanStack Router:
 `src/router.tsx` owns every router option, `src/routes/` holds the route
-files and `src/routes/__root.tsx` renders the providers of the Next root
-layout.
+files and `src/routes/__root.tsx` mounts the shared providers.
 
 - **Loading has no side effects.** `beforeLoad` and loaders also run when a
   link is hovered, so they never mutate: logout, a module ticket or an
@@ -356,9 +340,8 @@ layout.
   `QueryStateBoundary`.
 - **Search** is flat `URLSearchParams` (`src/lib/router/search.ts`): every
   value is a string, a repeated key a list.
-- **Navigation**: `vite.config.mts` aliases `@/lib/navigation` and
-  `@/lib/link` to their TanStack implementations (`*.tanstack.ts(x)`), typed
-  against the Next ones. The hooks report the page on screen until the next
+- **Navigation**: `@/lib/navigation` and `@/lib/link` own the shared TanStack
+  implementations. The hooks report the page on screen until the next
   one has loaded; `replaceUrl` is a router navigation in place (no history
   entry, no scroll reset, the page stays mounted). Test them in a real router
   with `renderWithRouter` (`src/test/router.tsx`).
@@ -369,8 +352,6 @@ layout.
 2. Then `className` with Tailwind utilities. Never `xstyle` or
    `stylex.create()`: this app has no StyleX compiler (Astryx ships compiled CSS).
 3. Import Astryx from subpaths: `import { Button } from "@astryxdesign/core/Button"`.
-   Interactive Astryx components are client components; server components can
-   render them with serialisable props.
 4. Icons: `lucide-react`.
 
 New code uses the prefixed **`ax-*` bridge** to Astryx tokens. The legacy
@@ -493,7 +474,7 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
 - `ClientTime` — the one way to show a date: `value`, `format: "date" |
 "date_long" | "date_time" | "relative" | "auto"` (`auto`, for lists: relative
   for the last week, then date and time). It renders in the viewer's time zone
-  after hydration, so server and client HTML never disagree. Where the text
+  on the first render. Where the text
   must go into a label (an accessible name), `useClientTimeText` returns the
   same string.
 - `ResourceCard` (`resource-tile.tsx`) — the card for assistants, apps and
@@ -518,22 +499,22 @@ Shared behaviour outside `composites`:
 - Settings switches that save on toggle: `useSettingSwitch`
   (`src/features/admin/use-setting-switch.ts`) — optimistic, reverts on error,
   queues a press made during a save.
-- Public pages (login, activate, …) use `PublicPage`
-  (`src/app/(public)/public-page.tsx`): one `main`, one `h1` and the
+- Public pages (login, password change, …) use `PublicPage`
+  (`src/features/auth/public-page.tsx`): one `main`, one `h1` and the
   accessibility statement link.
 
 ## CSP
 
 Production allows `<style>` elements only with the request nonce
 (`style-src 'self' 'nonce-…'`); inline `style=""` attributes are allowed. It
-has no `'unsafe-eval'`. Development allows both (`src/proxy.ts`), so only the
-production build shows these violations. Never loosen the policy.
+has no `'unsafe-eval'`. FastAPI owns this policy (`backend/src/eneo/server/web_app.py`). The Vite dev server sends no CSP; verify against the production
+build served by FastAPI. Never loosen the policy.
 
 - The Eneo theme is pre-built, so `Theme` injects nothing. Never pass a runtime
   `defineTheme()` object to `<Theme>`; runtime themes inject `<style>` tags.
 - `frame-src` allows `blob:` (file previews) and the one origin interactive
-  tool views (MCP Apps) are served from, `MCP_APP_CONTENT_ORIGIN` (the
-  backend's `MCP_APP_CONTENT_BASE_URL`); the backend in turn frames a view
+  tool views (MCP Apps) are served from, derived from the backend's
+  `MCP_APP_CONTENT_BASE_URL`; the backend in turn frames a view
   only for its `PUBLIC_ORIGIN` and the origins in `MCP_APP_HOST_ORIGINS`, so
   list this app's origin there when testing views here. The Word preview
   builds a same-origin `srcdoc` frame and stamps the nonce on every `<style>`
@@ -542,9 +523,9 @@ production build shows these violations. Never loosen the policy.
   production: `CodeBlock`/`CodeEditor` syntax colours (don't use them; code
   fences render through Streamdown's `@streamdown/code`) and `DateInput`'s
   engine probe (falls back to a pointer heuristic). Chat's stream-scroll rule
-  is server-rendered with the nonce in `src/app/layout.tsx`; Astryx skips its
+  is in `index.html` with the response nonce; Astryx skips its
   own injection when that element is there.
-- Zod probes for eval on its first object parse; `src/instrumentation-client.ts`
+- Zod probes for eval on its first object parse; `src/main.tsx`
   sets `jitless` so it doesn't (Zod's switch for strict CSPs).
 - Sonner injects its stylesheet at runtime unless patched:
   `frontend/patches/sonner@2.0.8.patch` makes the Toaster import the static
@@ -553,16 +534,15 @@ production build shows these violations. Never loosen the policy.
   fails if a `<style>` appears).
 - e2e specs import `{ expect, test }` from `tests/csp.ts`, which fails a test
   on any `securitypolicyviolation`, so the production build is checked too.
-- A server component that needs the nonce reads `(await headers()).get("x-nonce")`
-  (see `src/app/layout.tsx`). Client code gets it from `useNonce()`: the root
-  layout hands it to `Providers`, whose `NonceProvider`
-  (`src/components/providers/nonce.tsx`) also sets `__webpack_nonce__`, where
-  get-nonce looks. That covers react-remove-scroll's scroll lock (Radix), and
-  the legacy Select passes it to Radix's viewport; `tests/csp.spec.ts` opens one.
+- `src/main.tsx` reads the document nonce and sets `__webpack_nonce__` before
+  importing UI modules. `useNonce()` reads the same value from `NonceProvider`
+  (`src/components/providers/nonce.tsx`). This covers react-remove-scroll's
+  scroll lock, and the legacy Select passes it to Radix's viewport;
+  `tests/csp.spec.ts` opens one.
 
 ## Text and i18n
 
-- use-intl, locales `sv` (default) and `en`. `switchLocale` writes the `NEXT_LOCALE` preference cookie and reloads the document so React, router titles and boot data change language together. `AppIntlProvider` owns the Vite app's viewer time zone. The frozen Next layout keeps its existing provider until removal; changing its context during partial hydration can discard server-rendered pages. Calendar dates and backend day aggregates keep their own semantics.
+- use-intl, locales `sv` (default) and `en`. `switchLocale` writes the `NEXT_LOCALE` preference cookie and reloads the document so React, router titles and boot data change language together. `AppIntlProvider` owns the Vite app's viewer time zone. Calendar dates and backend day aggregates keep their own semantics.
   No hardcoded UI text (`eneo/no-hardcoded-text`).
 - `src/lib/i18n/messages/{sv,en}.json` are generated; never edit them.
   `bun run i18n:convert` builds them from the SvelteKit app's catalogs
@@ -600,11 +580,13 @@ production build shows these violations. Never loosen the policy.
   - `renderInApp(ui, { queryClient?, appContext?, shell?, route? })` renders
     with the app's providers (use-intl in Swedish, Astryx, React Query with the
     app's 30 s staleTime and no retries, app and shell context); also
-    `renderHookInApp` and `renderToHtml` (server render). Build app context with
+    `renderHookInApp`. Build app context with
     `testAppContext({ permissions: ["admin"], settings: { … } })`; don't mock
     `@/components/providers/app-context`.
   - Navigation: `vi.mock("@/lib/navigation", () => import("@/test/navigation"))`,
-    then the `route` option or `setRoute("/x?tab=y")`.
+    then the `route` option or `setRoute("/x?tab=y")`. Component tests use plain
+    anchors by default. Real-router tests call `vi.unmock("@/lib/link")` and
+    use `renderWithRouter` from `src/test/router.tsx`.
   - `src/test/setup-dom.ts` fills in what jsdom lacks and behaves like Chromium:
     `setViewport("phone" | "desktop" | {…})` drives `matchMedia`,
     `reportResize(el, { height })` drives ResizeObserver, `<dialog>` focuses
@@ -615,11 +597,11 @@ production build shows these violations. Never loosen the policy.
   dialogs, menus and the palette open) and the flows in the other specs, all
   under the fixture from `tests/csp.ts` (CI: "Frontend E2E (web-next)"): it
   fails a test on a CSP violation, and its `goto` and `reload` wait until the
-  page has hydrated, since a click on server HTML before that goes nowhere.
+  app has mounted.
   Successful authenticated API fixtures use `sessionResponseHeaders(route)`
   from `tests/helpers.ts` to preserve the requesting document's session.
-  Vite-only cases also need `test.skip(!process.env.E2E_BASE_URL, reason)`:
-  `@vite` selects the Vite subset but does not exclude a case from Next's run.
+  CI runs the complete suite against FastAPI. Built-asset and production CSP
+  cases require `E2E_BASE_URL`; the default local server is Vite development.
 - Check new UI in light and dark mode, with the keyboard, and at phone width
   (the full manual protocol is in ACCESSIBILITY.md).
 

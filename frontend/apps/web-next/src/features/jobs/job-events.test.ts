@@ -5,6 +5,11 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { JOB_EVENTS_PATH } from "@/lib/api/base";
 import { FakeEventSource, installFakeEventSource } from "./job-events.test-support";
 
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  createApiEventSource: (url: string) => new EventSource(url)
+}));
+
 type Module = typeof import("./job-events");
 let events: Module;
 

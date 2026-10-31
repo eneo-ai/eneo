@@ -60,8 +60,7 @@ const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => listeners.delete(listener);
 };
-const NONE: readonly PendingSync[] = [];
 
 export function usePendingSyncs(): readonly PendingSync[] {
-  return useSyncExternalStore(subscribe, pendingSyncs, () => NONE);
+  return useSyncExternalStore(subscribe, pendingSyncs);
 }

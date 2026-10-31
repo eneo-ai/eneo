@@ -26,8 +26,15 @@
  */
 import { cleanup } from "@testing-library/react";
 import { toast } from "sonner";
-import { afterEach } from "vitest";
+import { afterEach, vi } from "vitest";
 import { resetNavigation } from "./navigation";
+
+// Component tests use anchors without a router. Navigation/route tests opt into
+// the real TanStack link with vi.unmock("@/lib/link").
+vi.mock("@/lib/link", async () => {
+  const { Link } = await import("./navigation");
+  return { Link, default: Link };
+});
 
 // Viewport and matchMedia
 

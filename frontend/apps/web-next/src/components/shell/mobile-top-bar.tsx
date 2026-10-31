@@ -22,8 +22,8 @@ export function MobileTopBar() {
   const { openPalette } = useShell();
   return (
     <header className="bg-ax-surface border-ax-border flex h-14 shrink-0 items-center gap-1 border-b px-1.5 group-has-[[data-own-mobile-header]]/shell:hidden max-md:group-has-[[data-own-phone-header]]/shell:hidden lg:hidden">
-      {/* Astryx's toggle only renders once the phone layout is known (after
-          hydration); the slot keeps the logo from shifting when it appears. */}
+      {/* Astryx measures the layout after mount; reserve the toggle's space
+          so the logo stays in place. */}
       <span className="flex size-11 shrink-0 items-center justify-center">
         <MobileNavToggle label={t("shell_open_menu")} className="size-11" />
       </span>

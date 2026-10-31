@@ -40,7 +40,7 @@ export function AccountProfile() {
       </SettingsRow>
       {/* The row title is the visible label; the selector's own (hidden) label
           gives the combobox the same name. The current locale (the
-          NEXT_LOCALE cookie, read by src/lib/i18n/request.ts) is the value. */}
+          NEXT_LOCALE cookie, read by src/boot.ts) is the value. */}
       <SettingsRow title={t("language")}>
         <Selector
           label={t("language")}

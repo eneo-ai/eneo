@@ -1351,50 +1351,48 @@ backend and every worker.
 - [Object Content Storage](/guides/object-content-storage) - Configure SeaweedFS, MinIO, backups, and readiness
 - [Release SBOMs and attestations](/docs/release-sboms) - Verify shipped image digests and provenance
 
-## Run the Next beta alongside the existing app
+<span id="run-the-next-beta-alongside-the-existing-app" />
 
-The existing Svelte frontend remains `ghcr.io/eneo-ai/eneo-frontend`. The optional
-Next frontend uses `ghcr.io/eneo-ai/eneo-web-next`, published and pinned in the
-same release bundle (`release.env` sets `ENEO_WEB_NEXT_IMAGE`). Deploy both
-against **one backend** from one bundle. They share accounts, permissions,
-conversations, assistants, files, workers and database changes. Beta writes are
-real writes to the same data; this is not a separate sandbox.
+## Run the React beta alongside the existing app
 
-Use a separate HTTPS hostname, for example `beta.example.com`, rather than a
-path prefix. Keep the existing app and backend `PUBLIC_ORIGIN` unchanged.
-The beta proxies API and streaming requests server-side to the shared backend.
-No additional database, Redis, worker or backend instance is needed.
+The optional React/Vite app is built into `ghcr.io/eneo-ai/eneo-backend`.
+FastAPI serves its pages, assets, API and authentication callbacks. There is no
+separate `eneo-web-next` image, Node server or frontend session secret. The
+Svelte frontend remains `ghcr.io/eneo-ai/eneo-frontend` on its existing host.
+
+Deploy both against **one backend** from one release bundle. They share accounts,
+permissions, conversations, assistants, files, workers and database changes.
+Beta writes change the same data; this is not a separate sandbox.
+
+Choose a separate HTTPS hostname for a parallel beta. The names below are
+examples: each installation supplies its own hostname. Keep the Svelte app and
+backend `PUBLIC_ORIGIN` unchanged. No additional database, Redis, worker or
+backend instance is needed.
 
 1. Back up the existing database and storage, and rehearse the upgrade on staging.
-   Apply backend migrations once with the backend release. The beta's
-   feedback/provider-status migrations follow the release's existing chain;
-   confirm `alembic heads` reports a single head.
-2. Copy `docs/deployment/env_web_next.template` to `env_web_next.env`. Generate a
-   separate `SESSION_SECRET` with `openssl rand -base64 48`, and set
-   `LEGACY_APP_URL=https://app.example.com` for the return link in the beta profile
-   menu. Protect the file as you protect other deployment secrets.
-3. Set `WEB_NEXT_HOST=beta.example.com` in the deployment `.env`. The image
-   comes from the release bundle's `ENEO_WEB_NEXT_IMAGE`, so the beta always
-   runs the build verified with the backend you deploy. Merge the optional
-   overlay into the reference stack:
+   Apply backend migrations once with the backend release; confirm
+   `alembic heads` reports a single head.
+2. Set `WEB_NEXT_HOST=beta.example.com` in the deployment `.env`. Configure
+   `LEGACY_APP_URL=https://app.example.com` in `env_backend.env` for the return
+   link in the beta profile menu. Add the optional overlay to your existing
+   Compose invocation, preserving any storage or module overlays:
 
    ```bash
    docker compose --env-file .env --env-file release.env \
-     -f docker-compose.yml -f docker-compose.web-next.yml --profile web-next up -d
+     -f docker-compose.yml -f docker-compose.web-next.yml up -d
    ```
 
-4. For backend-managed federation, add
+   The overlay enables `WEB_APP_ENABLED` and `BROWSER_SESSION_ENABLED` on the
+   backend and routes the beta host to it with HTTPS. It excludes `/internal-mcp`
+   and its subpaths from public ingress. The Svelte service and its routing stay
+   in place. Both flags remain off by default when the overlay is absent.
+3. For generic OIDC federation, add
    `https://beta.example.com/login/callback` to each applicable federation
    configuration's `additional_redirect_uris`, and register the same URI with the
-   identity provider. The existing canonical callback stays registered.
-   Use backend-managed authentication for the beta rollout. The separate
-   frontend-managed OIDC flow remains experimental: concurrent requests can reuse
-   a one-time rotating refresh token and invalidate the session. Refresh ownership
-   is not coordinated across requests or replicas. Before releasing that mode,
-   implement shared refresh coordination and validate the intended provider's
-   rotation behavior. Its development configuration uses the beta's `OIDC_*`
-   variables and the client callback `https://beta.example.com/auth/callback`.
-5. For SharePoint and Confluence, retain `OAUTH_CALLBACK_URL` for the existing UI
+   identity provider. Keep the existing canonical callback registered. Identity
+   providers, including MobilityGuard, use the backend's federation flow; the
+   React app has no separate OIDC client.
+4. For SharePoint and Confluence, retain `OAUTH_CALLBACK_URL` for the existing UI
    and add this backend runtime variable (a JSON array):
 
    ```dotenv
@@ -1406,17 +1404,21 @@ No additional database, Redis, worker or backend instance is needed.
    callback to the initiating user's single-use OAuth state. Existing clients
    that omit a callback keep using the default. Restart the backend after changing
    its environment; finish or restart in-flight integration logins during upgrade.
+5. If MCP Apps are enabled, add the beta origin to `MCP_APP_HOST_ORIGINS` in
+   `env_backend.env`, retaining any existing entries:
 
+   ```dotenv
+   MCP_APP_HOST_ORIGINS=["https://beta.example.com"]
+   ```
+
+   Keep `MCP_APP_CONTENT_BASE_URL` on a separate origin from both frontends.
+   This permits the beta to frame tool views without weakening their isolation.
 6. Verify password/federated login, logout, streaming chat, files, tenant
-   permissions and both integration providers in each UI before inviting users.
-   Each UI has its own host-only session cookie. SSO can reuse the provider session,
-   but a local logout in one UI does not necessarily log out the other.
+   permissions, tool views and both integration providers in each UI before
+   inviting users. Each UI has its own host-only session cookie. SSO can reuse
+   the provider session, but a local logout in one UI does not log out the other.
 
-### Settings for the backend-served web app (not active yet)
-
-The backend now reads these optional variables. Nothing needs to be set: they
-prepare the move of the beta to a web app served by the backend, and later
-releases say when to turn them on.
+### Backend image and runtime settings
 
 The backend image includes the Vite build at `/app/web-dist`. Node and Bun are
 used only during the build; the running image remains Python-only. The web build
@@ -1428,25 +1430,36 @@ If you build the backend image yourself, run this from the repository root:
 docker buildx build --build-context web=./frontend -t eneo-backend:local backend
 ```
 
-The named `web` context is required. The initial Vite shell adds about 4.1 MB to
-the uncompressed image; this grows as more routes are ported. Deployments using
-the published images need no Compose changes, and `WEB_APP_ENABLED` remains off
-by default.
+The named `web` context is required. Published backend images already include
+the build. Configure the following in `env_backend.env`; the optional Compose
+overlay sets the two enable flags itself.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `BROWSER_SESSION_ENABLED` | `false` | Accept the backend's browser session cookie. |
 | `WEB_APP_ENABLED` | `false` | Serve the web app from the backend. |
-| `SHOW_HELP_CENTER` | `false` | Same meaning as in `env_web_next.env`. |
-| `HELP_CENTER_URL`, `LEGACY_APP_URL`, `ACCESSIBILITY_STATEMENT_URL`, `REQUEST_INTEGRATION_FORM_URL` | unset | Same values as in `env_web_next.env`; blank counts as unset. |
+| `SHOW_HELP_CENTER` | `false` | Show the configured help-center link. |
+| `HELP_CENTER_URL` | unset | Help-center destination. |
+| `LEGACY_APP_URL` | unset | Return link to the existing Svelte app. |
+| `ACCESSIBILITY_STATEMENT_URL` | unset | Link to the installation's accessibility statement. |
+| `REQUEST_INTEGRATION_FORM_URL` | unset | Destination for integration requests. |
 
-The backend gives these to the web app at `GET /api/v1/runtime-config`. When a
-release says to, set them in `env_backend.env` with the same values as in
-`env_web_next.env`; once the backend serves the main host, only the backend copy
-is used. Links must be absolute `http(s)` URLs: the backend drops any other and,
-with either flag on, names it in a startup warning. The web app frames MCP app
-views from the origin of `MCP_APP_CONTENT_BASE_URL`, so `MCP_APP_CONTENT_ORIGIN`
-is not needed in the backend.
+The backend exposes public runtime settings at `GET /api/v1/runtime-config`.
+Blank links count as unset. Links must be absolute `http(s)` URLs: the backend
+drops any other value and, with either flag on, names it in a startup warning.
+The web app frames MCP views from the origin of `MCP_APP_CONTENT_BASE_URL`;
+there is no separate frontend `MCP_APP_CONTENT_ORIGIN` setting.
+
+Outside development, enabling either browser flag makes `/docs` and `/redoc`
+(including the SCIM documentation pages) return 404. Their third-party scripts
+must not run on the session's origin. `/openapi.json` remains available for API
+tools and documentation clients.
+
+For a local test installation that previously ran the Next beta, remove the
+`web-next` entry from `COMPOSE_PROFILES` and remove the unused `env_web_next.env`
+after moving its public links into `env_backend.env`. Recreate the stack with
+the overlay above and `up -d --remove-orphans` to remove the old standalone
+container. Keep other active profiles and overlays.
 
 With `ENVIRONMENT=development`, the backend refuses to start with
 `BROWSER_SESSION_ENABLED=true` unless `PUBLIC_ORIGIN` is a `localhost` or
@@ -1468,8 +1481,9 @@ are required. The invitation appears in the signed-in shell and opens a new tab,
 leaving the current app available. Setting the flag back to `false` hides it; the
 beta remains reachable by its URL. The banner is discoverability, not access control.
 
-To withdraw the beta, disable the invitation and stop the `web-next` service or
-remove its ingress. Keep the shared backend and database running. Do not downgrade
+To withdraw the beta, disable the invitation, remove the beta overlay from the
+Compose invocation and recreate the backend so its beta ingress labels and
+enable flags are removed. Keep the shared backend and database running. Do not downgrade
 the shared database simply to turn off the beta; a backend rollback is a separate
 operation that requires a tested migration/restore plan and preserved user data.
 

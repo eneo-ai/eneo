@@ -14,7 +14,8 @@ const session = vi.hoisted(() => ({
   reload: vi.fn(),
   cleanup: vi.fn()
 }));
-vi.mock("@/lib/api/refusal", () => ({
+vi.mock("@/lib/api/refusal", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/refusal")>()),
   getSessionSnapshot: () => session.snapshot,
   subscribeSession: (listener: () => void) => {
     session.listeners.add(listener);

@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { MEDIA } from "@/lib/breakpoints";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router, setRoute } from "@/test/navigation";
-import { renderInApp, renderToHtml, testAppContext, testQueryClient } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { AppShellFrame } from "./app-shell";
 import { OPEN_NAV_EVENT } from "./routes";
@@ -155,21 +155,20 @@ describe("AppShellFrame breakpoint", () => {
 describe("AppShellFrame on a phone", () => {
   beforeEach(() => setViewport("phone"));
 
-  it("gives way to a page's own header in CSS, already in the server render", () => {
+  it("gives way to a page's own header in CSS", () => {
     // No state and no route list: the top bar is in every render and the
     // frame's :has() hides it while the page carries OWN_MOBILE_HEADER, so it
     // is right before hydration, while a page streams in and when a chat
     // fails. jsdom applies no stylesheet; tests/shell-headers.spec.ts checks
     // what users see.
     setRoute("/spaces/s1/chat");
-    const html = renderToHtml(
+    const { container } = renderInApp(
       <AppShellFrame>
         <div {...OWN_MOBILE_HEADER} />
       </AppShellFrame>,
       { queryClient: seededClient() }
     );
-    const doc = new DOMParser().parseFromString(html, "text/html");
-    const topBar = doc.querySelector("header");
+    const topBar = container.querySelector("header");
     expect(topBar?.className).toContain("group-has-[[data-own-mobile-header]]/shell:hidden");
     // A space's header replaces it on phones only (OWN_PHONE_HEADER).
     expect(topBar?.className).toContain("max-md:group-has-[[data-own-phone-header]]/shell:hidden");

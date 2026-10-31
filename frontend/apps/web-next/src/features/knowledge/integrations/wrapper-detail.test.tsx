@@ -4,7 +4,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router, setRoute } from "@/test/navigation";
-import { renderInApp, renderToHtml, testQueryClient } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 
 type Answer = { data?: unknown; error?: unknown; status?: number };
@@ -36,18 +36,15 @@ const toasts = vi.hoisted(() => ({
 vi.mock("@/lib/toast", () => ({ toast: toasts }));
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
-/** The props each next/link gets: Astryx's links too, through the app's LinkProvider. */
+/** The props each the app link gets: Astryx's links too, through the app's LinkProvider. */
 const links = vi.hoisted(() => [] as Record<string, unknown>[]);
-vi.mock("@/lib/link", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("@/lib/link")>();
+vi.mock("@/lib/link", async () => {
+  const { Link } = await import("@/test/navigation");
   const { createElement } = await import("react");
   return {
     default: (props: Record<string, unknown>) => {
       links.push(props);
-      return createElement(
-        actual.default,
-        props as unknown as Parameters<typeof actual.default>[0]
-      );
+      return createElement(Link, props as unknown as Parameters<typeof Link>[0]);
     }
   };
 });
@@ -626,32 +623,26 @@ describe("WrapperDetail in Swedish", () => {
   const overviewOrder = (root: ParentNode) =>
     [...root.querySelectorAll("table tbody tr")].map((row) => row.querySelector("a")?.textContent);
 
-  it("orders the folders by the Swedish alphabet on the server and in the browser alike", () => {
+  it("orders the folders by the Swedish alphabet", () => {
     state.space = makeSpace({
       integrations: folders.map((item) => makeIntegration({ ...folder, ...item }))
     });
     setRoute("/spaces/space-1/knowledge/integrations/wrapper/w1");
-    const server = document.createElement("div");
-    server.innerHTML = renderToHtml(<WrapperDetail wrapperId="w1" loaded={served()} />);
     const { container } = renderInApp(<WrapperDetail wrapperId="w1" loaded={served()} />);
 
-    for (const root of [server, container]) {
-      expect(folderOrder(root)).toEqual(["/Arkiv", "/Vuxen", "/Äldreomsorg"]);
-      expect(overviewOrder(root)).toEqual(["Arkiv", "Vuxen", "Äldreomsorg"]);
-    }
+    expect(folderOrder(container)).toEqual(["/Arkiv", "/Vuxen", "/Äldreomsorg"]);
+    expect(overviewOrder(container)).toEqual(["Arkiv", "Vuxen", "Äldreomsorg"]);
   });
 
-  it("writes document counts with the locale's digit grouping on the server and in the browser", () => {
+  it("writes document counts with the locale's digit grouping", () => {
     state.space = makeSpace({
       integrations: folders.map((item) => makeIntegration({ ...folder, ...item }))
     });
     setRoute("/spaces/space-1/knowledge/integrations/wrapper/w1");
-    const html = renderToHtml(<WrapperDetail wrapperId="w1" loaded={served()} />);
     renderInApp(<WrapperDetail wrapperId="w1" loaded={served()} />);
 
     // 2 600 + 12 + 12, grouped with a no-break space as in Swedish (the
     // queries below see it as a plain space; not "2,624" as in English).
-    expect(html).toContain("2\u00a0624");
     const searchable = screen.getByText("Sökbara dokument").closest("div")!;
     expect(within(searchable).getByText("2 624")).toBeTruthy();
     const arkiv = within(screen.getByRole("table", { name: "Mappar i Byggnad" }))

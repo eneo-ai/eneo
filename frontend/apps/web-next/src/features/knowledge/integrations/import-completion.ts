@@ -82,7 +82,7 @@ function sessionStorageOrNull(): Storage | null {
   }
 }
 
-// Read on first use: the server render has no sessionStorage.
+// Read on first use, including when browser storage is unavailable.
 let store: PendingImports | null = null;
 function pendingStore(): PendingImports {
   store ??= createPendingImports(sessionStorageOrNull());

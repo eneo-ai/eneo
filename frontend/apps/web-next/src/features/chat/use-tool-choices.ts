@@ -30,7 +30,6 @@ const AUTO_ACCEPT_TOOLS_STORAGE_KEY = "autoAcceptToolsEnabled";
  * they make; external views ask for each call regardless.
  */
 export function autoAcceptToolsPreference(): boolean {
-  if (typeof window === "undefined") return true;
   try {
     return window.localStorage.getItem(AUTO_ACCEPT_TOOLS_STORAGE_KEY) !== "false";
   } catch {
@@ -75,11 +74,7 @@ export function useToolChoices(partner: ChatPartner) {
     () => (preferenceContext ? readMcpPreferencesRaw(preferenceContext) : null),
     [preferenceContext]
   );
-  const rawPreferences = useSyncExternalStore(
-    subscribeMcpPreferences,
-    readPreferenceSnapshot,
-    () => null
-  );
+  const rawPreferences = useSyncExternalStore(subscribeMcpPreferences, readPreferenceSnapshot);
   const savedPreferences = useMemo(() => parseMcpPreferences(rawPreferences), [rawPreferences]);
   const defaultDisabledPreferenceIds = useMemo(
     () => [

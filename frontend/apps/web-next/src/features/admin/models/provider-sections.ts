@@ -235,7 +235,7 @@ export interface ModelsAttention {
 /**
  * Real problems the provider and model data expose, for the page banner.
  * `today` dates model deprecation; key expiry is against `viewerToday`, the
- * viewer's own date, and left out while that is unknown (before hydration).
+ * viewer's own date, when provided.
  */
 export function modelsAttention(
   sections: ProviderSection[],

@@ -101,7 +101,7 @@ jobs:
           cache-to: type=gha,mode=max,scope=${{ inputs.component }}
       # Cover reused images too; source/provenance checks do not establish CVE status.
       - name: Verify frontend runtime
-        if: inputs.component == 'frontend' || inputs.component == 'web-next'
+        if: inputs.component == 'frontend'
         env:
           IMAGE: ghcr.io/eneo-ai/eneo-${{ inputs.component }}@${{ steps.reuse.outputs.digest || steps.build.outputs.digest }}
         run: |
@@ -113,7 +113,7 @@ jobs:
             console.log(JSON.stringify(process.versions));
           '
       - name: Block frontend HIGH and CRITICAL vulnerabilities
-        if: inputs.component == 'frontend' || inputs.component == 'web-next'
+        if: inputs.component == 'frontend'
         uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
         with:
           image: ghcr.io/eneo-ai/eneo-${{ inputs.component }}@${{ steps.reuse.outputs.digest || steps.build.outputs.digest }}

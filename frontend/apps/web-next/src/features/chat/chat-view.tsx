@@ -224,7 +224,7 @@ function ConversationView({
   const online = useOnline();
   const approvals = useToolApprovalState();
   const [timings] = useState(() => new ActivityTimings());
-  useSyncExternalStore(timings.subscribe, timings.getVersion, timings.getVersion);
+  useSyncExternalStore(timings.subscribe, timings.getVersion);
   const toolChoices = useToolChoices(partner);
 
   const [input, setInput] = useState("");

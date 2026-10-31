@@ -8,7 +8,6 @@ import { useLocale, useTranslations } from "use-intl";
 import { useTheme } from "next-themes";
 import { useEffect, useId, useRef } from "react";
 import { THEMES } from "@/components/shell/theme-switcher";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { LOCALE_LABELS, locales } from "@/lib/i18n/locales";
 import { useLocaleSwitch } from "@/lib/i18n/use-locale-switch";
 
@@ -20,7 +19,6 @@ import { useLocaleSwitch } from "@/lib/i18n/use-locale-switch";
 export function AccountAppearance() {
   const t = useTranslations();
   const { theme, setTheme } = useTheme();
-  const hydrated = useHydrated();
   const pageLocale = useLocale();
   const { locale, switchLocale } = useLocaleSwitch();
   const announce = useAnnounce();
@@ -58,7 +56,7 @@ export function AccountAppearance() {
         {/* next-themes knows the theme only in the browser: none is marked until then. */}
         <SegmentedControl
           label={t("theme")}
-          value={hydrated ? (theme ?? "system") : ""}
+          value={theme ?? "system"}
           onChange={(next) => {
             setTheme(next);
             const option = THEMES.find(({ value }) => value === next);

@@ -18,7 +18,7 @@ export type ResizableSplitOptions = {
 };
 
 function readStored(key: string | undefined): number | null {
-  if (!key || typeof window === "undefined") return null;
+  if (!key) return null;
   try {
     const value = Number(window.localStorage.getItem(key));
     return Number.isFinite(value) && value > 0 ? value : null;

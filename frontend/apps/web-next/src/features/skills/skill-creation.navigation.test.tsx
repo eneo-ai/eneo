@@ -2,16 +2,16 @@
 import { createBrowserHistory, createRoute } from "@tanstack/react-router";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import Link from "@/lib/link.tanstack";
+import Link from "@/lib/link";
 import { renderWithRouter } from "@/test/router";
 import { replaceInstructionText } from "@/test/skill-instructions";
 import { OrganizationSkillNewPage } from "./organization-skill-new-page";
 import { SpaceSkillNewPage } from "./space-skill-new-page";
 
+vi.unmock("@/lib/link");
+
 const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { POST: post } }));
-vi.mock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
-vi.mock("@/lib/link", () => import("@/lib/link.tanstack"));
 vi.mock("@/features/spaces/use-space", () => ({
   useSpace: () => ({ space: { id: "space-1" }, routeId: "space-1" })
 }));

@@ -2,13 +2,12 @@
 import { createRoute } from "@tanstack/react-router";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
-import Link from "@/lib/link.tanstack";
+import Link from "@/lib/link";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderWithRouter } from "@/test/router";
 import { SkillForm } from "./skill-form";
 
-vi.mock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
-vi.mock("@/lib/link", () => import("@/lib/link.tanstack"));
+vi.unmock("@/lib/link");
 
 async function renderForm(onSubmit = vi.fn(async () => {})) {
   return renderWithRouter(<Link href="/done">Leave editor</Link>, {

@@ -1,6 +1,6 @@
 # @eneo/web-next
 
-The optional React/Next.js (App Router) beta with Astryx for Eneo. SvelteKit in
+The optional React/Vite SPA with TanStack Router, TanStack Query and Astryx for Eneo. SvelteKit in
 `frontend/apps/web` is the primary frontend and the default for frontend
 development. Implement ordinary frontend fixes and new features in Svelte;
 work here must be explicitly intended for the beta. See
@@ -8,32 +8,29 @@ work here must be explicitly intended for the beta. See
 Both apps share the backend, accounts and data.
 
 For deployment, callback registration, the opt-in banner and rollback, use
-[the deployment guide](../docs-site/src/content/guides/deployment.mdx#run-the-next-beta-alongside-the-existing-app).
+[the deployment guide](../docs-site/src/content/guides/deployment.mdx#run-the-react-beta-alongside-the-existing-app).
 
 ## Development
 
-Dev server runs on port **3100** (the SvelteKit app owns 3000):
+Copy [`.env.example`](.env.example) to `.env.local` and set `ENEO_BACKEND_URL`
+to your FastAPI backend. The Vite dev server runs on port **3101** (SvelteKit
+owns 3000):
 
 ```bash
-bun run dev      # next dev -p 3100
-bun run dev:clean # clear .next/node cache, then start next dev -p 3100
-bun run build    # production build
-bun run check    # tsc --noEmit
+bun run dev      # Vite dev server
+bun run dev:clean # clear generated caches, then start Vite
+bun run build    # generate routes and build the static SPA in dist/
+bun run check    # generate routes and run tsc --noEmit
 bun run lint     # i18n + theme staleness + prettier --check + eslint
 bun run test     # vitest run
 bun run theme:build # compile src/theme/eneo-theme.ts after editing it
 ```
 
-## Vite build (migration)
+## Production build
 
-The app is moving from Next.js to a Vite SPA with TanStack Router. Until the
-move is done, this package builds both, and Next stays the default:
-
-```bash
-bun run dev:vite        # Vite dev server on port 3101, beside Next on 3100
-bun run build:vite      # static SPA in dist/ (vite.config.mts)
-bun run routes:generate # rewrite src/routeTree.gen.ts from src/routes/
-```
+FastAPI serves `dist/` from the backend image, together with the API and
+authentication callbacks. There is no separate Node server or `start` command.
+`dev:vite` and `build:vite` remain aliases for existing development scripts.
 
 `src/routeTree.gen.ts` is generated and committed: commit it together with the
 route change that produced it. `vite build` does not type-check; `bun run check`
@@ -47,7 +44,7 @@ is `null` while that feature is absent from the build. Other dynamic imports,
 including locale catalogs, remain visible in the chunk graph. These sizes
 exclude CSS and other assets.
 
-CI checks route-tree drift before type checking, builds both frontends, and
+CI checks route-tree drift before type checking, builds the SPA, and
 publishes the bundle report and peak Vite build memory in the
 `web-next-vite-build-resources` artifact. Memory also appears in the job
 summary. Sizes and memory are measured without a budget gate.
@@ -75,33 +72,25 @@ request's host, so register `http://localhost:3101/login/callback` with the
 identity provider or the tenant's federation redirect URIs; with global OIDC,
 `PUBLIC_ORIGIN` already makes it the redirect URI.
 
-## Environment
+## Runtime configuration
 
-Copy [`.env.example`](.env.example) to `.env.local`. Set the backend URL,
-the app's public origin and a separate `SESSION_SECRET` (at least 32
-characters). Generate the secret with `openssl rand -base64 48`; rotating
-it invalidates existing Next sessions. Do not reuse the backend JWT secret.
-
-Validation lives in `src/lib/env.ts` (zod, parsed at import time). There is no
-`NEXT_PUBLIC_*` backend URL by design: all backend calls go through the server.
+Configure deployment links and browser sessions on the backend. The SPA reads
+validated public settings from `GET /api/v1/runtime-config`; it contains no
+deployment credentials. `ENEO_BACKEND_URL` configures the development proxy
+only. Production API requests use the document's origin.
 
 ## Auth
 
-- **Password and tenant federation** use the existing backend authentication
-  flow and store the backend-issued token in the encrypted, HTTP-only
-  `eneo_session` cookie. Register the beta callback with the tenant's
-  federation configuration and identity provider as described in the
-  deployment guide. These sessions end when the backend token expires.
-- **Frontend-managed OIDC** is an experimental separate confidential client,
-  configured with `OIDC_*`. The backend accepts its IdP access token when
-  `OIDC_RESOURCE_SERVER_ENABLED` and the matching issuer/audience are configured.
-  Concurrent requests can reuse a one-time rotating refresh token and invalidate
-  the session; refresh ownership is not coordinated across requests or replicas.
-  Use backend-managed authentication for the beta rollout. See the deployment
-  guide before evaluating this alternative.
+Password login and generic OIDC federation use FastAPI's browser-session
+endpoints and HTTP-only cookies (`__Host-eneo_web` in production, `eneo_web`
+on development localhost). Register the beta's callback with the federation
+and identity provider as described in the deployment guide. The frontend does
+not hold tokens or OIDC client secrets.
 
-`src/proxy.ts` gates navigation and request origins. Backend authorization
-remains responsible for tenant, role and resource access on every API call.
+The browser transport binds each document to its checked session generation;
+an account change in another tab requires a new document. FastAPI checks
+request origin, session, tenant, role and resource access. Router guards control
+navigation but do not replace backend authorization.
 
 ## UI components
 
@@ -125,7 +114,7 @@ hard-coded colours.
 
 ## i18n
 
-Client code uses use-intl; frozen Next routes retain next-intl until removal.
+The app uses use-intl.
 The locale comes from the `NEXT_LOCALE` cookie (default `sv`, also `en`), and
 changing it reloads the document. Catalogs in `src/lib/i18n/messages/` are
 generated from the SvelteKit app's Paraglide catalogs:

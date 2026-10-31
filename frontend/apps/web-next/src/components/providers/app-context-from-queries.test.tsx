@@ -1,12 +1,11 @@
 // @vitest-environment jsdom
 import { latestRelease } from "@eneo/whats-new";
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { beforeEach, expect, it, vi } from "vitest";
 import type { EneoClient } from "@/lib/api/browser";
 import { loadSession, sessionKeys } from "@/lib/api/session";
-import { renderInApp, renderToHtml, testAppContext, testQueryClient } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { useWhatsNew } from "@/features/whats-new/whats-new-provider";
 import { useAppContext, type AppContextValue } from "./app-context";
 import { QueryAppContextProvider, type AppContextEnv } from "./app-context-from-queries";
@@ -40,8 +39,7 @@ function request(path: string) {
 const browserGet = vi.hoisted(() => vi.fn());
 const browserPut = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: browserGet, PUT: browserPut } }));
-// The (app) layout loads with the server's client.
-const serverApi = { GET: vi.fn(request) } as unknown as EneoClient;
+const api = { GET: browserGet } as unknown as EneoClient;
 
 const env: AppContextEnv = {
   links: { accessibilityStatement: null, helpCenter: null, legacyApp: null },
@@ -82,35 +80,21 @@ function Probe() {
   );
 }
 
-/** What the (app) layout does: load on the server, hydrate, provide. */
-async function load() {
-  const server = testQueryClient();
-  await loadSession(server, serverApi);
-  return dehydrate(server);
-}
-
-/** `browser`: the browser's query client (a fresh one unless the test brings its own). */
-async function renderApp(browser = testQueryClient()) {
-  let state = await load();
+/** The route and mounted readers share one client. */
+async function renderApp(queryClient = testQueryClient()) {
+  await loadSession(queryClient, api);
+  browserGet.mockClear();
   const tree = () => (
-    <HydrationBoundary state={state}>
-      <QueryAppContextProvider env={env}>
-        <Probe />
-      </QueryAppContextProvider>
-    </HydrationBoundary>
+    <QueryAppContextProvider env={env}>
+      <Probe />
+    </QueryAppContextProvider>
   );
-  const html = renderToHtml(tree(), { queryClient: testQueryClient() });
   contextValues = [];
-  const view = renderInApp(tree(), { queryClient: browser });
+  const view = renderInApp(tree(), { queryClient });
   return {
     ...view,
-    html,
     rerender: () => view.rerender(tree()),
-    /** A fresh server layout snapshot reaches the mounted hydration boundary. */
-    refresh: async () => {
-      state = await load();
-      view.rerender(tree());
-    }
+    refresh: () => queryClient.invalidateQueries()
   };
 }
 
@@ -119,10 +103,8 @@ const settle = () => new Promise((resolve) => setTimeout(resolve, 30));
 
 const requested = () => browserGet.mock.calls.map(([path]) => path as string).sort();
 
-it("server-renders and hydrates the loaded context without a request", async () => {
-  const { html } = await renderApp();
-
-  expect(html).toContain("Anna Lind");
+it("uses the loaded context without another request", async () => {
+  await renderApp();
   expect(screen.getByTestId("user").textContent).toBe("Anna Lind");
   expect(contextValues.at(-1)?.featureFlags.federation).toBe(false);
   await settle();
@@ -153,7 +135,7 @@ it("keeps the context value when a refetch answers the same, so consumers need n
   expect(contextValues.at(-1)).toBe(before);
 });
 
-it("takes a refreshed layout's newer data without remounting the app", async () => {
+it("takes refreshed data without remounting the app", async () => {
   const { refresh } = await renderApp();
   fireEvent.click(screen.getByRole("button", { name: "Klick 0" }));
   backend.set(TENANT, ok({ ...signedIn.tenant, display_name: "Timrå kommun" }));
@@ -162,10 +144,10 @@ it("takes a refreshed layout's newer data without remounting the app", async () 
 
   await waitFor(() => expect(screen.getByTestId("tenant").textContent).toBe("Timrå kommun"));
   expect(screen.getByRole("button", { name: "Klick 1" })).toBeTruthy();
-  expect(browserGet).not.toHaveBeenCalled();
+  expect(requested()).toContain(TENANT);
 });
 
-it("keeps known What's new markers when a refreshed layout could not read them", async () => {
+it("keeps known What's new markers when a refresh could not read them", async () => {
   const { queryClient, refresh } = await renderApp();
   backend.set(WHATS_NEW, failure);
   backend.set(TENANT, ok({ ...signedIn.tenant, display_name: "Timrå kommun" }));
@@ -245,19 +227,4 @@ it("loads an unavailable What's new state as null: unknown markers, not a first 
   backend.set(WHATS_NEW, ok({ seen_version: "1.0.0", announced_version: "1.0.0" }));
   await refresh();
   await waitFor(() => expect(screen.getByTestId("seen").textContent).toBe("1.0.0"));
-});
-
-// Why every sign-in continues in a new document (ContinueSignedIn): a client
-// that outlives a client-side navigation still holds the previous user, and
-// HydrationBoundary applies newer data for a query it already holds only
-// after the first commit, so that commit (and its effects) shows the old one.
-it("renders the cached previous user first when a new user's data hydrates into the same client", async () => {
-  const sameClient = testQueryClient();
-  sameClient.setQueryData(sessionKeys.me, signedIn.user);
-  backend.set(ME, ok({ ...signedIn.user, username: "Bo Ek" }));
-
-  await renderApp(sameClient);
-
-  expect(contextValues[0]?.user.username).toBe("Anna Lind");
-  await waitFor(() => expect(screen.getByTestId("user").textContent).toBe("Bo Ek"));
 });

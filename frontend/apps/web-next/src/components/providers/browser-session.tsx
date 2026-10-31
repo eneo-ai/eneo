@@ -14,7 +14,7 @@ import {
 
 /** Vite's transport owns the state; this boundary only presents it. */
 export function BrowserSessionBoundary({ children }: { children: ReactNode }) {
-  const session = useSyncExternalStore(subscribeSession, getSessionSnapshot, getSessionSnapshot);
+  const session = useSyncExternalStore(subscribeSession, getSessionSnapshot);
   const heading = useRef<HTMLHeadingElement>(null);
   const t = useTranslations();
   useEffect(listenForSessionResume, []);

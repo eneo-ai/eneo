@@ -16,7 +16,6 @@ import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { formatDuration } from "@/lib/format";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { cn } from "@/lib/utils";
 import type { IntegrationKnowledge } from "../../knowledge";
 import {
@@ -137,10 +136,8 @@ function folderLabel(item: IntegrationKnowledge, items: readonly IntegrationKnow
 }
 
 // ClientTime has no time-of-day format; this renders the same Timestamp the
-// same way (after hydration, no hover card) with Astryx's "time" format.
+// same way (no hover card) with Astryx's "time" format.
 function TimeOfDay({ value }: { value: string }) {
-  const hydrated = useHydrated();
-  if (!hydrated) return null;
   return (
     <Timestamp value={value} format="time" type="inherit" color="inherit" hasTooltip={false} />
   );

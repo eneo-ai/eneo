@@ -17,13 +17,11 @@ const outputNames = [
   "docker_devcontainer",
   "web_next",
   "web_next_e2e",
-  "docker_web_next",
 ];
 
 const dockerImages = [
   { image: "backend", context: "./backend", file: "./backend/Dockerfile", build_contexts: "web=./frontend" },
   { image: "frontend", context: "./frontend", file: "./frontend/Dockerfile" },
-  { image: "web-next", context: "./frontend", file: "./frontend/apps/web-next/Dockerfile" },
   { image: "devcontainer", context: "./.devcontainer", file: "./.devcontainer/Dockerfile" },
 ];
 
@@ -128,7 +126,6 @@ export function classify(rawFiles) {
   // The backend image also contains the Vite app built from this source revision.
   const dockerBackend = full || backend || webNext;
   const dockerFrontend = full || frontend;
-  const dockerWebNext = full || webNext;
   const dockerDevcontainer = full || files.some((file) => file.startsWith(".devcontainer/"));
 
   return {
@@ -144,7 +141,6 @@ export function classify(rawFiles) {
     docker_devcontainer: dockerDevcontainer,
     web_next: webNext,
     web_next_e2e: webNextE2e,
-    docker_web_next: dockerWebNext,
   };
 }
 

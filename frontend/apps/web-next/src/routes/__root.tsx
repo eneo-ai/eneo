@@ -15,7 +15,7 @@ export const Route = createRootRouteWithContext<RouterContext>()({
   component: Root
 });
 
-/** The providers of the Next root layout (src/app/layout.tsx), in its order. */
+/** Shared providers for every route. */
 function Root() {
   const { locale, messages, nonce } = useBoot();
   return (

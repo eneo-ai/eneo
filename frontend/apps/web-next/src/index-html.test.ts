@@ -44,7 +44,7 @@ it("preserves the responsive document metadata and fixed server placeholders", (
     "/manifest.json"
   );
   expect(template.querySelector('link[rel="preload"][as="font"]')?.getAttribute("href")).toBe(
-    "/fonts/figtree-latin-wght-normal.woff2"
+    "/src/assets/fonts/figtree-latin-wght-normal.woff2"
   );
   expect(
     template.querySelector("[data-astryx-chat-following-style]")?.textContent?.replace(/\s/g, "")

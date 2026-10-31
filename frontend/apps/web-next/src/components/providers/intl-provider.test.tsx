@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
 import { cleanup, render, screen } from "@testing-library/react";
-import { renderToString } from "react-dom/server";
 import { useFormatter, useTimeZone } from "use-intl";
 import { afterEach, expect, it } from "vitest";
 import { AppIntlProvider } from "./intl-provider";
@@ -29,14 +28,4 @@ it("formats timestamps in the viewer's zone", () => {
     Intl.DateTimeFormat().resolvedOptions().timeZone
   );
   expect(screen.getByLabelText("hour").textContent).toBe("01");
-});
-
-it("uses a stable Stockholm snapshot for server rendering and hydration", () => {
-  const html = renderToString(
-    <AppIntlProvider locale="sv" messages={{}}>
-      <Clock />
-    </AppIntlProvider>
-  );
-  expect(html).toContain("Europe/Stockholm");
-  expect(html).toContain(">21</output>");
 });

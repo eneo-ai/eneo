@@ -1,11 +1,10 @@
 "use client";
 
-import { useQueries } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { blockingError } from "@/components/composites/query-state";
 import { usePathname, useSearchParams } from "@/lib/navigation";
 import { browserApi } from "@/lib/api/browser";
 import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { spacesListQueryOptions } from "@/features/spaces/space";
 import { currentNavTarget, navTarget, type NavTarget } from "./routes";
 
@@ -17,33 +16,18 @@ const firstInNav = (conversations: RecentConversation[]) =>
 
 const NO_CONVERSATIONS: RecentConversation[] = [];
 
-/*
- * The shell's lists load in the browser: before hydration (the server render
- * and the hydration render) their queries are not even created. A page that
- * prefetched the same data (the Spaces list) hydrates it during those renders
- * only into a query the cache does not hold yet; an existing one gets it after
- * mount, which the server never reaches. The shell renders before the page,
- * so a pending query it made there left the page's useSuspenseQuery to fetch
- * during the server render, with the browser's API client and its relative URL.
- */
-
 /** Shared (non-personal, non-organisation) spaces, from the existing spaces list query. */
 export function useNavSpaces() {
-  const queries = useHydrated() ? [spacesListQueryOptions(browserApi)] : [];
-  return useQueries({
-    queries,
-    combine: ([query]) => ({
-      spaces: (query?.data ?? []).filter((space) => !space.personal && !space.organization),
-      // Before hydration there is no query yet: loading, as the server rendered it.
-      isPending: query?.isPending ?? true,
-      // Any failure, beside the cached links (which stay), and a failure
-      // without cached spaces also while its retry runs (blockingError), so
-      // keyboard focus does not fall off the recovery button.
-      isError: query ? query.isError || blockingError(query) : false,
-      isFetching: query?.isFetching ?? false,
-      refetch: query?.refetch
-    })
-  });
+  const query = useQuery(spacesListQueryOptions(browserApi));
+  return {
+    spaces: (query.data ?? []).filter((space) => !space.personal && !space.organization),
+    isPending: query.isPending,
+    // Keep the error beside cached links, and through a retry without data,
+    // so keyboard focus does not fall off the recovery button.
+    isError: query.isError || blockingError(query),
+    isFetching: query.isFetching,
+    refetch: query.refetch
+  };
 }
 
 /**
@@ -51,10 +35,10 @@ export function useNavSpaces() {
  * of the list the ⌘K palette searches (one query, one cache entry).
  */
 export function useRecentConversations(): RecentConversation[] {
-  const queries = useHydrated()
-    ? [{ ...recentConversationsQueryOptions(browserApi), select: firstInNav }]
-    : [];
-  return useQueries({ queries, combine: ([query]) => query?.data ?? NO_CONVERSATIONS });
+  return (
+    useQuery({ ...recentConversationsQueryOptions(browserApi), select: firstInNav }).data ??
+    NO_CONVERSATIONS
+  );
 }
 
 /**

@@ -58,7 +58,7 @@ function WebsiteCell({
   );
 }
 
-/** The schedule state as a status dot; a backoff says until when (after hydration). */
+/** The schedule state as a status dot; a backoff says until when in the viewer's time zone. */
 function ScheduleStateCell({ item }: { item: CrawlerScheduledWebsite }) {
   const t = useTranslations();
   const state = SCHEDULE_STATE[item.schedule_state];

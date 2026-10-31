@@ -50,7 +50,7 @@ test("shared frontend inputs validate both apps and all application images", () 
   for (const file of ["frontend/bun.lock", "frontend/package.json", "frontend/patches/x.patch", "frontend/packages/ui/src/styles/main.css"]) {
     const plan = planCi([file], "merge_group");
     for (const name of ["frontend", "frontend_e2e", "web_next", "web_next_e2e"]) assert.equal(plan[name], true, `${file}: ${name}`);
-    assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["backend", "frontend", "web-next"]);
+    assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["backend", "frontend"]);
   }
 });
 
@@ -58,7 +58,7 @@ test("workflow, local action, scope and gate changes force full validation", () 
   for (const file of [".github/workflows/ci.yml", ".github/actions/setup-playwright/action.yml", ".github/scripts/ci-gate.mjs"]) {
     const plan = planCi([file], "merge_group");
     assert.equal(plan.full, true);
-    assert.equal(plan.docker_matrix.include.length, 4);
+    assert.equal(plan.docker_matrix.include.length, 3);
   }
 });
 
@@ -93,15 +93,16 @@ test("the Svelte build is checked against a memory budget below its heap limit",
   assert.ok(workflow.indexOf("- name: Check build memory budget") > workflow.indexOf("- name: Build web app for E2E"));
 });
 
-test("the web-next build reports its peak memory as an artifact without a budget", () => {
+test("web-next runs all browser cases on FastAPI and has no Next runtime job", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
-  const stepBody = (name) => workflow.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
-  const report = stepBody("Build web-next for E2E")?.match(/\/usr\/bin\/time -v -o "([^"]+)" bun run build/)?.[1];
-  assert.ok(report, "the web-next build runs under /usr/bin/time -v");
-  const upload = stepBody("Upload web-next build resource measurements");
-  assert.ok(upload?.includes("name: web-next-build-resources") && upload.includes("if: ${{ !cancelled() }}"));
-  assert.ok(upload.includes(`path: ${report.replace("$RUNNER_TEMP", "${{ runner.temp }}")}`));
-  assert.ok(!workflow.includes(`ci-build-memory.mjs "${report}"`), "report only, no budget yet");
+  const job = workflow.split("\n  frontend-web-next-e2e:\n")[1].split("\n  schema-drift:\n")[0];
+  assert.doesNotMatch(job, /next start|next-web-next|SESSION_SECRET|--grep|\.next\/cache/);
+  const native = job.split("- name: Run E2E and accessibility tests\n")[1]?.split(/\n      - name: /)[0];
+  assert.match(native ?? "", /E2E_BASE_URL: http:\/\/localhost:8124/);
+  assert.match(native ?? "", /^        run: bun run test:e2e$/m);
+  const assets = job.indexOf("- name: Build browser asset map");
+  assert.ok(assets > 0 && assets < job.indexOf("- name: Run E2E and accessibility tests"));
+  assert.match(job.slice(assets), /run: bun run --filter '@eneo\/web-next' build/);
 });
 
 test("web-next rejects route drift and retains Vite resource reports after build failure", () => {
@@ -109,10 +110,12 @@ test("web-next rejects route drift and retains Vite resource reports after build
   const job = workflow.split("\n  frontend-web-next:\n")[1].split("\n  frontend-e2e:\n")[0];
   const step = (name) => job.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
   assert.match(job, /working-directory: frontend\n/);
+  assert.match(job, /fetch-depth: 0/);
+  assert.match(job, /ROUTE_PARITY_UPSTREAM:/);
   assert.match(step("Check route tree drift") ?? "", /routes:generate && git diff --exit-code -- apps\/web-next\/src\/routeTree\.gen\.ts/);
   assert.ok(job.indexOf("- name: Check route tree drift") < job.indexOf("- name: Type check"));
   const report = "$RUNNER_TEMP/web-next-vite-build.txt";
-  assert.ok(step("Build (Vite)")?.includes(`/usr/bin/time -v -o "${report}" bun run --filter '@eneo/web-next' build:vite`));
+  assert.ok(step("Build (Vite)")?.includes(`/usr/bin/time -v -o "${report}" bun run --filter '@eneo/web-next' build`));
   assert.ok(step("Record Vite build memory")?.includes("Maximum resident set size"));
   for (const name of ["Record Vite build memory", "Upload Vite build reports"]) {
     assert.ok(step(name)?.includes("if: ${{ !cancelled() }}"), name);
@@ -166,7 +169,7 @@ test("push, tag and manual callers keep full validation even with only docs chan
   for (const event of ["push", "workflow_dispatch", "workflow_call", "unknown"]) {
     const plan = planCi([docsFile], event);
     assert.equal(plan.full, true);
-    assert.equal(plan.docker_matrix.include.length, 4);
+    assert.equal(plan.docker_matrix.include.length, 3);
     assert.equal(plan.expected_jobs["user-facing"], false);
   }
 });
@@ -210,12 +213,12 @@ test("contract inputs select their consumers and developer tooling", () => {
 });
 
 test("web-next-only changes do not build the Svelte app", () => {
-  const plan = planCi(["frontend/apps/web-next/src/app/page.tsx"], "merge_group");
+  const plan = planCi(["frontend/apps/web-next/src/routes/index.tsx"], "merge_group");
   assert.equal(plan.web_next, true);
   assert.equal(plan.web_next_e2e, true);
   assert.equal(plan.frontend, false);
   assert.equal(plan.frontend_e2e, false);
-  assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["backend", "web-next"]);
+  assert.deepEqual(plan.docker_matrix.include.map(({ image }) => image), ["backend"]);
 });
 
 test("web-next inputs rebuild the backend image that bundles the web app", () => {

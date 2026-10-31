@@ -38,11 +38,8 @@ const ShellCommandPalette = lazy(() => import("./command-palette"));
  * CSS; the chat's opens the drawer by dispatching `OPEN_NAV_EVENT` on the
  * window.
  *
- * Nothing above the page may change after hydration on phones: a context
- * update above a page React has not hydrated yet (its code is still loading)
- * replaces the server-rendered page with its loading state. So the
- * mobile-nav context, whose `isMobile` the server cannot know, wraps the
- * navigation only, and the top bar's visibility is CSS, not state.
+ * The mobile navigation context wraps navigation only. The top bar's
+ * visibility follows the page header in CSS, including while a page loads.
  */
 export function AppShellFrame({
   children,

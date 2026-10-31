@@ -134,7 +134,7 @@ export const MessageResponse = memo(
       () => ({ ...markdownComponents, ...components }),
       [components]
     );
-    const typeset = useSyncExternalStore(katexStore.subscribe, katexStore.typeset, () => null);
+    const typeset = useSyncExternalStore(katexStore.subscribe, katexStore.typeset);
     const canHoldMath = typeof props.children === "string" && mayContainMath(props.children);
     useEffect(() => {
       if (canHoldMath && !typeset) katexStore.load();

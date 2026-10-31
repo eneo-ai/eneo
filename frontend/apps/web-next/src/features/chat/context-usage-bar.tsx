@@ -11,8 +11,7 @@ import { cn } from "@/lib/utils";
 const PINNED_STORAGE_KEY = "contextUsageBarPinned";
 
 // localStorage-backed "always show" preference, read via useSyncExternalStore
-// so there's no setState-in-effect and no hydration mismatch (server
-// snapshot = not pinned, which renders nothing).
+// so every reader follows the same stored preference.
 const pinListeners = new Set<() => void>();
 
 function subscribePinned(callback: () => void) {
@@ -34,7 +33,7 @@ function readPinned() {
  * SHOW_FROM_PERCENT of the window.
  */
 export function useContextUsagePinned(): boolean {
-  return useSyncExternalStore(subscribePinned, readPinned, () => false);
+  return useSyncExternalStore(subscribePinned, readPinned);
 }
 
 export function setContextUsagePinned(next: boolean) {

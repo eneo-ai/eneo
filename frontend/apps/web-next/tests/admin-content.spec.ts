@@ -80,7 +80,6 @@ test("opens an installed helper in the organization editor", { tag: "@vite" }, a
 });
 
 test("an unknown helper kind shows not-found", { tag: "@vite" }, async ({ page }) => {
-  test.skip(!process.env.E2E_BASE_URL, "Unknown helper kinds are rejected by the Vite route.");
   await page.goto("/admin/help-assistants/unknown-kind");
   await expect(
     page.getByRole("heading", { level: 1, name: messages.page_not_found, exact: true })

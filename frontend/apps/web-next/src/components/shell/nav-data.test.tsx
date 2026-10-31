@@ -1,14 +1,14 @@
 // @vitest-environment jsdom
-import { dehydrate, HydrationBoundary } from "@tanstack/react-query";
 import { beforeEach, expect, it, vi } from "vitest";
 import { SpacesList } from "@/features/spaces/list/spaces-list";
 import { setRoute } from "@/test/navigation";
-import { renderToHtml, testQueryClient } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { AppShellFrame } from "./app-shell";
 
-// The browser's API client has a relative base URL (API_BASE): during the
-// server render it cannot reach the backend ("Failed to parse URL").
-const browserGet = vi.hoisted(() => vi.fn(() => new Promise(() => {})));
+// Cached navigation data must not start another request while still fresh.
+const browserGet = vi.hoisted(() =>
+  vi.fn<(_url: string) => Promise<never>>(() => new Promise(() => {}))
+);
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: browserGet } }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 // Stand-ins for the shell's bells (they have their own tests).
@@ -25,24 +25,21 @@ beforeEach(() => {
   browserGet.mockClear();
 });
 
-it("server-renders the spaces a page prefetched, under the shell's SideNav", () => {
-  // /spaces/list prefetches the list with the server's client and dehydrates
-  // it; the SideNav also shows spaces, loaded in the browser.
+it("shares prefetched spaces between the page and the shell's SideNav", () => {
+  // The route and SideNav read the same query cache.
   const prefetched = testQueryClient();
   prefetched.setQueryData(
     ["spaces"],
     [{ id: "s1", name: "Upphandling", description: null, personal: false, organization: false }]
   );
 
-  const html = renderToHtml(
+  const { container } = renderInApp(
     <AppShellFrame>
-      <HydrationBoundary state={dehydrate(prefetched)}>
-        <SpacesList title="Ytor" />
-      </HydrationBoundary>
+      <SpacesList title="Ytor" />
     </AppShellFrame>,
-    { queryClient: testQueryClient() }
+    { queryClient: prefetched }
   );
 
-  expect(html).toContain('aria-label="Upphandling"');
-  expect(browserGet).not.toHaveBeenCalled();
+  expect(container.innerHTML).toContain('aria-label="Upphandling"');
+  expect(browserGet.mock.calls.some(([url]) => url === "/api/v1/spaces/")).toBe(false);
 });

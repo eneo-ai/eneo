@@ -43,7 +43,7 @@ function ResultActions({ appId, run }: { appId: string; run: AppRunSparse }) {
   const [showDelete, setShowDelete] = useState(false);
   const titleLabels = resultTitleLabels(t);
   // A run has no name of its own; its row shows when it was made, so the
-  // menu is named by that time (null until hydration, like the time itself).
+  // menu is named by that time in the viewer's time zone.
   const time = useClientTimeText(run.created_at, "date_time");
 
   const deleteRun = useMutation({

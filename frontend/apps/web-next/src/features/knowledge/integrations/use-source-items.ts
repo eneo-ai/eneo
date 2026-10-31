@@ -4,14 +4,14 @@ import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react";
 import type { IntegrationKnowledge } from "../knowledge";
 
-/** The items a source's server page found. */
+/** The items loaded for the source route. */
 export type LoadedItems = { items: IntegrationKnowledge[] };
 
 /**
- * The cached space owns the source. If it lacks the server's items, show them
- * only until a successful client reread. Query update counts belong to this
- * browser; server and browser wall clocks cannot order the two snapshots.
- * Once seen in the cache, a removed item never falls back to the server copy.
+ * The cached space owns the source. If it lacks the route's items, show them
+ * only until a successful reread. Query update counts belong to this
+ * cache; wall clocks cannot reliably order the two snapshots.
+ * Once seen in the cache, a removed item never falls back to the route snapshot.
  */
 export function useSourceItems(
   routeId: string,
@@ -19,16 +19,14 @@ export function useSourceItems(
   loaded: LoadedItems
 ): IntegrationKnowledge[] {
   const queryClient = useQueryClient();
-  // Capture the browser's baseline even during hydration, when the external
-  // store first exposes its server snapshot (zero updates since arrival).
+  // Capture completed reads when the route arrives.
   const [arrivalReads] = useState(
     () => queryClient.getQueryState(["spaces", routeId])?.dataUpdateCount ?? 0
   );
   // Followed even when a read returns the same space, which leaves its data as it was.
   const reads = useSyncExternalStore(
     useCallback((listener) => queryClient.getQueryCache().subscribe(listener), [queryClient]),
-    () => (queryClient.getQueryState(["spaces", routeId])?.dataUpdateCount ?? 0) - arrivalReads,
-    () => 0
+    () => (queryClient.getQueryState(["spaces", routeId])?.dataUpdateCount ?? 0) - arrivalReads
   );
   const present = cached.length > 0;
   const [missingOnArrival] = useState(!present);

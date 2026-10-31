@@ -4,7 +4,6 @@ import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { useTranslations } from "use-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { StatusLabel } from "@/components/composites/status-label";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import type { IntegrationKnowledge } from "../knowledge";
 import {
   itemWatchState,
@@ -21,8 +20,7 @@ import type { SyncProgressSummary } from "./sync-progress";
  * now, which the server and the browser see differently.
  */
 export function useWatchStates(items: readonly IntegrationKnowledge[]): WatchState[] | null {
-  const hydrated = useHydrated();
-  return hydrated ? items.map((item) => itemWatchState(item)) : null;
+  return items.map((item) => itemWatchState(item));
 }
 
 /** A source's or item's state as a coloured dot and its label. */

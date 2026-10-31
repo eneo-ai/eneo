@@ -5,7 +5,7 @@ import tailwind from "@tailwindcss/postcss";
 import postcss, { type AtRule, type Rule } from "postcss";
 import { beforeAll, describe, expect, it } from "vitest";
 
-// Compiles globals.css through the same PostCSS + Tailwind pipeline Next uses,
+// Compiles globals.css through the same PostCSS + Tailwind pipeline Vite uses,
 // so regressions in @source paths, the layer order or the theme wiring fail
 // here instead of silently in the browser.
 const appDir = path.resolve(import.meta.dirname, "../..");
@@ -14,7 +14,7 @@ const entry = path.join(appDir, "src/styles/globals.css");
 // @tailwindcss/postcss caches its compiler per input path, so every compile
 // below uses its own `from` (same directory, so relative paths resolve alike).
 async function compile(css: string, fileName: string): Promise<string> {
-  const from = path.join(appDir, "src/app", fileName);
+  const from = path.join(path.dirname(entry), fileName);
   const result = await postcss([tailwind({ base: appDir, optimize: false })]).process(css, {
     from
   });
@@ -257,7 +257,7 @@ describe("globals.css", () => {
     expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-10px" });
   });
 
-  it("self-hosts every subset Next's font loader served, from public/fonts", () => {
+  it("self-hosts every required font subset as a Vite asset", () => {
     // family → subsets, from the file names (<family>-<subset>-wght-normal.woff2)
     const subsets = new Map<string, string[]>();
     postcss.parse(css).walkAtRules("font-face", (face: AtRule) => {
@@ -265,11 +265,11 @@ describe("globals.css", () => {
       face.walkDecls((decl) => {
         declarations[decl.prop] = decl.value;
       });
-      const file = declarations.src?.match(/url\("\/fonts\/([^"]+)"\)/)?.[1];
+      const file = declarations.src?.match(/url\("\.\.\/assets\/fonts\/([^"]+)"\)/)?.[1];
       if (!file) return;
       expect(declarations["font-display"], file).toBe("swap");
       expect(declarations["unicode-range"], file).toMatch(/^U\+/);
-      expect(existsSync(path.join(appDir, "public/fonts", file)), file).toBe(true);
+      expect(existsSync(path.join(appDir, "src/assets/fonts", file)), file).toBe(true);
       const family = declarations["font-family"] ?? "";
       const subset = file.match(
         /^[a-z0-9-]+?-((?:latin|cyrillic|greek|vietnamese)(?:-ext)?)-wght/
