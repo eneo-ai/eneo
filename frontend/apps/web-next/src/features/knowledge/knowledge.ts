@@ -11,6 +11,7 @@ export type CrawlRun = NonNullable<Website["latest_crawl"]>;
 export type CrawlFailure = Schema<"CrawlResourceFailurePublic">;
 export type CrawlFailurePage = Schema<"CrawlFailurePagePublic">;
 export type InfoBlob = Schema<"InfoBlobPublicNoText">;
+export type WebsiteContentFolder = Schema<"WebsiteContentFolderPublic">;
 export type EmbeddingModel = Schema<"EmbeddingModelPublic">;
 export type IntegrationKnowledge = Schema<"IntegrationKnowledgePublic">;
 
@@ -95,17 +96,33 @@ export function websiteCrawlRunsQueryOptions(api: EneoClient, websiteId: string)
 }
 
 /** What the website has indexed, a page at a time. */
-export function websiteBlobPagesQueryOptions(api: EneoClient, websiteId: string) {
+export function websiteBlobPagesQueryOptions(
+  api: EneoClient,
+  websiteId: string,
+  { prefix = "", q = "" }: { prefix?: string; q?: string } = {}
+) {
   return infiniteQueryOptions({
     ...cursorPagination,
-    queryKey: ["websites", websiteId, "info-blobs", "pages"],
-    queryFn: ({ pageParam }) =>
+    queryKey: [
+      "websites",
+      websiteId,
+      "info-blobs",
+      "pages",
+      ...(prefix || q ? [{ prefix, q }] : [])
+    ],
+    queryFn: ({ pageParam, signal }) =>
       unwrap(
         api.GET("/api/v1/websites/{id}/info-blobs/page/", {
           params: {
             path: { id: websiteId },
-            query: { limit: WEBSITE_PAGE_SIZE, cursor: pageParam }
-          }
+            query: {
+              limit: WEBSITE_PAGE_SIZE,
+              cursor: pageParam,
+              ...(prefix ? { prefix } : {}),
+              ...(q ? { q } : {})
+            }
+          },
+          signal
         })
       )
   });
@@ -113,6 +130,23 @@ export function websiteBlobPagesQueryOptions(api: EneoClient, websiteId: string)
 
 /** Failed addresses per page of the failures endpoint. */
 export const CRAWL_FAILURES_PAGE_SIZE = 100;
+
+export function websiteFoldersQueryOptions(api: EneoClient, websiteId: string, prefix: string) {
+  return infiniteQueryOptions({
+    ...cursorPagination,
+    queryKey: ["websites", websiteId, "info-blobs", "folders", prefix],
+    queryFn: ({ pageParam, signal }) =>
+      unwrap(
+        api.GET("/api/v1/websites/{id}/content-folders/", {
+          params: {
+            path: { id: websiteId },
+            query: { prefix, cursor: pageParam, limit: WEBSITE_PAGE_SIZE }
+          },
+          signal
+        })
+      )
+  });
+}
 
 /**
  * A run's recorded page and file failures (optionally one kind), oldest

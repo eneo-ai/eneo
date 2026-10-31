@@ -2,7 +2,10 @@
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useLocale, useTranslations } from "use-intl";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { X } from "lucide-react";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -23,7 +26,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { storageQueryOptions } from "@/features/storage/storage";
 import { browserApi } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
 import { sessionQueries } from "@/lib/api/session";
 import { formatBytes } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -31,6 +33,7 @@ import { useFileDrop } from "@/features/files/use-file-drop";
 import { FileFormatDetails } from "@/features/files/file-format-details";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { collectionBlobsQueryOptions } from "./knowledge";
+import { useFocusRescue } from "@/lib/focus-rescue";
 
 type ValidationError = { fileName?: string; message: string };
 
@@ -157,7 +160,9 @@ function UploadBlobsForm({
   const [submitted, setSubmitted] = useState(false);
   const [files, setFiles] = useState<File[]>([]);
   const [skippedFiles, setSkippedFiles] = useState<string[]>([]);
-  const { dragging, handlers } = useFileDrop(addSelectedFiles);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const rescueFocus = useFocusRescue();
+  const { dragging, handlers } = useFileDrop(addSelectedFiles, { enabled: !checking });
 
   const acceptedMimeTypes = limits.info_blobs.formats.map((format) => format.mimetype);
   const sizeLimitByType = new Map(
@@ -233,6 +238,7 @@ function UploadBlobsForm({
   }
 
   function addSelectedFiles(selected: File[]) {
+    if (checking) return;
     const accepted = selected.filter((file) => acceptedMimeTypes.includes(file.type));
     const skipped = selected.filter((file) => !acceptedMimeTypes.includes(file.type));
     if (skipped.length > 0) {
@@ -266,9 +272,11 @@ function UploadBlobsForm({
             {t("upload_dropzone_prompt")}
           </Label>
           <Input
+            ref={fileInput}
             id={FILES_ID}
             type="file"
             multiple
+            disabled={checking}
             accept={acceptedMimeTypes.join(",")}
             onChange={(event) => {
               addSelectedFiles(Array.from(event.target.files ?? []));
@@ -298,18 +306,36 @@ function UploadBlobsForm({
         )}
         {files.length > 0 && (
           <ul className="max-h-48 overflow-y-auto rounded-md border p-2 text-sm">
-            {files.map((file, index) => (
+            {files.map((file) => (
               <li
-                key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
-                className="flex justify-between gap-4 truncate py-0.5"
+                key={`${file.name}-${file.size}-${file.lastModified}`}
+                className="flex items-center gap-3 py-0.5"
               >
-                <span className="truncate">{file.name}</span>
+                <span className="min-w-0 flex-1 break-words">{file.name}</span>
                 <span className="text-muted-foreground shrink-0">
                   {formatBytes(file.size, locale)}
                 </span>
+                <IconButton
+                  label={t("remove_file", { fileName: file.name })}
+                  tooltip={t("remove_file", { fileName: file.name })}
+                  icon={<X aria-hidden="true" />}
+                  variant="ghost"
+                  isDisabled={checking}
+                  onClick={() => {
+                    rescueFocus(() => fileInput.current);
+                    setFiles((current) => current.filter((item) => item !== file));
+                  }}
+                />
               </li>
             ))}
           </ul>
+        )}
+        {files.length > 0 && (
+          <AstryxButton
+            label={t("add_more_files")}
+            isDisabled={checking}
+            onClick={() => fileInput.current?.click()}
+          />
         )}
         {errors.length > 0 && (
           <div
@@ -327,6 +353,7 @@ function UploadBlobsForm({
           <Button
             variant="ghost"
             className="mr-auto"
+            disabled={checking}
             onClick={() => {
               setFiles([]);
               setSkippedFiles([]);

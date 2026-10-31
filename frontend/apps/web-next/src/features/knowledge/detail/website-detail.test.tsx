@@ -39,16 +39,13 @@ const state = vi.hoisted(() => ({
   historyError: false,
   latestError: false,
   blobTitle: "lou.html",
+  contentQueries: [] as { q?: string; prefix?: string }[],
+  folderQueries: [] as string[],
   requests: [] as string[]
 }));
 const post = vi.hoisted(() => vi.fn());
 
-// The rest of next/navigation is real: @/lib/navigation reads its hooks on import.
-vi.mock("@/lib/navigation", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/navigation")>()),
-  useRouter: () => ({ push: () => {}, prefetch: () => {} }),
-  useSearchParams: () => new URLSearchParams()
-}));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
@@ -59,8 +56,30 @@ vi.mock("@/features/jobs/use-jobs", () => ({
 }));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: (path: string, options?: { params?: { query?: { cursor?: string | null } } }) => {
+    GET: (
+      path: string,
+      options?: { params?: { query?: { cursor?: string | null; q?: string; prefix?: string } } }
+    ) => {
       const cursor = options?.params?.query?.cursor ?? null;
+      const filters = options?.params?.query;
+      if (path === "/api/v1/websites/{id}/info-blobs/page/")
+        state.contentQueries.push(filters ?? {});
+      if (path === "/api/v1/websites/{id}/content-folders/") {
+        const prefix = filters?.prefix ?? "";
+        state.folderQueries.push(prefix);
+        return Promise.resolve({
+          data: {
+            items:
+              prefix === ""
+                ? [{ path: "https://example.test/", count: 10, has_children: true }]
+                : prefix === "https://example.test/"
+                  ? [{ path: "https://example.test/docs/", count: 4, has_children: true }]
+                  : [{ path: "https://example.test/docs/archive/", count: 2, has_children: false }],
+            next_cursor: null
+          },
+          response: new Response("{}")
+        });
+      }
       state.requests.push(`${path}${cursor ? `?cursor=${cursor}` : ""}`);
       if (
         (path === "/api/v1/websites/{id}/runs/" && cursor && state.historyError) ||
@@ -85,7 +104,15 @@ vi.mock("@/lib/api/browser", () => ({
                   }
               : path === "/api/v1/websites/{id}/info-blobs/page/"
                 ? {
-                    items: [{ id: "blob-1", metadata: { title: state.blobTitle, size: 2048 } }],
+                    items: [
+                      {
+                        id: "blob-1",
+                        metadata: {
+                          title: filters?.q ? `${filters.q}.html` : state.blobTitle,
+                          size: 2048
+                        }
+                      }
+                    ],
                     total_count: 1,
                     next_cursor: null
                   }
@@ -113,6 +140,8 @@ afterEach(() => {
   state.latestError = false;
   vi.useRealTimers();
   state.requests = [];
+  state.contentQueries = [];
+  state.folderQueries = [];
   post.mockReset();
 });
 
@@ -120,6 +149,47 @@ afterEach(() => {
 setRuns(run());
 
 describe("WebsiteDetail", () => {
+  it("browses URL folders lazily with counts and keeps folder selection in the URL", async () => {
+    renderInApp(<WebsiteDetail websiteId="website-1" />, {
+      route: "/spaces/space-1/knowledge/websites/website-1?tab=blobs"
+    });
+    const nav = await screen.findByRole("navigation", { name: "URL-struktur" });
+    const docs = await within(nav).findByRole("link", { name: /docs.*4 resurser/ });
+    expect(state.folderQueries).toEqual(["", "https://example.test/"]);
+    fireEvent.click(docs);
+    await waitFor(() =>
+      expect(state.contentQueries).toContainEqual(
+        expect.objectContaining({ prefix: "https://example.test/docs/" })
+      )
+    );
+    expect(new URL(window.location.href).searchParams.get("prefix")).toBe(
+      "https://example.test/docs/"
+    );
+    fireEvent.click(within(nav).getByRole("button", { name: "Fäll ut docs" }));
+    expect(await within(nav).findByRole("link", { name: /archive.*2 resurser/ })).toBeTruthy();
+    expect(state.folderQueries).toEqual([
+      "",
+      "https://example.test/",
+      "https://example.test/docs/"
+    ]);
+  });
+  it("restores a content deep link and searches the server for pages not yet loaded", async () => {
+    renderInApp(<WebsiteDetail websiteId="website-1" />, {
+      route:
+        "/spaces/space-1/knowledge/websites/website-1?tab=blobs&prefix=https%3A%2F%2Fexample.test%2Fdocs%2F&q=unloaded"
+    });
+    expect(await screen.findByRole("button", { name: "unloaded.html" })).toBeTruthy();
+    expect(state.contentQueries).toContainEqual(
+      expect.objectContaining({ q: "unloaded", prefix: "https://example.test/docs/" })
+    );
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: "budget" } });
+    expect(await screen.findByRole("button", { name: "budget.html" })).toBeTruthy();
+    expect(state.contentQueries).toContainEqual(
+      expect.objectContaining({ q: "budget", prefix: "https://example.test/docs/" })
+    );
+    expect(new URL(window.location.href).searchParams.get("q")).toBe("budget");
+  });
   it("switches between crawls and indexed content with Astryx tabs", async () => {
     // makeSpace() owns website-1, so the page offers its crawl controls.
     expect(makeSpace().id).toBe(makeWebsite().space_id);
