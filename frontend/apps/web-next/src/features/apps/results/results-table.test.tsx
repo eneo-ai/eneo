@@ -2,6 +2,7 @@
 import { cleanup, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 
 const run = (id: string, text: string | null, created_at: string) => ({
   id,
@@ -49,5 +50,21 @@ describe("ResultsTable", () => {
       expect(time).toMatch(/2026/);
       expect(within(row).getByRole("button", { name: `Fler åtgärder för ${time}` })).toBeTruthy();
     }
+  });
+
+  it("is a list of rows on a phone, one per run, each opening its result", async () => {
+    setViewport(PHONE_VIEWPORT);
+    renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/apps/app-1/results/${id}`} />);
+
+    const list = await screen.findByRole("list", { name: "Resultat" });
+    expect(screen.queryByRole("table")).toBeNull();
+    const links = within(list).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/apps/app-1/results/run-1",
+      "/apps/app-1/results/run-2"
+    ]);
+    expect(within(list).getByText(/Sammanfatta protokollet/)).toBeTruthy();
+    // Each row has its menu, named by the time the row shows.
+    expect(within(list).getAllByRole("button", { name: /^Fler åtgärder för / })).toHaveLength(2);
   });
 });

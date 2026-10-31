@@ -1,11 +1,12 @@
 "use client";
 
+import { List, ListItem } from "@astryxdesign/core/List";
 import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { FileText, MoreHorizontal, Paperclip, Trash2 } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { Button } from "@/components/ui/button";
@@ -28,6 +29,8 @@ import { unwrap } from "@/lib/api/errors";
 import { pollWhile } from "@/lib/api/query";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { toastApiError } from "@/lib/api/toast";
+import { useFocusAcrossLayouts } from "@/lib/hooks/use-focus-across-layouts";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { appRunsQueryOptions, getResultTitle, isRunActive, type AppRunSparse } from "../apps";
 import { AppRunStatusToken } from "../status-token";
 
@@ -87,7 +90,8 @@ function ResultActions({ appId, run }: { appId: string; run: AppRunSparse }) {
   );
 }
 
-function ResultInputCell({ run }: { run: AppRunSparse }) {
+/** `wrap`: a phone row shows the whole input, wrapped; the table cuts it at 40 characters. */
+function ResultInputCell({ run, wrap = false }: { run: AppRunSparse; wrap?: boolean }) {
   const t = useTranslations();
   const { text, files } = run.input;
   if (!text && files.length === 0) {
@@ -98,17 +102,22 @@ function ResultInputCell({ run }: { run: AppRunSparse }) {
   return (
     <div className="flex flex-wrap items-center gap-2">
       {text && (
-        <span className="flex max-w-[40ch] items-center gap-1.5">
+        <span
+          className={wrap ? "flex items-start gap-1.5" : "flex max-w-[40ch] items-center gap-1.5"}
+        >
           <FileText className="text-muted-foreground size-4 shrink-0" />
-          <span className="truncate">
+          <span className={wrap ? "break-words" : "truncate"}>
             {t("input")}: {text}
           </span>
         </span>
       )}
       {files.map((file) => (
-        <span key={file.id} className="flex max-w-[30ch] items-center gap-1.5">
+        <span
+          key={file.id}
+          className={wrap ? "flex items-start gap-1.5" : "flex max-w-[30ch] items-center gap-1.5"}
+        >
           <Paperclip className="text-muted-foreground size-4 shrink-0" />
-          <span className="truncate">{file.name}</span>
+          <span className={wrap ? "break-words" : "truncate"}>{file.name}</span>
         </span>
       ))}
     </div>
@@ -124,6 +133,9 @@ export function ResultsTable({
   resultHref: (runId: string) => string;
 }) {
   const t = useTranslations();
+  const phone = useMediaMatch(PHONE_QUERY);
+  const box = useRef<HTMLDivElement>(null);
+  useFocusAcrossLayouts(box, phone);
   // A finished run arrives through the job feed (every run is a job), which
   // refreshes this list; polling only covers the time the feed is down.
   const live = useJobEventsConnected();
@@ -139,8 +151,39 @@ export function ResultsTable({
     return <EmptyState title={t("no_previous_results_found")} />;
   }
 
+  if (phone) {
+    // A phone (decision 9): one row per run, its whole input wrapped, the state and time
+    // under it and the menu at the end; the table is a desktop layout.
+    return (
+      <div ref={box}>
+        <List hasDividers edgeCompensation="inline" aria-label={t("results")}>
+          {runs.map((run) => (
+            <ListItem
+              key={run.id}
+              href={resultHref(run.id)}
+              label={<ResultInputCell run={run} wrap />}
+              description={
+                <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                  <AppRunStatusToken status={run.status} />
+                  <span className="tabular-nums">
+                    {run.created_at ? (
+                      <ClientTime value={run.created_at} format="date_time" />
+                    ) : (
+                      "—"
+                    )}
+                  </span>
+                </span>
+              }
+              endContent={<ResultActions appId={appId} run={run} />}
+            />
+          ))}
+        </List>
+      </div>
+    );
+  }
+
   return (
-    <div className="overflow-x-auto">
+    <div ref={box} className="overflow-x-auto">
       {/* The runs fill the app page's "Resultat" tab, so the table takes its name. */}
       <Table aria-label={t("results")}>
         <TableHeader>

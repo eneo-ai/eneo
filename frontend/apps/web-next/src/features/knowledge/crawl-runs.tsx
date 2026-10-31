@@ -15,6 +15,7 @@ import { useState } from "react";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { formatDuration } from "@/lib/format";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { TableFrame } from "@/components/composites/table-frame";
 import { CrawlRunDetailsDialog } from "./crawl-run-details";
 import { crawlRunState, type CrawlFailureKind } from "./crawl-run-state";
@@ -117,6 +118,7 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
   const [filter, setFilter] = useState("");
   const [selection, setSelection] = useState<RunSelection | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const phone = useMediaMatch(PHONE_QUERY);
   const { sortedData, sortConfig } = useTableSortableState<CrawlRun, CrawlRunSortKey>({
     data: filterCrawlRuns(runs, filter),
     defaultSort: CRAWL_RUN_DEFAULT_SORT,
@@ -182,18 +184,43 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
           isCompact
         />
       ) : (
-        <TableFrame>
-          {/* No heading above it: the table fills the website page's
-              "Indexeringar" tab, so it takes the tab's name. */}
-          <Table
-            data={sortedData}
-            columns={columns}
-            idKey="id"
-            aria-label={t("crawls")}
-            pinnedColumn="started"
-            plugins={{ sort: sortPlugin }}
-          />
-        </TableFrame>
+        <>
+          {phone ? (
+            // A phone (decision 9): a block per run, newest first (the table's default order):
+            // when it started and its state, what it did, how long it took. A table of four
+            // wide columns cut the result and lost the duration off the screen.
+            <ul
+              aria-label={t("crawls")}
+              className="border-ax-border divide-ax-border -mx-4 divide-y border-y"
+            >
+              {sortedData.map((run) => (
+                <li key={run.id} className="flex flex-col gap-1.5 px-4 py-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <CrawlStartedCell run={run} onSelect={() => select(run, null)} />
+                    <CrawlRunStatusLabel run={run} />
+                  </div>
+                  <CrawlResultCell run={run} onShowFailures={(kind) => select(run, kind)} />
+                  <span className="text-ax-text-secondary text-xs">
+                    {t("duration")}: <CrawlDurationCell crawl={run} />
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <TableFrame>
+              {/* No heading above it: the table fills the website page's
+                  "Indexeringar" tab, so it takes the tab's name. */}
+              <Table
+                data={sortedData}
+                columns={columns}
+                idKey="id"
+                aria-label={t("crawls")}
+                pinnedColumn="started"
+                plugins={{ sort: sortPlugin }}
+              />
+            </TableFrame>
+          )}
+        </>
       )}
       {selection ? (
         <CrawlRunDetailsDialog

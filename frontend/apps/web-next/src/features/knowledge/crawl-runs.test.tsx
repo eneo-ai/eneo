@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import { CrawlRunsTable } from "./crawl-runs";
 import type { CrawlRun } from "./knowledge";
 
@@ -64,6 +65,21 @@ function statusColumn() {
 }
 
 describe("CrawlRunsTable", () => {
+  it("is a block per run on a phone, newest first, with the result and the duration in view", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderInApp(<CrawlRunsTable runs={RUNS} />);
+
+    expect(screen.queryByRole("table")).toBeNull();
+    const rows = within(screen.getByRole("list", { name: "Indexeringar" })).getAllByRole(
+      "listitem"
+    );
+    expect(rows).toHaveLength(3);
+    // The newest first, as the table's default order.
+    expect(within(rows[0]!).getByRole("button", { name: /5 mars 2024|2024-03-05/ })).toBeTruthy();
+    for (const row of rows)
+      expect(within(row).getAllByText(/Varaktighet/).length).toBeGreaterThan(0);
+  });
+
   it("lists runs newest first with their state as a status dot and text", async () => {
     const { container } = renderInApp(<CrawlRunsTable runs={RUNS} />);
 
