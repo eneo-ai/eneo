@@ -2,7 +2,7 @@
 
 import { History } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
@@ -17,20 +17,19 @@ export function InstructionsSection({ app }: { app: App }) {
   const update = useUpdateApp(app.id);
   const [showHistory, setShowHistory] = useState(false);
 
-  const promptDescription = useRef("");
-  const prompt = useAutosaveField({
+  const savedText = app.prompt?.text ?? "";
+  const savedDescription = app.prompt?.description ?? "";
+  const prompt = useAutosaveField<{ text: string; description?: string }>({
     key: "app-prompt",
-    value: app.prompt?.text ?? "",
+    value: { text: savedText, description: savedDescription },
+    equals: (a, b) => a.text === b.text && (a.description ?? "") === (b.description ?? ""),
     save: (value) =>
       update.mutateAsync({
         prompt: {
-          text: value,
-          ...(promptDescription.current ? { description: promptDescription.current } : {})
+          text: value.text,
+          ...(value.description ? { description: value.description } : {})
         }
       }),
-    onSaved: () => {
-      promptDescription.current = "";
-    },
     commitDebounceMs: 1500,
     commitOnVisibilityChange: true
   });
@@ -51,11 +50,14 @@ export function InstructionsSection({ app }: { app: App }) {
       >
         <Textarea
           id="app-prompt"
-          value={prompt.value}
+          value={prompt.value.text}
           rows={6}
           onChange={(event) => {
-            promptDescription.current = "";
-            prompt.setValue(event.target.value);
+            const text = event.target.value;
+            prompt.setValue({
+              text,
+              description: text === savedText ? savedDescription : undefined
+            });
           }}
           onBlur={() => prompt.commit()}
         />
@@ -65,11 +67,14 @@ export function InstructionsSection({ app }: { app: App }) {
         open={showHistory}
         onOpenChange={setShowHistory}
         onUseVersion={(version) => {
-          prompt.setValue(version.text);
-          promptDescription.current = t("prompt_restored_from_date", {
-            date: version.created_at ? formatDateTime(version.created_at) : t("unknown")
-          });
-          void prompt.commit(version.text);
+          const value = {
+            text: version.text,
+            description: t("prompt_restored_from_date", {
+              date: version.created_at ? formatDateTime(version.created_at) : t("unknown")
+            })
+          };
+          prompt.setValue(value);
+          void prompt.commit(value);
         }}
       />
     </SettingsGroup>

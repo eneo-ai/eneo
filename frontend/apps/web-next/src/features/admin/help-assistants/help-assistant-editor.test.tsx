@@ -99,55 +99,58 @@ it("leaves governed instructions to the server baseline instead of overriding wi
   );
 });
 
-it("records the historical version date through the existing assistant prompt save", async () => {
-  const assistant = {
-    id: "helper",
-    name: "Helper",
-    completion_model: models[0],
-    completion_model_kwargs: {},
-    prompt: { text: "Current body" },
-    attachments: []
-  } as unknown as Assistant;
-  const old = {
-    id: "old",
-    text: "Old body",
-    description: "Historic marker",
-    created_at: "2026-10-01T12:00:00Z",
-    is_selected: false,
-    user: { id: "user-1", email: "owner@example.se" }
-  };
-  api.GET.mockImplementation(async (path) => ({
-    data: path.includes("/prompts/{id}") ? old : { items: [old] },
-    response: new Response("{}")
-  }));
-  api.POST.mockImplementation(async (path, init) => ({
-    data: path.endsWith("/preflight")
-      ? { file_tokens: 0, prompt_tokens: 0 }
-      : { ...assistant, prompt: init.body.prompt },
-    response: new Response("{}")
-  }));
-  const queryClient = testQueryClient();
-  queryClient.setQueryData(["assistants", "helper"], assistant);
-  renderInApp(<HelpAssistantEditor assistantId="helper" helperKind="prompt_guide" />, {
-    queryClient
-  });
-  fireEvent.click(screen.getByRole("button", { name: "Visa prompthistorik" }));
-  fireEvent.click(await screen.findByRole("button", { name: /Historic marker/ }));
-  await screen.findByText("Old body");
-  fireEvent.click(
-    screen.getByRole("button", { name: /Återställ denna version|Använd denna version/ })
-  );
-  await waitFor(() =>
-    expect(api.POST).toHaveBeenCalledWith(
-      "/api/v1/assistants/{id}/",
-      expect.objectContaining({
-        body: {
-          prompt: {
-            text: "Old body",
-            description: expect.stringMatching(/^Återställd prompt från /)
+it.each([false, true])(
+  "records restore provenance through assistant autosave even for identical text: %s",
+  async (identical) => {
+    const assistant = {
+      id: "helper",
+      name: "Helper",
+      completion_model: models[0],
+      completion_model_kwargs: {},
+      prompt: { text: identical ? "Old body" : "Current body" },
+      attachments: []
+    } as unknown as Assistant;
+    const old = {
+      id: "old",
+      text: "Old body",
+      description: "Historic marker",
+      created_at: "2026-10-01T12:00:00Z",
+      is_selected: false,
+      user: { id: "user-1", email: "owner@example.se" }
+    };
+    api.GET.mockImplementation(async (path) => ({
+      data: path.includes("/prompts/{id}") ? old : { items: [old] },
+      response: new Response("{}")
+    }));
+    api.POST.mockImplementation(async (path, init) => ({
+      data: path.endsWith("/preflight")
+        ? { file_tokens: 0, prompt_tokens: 0 }
+        : { ...assistant, prompt: init.body.prompt },
+      response: new Response("{}")
+    }));
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(["assistants", "helper"], assistant);
+    renderInApp(<HelpAssistantEditor assistantId="helper" helperKind="prompt_guide" />, {
+      queryClient
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Visa prompthistorik" }));
+    fireEvent.click(await screen.findByRole("button", { name: /Historic marker/ }));
+    await screen.findByRole("button", { name: "Återställ denna version" });
+    fireEvent.click(
+      screen.getByRole("button", { name: /Återställ denna version|Använd denna version/ })
+    );
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith(
+        "/api/v1/assistants/{id}/",
+        expect.objectContaining({
+          body: {
+            prompt: {
+              text: "Old body",
+              description: expect.stringMatching(/^Återställd prompt från /)
+            }
           }
-        }
-      })
-    )
-  );
-});
+        })
+      )
+    );
+  }
+);

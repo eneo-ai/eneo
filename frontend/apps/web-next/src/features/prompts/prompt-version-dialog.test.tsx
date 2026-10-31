@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 import { PromptVersionDialog } from "./prompt-version-dialog";
 const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
@@ -197,3 +197,63 @@ it("blocks close immediately when saving starts, before mutation observers rende
     finish({ data: { ...old, description: "Saving note" }, response: new Response("{}") });
   }
 });
+
+it.each(["current changes", "target disappears"])(
+  "keeps the description action target when %s",
+  async (change) => {
+    const queryClient = testQueryClient();
+    api.PATCH.mockRejectedValue(new Error("Version unavailable"));
+    renderInApp(
+      <PromptVersionDialog
+        resource={{ type: "assistant", id: "assistant" }}
+        open
+        onOpenChange={vi.fn()}
+        onUseVersion={vi.fn()}
+      />,
+      { queryClient }
+    );
+    await screen.findByText("Current text");
+    const target = change === "current changes" ? current : old;
+    if (target === old) {
+      fireEvent.click(screen.getByRole("button", { name: /Old note/ }));
+      await screen.findByText("Old text");
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Redigera beskrivning" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Beskrivning" }), {
+      target: { value: "Target draft" }
+    });
+    api.GET.mockClear();
+    act(() =>
+      queryClient.setQueryData(
+        ["assistant", "assistant", "prompts"],
+        change === "current changes"
+          ? [
+              { ...current, is_selected: false },
+              { ...old, is_selected: true }
+            ]
+          : [current]
+      )
+    );
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith(
+        "/api/v1/prompts/{id}/",
+        expect.objectContaining({
+          params: { path: { id: change === "current changes" ? old.id : current.id } }
+        })
+      )
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Spara ändringar" }));
+    await waitFor(() =>
+      expect(api.PATCH).toHaveBeenCalledWith(
+        "/api/v1/prompts/{id}/",
+        expect.objectContaining({
+          params: { path: { id: target.id } },
+          body: { description: "Target draft" }
+        })
+      )
+    );
+    expect(
+      (screen.getByRole("textbox", { name: "Beskrivning" }) as HTMLTextAreaElement).value
+    ).toBe("Target draft");
+  }
+);

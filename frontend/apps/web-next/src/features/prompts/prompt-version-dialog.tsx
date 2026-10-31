@@ -95,17 +95,24 @@ function History({
   const saving = useRef(false);
   const listKey = [resource.type, resource.id, "prompts"];
   const [selection, setSelection] = useState<string | null>(null);
-  const [step, setStep] = useState<"preview" | "description" | "delete">("preview");
+  const [step, setStep] = useState<
+    | { kind: "preview" }
+    | {
+        kind: "description" | "delete";
+        target: Schema<"PromptSparse">;
+        originalDescription: string;
+      }
+  >({ kind: "preview" });
   const [description, setDescription] = useState("");
   const body = useRef<HTMLDivElement>(null);
   const actionHeading = useRef<HTMLHeadingElement>(null);
   const editButton = useRef<HTMLButtonElement>(null);
-  const previousStep = useRef(step);
+  const previousStep = useRef(step.kind);
   useEffect(() => {
-    if (previousStep.current !== step) {
-      if (step === "preview") (editButton.current ?? body.current)?.focus();
+    if (previousStep.current !== step.kind) {
+      if (step.kind === "preview") (editButton.current ?? body.current)?.focus();
       else actionHeading.current?.focus();
-      previousStep.current = step;
+      previousStep.current = step.kind;
     }
   }, [step]);
   const list = useQuery({
@@ -161,11 +168,11 @@ function History({
         );
         setSelection(null);
       }
-      if (saved && selected?.is_selected)
+      if (saved && list.data?.find((version) => version.id === action.id)?.is_selected)
         void client.invalidateQueries({
           queryKey: [resource.type === "assistant" ? "assistants" : "apps", resource.id]
         });
-      setStep("preview");
+      setStep({ kind: "preview" });
       void client.invalidateQueries({ queryKey: listKey });
     },
     onError: (error) => toastApiError(error, t),
@@ -182,16 +189,21 @@ function History({
     }),
     []
   );
-  const dirty = step === "description" && description !== (preview.data?.description ?? "");
-  const actionTitle = step === "delete" ? t("delete_prompt") : t("edit_prompt_description");
+  const dirty = step.kind === "description" && description !== step.originalDescription;
+  const actionTitle = step.kind === "delete" ? t("delete_prompt") : t("edit_prompt_description");
   function submit() {
-    if (saving.current || !selected || !author || step === "preview") return;
-    if (step === "delete" && selected.is_selected) return;
+    if (saving.current || step.kind === "preview" || step.target.user.id !== user.id) return;
+    if (
+      step.kind === "delete" &&
+      (list.data?.find((version) => version.id === step.target.id)?.is_selected ??
+        step.target.is_selected)
+    )
+      return;
     saving.current = true;
     mutation.mutate(
-      step === "delete"
-        ? { kind: "delete", id: selected.id }
-        : { kind: "description", id: selected.id, description }
+      step.kind === "delete"
+        ? { kind: "delete", id: step.target.id }
+        : { kind: "description", id: step.target.id, description }
     );
   }
   return (
@@ -207,7 +219,7 @@ function History({
         tabIndex={-1}
         className="focus-visible:outline-ring flex min-h-0 flex-col gap-4 overflow-y-auto py-4 focus-visible:outline-2"
       >
-        {step !== "preview" ? (
+        {step.kind !== "preview" ? (
           <>
             <h3
               ref={actionHeading}
@@ -216,7 +228,7 @@ function History({
             >
               {actionTitle}
             </h3>
-            {step === "delete" ? (
+            {step.kind === "delete" ? (
               <p>{t("do_you_really_want_to_delete_this_version")}</p>
             ) : (
               <TextArea
@@ -234,12 +246,12 @@ function History({
                 onClick={() => {
                   if (saving.current) return;
                   mutation.reset();
-                  setStep("preview");
+                  setStep({ kind: "preview" });
                 }}
               />
               <Button
-                label={t(step === "delete" ? "delete" : "save_changes")}
-                variant={step === "delete" ? "destructive" : "primary"}
+                label={t(step.kind === "delete" ? "delete" : "save_changes")}
+                variant={step.kind === "delete" ? "destructive" : "primary"}
                 isLoading={mutation.isPending}
                 isInterruptible
                 onClick={submit}
@@ -308,10 +320,14 @@ function History({
                                 )}
                                 isDisabled={!author}
                                 onClick={() => {
-                                  if (!author) return;
+                                  if (!author || !selected) return;
                                   mutation.reset();
                                   setDescription(prompt.description ?? "");
-                                  setStep("description");
+                                  setStep({
+                                    kind: "description",
+                                    target: selected,
+                                    originalDescription: prompt.description ?? ""
+                                  });
                                 }}
                               />
                             </span>
@@ -324,9 +340,13 @@ function History({
                                 label={t("delete_prompt")}
                                 isDisabled={!author || selected?.is_selected}
                                 onClick={() => {
-                                  if (!author || selected?.is_selected) return;
+                                  if (!author || !selected || selected.is_selected) return;
                                   mutation.reset();
-                                  setStep("delete");
+                                  setStep({
+                                    kind: "delete",
+                                    target: selected,
+                                    originalDescription: prompt.description ?? ""
+                                  });
                                 }}
                               />
                             </span>

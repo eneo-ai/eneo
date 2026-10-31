@@ -17,13 +17,13 @@ test("edits, restores and deletes real prompt history and validates, previews an
     prompt: { text: "First native instructions", description: "First native marker" }
   });
   await apiPost(page, path, {
-    prompt: { text: "Current native instructions", description: "Current native marker" }
+    prompt: { text: "First native instructions", description: "Current native marker" }
   });
   const editor = `${space}/assistants/${assistant.id}/edit`;
   await page.goto(`${editor}?section=instructions`);
   await page.getByRole("button", { name: "Visa prompthistorik" }).click();
   let dialog = page.getByRole("dialog", { name: "Prompthistorik" });
-  await expect(dialog.getByText("Current native instructions", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("First native instructions", { exact: true })).toBeVisible();
   await expect(dialog.getByRole("button", { name: "Återställ denna version" })).toBeDisabled();
   await dialog.getByRole("button", { name: /First native marker/ }).click();
   await dialog.getByRole("button", { name: "Redigera beskrivning" }).click();
