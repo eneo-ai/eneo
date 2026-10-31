@@ -281,6 +281,13 @@ describe("ChatView start state on a phone (decisions 5 and 8)", () => {
     expect(follows(quickLinks, keepGoing)).toBe(true);
   });
 
+  it("says only where the data stays under the docked composer before the first answer", () => {
+    setViewport("phone");
+    renderInApp(<Harness partner={personal} />);
+    expect(screen.getByText("Data behandlas inom er infrastruktur")).toBeTruthy();
+    expect(screen.queryByText(/Kontrollera viktiga uppgifter/)).toBeNull();
+  });
+
   it("keeps focus in the docked composer once a question is asked", async () => {
     setViewport("phone");
     renderInApp(<Harness partner={personal} />);

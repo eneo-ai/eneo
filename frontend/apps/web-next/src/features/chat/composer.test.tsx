@@ -23,13 +23,15 @@ function Harness({
   onSubmit = vi.fn(),
   onStop = vi.fn(),
   initial = "",
-  sendBlocked = null
+  sendBlocked = null,
+  beforeAnswer = false
 }: {
   busy?: boolean;
   onSubmit?: () => void;
   onStop?: () => void;
   initial?: string;
   sendBlocked?: string | null;
+  beforeAnswer?: boolean;
 }) {
   const [value, setValue] = useState(initial);
   const attachments = useAttachments(partner);
@@ -46,6 +48,7 @@ function Harness({
       attachments={attachments}
       onOpenFileDialog={vi.fn()}
       knowledge={partner.knowledge}
+      beforeAnswer={beforeAnswer}
     />
   );
 }
@@ -198,6 +201,12 @@ describe("Composer", () => {
         "Data behandlas inom er infrastruktur. Kontrollera viktiga uppgifter mot källorna."
       )
     ).toBeTruthy();
+  });
+
+  it("says only where the data stays before the first answer, and adds the advice to check it after", () => {
+    renderComposer({ beforeAnswer: true });
+    expect(screen.getByText("Data behandlas inom er infrastruktur")).toBeTruthy();
+    expect(screen.queryByText(/Kontrollera viktiga uppgifter/)).toBeNull();
   });
 
   it("has no axe violations", async () => {

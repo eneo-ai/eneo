@@ -1027,6 +1027,7 @@ function ConversationView({
               {errorNotice}
               <Composer
                 {...composerProps}
+                beforeAnswer
                 partnerToken={partnerToken}
                 textareaRef={startDockTextareaRef}
               />

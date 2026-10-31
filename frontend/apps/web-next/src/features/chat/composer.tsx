@@ -215,6 +215,13 @@ export type ComposerProps = {
   /** A passage quoted from a file or a view, sent as the opening lines of the question. */
   quote?: ComposerQuote | null;
   variant?: "docked" | "start";
+  /**
+   * No answer in the conversation yet: the advice to check an answer against its
+   * sources has nothing to apply to, so one line on where the data stays is enough
+   * (the centred start composer says it that way at every width, and a phone's
+   * docked one, which stays where it is, now does the same).
+   */
+  beforeAnswer?: boolean;
   textareaRef?: Ref<HTMLTextAreaElement>;
 };
 
@@ -293,6 +300,7 @@ export function Composer({
   contextBar,
   quote = null,
   variant = "docked",
+  beforeAnswer = false,
   textareaRef
 }: ComposerProps) {
   const t = useTranslations();
@@ -450,7 +458,9 @@ export function Composer({
       {contextBar}
       <p className="text-ax-text-secondary flex items-center justify-center gap-1.5 text-center text-xs">
         <ShieldCheck aria-hidden="true" className="size-3.5 shrink-0" />
-        {variant === "start" ? t("chat_sovereignty_hint") : t("chat_sovereignty_hint_full")}
+        {variant === "start" || beforeAnswer
+          ? t("chat_sovereignty_hint")
+          : t("chat_sovereignty_hint_full")}
       </p>
     </div>
   );
