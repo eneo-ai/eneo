@@ -66,6 +66,7 @@ test(
       preview.getByText("Instructions for Concurrent version", { exact: true })
     ).toBeVisible();
     expect(restores).toHaveLength(1);
+    await expect(preview).toHaveCSS("opacity", "1");
     const source = preview
       .locator("section")
       .filter({ has: page.getByText(skill.current_revision.instructions, { exact: true }) });
@@ -250,10 +251,14 @@ test(
       ).toBeVisible();
       await expect(page.getByText("Personlig chatt uppdaterades.", { exact: true })).toBeVisible();
       expect(appCalls).toBe(0);
+      await expect(
+        page.getByRole("button", { name: "Uppdatera alla inaktuella kopplingar", exact: true })
+      ).not.toHaveAttribute("aria-busy", "true");
       await restart.click();
       await expect(page.getByText("Fixture app phase unavailable", { exact: false })).toBeVisible();
       expect(assistantCalls).toBe(2);
       await expect(restart).toBeVisible();
+      await expect(restart).not.toHaveAttribute("aria-busy", "true");
       await restart.click();
       await expect(
         page
