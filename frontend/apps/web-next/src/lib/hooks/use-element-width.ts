@@ -8,7 +8,7 @@ import { useEffect, useRef, useState, type RefObject } from "react";
  * has rather than on the window. The caller re-renders only when what
  * `select` returns changes, so one that needs a threshold does not re-render
  * on every pixel of a resize; `select` depends on the width alone. `null`
- * until measured (on the server, during hydration). A hidden element
+ * until measured. A hidden element
  * (`display: none`) keeps its last width.
  */
 export function useElementWidth<T = number>(

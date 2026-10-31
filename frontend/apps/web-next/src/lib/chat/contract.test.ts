@@ -15,6 +15,12 @@ import type { EneoUIMessage } from "./types";
 type FinishArgs = { isAbort: boolean; isError: boolean; isDisconnect: boolean };
 type DataPart = { type: string; data: unknown };
 
+// This suite owns stream decoding; base.test.ts owns cookie/session transport.
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  apiFetch: (...args: Parameters<typeof fetch>) => fetch(...args)
+}));
+
 const fetchMock = vi.fn<typeof fetch>();
 vi.stubGlobal("fetch", fetchMock);
 

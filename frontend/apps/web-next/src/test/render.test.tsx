@@ -8,7 +8,7 @@ import { afterEach, expect, it, vi } from "vitest";
 import { useAppContext } from "@/components/providers/app-context";
 import { useShell } from "@/components/shell/shell-context";
 import { Link, replaceUrl, router } from "./navigation";
-import { renderHookInApp, renderInApp, renderToHtml, testAppContext } from "./render";
+import { renderHookInApp, renderInApp, testAppContext } from "./render";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
@@ -78,12 +78,6 @@ it("starts every test at / with fresh router mocks", () => {
   const { result } = renderHookInApp(() => usePathname());
   expect(result.current).toBe("/");
   expect(router.push).not.toHaveBeenCalled();
-});
-
-it("renders what the server sends", () => {
-  expect(renderToHtml(<Probe />, { route: "/dashboard" })).toContain(
-    "Logga in | Anna Lind | no admin | /dashboard"
-  );
 });
 
 it("merges overrides into each part of the app context", () => {

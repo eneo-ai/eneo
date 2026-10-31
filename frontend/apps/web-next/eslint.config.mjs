@@ -12,7 +12,6 @@ const generatedAndVendored = [
   "src/lib/i18n/**",
   "src/components/ai-elements/**",
   "src/components/ui/**",
-  "src/app/global-error.tsx",
   "src/**/*.test.{ts,tsx}"
 ];
 
@@ -43,27 +42,10 @@ const astryxWrappedImports = [
   }
 ];
 
-// Next APIs app code reaches through the app's own modules, so the Vite build
-// can swap the implementation (src/lib/navigation.ts, src/lib/link.ts).
-const frameworkSeamImports = [
-  {
-    name: "next/navigation",
-    importNames: [
-      "useRouter",
-      "usePathname",
-      "useSearchParams",
-      "useSelectedLayoutSegments",
-      "useSelectedLayoutSegment",
-      "useParams"
-    ],
-    message: 'Use "@/lib/navigation" (Next now, TanStack Router in the Vite build).'
-  },
-  { name: "next/link", message: 'Use "@/lib/link".' },
-  {
-    name: "next-intl",
-    message:
-      'Use "use-intl" for client hooks. Next server owners keep "next-intl/server" until their routes are ported.'
-  }
+const retiredFrameworkImports = [
+  { name: "next", message: "web-next is a Vite SPA; use its TanStack owners." },
+  { name: "next-intl", message: 'Use "use-intl".' },
+  { name: "server-only", message: "Server behavior belongs to FastAPI." }
 ];
 
 const eslintConfig = defineConfig([
@@ -115,10 +97,8 @@ const eslintConfig = defineConfig([
   },
   globalIgnores([
     // Frozen Next output remains until its routes and build are removed.
-    ".next/**",
     "out/**",
     "build/**",
-    "next-env.d.ts",
     // Vite build output and the TanStack Router route tree it generates.
     "dist/**",
     "src/routeTree.gen.ts",
@@ -315,17 +295,17 @@ const eslintConfig = defineConfig([
     // ignore src/components/astryx/**. Later restrictions extend this block's
     // `paths`/`patterns`; never add a competing block with the same rule.
     files: ["src/**/*.{ts,tsx}"],
-    ignores: ["src/app/**", "src/components/astryx/**", "src/lib/navigation.ts", "src/lib/link.ts"],
+    ignores: ["src/components/astryx/**"],
     rules: {
       "@typescript-eslint/no-restricted-imports": [
         "error",
         {
-          paths: [...astryxWrappedImports, ...frameworkSeamImports],
+          paths: [...astryxWrappedImports, ...retiredFrameworkImports],
           patterns: [
             {
-              group: ["@/app/*", "**/app/(app)/*", "**/app/(public)/*"],
+              group: ["next/*", "next-intl/*", "@/app/*", "**/app/(app)/*", "**/app/(public)/*"],
               message:
-                "src/app holds frozen Next files until removal; import from src/features or src/styles."
+                "Next is retired; use framework-neutral features and the TanStack navigation owner."
             }
           ]
         }

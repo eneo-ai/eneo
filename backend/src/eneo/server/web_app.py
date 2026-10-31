@@ -71,7 +71,7 @@ _IMMUTABLE = "public, max-age=31536000, immutable"
 
 
 def build_content_security_policy(nonce: str, frame_origins: Sequence[str]) -> str:
-    """The production policy web-next's Next proxy sends (src/proxy.ts)."""
+    """The production policy for the backend-served React app."""
     return "; ".join(
         (
             "default-src 'self'",

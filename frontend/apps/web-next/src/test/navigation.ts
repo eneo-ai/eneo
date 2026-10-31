@@ -5,12 +5,10 @@
  *
  *   vi.mock("@/lib/navigation", () => import("@/test/navigation"));
  *
- * (src/app code still imports next/navigation: mock that with this module.)
- *
  * The hooks then read the route the test set (`renderInApp(ui, { route })` or
  * `setRoute`), and `router` records where the app navigates. Both reset after
  * every test (src/test/setup-dom.ts). `replaceUrl` rerenders the hooks' users,
- * as both routers do; after `setRoute`, rerender yourself.
+ * as the app router does; after `setRoute`, rerender yourself.
  *
  * A route component, or the TanStack navigation itself, is tested in a real
  * router instead: `renderWithRouter` (src/test/router.tsx).
@@ -25,7 +23,7 @@ import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 const HOME = "/";
 
 let url = new URL(HOME, "http://localhost");
-// One object per route, like Next's: effects that depend on it rerun only
+// One object per route: effects that depend on it rerun only
 // when the route changes.
 let searchParams = new URLSearchParams();
 
@@ -83,11 +81,11 @@ const readPathname = () => url.pathname;
 const readSearchParams = () => searchParams;
 
 export function usePathname(): string {
-  return useSyncExternalStore(subscribe, readPathname, readPathname);
+  return useSyncExternalStore(subscribe, readPathname);
 }
 
 export function useSearchParams(): URLSearchParams {
-  return useSyncExternalStore(subscribe, readSearchParams, readSearchParams);
+  return useSyncExternalStore(subscribe, readSearchParams);
 }
 
 export function useRouter(): typeof router {

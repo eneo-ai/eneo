@@ -70,6 +70,9 @@ COPY --from=builder /app/.venv /app/.venv
 COPY --from=builder /tiktoken /tiktoken
 COPY --from=builder /app /app
 COPY --from=web-build /repo/apps/web-next/dist /app/web-dist
+# Browser tests resolve chunks from this exact build. Keep the map outside
+# web-dist so module metadata is not served by the web app.
+COPY --from=web-build /repo/apps/web-next/node_modules/.cache/vite-bundle-report.json /app/web-bundle-report.json
 
 # Set PATH to use venv and environment variables.
 # LITELLM_LOCAL_MODEL_COST_MAP keeps LiteLLM on the model and price catalog

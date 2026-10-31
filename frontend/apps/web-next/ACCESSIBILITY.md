@@ -67,8 +67,8 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - One `h1` per page, from `PageHeader`. Section headings follow in order (`h2`,
   then `h3`); pick the level for the outline and style with props or classes.
   `EmptyState` takes `headingLevel`.
-- Every route has a unique, translated title: `generateMetadata` from
-  `pageTitle("key")` (`src/lib/page-metadata.ts`) gives "Titel · Eneo".
+- Every route has a unique, translated title: `head: routeTitle("key")`
+  (`src/lib/route-head.ts`) gives "Titel · Eneo".
 - More than one `<nav>` on a page: give each a translated `aria-label`.
 - Lists are `<ul>`/`<ol>`, tables are `<table>` with `<th scope>`, never a grid
   of divs that looks like a table.

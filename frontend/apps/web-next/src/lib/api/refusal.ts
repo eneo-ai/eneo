@@ -79,7 +79,6 @@ export function reloadSession(): void {
 export const handleRefusal: (response: Response, requestUrl: string) => Promise<void> = async (
   response
 ) => {
-  if (typeof window === "undefined") return;
   assertCurrent();
   const generation = response.headers.get(SESSION_GENERATION_HEADER);
   if (snapshot.status === "bound" && generation !== null && generation !== snapshot.generation) {

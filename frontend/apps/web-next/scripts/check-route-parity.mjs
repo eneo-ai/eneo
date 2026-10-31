@@ -8,14 +8,21 @@
  * Ordinary lint checks recorded sources and shared paths; --strict also requires
  * every Next page path and every page/layout snapshot. Path presence does not
  * prove equivalent loaders or UI: each route port still owns its behavior tests.
- * Delete this temporary migration check with Next in P6B.
+ * After retirement, route-parity-base.json keeps the verified source revision
+ * and the last reviewed upstream revision. Full Git history is required. Port
+ * upstream changes before advancing upstreamRevision; remove this temporary
+ * guard only after the migration has landed.
  */
 import { createHash } from "node:crypto";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const SECURITY_SOURCES = ["../proxy.ts", "../../next.config.ts"];
+export const RETIRED_NEXT_ROUTES = new Map([
+  ["/activate", "Next-only provisioning is retired; Vite serves signed-in not-found instead."]
+]);
 export const VITE_ONLY = new Map([
   ["/*", "Signed-in not-found splat (P4 router shell)."],
   ["/spaces/$/*", "Space-layout not-found splat (P4 gate pages)."],
@@ -103,7 +110,9 @@ export function checkParity(files, viteRoutes, records, strict = false) {
     [...files.keys()].filter((file) => path.posix.basename(file) === "page.tsx").map(pageRoute)
   );
   const vitePaths = new Set(viteRoutes);
-  const unported = [...nextPages].filter((route) => !vitePaths.has(route)).sort();
+  const unported = [...nextPages]
+    .filter((route) => !vitePaths.has(route) && !RETIRED_NEXT_ROUTES.has(route))
+    .sort();
   for (const [file, hashes] of records) {
     if (!files.has(file)) {
       errors.push(`Stale lock path (missing or not a page/layout/security source): ${file}`);
@@ -144,7 +153,7 @@ function sourceFiles(appDir) {
         files.set(path.relative(appDir, file), readFileSync(file));
     }
   }
-  visit(appDir);
+  if (existsSync(appDir)) visit(appDir);
   for (const file of SECURITY_SOURCES) {
     if (existsSync(path.resolve(appDir, file)))
       files.set(file, readFileSync(path.resolve(appDir, file)));
@@ -152,15 +161,74 @@ function sourceFiles(appDir) {
   return files;
 }
 
+function gitSources(root, revision) {
+  const sources = new Map();
+  const entries = execFileSync(
+    "git",
+    ["ls-tree", "-rz", revision, "--", "src/app", "src/proxy.ts", "next.config.ts"],
+    { cwd: root, encoding: "utf8" }
+  );
+  for (const entry of entries.split("\0").filter(Boolean)) {
+    const [metadata, file] = entry.split("\t");
+    const relative = path.relative("src/app", file);
+    if (
+      SECURITY_SOURCES.includes(relative) ||
+      /^src\/app\/(?:.*\/)?(?:page|layout)\.tsx$/.test(file)
+    )
+      sources.set(relative, metadata.split(" ")[2]);
+  }
+  return sources;
+}
+
+function retiredSources(root, baseline) {
+  for (const key of ["sourceRevision", "upstreamRevision"]) {
+    if (!/^[0-9a-f]{40}$/.test(baseline[key]))
+      throw new Error(`route-parity-base.json needs a full ${key} SHA`);
+  }
+  const source = gitSources(root, baseline.sourceRevision);
+  const files = new Map(
+    [...source].map(([file, hash]) => [
+      file,
+      execFileSync("git", ["cat-file", "blob", hash], { cwd: root })
+    ])
+  );
+  const upstream = process.env.ROUTE_PARITY_UPSTREAM || "origin/develop";
+  const current = gitSources(root, upstream);
+  const previous = gitSources(root, baseline.upstreamRevision);
+  const landed =
+    current.size === 0 &&
+    spawnSync("git", ["merge-base", "--is-ancestor", baseline.sourceRevision, upstream], {
+      cwd: root
+    }).status === 0;
+  const errors = landed
+    ? []
+    : [...new Set([...previous.keys(), ...current.keys()])]
+        .filter((file) => previous.get(file) !== current.get(file))
+        .map(
+          (file) =>
+            `Upstream drift: ${file}. Port the change or removal, then advance upstreamRevision in route-parity-base.json.`
+        );
+  for (const file of sourceFiles(path.join(root, "src/app")).keys())
+    errors.push(
+      `Restored Next source: ${file}. Port its behavior to the Vite owner and remove it.`
+    );
+  return { files, errors };
+}
+
 export function main(args) {
   try {
     const root = fileURLToPath(new URL("../", import.meta.url));
     const appDir = path.join(root, "src/app");
     const lockPath = path.join(root, "scripts/route-parity.lock");
-    const files = sourceFiles(appDir);
+    const baselinePath = path.join(root, "scripts/route-parity-base.json");
+    const retired = existsSync(baselinePath)
+      ? retiredSources(root, JSON.parse(readFileSync(baselinePath, "utf8")))
+      : undefined;
+    const files = retired?.files ?? sourceFiles(appDir);
     const records = parseLock(existsSync(lockPath) ? readFileSync(lockPath, "utf8") : "");
     const [mode, ...requested] = args;
     if (mode === "--record" || mode === "--rerecord") {
+      if (retired) throw new Error("Next source is frozen at sourceRevision after retirement.");
       if (!requested.length) throw new Error(`${mode} needs at least one source file`);
       const paths = requested.map((file) => path.relative(appDir, path.resolve(root, file)));
       for (const file of paths) {
@@ -180,7 +248,13 @@ export function main(args) {
         "Usage: check-route-parity.mjs [--strict | --record <file>... | --rerecord <file>...]"
       );
     const routes = viteRoutePaths(readFileSync(path.join(root, "src/routeTree.gen.ts"), "utf8"));
-    const { errors, unported } = checkParity(files, routes, records, mode === "--strict");
+    const { errors, unported } = checkParity(
+      files,
+      routes,
+      records,
+      !!retired || mode === "--strict"
+    );
+    errors.push(...(retired?.errors ?? []));
     if (unported.length)
       console.log(
         `Next routes not yet ported:\n${unported.map((route) => `  ${route}`).join("\n")}`

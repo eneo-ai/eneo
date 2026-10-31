@@ -31,7 +31,7 @@ const STATUS: Record<
 /**
  * Whether the hourly scheduler ran recently and admitted every due website:
  * its state, when it last ran and what it did, with what to do when it is
- * not fine. The time shows after hydration (ClientTime).
+ * not fine. ClientTime uses the viewer's time zone.
  */
 export function SchedulerHealth({ scheduler }: { scheduler: CrawlerSchedulerHealth }) {
   const t = useTranslations();

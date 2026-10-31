@@ -1,7 +1,7 @@
 import { copyFileSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { afterEach, expect, it } from "vitest";
 import { blobHash, nextRoutePath, viteRoutePaths } from "../../scripts/check-route-parity.mjs";
 
@@ -35,6 +35,7 @@ function fixture() {
   function run(...args: string[]) {
     return spawnSync(process.execPath, ["scripts/check-route-parity.mjs", ...args], {
       cwd: root,
+      env: { ...process.env, ROUTE_PARITY_UPSTREAM: "origin/develop" },
       encoding: "utf8"
     });
   }
@@ -122,6 +123,18 @@ it("reports unported pages without blocking ordinary lint, but blocks strict mod
   expect(strict.stderr).toContain("/missing");
 });
 
+it("allows the retired activation route only with an unchanged source snapshot", () => {
+  const f = fixture();
+  const source = "src/app/(public)/activate/page.tsx";
+  f.write(source, "export default function Activate() {}\n");
+  expect(f.run("--strict").stderr).toContain("Unrecorded source: (public)/activate/page.tsx");
+  expect(f.run("--record", source).status).toBe(0);
+  const retired = f.run("--strict");
+  expect(retired.status, retired.stderr).toBe(0);
+  f.write(source, "export default function ChangedActivation() {}\n");
+  expect(f.run("--strict").stderr).toContain("Drift: (public)/activate/page.tsx");
+});
+
 it("requires a snapshot of every layout in strict mode", () => {
   const f = fixture();
   f.write("src/app/(app)/layout.tsx", "export default function AppLayout() {}\n");
@@ -204,3 +217,82 @@ it.each(["src/app/(public)/public-page.tsx", "src/app/missing/page.tsx", "../out
     expect(f.lock()).toBe(before);
   }
 );
+
+function retiredFixture() {
+  const f = fixture();
+  const git = (...args: string[]) =>
+    execFileSync("git", args, { cwd: f.root, encoding: "utf8" }).trim();
+  git("init", "-q", "-b", "migration");
+  const commit = () => {
+    git("add", ".");
+    git(
+      "-c",
+      "user.name=Parity test",
+      "-c",
+      "user.email=parity@example.invalid",
+      "commit",
+      "-qm",
+      "fixture"
+    );
+    return git("rev-parse", "HEAD");
+  };
+  const sourceRevision = commit();
+  git("update-ref", "refs/remotes/origin/develop", sourceRevision);
+  f.write(
+    "scripts/route-parity-base.json",
+    JSON.stringify({ sourceRevision, upstreamRevision: sourceRevision })
+  );
+  for (const file of ["src/app", "src/proxy.ts", "next.config.ts"])
+    rmSync(path.join(f.root, file), { recursive: true });
+  commit();
+  return { ...f, git, commit, sourceRevision };
+}
+
+it("checks the recorded source after Next deletion and still rejects a missing Vite route", () => {
+  const f = retiredFixture();
+  expect(f.run("--strict").status).toBe(0);
+  f.write("src/routeTree.gen.ts", tree(["/$"]));
+  const missing = f.run("--strict");
+  expect(missing.status).toBe(1);
+  expect(missing.stderr).toContain("Missing Vite route: /");
+});
+
+it.each([
+  ["add", "src/app/new/page.tsx"],
+  ["change", "src/app/page.tsx"],
+  ["delete", "src/app/layout.tsx"],
+  ["change", "src/proxy.ts"],
+  ["delete", "next.config.ts"]
+])("detects upstream %s of %s after local Next deletion", (operation, file) => {
+  const f = retiredFixture();
+  f.git("checkout", "-q", "-b", "upstream", f.sourceRevision);
+  if (operation === "delete") rmSync(path.join(f.root, file));
+  else f.write(file, "export const changed = true;\n");
+  f.git("update-ref", "refs/remotes/origin/develop", f.commit());
+  f.git("checkout", "-q", "migration");
+  const drift = f.run("--strict");
+  expect(drift.status).toBe(1);
+  expect(drift.stderr).toContain("Upstream drift:");
+  expect(drift.stderr).toContain(path.basename(file));
+});
+
+it("accepts retirement when the upstream contains the verified source revision and removes Next", () => {
+  const f = retiredFixture();
+  f.git("update-ref", "refs/remotes/origin/develop", "HEAD");
+  const result = f.run("--strict");
+  expect(result.status, result.stderr).toBe(0);
+});
+
+it("fails when the upstream comparison ref is missing instead of claiming no drift", () => {
+  const f = retiredFixture();
+  f.git("update-ref", "-d", "refs/remotes/origin/develop");
+  expect(f.run("--strict").status).toBe(2);
+});
+
+it("rejects Next sources accidentally restored by an integration", () => {
+  const f = retiredFixture();
+  f.write("src/app/new/page.tsx", "export default function Restored() {}\n");
+  const restored = f.run("--strict");
+  expect(restored.status).toBe(1);
+  expect(restored.stderr).toContain("Restored Next source:");
+});

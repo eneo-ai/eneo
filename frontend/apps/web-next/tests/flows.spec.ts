@@ -130,11 +130,16 @@ test(
     const historyRow = page.getByRole("row").filter({
       has: page.getByRole("link", { name: runName, exact: true })
     });
-    await expect(
-      historyRow.getByText("Ingen registrerad användning", { exact: true })
-    ).toBeVisible();
+    const historyUsage = historyRow.getByText("Ingen registrerad användning", { exact: true });
+    await expect(historyUsage).toBeVisible();
     await page.screenshot({
       path: test.info().outputPath("flow-run-history-desktop.png"),
+      fullPage: true
+    });
+    await historyUsage.scrollIntoViewIfNeeded();
+    await expect(historyUsage).toBeInViewport();
+    await page.screenshot({
+      path: test.info().outputPath("flow-run-history-usage-desktop.png"),
       fullPage: true
     });
     await page.setViewportSize({ width: 320, height: 844 });
@@ -143,8 +148,15 @@ test(
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true);
     await expect(page.locator("html")).toHaveClass(/dark/);
+    await page.getByRole("link", { name: runName, exact: true }).scrollIntoViewIfNeeded();
     await page.screenshot({
       path: test.info().outputPath("flow-run-history-mobile-dark.png"),
+      fullPage: true
+    });
+    await historyUsage.scrollIntoViewIfNeeded();
+    await expect(historyUsage).toBeInViewport();
+    await page.screenshot({
+      path: test.info().outputPath("flow-run-history-usage-mobile-dark.png"),
       fullPage: true
     });
     const historyAxe = await new AxeBuilder({

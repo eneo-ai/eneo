@@ -19,7 +19,6 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = "http://127.0.0.1:8124"
 RUNTIME = "http://127.0.0.1:8310"
-WEB_NEXT = "http://127.0.0.1:8135"
 # The numeric loopback address is the stack's MCP content host, not its web app.
 WEB_APP = "http://localhost:8124"
 
@@ -193,6 +192,8 @@ def main():
                 "compose",
                 "-f",
                 str(ROOT / "docker-compose.e2e.ci.yml"),
+                "-f",
+                str(ROOT / "docker-compose.e2e.web-app.yml"),
                 "config",
                 "--format",
                 "json",
@@ -217,8 +218,6 @@ def main():
             "TOOL_RUNTIME_URL": "http://tool-runtime:3010",
             "TOOL_RUNTIME_TOKEN": token,
             "FILE_REFERENCE_BASE_URL": "http://e2e-backend:8000",
-            "WEB_APP_ENABLED": "true",
-            "BROWSER_SESSION_ENABLED": "true",
         }
     )
     # /healthz includes the real worker heartbeat. Use the bundle's normal
@@ -263,18 +262,6 @@ def main():
             "JWT_SECRET": backend["environment"]["JWT_SECRET"],
         },
     }
-    # The optional Next beta ships in the bundle; it must at least start and
-    # answer its health probe against this release's backend.
-    config["services"]["web-next"] = {
-        "image": bundle["images"]["web-next"],
-        "networks": ["e2e"],
-        "ports": ["127.0.0.1:8135:3000"],
-        "environment": {
-            "ENEO_BACKEND_URL": "http://e2e-backend:8000",
-            "APP_ORIGIN": WEB_NEXT,
-            "SESSION_SECRET": secrets.token_hex(32),
-        },
-    }
     with tempfile.TemporaryDirectory() as directory:
         path = Path(directory) / "compose.json"
         path.write_text(json.dumps(config))
@@ -296,7 +283,6 @@ def main():
                         "version": bundle["version"],
                         "revision": bundle["revision"],
                     }
-                    request(WEB_NEXT + "/healthz", raw=True)
                     assert fetch(WEB_APP + "/healthz")[0] == 200
                     break
                 except (OSError, AssertionError):
@@ -419,7 +405,7 @@ def main():
             assert status["runtime"]["state"] == "ready"
             assert "version_mismatch" not in status["runtime"]["warnings"]
             print(
-                "Verified frontend, Next beta, backend web app and browser session, runtime, compute, signed-file analysis, chart, and document."
+                "Verified Svelte frontend, backend web app and browser session, runtime, compute, signed-file analysis, chart, and document."
             )
         finally:
             subprocess.run(

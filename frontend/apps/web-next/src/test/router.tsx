@@ -1,18 +1,14 @@
 /**
  * Test-only: renders UI inside a real TanStack Router, for tests of route
- * components and of the TanStack navigation (`src/lib/navigation.tanstack.ts`,
- * `src/lib/link.tanstack.tsx`). The router is the app's own
+ * components and of the TanStack navigation (`src/lib/navigation.ts`,
+ * `src/lib/link.tsx`). The router is the app's own
  * (`createAppRouter`: search serialization, trailing slash, scroll, pending
  * and error UI) on a memory history, inside `renderInApp`'s providers with
  * the same query client. Feature tests keep mocking the navigation instead
  * (`vi.mock("@/lib/navigation", () => import("@/test/navigation"))`).
  *
- * In vitest `@/lib/navigation` and `@/lib/link` are the Next modules, as in
- * the Next build. A test that needs the TanStack ones, such as an Astryx
- * link through the app's `LinkProvider`, swaps them:
- *
- *   vi.mock("@/lib/link", () => import("@/lib/link.tanstack"));
- *   vi.mock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
+ * Component tests use plain anchors by default. Real-router tests enable
+ * app links with vi.unmock("@/lib/link").
  */
 import {
   createMemoryHistory,

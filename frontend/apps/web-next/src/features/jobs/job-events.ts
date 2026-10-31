@@ -103,9 +103,8 @@ const subscribeStatus = (listener: Listener) => {
   return () => statusListeners.delete(listener);
 };
 const getConnected = () => connected;
-const getServerConnected = () => false;
 
-/** Whether the live feed is open right now; false on the server and while reconnecting. */
+/** Whether the live feed is open right now; false while reconnecting. */
 export function useJobEventsConnected(): boolean {
-  return useSyncExternalStore(subscribeStatus, getConnected, getServerConnected);
+  return useSyncExternalStore(subscribeStatus, getConnected);
 }

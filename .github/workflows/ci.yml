@@ -396,14 +396,11 @@ jobs:
     defaults:
       run:
         working-directory: frontend
-    env:
-      # env.ts validates at import time; build/test need a valid baseline
-      ENEO_BACKEND_URL: http://localhost:8123
-      SESSION_SECRET: ci-only-session-secret-32-chars-min!!
-
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
 
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
@@ -413,6 +410,8 @@ jobs:
         run: bun run --filter '@eneo/web-next' routes:generate && git diff --exit-code -- apps/web-next/src/routeTree.gen.ts
 
       - name: Lint
+        env:
+          ROUTE_PARITY_UPSTREAM: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/develop' }}
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' lint
 
       - name: Type check
@@ -421,11 +420,8 @@ jobs:
       - name: Test
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' test
 
-      - name: Build
-        run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' build
-
       - name: Build (Vite)
-        run: /usr/bin/time -v -o "$RUNNER_TEMP/web-next-vite-build.txt" bun run --filter '@eneo/web-next' build:vite
+        run: /usr/bin/time -v -o "$RUNNER_TEMP/web-next-vite-build.txt" bun run --filter '@eneo/web-next' build
 
       - name: Record Vite build memory
         if: ${{ !cancelled() }}
@@ -561,15 +557,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next_e2e == 'true'
     runs-on: ubuntu-24.04
-    # During migration this job runs both Next and Vite suites sequentially.
-    # The combined Flows build and Next suite take about 32 minutes before
-    # the native suite starts; leave room for both suites and runner variation.
-    timeout-minutes: 75
-    env:
-      # env.ts validates at import time, during the build and in `next start`.
-      # The server talks to the stack's backend on the loopback port.
-      ENEO_BACKEND_URL: http://127.0.0.1:8124
-      SESSION_SECRET: ci-only-session-secret-32-chars-min!!
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -578,7 +566,7 @@ jobs:
       # and the backend built from its Dockerfile. Nothing touches a real provider.
       - name: Start isolated E2E stack in the background
         # The backend image build and health checks overlap with bun install and
-        # the web-next build. "Wait for the E2E stack" collects the exit status
+        # browser setup. "Wait for the E2E stack" collects the exit status
         # before the tests start.
         run: |
           nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
@@ -592,31 +580,6 @@ jobs:
         with:
           working-directory: frontend/apps/web-next
 
-      # Next's incremental build cache: unchanged modules are not recompiled.
-      - name: Cache Next.js build
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
-        with:
-          path: frontend/apps/web-next/.next/cache
-          key: next-web-next-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}-${{ hashFiles('frontend/apps/web-next/src/**', 'frontend/apps/web-next/next.config.ts', 'frontend/apps/web-next/public/**') }}
-          restore-keys: next-web-next-${{ runner.os }}-${{ hashFiles('frontend/bun.lock') }}-
-
-      # Build up front so the Playwright webServer only has to run `next start`
-      # (playwright.config.ts), keeping the build out of its startup timeout.
-      - name: Build web-next for E2E
-        working-directory: frontend/apps/web-next
-        # Peak memory is reported, not budgeted: it is the Next baseline for the
-        # phase 4 Vite build memory gate (P0-baseline).
-        run: /usr/bin/time -v -o "$RUNNER_TEMP/web-next-build-resources.txt" bun run build
-
-      - name: Upload web-next build resource measurements
-        if: ${{ !cancelled() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: web-next-build-resources
-          path: ${{ runner.temp }}/web-next-build-resources.txt
-          if-no-files-found: ignore
-          retention-days: 7
-
       - name: Wait for the E2E stack
         run: |
           for _ in $(seq 1 300); do
@@ -626,29 +589,19 @@ jobs:
           cat "$RUNNER_TEMP/e2e-stack.log"
           [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
 
-      - name: Run E2E and accessibility tests
-        working-directory: frontend/apps/web-next
-        env:
-          E2E_PORT: "3100"
-          # The login seeded by docker-compose.e2e.ci.yml (DEFAULT_USER_*).
-          E2E_USER: e2e@example.com
-          E2E_PASSWORD: E2ePassword123!
-        run: bun run test:e2e
+      - name: Copy browser asset map from the running backend
+        run: |
+          mkdir -p frontend/apps/web-next/node_modules/.cache
+          docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml cp \
+            e2e-backend:/app/web-bundle-report.json frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
 
-      - name: Run E2E against FastAPI serving the Vite build
+      - name: Run E2E and accessibility tests
         working-directory: frontend/apps/web-next
         env:
           E2E_BASE_URL: http://localhost:8124
           E2E_USER: e2e@example.com
           E2E_PASSWORD: E2ePassword123!
-        run: >-
-          bun run test:e2e tests/csp.spec.ts tests/web-app.spec.ts
-          tests/smoke.spec.ts tests/a11y.spec.ts tests/chat.spec.ts tests/space-members.spec.ts
-          tests/account.spec.ts tests/space-knowledge.spec.ts tests/knowledge-tables.spec.ts tests/navigation.spec.ts
-          tests/flows.spec.ts tests/flows-runtime.spec.ts tests/flows-live-transcription.spec.ts
-          tests/admin-providers.spec.ts tests/answer-presentation.spec.ts tests/admin-content.spec.ts
-          tests/lazy-features.spec.ts
-          --grep 'csp\.spec\.ts|web-app\.spec\.ts|@vite'
+        run: bun run test:e2e
 
       - name: Capture E2E stack diagnostics
         if: ${{ failure() }}

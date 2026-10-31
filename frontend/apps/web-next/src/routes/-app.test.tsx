@@ -28,6 +28,8 @@ import type { KnowledgePage } from "@/features/knowledge/knowledge-page";
 import type { WebsiteDetail } from "@/features/knowledge/detail/website-detail.client";
 import { setViewport } from "@/test/setup-dom";
 
+vi.unmock("@/lib/link");
+
 const navigate = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/navigate-to", () => ({ navigateTo: navigate }));
 // These features own polling/tour tests; this suite exercises the route and session boundary.
@@ -92,8 +94,6 @@ beforeEach(async () => {
       : new Response(JSON.stringify(reply), { headers });
   });
   vi.stubGlobal("fetch", fetcher);
-  vi.doMock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
-  vi.doMock("@/lib/link", () => import("@/lib/link.tanstack"));
   // Knowledge feature tests own rendering; these expose the route's loaded data and runtime props.
   vi.doMock("@/features/knowledge/integrations/item-detail.client", () => ({
     ItemDetail: ({ itemId, loaded }: ComponentProps<typeof ItemDetail>) => (
@@ -176,7 +176,7 @@ beforeEach(async () => {
     };
   });
   vi.doMock("@/lib/api/base", async () => ({
-    ...(await import("@/lib/api/base.vite")),
+    ...(await vi.importActual<typeof import("@/lib/api/base")>("@/lib/api/base")),
     // Node's Request needs an absolute base; response/session middleware stays real.
     API_BASE: window.location.origin
   }));

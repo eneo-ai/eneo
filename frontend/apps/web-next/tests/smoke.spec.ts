@@ -1,12 +1,15 @@
 import { expect, test } from "./csp";
+import sv from "../src/lib/i18n/messages/sv.json";
 
 // Smoke coverage for the parity-buildout surfaces: each page loads
 // authenticated and shows a marker element from the newly-ported feature.
 // Labels are the Swedish defaults (the app's default locale).
 
-test("activate landing renders", async ({ page }) => {
+test("the retired activation route shows signed-in not-found", async ({ page }) => {
   await page.goto("/activate");
-  await expect(page.getByText(/nästan klar/i)).toBeVisible();
+  await expect(page).toHaveURL(/\/activate$/);
+  await expect(page.getByRole("heading", { level: 1, name: sv.page_not_found })).toBeVisible();
+  await expect(page.getByRole("link", { name: sv.back_to_home })).toHaveAttribute("href", "/");
 });
 
 test("account shows the change-password card", { tag: "@vite" }, async ({ page }) => {
@@ -59,19 +62,17 @@ test("admin api-keys exposes the tenant policy + filters", { tag: "@vite" }, asy
 // Fonts (src/styles/globals.css "2b. Fonts"): self-hosted, only the UI font preloaded.
 
 test("preloads only Figtree and renders with it", { tag: "@vite" }, async ({ page }) => {
-  const response = await page.goto("/spaces/list");
-  // Next's font loader sent its preloads only as a Link header; Next mirrors
-  // the app's own HTML preload into that header too. Both count, once each.
-  const headerPreloads = (response?.headers()["link"] ?? "")
-    .split(/,\s*(?=<)/)
-    .filter((entry) => /rel=preload/.test(entry) && /as="?font/.test(entry))
-    .map((entry) => entry.slice(1, entry.indexOf(">")));
-  const htmlPreloads = await page
+  await page.goto("/spaces/list");
+  const preloads = await page
     .locator('link[rel="preload"][as="font"]')
     .evaluateAll((links) => links.map((link) => link.getAttribute("href")));
-  const preloads = [...new Set([...headerPreloads, ...htmlPreloads])];
-  expect(preloads).toEqual(["/fonts/figtree-latin-wght-normal.woff2"]);
-  expect(preloads.join()).not.toMatch(/jetbrains|source-serif/);
+  // Vite serves the source during development and hashes it in the build.
+  expect(preloads).toEqual([
+    expect.stringMatching(
+      /^\/(?:assets\/figtree-latin-wght-normal-[\w-]+|src\/assets\/fonts\/figtree-latin-wght-normal)\.woff2$/
+    )
+  ]);
+  expect((await page.request.get(preloads[0]!)).status()).toBe(200);
 
   await expect
     .poll(() =>

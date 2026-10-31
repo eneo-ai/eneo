@@ -1,6 +1,4 @@
 import {
-  defaultShouldDehydrateQuery,
-  environmentManager,
   QueryClient,
   type DefaultError,
   type QueryExecuteOptions,
@@ -9,10 +7,7 @@ import {
 import { EneoApiError, isFinalError } from "./errors";
 
 /**
- * TanStack Query setup for the App Router hydration pattern: server
- * components prefetch into a per-request QueryClient and pass
- * `dehydrate(queryClient)` through a <HydrationBoundary>; client components
- * pick the data up with useQuery without refetching on mount.
+ * Shared cache and retry defaults for route loaders and mounted components.
  *
  * Query key convention: keys mirror backend resource paths —
  * ["dashboard"], ["spaces", spaceId], ["spaces", spaceId, "applications"].
@@ -21,16 +16,9 @@ export function makeQueryClient(): QueryClient {
   return new QueryClient({
     defaultOptions: {
       queries: {
-        // Server-rendered data is fresh long enough that hydration does not
-        // immediately refetch it on the client.
+        // Reuse recently loaded data across route and component readers.
         staleTime: 30_000,
         retry: retryTransientFailure
-      },
-      dehydrate: {
-        // Also dehydrate in-flight prefetches so suspended server components
-        // can stream them to the client.
-        shouldDehydrateQuery: (query) =>
-          defaultShouldDehydrateQuery(query) || query.state.status === "pending"
       }
     }
   });
@@ -39,11 +27,9 @@ export function makeQueryClient(): QueryClient {
 /**
  * The default retry policy (a query with its own `retry` keeps it): a refusal
  * (4xx) is final, asking again won't change it; a server or network failure
- * is tried three more times. The server renders without retries, as before
- * there was a policy, until Next is removed.
+ * is tried three more times.
  */
 function retryTransientFailure(failureCount: number, error: unknown): boolean {
-  if (environmentManager.isServer()) return false;
   if (error instanceof EneoApiError && error.status >= 400 && error.status < 500) return false;
   return failureCount < 3;
 }
@@ -51,11 +37,9 @@ function retryTransientFailure(failureCount: number, error: unknown): boolean {
 let browserQueryClient: QueryClient | undefined;
 
 /**
- * On the server: a fresh client per call (no cross-request state). In the
- * browser: a singleton that survives suspense-driven re-renders.
+ * One client per document, surviving suspense-driven re-renders.
  */
 export function getQueryClient(): QueryClient {
-  if (environmentManager.isServer()) return makeQueryClient();
   return (browserQueryClient ??= makeQueryClient());
 }
 

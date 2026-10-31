@@ -7,6 +7,8 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { testAppContext } from "@/test/render";
 
+vi.unmock("@/lib/link");
+
 vi.mock("@/features/jobs/use-jobs", () => ({
   JobsProvider: ({ children }: { children: ReactNode }) => children,
   useJobs: () => ({ trackJob: vi.fn() })
@@ -98,10 +100,8 @@ beforeEach(async () => {
       : new Response(JSON.stringify(reply), { headers });
   });
   vi.stubGlobal("fetch", fetcher);
-  vi.doMock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
-  vi.doMock("@/lib/link", () => import("@/lib/link.tanstack"));
   vi.doMock("@/lib/api/base", async () => ({
-    ...(await import("@/lib/api/base.vite")),
+    ...(await vi.importActual<typeof import("@/lib/api/base")>("@/lib/api/base")),
     API_BASE: window.location.origin
   }));
   await import("@/router");

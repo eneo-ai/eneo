@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -42,7 +43,7 @@ class FakeUpload {
   }
   setRequestHeader() {}
   getAllResponseHeaders() {
-    return "";
+    return `${SESSION_GENERATION_HEADER}: session-a\r\n`;
   }
   abort() {}
   send(body: FormData) {
@@ -116,7 +117,16 @@ function pickFile(dialog: HTMLElement, file: File) {
   fireEvent.change(input, { target: { files: [file] } });
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(null, { status: 204, headers: { [SESSION_GENERATION_HEADER]: "session-a" } })
+      )
+  );
+  await initializeBrowserSession();
   api.routes = {};
   FakeUpload.sent = [];
   vi.stubGlobal("XMLHttpRequest", FakeUpload);
@@ -191,9 +201,7 @@ describe("StartRunDialog", () => {
     fireEvent.change(within(dialog).getByLabelText(/^Ärende/), { target: { value: "Bygglov" } });
     pickFile(dialog, new File(["%PDF"], "brev.pdf", { type: "application/pdf" }));
     expect(await within(dialog).findByText(/Uppladdad/)).toBeTruthy();
-    expect(FakeUpload.sent[0]?.url).toBe(
-      "/api/eneo/api/v1/flows/flow-1/steps/step-1/runtime-files/"
-    );
+    expect(FakeUpload.sent[0]?.url).toBe("/api/v1/flows/flow-1/steps/step-1/runtime-files/");
 
     fireEvent.click(button(dialog, messages.flow_runs_summary_next));
 

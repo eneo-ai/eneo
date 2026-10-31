@@ -4,7 +4,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react";
 import { afterEach, expect, it, vi } from "vitest";
 import { loadPreview } from "@/features/workspace/preview/load-preview";
-import Link from "@/lib/link.tanstack";
+import Link from "@/lib/link";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { toast } from "@/lib/toast";
 import { renderWithRouter } from "@/test/router";
@@ -12,10 +12,10 @@ import { observedElements, reportResize } from "@/test/setup-dom";
 import { replaceInstructionText } from "@/test/skill-instructions";
 import { ChatView, type ActivityState } from "./chat-view";
 
+vi.unmock("@/lib/link");
+
 const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { POST: post } }));
-vi.mock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
-vi.mock("@/lib/link", () => import("@/lib/link.tanstack"));
 vi.mock("@/features/workspace/preview/load-preview", () => ({
   loadPreview: vi.fn(),
   PreviewTooLargeError: class extends Error {}

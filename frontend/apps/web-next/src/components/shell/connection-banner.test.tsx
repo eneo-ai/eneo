@@ -3,7 +3,7 @@ import { act, cleanup, screen, waitFor } from "@testing-library/react";
 import { onlineManager } from "@tanstack/react-query";
 import { afterEach, describe, expect, it } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, renderToHtml } from "@/test/render";
+import { renderInApp } from "@/test/render";
 import { ConnectionAnnouncer, ConnectionBanner } from "./connection-banner";
 
 afterEach(() => {
@@ -52,11 +52,6 @@ describe("ConnectionBanner", () => {
     goOnline();
     expect(container.textContent).toBe("");
     await waitFor(() => expect(announced()).toContain("Du är uppkopplad igen"));
-  });
-
-  it("is never in the server render", () => {
-    onlineManager.setOnline(false);
-    expect(renderToHtml(<Shown />)).not.toContain("offline");
   });
 
   it("is said once however many pages show it", async () => {

@@ -9,8 +9,6 @@ import {
 } from "./helpers";
 
 test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
-  test.skip(!process.env.E2E_BASE_URL, "The in-app blocker is owned by the Vite router.");
-
   test("Skills keep edits on cancelled Back and link navigation, then leave on confirmation", async ({
     page
   }) => {

@@ -10,17 +10,13 @@ export default defineConfig({
     }
   },
   test: {
-    // Server-side logic runs under node (jose/oauth4webapi reject jsdom's
-    // cross-realm Uint8Array); component tests opt into jsdom per file.
+    // Pure logic runs under Node; component tests opt into jsdom per file.
     environment: "node",
     include: ["src/**/*.test.{ts,tsx}"],
     // What jsdom lacks and Astryx needs (modal <dialog>, CSS.escape, …).
     setupFiles: ["./src/test/setup-dom.ts"],
     env: {
-      TZ: "Asia/Kolkata",
-      // env.ts validates at import time; give tests a valid baseline
-      ENEO_BACKEND_URL: "http://localhost:8123",
-      SESSION_SECRET: "vitest-session-secret-32-chars-min!!"
+      TZ: "Asia/Kolkata"
     }
   }
 });

@@ -27,21 +27,18 @@ curl -LsSf https://astral.sh/uv/install.sh | sh
 export PATH="$HOME/.local/bin:$PATH"
 export UV_LINK_MODE=copy
 
-# The backend .venv, frontend node_modules, and web-next .next cache are on
+# The backend .venv and frontend node_modules are on
 # named Docker volumes (see docker-compose.yml). Docker creates named volume
 # mount points as root:root, but post-create.sh runs as vscode — without these
-# chowns, uv/bun/next fail to write into them. The volumes also persist across
+# chowns, uv/bun fail to write into them. The volumes also persist across
 # rebuilds, so fix ownership recursively in case a previous container left
 # root-owned installed files.
 sudo mkdir -p /workspace/backend/.venv \
-    /workspace/frontend/node_modules \
-    /workspace/frontend/apps/web-next/.next
+    /workspace/frontend/node_modules
 sudo chown -R -h vscode:vscode /workspace/backend/.venv \
-    /workspace/frontend/node_modules \
-    /workspace/frontend/apps/web-next/.next
+    /workspace/frontend/node_modules
 sudo chmod -R u+rwX /workspace/backend/.venv \
-    /workspace/frontend/node_modules \
-    /workspace/frontend/apps/web-next/.next
+    /workspace/frontend/node_modules
 
 # Install Python dependencies
 # Use --reinstall-package to ensure the project entry points are up-to-date

@@ -1,7 +1,6 @@
 import { useLocale, useTranslations } from "use-intl";
 import type { StatusTone } from "@/components/composites/status-label";
 import { formatCalendarDate } from "@/lib/calendar-date";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { type KeyExpiry, keyExpiry, localIsoDate } from "./key-expiry";
 import type { ConnectionCheckError, ModelProvider } from "./model-providers";
 import type { ProviderStatus } from "./provider-sections";
@@ -12,14 +11,12 @@ export type ProviderNotice = { tone: StatusTone; label: string };
 /**
  * The words and tones for a provider's state, shared by its card and the
  * models page banner so both say the same thing. Key expiry depends on the
- * viewer's date, so `today` is null (and there is no expiry notice) until
- * hydration.
+ * viewer's date.
  */
 export function useProviderNotices() {
   const t = useTranslations();
   const locale = useLocale();
-  const hydrated = useHydrated();
-  const today = hydrated ? localIsoDate(new Date()) : null;
+  const today = localIsoDate(new Date());
 
   /** The short reason that follows "Anslutningen misslyckades:". */
   function failureReason(error: ConnectionCheckError | null | undefined): string {

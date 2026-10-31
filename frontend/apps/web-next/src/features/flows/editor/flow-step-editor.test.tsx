@@ -10,6 +10,8 @@ import { flowEditorKeys } from "./editor-api";
 import type { FlowPublic } from "./step-types";
 import { makeAssistant, makeFlow, makeStep } from "./testing/fixtures";
 
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+
 const api = vi.hoisted(() => ({
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
   stub: null as unknown as ReturnType<typeof import("./testing/fixtures").apiStub>

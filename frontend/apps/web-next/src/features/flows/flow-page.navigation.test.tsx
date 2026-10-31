@@ -18,8 +18,8 @@ import { FlowPage } from "./flow-page";
 import { flowKeys, type FlowPublic } from "./flows-api";
 import { parseFlowSearch } from "./flow-search";
 
-vi.mock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
-vi.mock("@/lib/link", () => import("@/lib/link.tanstack"));
+vi.unmock("@/lib/link");
+
 const api = vi.hoisted(() => ({
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
   stub: null as unknown as ReturnType<typeof import("./editor/testing/fixtures").apiStub>

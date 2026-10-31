@@ -144,32 +144,35 @@ ordering, production data, or third-party services.
 
 ### React beta: Vite and FastAPI
 
-Run the React beta's Playwright suite from `frontend/apps/web-next`. Set
-`E2E_BASE_URL` to use an already-running server; Playwright then starts no web
-server of its own:
+The React beta's full Playwright suite requires a production build served by
+FastAPI. Set `E2E_USER` and `E2E_PASSWORD` for the isolated stack's seeded user,
+then run from the repository root:
 
 ```bash
-# Vite dev server, started separately with bun run dev:vite
-E2E_BASE_URL=http://localhost:3101 bun run test:e2e
-
-# FastAPI serving build:vite output with WEB_APP_ENABLED and BROWSER_SESSION_ENABLED
-E2E_BASE_URL=http://localhost:8123 bun run test:e2e tests/csp.spec.ts tests/web-app.spec.ts
+docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml up -d --build --wait
+mkdir -p frontend/apps/web-next/node_modules/.cache
+docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml cp \
+  e2e-backend:/app/web-bundle-report.json frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
+cd frontend/apps/web-next
+E2E_BASE_URL=http://localhost:8124 bun run test:e2e
+cd ../../..
+docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml down -v
 ```
 
-Use the isolated test backend and set `E2E_USER` and `E2E_PASSWORD` for its seeded
-user. In the E2E Docker stack the FastAPI URL is `http://localhost:8124`; use
-`localhost`, since the SPA does not serve on the backend's own `127.0.0.1`
-address. During migration, select specs for routes already ported to Vite;
-Next-specific checks and unported screens still require the default server.
-Production CSP checks require the FastAPI-served build.
+Copy the module report from the running image: fault-injection tests need the
+exact chunk filenames that image serves. Do not rebuild a mounted `dist/` while
+FastAPI is running; it reads its HTML once at startup. Use `localhost`,
+since the stack's `127.0.0.1` address is the separate MCP content origin. To run
+selected cases, append their paths, for example `tests/csp.spec.ts`.
 
 CI enables both backend settings through `docker-compose.e2e.web-app.yml` and
-runs these two specs after the existing suite. They cover the built app's CSP,
-boot failure and recovery, locale, cookie login and cross-origin rejection.
+runs the full browser suite there, including CSP, boot failure and recovery,
+locale, cookie login and cross-origin rejection.
 
-External-server results go to `test-results-fastapi/`, with the CI HTML report
-in `playwright-report-fastapi/`. Both are ignored by Git. With `E2E_BASE_URL`
-unset, the existing Next server and report directories remain the defaults.
+Results go to `test-results-fastapi/`, with the CI HTML report in
+`playwright-report-fastapi/`. Both are ignored by Git. `E2E_BASE_URL` is required;
+Playwright starts no server. Use `bun run dev` for interactive development, not
+this suite: the development server has neither production CSP nor hashed chunks.
 
 ## Writing tests
 

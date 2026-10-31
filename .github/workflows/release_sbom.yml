@@ -28,7 +28,6 @@ concurrency:
 env:
   BACKEND_IMAGE: ghcr.io/eneo-ai/eneo-backend
   FRONTEND_IMAGE: ghcr.io/eneo-ai/eneo-frontend
-  WEB_NEXT_IMAGE: ghcr.io/eneo-ai/eneo-web-next
   TOOL_RUNTIME_IMAGE: ghcr.io/eneo-ai/eneo-tool-runtime
   SEAWEEDFS_IMAGE: ghcr.io/eneo-ai/eneo-seaweedfs
   PLATFORM: linux/amd64
@@ -386,7 +385,6 @@ jobs:
           generate_component_sbom "backend" "$BACKEND_IMAGE"
           generate_backend_python_runtime_sbom "$backend_digest_ref"
           generate_component_sbom "frontend" "$FRONTEND_IMAGE"
-          generate_component_sbom "web-next" "$WEB_NEXT_IMAGE"
           generate_component_sbom "tool-runtime" "$TOOL_RUNTIME_IMAGE" "$IMAGE_TAG" "linux/amd64" "linux" "amd64"
           generate_component_sbom "tool-runtime" "$TOOL_RUNTIME_IMAGE" "$IMAGE_TAG" "linux/arm64" "linux" "arm64"
           seaweedfs_tag="$SEAWEEDFS_VERSION"
@@ -535,9 +533,6 @@ jobs:
             "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Frontend image SBOM - SPDX JSON"
             "release-sbom/eneo-frontend-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Frontend image packages - readable table"
             "release-sbom/eneo-frontend-source-${RELEASE_TAG}.cyclonedx.json#Frontend source dependencies - CycloneDX JSON"
-            "release-sbom/eneo-web-next-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.cyclonedx.json#Next beta image SBOM - CycloneDX JSON"
-            "release-sbom/eneo-web-next-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.spdx.json#Next beta image SBOM - SPDX JSON"
-            "release-sbom/eneo-web-next-${RELEASE_TAG}-${PLATFORM_OS}-${PLATFORM_ARCH}.table.txt#Next beta image packages - readable table"
             "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-amd64.cyclonedx.json#SeaweedFS linux/amd64 image SBOM - CycloneDX JSON"
             "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-amd64.spdx.json#SeaweedFS linux/amd64 image SBOM - SPDX JSON"
             "release-sbom/eneo-seaweedfs-${RELEASE_TAG}-linux-amd64.table.txt#SeaweedFS linux/amd64 image packages - readable table"

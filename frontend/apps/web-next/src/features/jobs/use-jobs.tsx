@@ -88,11 +88,8 @@ function createUploadStore(): UploadStore {
 }
 
 /*
- * Only actions, which hold still: the provider sits above every page, and a
- * context that changes while React is still hydrating a page (the jobs
- * arriving, an upload's progress) makes React throw the page's server HTML
- * away and render it again. The job indicator reads jobs and uploads itself
- * (useJobActivity).
+ * Stable actions keep job and upload progress from rerendering every page.
+ * The job indicator subscribes to those values itself (useJobActivity).
  */
 type JobsContextValue = {
   /**
@@ -305,10 +302,8 @@ export function JobsProvider({ children }: { children: React.ReactNode }) {
   const [uploadStore] = useState(createUploadStore);
   // Re-renders only when the answer flips, not on every progress tick.
   useBeforeUnloadWarning(
-    useSyncExternalStore(
-      uploadStore.subscribe,
-      () => uploadStore.getSnapshot().some(isUploadPending),
-      () => false
+    useSyncExternalStore(uploadStore.subscribe, () =>
+      uploadStore.getSnapshot().some(isUploadPending)
     )
   );
 
@@ -416,11 +411,7 @@ export function useJobActivity(): { jobs: Job[]; uploads: Upload[]; runningCount
   const { uploadStore, listJobs } = useJobs();
   // The provider's fetcher: the query runs whichever observer's queryFn rendered last.
   const { data: jobs = NO_JOBS } = useQuery({ queryKey: JOBS_KEY, queryFn: listJobs });
-  const uploads = useSyncExternalStore(
-    uploadStore.subscribe,
-    uploadStore.getSnapshot,
-    uploadStore.getSnapshot
-  );
+  const uploads = useSyncExternalStore(uploadStore.subscribe, uploadStore.getSnapshot);
   const runningCount = jobs.filter(isJobActive).length + uploads.filter(isUploadPending).length;
   return { jobs, uploads, runningCount };
 }

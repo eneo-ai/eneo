@@ -6,11 +6,11 @@ import type { Schema } from "@/lib/api/models";
 import { renderWithRouter } from "@/test/router";
 import { OrganizationSkillDetailPage } from "./organization-skill-detail-page";
 
+vi.unmock("@/lib/link");
+
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
-vi.mock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
-vi.mock("@/lib/link", () => import("@/lib/link.tanstack"));
 
 it("settles a pending Back when saving replaces the actual revision editor", async () => {
   const revision: Schema<"SkillRevisionPublic"> = {

@@ -13,7 +13,6 @@ import { useAppContext } from "@/components/providers/app-context";
 import { profileDisplayName, profileInitials } from "@/components/shell/profile-menu";
 import { THEMES } from "@/components/shell/theme-switcher";
 import { useWhatsNew } from "@/features/whats-new/whats-new-provider";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { MOBILE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { LOCALE_LABELS } from "@/lib/i18n/locales";
 import { navigateTo } from "@/lib/navigate-to";
@@ -52,7 +51,6 @@ function Konto() {
   const { enabled: whatsNewEnabled, hasUnseen } = useWhatsNew();
   const locale = useLocale();
   const { theme } = useTheme();
-  const hydrated = useHydrated();
   const copyFormat = useCopyFormatLabel();
 
   const name = profileDisplayName(user);
@@ -60,7 +58,7 @@ function Konto() {
   const roles = user.roles.map((role) => role.name).join(", ");
   const language = LOCALE_LABELS[locale] ?? locale;
   // next-themes knows the theme only in the browser.
-  const themeKey = hydrated ? THEMES.find((option) => option.value === theme)?.labelKey : undefined;
+  const themeKey = THEMES.find((option) => option.value === theme)?.labelKey;
 
   return (
     <div className="flex flex-col gap-6 lg:hidden">

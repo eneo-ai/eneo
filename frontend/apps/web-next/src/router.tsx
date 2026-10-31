@@ -10,7 +10,7 @@ import type { createTranslator } from "use-intl";
 import { NotFoundPage } from "@/components/shell/not-found-page";
 import { PagePending } from "@/components/shell/page-pending";
 import { RouteError } from "@/components/shell/route-error";
-import { bindNavigationRouter } from "@/lib/navigation.tanstack";
+import { bindNavigationRouter } from "@/lib/navigation";
 import { parseSearch, stringifySearch } from "@/lib/router/search";
 import { routeTree } from "./routeTree.gen";
 
@@ -37,7 +37,7 @@ export function createAppRouter(
     // Flat URLSearchParams (src/lib/router/search.ts), not TanStack's JSON.
     parseSearch,
     stringifySearch,
-    // `/x/?q=1` → `/x?q=1`, as Next's 308 did.
+    // Canonical page paths omit a trailing slash: `/x/?q=1` → `/x?q=1`.
     trailingSlash: "never",
     // The page panel, not the window, is what scrolls (app-shell.tsx).
     scrollRestoration: true,

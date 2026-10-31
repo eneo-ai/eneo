@@ -1,5 +1,4 @@
 node_modules
-.next
 bun.lock
 src/lib/i18n/messages
 # Written by the Vite build and by `bun run routes:generate`

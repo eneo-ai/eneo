@@ -1,13 +1,10 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { createSpace, uniqueName } from "./helpers";
+import { createSpace, productionAsset, uniqueName } from "./helpers";
+import sv from "../src/lib/i18n/messages/sv.json";
 
-// Below 1024 px a page with its own header (the chat's, a pushed screen's
-// PageBar) replaces the shell's top bar. The top bar gives way in CSS
-// (app-shell.tsx, OWN_MOBILE_HEADER), so this has to hold before any script
-// runs, while the page's code is still loading and across client navigation:
-// one header on screen, never two, and the server-rendered page never swapped
-// for its loading state.
+// Below 1024 px a page's own header replaces the shell's top bar. These
+// checks cover loaded screens and navigation when a page chunk is delayed or missing.
 
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
 test.use(PHONE);
@@ -49,19 +46,11 @@ async function recordHeaders(page: Page) {
 const headerFrames = (page: Page) =>
   page.evaluate(() => (window as unknown as { __headerFrames: Frame[] }).__headerFrames);
 
-test("before hydration, a pushed screen or a chat shows only its own header", async ({ page }) => {
-  // The app's code never arrives; Next's inline scripts still move the
-  // streamed page into place, as they do before hydration. (With scripts off
-  // altogether the streamed page would never leave its hidden template.)
-  await page.route(
-    (url) => url.pathname.startsWith("/_next/static/chunks/") && url.pathname.endsWith(".js"),
-    (route) => route.abort()
-  );
-  const open = (path: string) => page.mainFrame().goto(path);
+test("a loaded pushed screen or chat shows only its own header", async ({ page }) => {
+  const open = (path: string) => page.goto(path);
 
   for (const pushed of ["/admin/users", "/account/appearance", "/spaces/personal/chat"]) {
     await open(pushed);
-    // The dev server may compile the route first.
     await expect(page.locator("[data-own-mobile-header]")).toBeVisible({ timeout: 15_000 });
     await expect(page.locator(TOP_BAR)).toBeHidden();
   }
@@ -89,15 +78,6 @@ test("a shared space is pushed on a phone; the personal and organisation spaces 
   const back = page.getByRole("link", { name: /^(Tillbaka till|Back to) (Ytor|Spaces)$/ });
   const tabs = page.getByRole("navigation", { name: /^(Ytans innehåll|Space content)$/ });
 
-  // Before any script runs (decision 24): the space's bar, not the menu.
-  await page.route(isChunk, (route) => route.abort());
-  await page.mainFrame().goto(`${space}/overview`);
-  await expect(page.locator("[data-own-phone-header]")).toBeVisible({ timeout: 15_000 });
-  await expect(back).toBeVisible();
-  await expect(page.locator(TOP_BAR)).toBeHidden();
-  await page.unrouteAll({ behavior: "ignoreErrors" });
-
-  // Hydrated: the content tabs fit without scrolling, the rest is under Hantera ytan.
   await page.goto(`${space}/overview`);
   await expect(back).toBeVisible();
   await expect(page.locator(TOP_BAR)).toBeHidden();
@@ -149,94 +129,63 @@ test("a long space name in the back link never makes a 320 px page scroll sidewa
   expect(box.x + box.width).toBeLessThanOrEqual(320);
 });
 
-/** Script chunks of the app (not Next's inline streaming scripts). */
-const isChunk = (url: URL) =>
-  url.pathname.startsWith("/_next/static/chunks/") && url.pathname.endsWith(".js");
-/** A string only the users page's code holds (its tabs' label key). */
-const USERS_PAGE_CODE = "admin_users_tabs_label";
-/** A string of the shell's code: it must never be held with the page. */
-const SHELL_CODE = "group/shell";
-
-const isHydrated = (page: Page, selector: string) =>
-  page
-    .locator(selector)
-    .first()
-    .evaluate((element) => Object.keys(element).some((key) => key.startsWith("__reactFiber$")));
-
-test("the shell answers while a pushed screen's code loads, and the server page stays", async ({
-  page
-}) => {
-  // Hold the users page's code only: the shell hydrates, the page cannot.
-  const held: string[] = [];
+test("the shell remains usable while a destination's code loads", async ({ page }) => {
+  const asset = productionAsset("src/routes/_app/admin/users.tsx?tsr-split=component");
+  let held = 0;
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
-  await page.route(isChunk, async (route) => {
-    const response = await route.fetch();
-    const body = await response.text();
-    if (body.includes(USERS_PAGE_CODE)) {
-      held.push(body.includes(SHELL_CODE) ? "page and shell" : "page");
+  await page.route(
+    (url) => url.pathname === asset,
+    async (route) => {
+      held++;
       await released;
+      await route.continue();
     }
-    await route.fulfill({ response, body });
-  });
-  await recordHeaders(page);
-  // Not page.goto: the csp fixture's goto waits for the page to hydrate.
-  await page.mainFrame().goto("/admin/users", { waitUntil: "commit" });
-  await expect(page.locator("main h1")).toBeVisible({ timeout: 15_000 });
-  await expect.poll(() => held.length).toBeGreaterThan(0);
-  expect(
-    held.every((code) => code === "page"),
-    "the shell's code is never held"
-  ).toBe(true);
+  );
+  try {
+    await page.goto("/admin");
+    await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
+    await page
+      .getByRole("dialog", { name: /^(Meny|Menu)$/ })
+      .getByRole("link", { name: /^(Användare|Users)$/ })
+      .click();
+    await expect.poll(() => held).toBeGreaterThan(0);
 
-  // The shell is live: ⌘K opens its palette and Escape closes it.
-  const palette = page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ });
-  await expect(async () => {
+    const palette = page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ });
     await page.keyboard.press("ControlOrMeta+k");
-    await expect(palette).toBeVisible({ timeout: 1_000 });
-  }).toPass({ timeout: 15_000 });
-  await page.keyboard.press("Escape");
-  await expect(palette).toBeHidden();
+    await expect(palette).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(palette).toBeHidden();
 
-  // Meanwhile the page is still the server's, not swapped for its loading state.
-  expect(await isHydrated(page, "main h1")).toBe(false);
-  await expect(page.locator("[data-own-mobile-header]")).toBeVisible();
-  await expect(page.locator(TOP_BAR)).toBeHidden();
-
-  release();
-  await expect.poll(() => isHydrated(page, "main h1"), { timeout: 15_000 }).toBe(true);
-
-  // From the first frame with the page in it: the page stays, under one header.
-  const frames = await headerFrames(page);
-  const firstPage = frames.findIndex((frame) => frame.h1);
-  expect(firstPage).toBeGreaterThanOrEqual(0);
-  for (const frame of frames.slice(firstPage)) {
-    expect(frame, `at ${frame.at} ms`).toMatchObject({ top: false, own: true, h1: true });
+    release();
+    await expect(page).toHaveURL(/\/admin\/users$/);
+    await expect(page.locator("[data-own-mobile-header]")).toBeVisible();
+    await expect(page.locator(TOP_BAR)).toBeHidden();
+    await expect(
+      page.getByRole("button", { name: /^(Skapa användare|Create user)$/ })
+    ).toBeVisible();
+  } finally {
+    release();
+    await page.unrouteAll({ behavior: "ignoreErrors" });
   }
 });
 
-test("when a pushed screen's code fails to load, its server-rendered back link still leads out", async ({
-  page
-}) => {
-  await page.route(isChunk, async (route) => {
-    const response = await route.fetch();
-    const body = await response.text();
-    if (body.includes(USERS_PAGE_CODE)) return route.abort();
-    await route.fulfill({ response, body });
-  });
-  await page.mainFrame().goto("/admin/users", { waitUntil: "commit" });
-  // React leaves the page as the server rendered it: readable, with its bar
-  // (whose code is the shell's, so the link works either way).
-  await expect(page.locator("main h1")).toBeVisible({ timeout: 15_000 });
-  const back = page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ });
-  await expect(back).toBeVisible();
-  // It leads out without the page's code, to a screen with the menu.
-  await back.click();
+test("a missing page chunk shows an error and the back link still leads out", async ({ page }) => {
+  const asset = productionAsset("src/routes/_app/admin/users.tsx?tsr-split=component");
+  let failed = 0;
+  await page.route(
+    (url) => url.pathname === asset,
+    async (route) => {
+      failed++;
+      await route.fulfill({ status: 404, body: "Missing deployed chunk" });
+    }
+  );
+  await page.goto("/admin/users");
+  await expect(page.getByRole("heading", { name: sv.something_went_wrong })).toBeVisible();
+  expect(failed, "the production page chunk was actually faulted").toBeGreaterThan(0);
+  await page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ }).click();
   await expect(page).toHaveURL(/\/admin$/);
-  await page.getByRole("button", { name: /öppna menyn|open menu/i }).click();
-  await expect(page.getByRole("dialog", { name: /^(Meny|Menu)$/ })).toBeVisible();
-  // Chunks still on their way through the route would fail the next test.
-  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await expect(page.locator("main h1")).toBeVisible();
 });
 
 test("focus moving up a pushed screen stops below its PageBar", async ({ page }) => {

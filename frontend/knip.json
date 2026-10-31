@@ -24,7 +24,7 @@
     },
     "apps/web-next": {
       "entry": [
-        "src/lib/i18n/request.ts",
+        "src/main.tsx",
         "src/theme/eneo-theme.ts",
         "scripts/*.mjs"
       ]

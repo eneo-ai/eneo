@@ -13,14 +13,10 @@ export const PHONE_QUERY = `not all and ${MEDIA.md}`;
  */
 export const MOBILE_QUERY = `not all and ${MEDIA.lg}`;
 
-/**
- * Whether a media query matches, and `null` while that cannot be known: on
- * the server and during hydration. For markup that CSS already lays out per
- * width from the first paint (both variants rendered, the wrong one hidden):
- * once this knows, the hidden variant can go, with no frame in between.
- * Astryx's useMediaQuery answers `false` until it has measured instead.
+/** Match the current viewport immediately and follow changes.
+ * Astryx's useMediaQuery returns false until its effect measures the viewport.
  */
-export function useMediaMatch(query: string): boolean | null {
+export function useMediaMatch(query: string): boolean {
   // Stable per query, so a re-render does not subscribe again.
   const subscribe = useCallback(
     (onChange: () => void) => {
@@ -30,9 +26,5 @@ export function useMediaMatch(query: string): boolean | null {
     },
     [query]
   );
-  return useSyncExternalStore(
-    subscribe,
-    () => window.matchMedia(query).matches,
-    () => null
-  );
+  return useSyncExternalStore(subscribe, () => window.matchMedia(query).matches);
 }

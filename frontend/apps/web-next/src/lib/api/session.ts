@@ -80,9 +80,8 @@ export async function loadSession(queryClient: QueryClient, api: EneoClient): Pr
     readCached(queryClient, session.federationStatus),
     readCached(queryClient, session.limits),
     // Optional during rolling deployments; an unavailable marker must not look
-    // like "never seen", and must not replace markers already known: not here,
-    // and not where this cache is hydrated into one that knows them (a
-    // refreshed Next layout), so it is dated as the oldest possible answer.
+    // like "never seen" or replace known markers. Leave the fallback stale
+    // so a later read can retry.
     readCached(queryClient, session.whatsNew).catch(() => {
       if (queryClient.getQueryData(sessionKeys.whatsNew) === undefined) {
         queryClient.setQueryData(sessionKeys.whatsNew, null, { updatedAt: 0 });

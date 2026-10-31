@@ -16,7 +16,6 @@ import { RemovalFocusScope } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import type { IntegrationKnowledge } from "../../knowledge";
 import { IntegrationActions, WrapperActions } from "../actions";
 import { safeExternalUrl } from "../external-url";
@@ -109,7 +108,6 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   const searchParams = useSearchParams();
   const { space, routeId } = useSpace();
   const { can } = useAppContext();
-  const hydrated = useHydrated();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const baseId = useId();
   const panelId = `${baseId}-panel`;
@@ -158,9 +156,7 @@ export function SourcePage({ source }: { source: IntegrationSource }) {
   );
 
   const listHref = `/spaces/${routeId}/knowledge?tab=integrations`;
-  const adminIntegrationsUrl = hydrated
-    ? new URL("/admin/integrations", window.location.origin).href
-    : "/admin/integrations";
+  const adminIntegrationsUrl = new URL("/admin/integrations", window.location.origin).href;
   const { canEdit, canDelete } = wrapperPermissions(source.items, space.id);
   const firstSync = source.items.every((item) => !item.metadata?.last_synced_at);
   // A folder's own feed already names its file, so only the overview lists them here.

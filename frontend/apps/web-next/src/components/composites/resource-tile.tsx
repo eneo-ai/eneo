@@ -29,7 +29,7 @@ export function useResourceLayout(): ResourceLayout {
  * A collection of resources (decision 9): list rows on a phone, cards from
  * 768 px. Its children are `ResourceCard`s (or items that read
  * `useResourceLayout`); each renders its own list item. CSS picks the
- * layout from the server render on; once the width is known, the other
+ * layout from the first render; once the width is known, the other
  * goes. `trailing` (a create card) follows the cards, or the rows.
  *
  * Crossing 768 px (a phone turned) replaces every item, and an open menu or

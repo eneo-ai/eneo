@@ -36,14 +36,6 @@ def test_blank_links_are_unset():
     assert [getattr(settings, name) for name in LINKS] == [None] * len(LINKS)
 
 
-def test_field_names_match_web_next_env_names():
-    template = (REPO_ROOT / "docs/deployment/env_web_next.template").read_text()
-    names = set(re.findall(r"(?m)^([A-Z][A-Z0-9_]+)=", template)) - {"SESSION_SECRET"}
-
-    assert names
-    assert {name.lower() for name in names} <= set(Settings.model_fields)
-
-
 def test_development_cookie_refused_on_public_host():
     with pytest.raises(ValidationError, match="BROWSER_SESSION_ENABLED"):
         _settings(

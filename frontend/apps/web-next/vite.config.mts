@@ -4,8 +4,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, loadEnv, type ServerOptions } from "vite";
 import { bundleReport } from "./scripts/vite-bundle-report";
 
-// The Vite build of the SPA (`bun run build:vite`) and its dev server
-// (`bun run dev:vite`); Next still owns `dev`, `build` and `start`. Tests keep
+// The Vite SPA build and dev server. Tests keep
 // their own vitest.config.mts, without the router plugin, so a test run never
 // rewrites the route tree.
 export default defineConfig(({ command, mode }) => ({
@@ -27,20 +26,6 @@ export default defineConfig(({ command, mode }) => ({
       // other fences fall back to plain text. Only bare `shiki` is matched, so
       // `shiki/engine/javascript` still resolves normally.
       { find: /^shiki$/, replacement: "shiki/bundle/web" },
-      {
-        find: /^@\/lib\/api\/base$/,
-        replacement: path.resolve(import.meta.dirname, "src/lib/api/base.vite.ts")
-      },
-      // The navigation seam's TanStack implementation; vitest keeps the Next
-      // one (feature tests mock the seam with @/test/navigation).
-      {
-        find: /^@\/lib\/navigation$/,
-        replacement: path.resolve(import.meta.dirname, "src/lib/navigation.tanstack.ts")
-      },
-      {
-        find: /^@\/lib\/link$/,
-        replacement: path.resolve(import.meta.dirname, "src/lib/link.tanstack.tsx")
-      },
       { find: /^@\//, replacement: `${path.resolve(import.meta.dirname, "src")}/` }
     ]
   },

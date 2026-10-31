@@ -4,7 +4,7 @@ import { useRef, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner, EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, renderToHtml, testAppContext } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
 import { composerValue } from "@/test/composer";
 import { ChatView, type ActivityState } from "./chat-view";
@@ -209,11 +209,6 @@ describe("ChatView start state on a phone (decisions 5 and 8)", () => {
     expect(centred).not.toBe(docked);
     expect(document.activeElement).toBe(centred);
     expect((centred as HTMLTextAreaElement).value).toBe("Ett halvskrivet utkast");
-  });
-
-  it("renders both places before the width is known, for CSS to pick from the first paint", () => {
-    const html = renderToHtml(<Harness partner={personal} />);
-    expect(html.match(/<textarea/g)).toHaveLength(2);
   });
 });
 

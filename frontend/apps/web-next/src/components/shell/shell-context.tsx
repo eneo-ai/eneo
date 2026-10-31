@@ -20,9 +20,8 @@ export function useShell(): ShellContextValue {
 /**
  * Spread on a page header that replaces the shell's phone top bar (the
  * chat's, a pushed screen's PageBar). The top bar hides itself in CSS while
- * such a header is on the page (mobile-top-bar.tsx), so it is right from the
- * server render on, while the page streams in and before it hydrates, and a
- * chat that is loading or failed still shows the menu. A header that hides
+ * such a header is on the page (mobile-top-bar.tsx). A chat that is loading
+ * or failed still shows the menu. A header that hides
  * the menu must offer it or a way back: a button that dispatches
  * `OPEN_NAV_EVENT` (routes.ts) or a back link.
  */

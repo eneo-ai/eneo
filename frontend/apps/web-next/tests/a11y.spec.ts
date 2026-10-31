@@ -1,6 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
 import type { Schema } from "../src/lib/api/models";
+import sv from "../src/lib/i18n/messages/sv.json";
 import type { FederationView } from "../src/features/admin/federation/federation";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "../src/components/shell/side-nav-preference";
 import { assertDocumented, WCAG_22_AA_TAGS } from "../src/test/wcag";
@@ -347,12 +348,12 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    // Signed-in public pages (the frame they share with /login).
-    test("activation", async ({ page }) => {
+    test("the retired activation route shows signed-in not-found", async ({ page }) => {
       await scan(page, "/activate", async () => {
         await expect(
-          page.getByRole("heading", { level: 1, name: /nästan klar|almost there/i })
+          page.getByRole("heading", { level: 1, name: sv.page_not_found })
         ).toBeVisible();
+        await expect(page).toHaveURL(/\/activate$/);
       });
     });
 
@@ -567,7 +568,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         ).toBeVisible();
         await expectNoAxeViolations(page);
         await page.getByRole("textbox", { name: /^(Namn|Name)$/ }).fill(name);
-        if (process.env.E2E_BASE_URL) {
+        {
           await page
             .getByLabel(/^(Ytans innehåll|Space sections)$/)
             .getByRole("link", { name: "Skills", exact: true })
@@ -779,7 +780,6 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
 
     test("admin user groups", { tag: "@vite" }, async ({ page }) => {
-      test.skip(!process.env.E2E_BASE_URL, "User-group administration has a Vite-only route.");
       await scan(page, "/admin/user-groups", async () => {
         await expect(
           page.getByRole("heading", { level: 1, name: /^(Användargrupper|User Groups)$/ })
@@ -803,7 +803,6 @@ for (const colorScheme of ["light", "dark"] as const) {
     });
 
     test("admin federation", { tag: "@vite" }, async ({ page }) => {
-      test.skip(!process.env.E2E_BASE_URL, "Federation administration has a Vite-only route.");
       // A configured IdP is a UI fixture; this scan never contacts an IdP or saves credentials.
       await page.route("**/api/v1/runtime-config", async (route) => {
         const response = await route.fetch();

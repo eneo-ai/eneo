@@ -5,6 +5,8 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));

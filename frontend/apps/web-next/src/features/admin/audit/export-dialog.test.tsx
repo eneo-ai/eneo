@@ -53,7 +53,7 @@ describe("ExportDialog", () => {
     await flush();
     expect(api.GET).toHaveBeenCalledTimes(2);
     expect(save).toHaveBeenCalledExactlyOnceWith(
-      "/api/eneo/api/v1/audit/logs/export/job-1/signed-download?token=fresh",
+      "/api/v1/audit/logs/export/job-1/signed-download?token=fresh",
       ""
     );
     api.GET.mockRejectedValueOnce(new EneoApiError("Session changed", { status: 401, code: 9090 }));

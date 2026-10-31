@@ -2,7 +2,7 @@ import { expect, test as base, type Page } from "@playwright/test";
 
 /**
  * Playwright's `test`, failing any test during which a page broke the
- * Content-Security-Policy (FastAPI's web app or the Next proxy). Production allows <style> only with
+ * Content-Security-Policy served by FastAPI. Production allows <style> only with
  * the request nonce: a library that injects styles at runtime (Sonner did,
  * Astryx CodeBlock does) is blocked there and renders unstyled, while the
  * dev server's looser policy hides it. CI runs the specs against the
@@ -17,16 +17,10 @@ import { expect, test as base, type Page } from "@playwright/test";
  * `import { expect, test } from "./csp";`
  */
 export const test = base.extend<{ cspViolations: string[] }>({
-  // The server's HTML shows before React attaches its handlers: the shell
-  // hydrates first and the page (the (app) loading boundary) after it, and a
-  // click on the page before that goes nowhere (React can't hydrate a part
-  // whose code hasn't loaded yet, so it drops the click). goto and reload wait
-  // until the page's first element, Vite's root child, or the body's on a page
-  // without either carries the `__reactFiber$…` property React DOM gives both
-  // hydrated elements and elements mounted by createRoot.
-  // `run`, not `use`: the React hooks lint rule reads `use(page)` as a hook call.
+  // Wait for React to mount before interacting with the page.
+  // `run`, not `use`: the hooks lint rule would treat use(page) as a hook.
   page: async ({ page }, run) => {
-    const hydrated = () =>
+    const mounted = () =>
       page.waitForFunction(
         () => {
           const first =
@@ -42,12 +36,12 @@ export const test = base.extend<{ cspViolations: string[] }>({
     const reload = page.reload.bind(page);
     page.goto = async (...args: Parameters<Page["goto"]>) => {
       const response = await goto(...args);
-      await hydrated();
+      await mounted();
       return response;
     };
     page.reload = async (...args: Parameters<Page["reload"]>) => {
       const response = await reload(...args);
-      await hydrated();
+      await mounted();
       return response;
     };
     await run(page);

@@ -2,6 +2,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -52,7 +53,7 @@ class FakeUpload {
   open() {}
   setRequestHeader() {}
   getAllResponseHeaders() {
-    return "";
+    return `${SESSION_GENERATION_HEADER}: session-a\r\n`;
   }
   abort() {}
   send(body: FormData) {
@@ -245,7 +246,16 @@ function startBody() {
     Record<string, unknown> | undefined;
 }
 
-beforeEach(() => {
+beforeEach(async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValue(
+        new Response(null, { status: 204, headers: { [SESSION_GENERATION_HEADER]: "session-a" } })
+      )
+  );
+  await initializeBrowserSession();
   // These tests exercise the recorder lifecycle, not a browser media decoder.
   vi.spyOn(URL, "createObjectURL").mockImplementation(() => `blob:${crypto.randomUUID()}`);
   vi.spyOn(URL, "revokeObjectURL").mockImplementation(() => {});
@@ -400,7 +410,7 @@ describe("RunRecorder in the start dialog", () => {
     fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
     await waitFor(() => expect(FakeSocket.instances).toHaveLength(1));
     const socket = FakeSocket.instances[0]!;
-    expect(socket.url).toBe("ws://localhost:3000/api/eneo/api/v1/live-transcription");
+    expect(socket.url).toBe("ws://localhost:3000/api/v1/live-transcription");
     act(() => {
       socket.open();
       socket.receive({ type: "ready" });

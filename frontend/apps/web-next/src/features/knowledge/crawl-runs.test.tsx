@@ -1,11 +1,6 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
-import { IntlProvider } from "use-intl";
-import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { AstryxProvider } from "@/components/providers/astryx-provider";
-import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { CrawlRunsTable } from "./crawl-runs";
@@ -127,20 +122,7 @@ describe("CrawlRunsTable", () => {
     expect(within(dialog).getByText(/Öppna länken och kontrollera/)).toBeTruthy();
   });
 
-  it("renders dates only after hydration, in the viewer's time zone", () => {
-    const html = renderToString(
-      <QueryClientProvider client={new QueryClient()}>
-        <IntlProvider locale="sv" messages={messages} timeZone="Europe/Stockholm">
-          <AstryxProvider>
-            <CrawlRunsTable runs={[run({ id: "old", created_at: "2024-03-01T10:00:00Z" })]} />
-          </AstryxProvider>
-        </IntlProvider>
-      </QueryClientProvider>
-    );
-    // The server does not know the viewer's zone: no date in its HTML to mismatch.
-    expect(html).not.toContain("2024");
-    expect(html).not.toContain("<time");
-
+  it("renders dates in the viewer's time zone", () => {
     renderInApp(<CrawlRunsTable runs={[run({ id: "old", created_at: "2024-03-01T10:00:00Z" })]} />);
     const started = within(screen.getByRole("table")).getAllByRole("row")[1]!;
     expect(within(started).getAllByRole("cell")[0]!.querySelector("time")).toBeTruthy();

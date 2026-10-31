@@ -6,8 +6,9 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
 import { renderWithRouter } from "@/test/router";
 
+vi.unmock("@/lib/link");
+
 // As in the Vite build: the not-found page links home through TanStack.
-vi.mock("@/lib/link", () => import("@/lib/link.tanstack"));
 
 let loaders: { slow: () => Promise<void>; failing: () => Promise<void> };
 let readData: () => Promise<string>;

@@ -1,9 +1,8 @@
 """What the web app needs at boot, read from backend settings.
 
-The same values web-next reads from its own environment today (``env.ts``),
-under the same env names, so one ``env_backend.env`` configures both. Every
-value here is public: links the app renders and the backend version, which
-``/version`` already publishes.
+``env_backend.env`` owns deployment settings. Every value here is public:
+links the app renders and the backend version, which ``/version`` already
+publishes.
 """
 
 from urllib.parse import SplitResult, urlsplit

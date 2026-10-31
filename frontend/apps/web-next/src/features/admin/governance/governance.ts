@@ -25,10 +25,7 @@ export function governancePolicyQueryOptions(api: EneoClient) {
 }
 
 /**
- * The Skill runtime policy the governance page reads for selective
- * activation. The server route prefetches it like the other queries: a
- * suspense query that is not in the dehydrated cache would run on the server
- * with the browser client's relative proxy URL, which fails there.
+ * The Skill runtime policy read by the governance page and its route loader.
  */
 export function skillRuntimePolicyQueryOptions(api: EneoClient) {
   return queryOptions({

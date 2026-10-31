@@ -58,9 +58,19 @@ test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
   test("logs out", async ({ page, context }) => {
     // Ends this test's session only: the stored state is read, never written.
     await page.goto("/account");
+    const sessionNames = new Set(["eneo_web", "__Host-eneo_web"]);
+    expect(
+      (await context.cookies()).filter((cookie) => sessionNames.has(cookie.name))
+    ).toHaveLength(1);
     await page.getByRole("button", { name: "Logga ut" }).click();
     await expect(page).toHaveURL(/\/login\?message=logout/);
-    expect((await context.cookies()).some((cookie) => cookie.name === "eneo_session")).toBe(false);
+    expect(
+      (await context.cookies()).filter((cookie) => sessionNames.has(cookie.name))
+    ).toHaveLength(0);
+    const protectedRead = await page.request.get("/api/v1/users/me/", {
+      headers: { "Sec-Fetch-Site": "same-origin" }
+    });
+    expect(protectedRead.status()).toBe(401);
   });
 
   test("saves multiple reminder days and searches API keys without page overflow", async ({

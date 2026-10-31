@@ -1081,9 +1081,7 @@ describe("FlowRunPage", () => {
       const audio = await screen.findByLabelText<HTMLAudioElement>(
         messages.flow_transcript_audio_label
       );
-      expect(audio.getAttribute("src")).toBe(
-        "/api/eneo/api/v1/files/audio-1/download/?token=t0k3n"
-      );
+      expect(audio.getAttribute("src")).toBe("/api/v1/files/audio-1/download/?token=t0k3n");
       fireEvent.loadedMetadata(audio);
       expect(audio.currentTime).toBe(65);
       expect(play).toHaveBeenCalled();

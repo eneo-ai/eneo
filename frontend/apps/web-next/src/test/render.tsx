@@ -8,7 +8,6 @@
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { render, renderHook } from "@testing-library/react";
 import { AppIntlProvider } from "@/components/providers/intl-provider";
-import { renderToString } from "react-dom/server";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import { AstryxProvider } from "@/components/providers/astryx-provider";
 import { ShellContext, type ShellContextValue } from "@/components/shell/shell-context";
@@ -109,8 +108,6 @@ function providers({
   if (route !== undefined) {
     let mocked = false;
     try {
-      // Also true under a next/navigation mock (src/app tests): the app's
-      // module re-exports Next's hooks.
       mocked = appNavigation.useRouter === navigation.useRouter;
     } catch {
       // A test's own navigation mock without useRouter.
@@ -162,10 +159,4 @@ export function renderInApp(ui: React.ReactNode, options: RenderInAppOptions = {
 export function renderHookInApp<Result>(hook: () => Result, options: RenderInAppOptions = {}) {
   const { queryClient, Providers } = providers(options);
   return { queryClient, ...renderHook(hook, { wrapper: Providers }) };
-}
-
-/** The HTML the server sends for `ui` in the app's providers: no effects, no client-only values. */
-export function renderToHtml(ui: React.ReactNode, options: RenderInAppOptions = {}): string {
-  const { Providers } = providers(options);
-  return renderToString(<Providers>{ui}</Providers>);
 }

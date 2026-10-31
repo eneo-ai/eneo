@@ -1,5 +1,4 @@
 import { readdirSync, readFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { expect, it } from "vitest";
 import {
@@ -29,8 +28,7 @@ const CHAT_METRICS = [
   "chatTtftMs",
   "inpMs"
 ];
-const installedNext = (createRequire(import.meta.url)("next/package.json") as { version: string })
-  .version;
+const RETIRED_NEXT_VERSION = "16.4.1";
 
 type PerfRun = {
   meta: {
@@ -52,8 +50,8 @@ type Baseline = PerfRun & {
 
 const files = readdirSync(PERF).filter((file) => /^baseline-next-.*\.json$/.test(file));
 
-it("has a baseline for the installed Next version", () => {
-  expect(files).toContain(`baseline-next-${installedNext}.json`);
+it("preserves the baseline for the retired Next version", () => {
+  expect(files).toContain(`baseline-next-${RETIRED_NEXT_VERSION}.json`);
 });
 
 it.each(files)("perf/%s has complete samples and a stable consecutive run", (file) => {
@@ -63,10 +61,10 @@ it.each(files)("perf/%s has complete samples and a stable consecutive run", (fil
   ) as PerfRun;
   expect(`baseline-next-${baseline.meta.frameworkVersion}.json`).toBe(file);
   for (const report of [baseline, stability]) {
-    // Reject stale locally installed Next versions as well as incomplete runs.
+    // The historical comparison stays fixed when the active app changes.
     expect(report.meta).toMatchObject({
       framework: "next",
-      frameworkVersion: installedNext,
+      frameworkVersion: RETIRED_NEXT_VERSION,
       node: "v22.23.4",
       runs: 30
     });

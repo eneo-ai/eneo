@@ -90,11 +90,7 @@ function subscribe(listener: () => void) {
 
 /** The modal <dialog> opened last, while one is open. */
 export function useTopModalDialog(): HTMLDialogElement | null {
-  return useSyncExternalStore(
-    subscribe,
-    () => topModal,
-    () => null
-  );
+  return useSyncExternalStore(subscribe, () => topModal);
 }
 
 /** Astryx's live regions (useAnnounce, useClipboard's `announce`), in <body>. */

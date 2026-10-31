@@ -10,8 +10,8 @@ import { FLOW_SETTINGS_KEY } from "./flow-settings";
 import { flowSettingsFixture } from "./flow-settings-fixtures";
 import { FlowSettingsPage } from "./flow-settings-page";
 
-vi.mock("@/lib/navigation", () => import("@/lib/navigation.tanstack"));
-vi.mock("@/lib/link", () => import("@/lib/link.tanstack"));
+vi.unmock("@/lib/link");
+
 const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
