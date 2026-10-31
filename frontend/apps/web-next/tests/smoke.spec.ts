@@ -43,11 +43,15 @@ test("admin usage has a per-user tab", { tag: "@vite" }, async ({ page }) => {
   await expect(page.getByRole("tab", { name: /användare/i })).toBeVisible();
 });
 
-test("admin insights has a compare toggle and period picker", { tag: "@vite" }, async ({ page }) => {
-  await page.goto("/admin/insights");
-  await expect(page.getByRole("switch", { name: /^jämför$/i })).toBeVisible();
-  await expect(page.getByRole("button", { name: /^Period:/ })).toBeVisible();
-});
+test(
+  "admin insights has a compare toggle and period picker",
+  { tag: "@vite" },
+  async ({ page }) => {
+    await page.goto("/admin/insights");
+    await expect(page.getByRole("switch", { name: /^jämför$/i })).toBeVisible();
+    await expect(page.getByRole("button", { name: /^Period:/ })).toBeVisible();
+  }
+);
 
 test("admin models has a migration-history tab", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/admin/models");

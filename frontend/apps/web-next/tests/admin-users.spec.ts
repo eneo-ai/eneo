@@ -102,12 +102,15 @@ test.describe("the user editor on a phone", () => {
     await menu.click();
     await page.getByRole("menuitem", { name: /redigera/i }).click();
     const dialog = page.getByRole("dialog", { name: "Redigera användare" });
-    const role = dialog.getByRole("checkbox").last();
+    const group = dialog.getByRole("group", { name: /^(Standardroller|Anpassade roller)$/ }).last();
+    const row = group.locator(":scope > div").last();
+    const role = row.getByRole("checkbox");
+    await expect(role).toBeVisible();
     const before = await role.isChecked();
-    // The row's far end, well past the role's name.
-    const row = (await dialog.getByRole("group").last().boundingBox())!;
-    const box = (await role.boundingBox())!;
-    await page.mouse.click(row.x + row.width - 8, box.y + box.height / 2);
+    // Tap the far end after Playwright has scrolled the row into view and
+    // waited for the dialog's opening motion to settle.
+    const box = (await row.boundingBox())!;
+    await row.tap({ position: { x: box.width - 8, y: box.height / 2 } });
     // Retried: the box is checked once React has re-rendered.
     await expect(role).toBeChecked({ checked: !before });
     // Nothing is saved.
