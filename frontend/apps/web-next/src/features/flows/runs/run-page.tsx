@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import {
   keepPreviousData,
@@ -21,6 +22,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { CopyableValue } from "@/features/chat/debug-section";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
@@ -222,6 +224,31 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 /**
+ * A section a phone folds away: the result is what the page is for, and the
+ * steps, what was asked, what it cost and the rest are one tap below it. From
+ * a phone's width up it is the plain section, open, as before.
+ */
+function FoldSection({
+  title,
+  defaultOpen = false,
+  children
+}: {
+  title: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const phone = useMediaMatch(PHONE_QUERY);
+  if (!phone) return <Section title={title}>{children}</Section>;
+  return (
+    <section aria-label={title} className="border-ax-border border-t pt-1">
+      <Collapsible trigger={title} defaultIsOpen={defaultOpen} className="w-full">
+        <div className="pt-2 pb-1">{children}</div>
+      </Collapsible>
+    </section>
+  );
+}
+
+/**
  * One run of a flow: its status (kept current while it moves, announced
  * when it changes), why it failed, its result and produced files, each step
  * with its output and evidence, what it was started with, and what it used.
@@ -237,6 +264,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const { can, user } = useAppContext();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
+  // A phone has the space's header above the page already: no breadcrumbs here, a narrower
+  // gutter, and the sections after the result folded.
+  const phone = useMediaMatch(PHONE_QUERY);
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const [clock] = useState(() => createPollClock());
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -404,21 +434,71 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     </div>
   ) : undefined;
 
+  const stepsSection = summary ? (
+    <FoldSection title={t("flow_runs_steps_heading")} defaultOpen={status !== "completed"}>
+      {steps.isError ? (
+        <ListError
+          error={steps.error}
+          title={t("flow_runs_steps_failed")}
+          onRetry={() => void steps.refetch()}
+          isRetrying={steps.isFetching}
+        />
+      ) : (
+        <>
+          <RunLiveProgress summary={summary} steps={stepViews} />
+          <RunSteps
+            flowId={flowId}
+            runId={runId}
+            steps={stepViews}
+            runStatus={status}
+            canReadEvidence={run?.evidence_access.can_read_evidence ?? false}
+          />
+        </>
+      )}
+    </FoldSection>
+  ) : null;
+  const transcriptSection =
+    transcriptTargets(steps.data).length > 0 && !reviewTranscript ? (
+      <Section title={t("flow_runs_transcript_heading")}>
+        <RunTranscripts
+          flowId={flowId}
+          runId={runId}
+          targets={transcriptTargets(steps.data)}
+          labelFor={(target) =>
+            stepTitle(
+              stepViews.find((step) => step.order === target.stepOrder) ?? {
+                order: target.stepOrder,
+                label: ""
+              },
+              t
+            )
+          }
+          mayEdit={can("flows_manage")}
+          runCompleted={status === "completed"}
+          runRevision={summary?.revision ?? null}
+        />
+      </Section>
+    ) : null;
+
   const view = status ? runStatusView(status) : null;
   const duration = summary ? runDurationMs(summary) : null;
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3">
+      <div className="border-ax-border flex flex-col gap-3 border-b px-4 pt-4 pb-3 md:px-6">
         <PageHeader
           title={title}
           headingRef={headingRef}
-          breadcrumbs={[
-            { label: spaceName, href: spaceLandingHref(sections, routeId) },
-            { label: t("flows"), href: `/spaces/${routeId}/flows` },
-            { label: flow.name, href: `/spaces/${routeId}/flows/${flowId}?tab=runs` },
-            { label: title, current: true }
-          ]}
+          breadcrumbs={
+            phone
+              ? undefined
+              : [
+                  { label: spaceName, href: spaceLandingHref(sections, routeId) },
+                  { label: t("flows"), href: `/spaces/${routeId}/flows` },
+                  { label: flow.name, href: `/spaces/${routeId}/flows/${flowId}?tab=runs` },
+                  { label: title, current: true }
+                ]
+          }
           actions={actions}
         />
         {summary && view ? (
@@ -468,7 +548,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         ) : null}
       </div>
 
-      <div className="flex w-full max-w-5xl flex-col gap-8 px-6 py-5">
+      <div className="flex w-full max-w-5xl flex-col gap-6 px-4 py-4 md:gap-8 md:px-6 md:py-5">
         {progress.isPending ? (
           <LoadingState rows={4} label={t("flow_runs_run_loading")} />
         ) : progress.isError ? (
@@ -521,70 +601,31 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 <LoadingState rows={2} />
               )}
             </Section>
-            <Section title={t("flow_runs_steps_heading")}>
-              {steps.isError ? (
-                <ListError
-                  error={steps.error}
-                  title={t("flow_runs_steps_failed")}
-                  onRetry={() => void steps.refetch()}
-                  isRetrying={steps.isFetching}
-                />
-              ) : (
-                <>
-                  <RunLiveProgress summary={progress.data.status} steps={stepViews} />
-                  <RunSteps
-                    flowId={flowId}
-                    runId={runId}
-                    steps={stepViews}
-                    runStatus={status}
-                    canReadEvidence={run?.evidence_access.can_read_evidence ?? false}
-                  />
-                </>
-              )}
-            </Section>
-            {transcriptTargets(steps.data).length > 0 && !reviewTranscript ? (
-              <Section title={t("flow_runs_transcript_heading")}>
-                <RunTranscripts
-                  flowId={flowId}
-                  runId={runId}
-                  targets={transcriptTargets(steps.data)}
-                  labelFor={(target) =>
-                    stepTitle(
-                      stepViews.find((step) => step.order === target.stepOrder) ?? {
-                        order: target.stepOrder,
-                        label: ""
-                      },
-                      t
-                    )
-                  }
-                  mayEdit={can("flows_manage")}
-                  runCompleted={status === "completed"}
-                  runRevision={summary?.revision ?? null}
-                />
-              </Section>
-            ) : null}
+            {phone ? transcriptSection : null}
+            {stepsSection}
+            {phone ? null : transcriptSection}
             {run?.evidence_access.can_read_evidence ? (
-              <Section title={t("flow_runs_knowledge_heading")}>
+              <FoldSection title={t("flow_runs_knowledge_heading")}>
                 <RunKnowledge
                   flowId={flowId}
                   runId={runId}
                   steps={stepViews}
                   runSettled={settled}
                 />
-              </Section>
+              </FoldSection>
             ) : null}
             {run ? (
               <>
-                <Section title={t("flow_runs_input_heading")}>
+                <FoldSection title={t("flow_runs_input_heading")}>
                   <RunInput flow={flow} run={run} />
-                </Section>
+                </FoldSection>
                 {run.token_usage || run.transcription_usage ? (
-                  <Section title={t("flow_runs_usage_heading")}>
+                  <FoldSection title={t("flow_runs_usage_heading")}>
                     <RunUsage run={run} />
-                  </Section>
+                  </FoldSection>
                 ) : null}
                 {run.webhook_deliveries.length > 0 ? (
-                  <Section title={t("flow_run_extras_webhook_heading")}>
+                  <FoldSection title={t("flow_run_extras_webhook_heading")}>
                     <RunWebhookDeliveries
                       deliveries={run.webhook_deliveries}
                       stepName={(order) =>
@@ -594,7 +635,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                         )
                       }
                     />
-                  </Section>
+                  </FoldSection>
                 ) : null}
               </>
             ) : null}

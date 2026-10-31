@@ -8,6 +8,7 @@ import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { makeFlow } from "../flow-fixtures";
 import { flowKeys } from "../flows-api";
@@ -902,6 +903,30 @@ describe("FlowRunPage", () => {
       state.routes[CORRECTIONS] = () => ({ body: [] });
     }
 
+    it("puts the transcript before the steps on a phone, and after them from a tablet up", async () => {
+      const before = (earlier: Node, later: Node) =>
+        Boolean(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING);
+      setViewport("phone");
+      answerAudioRun();
+      renderRun(["flows_view", "flows_manage"]);
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      const steps = screen.getByRole("region", { name: messages.flow_runs_steps_heading });
+      expect(before(lines, steps)).toBe(true);
+      cleanup();
+
+      setViewport("tablet-portrait");
+      answerAudioRun();
+      renderRun(["flows_view", "flows_manage"]);
+      const wideLines = await screen.findByRole("list", {
+        name: messages.flow_runs_transcript_lines
+      });
+      const stepsHeading = screen.getByRole("heading", {
+        level: 2,
+        name: messages.flow_runs_steps_heading
+      });
+      expect(before(stepsHeading, wideLines)).toBe(true);
+    });
+
     it("shows each line with its time and speaker, and saves the speakers' names", async () => {
       answerAudioRun();
       state.routes[EDIT] = () => ({ body: {} });
@@ -1626,5 +1651,55 @@ describe("FlowRunPage", () => {
       expect(await screen.findByText(text)).toBeTruthy();
       expect(screen.queryByRole("list", { name: messages.flow_runs_transcript_lines })).toBeNull();
     });
+  });
+});
+
+describe("FlowRunPage on a phone", () => {
+  it("shows the result first and folds the steps, what it was started with and what it used", async () => {
+    setViewport("phone");
+    answerRun(makeRunSummary());
+    const { container } = renderRun();
+
+    expect(await screen.findByText("Beslutet är fattat.")).toBeTruthy();
+    expect(
+      screen.getByRole("heading", { level: 2, name: messages.flow_runs_result_heading })
+    ).toBeTruthy();
+    // A tap away: closed until then.
+    const steps = screen.getByRole("button", { name: messages.flow_runs_steps_heading });
+    const input = screen.getByRole("button", { name: messages.flow_runs_input_heading });
+    const usage = screen.getByRole("button", { name: messages.flow_runs_usage_heading });
+    for (const folded of [steps, input, usage]) {
+      expect(folded.getAttribute("aria-expanded")).toBe("false");
+    }
+
+    fireEvent.click(steps);
+    expect(steps.getAttribute("aria-expanded")).toBe("true");
+    expect(await screen.findByRole("article", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
+    expect(input.getAttribute("aria-expanded")).toBe("false");
+    await expectNoAxeViolations(container);
+  });
+
+  it("keeps the steps open while the run is still going, where its progress is", async () => {
+    setViewport("phone");
+    answerRun(makeRunSummary({ status: "running", finished_at: null }));
+    renderRun();
+    expect(await screen.findByRole("article", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
+    const steps = screen.getByRole("button", { name: messages.flow_runs_steps_heading });
+    expect(steps.getAttribute("aria-expanded")).toBe("true");
+  });
+
+  it("has no breadcrumbs, and keeps them from a tablet up", async () => {
+    setViewport("phone");
+    answerRun(makeRunSummary());
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    expect(screen.queryByRole("link", { name: "Flöden" })).toBeNull();
+    cleanup();
+
+    setViewport("tablet-portrait");
+    answerRun(makeRunSummary());
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    expect(screen.getByRole("link", { name: "Flöden" })).toBeTruthy();
   });
 });
