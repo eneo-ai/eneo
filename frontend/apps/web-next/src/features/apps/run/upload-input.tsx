@@ -6,9 +6,7 @@ import { useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { inputFieldRules } from "@/features/files/upload-plan";
 import { FileFormatDetails } from "@/features/files/file-format-details";
-import { useFileDrop } from "@/features/files/use-file-drop";
 import { formatBytes } from "@/lib/format";
-import { cn } from "@/lib/utils";
 import type { InputField } from "../apps";
 import type { RunFile } from "./use-app-run";
 
@@ -68,7 +66,7 @@ export function FileChip({ file, onRemove }: { file: RunFile; onRemove?: () => v
   );
 }
 
-/** Drag/drop + click file picker for an upload-type app input. */
+/** File picker for an upload-type app input; RunView owns page drops. */
 export function UploadInput({
   field,
   description,
@@ -85,7 +83,6 @@ export function UploadInput({
   const t = useTranslations();
   const inputRef = useRef<HTMLInputElement>(null);
   const rules = inputFieldRules(field);
-  const { dragging, handlers } = useFileDrop((dropped) => onAddFiles(dropped, rules));
 
   const acceptedLabel = [
     ...new Set(rules.perTypeLimits.map((limit) => friendlyType(limit.mimetype)))
@@ -107,12 +104,8 @@ export function UploadInput({
       {!atCapacity && (
         <button
           type="button"
-          className={cn(
-            "border-border bg-muted/40 hover:border-primary/50 hover:bg-muted flex w-full cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed p-6 transition-colors",
-            dragging && "border-primary bg-muted"
-          )}
+          className="border-border bg-muted/40 hover:border-primary/50 hover:bg-muted flex w-full cursor-pointer flex-col items-center gap-2 rounded-xl border-2 border-dashed p-6 transition-colors"
           onClick={() => inputRef.current?.click()}
-          {...handlers}
         >
           <Upload className="text-muted-foreground size-5" />
           <span className="text-sm font-medium">
