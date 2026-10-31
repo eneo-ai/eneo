@@ -396,9 +396,11 @@ export function Composer({
           sendActions={
             <>
               {modelSelector}
-              {/* The shortcut beside the button it stands for, where there is a
-                  keyboard to press it; the field's description says it in words. */}
-              <span aria-hidden="true" className="hidden pointer-fine:inline-flex">
+              {/* The shortcut beside the button it stands for, where there is a keyboard
+                  to press it and room for it: not on a touch screen, nor in a phone-width
+                  window, where it only crowds the send button. The field's description says
+                  it in words. */}
+              <span aria-hidden="true" className="hidden md:pointer-fine:inline-flex">
                 <Kbd keys="mod+enter" />
               </span>
             </>

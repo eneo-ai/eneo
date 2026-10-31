@@ -8,7 +8,7 @@ import type { Page } from "@playwright/test";
  * new on every run.
  */
 export type Violation = {
-  kind: "small" | "outside" | "overlap" | "clipped" | "zoom";
+  kind: "small" | "outside" | "overlap" | "clipped" | "zoom" | "hint";
   key: string;
 };
 
@@ -126,6 +126,11 @@ export function measure(page: Page): Promise<PageMeasure> {
       )
         violations.push({ kind: "zoom", key: name(element) });
       targets.push({ element: area, box });
+    }
+    // A key hint (⌘ ↵, ⌘K) points at keys a touch screen does not have.
+    for (const key of document.querySelectorAll("kbd")) {
+      if (shown(key))
+        violations.push({ kind: "hint", key: `kbd:${(key.textContent ?? "").trim()}` });
     }
     for (let i = 0; i < targets.length; i++) {
       for (let j = i + 1; j < targets.length; j++) {

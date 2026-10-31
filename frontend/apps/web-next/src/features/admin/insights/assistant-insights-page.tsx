@@ -5,6 +5,7 @@ import { Card } from "@astryxdesign/core/Card";
 import { DateInput } from "@astryxdesign/core/DateInput";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { revealProblems } from "@/components/composites/field-problem";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { Switch } from "@/components/astryx/switch";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
@@ -127,6 +128,7 @@ function AnalysisTab({
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
+  const coarse = useMediaMatch("(pointer: coarse)");
   const [question, setQuestion] = useState("");
   const [asked, setAsked] = useState(false);
   const questionRef = useRef<HTMLTextAreaElement>(null);
@@ -165,7 +167,8 @@ function AnalysisTab({
           <TextArea
             ref={questionRef}
             label={t("ask_about_insights")}
-            description={t("insights_enter_hint")}
+            // Enter sends only with a keyboard (the handler below); a phone's Return adds a line.
+            description={coarse ? undefined : t("insights_enter_hint")}
             rows={4}
             value={question}
             onChange={setQuestion}

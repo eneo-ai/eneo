@@ -77,7 +77,8 @@ export function MainTopContent() {
           onClick={() => openPalette()}
           aria-keyshortcuts="Meta+K Control+K"
           endContent={
-            <span aria-hidden="true" className="flex">
+            // The drawer (below lg) is the phone's menu: no key hints there, nor on touch.
+            <span aria-hidden="true" className="flex max-lg:hidden pointer-coarse:hidden">
               <Kbd keys="mod+k" />
             </span>
           }

@@ -204,10 +204,10 @@ function CancelButton() {
   );
 }
 
-/** A key hint in the footer; touch screens have no keys to hint at. */
+/** A key hint in the footer; touch screens and phone-width windows have no use for it. */
 function Hint({ keys, keyName, label }: { keys: string[]; keyName: string; label: string }) {
   return (
-    <span className="flex items-center gap-1.5 pointer-coarse:hidden">
+    <span className="flex items-center gap-1.5 max-md:hidden pointer-coarse:hidden">
       <span aria-hidden="true" className="flex items-center gap-1">
         {keys.map((key) => (
           <Kbd key={key} keys={key} />
