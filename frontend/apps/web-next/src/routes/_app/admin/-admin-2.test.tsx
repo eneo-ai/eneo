@@ -83,7 +83,6 @@ beforeEach(async () => {
     ["/api/v1/mcp-servers/server-1/tools/", { items: [] }],
     ["/api/v1/mcp-servers/bundled/", { items: [], count: 0, runtime: null }],
     ["/api/v1/integrations/tenant/", { items: [] }],
-    ["/api/v1/analysis/counts/", {}],
     ["/api/v1/assistants/assistant-1/", { id: "assistant-1" }]
   ]);
   fetcher = vi.fn<typeof fetch>(async (input) => {
@@ -168,7 +167,6 @@ it.each([
   ["/admin/tools", "Tools functions", "tools", "/api/v1/mcp-servers/settings/"],
   ["/admin/integrations", "Integrations", "integrations", "/api/v1/integrations/tenant/"],
   ["/admin/modules", messages.module_admin_title, "module_admin_title", "/api/v1/users/me/"],
-  ["/admin/insights", "Insights", "insights", "/api/v1/analysis/counts/"],
   [
     "/admin/insights/assistant/assistant-1",
     "Insights assistant-1",
@@ -180,6 +178,13 @@ it.each([
   await screen.findByRole("heading", { name: heading, level: 1 });
   expect(document.title).toBe(`${messages[title]} · Eneo`);
   expect(requestedPaths()).toContain(endpoint);
+});
+
+it("opens Insights with its title without preloading all-time counts", async () => {
+  await renderRoute("/admin/insights");
+  await screen.findByRole("heading", { name: "Insights", level: 1 });
+  expect(document.title).toBe(`${messages.insights} · Eneo`);
+  expect(requestedPaths()).not.toContain("/api/v1/analysis/counts/");
 });
 
 it("redirects an admin without modules permission without reading me again", async () => {

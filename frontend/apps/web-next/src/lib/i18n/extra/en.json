@@ -1802,5 +1802,14 @@
   "audit_config_partial_save": "The configuration was partially saved",
   "audit_config_save_failed": "The configuration could not be saved",
   "audit_config_server_unknown": "The server state could not be reloaded. Your changes are preserved.",
-  "audit_config_reload_server": "Reload server state"
+  "audit_config_reload_server": "Reload server state",
+  "insights_period_change": "{percent} compared with the previous period",
+  "insights_chart_metric": "Activity metric",
+  "insights_chart_grouping": "Group activity",
+  "insights_earlier_days": "Earlier days",
+  "insights_later_days": "Later days",
+  "insights_first_activity_in_period": "First recorded activity in the selected period: {date}.",
+  "insights_token_usage_link": "View token usage",
+  "insights_question_details": "Question details",
+  "insights_logged_json": "Logged record as JSON"
 }

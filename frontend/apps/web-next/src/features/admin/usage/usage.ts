@@ -56,11 +56,18 @@ export function usageRangeQuery(range: UsageRange): { start_date: string; end_da
 }
 
 /** Tenant token usage per model; by default the last 30 days, the page's overview. */
-export function tokenUsageQueryOptions(api: EneoClient, range = defaultUsageRange()) {
+export function tokenUsageQueryOptions(
+  api: EneoClient,
+  range: UsageRange | { startTime: string; endTime: string } = defaultUsageRange()
+) {
+  const query =
+    "startTime" in range
+      ? { start_date: range.startTime, end_date: range.endTime }
+      : usageRangeQuery(range);
   return queryOptions({
     queryKey: ["admin-token-usage", range],
     queryFn: (): Promise<TokenUsage> =>
-      unwrap(api.GET("/api/v1/token-usage/", { params: { query: usageRangeQuery(range) } }))
+      unwrap(api.GET("/api/v1/token-usage/", { params: { query } }))
   });
 }
 

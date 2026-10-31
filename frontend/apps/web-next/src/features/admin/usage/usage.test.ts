@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { EneoClient } from "@/lib/api/browser";
 import {
   defaultUsageRange,
   readUsageView,
@@ -11,6 +12,29 @@ import {
   usageViewSearch,
   userUsageCost
 } from "./usage";
+import { tokenUsageQueryOptions } from "./usage";
+
+it("keeps calendar token queries unchanged and sends explicit instant periods without losing microseconds", async () => {
+  const GET = vi.fn().mockResolvedValue({ data: {}, response: new Response("{}") });
+  const api = { GET } as unknown as EneoClient;
+  const calendar = { from: "2026-10-24", to: "2026-10-26" };
+  const instants = {
+    startTime: "2026-10-23T22:00:00.000Z",
+    endTime: "2026-10-26T22:59:59.999999Z"
+  };
+  const old = tokenUsageQueryOptions(api, calendar);
+  const exact = tokenUsageQueryOptions(api, instants);
+  expect(old.queryKey).toEqual(["admin-token-usage", calendar]);
+  expect(exact.queryKey).toEqual(["admin-token-usage", instants]);
+  await old.queryFn!({} as never);
+  expect(GET).toHaveBeenLastCalledWith("/api/v1/token-usage/", {
+    params: { query: { start_date: "2026-10-24", end_date: "2026-10-27" } }
+  });
+  await exact.queryFn!({} as never);
+  expect(GET).toHaveBeenLastCalledWith("/api/v1/token-usage/", {
+    params: { query: { start_date: instants.startTime, end_date: instants.endTime } }
+  });
+});
 
 describe("usage ranges", () => {
   it.each(["2026-99-99", "2026-02-30", "2025-02-29", "2026-07-01"])(

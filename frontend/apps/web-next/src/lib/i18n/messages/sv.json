@@ -7044,5 +7044,14 @@
   "audit_config_partial_save": "Konfigurationen sparades delvis",
   "audit_config_save_failed": "Det gick inte att spara konfigurationen",
   "audit_config_server_unknown": "Serverläget kunde inte läsas om. Dina ändringar finns kvar.",
-  "audit_config_reload_server": "Läs in serverläget"
+  "audit_config_reload_server": "Läs in serverläget",
+  "insights_period_change": "{percent} jämfört med föregående period",
+  "insights_chart_metric": "Visa aktivitet",
+  "insights_chart_grouping": "Gruppera aktivitet",
+  "insights_earlier_days": "Tidigare dagar",
+  "insights_later_days": "Senare dagar",
+  "insights_first_activity_in_period": "Första registrerade aktivitet i vald period: {date}.",
+  "insights_token_usage_link": "Visa tokenanvändning",
+  "insights_question_details": "Frågedetaljer",
+  "insights_logged_json": "Loggad information som JSON"
 }
