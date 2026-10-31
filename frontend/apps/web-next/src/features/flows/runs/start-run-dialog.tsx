@@ -682,6 +682,28 @@ export function StartRunDialog({
     }
   }
 
+  const secondary = summary ? (
+    <Button key="back" label={t("back")} isDisabled={pending} onClick={backToForm} />
+  ) : (
+    <Button
+      key="cancel"
+      label={t("cancel")}
+      isDisabled={pending}
+      onClick={() => requestOpenChange(false)}
+    />
+  );
+  const primary = contract.data ? (
+    <Button
+      key="next"
+      type="submit"
+      form={formId}
+      variant="primary"
+      label={summary ? t("flow_runs_start_submit") : t("flow_runs_summary_next")}
+      isLoading={pending}
+      isInterruptible
+    />
+  ) : null;
+
   return (
     <>
       <Dialog
@@ -709,34 +731,12 @@ export function StartRunDialog({
                 <div
                   className={cn(
                     "flex gap-2",
-                    phone ? "flex-col-reverse [&>*]:w-full" : "flex-wrap justify-end"
+                    phone ? "flex-col [&>*]:w-full" : "flex-wrap justify-end"
                   )}
                 >
-                  {summary ? (
-                    <Button
-                      key="back"
-                      label={t("back")}
-                      isDisabled={pending}
-                      onClick={backToForm}
-                    />
-                  ) : (
-                    <Button
-                      key="cancel"
-                      label={t("cancel")}
-                      isDisabled={pending}
-                      onClick={() => requestOpenChange(false)}
-                    />
-                  )}
-                  {contract.data ? (
-                    <Button
-                      type="submit"
-                      form={formId}
-                      variant="primary"
-                      label={summary ? t("flow_runs_start_submit") : t("flow_runs_summary_next")}
-                      isLoading={pending}
-                      isInterruptible
-                    />
-                  ) : null}
+                  {/* Keyed: the primary action is first where it is on top (a phone), so Tab goes
+                      the way the eye does, and last where the row reads left to right. */}
+                  {phone ? [primary, secondary] : [secondary, primary]}
                 </div>
               </LayoutFooter>
             ) : null

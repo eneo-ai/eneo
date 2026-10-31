@@ -426,8 +426,12 @@ describe("StartRunDialog on a phone", () => {
     const next = button(dialog, "Granska");
     const cancel = button(dialog, "Avbryt");
     expect(next.parentElement).toBe(cancel.parentElement);
-    // Cancel comes first in the DOM, the stack reverses it: the primary action is on top.
-    expect(next.parentElement?.className).toContain("flex-col-reverse");
+    // The primary action is on top, and first in the DOM, so Tab goes the way the eye does.
+    expect(next.parentElement?.className).toContain("flex-col");
+    expect(next.parentElement?.className).not.toContain("flex-col-reverse");
+    expect(Boolean(next.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+      true
+    );
     expect(within(dialog).getByText("Välj filer")).toBeTruthy();
     expect(within(dialog).queryByText(/dra hit/)).toBeNull();
   });
@@ -509,8 +513,13 @@ describe("StartRunDialog on a phone", () => {
   it("keeps the dialog, its row of buttons and the drag wording for a mouse", async () => {
     const { dialog } = await openDialog();
     const next = button(dialog, "Granska");
+    const cancel = button(dialog, "Avbryt");
     expect(next.parentElement?.className).toContain("justify-end");
-    expect(next.parentElement?.className).not.toContain("flex-col-reverse");
+    expect(next.parentElement?.className).not.toContain("flex-col");
+    // A row reads left to right: Avbryt, then Granska, in Tab order too.
+    expect(Boolean(cancel.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+      true
+    );
     expect(within(dialog).getByText("Välj filer eller dra hit dem")).toBeTruthy();
   });
 });
