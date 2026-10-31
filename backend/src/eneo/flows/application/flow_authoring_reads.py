@@ -10,8 +10,10 @@ suggestions and the publish rules are judged on, computed once per read.
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any
+from collections.abc import Mapping, Sequence
+from datetime import datetime
+from enum import Enum
+from typing import Any, cast
 from uuid import UUID
 
 from eneo.flows.application.flow_suggestion_service import suggestion_flow
@@ -107,6 +109,125 @@ def run_form_fields(metadata_json: Mapping[str, object] | None) -> list[dict[str
             item["options"] = field.options
         fields.append(item)
     return fields
+
+
+def _value(item: object) -> object:
+    return item.value if isinstance(item, Enum) else item
+
+
+def _seconds(start: datetime | None, end: datetime | None) -> float | None:
+    if start is None or end is None:
+        return None
+    return round((end - start).total_seconds(), 1)
+
+
+def _iso(moment: datetime | None) -> str | None:
+    return moment.isoformat() if moment is not None else None
+
+
+RESULT_PREVIEW_CHARS = 400
+
+
+def _result_summary(result: Any) -> dict[str, Any] | None:
+    """A run's final result in short: its kind and the start of its text."""
+    if result is None:
+        return None
+    text = getattr(result, "text", None) or getattr(result, "preview", None)
+    item: dict[str, Any] = {"kind": _value(getattr(result, "kind", None))}
+    if isinstance(text, str):
+        item["preview"] = text[:RESULT_PREVIEW_CHARS]
+        item["preview_truncated"] = len(text) > RESULT_PREVIEW_CHARS
+    return item
+
+
+def run_summary(
+    detail: Any,
+    steps: Sequence[Any],
+    labels: Mapping[int, str],
+    checkpoints: Sequence[Any],
+) -> dict[str, Any]:
+    """The compact view of one run the chat reasons from: the run's status,
+    timing, tokens, error and result in short, and each step in one line
+    (status, duration, tokens, whether its prompt was cut, its long-material
+    coverage, its diagnostics, its error, its review's latest outcome), so the
+    chat can say which step costs or failed and why. ``detail`` is the run's
+    audited detail, ``steps`` its step results, ``labels`` the step names of
+    the run's version by order and ``checkpoints`` its review checkpoints."""
+    reviews: dict[int, Any] = {}
+    for checkpoint in checkpoints:
+        # Ordered by step and attempt: the last one is the step's latest.
+        reviews[checkpoint.step_order] = checkpoint
+    tokens = getattr(detail, "token_usage", None)
+    error = getattr(detail, "error", None)
+    items: list[dict[str, Any]] = []
+    for step in sorted(steps, key=lambda item: item.step_order):
+        order = step.step_order
+        diagnostics = [
+            {"code": item.code, "severity": _value(item.severity)}
+            for item in cast(list[Any], getattr(step, "diagnostics", None) or [])
+        ]
+        coverage = getattr(step, "long_material", None)
+        review = reviews.get(order)
+        item: dict[str, Any] = {
+            "step_order": order,
+            "name": labels.get(order) or f"Steg {order}",
+            "status": _value(step.status),
+            "attempts": getattr(step, "current_attempt_no", None),
+            "duration_seconds": _seconds(step.started_at, step.finished_at),
+            "tokens": {
+                "input": step.num_tokens_input,
+                "output": step.num_tokens_output,
+            },
+            "prompt_truncated": bool(
+                getattr(step, "effective_prompt_truncated", False)
+            ),
+            "coverage": _value(coverage.coverage) if coverage is not None else None,
+            "diagnostics": diagnostics,
+            "error": (
+                {"code": _value(step.error_code), "message": step.error_message}
+                if step.error_code or step.error_message
+                else None
+            ),
+            "review": (
+                {"state": _value(review.state), "attempt": review.attempt_no}
+                if review is not None
+                else None
+            ),
+        }
+        items.append(item)
+    return {
+        "run_id": str(detail.id),
+        "status": _value(detail.status),
+        "flow_version": detail.flow_version,
+        "purpose": _value(getattr(detail, "purpose", None)),
+        "started_at": _iso(detail.started_at),
+        "finished_at": _iso(detail.finished_at),
+        "duration_seconds": _seconds(detail.started_at, detail.finished_at),
+        "tokens": (
+            {
+                "input": tokens.num_tokens_input,
+                "output": tokens.num_tokens_output,
+                "total": tokens.num_tokens_total,
+                "complete": tokens.input_completeness == "complete"
+                and tokens.output_completeness == "complete",
+            }
+            if tokens is not None
+            else None
+        ),
+        "error": (
+            {
+                "code": _value(error.code),
+                "message": error.message,
+                "step_order": getattr(error, "step_order", None),
+                "retryable": getattr(error, "retryable", None),
+                "user_action": getattr(error, "user_action", None),
+            }
+            if error is not None
+            else None
+        ),
+        "result": _result_summary(getattr(detail, "result", None)),
+        "steps": items,
+    }
 
 
 def output_fields(output_contract: Mapping[str, object] | None) -> list[str] | None:

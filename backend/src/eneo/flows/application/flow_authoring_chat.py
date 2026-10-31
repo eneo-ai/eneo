@@ -223,6 +223,22 @@ are hidden.
 """
 
 
+_RUN_HELP = """When the person asks about a run (why it failed, what it cost, how to
+improve from it), read it with read_run first: its summary names the failing
+step, the error code, whether the error is retryable, and each step's tokens,
+duration, cut prompt, coverage and review. Say which kind the problem is: a
+setting of the flow (a prompt, a contract, a read), missing input or a
+connection that is not configured, a transient error of a service (retryable),
+or content the person dislikes. A transient error never changes a prompt: say
+the run can be started again as it is. For a setting, propose the change and
+make it only in edit mode once the person agrees. For content, ask whether to
+correct this run's result through its review or the instruction for future
+runs. To improve from a run, also read read_flow_suggestions with include_runs
+and present what was found, which steps, the evidence and the next action; call
+a token impact an estimate.
+"""
+
+
 def _suggestion_rules() -> str:
     """The catalogue's authoring rules, one per suggestion code."""
     return "".join(
@@ -248,6 +264,7 @@ AUTHORING_INSTRUCTIONS = (
     + _suggestion_rules()
     + _SUGGESTIONS_INTRODUCED
     + _SUGGESTIONS_ON_REQUEST
+    + _RUN_HELP
 )
 
 

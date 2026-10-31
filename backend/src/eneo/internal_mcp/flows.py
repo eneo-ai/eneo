@@ -1227,17 +1227,57 @@ async def run_flow(
     return await _call_runtime(ctx, operation)
 
 
+RunSection = Literal["summary", "all"]
+
+
 @mcp.tool()
-async def read_run(ctx: Context, run_id: UUID, offset: int = 0) -> CallToolResult:
-    """Read paged run results through the authorized evidence snapshot and audit."""
+async def read_run(
+    ctx: Context, run_id: UUID, section: RunSection = "summary", offset: int = 0
+) -> CallToolResult:
+    """Read a run of this flow. The summary (the default) gives the run's
+    status, timing, tokens, error and result in short, and each step in one
+    line: its status, duration, tokens, whether its prompt was cut, its
+    long-material coverage, its diagnostics, its error and its review's
+    outcome, so you can say which step costs or failed and why. Section
+    "all" pages the whole run detail. Both are audited evidence reads."""
 
     async def operation(container, chat, request):
+        from starlette.responses import Response
+
         from eneo.flows.api.flow_run_lifecycle_router import get_flow_run
 
         result = await get_flow_run(
             id=chat.flow_id, run_id=run_id, request=request, container=container
         )
-        return _runtime_result(result, flow_id=chat.flow_id, offset=offset)
+        if section == "all" or isinstance(result, Response):
+            return _runtime_result(result, flow_id=chat.flow_id, offset=offset)
+        from eneo.flows.api.flow_run_steps_router import (
+            get_flow_graph,
+            list_flow_run_steps,
+        )
+        from eneo.flows.application.flow_authoring_reads import run_summary
+
+        steps = await list_flow_run_steps(
+            id=chat.flow_id, run_id=run_id, request=request, container=container
+        )
+        graph = await get_flow_graph(
+            id=chat.flow_id, request=request, run_id=run_id, container=container
+        )
+        labels = {
+            node.step_order: node.label
+            for node in graph.nodes
+            if node.step_order is not None
+        }
+        checkpoints = await container.flow_run_review_checkpoint_repo().list_review_checkpoints_for_run(
+            run_id=run_id, tenant_id=container.user().tenant_id
+        )
+        page = page_result(
+            run_summary(result, steps, labels, checkpoints),
+            flow_id=chat.flow_id,
+            offset=offset,
+        )
+        page.structuredContent = {"flow_id": str(chat.flow_id), "run_id": str(run_id)}
+        return page
 
     return await _call_runtime(ctx, operation)
 

@@ -165,8 +165,9 @@ function AuthoringConversation({
   chat,
   onFlowMayHaveChanged,
   onRefused,
-  onComposer
-}: Pick<ChatPanelProps, "onComposer"> & {
+  onComposer,
+  onAskChat
+}: Pick<ChatPanelProps, "onComposer" | "onAskChat"> & {
   flow: FlowPublic;
   chat: FlowAuthoringChat;
   onFlowMayHaveChanged: () => void;
@@ -259,7 +260,7 @@ function AuthoringConversation({
       startHeadingLevel={3}
       references={references}
       // A run the chat starts shows in the answer, with its progress and result.
-      toolCards={(call) => flowRunCardFor(call, flow, routeId)}
+      toolCards={(call) => flowRunCardFor(call, flow, routeId, onAskChat)}
       footerActions={<ModePicker chat={chat} onRefused={onRefused} />}
       placeholder={
         chat.editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")
@@ -337,6 +338,7 @@ export function FlowChatPanel({
           onFlowMayHaveChanged={onFlowMayHaveChanged}
           onRefused={onRefused}
           onComposer={onComposer}
+          onAskChat={onAskChat}
         />
       ) : mayEdit && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />

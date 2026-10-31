@@ -96,6 +96,15 @@ def test_the_instructions_carry_a_change_to_the_steps_that_read_it() -> None:
     assert "read a step in full (section steps) before changing it" in instructions
 
 
+def test_the_instructions_tell_a_runs_kinds_of_failure_apart() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "read it with read_run first" in instructions
+    assert "A transient error never changes a prompt" in instructions
+    assert "correct this run's result through its review" in instructions
+    assert "call a token impact an estimate" in instructions
+
+
 def test_the_chat_gets_the_tool_runtime_functions_its_space_offers_and_a_provider_serves():
     states = [
         CapabilityAvailability(purpose="file_analysis", available=True),

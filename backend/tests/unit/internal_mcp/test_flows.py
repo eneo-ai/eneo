@@ -671,6 +671,96 @@ async def test_an_example_that_gives_no_contract_is_refused_without_saving(monke
     save.assert_not_awaited()
 
 
+async def test_read_run_summarises_a_run_from_its_audited_reads(monkeypatch):
+    from eneo.flows.api import flow_run_lifecycle_router, flow_run_steps_router
+
+    container = _transaction_container([])
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=False)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    monkeypatch.setattr(
+        flow_authoring_chat,
+        "FlowAuthoringChatPublic",
+        SimpleNamespace(model_validate=lambda item: item),
+    )
+    run_id = uuid4()
+    detail = SimpleNamespace(
+        id=run_id,
+        status="completed",
+        flow_version=2,
+        purpose="production",
+        started_at=None,
+        finished_at=None,
+        token_usage=None,
+        error=None,
+        result=None,
+    )
+    step = SimpleNamespace(
+        step_order=1,
+        status="completed",
+        current_attempt_no=1,
+        started_at=None,
+        finished_at=None,
+        num_tokens_input=5,
+        num_tokens_output=7,
+        effective_prompt_truncated=False,
+        long_material=None,
+        diagnostics=[],
+        error_code=None,
+        error_message=None,
+    )
+    get_run = AsyncMock(return_value=detail)
+    list_steps = AsyncMock(return_value=[step])
+    graph = AsyncMock(
+        return_value=SimpleNamespace(
+            nodes=[
+                SimpleNamespace(step_order=None, label="Start"),
+                SimpleNamespace(step_order=1, label="Sammanfatta"),
+            ]
+        )
+    )
+    monkeypatch.setattr(flow_run_lifecycle_router, "get_flow_run", get_run)
+    monkeypatch.setattr(flow_run_steps_router, "list_flow_run_steps", list_steps)
+    monkeypatch.setattr(flow_run_steps_router, "get_flow_graph", graph)
+    repo = container.flow_run_review_checkpoint_repo.return_value
+    repo.list_review_checkpoints_for_run = AsyncMock(
+        return_value=[SimpleNamespace(step_order=1, attempt_no=1, state="approved")]
+    )
+    container.user.return_value = SimpleNamespace(tenant_id=uuid4())
+
+    result = await flows.read_run(MagicMock(), run_id=run_id)
+
+    assert result.isError is not True
+    page = json.loads(result.content[0].text)
+    summary = json.loads(page["content"])
+    assert summary["run_id"] == str(run_id)
+    assert summary["steps"] == [
+        {
+            "step_order": 1,
+            "name": "Sammanfatta",
+            "status": "completed",
+            "attempts": 1,
+            "duration_seconds": None,
+            "tokens": {"input": 5, "output": 7},
+            "prompt_truncated": False,
+            "coverage": None,
+            "diagnostics": [],
+            "error": None,
+            "review": {"state": "approved", "attempt": 1},
+        }
+    ]
+    assert result.structuredContent == {
+        "flow_id": str(chat.flow_id),
+        "run_id": str(run_id),
+    }
+    # Every read goes through the audited router reads for this flow's run.
+    for read in (get_run, list_steps, graph):
+        assert read.await_args.kwargs["id"] == chat.flow_id
+        assert read.await_args.kwargs["run_id"] == run_id
+
+
 def test_every_tool_that_needs_edit_mode_is_withheld_while_the_chat_asks():
     import inspect
 

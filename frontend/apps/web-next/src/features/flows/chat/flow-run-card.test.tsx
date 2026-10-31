@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -169,5 +169,68 @@ describe("FlowRunCard", () => {
     expect(within(card).getByText(messages.flow_runs_status_failed)).toBeTruthy();
     await waitFor(() => expect(within(card).getByText(/Skriv svar/)).toBeTruthy());
     expect(within(card).queryByRole("button", { name: messages.copy })).toBeNull();
+  });
+
+  it("offers to explain a failure and to improve from a run, as prepared requests", async () => {
+    const summary = makeRunSummary({ status: "failed" });
+    answerRun(
+      summary,
+      [{ order: 1, label: "Skriv svar", status: "failed" }],
+      makeRunDetail({
+        ...summary,
+        result: null,
+        error: {
+          code: "flow_step_timeout",
+          message: "Step timed out.",
+          retryable: true,
+          step_order: 1,
+          user_action: null,
+          consumer_action: null,
+          details: {}
+        } as RunDetail["error"]
+      })
+    );
+    const onAskChat = vi.fn();
+    renderInApp(
+      <FlowRunCard
+        flowId="flow-1"
+        flowName="Förslagstest A"
+        runId="run-1"
+        spaceRouteId="space-1"
+        onAskChat={onAskChat}
+      />
+    );
+    const card = await screen.findByRole("region", { name: "Körning av Förslagstest A" });
+    fireEvent.click(await within(card).findByRole("button", { name: "Förklara felet" }));
+    expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("run-1"));
+    expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("Förklara varför"));
+    fireEvent.click(within(card).getByRole("button", { name: "Förbättra utifrån körningen" }));
+    expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("Förbättra flödet"));
+    expect(onAskChat).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers no explanation for a run that completed, and nothing without a chat to ask", async () => {
+    answerRun(makeRunSummary(), [{ order: 1, label: "Sammanfatta", status: "completed" }]);
+    const onAskChat = vi.fn();
+    renderInApp(
+      <FlowRunCard
+        flowId="flow-1"
+        flowName="Förslagstest A"
+        runId="run-1"
+        spaceRouteId="space-1"
+        onAskChat={onAskChat}
+      />
+    );
+    const card = await screen.findByRole("region", { name: "Körning av Förslagstest A" });
+    expect(
+      await within(card).findByRole("button", { name: "Förbättra utifrån körningen" })
+    ).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: "Förklara felet" })).toBeNull();
+    cleanup();
+    answerRun(makeRunSummary(), [{ order: 1, label: "Sammanfatta", status: "completed" }]);
+    renderCard();
+    const plain = await screen.findByRole("region", { name: "Körning av Förslagstest A" });
+    await within(plain).findByText("Beslutet är fattat.");
+    expect(within(plain).queryByRole("button", { name: "Förbättra utifrån körningen" })).toBeNull();
   });
 });

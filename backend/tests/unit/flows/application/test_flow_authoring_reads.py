@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -9,6 +10,7 @@ from eneo.flows.application.flow_authoring_reads import (
     output_fields,
     read_reference,
     run_form_fields,
+    run_summary,
     step_reads_summary,
 )
 from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
@@ -145,3 +147,158 @@ def test_output_fields_names_the_contracts_top_level_fields():
     assert output_fields(None) is None
     assert output_fields({"type": "object"}) == []
     assert output_fields({"properties": {"a": {}, "b": {}}}) == ["a", "b"]
+
+
+def _at(minute: int, second: int = 0) -> datetime:
+    return datetime(2026, 10, 30, 12, minute, second, tzinfo=timezone.utc)
+
+
+def test_a_run_summary_names_each_step_with_what_it_cost_and_how_it_ended():
+    run_id = uuid4()
+    detail = SimpleNamespace(
+        id=run_id,
+        status="failed",
+        flow_version=3,
+        purpose="production",
+        started_at=_at(0),
+        finished_at=_at(1, 30),
+        token_usage=SimpleNamespace(
+            num_tokens_input=100,
+            num_tokens_output=40,
+            num_tokens_total=140,
+            input_completeness="complete",
+            output_completeness="incomplete",
+        ),
+        error=SimpleNamespace(
+            code="flow_step_timeout",
+            message="Step timed out.",
+            step_order=2,
+            retryable=True,
+            user_action="Start the run again.",
+        ),
+        result=None,
+    )
+    steps = [
+        SimpleNamespace(
+            step_order=2,
+            status="failed",
+            current_attempt_no=2,
+            started_at=_at(0, 20),
+            finished_at=_at(1, 30),
+            num_tokens_input=60,
+            num_tokens_output=0,
+            effective_prompt_truncated=True,
+            long_material=SimpleNamespace(coverage="partial"),
+            diagnostics=[SimpleNamespace(code="material_left_out", severity="warning")],
+            error_code="flow_step_timeout",
+            error_message="Step timed out.",
+        ),
+        SimpleNamespace(
+            step_order=1,
+            status="completed",
+            current_attempt_no=1,
+            started_at=_at(0),
+            finished_at=_at(0, 20),
+            num_tokens_input=40,
+            num_tokens_output=40,
+            effective_prompt_truncated=False,
+            long_material=None,
+            diagnostics=[],
+            error_code=None,
+            error_message=None,
+        ),
+    ]
+    checkpoints = [
+        SimpleNamespace(step_order=1, attempt_no=1, state="rejected"),
+        SimpleNamespace(step_order=1, attempt_no=2, state="approved"),
+    ]
+
+    summary = run_summary(
+        detail, steps, {1: "Läs brevet", 2: "Skriv svaret"}, checkpoints
+    )
+
+    assert summary["run_id"] == str(run_id)
+    assert summary["status"] == "failed"
+    assert summary["duration_seconds"] == 90.0
+    assert summary["tokens"] == {
+        "input": 100,
+        "output": 40,
+        "total": 140,
+        "complete": False,
+    }
+    assert summary["error"] == {
+        "code": "flow_step_timeout",
+        "message": "Step timed out.",
+        "step_order": 2,
+        "retryable": True,
+        "user_action": "Start the run again.",
+    }
+    assert summary["result"] is None
+    # Steps in order, the latest review per step, and the facts that tell a
+    # setting from a transient failure.
+    assert [s["step_order"] for s in summary["steps"]] == [1, 2]
+    assert summary["steps"][0] == {
+        "step_order": 1,
+        "name": "Läs brevet",
+        "status": "completed",
+        "attempts": 1,
+        "duration_seconds": 20.0,
+        "tokens": {"input": 40, "output": 40},
+        "prompt_truncated": False,
+        "coverage": None,
+        "diagnostics": [],
+        "error": None,
+        "review": {"state": "approved", "attempt": 2},
+    }
+    assert summary["steps"][1] == {
+        "step_order": 2,
+        "name": "Skriv svaret",
+        "status": "failed",
+        "attempts": 2,
+        "duration_seconds": 70.0,
+        "tokens": {"input": 60, "output": 0},
+        "prompt_truncated": True,
+        "coverage": "partial",
+        "diagnostics": [{"code": "material_left_out", "severity": "warning"}],
+        "error": {"code": "flow_step_timeout", "message": "Step timed out."},
+        "review": None,
+    }
+
+
+def test_a_run_summary_shows_the_start_of_a_text_result_and_names_a_missing_step():
+    detail = SimpleNamespace(
+        id=uuid4(),
+        status="completed",
+        flow_version=1,
+        purpose="test",
+        started_at=None,
+        finished_at=None,
+        token_usage=None,
+        error=None,
+        result=SimpleNamespace(kind="inline_text", text="x" * 500),
+    )
+    step = SimpleNamespace(
+        step_order=1,
+        status="completed",
+        current_attempt_no=1,
+        started_at=None,
+        finished_at=None,
+        num_tokens_input=None,
+        num_tokens_output=None,
+        effective_prompt_truncated=False,
+        long_material=None,
+        diagnostics=[],
+        error_code=None,
+        error_message=None,
+    )
+
+    summary = run_summary(detail, [step], {}, [])
+
+    assert summary["result"] == {
+        "kind": "inline_text",
+        "preview": "x" * 400,
+        "preview_truncated": True,
+    }
+    assert summary["duration_seconds"] is None
+    assert summary["tokens"] is None
+    assert summary["steps"][0]["name"] == "Steg 1"

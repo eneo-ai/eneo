@@ -54,12 +54,19 @@ export function startedRunId(
 export function flowRunCardFor(
   call: ToolCallRecord,
   flow: { id: string; name: string },
-  spaceRouteId: string
+  spaceRouteId: string,
+  onAskChat?: (text: string) => void
 ): ReactNode {
   const runId = startedRunId(call);
   if (!runId) return null;
   return (
-    <FlowRunCard flowId={flow.id} flowName={flow.name} runId={runId} spaceRouteId={spaceRouteId} />
+    <FlowRunCard
+      flowId={flow.id}
+      flowName={flow.name}
+      runId={runId}
+      spaceRouteId={spaceRouteId}
+      onAskChat={onAskChat}
+    />
   );
 }
 
@@ -77,18 +84,22 @@ function resultText(run: RunDetail | undefined): string | null {
  * what it is doing step by step while it runs (read the way the run page
  * reads it, so the model does not have to wait for it), the result when it
  * is done, why it failed when it did, and the way to the run's own page.
- * Reopening the conversation shows the run as it ended.
+ * Reopening the conversation shows the run as it ended. Once the run has
+ * ended, "Förklara felet" and "Förbättra utifrån körningen" put a prepared
+ * request about this run in the composer (`onAskChat`), never send it.
  */
 export function FlowRunCard({
   flowId,
   flowName,
   runId,
-  spaceRouteId
+  spaceRouteId,
+  onAskChat
 }: {
   flowId: string;
   flowName: string;
   runId: string;
   spaceRouteId: string;
+  onAskChat?: (text: string) => void;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -253,6 +264,22 @@ export function FlowRunCard({
             label={t("copy")}
             icon={<Copy aria-hidden="true" className="size-4" />}
             onClick={() => void copy(text)}
+          />
+        ) : null}
+        {onAskChat && status === "failed" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_explain")}
+            onClick={() => onAskChat(t("flows_run_card_explain_request", { run: runId }))}
+          />
+        ) : null}
+        {onAskChat && (status === "completed" || status === "failed") ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_improve")}
+            onClick={() => onAskChat(t("flows_run_card_improve_request", { run: runId }))}
           />
         ) : null}
         {status && isCancellable(status) ? (
