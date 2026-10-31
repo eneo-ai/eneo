@@ -52,7 +52,7 @@ function PhaseReceipt({ phase, apps }: { phase: RolloutPhase; apps: boolean }) {
     {
       key: "count",
       header: t("organization_skills_rollout_count_column"),
-      width: proportional(1),
+      width: proportional(1, { minWidth: 48 }),
       align: "end"
     }
   ];

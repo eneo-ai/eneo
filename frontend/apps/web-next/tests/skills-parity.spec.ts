@@ -273,6 +273,34 @@ test(
           { exact: true }
         )
       ).toBeVisible();
+      const receipt = page
+        .getByRole("heading", { name: "Befintliga kopplingar uppdateras", exact: true })
+        .locator("..");
+      await expect(receipt.getByText("Uppdateringen är klar", { exact: true })).toHaveCount(3);
+      for (const width of [1280, 320]) {
+        await page.setViewportSize({ width, height: 900 });
+        for (const name of ["Assistenter", "Appkopplingar"]) {
+          const bounds = await page.getByRole("table", { name, exact: true }).evaluate((table) => {
+            const viewport = table.closest(".astryx-table-scroll-wrapper");
+            const count = table.querySelector("thead th:last-child");
+            if (!viewport || !count) throw new Error("Missing rollout count column or viewport");
+            return {
+              countRight: count.getBoundingClientRect().right,
+              viewportRight: viewport.getBoundingClientRect().right
+            };
+          });
+          expect(bounds.countRight, `${name} count column at ${width}px`).toBeLessThanOrEqual(
+            bounds.viewportRight + 1
+          );
+        }
+        if (width === 320)
+          await page
+            .getByRole("region", { name: "Assistenter", exact: true })
+            .screenshot({ path: testInfo.outputPath("rollout-counts-320.png") });
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await receipt.scrollIntoViewIfNeeded();
+      await receipt.screenshot({ path: testInfo.outputPath("rollout-reasons-resume.png") });
       const search = page.getByRole("searchbox", {
         name: "Sök på resurs, yta eller ägare",
         exact: true
@@ -287,7 +315,7 @@ test(
       await search.fill("Fixture owner");
       await searched;
       await page.screenshot({
-        path: testInfo.outputPath("rollout-reasons-resume.png"),
+        path: testInfo.outputPath("adoption-live-search.png"),
         fullPage: true
       });
       expect(errors).toEqual([]);
