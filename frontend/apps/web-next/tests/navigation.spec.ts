@@ -230,6 +230,9 @@ for (const cached of [false, true]) {
     const firstLink = nav.getByRole("link", { name: firstName, exact: true });
     const secondLink = nav.getByRole("link", { name: secondName, exact: true });
     const main = page.getByRole("main");
+    await expect(
+      main.getByRole("heading", { name: cached ? secondName : firstName, exact: true })
+    ).toBeVisible();
     async function openSpace(name: string) {
       await page.keyboard.press("ControlOrMeta+k");
       const palette = page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ });
