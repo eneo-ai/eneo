@@ -11,11 +11,16 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * composer still shows its hint, so hiding must not go too far.
  */
 
-const visibleKeyHints = (page: import("@playwright/test").Page) =>
-  page.evaluate(() =>
-    [...document.querySelectorAll("kbd")]
-      .filter((key) => key.getClientRects().length > 0)
-      .map((key) => (key.textContent ?? "").trim())
+/** The visible key hints in the document, or only in what `within` selects. */
+const visibleKeyHints = (page: import("@playwright/test").Page, within?: string) =>
+  page.evaluate(
+    (scope) =>
+      [...(scope ? document.querySelectorAll(scope) : [document]).values()].flatMap((root) =>
+        [...root.querySelectorAll("kbd")]
+          .filter((key) => key.getClientRects().length > 0)
+          .map((key) => (key.textContent ?? "").trim())
+      ),
+    within
   );
 
 for (const touch of [true, false]) {
@@ -60,7 +65,9 @@ test(
     const page = await context.newPage();
     await page.goto("/spaces/personal/chat");
     await expect(page.getByRole("textbox", { name: /^Fråga / })).toBeVisible();
-    expect((await visibleKeyHints(page)).length).toBeGreaterThan(0);
+    // In the composer itself: the menu's own ⌘K hint is also on screen at this width and
+    // would keep this green if the composer's went missing.
+    expect((await visibleKeyHints(page, "[data-start-composer]")).length).toBeGreaterThan(0);
     await context.close();
   }
 );
