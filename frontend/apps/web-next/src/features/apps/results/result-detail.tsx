@@ -4,12 +4,12 @@ import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Check, ChevronLeft, Copy, Download } from "lucide-react";
-import Link from "@/lib/link";
+import { Check, Copy, Download } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { Streamdown } from "streamdown";
 import { LoadingState } from "@/components/composites/loading-state";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { browserApi } from "@/lib/api/browser";
@@ -253,13 +253,9 @@ export function ResultDetail({
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <Link
-          href={backHref}
-          className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-        >
-          <ChevronLeft className="size-4" />
+        <BackLink href={backHref} hideOnPhone>
           {t("back")}
-        </Link>
+        </BackLink>
         <PageHeader
           title={title}
           actions={

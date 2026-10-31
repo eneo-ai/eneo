@@ -1,10 +1,9 @@
 "use client";
 
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
-import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
 import { useId, useRef } from "react";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { AddTextDialog, BlobTable } from "@/features/knowledge/blobs";
@@ -36,13 +35,9 @@ export function CollectionDetail({ collectionId }: { collectionId: string }) {
     <RemovalFocusScope target={headingRef}>
       <div className="flex w-full flex-col gap-6">
         <div className="flex flex-col gap-1">
-          <Link
-            href={`/spaces/${routeId}/knowledge?tab=collections`}
-            className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-          >
-            <ChevronLeft className="size-4" />
+          <BackLink href={`/spaces/${routeId}/knowledge?tab=collections`} hideOnPhone>
             {t("knowledge")}
-          </Link>
+          </BackLink>
           <PageHeader title={collection.name} headingRef={headingRef} headingId={headingId}>
             <AddTextDialog collectionId={collection.id} disabled={readonly || modelDisabled} />
             <UploadBlobsButton

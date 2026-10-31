@@ -1,10 +1,10 @@
 "use client";
 
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
 import Link from "@/lib/link";
 import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -37,13 +37,9 @@ export function AppDetail({ appId }: { appId: string }) {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <Link
-          href={`/spaces/${routeId}/apps`}
-          className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-        >
-          <ChevronLeft className="size-4" />
+        <BackLink href={`/spaces/${routeId}/apps`} hideOnPhone>
           {t("apps")}
-        </Link>
+        </BackLink>
         <PageHeader title={app.name}>
           {canEdit && (
             <Button asChild variant="outline">

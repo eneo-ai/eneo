@@ -123,10 +123,10 @@ describe("AdminUserGroupsPage", () => {
     await waitFor(() => expect(rowNames()).toEqual(["Arkiv", "Ekonomi", "Bygglov"]));
   });
 
-  it("offers to create the first group when there is none", async () => {
+  it("offers to create the first group when there is none, with one button, not two", async () => {
     await renderPage([]);
     expect(await screen.findByText(/inga användargrupper konfigurerade/)).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Skapa användargrupp" })).toHaveLength(2);
+    expect(screen.getAllByRole("button", { name: "Skapa användargrupp" })).toHaveLength(1);
   });
 
   it("creates a group, saying at the field when the name is missing", async () => {

@@ -10,11 +10,11 @@ import {
   useSuspenseInfiniteQuery,
   useSuspenseQuery
 } from "@tanstack/react-query";
-import { ChevronLeft, RefreshCw, Square } from "lucide-react";
-import Link from "@/lib/link";
+import { RefreshCw, Square } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { LoadMore } from "@/components/composites/query-state";
 import { useClientTimeText } from "@/components/composites/client-time";
@@ -264,13 +264,9 @@ export function WebsiteDetail({
   return (
     <div className="flex w-full flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <Link
-          href={`/spaces/${routeId}/knowledge?tab=websites`}
-          className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-        >
-          <ChevronLeft className="size-4" />
+        <BackLink href={`/spaces/${routeId}/knowledge?tab=websites`} hideOnPhone>
           {t("knowledge")}
-        </Link>
+        </BackLink>
         <PageHeader title={formatWebsiteName(website)}>
           {!readonly && (
             <CrawlRunControls

@@ -261,7 +261,7 @@ export function AdminUserGroupsPage() {
           { label: t("admin_breadcrumb_root"), href: "/admin" },
           { label: t("admin_section_organisation") }
         ]}
-        actions={createButton}
+        actions={groups.data?.length ? createButton : undefined}
       />
       <QueryStateBoundary query={groups} rows={4}>
         {(items) =>
