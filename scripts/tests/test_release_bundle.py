@@ -386,6 +386,30 @@ vm.runInNewContext(process.argv[1], {
 
 class ComposeTests(unittest.TestCase):
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI required")
+    def test_native_web_app_tool_frames_allow_the_browser_origin(self):
+        config = json.loads(
+            subprocess.check_output(
+                [
+                    "docker", "compose",
+                    "-f", str(ROOT / "docker-compose.e2e.ci.yml"),
+                    "-f", str(ROOT / "docker-compose.e2e.web-app.yml"),
+                    "config", "--format", "json",
+                ],
+                env={**os.environ, "E2E_APP_CONTENT_ORIGIN": ""},
+                text=True,
+            )
+        )
+        backend = config["services"]["e2e-backend"]
+        port = next(p["published"] for p in backend["ports"] if p["target"] == 8000)
+        self.assertEqual(
+            backend["environment"]["PUBLIC_ORIGIN"], f"http://localhost:{port}"
+        )
+        self.assertEqual(
+            backend["environment"]["MCP_APP_CONTENT_BASE_URL"],
+            f"http://127.0.0.1:{port}",
+        )
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI required")
     def test_bundle_pins_every_service_and_legacy_overlay_is_inert(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
