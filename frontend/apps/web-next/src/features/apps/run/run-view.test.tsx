@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import type { App } from "../apps";
@@ -106,4 +106,76 @@ it("asks to wait while a file uploads, and keeps focus on a busy submit", async 
   fireEvent.click(busy);
   expect(api.POST).toHaveBeenCalledTimes(2);
   created({ data: { id: "run-1" }, response: new Response("{}") });
+});
+
+const drag = (files: File[] = []) => ({ dataTransfer: { types: ["Files"], files, items: [] } });
+
+it("shows a named page overlay outside the picker and uploads once when dropped over the picker", async () => {
+  api.POST.mockResolvedValue({ data: { id: "file-1" }, response: new Response("{}") });
+  const { container } = renderInApp(
+    <RunView app={app([{ type: "text-upload" }])} resultHref={(id) => `/runs/${id}`} />
+  );
+  const title = screen.getByRole("heading", { name: "Sammanfattaren" });
+  fireEvent.dragEnter(title, drag());
+  expect(
+    within(container).getByText("Släpp filer här för att ladda upp dem till Sammanfattaren")
+  ).toBeTruthy();
+  fireEvent.dragLeave(title, drag());
+  expect(
+    within(container).queryByText("Släpp filer här för att ladda upp dem till Sammanfattaren")
+  ).toBeNull();
+  const picker = screen.getByRole("button", { name: /Ladda upp/ });
+  fireEvent.dragEnter(picker, drag());
+  fireEvent.drop(picker, drag([new File(["%PDF"], "protocol.pdf", { type: "application/pdf" })]));
+  await screen.findByText("protocol.pdf");
+  expect(api.POST).toHaveBeenCalledTimes(1);
+  expect(
+    within(container).queryByText("Släpp filer här för att ladda upp dem till Sammanfattaren")
+  ).toBeNull();
+});
+
+it("uses the first upload field's rules for a page drop", async () => {
+  api.POST.mockResolvedValue({ data: { id: "file-1" }, response: new Response("{}") });
+  const configured = app([
+    { type: "text-field" },
+    { type: "text-upload" },
+    { type: "image-upload" }
+  ]);
+  configured.input_fields[2]!.accepted_file_types = [
+    { mimetype: "image/png", extensions: ["png"], size_limit: 1000 }
+  ];
+  renderInApp(<RunView app={configured} resultHref={(id) => `/runs/${id}`} />);
+  const title = screen.getByRole("heading", { name: "Sammanfattaren" });
+  fireEvent.drop(title, drag([new File(["%PDF"], "first.pdf", { type: "application/pdf" })]));
+  await screen.findAllByText("first.pdf");
+  await act(async () =>
+    fireEvent.drop(title, drag([new File(["png"], "second.png", { type: "image/png" })]))
+  );
+  expect(api.POST).toHaveBeenCalledTimes(1);
+  expect(screen.queryByText("second.png")).toBeNull();
+});
+
+it.each(["text-field", "audio-recorder"] as const)("does not enable page drop for %s", (type) => {
+  const { container } = renderInApp(
+    <RunView app={app([{ type }])} resultHref={(id) => `/runs/${id}`} />
+  );
+  const title = screen.getByRole("heading", { name: "Sammanfattaren" });
+  fireEvent.dragEnter(title, drag());
+  fireEvent.drop(title, drag([new File(["%PDF"], "ignored.pdf", { type: "application/pdf" })]));
+  expect(
+    within(container).queryByText("Släpp filer här för att ladda upp dem till Sammanfattaren")
+  ).toBeNull();
+  expect(api.POST).not.toHaveBeenCalled();
+});
+
+it("does not enable page drop without a completion model", () => {
+  const configured = app([{ type: "text-upload" }]);
+  configured.completion_model = null;
+  const { container } = renderInApp(
+    <RunView app={configured} resultHref={(id) => `/runs/${id}`} />
+  );
+  fireEvent.dragEnter(screen.getByRole("heading", { name: "Sammanfattaren" }), drag());
+  expect(
+    within(container).queryByText("Släpp filer här för att ladda upp dem till Sammanfattaren")
+  ).toBeNull();
 });

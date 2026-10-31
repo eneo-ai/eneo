@@ -1,19 +1,53 @@
 "use client";
 
-import { Mic, Square, Trash2 } from "lucide-react";
+import { Download, Mic, Square, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
-import { Button } from "@/components/ui/button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
+import { Collapsible } from "@astryxdesign/core/Collapsible";
+import { Button } from "@astryxdesign/core/Button";
+import { IconButton } from "@astryxdesign/core/IconButton";
+import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { inputFieldRules } from "@/features/files/upload-plan";
-import { formatBytes } from "@/lib/format";
+import { saveBlob } from "@/features/files/signed-file-url";
+import { formatBytes, formatDateTime } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { toast } from "@/lib/toast";
-import { cn } from "@/lib/utils";
 import type { InputField } from "../apps";
 import { FileChip } from "./upload-input";
 import type { RunFile } from "./use-app-run";
 
 const TIMESLICE_MS = 10_000;
+const STALL_TIMEOUT_MS = 20_000;
+const AUDIO_CONSTRAINTS: MediaTrackConstraints = {
+  noiseSuppression: true,
+  echoCancellation: true,
+  autoGainControl: true
+};
+
+function microphoneErrorKey(error: unknown) {
+  switch (error instanceof DOMException ? error.name : "") {
+    case "NotAllowedError":
+    case "PermissionDeniedError":
+      return "recording_error_permission";
+    case "NotFoundError":
+      return "recording_error_not_found";
+    case "NotReadableError":
+      return "recording_error_not_readable";
+    case "OverconstrainedError":
+      return "recording_error_overconstrained";
+    case "SecurityError":
+      return "recording_error_security";
+    case "NotSupportedError":
+      return "recording_error_not_supported";
+    default:
+      return "recording_error_generic";
+  }
+}
+
+function mediaErrorDetails(error: unknown): string {
+  return error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+}
 
 function pickMimeType(): string {
   if (typeof MediaRecorder === "undefined") return "audio/webm";
@@ -26,9 +60,14 @@ type Capture = {
   recorder: MediaRecorder | null;
   context: AudioContext | null;
   raf: number | null;
+  cleanupListeners: () => void;
+  stallTimer: ReturnType<typeof setInterval> | null;
+  diagnostics: string[];
 };
 
 function releaseCapture(capture: Capture) {
+  capture.cleanupListeners();
+  if (capture.stallTimer !== null) clearInterval(capture.stallTimer);
   if (capture.raf !== null) cancelAnimationFrame(capture.raf);
   capture.stream?.getTracks().forEach((track) => track.stop());
   if (capture.recorder && capture.recorder.state !== "inactive") capture.recorder.stop();
@@ -61,6 +100,7 @@ export function AudioRecorderInput({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const announce = useAnnounce();
   const rules = inputFieldRules(field);
   const maxBytes = Number.isFinite(rules.maxSize) ? rules.maxSize : null;
 
@@ -71,10 +111,18 @@ export function AudioRecorderInput({
   const [volume, setVolume] = useState(0);
   const [bytes, setBytes] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [diagnostics, setDiagnostics] = useState<string | null>(null);
   const [recorded, setRecorded] = useState<{ file: File; url: string } | null>(null);
+  const [discardOpen, setDiscardOpen] = useState(false);
 
   const captureRef = useRef<Capture | null>(null);
   const previewUrlRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const message = error || warning;
+    if (message) announce(message);
+  }, [error, warning, announce]);
 
   // A reload loses a recording until it is queued for the run and uploaded,
   // also while Stop is finalizing it.
@@ -102,20 +150,53 @@ export function AudioRecorderInput({
       stream: null,
       recorder: null,
       context: null,
-      raf: null
+      raf: null,
+      stallTimer: null,
+      diagnostics: [],
+      cleanupListeners: () => {}
     };
     captureRef.current = capture;
     setPhase("acquiring");
     setError(null);
+    setWarning(null);
+    setDiagnostics(null);
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { noiseSuppression: true, echoCancellation: true, autoGainControl: true }
-      });
+      if (
+        !navigator.mediaDevices?.getUserMedia ||
+        typeof MediaRecorder === "undefined" ||
+        typeof AudioContext === "undefined"
+      ) {
+        throw new DOMException("Microphone recording APIs are unavailable", "NotSupportedError");
+      }
+      let stream: MediaStream;
+      let fallback = false;
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: AUDIO_CONSTRAINTS });
+      } catch (primaryError) {
+        if (captureRef.current !== capture) return;
+        if (
+          !(primaryError instanceof DOMException) ||
+          !["NotFoundError", "OverconstrainedError"].includes(primaryError.name)
+        )
+          throw primaryError;
+        capture.diagnostics.push(mediaErrorDetails(primaryError));
+        fallback = true;
+        stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      }
       if (captureRef.current !== capture) {
         stream.getTracks().forEach((track) => track.stop());
         return;
       }
       capture.stream = stream;
+      const track = stream.getAudioTracks()[0];
+      if (fallback && track?.applyConstraints) {
+        try {
+          await track.applyConstraints(AUDIO_CONSTRAINTS);
+        } catch (constraintError) {
+          capture.diagnostics.push(mediaErrorDetails(constraintError));
+        }
+        if (captureRef.current !== capture) return;
+      }
       const context = new AudioContext();
       capture.context = context;
       const analyser = context.createAnalyser();
@@ -124,18 +205,20 @@ export function AudioRecorderInput({
       capture.recorder = recorder;
       const chunks: Blob[] = [];
       let totalBytes = 0;
+      let lastChunkAt = Date.now();
       setBytes(0);
-      recorder.addEventListener("dataavailable", (event) => {
+      const receiveData = (event: BlobEvent) => {
         if (captureRef.current !== capture || event.data.size === 0) return;
+        lastChunkAt = Date.now();
         chunks.push(event.data);
         totalBytes += event.data.size;
         setBytes(totalBytes);
         if (maxBytes && totalBytes >= maxBytes && capture.phase === "recording") {
-          toast.warning(t("recording_limit_reached"));
+          setWarning(t("recording_limit_reached"));
           stopRecording();
         }
-      });
-      recorder.addEventListener("stop", () => {
+      };
+      const finalize = () => {
         if (captureRef.current !== capture) return;
         captureRef.current = null;
         releaseCapture(capture);
@@ -145,17 +228,69 @@ export function AudioRecorderInput({
           // File validation uses MIME essence; codecs describe the recording transport.
           const fileType = mimeType.split(";")[0]!.trim();
           const extension = fileType.replace("audio/", "") || "webm";
-          const file = new File([blob], `recording.${extension}`, { type: fileType });
+          const now = new Date();
+          const datetime =
+            `${formatDateTime(now.toISOString())}-${String(now.getSeconds()).padStart(2, "0")}`.replaceAll(
+              ":",
+              "-"
+            );
+          const file = new File(
+            [blob],
+            `${t("recording_filename_template", { datetime })}.${extension}`,
+            { type: fileType }
+          );
           if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
           const url = URL.createObjectURL(blob);
           previewUrlRef.current = url;
           setRecorded({ file, url });
+        } else {
+          setWarning(null);
+          setError(t("no_audio_data_captured"));
         }
         setPhase("idle");
         setVolume(0);
-      });
+      };
+      const disconnected = () => {
+        if (captureRef.current !== capture || capture.phase !== "recording") return;
+        setWarning(t("recording_device_disconnected"));
+        stopRecording();
+      };
+      const failed = (event: Event) => {
+        if (captureRef.current !== capture || capture.phase !== "recording") return;
+        setWarning(t("recording_saved_after_error"));
+        capture.diagnostics.push(
+          mediaErrorDetails((event as ErrorEvent).error ?? "MediaRecorder error")
+        );
+        setDiagnostics(
+          [
+            ...capture.diagnostics,
+            `chunks=${chunks.length} bytes=${totalBytes} mimeType=${recorder.mimeType}`
+          ].join("\n")
+        );
+        stopRecording();
+      };
+      stream.addEventListener("inactive", disconnected);
+      const tracks = stream.getAudioTracks();
+      tracks.forEach((track) => track.addEventListener("ended", disconnected));
+      recorder.addEventListener("error", failed);
+      recorder.addEventListener("dataavailable", receiveData);
+      recorder.addEventListener("stop", finalize);
+      capture.cleanupListeners = () => {
+        stream.removeEventListener("inactive", disconnected);
+        tracks.forEach((track) => track.removeEventListener("ended", disconnected));
+        recorder.removeEventListener("error", failed);
+        recorder.removeEventListener("dataavailable", receiveData);
+        recorder.removeEventListener("stop", finalize);
+      };
       recorder.start(TIMESLICE_MS);
       capture.phase = "recording";
+      capture.stallTimer = setInterval(() => {
+        if (captureRef.current !== capture || capture.phase !== "recording") return;
+        if (Date.now() - lastChunkAt >= STALL_TIMEOUT_MS) {
+          setWarning(t("recording_stalled"));
+          stopRecording();
+        }
+      }, 1000);
       const startedAt = Date.now();
       const buffer = new Float32Array(analyser.fftSize);
       const tick = () => {
@@ -175,13 +310,13 @@ export function AudioRecorderInput({
       captureRef.current = null;
       releaseCapture(capture);
       setPhase("idle");
-      const name = caught instanceof DOMException ? caught.name : "";
-      setError(
-        name === "NotAllowedError" || name === "PermissionDeniedError"
-          ? t("recording_error_permission")
-          : name === "NotFoundError"
-            ? t("recording_error_not_found")
-            : t("recording_error_generic")
+      setError(t(microphoneErrorKey(caught)));
+      setDiagnostics(
+        [
+          ...capture.diagnostics,
+          mediaErrorDetails(caught),
+          `secureContext=${window.isSecureContext} protocol=${window.location.protocol} getUserMedia=${typeof navigator.mediaDevices?.getUserMedia} MediaRecorder=${typeof MediaRecorder}`
+        ].join("\n")
       );
     }
   }
@@ -191,56 +326,75 @@ export function AudioRecorderInput({
     if (!capture?.recorder || capture.phase !== "recording") return;
     capture.phase = "stopping";
     setPhase("stopping");
-    capture.recorder.stop();
+    // An error may inactivate the recorder before its final data/stop events.
+    if (capture.recorder.state !== "inactive") capture.recorder.stop();
   }
 
   function discardRecording() {
+    setDiscardOpen(false);
     if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
     previewUrlRef.current = null;
     setRecorded(null);
     setBytes(0);
-  }
-
-  // Once queued into the run, show it like any other uploaded file.
-  if (files.length > 0) {
-    return (
-      <div className="flex w-full max-w-[60ch] flex-col gap-2">
-        {files.map((file) => (
-          <FileChip key={file.key} file={file} onRemove={() => onRemoveFile(file.key)} />
-        ))}
-      </div>
-    );
+    setError(null);
+    setWarning(null);
+    setDiagnostics(null);
   }
 
   return (
     <div className="flex w-full max-w-[60ch] flex-col items-center gap-3">
       {description && <span className="text-muted-foreground text-sm">{description}</span>}
 
+      {files.length > 0 && (
+        <div className="flex w-full min-w-0 flex-col gap-2">
+          {files.map((file) => (
+            <FileChip key={file.key} file={file} onRemove={() => onRemoveFile(file.key)} />
+          ))}
+        </div>
+      )}
       {recorded ? (
         <>
           <audio controls src={recorded.url} className="w-full" />
-          <div className="flex items-center gap-2">
-            <Button onClick={() => onAddFiles([recorded.file], rules)}>
-              {t("use_this_recording")}
-            </Button>
-            <Button variant="ghost" onClick={discardRecording}>
-              <Trash2 className="size-4" /> {t("discard")}
-            </Button>
+          <div className="flex flex-wrap items-center justify-center gap-2">
+            {files.length === 0 && (
+              <Button
+                variant="primary"
+                label={t("use_this_recording")}
+                onClick={() => onAddFiles([recorded.file], rules)}
+              />
+            )}
+            <Button
+              label={t("save_as_file")}
+              icon={<Download className="size-4" />}
+              onClick={() => {
+                try {
+                  saveBlob(recorded.file, recorded.file.name);
+                } catch {
+                  toast.error(t("recording_save_failed"));
+                }
+              }}
+            />
+            <Button
+              variant="ghost"
+              label={t("discard")}
+              icon={<Trash2 className="size-4" />}
+              onClick={() => setDiscardOpen(true)}
+            />
           </div>
         </>
-      ) : (
+      ) : files.length === 0 ? (
         <div className="border-border bg-background flex items-center gap-3 rounded-full border p-2 shadow-sm">
-          <Button
+          <IconButton
             type="button"
-            size="icon"
-            variant={recording ? "destructive" : "default"}
+            variant={recording ? "destructive" : "primary"}
             className="size-12 rounded-full"
-            aria-label={recording ? t("stop_recording") : t("start_recording")}
-            aria-busy={busy || undefined}
+            label={recording ? t("stop_recording") : t("start_recording")}
+            tooltip={recording ? t("stop_recording") : t("start_recording")}
+            isLoading={busy}
+            isInterruptible
             onClick={recording ? stopRecording : startRecording}
-          >
-            {recording ? <Square className="size-5" /> : <Mic className="size-5" />}
-          </Button>
+            icon={recording ? <Square className="size-5" /> : <Mic className="size-5" />}
+          />
           {recording ? (
             <div className="flex flex-col gap-1 pr-3 font-mono">
               <div className="flex items-center gap-3">
@@ -262,9 +416,25 @@ export function AudioRecorderInput({
             <span className="text-muted-foreground pr-4 text-sm">{t("start_recording")}</span>
           )}
         </div>
-      )}
+      ) : null}
 
-      {error && <span className={cn("text-destructive text-sm")}>{error}</span>}
+      {error && <span className="text-destructive text-sm">{error}</span>}
+      {warning && <p className="text-muted-foreground text-sm">{warning}</p>}
+      {diagnostics && (
+        <div className="w-full min-w-0">
+          <Collapsible trigger={t("view_diagnostics")} defaultIsOpen={false}>
+            <pre className="text-xs break-words whitespace-pre-wrap">{diagnostics}</pre>
+          </Collapsible>
+        </div>
+      )}
+      <ConfirmDialogControlled
+        open={discardOpen}
+        onOpenChange={setDiscardOpen}
+        title={t("discard")}
+        description={t("confirm_discard_recording")}
+        confirmLabel={t("discard")}
+        onConfirm={discardRecording}
+      />
     </div>
   );
 }
