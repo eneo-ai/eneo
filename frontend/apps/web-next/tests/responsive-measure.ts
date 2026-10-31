@@ -95,7 +95,22 @@ export function measure(page: Page): Promise<PageMeasure> {
       const tapBox = element.matches(".astryx-item > a")
         ? (element.closest(".astryx-item")?.getBoundingClientRect() ?? box)
         : box;
-      if (!inline && (tapBox.width < minTarget - 0.5 || tapBox.height < minTarget - 0.5))
+      // A control that takes pointer input on a larger, invisible area of its own
+      // (a switch's or checkbox's ::after) is as big as that area.
+      let tapWidth = tapBox.width;
+      let tapHeight = tapBox.height;
+      for (const pseudo of ["::before", "::after"]) {
+        const style = getComputedStyle(element, pseudo);
+        if (
+          style.content !== "none" &&
+          style.position === "absolute" &&
+          style.pointerEvents !== "none"
+        ) {
+          tapWidth = Math.max(tapWidth, parseFloat(style.width) || 0);
+          tapHeight = Math.max(tapHeight, parseFloat(style.height) || 0);
+        }
+      }
+      if (!inline && (tapWidth < minTarget - 0.5 || tapHeight < minTarget - 0.5))
         violations.push({ kind: "small", key: name(element) });
       targets.push({ element: area, box });
     }
@@ -104,11 +119,17 @@ export function measure(page: Page): Promise<PageMeasure> {
         const a = targets[i]!;
         const b = targets[j]!;
         if (a.element.contains(b.element) || b.element.contains(a.element)) continue;
-        // A docked bar is fixed over the page's end, which scrolls clear of it.
+        // A docked bar is fixed over the page's end, which scrolls clear of it; a
+        // pinned table column covers what scrolls under it.
         if (
           a.element.closest("[data-docked-actions]") !== b.element.closest("[data-docked-actions]")
         )
           continue;
+        const pinned = (element: Element) => {
+          const cell = element.closest("td, th");
+          return cell !== null && getComputedStyle(cell).position === "sticky";
+        };
+        if (pinned(a.element) !== pinned(b.element)) continue;
         const w = Math.min(a.box.right, b.box.right) - Math.max(a.box.left, b.box.left);
         const h = Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top);
         if (w > 4 && h > 4)

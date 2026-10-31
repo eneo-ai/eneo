@@ -40,6 +40,13 @@ export async function createFixtures(
     name: uniqueName("Samling"),
     embedding_model: embedding ? { id: embedding } : undefined
   });
+  // A key, so the tables of /admin/api-keys and /account/api-keys have a row to measure.
+  await apiPost(page, "/api-keys", {
+    name: uniqueName("Kontrollnyckel"),
+    key_type: "sk_",
+    permission: "read",
+    scope_type: "tenant"
+  });
   await context.close();
   return {
     space: work.space,

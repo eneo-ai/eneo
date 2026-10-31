@@ -19,7 +19,6 @@
  ],
  "ipad-landscape|/admin/api-keys": [
   "small button[radio]:",
-  "small button[switch]:",
   "small input[combobox]:"
  ],
  "ipad-landscape|/admin/crawler": [
@@ -35,22 +34,12 @@
  "ipad-landscape|/admin/modules": [
   "small a:/admin/api-keys"
  ],
- "ipad-landscape|/admin/personal-assistant": [
-  "small button[switch]:"
- ],
+ "ipad-landscape|/admin/personal-assistant": [],
  "ipad-landscape|/admin/prompt-library": [],
- "ipad-landscape|/admin/roles": [
-  "small summary:visa behörigheter för ai con",
-  "small summary:visa behörigheter för owner",
-  "small summary:visa behörigheter för user"
- ],
- "ipad-landscape|/admin/security-classifications": [
-  "small button[switch]:"
- ],
+ "ipad-landscape|/admin/roles": [],
+ "ipad-landscape|/admin/security-classifications": [],
  "ipad-landscape|/admin/settings": [],
- "ipad-landscape|/admin/skills": [
-  "small button[switch]:tillåt aktivering vid behov"
- ],
+ "ipad-landscape|/admin/skills": [],
  "ipad-landscape|/admin/storage": [
   "small input:",
   "small select:enhet för gräns för kunskaps",
@@ -104,8 +93,7 @@
   "outside a:api-nycklarapi-nycklar",
   "outside a:publiceringpublicering",
   "outside a:säkerhet & integritetsäkerhe",
-  "small button:chattmodell: ee mock",
-  "small button[switch]:"
+  "small button:chattmodell: ee mock"
  ],
  "ipad-landscape|/spaces/$/chat": [
   "small button:chattmodell: ee mock",
@@ -113,9 +101,7 @@
   "small button:sammanfatta någotprotokoll",
   "small button:skriv ett utkasttjänsteskriv"
  ],
- "ipad-landscape|/spaces/$/group-chats/$/edit": [
-  "small button[switch]:"
- ],
+ "ipad-landscape|/spaces/$/group-chats/$/edit": [],
  "ipad-landscape|/spaces/$/knowledge": [],
  "ipad-landscape|/spaces/$/knowledge/collections/$": [],
  "ipad-landscape|/spaces/$/knowledge/integrations": [],
@@ -125,21 +111,18 @@
  "ipad-landscape|/spaces/$/services": [],
  "ipad-landscape|/spaces/$/services/$": [],
  "ipad-landscape|/spaces/$/settings": [
-  "outside a:farozonfarozon",
-  "small button[switch]:"
+  "outside a:farozonfarozon"
  ],
  "ipad-landscape|/spaces/$/skills": [],
  "ipad-landscape|/spaces/$/skills/new": [
-  "small a:/spaces/$/skills",
-  "small summary:avancerade alternativ"
+  "small a:/spaces/$/skills"
  ],
  "ipad-landscape|/spaces/list": [],
  "ipad-landscape|/whats-new": [
   "small a:alla versionsnyheter på docs",
   "small button:administration",
   "small button:alla",
-  "small button:kunskap",
-  "small button[switch]:"
+  "small button:kunskap"
  ],
  "ipad-portrait|/*": [],
  "ipad-portrait|/account": [],
@@ -158,7 +141,6 @@
  ],
  "ipad-portrait|/admin/api-keys": [
   "small button[radio]:",
-  "small button[switch]:",
   "small input[combobox]:"
  ],
  "ipad-portrait|/admin/crawler": [
@@ -174,22 +156,12 @@
  "ipad-portrait|/admin/modules": [
   "small a:/admin/api-keys"
  ],
- "ipad-portrait|/admin/personal-assistant": [
-  "small button[switch]:"
- ],
+ "ipad-portrait|/admin/personal-assistant": [],
  "ipad-portrait|/admin/prompt-library": [],
- "ipad-portrait|/admin/roles": [
-  "small summary:visa behörigheter för ai con",
-  "small summary:visa behörigheter för owner",
-  "small summary:visa behörigheter för user"
- ],
- "ipad-portrait|/admin/security-classifications": [
-  "small button[switch]:"
- ],
+ "ipad-portrait|/admin/roles": [],
+ "ipad-portrait|/admin/security-classifications": [],
  "ipad-portrait|/admin/settings": [],
- "ipad-portrait|/admin/skills": [
-  "small button[switch]:tillåt aktivering vid behov"
- ],
+ "ipad-portrait|/admin/skills": [],
  "ipad-portrait|/admin/storage": [
   "small input:",
   "small select:enhet för gräns för kunskaps",
@@ -244,8 +216,7 @@
   "outside a:api-nycklarapi-nycklar",
   "outside a:publiceringpublicering",
   "outside a:säkerhet & integritetsäkerhe",
-  "small button:chattmodell: ee mock",
-  "small button[switch]:"
+  "small button:chattmodell: ee mock"
  ],
  "ipad-portrait|/spaces/$/chat": [
   "small button:chattmodell: ee mock",
@@ -253,9 +224,7 @@
   "small button:sammanfatta någotprotokoll",
   "small button:skriv ett utkasttjänsteskriv"
  ],
- "ipad-portrait|/spaces/$/group-chats/$/edit": [
-  "small button[switch]:"
- ],
+ "ipad-portrait|/spaces/$/group-chats/$/edit": [],
  "ipad-portrait|/spaces/$/knowledge": [],
  "ipad-portrait|/spaces/$/knowledge/collections/$": [],
  "ipad-portrait|/spaces/$/knowledge/integrations": [],
@@ -266,21 +235,18 @@
  "ipad-portrait|/spaces/$/services/$": [],
  "ipad-portrait|/spaces/$/settings": [
   "outside a:api-nycklarapi-nycklar",
-  "outside a:farozonfarozon",
-  "small button[switch]:"
+  "outside a:farozonfarozon"
  ],
  "ipad-portrait|/spaces/$/skills": [],
  "ipad-portrait|/spaces/$/skills/new": [
-  "small a:/spaces/$/skills",
-  "small summary:avancerade alternativ"
+  "small a:/spaces/$/skills"
  ],
  "ipad-portrait|/spaces/list": [],
  "ipad-portrait|/whats-new": [
   "small a:alla versionsnyheter på docs",
   "small button:administration",
   "small button:alla",
-  "small button:kunskap",
-  "small button[switch]:"
+  "small button:kunskap"
  ],
  "phone-320|/*": [
   "small a:/"
@@ -302,10 +268,10 @@
   "small a:/"
  ],
  "phone-320|/admin/api-keys": [
+  "outside a:/admin/users",
   "outside button[tab]:alla statusar",
   "outside button[tab]:utgången",
   "small button[radio]:",
-  "small button[switch]:",
   "small input[combobox]:"
  ],
  "phone-320|/admin/crawler": [
@@ -329,22 +295,13 @@
   "clipped x section:bilagorinaktiv",
   "clipped x section:gemensam promptinaktiv – ing",
   "clipped x section:resonemanginaktiv",
-  "clipped x section:verktyginaktiv – inga verkty",
-  "small button[switch]:"
+  "clipped x section:verktyginaktiv – inga verkty"
  ],
  "phone-320|/admin/prompt-library": [],
- "phone-320|/admin/roles": [
-  "small summary:visa behörigheter för ai con",
-  "small summary:visa behörigheter för owner",
-  "small summary:visa behörigheter för user"
- ],
- "phone-320|/admin/security-classifications": [
-  "small button[switch]:"
- ],
+ "phone-320|/admin/roles": [],
+ "phone-320|/admin/security-classifications": [],
  "phone-320|/admin/settings": [],
- "phone-320|/admin/skills": [
-  "small button[switch]:tillåt aktivering vid behov"
- ],
+ "phone-320|/admin/skills": [],
  "phone-320|/admin/storage": [
   "small input:",
   "small select:enhet för gräns för kunskaps",
@@ -438,13 +395,11 @@
   "outside a:modellermodeller",
   "outside a:verktyg och anslutningarverk",
   "outside button[tab]:utgångenutgången",
-  "outside button[tab]:återkalladåterkallad",
-  "small button[switch]:"
+  "outside button[tab]:återkalladåterkallad"
  ],
  "phone-320|/spaces/$/skills": [],
  "phone-320|/spaces/$/skills/new": [
-  "small a:/spaces/$/skills",
-  "small summary:avancerade alternativ"
+  "small a:/spaces/$/skills"
  ],
  "phone-320|/spaces/list": [
   "small a:/"
@@ -453,8 +408,7 @@
   "small a:alla versionsnyheter på docs",
   "small button:administration",
   "small button:alla",
-  "small button:kunskap",
-  "small button[switch]:"
+  "small button:kunskap"
  ],
  "phone-390|/*": [],
  "phone-390|/account": [],
@@ -470,7 +424,6 @@
  "phone-390|/admin": [],
  "phone-390|/admin/api-keys": [
   "small button[radio]:",
-  "small button[switch]:",
   "small input[combobox]:"
  ],
  "phone-390|/admin/crawler": [
@@ -488,22 +441,12 @@
  "phone-390|/admin/modules": [
   "small a:/admin/api-keys"
  ],
- "phone-390|/admin/personal-assistant": [
-  "small button[switch]:"
- ],
+ "phone-390|/admin/personal-assistant": [],
  "phone-390|/admin/prompt-library": [],
- "phone-390|/admin/roles": [
-  "small summary:visa behörigheter för ai con",
-  "small summary:visa behörigheter för owner",
-  "small summary:visa behörigheter för user"
- ],
- "phone-390|/admin/security-classifications": [
-  "small button[switch]:"
- ],
+ "phone-390|/admin/roles": [],
+ "phone-390|/admin/security-classifications": [],
  "phone-390|/admin/settings": [],
- "phone-390|/admin/skills": [
-  "small button[switch]:tillåt aktivering vid behov"
- ],
+ "phone-390|/admin/skills": [],
  "phone-390|/admin/storage": [
   "small input:",
   "small select:enhet för gräns för kunskaps",
@@ -573,21 +516,18 @@
   "outside a:funktionerfunktioner",
   "outside a:modellermodeller",
   "outside a:verktyg och anslutningarverk",
-  "outside button[tab]:utgångenutgången",
-  "small button[switch]:"
+  "outside button[tab]:utgångenutgången"
  ],
  "phone-390|/spaces/$/skills": [],
  "phone-390|/spaces/$/skills/new": [
-  "small a:/spaces/$/skills",
-  "small summary:avancerade alternativ"
+  "small a:/spaces/$/skills"
  ],
  "phone-390|/spaces/list": [],
  "phone-390|/whats-new": [
   "small a:alla versionsnyheter på docs",
   "small button:administration",
   "small button:alla",
-  "small button:kunskap",
-  "small button[switch]:"
+  "small button:kunskap"
  ],
  "phone-landscape|/*": [],
  "phone-landscape|/account": [],
@@ -601,7 +541,6 @@
  "phone-landscape|/admin": [],
  "phone-landscape|/admin/api-keys": [
   "small button[radio]:",
-  "small button[switch]:",
   "small input[combobox]:"
  ],
  "phone-landscape|/admin/crawler": [
@@ -619,22 +558,12 @@
  "phone-landscape|/admin/modules": [
   "small a:/admin/api-keys"
  ],
- "phone-landscape|/admin/personal-assistant": [
-  "small button[switch]:"
- ],
+ "phone-landscape|/admin/personal-assistant": [],
  "phone-landscape|/admin/prompt-library": [],
- "phone-landscape|/admin/roles": [
-  "small summary:visa behörigheter för ai con",
-  "small summary:visa behörigheter för owner",
-  "small summary:visa behörigheter för user"
- ],
- "phone-landscape|/admin/security-classifications": [
-  "small button[switch]:"
- ],
+ "phone-landscape|/admin/roles": [],
+ "phone-landscape|/admin/security-classifications": [],
  "phone-landscape|/admin/settings": [],
- "phone-landscape|/admin/skills": [
-  "small button[switch]:tillåt aktivering vid behov"
- ],
+ "phone-landscape|/admin/skills": [],
  "phone-landscape|/admin/storage": [
   "small input:",
   "small select:enhet för gräns för kunskaps",
@@ -696,21 +625,18 @@
  "phone-landscape|/spaces/$/settings": [
   "outside a:api-nycklarapi-nycklar",
   "outside a:farozonfarozon",
-  "outside a:funktionerfunktioner",
-  "small button[switch]:"
+  "outside a:funktionerfunktioner"
  ],
  "phone-landscape|/spaces/$/skills": [],
  "phone-landscape|/spaces/$/skills/new": [
   "overlap input: x button:skapa skill",
-  "small a:/spaces/$/skills",
-  "small summary:avancerade alternativ"
+  "small a:/spaces/$/skills"
  ],
  "phone-landscape|/spaces/list": [],
  "phone-landscape|/whats-new": [
   "small a:alla versionsnyheter på docs",
   "small button:administration",
   "small button:alla",
-  "small button:kunskap",
-  "small button[switch]:"
+  "small button:kunskap"
  ]
 }
