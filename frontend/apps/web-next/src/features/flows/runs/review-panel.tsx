@@ -245,6 +245,7 @@ export function ReviewPanel({
   const [draft, setDraft] = useState<ReviewDraft>(() => reviewDraftOf(checkpoint));
   const [problem, setProblem] = useState<Problem | null>(null);
   const [rejecting, setRejecting] = useState(false);
+  const rejectButton = useRef<HTMLButtonElement>(null);
   const [reason, setReason] = useState("");
   const [reasonProblem, setReasonProblem] = useState<string | null>(null);
   // The transcript holds approval while one of its edits is not saved.
@@ -578,8 +579,12 @@ export function ReviewPanel({
               label={t("flow_runs_review_reject_back")}
               onClick={() => {
                 if (reject.isPending) return;
-                setRejecting(false);
-                setReasonProblem(null);
+                flushSync(() => {
+                  setRejecting(false);
+                  setReasonProblem(null);
+                });
+                // Back to the decision, on the button that led away from it.
+                rejectButton.current?.focus();
               }}
             />
           </div>
@@ -626,6 +631,7 @@ export function ReviewPanel({
             />
           ) : null}
           <Button
+            ref={rejectButton}
             label={t("flow_runs_review_reject")}
             variant="destructive"
             onClick={() => {

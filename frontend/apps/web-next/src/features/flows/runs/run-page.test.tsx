@@ -730,6 +730,21 @@ describe("FlowRunPage", () => {
       });
     });
 
+    it("goes back from the reason to the decision with focus on the button that led away", async () => {
+      answerReview();
+      renderRun(["flows_view", "flows_manage"]);
+      const panel = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
+      fireEvent.click(
+        within(panel).getByRole("button", { name: messages.flow_runs_review_reject })
+      );
+      fireEvent.click(
+        within(panel).getByRole("button", { name: messages.flow_runs_review_reject_back })
+      );
+      expect(document.activeElement).toBe(
+        within(panel).getByRole("button", { name: messages.flow_runs_review_reject })
+      );
+    });
+
     it("asks for a reason before rejecting", async () => {
       answerReview();
       state.routes[
