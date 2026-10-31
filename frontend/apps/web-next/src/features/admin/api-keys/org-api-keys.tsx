@@ -47,6 +47,7 @@ import { ApiKeyActions } from "@/features/api-keys/api-key-actions";
 import { userLabel } from "@/features/api-keys/api-key-details";
 import { CreateApiKeyDialog } from "@/features/api-keys/api-key-form";
 import { useSecretReveal } from "@/features/api-keys/user-api-key-list";
+import { showListTop } from "@/lib/show-list-top";
 import {
   ADMIN_API_KEYS_KEY,
   API_KEY_STATE_BADGE_VARIANT,
@@ -320,11 +321,22 @@ export function OrgApiKeysPage() {
             variant="outline"
             size="sm"
             disabled={!list.hasPreviousPage}
-            onClick={list.previousPage}
+            onClick={() => {
+              list.previousPage();
+              showListTop(panelRef.current);
+            }}
           >
             {t("previous")}
           </Button>
-          <Button variant="outline" size="sm" disabled={!list.hasNextPage} onClick={list.nextPage}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!list.hasNextPage}
+            onClick={() => {
+              list.nextPage();
+              showListTop(panelRef.current);
+            }}
+          >
             {t("next")}
           </Button>
         </div>
