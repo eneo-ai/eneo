@@ -100,9 +100,12 @@ test("web-next runs all browser cases on FastAPI and has no Next runtime job", (
   const native = job.split("- name: Run E2E and accessibility tests\n")[1]?.split(/\n      - name: /)[0];
   assert.match(native ?? "", /E2E_BASE_URL: http:\/\/localhost:8124/);
   assert.match(native ?? "", /^        run: bun run test:e2e$/m);
-  const assets = job.indexOf("- name: Build browser asset map");
-  assert.ok(assets > 0 && assets < job.indexOf("- name: Run E2E and accessibility tests"));
-  assert.match(job.slice(assets), /run: bun run --filter '@eneo\/web-next' build/);
+  const assets = job.indexOf("- name: Copy browser asset map from the running backend");
+  assert.ok(assets > job.indexOf("- name: Wait for the E2E stack"));
+  assert.ok(assets < job.indexOf("- name: Run E2E and accessibility tests"));
+  assert.match(job.slice(assets), /e2e-backend:\/app\/web-bundle-report.json frontend\/apps\/web-next\/node_modules\/\.cache\/vite-bundle-report.json/);
+  const dockerfile = fs.readFileSync(path.join(root, "backend/Dockerfile"), "utf8");
+  assert.match(dockerfile, /COPY --from=web-build .*\/vite-bundle-report.json \/app\/web-bundle-report.json/);
 });
 
 test("web-next rejects route drift and retains Vite resource reports after build failure", () => {
@@ -111,7 +114,8 @@ test("web-next rejects route drift and retains Vite resource reports after build
   const step = (name) => job.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
   assert.match(job, /working-directory: frontend\n/);
   assert.match(job, /fetch-depth: 0/);
-  assert.match(job, /ROUTE_PARITY_UPSTREAM:/);
+  assert.doesNotMatch(job.split("\n    steps:")[0], /ROUTE_PARITY_UPSTREAM:/);
+  assert.match(step("Lint") ?? "", /ROUTE_PARITY_UPSTREAM:/);
   assert.match(step("Check route tree drift") ?? "", /routes:generate && git diff --exit-code -- apps\/web-next\/src\/routeTree\.gen\.ts/);
   assert.ok(job.indexOf("- name: Check route tree drift") < job.indexOf("- name: Type check"));
   const report = "$RUNNER_TEMP/web-next-vite-build.txt";

@@ -35,6 +35,7 @@ function fixture() {
   function run(...args: string[]) {
     return spawnSync(process.execPath, ["scripts/check-route-parity.mjs", ...args], {
       cwd: root,
+      env: { ...process.env, ROUTE_PARITY_UPSTREAM: "origin/develop" },
       encoding: "utf8"
     });
   }

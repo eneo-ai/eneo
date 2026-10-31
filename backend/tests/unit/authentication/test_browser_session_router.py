@@ -583,6 +583,23 @@ def test_a_refused_cookie_session_names_no_generation(
     assert GENERATION not in response.headers
 
 
+def test_retired_next_cookie_does_not_authenticate(endpoints: Endpoints):
+    token = mint()
+    endpoints.valid_tokens.add(token)
+
+    retired = endpoints.client.get(
+        ME, headers=SAME_ORIGIN | {"Cookie": f"eneo_session={token}"}
+    )
+    current = endpoints.client.get(
+        ME, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+    )
+
+    assert retired.status_code == 401
+    assert GENERATION not in retired.headers
+    assert current.status_code == 200
+    assert current.headers[GENERATION] == session_generation(token)
+
+
 def test_cookie_authenticated_responses_name_their_generation(endpoints: Endpoints):
     first, second = mint(), mint(30)
     endpoints.valid_tokens.update({first, second})

@@ -36,6 +36,12 @@ authentication callbacks. There is no separate Node server or `start` command.
 route change that produced it. `vite build` does not type-check; `bun run check`
 does.
 
+The browser suite runs against the production build served by FastAPI:
+`E2E_BASE_URL=http://localhost:8124 bun run test:e2e`. Copy the asset map from the
+running backend image first. See [frontend/TESTING.md](../../TESTING.md#react-beta-vite-and-fastapi)
+for the isolated stack and test credentials; the Vite dev server cannot supply
+the suite's production CSP and hashed chunks.
+
 Each Vite build writes `node_modules/.cache/vite-bundle-report.json` with
 module membership, chunk imports and uncompressed JavaScript sizes. The
 `startup` scope includes the entry and required `render-app` module with their

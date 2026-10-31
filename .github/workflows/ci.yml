@@ -360,9 +360,6 @@ jobs:
     defaults:
       run:
         working-directory: frontend
-    env:
-      ROUTE_PARITY_UPSTREAM: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/develop' }}
-
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -377,6 +374,8 @@ jobs:
         run: bun run --filter '@eneo/web-next' routes:generate && git diff --exit-code -- apps/web-next/src/routeTree.gen.ts
 
       - name: Lint
+        env:
+          ROUTE_PARITY_UPSTREAM: ${{ github.event.pull_request.base.sha || github.event.merge_group.base_sha || 'origin/develop' }}
         run: FORCE_COLOR=1 bun run --filter '@eneo/web-next' lint
 
       - name: Type check
@@ -539,11 +538,6 @@ jobs:
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend
 
-      # Fault-injection tests resolve lazy chunks from the build's module map.
-      - name: Build browser asset map
-        working-directory: frontend
-        run: bun run --filter '@eneo/web-next' build
-
       - name: Install Playwright Chromium
         uses: ./.github/actions/setup-playwright
         with:
@@ -557,6 +551,12 @@ jobs:
           done
           cat "$RUNNER_TEMP/e2e-stack.log"
           [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
+
+      - name: Copy browser asset map from the running backend
+        run: |
+          mkdir -p frontend/apps/web-next/node_modules/.cache
+          docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml cp \
+            e2e-backend:/app/web-bundle-report.json frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
 
       - name: Run E2E and accessibility tests
         working-directory: frontend/apps/web-next

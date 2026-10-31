@@ -1,9 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Tests use FastAPI's browser session. Set E2E_BASE_URL for a production build;
-// local development starts Vite with its same-origin backend proxy.
-const PORT = process.env.E2E_PORT ?? "3101";
-const EXTERNAL_BASE_URL = process.env.E2E_BASE_URL;
+// The full suite verifies production CSP and built chunks served by FastAPI.
+const BASE_URL = process.env.E2E_BASE_URL;
+if (!BASE_URL) {
+  throw new Error("Set E2E_BASE_URL to a FastAPI-served Vite build; see frontend/TESTING.md.");
+}
 
 export const STORAGE_STATE = "playwright/.auth/user.json";
 
@@ -16,29 +17,13 @@ export default defineConfig({
   // list: console output; html: the report CI uploads as an artifact; github:
   // inline PR annotations (CI only).
   reporter: process.env.CI
-    ? [
-        ["list"],
-        [
-          "html",
-          { open: "never", ...(EXTERNAL_BASE_URL && { outputFolder: "playwright-report-fastapi" }) }
-        ],
-        ["github"]
-      ]
+    ? [["list"], ["html", { open: "never", outputFolder: "playwright-report-fastapi" }], ["github"]]
     : "list",
-  outputDir: EXTERNAL_BASE_URL ? "test-results-fastapi" : undefined,
+  outputDir: "test-results-fastapi",
   use: {
-    baseURL: EXTERNAL_BASE_URL || `http://localhost:${PORT}`,
+    baseURL: BASE_URL,
     trace: "on-first-retry"
   },
-  // Production CI supplies FastAPI's URL; local runs reuse or start Vite.
-  webServer: EXTERNAL_BASE_URL
-    ? undefined
-    : {
-        command: `bun run dev --port ${PORT}`,
-        url: `http://localhost:${PORT}/login`,
-        reuseExistingServer: !process.env.CI,
-        timeout: 120_000
-      },
   projects: [
     { name: "setup", testMatch: /auth\.setup\.ts/ },
     {

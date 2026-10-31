@@ -600,8 +600,10 @@ build served by FastAPI. Never loosen the policy.
   app has mounted.
   Successful authenticated API fixtures use `sessionResponseHeaders(route)`
   from `tests/helpers.ts` to preserve the requesting document's session.
-  CI runs the complete suite against FastAPI. Built-asset and production CSP
-  cases require `E2E_BASE_URL`; the default local server is Vite development.
+  Local runs and CI use the complete suite against FastAPI. `E2E_BASE_URL` is
+  required; copy the asset map from the running backend image before testing.
+  Follow `frontend/TESTING.md` for the isolated stack. Vite development does not
+  satisfy the suite's production CSP and built-asset contracts.
 - Check new UI in light and dark mode, with the keyboard, and at phone width
   (the full manual protocol is in ACCESSIBILITY.md).
 
