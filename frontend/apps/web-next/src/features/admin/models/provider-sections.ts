@@ -150,6 +150,7 @@ function sectionModels(
 ): KindedModel[] {
   const nameMatches = matchesSearch([section.name], search);
   return section.models.filter(({ model, kind: modelKind }) => {
+    if ("migrated_to_model_id" in model && model.migrated_to_model_id) return false;
     if (kind !== "all" && modelKind !== kind) return false;
     if (!matchesSecurity(model, security)) return false;
     return nameMatches || matchesSearch([modelDisplayName(model), model.name], search);
@@ -167,7 +168,10 @@ export function filterSections(
   filters: ModelFilters
 ): { section: ProviderSection; models: KindedModel[] }[] {
   const showsEmpty = (section: ProviderSection) =>
-    section.models.length === 0 &&
+    // Historical models still block provider deletion but are not usable rows.
+    section.models.every(
+      ({ model }) => "migrated_to_model_id" in model && model.migrated_to_model_id
+    ) &&
     filters.kind === "all" &&
     filters.security === "all" &&
     matchesSearch([section.name], filters.search);
@@ -230,6 +234,8 @@ export interface ModelsAttention {
   providers: ProviderAttention[];
   /** Deprecated models that are still enabled and not yet migrated. */
   deprecated: KindedModel[];
+  /** Completion models scheduled for retirement and not yet migrated. */
+  retiring: KindedModel[];
 }
 
 /**
@@ -257,7 +263,15 @@ export function modelsAttention(
         modelLifecycle(model, today).kind === "deprecated"
     )
   );
-  return { providers, deprecated };
+  const retiring = sections.flatMap((section) =>
+    section.models.filter(
+      ({ model, kind }) =>
+        kind === "completion" &&
+        !("migrated_to_model_id" in model && model.migrated_to_model_id) &&
+        modelLifecycle(model, today).kind === "retiring"
+    )
+  );
+  return { providers, deprecated, retiring };
 }
 
 export type ModelPrice =

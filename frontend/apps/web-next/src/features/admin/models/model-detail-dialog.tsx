@@ -1,19 +1,23 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { useFormatter, useTranslations } from "use-intl";
-import { useId } from "react";
-import { LoadingState } from "@/components/composites/loading-state";
+import { QueryStateBoundary } from "@/components/composites/query-state";
+import { ModelUsageBreakdown } from "./model-usage-breakdown";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { QuietBanner } from "@/components/astryx/banner";
+import { sanitizeWebHref } from "@/lib/safe-url";
+import { modelLifecycle, modelPrice } from "./provider-sections";
+import { isEmbeddingFamily } from "./model-metadata-options";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle
+} from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { modelDisplayName } from "@/lib/models/model-display-name";
@@ -26,32 +30,30 @@ import {
   modelUsageDetailsQueryOptions
 } from "./models";
 
-/** Labels for the entity types the usage endpoint returns; an unknown one shows as sent. */
-const ENTITY_TYPE_KEYS = new Map([
-  ["assistant", "assistant"],
-  ["app", "app"],
-  ["service", "model_usage_type_service"],
-  ["assistant_template", "model_usage_type_assistant_template"],
-  ["app_template", "model_usage_type_app_template"]
-]);
-
 /**
- * Read-only model details: properties (Info) + which resources use it
- * (Usage). Image models have no usage endpoint, so they show the properties
- * alone, with their request defaults and the capability sources on them.
+ * Model properties and usage, with actions delegated to the dialog owner.
+ * Only completion and transcription models have usage endpoints.
  */
 export function ModelDetailDialog({
   model,
   kind,
   open,
-  onOpenChange
+  onOpenChange,
+  onEdit,
+  onMigrate
 }: {
   model: AdminModel;
-  kind: Exclude<ModelKind, "embedding">;
+  kind: ModelKind;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  onEdit?: () => void;
+  onMigrate?: () => void;
 }) {
   const t = useTranslations();
+  const lifecycle = modelLifecycle(model);
+  const alreadyMigrated = "migrated_to_model_id" in model && Boolean(model.migrated_to_model_id);
+  const canMigrate =
+    (kind === "completion" || kind === "transcription") && !alreadyMigrated && onMigrate;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -59,7 +61,24 @@ export function ModelDetailDialog({
         <DialogHeader>
           <DialogTitle>{modelDisplayName(model)}</DialogTitle>
         </DialogHeader>
-        {kind === "image" || kind === "rerank" ? (
+        {lifecycle.kind !== "active" && (
+          <QuietBanner
+            status="warning"
+            collapsible={false}
+            title={
+              lifecycle.kind === "deprecated"
+                ? t("model_label_deprecated")
+                : t("model_tooltip_retiring", { date: lifecycle.date })
+            }
+          >
+            {canMigrate && (
+              <Button variant="outline" onClick={onMigrate}>
+                {t("migrate")}
+              </Button>
+            )}
+          </QuietBanner>
+        )}
+        {kind !== "completion" && kind !== "transcription" ? (
           <InfoTab model={model} kind={kind} t={t} />
         ) : (
           <Tabs defaultValue="info">
@@ -71,9 +90,14 @@ export function ModelDetailDialog({
               <InfoTab model={model} kind={kind} t={t} />
             </TabsContent>
             <TabsContent value="usage" className="pt-4">
-              <UsageTab modelId={model.id} kind={kind} open={open} t={t} />
+              <UsageTab modelId={model.id} kind={kind} open={open} />
             </TabsContent>
           </Tabs>
+        )}
+        {onEdit && (
+          <DialogFooter>
+            <Button onClick={onEdit}>{t("edit")}</Button>
+          </DialogFooter>
         )}
       </DialogContent>
     </Dialog>
@@ -86,71 +110,139 @@ function InfoTab({
   t
 }: {
   model: AdminModel;
-  kind: Exclude<ModelKind, "embedding">;
+  kind: ModelKind;
   t: ReturnType<typeof useTranslations>;
 }) {
   const imageLabels = useImageOptionLabels();
   const format = useFormatter();
-  const get = (key: string) => (model as Record<string, unknown>)[key];
-  const contextWindow = get("max_input_tokens");
+  const contextWindow =
+    "max_input_tokens" in model
+      ? model.max_input_tokens
+      : "max_input" in model
+        ? model.max_input
+        : null;
+  const outputTokens = "max_output_tokens" in model ? model.max_output_tokens : null;
   const usedBy = imageModelUsedBy(model);
+  const hfLink = sanitizeWebHref("hf_link" in model ? model.hf_link : null);
+  const price = modelPrice(model, kind);
+  const priceLabel =
+    price.kind === "tokens"
+      ? t("model_cost_per_million", { input: price.input ?? "—", output: price.output ?? "—" })
+      : price.kind === "image"
+        ? t("model_cost_chip_per_image", { value: price.value })
+        : price.kind === "minute"
+          ? t("model_cost_per_minute", { cost: price.value })
+          : t("model_cost_unknown");
+  const capabilities = [
+    "vision" in model && model.vision ? t("capability_vision") : null,
+    "reasoning" in model && model.reasoning ? t("capability_reasoning") : null,
+    "supports_tool_calling" in model && model.supports_tool_calling
+      ? t("model_label_tool_calling")
+      : null
+  ].filter((value): value is string => value !== null);
 
   return (
     <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
-      {model.description && (
-        <div className="sm:col-span-2">
-          <dt className="text-muted-foreground text-xs">{t("description")}</dt>
-          <dd>{model.description}</dd>
-        </div>
+      <Field label={t("model_identifier")} value={model.name} />
+      {model.family && (
+        <Field
+          label={t("model_family")}
+          value={
+            kind === "embedding" && isEmbeddingFamily(model.family)
+              ? t(`model_family_${model.family}`)
+              : model.family
+          }
+        />
       )}
-      {typeof get("family") === "string" && (
-        <Field label={t("model_family")} value={String(get("family"))} />
+      {model.hosting && (
+        <Field
+          label={t("hosting_region")}
+          value={t.has(`hosting_${model.hosting}`) ? t(`hosting_${model.hosting}`) : model.hosting}
+        />
       )}
-      {model.hosting && <Field label={t("hosting_region")} value={model.hosting} />}
       {typeof contextWindow === "number" && (
         <Field label={t("model_context_label")} value={format.number(contextWindow)} />
       )}
-      {kind === "image" ? (
+      {typeof outputTokens === "number" && (
+        <Field label={t("max_output_tokens")} value={format.number(outputTokens)} />
+      )}
+      {"dimensions" in model && typeof model.dimensions === "number" && (
+        <Field label={t("dimensions")} value={format.number(model.dimensions)} />
+      )}
+      {kind === "completion" && (
+        <Field
+          label={t("capabilities")}
+          value={
+            capabilities.length ? (
+              <div className="flex flex-wrap gap-1 pt-0.5">
+                {capabilities.map((label) => (
+                  <Badge key={label} variant="outline">
+                    {label}
+                  </Badge>
+                ))}
+              </div>
+            ) : (
+              t("none")
+            )
+          }
+        />
+      )}
+      {kind === "image" && (
         <>
-          {/* The request defaults the image tool uses when the assistant does not ask. */}
           <Field
             label={t("image_default_size")}
-            value={imageLabels.size(get("default_size") as string | undefined)}
+            value={imageLabels.size("default_size" in model ? model.default_size : undefined)}
           />
           <Field
             label={t("image_default_quality")}
-            value={imageLabels.quality(get("default_quality") as string | undefined)}
-          />
-          {usedBy.length > 0 && (
-            <div className="sm:col-span-2">
-              <dt className="text-muted-foreground text-xs">
-                {t("model_used_by_image_generation")}
-              </dt>
-              <dd>
-                <ul className="flex flex-wrap gap-1 pt-0.5">
-                  {usedBy.map((source) => (
-                    <li key={source.id} className="flex">
-                      <Badge variant="outline">{source.name}</Badge>
-                    </li>
-                  ))}
-                </ul>
-              </dd>
-            </div>
-          )}
-        </>
-      ) : kind === "rerank" ? (
-        <>
-          <Field label={t("rerank_candidate_factor")} value={String(get("candidate_factor"))} />
-          <Field label={t("rerank_max_candidates")} value={String(get("max_candidates"))} />
-        </>
-      ) : (
-        <div>
-          <dt className="text-muted-foreground text-xs">{t("capabilities")}</dt>
-          <dd className="flex flex-wrap gap-1 pt-0.5">
-            {get("vision") === true && <Badge variant="outline">{t("capability_vision")}</Badge>}
-            {get("reasoning") === true && (
-              <Badge variant="outline">{t("capability_reasoning")}</Badge>
+            value={imageLabels.quality(
+              "default_quality" in model ? model.default_quality : undefined
             )}
+          />
+        </>
+      )}
+      {"candidate_factor" in model && (
+        <Field label={t("rerank_candidate_factor")} value={String(model.candidate_factor)} />
+      )}
+      {"max_candidates" in model && (
+        <Field label={t("rerank_max_candidates")} value={String(model.max_candidates)} />
+      )}
+      <Field label={t("model_pricing_label")} value={priceLabel} />
+      <Field
+        label={t("security_classification")}
+        value={model.security_classification?.name ?? t("no_classification")}
+      />
+      {typeof model.open_source === "boolean" && (
+        <Field label={t("open_source")} value={t(model.open_source ? "yes" : "no")} />
+      )}
+      {model.org && <Field label={t("provider")} value={model.org} />}
+      {model.description && <Field label={t("description")} value={model.description} />}
+      {hfLink && (
+        <div className="sm:col-span-2">
+          <dt className="sr-only">{t("model_huggingface_link")}</dt>
+          <dd>
+            <a
+              href={hfLink}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-ax-accent hover:underline"
+            >
+              {t("model_huggingface_link")}
+            </a>
+          </dd>
+        </div>
+      )}
+      {usedBy.length > 0 && (
+        <div className="sm:col-span-2">
+          <dt className="text-muted-foreground text-xs">{t("model_used_by_image_generation")}</dt>
+          <dd>
+            <ul className="flex flex-wrap gap-1 pt-0.5">
+              {usedBy.map((source) => (
+                <li key={source.id} className="flex">
+                  <Badge variant="outline">{source.name}</Badge>
+                </li>
+              ))}
+            </ul>
           </dd>
         </div>
       )}
@@ -161,70 +253,28 @@ function InfoTab({
 function UsageTab({
   modelId,
   kind,
-  open,
-  t
+  open
 }: {
   modelId: string;
   kind: MigratableModelKind;
   open: boolean;
-  t: ReturnType<typeof useTranslations>;
 }) {
-  const titleId = useId();
-  const { data, isPending } = useQuery({
+  const details = useQuery({
     ...modelUsageDetailsQueryOptions(browserApi, modelId, kind),
     enabled: open
   });
-  const entityTypeLabel = (type: string) => {
-    const key = ENTITY_TYPE_KEYS.get(type);
-    return key ? t(key) : type;
-  };
-
-  if (isPending) return <LoadingState rows={1} height={160} />;
-  if (!data || data.items.length === 0)
-    return <p className="text-muted-foreground py-4 text-sm">{t("model_usage_empty")}</p>;
-
   return (
-    <div className="flex flex-col gap-2">
-      <p id={titleId} className="text-muted-foreground text-xs">
-        {t("model_usage_title")}
-      </p>
-      <div className="overflow-x-auto">
-        <Table aria-labelledby={titleId}>
-          <TableHeader>
-            <TableRow>
-              <TableHead>{t("name")}</TableHead>
-              <TableHead>{t("migration_impact_type")}</TableHead>
-              <TableHead>{t("migration_impact_space")}</TableHead>
-              <TableHead>{t("migration_impact_owner")}</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.items.map((entity) => (
-              <TableRow key={`${entity.entity_type}-${entity.entity_id}`}>
-                <TableCell className="text-sm font-medium">{entity.entity_name}</TableCell>
-                <TableCell>
-                  <Badge variant="secondary">{entityTypeLabel(entity.entity_type)}</Badge>
-                </TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {entity.space_name ?? "—"}
-                </TableCell>
-                <TableCell className="text-muted-foreground text-sm">
-                  {entity.owner_name ?? "—"}
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </div>
-    </div>
+    <QueryStateBoundary query={details}>
+      {(data) => <ModelUsageBreakdown data={data} />}
+    </QueryStateBoundary>
   );
 }
 
-function Field({ label, value }: { label: string; value: string }) {
+function Field({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div>
       <dt className="text-muted-foreground text-xs">{label}</dt>
-      <dd>{value}</dd>
+      <dd className="[overflow-wrap:anywhere]">{value}</dd>
     </div>
   );
 }

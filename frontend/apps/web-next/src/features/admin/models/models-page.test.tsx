@@ -169,11 +169,11 @@ function choose(menu: HTMLElement, submenu: string, option: string) {
   fireEvent.click(within(items).getByRole("menuitemradio", { name: option }));
 }
 
-function renderPage() {
+function renderPage(data = presentation) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false, staleTime: Infinity } }
   });
-  client.setQueryData(MODELS_KEY, presentation);
+  client.setQueryData(MODELS_KEY, data);
   client.setQueryData(PROVIDERS_KEY, providers);
   client.setQueryData(CAPABILITIES_KEY, capabilities);
   client.setQueryData(SECURITY_CLASSIFICATIONS_KEY, security);
@@ -257,7 +257,7 @@ describe("ModelsPage", () => {
 
     expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
     const vllm = screen.getByRole("region", { name: "vLLM" });
-    expect(within(vllm).getByText("Multilingual E5 Large")).toBeTruthy();
+    expect(within(vllm).getByRole("button", { name: "Multilingual E5 Large" })).toBeTruthy();
     // The type column is dropped while one type is shown.
     expect(within(vllm).queryByRole("columnheader", { name: "Typ" })).toBeNull();
     // Through Astryx's persistent polite live region (WCAG 4.1.3).
@@ -272,7 +272,7 @@ describe("ModelsPage", () => {
     renderPage();
     const images = screen.getByRole("region", { name: "OpenAI Images" });
     expect(within(images).getByText("1 modell · nyckel ...9c1e")).toBeTruthy();
-    expect(within(images).getByText("GPT Image 1")).toBeTruthy();
+    expect(within(images).getByRole("button", { name: "GPT Image 1" })).toBeTruthy();
     expect(within(images).getByText("gpt-image-1")).toBeTruthy();
     // With every type shown, the type column says which this is.
     expect(within(images).getByRole("cell", { name: "Bildgenerering" })).toBeTruthy();
@@ -304,14 +304,16 @@ describe("ModelsPage", () => {
   it("lists a rerank model under its provider with its type and no price", async () => {
     renderPage();
     const vllm = screen.getByRole("region", { name: "vLLM" });
-    expect(within(vllm).getByText("Qwen Reranker")).toBeTruthy();
+    expect(within(vllm).getByRole("button", { name: "Qwen Reranker" })).toBeTruthy();
     expect(within(vllm).getByRole("cell", { name: "Rerankning" })).toBeTruthy();
 
     const types = screen.getByRole("radiogroup", { name: "Modelltyp" });
     fireEvent.click(within(types).getByRole("radio", { name: "Rerankning (1)" }));
     expect(screen.queryByRole("region", { name: "Anthropic" })).toBeNull();
     expect(
-      within(screen.getByRole("region", { name: "vLLM" })).queryByText("Multilingual E5 Large")
+      within(screen.getByRole("region", { name: "vLLM" })).queryByRole("button", {
+        name: "Multilingual E5 Large"
+      })
     ).toBeNull();
     await expectNoAxeViolations(document.body);
   });
@@ -379,8 +381,8 @@ describe("ModelsPage", () => {
 
     fireEvent.change(search, { target: { value: "sonnet" } });
     const anthropic = screen.getByRole("region", { name: "Anthropic" });
-    expect(within(anthropic).getByText("Claude 3.7 Sonnet")).toBeTruthy();
-    expect(within(anthropic).queryByText("Claude Opus 4.7")).toBeNull();
+    expect(within(anthropic).getByRole("button", { name: "Claude 3.7 Sonnet" })).toBeTruthy();
+    expect(within(anthropic).queryByRole("button", { name: "Claude Opus 4.7" })).toBeNull();
 
     fireEvent.change(search, { target: { value: "e5-large" } });
     expect(screen.getByRole("region", { name: "vLLM" })).toBeTruthy();
@@ -588,9 +590,10 @@ describe("ModelsPage", () => {
 
     const dialog = await screen.findByRole("dialog", {
       name: "Anthropic kan inte tas bort än",
-      description:
-        "Leverantören har 2 modeller. Ta bort dem i leverantörens tabell först, och ta sedan bort leverantören."
+      description: /Leverantören har 2 modeller\./
     });
+    expect(within(dialog).getByText("Claude Opus 4.7")).toBeTruthy();
+    expect(within(dialog).getByText("Claude 3.7 Sonnet")).toBeTruthy();
     expect(within(dialog).queryByRole("button", { name: "Ta bort" })).toBeNull();
     await expectNoAxeViolations(document.body);
 
@@ -682,4 +685,63 @@ describe("ModelsPage on a phone (decision 31)", () => {
     expect(screen.queryByRole("radiogroup", { name: "Modelltyp" })).toBeNull();
     expect(screen.getByRole("combobox", { name: /^Modelltyp/ })).toBeTruthy();
   });
+});
+
+it("sorts a provider's models by name, activation and security classification", async () => {
+  renderPage({
+    ...presentation,
+    completion_models: [
+      completion({
+        id: "z",
+        nickname: "Zeta",
+        is_org_enabled: false,
+        security_classification: { id: "s1", name: "Klass 1", security_level: 1 }
+      }),
+      completion({
+        id: "a",
+        nickname: "Alfa",
+        security_classification: { id: "s3", name: "Klass 3", security_level: 3 }
+      })
+    ]
+  } as ModelsPresentation);
+  const table = within(screen.getByRole("region", { name: "Anthropic" })).getByRole("table");
+  const firstName = () => within(table).getAllByRole("row")[1]?.getAttribute("data-model-id");
+  fireEvent.click(within(table).getByRole("button", { name: /Modell/ }));
+  expect(firstName()).toBe("a");
+  expect(
+    within(table)
+      .getByRole("columnheader", { name: /Modell/ })
+      .getAttribute("aria-sort")
+  ).toBe("ascending");
+  fireEvent.click(within(table).getByRole("button", { name: /Modell/ }));
+  expect(firstName()).toBe("z");
+  fireEvent.click(within(table).getByRole("button", { name: /Aktiv/ }));
+  expect(firstName()).toBe("z");
+  fireEvent.click(within(table).getByRole("button", { name: /Aktiv/ }));
+  expect(firstName()).toBe("a");
+  fireEvent.click(within(table).getByRole("button", { name: /Säkerhetsklass/ }));
+  expect(firstName()).toBe("z");
+  await expectNoAxeViolations(table);
+});
+
+it("shows an upcoming retirement notice with the model name before deprecation", async () => {
+  renderPage({
+    ...presentation,
+    completion_models: [completion({ deprecation_date: "2099-01-01" })]
+  } as ModelsPresentation);
+  expect(await screen.findByText("1 modell kommer utfasas snart")).toBeTruthy();
+  expect(
+    screen.getByText(
+      "Claude Opus 4.7: välj en ersättare och migrera användningen före utfasningen."
+    )
+  ).toBeTruthy();
+});
+
+it("opens embedding model details from its model name", async () => {
+  renderPage();
+  fireEvent.click(screen.getByRole("button", { name: "Multilingual E5 Large" }));
+  const dialog = await screen.findByRole("dialog", { name: "Multilingual E5 Large" });
+  expect(within(dialog).getByText("Modellidentifierare").nextElementSibling?.textContent).toBe(
+    "intfloat/multilingual-e5-large"
+  );
 });

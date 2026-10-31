@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { useTranslations } from "use-intl";
-import { useId } from "react";
+import { useId, type ReactNode } from "react";
 
 /**
  * Why something cannot be deleted yet: a provider that still has models, or
@@ -21,7 +21,7 @@ export function DeleteBlockedDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
-  description: string;
+  description: ReactNode;
 }) {
   const t = useTranslations();
   const descriptionId = useId();
@@ -33,9 +33,9 @@ export function DeleteBlockedDialog({
         header={<DialogHeader title={title} />}
         content={
           <LayoutContent>
-            <p id={descriptionId} className="text-sm">
+            <div id={descriptionId} className="text-sm">
               {description}
-            </p>
+            </div>
           </LayoutContent>
         }
         footer={
