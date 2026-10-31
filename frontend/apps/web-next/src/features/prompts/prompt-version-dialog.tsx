@@ -91,6 +91,8 @@ function History({
   const { user } = useAppContext();
   const client = useQueryClient();
   const discard = useRef<LeaveConfirmationHandle>(null);
+  // Mutation observers render asynchronously; submitted work owns close immediately.
+  const saving = useRef(false);
   const listKey = [resource.type, resource.id, "prompts"];
   const [selection, setSelection] = useState<string | null>(null);
   const [step, setStep] = useState<"preview" | "description" | "delete">("preview");
@@ -166,25 +168,31 @@ function History({
       setStep("preview");
       void client.invalidateQueries({ queryKey: listKey });
     },
-    onError: (error) => toastApiError(error, t)
+    onError: (error) => toastApiError(error, t),
+    onSettled: () => {
+      saving.current = false;
+    }
   });
   useImperativeHandle(
     leave,
     () => ({
       confirm(action) {
-        if (!mutation.isPending) discard.current?.confirm(action);
+        if (!saving.current) discard.current?.confirm(action);
       }
     }),
-    [mutation.isPending]
+    []
   );
   const dirty = step === "description" && description !== (preview.data?.description ?? "");
   const actionTitle = step === "delete" ? t("delete_prompt") : t("edit_prompt_description");
   function submit() {
-    if (mutation.isPending || !selected || !author) return;
-    if (step === "delete" && !selected.is_selected)
-      mutation.mutate({ kind: "delete", id: selected.id });
-    if (step === "description")
-      mutation.mutate({ kind: "description", id: selected.id, description });
+    if (saving.current || !selected || !author || step === "preview") return;
+    if (step === "delete" && selected.is_selected) return;
+    saving.current = true;
+    mutation.mutate(
+      step === "delete"
+        ? { kind: "delete", id: selected.id }
+        : { kind: "description", id: selected.id, description }
+    );
   }
   return (
     <>
@@ -224,6 +232,7 @@ function History({
                 label={t("cancel")}
                 isDisabled={mutation.isPending}
                 onClick={() => {
+                  if (saving.current) return;
                   mutation.reset();
                   setStep("preview");
                 }}

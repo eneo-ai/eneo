@@ -187,7 +187,7 @@ test("explains model-specific settings and governed startup defaults", async ({ 
   await expect(page.locator("#assistant-model-behaviour-note")).toBeVisible();
   await expect(page.getByLabel("Top P")).toHaveAttribute("aria-describedby", /help/);
   await page.goto(`${editor}?section=mcp`);
-  await expect(page.getByText("Webbsökning", { exact: true })).toBeVisible();
+  await expect(page.locator("#mcp").getByText("Webbsökning", { exact: true })).toBeVisible();
   await expect(page.getByText("Provider secret name")).toHaveCount(0);
   await page.goto(`${editor}?section=capabilities`);
   await expect(page.getByText("Av från början i chatten")).toBeVisible();

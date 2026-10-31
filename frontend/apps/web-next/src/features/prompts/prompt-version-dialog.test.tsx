@@ -163,3 +163,37 @@ it("names the dialog when opened after its parent was mounted closed", async () 
   await screen.findByText("Current text");
   expect(screen.getByRole("dialog", { name: "Prompthistorik" })).toBeTruthy();
 });
+
+it("blocks close immediately when saving starts, before mutation observers render", async () => {
+  let finish!: (result: unknown) => void;
+  api.PATCH.mockImplementation(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+  );
+  const onOpenChange = vi.fn();
+  renderInApp(
+    <PromptVersionDialog
+      resource={{ type: "assistant", id: "assistant" }}
+      open
+      onOpenChange={onOpenChange}
+      onUseVersion={vi.fn()}
+    />
+  );
+  fireEvent.click(await screen.findByRole("button", { name: /Old note/ }));
+  await screen.findByText("Old text");
+  fireEvent.click(screen.getByRole("button", { name: "Redigera beskrivning" }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Beskrivning" }), {
+    target: { value: "Saving note" }
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Spara ändringar" }));
+  fireEvent.click(screen.getByRole("button", { name: "Stäng", exact: true }));
+  await waitFor(() => expect(api.PATCH).toHaveBeenCalled());
+  try {
+    expect(onOpenChange).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  } finally {
+    finish({ data: { ...old, description: "Saving note" }, response: new Response("{}") });
+  }
+});
