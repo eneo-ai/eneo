@@ -433,7 +433,7 @@ export function ChatPage({
             activeSessionId={sessionId ?? pendingSessionId}
             onSelect={selectSession}
             onDeleted={(id) => {
-              if (active?.sessionId === id) newConversation();
+              if (active?.sessionId === id) startConversation(false);
             }}
             onRenamed={(id, name) =>
               setActive((current) =>
