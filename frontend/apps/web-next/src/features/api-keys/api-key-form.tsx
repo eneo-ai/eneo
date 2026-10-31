@@ -4,6 +4,7 @@ import { createStaticSource, type SearchableItem } from "@astryxdesign/core/Type
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useMemo, useRef, useState, type ReactNode } from "react";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Tokenizer } from "@/components/astryx/tokenizer";
 import {
   FieldProblem,
@@ -657,6 +658,9 @@ function AllowlistField({
         emptySearchResultsText={t("no_results")}
         status={problem ? { type: "error", message: problem } : undefined}
         width="100%"
+        // Origins and addresses: the URL keyboard has the dots, colons and slashes.
+        {...KEYBOARD.identifier}
+        inputMode="url"
       />
     </div>
   );

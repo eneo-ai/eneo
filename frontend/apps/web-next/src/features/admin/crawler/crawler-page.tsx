@@ -651,6 +651,7 @@ export function CrawlerPage() {
                 columns={columns}
                 idKey="id"
                 aria-labelledby={tabId(view)}
+                pinnedColumn="website"
                 className="min-w-[960px]"
               />
             )

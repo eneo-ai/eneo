@@ -6,6 +6,7 @@ import { KEYBOARD } from "./keyboard-hints";
 import { createStaticSource } from "@astryxdesign/core/Typeahead";
 import { PasswordInput } from "./password-input";
 import { TextInput } from "./text-input";
+import { Tokenizer } from "./tokenizer";
 import { Typeahead } from "./typeahead";
 
 const attributes = (field: HTMLElement) => ({
@@ -89,6 +90,26 @@ it("keeps a revealed password as typed: no capital, auto-correction or spell-che
   renderInApp(<PasswordInput label="Lösenord" value="" onChange={() => {}} />);
   fireEvent.click(screen.getByRole("button", { name: /visa lösenord/i }));
   expect(attributes(screen.getByLabelText("Lösenord"))).toMatchObject({
+    autocapitalize: "none",
+    autocorrect: "off",
+    spellcheck: "false"
+  });
+});
+
+it("sets the preset on a Tokenizer's input too, with the URL keyboard for an address list", () => {
+  renderInApp(
+    <Tokenizer
+      label="Tillåtna adresser"
+      searchSource={createStaticSource([{ id: "a", label: "https://example.org" }])}
+      value={[]}
+      onChange={() => {}}
+      hasCreate
+      {...KEYBOARD.identifier}
+      inputMode="url"
+    />
+  );
+  expect(attributes(screen.getByRole("combobox", { name: /Tillåtna adresser/ }))).toMatchObject({
+    inputmode: "url",
     autocapitalize: "none",
     autocorrect: "off",
     spellcheck: "false"
