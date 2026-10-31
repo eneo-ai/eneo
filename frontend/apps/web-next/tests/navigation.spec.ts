@@ -1,4 +1,5 @@
 import type { Page } from "@playwright/test";
+import messages from "../src/lib/i18n/messages/sv.json";
 import { expect, test } from "./csp";
 import {
   askChatQuestion,
@@ -294,7 +295,9 @@ test("a direct space load shows progress while waiting for its data", async ({ p
   const loading = page.goto(`${space}/overview`);
   try {
     await expect.poll(() => held).toBeGreaterThan(0);
-    await expect(page.getByRole("status").filter({ hasText: "Laddar..." })).toBeVisible();
+    const progress = page.getByRole("status").filter({ hasText: messages.loading });
+    await expect(progress).toBeVisible();
+    await expect(progress).toHaveAttribute("aria-busy", "true");
     release();
     await loading;
     await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
