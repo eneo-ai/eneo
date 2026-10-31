@@ -195,6 +195,7 @@ test("model parity: sorts rows, edits token budgets and default, and names provi
   await expect(
     provider.getByRole("button", { name: "Historical fixture", exact: true })
   ).toHaveCount(0);
+  await expect(provider.getByText("3 modeller · nyckel ...fixture", { exact: true })).toBeVisible();
   const table = provider.getByRole("table");
   await table.getByRole("button", { name: /Sortera efter Modell/ }).click();
   await expect(table.getByRole("row").nth(1)).toHaveAttribute("data-model-id", "model-compatible");
@@ -207,7 +208,7 @@ test("model parity: sorts rows, edits token budgets and default, and names provi
   await edit.getByLabel("Max indatatokens", { exact: true }).fill("0");
   await edit.getByRole("button", { name: "Spara", exact: true }).click();
   await expect(edit.getByLabel("Max indatatokens", { exact: true })).toBeFocused();
-  await expect(edit.getByText("Ange ett heltal större än 0.")).toBeVisible();
+  await expect(edit.locator("#model-max-input-problem")).toHaveText("Ange ett heltal större än 0.");
   expect(writes).toEqual([]);
   await edit.getByLabel("Max indatatokens", { exact: true }).fill("128000");
   await edit.getByRole("switch", { name: "Ange som standardmodell" }).uncheck();
@@ -294,7 +295,7 @@ test.describe("model parity on a touch screen", () => {
     await page.goto("/admin/models");
     await page
       .getByRole("region", { name: "Fixture provider", exact: true })
-      .getByRole("button", { name: "Lägg till modell", exact: true })
+      .getByRole("button", { name: "Lägg till modell i Fixture provider", exact: true })
       .click();
     const dialog = page.getByRole("dialog", { name: "Lägg till modell", exact: true });
     await dialog.getByRole("combobox", { name: /^Modelltyp/ }).click();

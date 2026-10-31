@@ -745,3 +745,41 @@ it("opens embedding model details from its model name", async () => {
     "intfloat/multilingual-e5-large"
   );
 });
+
+it("counts only usable models in the provider summary while historical models still block deletion", async () => {
+  renderPage({
+    ...presentation,
+    completion_models: [
+      ...presentation.completion_models,
+      completion({
+        id: "historical",
+        nickname: "Historical model",
+        migrated_to_model_id: "c1",
+        is_org_enabled: false
+      })
+    ]
+  } as ModelsPresentation);
+  const provider = screen.getByRole("region", { name: "Anthropic" });
+  expect(within(provider).getByText("2 modeller · nyckel ...4f2a")).toBeTruthy();
+  expect(
+    within(provider).queryByRole("button", { name: "Historical model", exact: true })
+  ).toBeNull();
+  const menu = openRowMenu("Anthropic", "Fler alternativ för");
+  const remove = within(menu).getByRole("menuitem", { name: /^Ta bort leverantör/ });
+  expect(remove.textContent).toContain("Ta bort dess 3 modeller först");
+  fireEvent.click(remove);
+  const dialog = await screen.findByRole("dialog", { name: "Anthropic kan inte tas bort än" });
+  expect(within(dialog).getByText("Historical model")).toBeTruthy();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Stäng", exact: true }));
+  fireEvent.change(screen.getByRole("textbox", { name: "Sök modeller och leverantörer" }), {
+    target: { value: "sonnet" }
+  });
+  expect(within(provider).getByText("1 modell · nyckel ...4f2a")).toBeTruthy();
+  expect(
+    within(provider).queryByRole("button", { name: "Claude Opus 4.7", exact: true })
+  ).toBeNull();
+  const filteredMenu = openRowMenu("Anthropic", "Fler alternativ för");
+  expect(
+    within(filteredMenu).getByRole("menuitem", { name: /^Ta bort leverantör/ }).textContent
+  ).toContain("Ta bort dess 3 modeller först");
+});

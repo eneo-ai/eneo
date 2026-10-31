@@ -182,7 +182,8 @@ export function ProviderCard({
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   // All of them, not only those the filters show: any one blocks a delete.
-  const modelCount = section.models.length;
+  const dependencyCount = section.models.length;
+  const visibleModelCount = models.length;
 
   // The card, its menu and the dialog go with the provider: focus moves to
   // the page's RemovalFocusScope (the tab panel) once the lists refetched.
@@ -200,7 +201,7 @@ export function ProviderCard({
   });
 
   const summary = [
-    t("provider_model_count", { count: section.models.length }),
+    t("provider_model_count", { count: visibleModelCount }),
     section.maskedKey ? t("admin_models_provider_key", { key: section.maskedKey }) : null
   ]
     .filter(Boolean)
@@ -265,8 +266,8 @@ export function ProviderCard({
               // The reason is at the action, and the item stays reachable:
               // Astryx menus skip disabled items, reason and all.
               description={
-                modelCount > 0
-                  ? t("provider_delete_models_first", { count: modelCount })
+                dependencyCount > 0
+                  ? t("provider_delete_models_first", { count: dependencyCount })
                   : undefined
               }
               variant="destructive"
@@ -278,9 +279,9 @@ export function ProviderCard({
 
       <ProviderConnectionStatus provider={section.provider} />
 
-      {modelCount === 0 ? (
+      {visibleModelCount === 0 ? (
         <Text type="supporting" className="block px-4 py-3">
-          {t("provider_no_models")}
+          {t(dependencyCount > 0 ? "no_models_found" : "provider_no_models")}
         </Text>
       ) : (
         <>
@@ -347,14 +348,14 @@ export function ProviderCard({
         />
       )}
       <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
-      {modelCount > 0 ? (
+      {dependencyCount > 0 ? (
         <DeleteBlockedDialog
           open={showDelete}
           onOpenChange={setShowDelete}
           title={t("provider_delete_blocked_title", { name: section.name })}
           description={
             <>
-              <p>{t("provider_delete_blocked_description", { count: modelCount })}</p>
+              <p>{t("provider_delete_blocked_description", { count: dependencyCount })}</p>
               <ul className="mt-3 list-disc space-y-1 ps-5">
                 {section.models.map(({ model, kind }) => (
                   <li key={`${kind}:${model.id}`}>{modelDisplayName(model)}</li>
