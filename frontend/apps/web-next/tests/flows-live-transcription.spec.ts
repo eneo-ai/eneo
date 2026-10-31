@@ -30,6 +30,18 @@ test(
     await expect(
       dialog.getByText("E2E live transcription: mikrofonen fungerar.", { exact: true })
     ).toBeVisible({ timeout: 20_000 });
+    const recordingUrl = page.url();
+    const asks = page.waitForEvent("dialog");
+    const reload = page.evaluate(() => window.location.reload());
+    const warning = await asks;
+    expect(warning.type()).toBe("beforeunload");
+    await warning.dismiss();
+    await reload;
+    await expect(page).toHaveURL(recordingUrl);
+    await expect(dialog.getByRole("button", { name: "Stoppa", exact: true })).toBeEnabled();
+    await expect(
+      dialog.getByText("E2E live transcription: mikrofonen fungerar.", { exact: true })
+    ).toBeVisible();
     await page.screenshot({
       path: test.info().outputPath("flow-live-recording-desktop.png"),
       fullPage: true
