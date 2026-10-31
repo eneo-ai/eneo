@@ -386,6 +386,14 @@ function KeyFilterForm({
     <form
       aria-labelledby={`${id}-title`}
       className="flex flex-col gap-4 rounded-xl border p-4"
+      // A field folded away cannot take focus, so the browser would refuse the
+      // submit without a word: open the section and show the problem where it is.
+      onInvalidCapture={(event) => {
+        if (moreOpen) return;
+        const field = event.target as HTMLInputElement;
+        setMoreOpen(true);
+        requestAnimationFrame(() => field.reportValidity());
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         if (!pending) onApply({ ...filters, scopeId: manualScopeId.trim() || filters.scopeId });
@@ -622,7 +630,7 @@ function KeyTable({
                   the owner links on a phone. */}
               <TableCell>
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex max-w-48 min-w-0 flex-col gap-1 wrap-break-word xl:max-w-80">
+                  <div className="flex max-w-48 min-w-0 flex-col gap-1 wrap-break-word whitespace-normal xl:max-w-80">
                     <span className="font-medium">{apiKey.name}</span>
                     <code className="text-muted-foreground font-mono text-xs">
                       {apiKey.key_prefix}…{apiKey.key_suffix}

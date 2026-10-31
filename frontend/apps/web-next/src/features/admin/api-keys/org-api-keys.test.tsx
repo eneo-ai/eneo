@@ -123,6 +123,21 @@ describe("OrgApiKeysPage", () => {
     expect(more?.className).not.toContain("max-md:hidden");
   });
 
+  it("opens the folded filters when one of them is invalid, instead of refusing the form silently", async () => {
+    show();
+    await screen.findByText("Ärendesystemet");
+    const toggle = screen.getByRole("button", { name: "Fler filter" });
+    fireEvent.click(toggle);
+    fireEvent.change(screen.getByLabelText("Utgår inom (dagar)"), { target: { value: "0" } });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
+
+    await waitFor(() => expect(toggle.getAttribute("aria-expanded")).toBe("true"));
+    expect(listQueries().every((query) => query.expires_within_days === undefined)).toBe(true);
+  });
+
   it("applies the filters together: search, expiry window and page size", async () => {
     show();
     await screen.findByText("Ärendesystemet");

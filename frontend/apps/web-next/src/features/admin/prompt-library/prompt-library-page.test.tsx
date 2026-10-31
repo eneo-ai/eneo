@@ -77,6 +77,15 @@ describe("PromptLibraryPage", () => {
     expect(screen.queryByRole("button", { name: "Ny prompt" })).toBeNull();
   });
 
+  it("keeps the create button when the list cannot be loaded", async () => {
+    api.GET.mockImplementation(() =>
+      Promise.resolve({ error: { message: "Down" }, response: new Response("{}", { status: 503 }) })
+    );
+    renderInApp(<PromptLibraryPage />);
+
+    expect(await screen.findByRole("button", { name: "Ny prompt" })).toBeTruthy();
+  });
+
   it("names the prompt table by the page title, newest change first", async () => {
     const { container } = renderInApp(<PromptLibraryPage />);
 
