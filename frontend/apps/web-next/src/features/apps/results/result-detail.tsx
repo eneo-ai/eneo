@@ -1,13 +1,14 @@
 "use client";
 
 import { useJobEventsConnected } from "@/features/jobs/job-events";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Check, ChevronLeft, Copy, Download } from "lucide-react";
+import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
+import { Check, ChevronLeft, Copy, Download, Printer } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
-import { useId, useState } from "react";
+import { useId, useRef, useState, type RefObject } from "react";
 import { Streamdown } from "streamdown";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
@@ -23,6 +24,8 @@ import {
   toastDownloadError
 } from "@/features/files/signed-file-url";
 import { appRunQueryOptions, getResultTitle, isRunActive, type AppRun } from "../apps";
+import { signedOriginalUrl } from "@/features/files/signed-original-url";
+import { printResult } from "./print-result";
 import { AppRunStatusToken } from "../status-token";
 
 const RESULT_POLL_MS = 3_000;
@@ -37,17 +40,35 @@ function saveText(text: string, fileName: string) {
   saveBlob(new Blob([text], { type: "text/plain;charset=utf-8" }), fileName);
 }
 
-/**
- * Kopiera and Ladda ner for the run's output: the page's own actions, docked
- * with Ny körning on a phone and in the page header from 768 px.
- */
-function OutputActions({ text, fileName }: { text: string; fileName: string }) {
+/** Text actions shared by the output and each individual transcription. */
+function TextActions({
+  text,
+  fileName,
+  type = "output",
+  printElement
+}: {
+  text: string;
+  fileName: string;
+  type?: "output" | "transcription";
+  printElement: RefObject<HTMLDivElement | null>;
+}) {
   const t = useTranslations();
   const { copy, isCopied } = useCopy();
+  const typeLabel = t(type).toLocaleLowerCase();
+  const copyLabel = isCopied
+    ? t("copied")
+    : type === "output"
+      ? t("copy")
+      : t("copy_type", { type: typeLabel });
+  const downloadLabel =
+    type === "output" ? t("download") : t("download_type_raw_text", { type: typeLabel });
+  const printLabel = t("print_save_type_pdf", { type: typeLabel });
+  const Action = type === "output" ? Button : IconButton;
   return (
     <>
-      <Button
-        label={isCopied ? t("copied") : t("copy")}
+      <Action
+        label={copyLabel}
+        tooltip={type === "transcription" ? copyLabel : undefined}
         icon={
           isCopied ? (
             <Check className="size-4" aria-hidden="true" />
@@ -57,8 +78,17 @@ function OutputActions({ text, fileName }: { text: string; fileName: string }) {
         }
         onClick={() => void copy(text)}
       />
-      <Button
-        label={t("download")}
+      <IconButton
+        label={printLabel}
+        tooltip={printLabel}
+        icon={<Printer className="size-4" aria-hidden="true" />}
+        onClick={() => {
+          if (printElement.current) printResult(printElement.current);
+        }}
+      />
+      <Action
+        label={downloadLabel}
+        tooltip={type === "transcription" ? downloadLabel : undefined}
         icon={<Download className="size-4" aria-hidden="true" />}
         onClick={() => saveText(text, fileName)}
       />
@@ -66,12 +96,22 @@ function OutputActions({ text, fileName }: { text: string; fileName: string }) {
   );
 }
 
-function RunOutput({ run }: { run: AppRun }) {
+function RunOutput({
+  run,
+  printElement
+}: {
+  run: AppRun;
+  printElement: RefObject<HTMLDivElement | null>;
+}) {
   const t = useTranslations();
   if (!run.output) {
     return <p className="text-muted-foreground text-center">{t("no_output_generated")}</p>;
   }
-  return <Streamdown>{run.output}</Streamdown>;
+  return (
+    <div ref={printElement}>
+      <Streamdown>{run.output}</Streamdown>
+    </div>
+  );
 }
 
 /** A run still queued or running: what happens, and that leaving is safe. */
@@ -111,7 +151,60 @@ function FailedFileDownloads({ run }: { run: AppRun }) {
   );
 }
 
-function TranscriptionTab({ run }: { run: AppRun }) {
+function Transcription({
+  file,
+  audioUrl,
+  fileName
+}: {
+  file: AppRun["input"]["files"][number];
+  audioUrl?: string;
+  fileName: string;
+}) {
+  const t = useTranslations();
+  const headingId = useId();
+  const printElement = useRef<HTMLDivElement>(null);
+  const download = useMutation<void, unknown, void>({
+    mutationFn: async () => {
+      saveUrl(await signedOriginalUrl(browserApi, file.id), file.name);
+    },
+    onError: (error) => toastDownloadError(error, t)
+  });
+
+  return (
+    <section aria-labelledby={headingId} className="border-border bg-muted/40 rounded-xl border">
+      <div className="border-border flex flex-wrap items-center justify-between gap-3 border-b p-3">
+        <h2 id={headingId} className="min-w-0 flex-1 truncate text-sm font-medium">
+          {file.name}
+        </h2>
+        <Button
+          variant="ghost"
+          size="sm"
+          label={t("download_original")}
+          aria-label={`${t("download_original")} "${file.name}"`}
+          icon={<Download className="size-4" aria-hidden="true" />}
+          isLoading={download.isPending}
+          onClick={() => {
+            if (!download.isPending) download.mutate();
+          }}
+        />
+        <div className="flex w-full flex-wrap gap-2">
+          <TextActions
+            text={file.transcription ?? ""}
+            fileName={fileName}
+            type="transcription"
+            printElement={printElement}
+          />
+        </div>
+      </div>
+      {audioUrl && <audio controls src={audioUrl} className="w-full px-3 py-2" />}
+      <div ref={printElement} className="p-4">
+        <Streamdown>{file.transcription ?? ""}</Streamdown>
+      </div>
+    </section>
+  );
+}
+
+function TranscriptionTab({ run, fileName }: { run: AppRun; fileName: string }) {
   const transcribed = run.input.files.filter((file) => file.transcription);
   const { data: urls = {} } = useQuery({
     // Outside the "app-runs" prefix a finished job refreshes: signing again
@@ -127,29 +220,10 @@ function TranscriptionTab({ run }: { run: AppRun }) {
     },
     enabled: transcribed.length > 0
   });
-  const t = useTranslations();
-
   return (
     <div className="flex flex-col gap-8">
       {transcribed.map((file) => (
-        <div key={file.id} className="border-border bg-muted/40 rounded-xl border">
-          <div className="border-border flex items-center justify-between gap-4 border-b p-3">
-            <span className="truncate text-sm font-medium">{file.name}</span>
-            {file.transcription && (
-              <Button
-                variant="ghost"
-                size="sm"
-                label={t("download")}
-                icon={<Download className="size-4" aria-hidden="true" />}
-                onClick={() => saveText(file.transcription ?? "", `${file.name}.txt`)}
-              />
-            )}
-          </div>
-          {urls[file.id] && <audio controls src={urls[file.id]} className="w-full px-3 py-2" />}
-          <div className="p-4">
-            <Streamdown>{file.transcription ?? ""}</Streamdown>
-          </div>
-        </div>
+        <Transcription key={file.id} file={file} audioUrl={urls[file.id]} fileName={fileName} />
       ))}
     </div>
   );
@@ -166,11 +240,15 @@ function TranscriptionTab({ run }: { run: AppRun }) {
 function ResultTabs({
   run,
   tab,
-  onTabChange
+  onTabChange,
+  printElement,
+  fileName
 }: {
   run: AppRun;
   tab: ResultTab;
   onTabChange: (tab: ResultTab) => void;
+  printElement: RefObject<HTMLDivElement | null>;
+  fileName: string;
 }) {
   const t = useTranslations();
   const baseId = useId();
@@ -214,8 +292,8 @@ function ResultTabs({
           panelId={panelId("transcription")}
         />
       </TabList>
-      {panel("results", <RunOutput run={run} />)}
-      {panel("transcription", <TranscriptionTab run={run} />)}
+      {panel("results", <RunOutput run={run} printElement={printElement} />)}
+      {panel("transcription", <TranscriptionTab run={run} fileName={fileName} />)}
     </div>
   );
 }
@@ -249,6 +327,7 @@ export function ResultDetail({
   const outputShown = transcribedCount === 0 || tab === "results";
   const title = getResultTitle(run, resultTitleLabels(t));
   const outputFileName = `${title.slice(0, 40)}.txt`;
+  const printElement = useRef<HTMLDivElement>(null);
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
@@ -267,7 +346,11 @@ export function ResultDetail({
               {editHref && <Button href={editHref} label={t("edit")} />}
               <DockedActions label={t("app_result_actions")}>
                 {complete && run.output && outputShown && (
-                  <OutputActions text={run.output} fileName={outputFileName} />
+                  <TextActions
+                    text={run.output}
+                    fileName={outputFileName}
+                    printElement={printElement}
+                  />
                 )}
                 <Button href={newRunHref} variant="primary" label={t("new_run")} />
               </DockedActions>
@@ -314,9 +397,15 @@ export function ResultDetail({
           {!complete ? (
             <PendingResult />
           ) : transcribedCount > 0 ? (
-            <ResultTabs run={run} tab={tab} onTabChange={setTab} />
+            <ResultTabs
+              run={run}
+              tab={tab}
+              onTabChange={setTab}
+              printElement={printElement}
+              fileName={outputFileName}
+            />
           ) : run.output ? (
-            <RunOutput run={run} />
+            <RunOutput run={run} printElement={printElement} />
           ) : run.status === "failed" && run.input.files.length > 0 ? (
             <FailedFileDownloads run={run} />
           ) : (
