@@ -1,12 +1,15 @@
 import { expect, test } from "./csp";
+import sv from "../src/lib/i18n/messages/sv.json";
 
 // Smoke coverage for the parity-buildout surfaces: each page loads
 // authenticated and shows a marker element from the newly-ported feature.
 // Labels are the Swedish defaults (the app's default locale).
 
-test("activate landing renders", async ({ page }) => {
+test("the retired activation route shows signed-in not-found", async ({ page }) => {
   await page.goto("/activate");
-  await expect(page.getByText(/nästan klar/i)).toBeVisible();
+  await expect(page).toHaveURL(/\/activate$/);
+  await expect(page.getByRole("heading", { level: 1, name: sv.page_not_found })).toBeVisible();
+  await expect(page.getByRole("link", { name: sv.back_to_home })).toHaveAttribute("href", "/");
 });
 
 test("account shows the change-password card", { tag: "@vite" }, async ({ page }) => {

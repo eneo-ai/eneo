@@ -122,6 +122,18 @@ it("reports unported pages without blocking ordinary lint, but blocks strict mod
   expect(strict.stderr).toContain("/missing");
 });
 
+it("allows the retired activation route only with an unchanged source snapshot", () => {
+  const f = fixture();
+  const source = "src/app/(public)/activate/page.tsx";
+  f.write(source, "export default function Activate() {}\n");
+  expect(f.run("--strict").stderr).toContain("Unrecorded source: (public)/activate/page.tsx");
+  expect(f.run("--record", source).status).toBe(0);
+  const retired = f.run("--strict");
+  expect(retired.status, retired.stderr).toBe(0);
+  f.write(source, "export default function ChangedActivation() {}\n");
+  expect(f.run("--strict").stderr).toContain("Drift: (public)/activate/page.tsx");
+});
+
 it("requires a snapshot of every layout in strict mode", () => {
   const f = fixture();
   f.write("src/app/(app)/layout.tsx", "export default function AppLayout() {}\n");

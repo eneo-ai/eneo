@@ -1,4 +1,7 @@
 import { expect, type Page, type Route } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import type { BundleReport } from "../scripts/vite-bundle-report";
 import type { components } from "../src/lib/api/schema";
 
 export const MOCK_REPLY = process.env.MOCK_REPLY ?? "E2E mock completion: pong";
@@ -12,6 +15,16 @@ let counter = 0;
 export function uniqueName(prefix: string) {
   counter += 1;
   return `${prefix} ${Date.now()} ${counter}`;
+}
+
+/** Resolve a production asset by its source module, independently of hashed chunk names. */
+export function productionAsset(source: string): string {
+  const report: BundleReport = JSON.parse(
+    readFileSync(path.resolve("node_modules/.cache/vite-bundle-report.json"), "utf8")
+  );
+  const chunks = report.chunks.filter((chunk) => Object.hasOwn(chunk.modules, source));
+  expect(chunks, `one built chunk for ${source}`).toHaveLength(1);
+  return `/${chunks[0]!.fileName}`;
 }
 
 export function collectAssetFailures(page: Page) {

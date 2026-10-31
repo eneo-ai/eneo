@@ -63,6 +63,7 @@ ea195359e2145eb01b783dafd48d9dcb763ce366  (app)/spaces/[spaceId]/settings/page.t
 0725559d609d0ff2033094d85a5ad386e4346fb4  (app)/spaces/list/page.tsx
 31c152c90ffc3334b04cc212f9fcaa88eaeadce0  (app)/spaces/page.tsx
 21c1a6f487185c59ea77e0878fb8a4dd2bb42899  (app)/whats-new/page.tsx
+dc16744ed08d2b8330ea7d566f02c6c3d06054f6  (public)/activate/page.tsx
 f0ad8f5a043b9c1dc8ea1d47dbf4d3ab421c51b3  (public)/deactivated/page.tsx
 e72b8147f4715492e913ddbd19576edf73d65bf8  (public)/integrations/callback/token/page.tsx
 36886c872f4b40f6b6abe90b1a10f17c59e3bb78  (public)/invite/[[...rest]]/page.tsx

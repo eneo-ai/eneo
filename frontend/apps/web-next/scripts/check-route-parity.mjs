@@ -16,6 +16,9 @@ import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const SECURITY_SOURCES = ["../proxy.ts", "../../next.config.ts"];
+export const RETIRED_NEXT_ROUTES = new Map([
+  ["/activate", "Next-only provisioning is retired; Vite serves signed-in not-found instead."]
+]);
 export const VITE_ONLY = new Map([
   ["/*", "Signed-in not-found splat (P4 router shell)."],
   ["/spaces/$/*", "Space-layout not-found splat (P4 gate pages)."],
@@ -103,7 +106,9 @@ export function checkParity(files, viteRoutes, records, strict = false) {
     [...files.keys()].filter((file) => path.posix.basename(file) === "page.tsx").map(pageRoute)
   );
   const vitePaths = new Set(viteRoutes);
-  const unported = [...nextPages].filter((route) => !vitePaths.has(route)).sort();
+  const unported = [...nextPages]
+    .filter((route) => !vitePaths.has(route) && !RETIRED_NEXT_ROUTES.has(route))
+    .sort();
   for (const [file, hashes] of records) {
     if (!files.has(file)) {
       errors.push(`Stale lock path (missing or not a page/layout/security source): ${file}`);

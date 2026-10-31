@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
+import sv from "../src/lib/i18n/messages/sv.json";
 import type { FederationView } from "../src/features/admin/federation/federation";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "../src/components/shell/side-nav-preference";
 import { assertDocumented, WCAG_22_AA_TAGS } from "../src/test/wcag";
@@ -345,12 +346,12 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    // Signed-in public pages (the frame they share with /login).
-    test("activation", async ({ page }) => {
+    test("the retired activation route shows signed-in not-found", async ({ page }) => {
       await scan(page, "/activate", async () => {
         await expect(
-          page.getByRole("heading", { level: 1, name: /nästan klar|almost there/i })
+          page.getByRole("heading", { level: 1, name: sv.page_not_found })
         ).toBeVisible();
+        await expect(page).toHaveURL(/\/activate$/);
       });
     });
 
