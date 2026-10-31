@@ -109,10 +109,10 @@ it("filters result titles and sorts name, status and created without mutating ca
   const column = (name: string) =>
     within(table).getByRole("columnheader", { name: new RegExp(name) });
   fireEvent.click(within(column("Namn")).getByRole("button"));
-  expect(order()).toEqual(["/results/a", "/results/z", "/results/b"]);
+  expect(order()).toEqual(["/results/b", "/results/a", "/results/z"]);
   expect(column("Namn").getAttribute("aria-sort")).toBe("ascending");
   fireEvent.click(within(column("Namn")).getByRole("button"));
-  expect(order()).toEqual(["/results/b", "/results/z", "/results/a"]);
+  expect(order()).toEqual(["/results/z", "/results/a", "/results/b"]);
   fireEvent.click(within(column("Status")).getByRole("button"));
   // The Swedish visible statuses sort I kö, Misslyckades, Slutförd.
   expect(order()).toEqual(["/results/z", "/results/a", "/results/b"]);
@@ -125,6 +125,27 @@ it("filters result titles and sorts name, status and created without mutating ca
   expect(screen.getByRole("heading", { name: "Inga resultat hittades" })).toBeTruthy();
   expect(screen.getByRole("textbox", { name: "Filtrera resultat" })).toBe(filter);
   expect(runs.map((run) => run.id)).toEqual(["z", "a", "b"]);
+});
+
+it("filters by the visible empty-input title and uses it in the deletion confirmation", async () => {
+  const emptyTitle = "Den här körningen tog inte emot några indata.";
+  renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/results/${id}`} />);
+  await screen.findByRole("table", { name: "Resultat" });
+  expect(screen.getByRole("link", { name: emptyTitle })).toBeTruthy();
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Filtrera resultat" }), {
+    target: { value: emptyTitle }
+  });
+  expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+    "/results/run-2"
+  ]);
+  const row = screen.getByRole("link", { name: emptyTitle }).closest("tr")!;
+  fireEvent.keyDown(within(row).getByRole("button"), { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+  const dialog = await screen.findByRole("alertdialog");
+  expect(
+    within(dialog).getByText(`Vill du verkligen ta bort resultatet ${emptyTitle}?`)
+  ).toBeTruthy();
 });
 
 async function requestDelete(id: string) {

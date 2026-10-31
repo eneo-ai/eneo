@@ -38,7 +38,7 @@ import { AppRunStatusToken, appRunStatusLabel } from "../status-token";
 const RESULTS_POLL_MS = 5_000;
 
 function resultTitleLabels(t: (key: string) => string) {
-  return { inputPrefix: t("input"), empty: t("app_run_no_input_title") };
+  return { inputPrefix: t("input"), empty: t("this_run_did_not_receive_any_inputs") };
 }
 
 function ResultActions({ appId, run }: { appId: string; run: AppRunSparse }) {
@@ -93,11 +93,10 @@ function ResultActions({ appId, run }: { appId: string; run: AppRunSparse }) {
 
 function ResultInputCell({ run }: { run: AppRunSparse }) {
   const t = useTranslations();
+  const labels = resultTitleLabels(t);
   const { text, files } = run.input;
   if (!text && files.length === 0) {
-    return (
-      <span className="text-muted-foreground">{t("this_run_did_not_receive_any_inputs")}</span>
-    );
+    return <span className="text-muted-foreground">{getResultTitle(run, labels)}</span>;
   }
   return (
     <div className="flex flex-wrap items-center gap-2">
@@ -105,7 +104,7 @@ function ResultInputCell({ run }: { run: AppRunSparse }) {
         <span className="flex max-w-[40ch] items-center gap-1.5">
           <FileText className="text-muted-foreground size-4 shrink-0" />
           <span className="truncate">
-            {t("input")}: {text}
+            {labels.inputPrefix}: {text}
           </span>
         </span>
       )}
