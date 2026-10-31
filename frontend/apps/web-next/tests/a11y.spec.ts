@@ -680,47 +680,51 @@ for (const colorScheme of ["light", "dark"] as const) {
       await expectNoAxeViolations(page);
     });
 
-    test("space flows, the new-flow dialog and a flow's page", async ({ page }) => {
-      const space = await createSpace(page, uniqueName(`E2E A11y Flows ${colorScheme}`));
-      await page.goto(`${space}/overview`);
-      const flowsTab = page.getByRole("link", { name: /^(Flöden|Flows)$/ });
-      test.skip(
-        (await flowsTab.count()) === 0,
-        "The tenant's flows_core gate is off in this stack, so the flow routes 404."
-      );
+    test(
+      "space flows, the new-flow dialog and a flow's page",
+      { tag: "@vite" },
+      async ({ page }) => {
+        const space = await createSpace(page, uniqueName(`E2E A11y Flows ${colorScheme}`));
+        await page.goto(`${space}/overview`);
+        const flowsTab = page.getByRole("link", { name: /^(Flöden|Flows)$/ });
+        test.skip(
+          (await flowsTab.count()) === 0,
+          "The tenant's flows_core gate is off in this stack, so the flow routes 404."
+        );
 
-      await scan(page, `${space}/flows`, async () => {
-        await expect(
-          page.getByRole("heading", { level: 2, name: /^(Flöden|Flows)$/ })
-        ).toBeVisible();
-      });
+        await scan(page, `${space}/flows`, async () => {
+          await expect(
+            page.getByRole("heading", { level: 2, name: /^(Flöden|Flows)$/ })
+          ).toBeVisible();
+        });
 
-      await page
-        .getByRole("main")
-        .getByRole("button", { name: /^(Nytt flöde|New flow)$/ })
-        .first()
-        .click();
-      const dialog = page.getByRole("dialog", { name: /^(Nytt flöde|New flow)$/ });
-      await expect(dialog.getByLabel(/^(namn|name)/i)).toBeVisible();
-      await expectNoAxeViolations(page);
-
-      const name = uniqueName("E2E A11y flöde");
-      await dialog.getByLabel(/^(namn|name)/i).fill(name);
-      await dialog.getByRole("button", { name: /^(skapa flöde|create flow)$/i }).click();
-      await page.waitForURL(/\/flows\/[^/?]+$/, { timeout: 15_000 });
-      await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-      await expect(page.getByRole("heading", { level: 2, name: /^(Steg|Steps)$/ })).toBeVisible();
-      // The chat panel has settled: its composer (a combobox, as it offers
-      // references on "@"), or why the chat is not available.
-      await expect(
-        page
-          .getByLabel(/^(Meddelande till|Message to)/)
-          .or(page.getByText(/^(Chatten är inte tillgänglig|The chat is not available)$/))
-          .or(page.getByText(/^(Chatten kunde inte öppnas|The chat could not be opened)$/))
+        await page
+          .getByRole("main")
+          .getByRole("button", { name: /^(Nytt flöde|New flow)$/ })
           .first()
-      ).toBeVisible({ timeout: 15_000 });
-      await expectNoAxeViolations(page);
-    });
+          .click();
+        const dialog = page.getByRole("dialog", { name: /^(Nytt flöde|New flow)$/ });
+        await expect(dialog.getByLabel(/^(namn|name)/i)).toBeVisible();
+        await expectNoAxeViolations(page);
+
+        const name = uniqueName("E2E A11y flöde");
+        await dialog.getByLabel(/^(namn|name)/i).fill(name);
+        await dialog.getByRole("button", { name: /^(skapa flöde|create flow)$/i }).click();
+        await page.waitForURL(/\/flows\/[^/?]+$/, { timeout: 15_000 });
+        await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+        await expect(page.getByRole("heading", { level: 2, name: /^(Steg|Steps)$/ })).toBeVisible();
+        // The chat panel has settled: its composer (a combobox, as it offers
+        // references on "@"), or why the chat is not available.
+        await expect(
+          page
+            .getByRole("combobox", { name: /^(Fråga Flödesassistenten|Ask Flow assistant)$/ })
+            .or(page.getByText(/^(Chatten är inte tillgänglig|The chat is not available)$/))
+            .or(page.getByText(/^(Chatten kunde inte öppnas|The chat could not be opened)$/))
+            .first()
+        ).toBeVisible({ timeout: 15_000 });
+        await expectNoAxeViolations(page);
+      }
+    );
 
     test("collection detail", { tag: "@vite" }, async ({ page }) => {
       // A new space gets the organisation's embedding model (e2e/seed.py),

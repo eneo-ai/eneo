@@ -1,3 +1,4 @@
+import sv from "../src/lib/i18n/messages/sv.json";
 import { expect, test } from "./csp";
 import {
   askChatQuestion,
@@ -58,7 +59,7 @@ test(
     await expect(log.getByText("Priser: $5 och $10.", { exact: false })).toBeVisible();
     await log.getByRole("button", { name: /fler åtgärder|more actions/i }).click();
     await page.getByRole("menuitem", { name: /kopiera som rich text|copy as rich text/i }).click();
-    await expect(page.getByText("Kopierad!", { exact: true })).toBeVisible();
+    await expect(page.getByText(sv.copied, { exact: true })).toBeVisible();
     const copied = await page.evaluate(async () => {
       const [item] = await navigator.clipboard.read();
       if (!item) throw new Error("The answer was not copied");
