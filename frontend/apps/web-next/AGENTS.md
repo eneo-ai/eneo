@@ -292,7 +292,12 @@ settings uses the layout without `phone` and keeps one page on every width.
   catalog) render through `ResourceCollection` (`resource-tile.tsx`): list
   rows on a phone (`PHONE_QUERY`), cards from 768 px in a grid that fits as
   many columns as the page has room for. A list row with a link is one
-  target (globals.css 12b); put controls in its end slot.
+  target (globals.css 12b); put controls in its end slot. A turn across
+  768 px remounts every item, so the dialogs of an item's menu (move, publish,
+  delete) are not in the item: `createResourceActions`
+  (`resource-action-scope.tsx`) puts them in one scope above the collection,
+  the menus only ask to open one, and an open dialog survives the turn. Follow
+  `services/actions.tsx` for a new resource.
 - **Navigation and links**: app code imports `@/lib/navigation` and
   `@/lib/link`, which own the TanStack adapters. Next imports are lint errors.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
