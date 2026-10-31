@@ -593,7 +593,7 @@ function KeyTable({
           <TableHead>{t("api_keys_admin_rate_limit")}</TableHead>
           <TableHead>{t("api_keys_last_used")}</TableHead>
           <TableHead>{t("api_keys_expires")}</TableHead>
-          <TableHead className="bg-background sticky end-0 w-14 min-w-14" />
+          <TableHead className="w-14 min-w-14" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -623,7 +623,7 @@ function KeyTable({
                   apiKey.owner_user?.email ? (
                     <Link
                       href={`/admin/users?search=${encodeURIComponent(apiKey.owner_user.email)}`}
-                      className="underline"
+                      className="inline-flex min-h-6 items-center underline pointer-coarse:min-h-11"
                     >
                       {userLabel(apiKey.owner_user, apiKey.owner_user_id)}
                     </Link>
@@ -659,7 +659,7 @@ function KeyTable({
               <TableCell className="text-muted-foreground text-sm">
                 {apiKey.expires_at ? formatApiKeyDate(apiKey.expires_at) : t("api_keys_never")}
               </TableCell>
-              <TableCell className="bg-background sticky end-0 text-end">
+              <TableCell className="text-end">
                 <ApiKeyActions
                   apiKey={apiKey}
                   mode="admin"

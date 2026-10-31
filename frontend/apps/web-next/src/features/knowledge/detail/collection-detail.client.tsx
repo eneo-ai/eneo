@@ -5,6 +5,7 @@ import { useTranslations } from "use-intl";
 import { useId, useRef } from "react";
 import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { browserApi } from "@/lib/api/browser";
 import { AddTextDialog, BlobTable } from "@/features/knowledge/blobs";
 import {
@@ -39,12 +40,14 @@ export function CollectionDetail({ collectionId }: { collectionId: string }) {
             {t("knowledge")}
           </BackLink>
           <PageHeader title={collection.name} headingRef={headingRef} headingId={headingId}>
-            <AddTextDialog collectionId={collection.id} disabled={readonly || modelDisabled} />
-            <UploadBlobsButton
-              collectionId={collection.id}
-              collectionName={collection.name}
-              disabled={readonly || modelDisabled}
-            />
+            <DockedActions label={t("space_knowledge_actions")}>
+              <AddTextDialog collectionId={collection.id} disabled={readonly || modelDisabled} />
+              <UploadBlobsButton
+                collectionId={collection.id}
+                collectionName={collection.name}
+                disabled={readonly || modelDisabled}
+              />
+            </DockedActions>
           </PageHeader>
         </div>
         <BlobTable blobs={blobs} canEdit={!readonly} labelledBy={headingId} />

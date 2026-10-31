@@ -183,8 +183,7 @@ export function SpaceSkillsPage() {
         description={t("skills_library_intro")}
         tour="space-skills"
         actions={
-          // While the page is empty, the empty state carries the one create button.
-          can("create", "skill") && (items.length > 0 || search) ? (
+          can("create", "skill") ? (
             <Button asChild>
               <Link href={`${base}/new`}>
                 <Plus className="size-4" />

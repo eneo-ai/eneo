@@ -1244,6 +1244,7 @@
  *      stepper, the like on an answer) is two taps, not a double-tap zoom.
  *      It sits in `base`, below Astryx, so a control that sets its own
  *      touch-action (a slider thumb, a drag handle) keeps it.
+ *    - A disclosure's <summary> is 44 px tall on a coarse pointer.
  */
 @layer base {
   a,
@@ -1258,6 +1259,13 @@
   [role="menuitem"],
   [role="option"] {
     touch-action: manipulation;
+  }
+  /* A disclosure's summary is its whole target: a line of text is 20 px. */
+  @media (pointer: coarse) {
+    summary {
+      min-block-size: 44px;
+      align-content: center;
+    }
   }
 }
 
