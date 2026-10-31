@@ -47,6 +47,9 @@ export async function createFixtures(
     permission: "read",
     scope_type: "tenant"
   });
+  const userId = await page.evaluate(
+    async () => (await (await fetch("/api/v1/users/me/")).json()).id
+  );
   await context.close();
   return {
     space: work.space,
@@ -56,7 +59,8 @@ export async function createFixtures(
     groupChat,
     service,
     website,
-    collection
+    collection,
+    userId
   };
 }
 

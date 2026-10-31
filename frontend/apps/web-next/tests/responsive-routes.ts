@@ -20,6 +20,8 @@ export type Fixtures = {
   service: string;
   website: string;
   collection: string;
+  /** The signed-in user, who has token usage to show. */
+  userId: string;
 };
 
 export type Entry = { url: (f: Fixtures) => string; auth?: "in" | "out" } | { skip: string };
@@ -49,7 +51,9 @@ export const ROUTES: Record<string, Entry> = {
   "/admin/insights/assistant/$": { skip: "Needs an assistant with conversations." },
   "/admin/integrations": open("/admin/integrations"),
   "/admin/mcp-servers": open("/admin/mcp-servers"),
-  "/admin/mcp-servers/$": { skip: "Needs an MCP server fixture." },
+  "/admin/mcp-servers/$": {
+    skip: "Needs an MCP server fixture: creating one connects to a live MCP server."
+  },
   "/admin/models": open("/admin/models"),
   "/admin/modules": open("/admin/modules"),
   "/admin/personal-assistant": open("/admin/personal-assistant"),
@@ -63,7 +67,7 @@ export const ROUTES: Record<string, Entry> = {
   "/admin/templates": open("/admin/templates"),
   "/admin/tools": open("/admin/tools"),
   "/admin/usage": open("/admin/usage"),
-  "/admin/usage/users/$": { skip: "Needs a user with usage." },
+  "/admin/usage/users/$": { url: (f) => `/admin/usage/users/${f.userId}` },
   "/admin/users": open("/admin/users"),
   "/dashboard": open("/dashboard"),
   "/dashboard/$/*": { url: (f) => `/dashboard/${f.assistant}` },
@@ -111,6 +115,6 @@ export const ROUTES: Record<string, Entry> = {
 };
 
 /** Routes the contract does not open yet. Lower it when a fixture lands; never raise it. */
-export const SKIP_BUDGET = 12;
+export const SKIP_BUDGET = 11;
 
 export const skipped = () => Object.entries(ROUTES).filter(([, entry]) => "skip" in entry);
