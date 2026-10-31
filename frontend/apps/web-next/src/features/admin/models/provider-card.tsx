@@ -7,13 +7,22 @@ import {
   DropdownMenuItem
 } from "@astryxdesign/core/DropdownMenu";
 import { Heading } from "@astryxdesign/core/Heading";
-import { TableBody, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
+import {
+  TableBody,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+  useTableSortable,
+  useTableSortableState,
+  type HeaderCellRenderProps
+} from "@astryxdesign/core/Table";
+import { useCollator } from "@astryxdesign/core/i18n";
 import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
@@ -22,6 +31,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
+import { modelDisplayName } from "@/lib/models/model-display-name";
 import { toast } from "@/lib/toast";
 import { DeleteBlockedDialog } from "./delete-blocked-dialog";
 import { deleteProvider, PROVIDERS_KEY } from "./model-providers";
@@ -54,6 +64,45 @@ function ModelTable({
   onModelAction: (selection: ModelSelection) => void;
 }) {
   const t = useTranslations();
+  const collator = useCollator();
+  type SortKey = "name" | "enabled" | "classification";
+  const comparators = useMemo(
+    () => ({
+      name: (a: KindedModel, b: KindedModel) =>
+        collator.compare(modelDisplayName(a.model), modelDisplayName(b.model)),
+      enabled: (a: KindedModel, b: KindedModel) =>
+        Number(Boolean(a.model.is_org_enabled)) - Number(Boolean(b.model.is_org_enabled)),
+      classification: (a: KindedModel, b: KindedModel) =>
+        (a.model.security_classification?.security_level ?? -1) -
+        (b.model.security_classification?.security_level ?? -1)
+    }),
+    [collator]
+  );
+  const { sortedData, sortConfig } = useTableSortableState<KindedModel, SortKey>({
+    data: models,
+    comparators
+  });
+  const sort = useTableSortable<KindedModel, SortKey>(sortConfig);
+
+  // Children mode preserves row-owned mutations; Astryx owns the header's sort controls.
+  function sortableHeader(key: SortKey, label: string, className?: string) {
+    const initial: HeaderCellRenderProps = {
+      htmlProps: { scope: "col", className },
+      xstyle: [],
+      content: label
+    };
+    const props =
+      sort.transformHeaderCell?.(initial, { key, header: label, sortable: true }, 0, []) ?? initial;
+    return (
+      <TableHeaderCell
+        {...props.htmlProps}
+        scope="col"
+        contextMenuActions={props.contextMenuActions}
+      >
+        {props.content}
+      </TableHeaderCell>
+    );
+  }
 
   // Fixed layout: every column but "Modell" has a set width, so the model
   // column takes what is left and long ids truncate instead of widening the
@@ -63,10 +112,8 @@ function ModelTable({
     <Table aria-labelledby={labelledBy} hasHover className="min-w-212 table-fixed">
       <TableHeader>
         <TableRow className="bg-ax-sunken [&>th]:text-xs">
-          <TableHeaderCell scope="col" className="w-18 min-w-18">
-            {t("active")}
-          </TableHeaderCell>
-          <TableHeaderCell scope="col">{t("model")}</TableHeaderCell>
+          {sortableHeader("enabled", t("active"), "w-18 min-w-18")}
+          {sortableHeader("name", t("model"))}
           {showKind && (
             <TableHeaderCell scope="col" className="w-30 min-w-30">
               {t("type")}
@@ -78,18 +125,15 @@ function ModelTable({
           <TableHeaderCell scope="col" className="w-38 min-w-38 text-end">
             {t("admin_models_column_price")}
           </TableHeaderCell>
-          {securityEnabled && (
-            <TableHeaderCell scope="col" className="w-34 min-w-34">
-              {t("admin_models_column_security")}
-            </TableHeaderCell>
-          )}
+          {securityEnabled &&
+            sortableHeader("classification", t("admin_models_column_security"), "w-34 min-w-34")}
           <TableHeaderCell scope="col" className="w-14 min-w-14">
             <span className="sr-only">{t("actions")}</span>
           </TableHeaderCell>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {models.map(({ model, kind }) => (
+        {sortedData.map(({ model, kind }) => (
           <ModelRow
             key={model.id}
             model={model}
@@ -138,7 +182,8 @@ export function ProviderCard({
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   // All of them, not only those the filters show: any one blocks a delete.
-  const modelCount = section.models.length;
+  const dependencyCount = section.models.length;
+  const visibleModelCount = models.length;
 
   // The card, its menu and the dialog go with the provider: focus moves to
   // the page's RemovalFocusScope (the tab panel) once the lists refetched.
@@ -156,7 +201,7 @@ export function ProviderCard({
   });
 
   const summary = [
-    t("provider_model_count", { count: section.models.length }),
+    t("provider_model_count", { count: visibleModelCount }),
     section.maskedKey ? t("admin_models_provider_key", { key: section.maskedKey }) : null
   ]
     .filter(Boolean)
@@ -221,8 +266,8 @@ export function ProviderCard({
               // The reason is at the action, and the item stays reachable:
               // Astryx menus skip disabled items, reason and all.
               description={
-                modelCount > 0
-                  ? t("provider_delete_models_first", { count: modelCount })
+                dependencyCount > 0
+                  ? t("provider_delete_models_first", { count: dependencyCount })
                   : undefined
               }
               variant="destructive"
@@ -234,9 +279,9 @@ export function ProviderCard({
 
       <ProviderConnectionStatus provider={section.provider} />
 
-      {modelCount === 0 ? (
+      {visibleModelCount === 0 ? (
         <Text type="supporting" className="block px-4 py-3">
-          {t("provider_no_models")}
+          {t(dependencyCount > 0 ? "no_models_found" : "provider_no_models")}
         </Text>
       ) : (
         <>
@@ -299,15 +344,25 @@ export function ProviderCard({
             setModelSelection((current) => (current === modelSelection ? null : current));
           }}
           onMigrate={() => setModelSelection({ ...modelSelection, action: "migrate" })}
+          onEdit={() => setModelSelection({ ...modelSelection, action: "edit" })}
         />
       )}
       <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
-      {modelCount > 0 ? (
+      {dependencyCount > 0 ? (
         <DeleteBlockedDialog
           open={showDelete}
           onOpenChange={setShowDelete}
           title={t("provider_delete_blocked_title", { name: section.name })}
-          description={t("provider_delete_blocked_description", { count: modelCount })}
+          description={
+            <>
+              <p>{t("provider_delete_blocked_description", { count: dependencyCount })}</p>
+              <ul className="mt-3 list-disc space-y-1 ps-5">
+                {section.models.map(({ model, kind }) => (
+                  <li key={`${kind}:${model.id}`}>{modelDisplayName(model)}</li>
+                ))}
+              </ul>
+            </>
+          }
         />
       ) : (
         <ConfirmDialogControlled

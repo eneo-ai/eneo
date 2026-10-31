@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleAlert, Database, HardDrive, Info } from "lucide-react";
+import { CircleAlert, Database, ExternalLink, HardDrive, Info } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -131,17 +131,13 @@ export function StorageOverview({
           <CardHeader className="flex items-center justify-between">
             <CardTitle className="text-sm">{t("storage_target_object_store")}</CardTitle>
             <Badge variant={ready || notConfigured ? "outline" : "destructive"}>
-              {ready
-                ? t("storage_connection_summary_configured")
-                : notConfigured
-                  ? t("storage_connection_summary_unconfigured")
-                  : t("storage_overview_attention")}
+              {ready ? t("storage_target_ready") : t("storage_target_unavailable")}
             </Badge>
           </CardHeader>
           <CardContent className="space-y-2">
             <strong>
               {ready
-                ? t("storage_target_ready")
+                ? t("storage_connection_summary_configured")
                 : notConfigured
                   ? t("storage_connection_empty_title")
                   : t(`storage_readiness_${objectStoreCapability.readiness_code}`)}
@@ -151,6 +147,18 @@ export function StorageOverview({
                 ? t("storage_overview_object_store_ready")
                 : t("storage_overview_object_store_help")}
             </p>
+            {!ready && (
+              <Button asChild variant="link" size="sm" className="h-auto px-0">
+                <a
+                  href="https://docs.eneo.ai/guides/object-content-storage"
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  {t("storage_settings_object_store_docs")}
+                  <ExternalLink className="size-4" aria-hidden="true" />
+                </a>
+              </Button>
+            )}
           </CardContent>
         </Card>
         <Card>

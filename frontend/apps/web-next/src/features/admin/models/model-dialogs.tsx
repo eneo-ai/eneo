@@ -26,13 +26,15 @@ export function ModelDialogs({
   classifications,
   securityEnabled,
   onClose,
-  onMigrate
+  onMigrate,
+  onEdit
 }: {
   selection: ModelSelection;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
   onClose: () => void;
   onMigrate: () => void;
+  onEdit: () => void;
 }) {
   const { model, kind, action } = selection;
   const t = useTranslations();
@@ -87,8 +89,15 @@ export function ModelDialogs({
       {action === "migrate" && (kind === "completion" || kind === "transcription") && (
         <MigrateModelDialog model={model} kind={kind} open onOpenChange={onOpenChange} />
       )}
-      {action === "detail" && kind !== "embedding" && (
-        <ModelDetailDialog model={model} kind={kind} open onOpenChange={onOpenChange} />
+      {action === "detail" && (
+        <ModelDetailDialog
+          model={model}
+          kind={kind}
+          open
+          onOpenChange={onOpenChange}
+          onEdit={!("readonly" in model && model.readonly) ? onEdit : undefined}
+          onMigrate={onMigrate}
+        />
       )}
       {action === "delete" && deleteBlocked && (
         <DeleteBlockedDialog

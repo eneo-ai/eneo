@@ -24,7 +24,11 @@ import { StatusLabel, type StatusTone } from "@/components/composites/status-lab
 import { browserApi } from "@/lib/api/browser";
 import { matchesSearch } from "@/lib/search";
 import { useModelTypeLabel } from "./model-type-label";
-import { type ModelMigrationHistory, migrationHistoryQueryOptions } from "./models";
+import {
+  type ModelMigrationHistory,
+  migrationHistoryQueryOptions,
+  migrationWarningLabel
+} from "./models";
 
 type TypeFilter = "all" | "completion" | "transcription";
 type StatusFilter = "all" | "completed" | "failed" | "in_progress";
@@ -288,7 +292,9 @@ function DetailRow({
             {row.duration != null && (
               <span>
                 <span className="text-ax-text-secondary">{t("migration_history_duration")}: </span>
-                {(row.duration / 1000).toFixed(1)}s
+                {row.duration < 1
+                  ? `${Math.round(row.duration * 1000)}ms`
+                  : `${row.duration.toFixed(1)}s`}
               </span>
             )}
           </div>
@@ -309,7 +315,7 @@ function DetailRow({
               <span className="font-medium">{t("migration_history_warnings")}</span>
               <ul className="flex flex-col gap-0.5">
                 {row.warnings.map((warning, index) => (
-                  <li key={index}>{warning}</li>
+                  <li key={index}>{migrationWarningLabel(t, warning, warning)}</li>
                 ))}
               </ul>
             </div>

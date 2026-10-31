@@ -6719,7 +6719,7 @@
   "provider_no_models": "This provider has no models yet.",
   "provider_delete_models_first": "Delete {count, plural, one {its model} other {its # models}} first",
   "provider_delete_blocked_title": "{name} can't be deleted yet",
-  "provider_delete_blocked_description": "The provider has {count, plural, one {a model} other {# models}}. Delete {count, plural, one {it} other {them}} in the provider's table first, then delete the provider.",
+  "provider_delete_blocked_description": "The provider has {count, plural, one {a model} other {# models}}. It cannot be deleted while the models below are linked to it.",
   "change_password_current_required": "Enter your current password.",
   "change_password_new_required": "Enter a new password.",
   "change_password_confirm_required": "Type the new password again.",
@@ -7034,5 +7034,8 @@
   "api_keys_no_search_matches": "No matching API keys",
   "api_keys_notifications_reminder_days_label": "Reminder days",
   "api_keys_notifications_reminder_days_description": "Enter the number of days before expiry, separated by commas.",
-  "api_keys_notifications_add_day": "Add {days} days"
+  "api_keys_notifications_add_day": "Add {days} days",
+  "form_problem_confirm_migration_warning": "Confirm that you want to continue despite the compatibility warnings.",
+  "model_huggingface_link": "View on HuggingFace",
+  "admin_models_retiring_description": "{models}: choose a replacement and migrate usage before retirement."
 }
