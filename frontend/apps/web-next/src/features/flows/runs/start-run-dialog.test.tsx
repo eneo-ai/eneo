@@ -6,6 +6,7 @@ import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/r
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeFlow } from "../flow-fixtures";
 import { makeContract, makeInput, makeRunDetail, makeRunSummary } from "./run-fixtures";
 import type { RunContract, RunPublic } from "./runs-api";
@@ -410,5 +411,32 @@ describe("StartRunDialog", () => {
     fireEvent.click(button(dialog, messages.flow_runs_summary_next));
     expect(await within(dialog).findByText(messages.flow_runs_blocked)).toBeTruthy();
     expect(api.stub.calls.filter((call) => call.method === "POST")).toEqual([]);
+  });
+});
+
+describe("StartRunDialog on a phone", () => {
+  it("takes the whole screen, stacks the footer with the primary action first and has nothing to drag", async () => {
+    const standard = (await openDialog()).dialog.className;
+    cleanup();
+
+    setViewport("phone");
+    const { dialog } = await openDialog();
+    // The fullscreen variant is another set of the dialog's own classes.
+    expect(dialog.className).not.toBe(standard);
+    const next = button(dialog, "Granska");
+    const cancel = button(dialog, "Avbryt");
+    expect(next.parentElement).toBe(cancel.parentElement);
+    // Cancel comes first in the DOM, the stack reverses it: the primary action is on top.
+    expect(next.parentElement?.className).toContain("flex-col-reverse");
+    expect(within(dialog).getByText("Välj filer")).toBeTruthy();
+    expect(within(dialog).queryByText(/dra hit/)).toBeNull();
+  });
+
+  it("keeps the dialog, its row of buttons and the drag wording for a mouse", async () => {
+    const { dialog } = await openDialog();
+    const next = button(dialog, "Granska");
+    expect(next.parentElement?.className).toContain("justify-end");
+    expect(next.parentElement?.className).not.toContain("flex-col-reverse");
+    expect(within(dialog).getByText("Välj filer eller dra hit dem")).toBeTruthy();
   });
 });

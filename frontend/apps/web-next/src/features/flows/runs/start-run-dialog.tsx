@@ -15,7 +15,9 @@ import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 import { restrictedBeforeApproval } from "../flow-form-fields";
 import type { FlowPublic } from "../flows-api";
 import { RecordingKeeper } from "./recording/recording-keeper";
@@ -576,6 +578,9 @@ export function StartRunDialog({
   onStarted: (run: RunPublic) => void;
 }) {
   const t = useTranslations();
+  // A phone gets the whole screen (the form is long and the keyboard takes half of it) and a
+  // footer that stacks with the primary action first, under the thumb.
+  const phone = useMediaMatch(PHONE_QUERY);
   const formId = useId();
   const [pending, setPending] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -666,6 +671,7 @@ export function StartRunDialog({
         isOpen={open}
         onOpenChange={requestOpenChange}
         purpose="form"
+        variant={phone ? "fullscreen" : "standard"}
         width={640}
         maxHeight="85dvh"
       >
@@ -681,7 +687,12 @@ export function StartRunDialog({
           footer={
             open ? (
               <LayoutFooter>
-                <div className="flex flex-wrap justify-end gap-2">
+                <div
+                  className={cn(
+                    "flex gap-2",
+                    phone ? "flex-col-reverse [&>*]:w-full" : "flex-wrap justify-end"
+                  )}
+                >
                   {summary ? (
                     <Button
                       key="back"

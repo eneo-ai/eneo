@@ -7,6 +7,7 @@ import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { formatBytes } from "@/lib/format";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { UploadRetryHint } from "./recording/upload-retry-hint";
 import type { InputProblem, UploadEntry } from "./run-contract";
 import { inputLimitsText } from "./run-format";
@@ -165,6 +166,7 @@ export function RunFileInput({
 }) {
   const t = useTranslations();
   const locale = useLocale();
+  const coarse = useMediaMatch("(pointer: coarse)");
   const label = inputLabel(input, t);
   const limits = inputLimitsText(input, t, locale);
   const description = [input.description?.trim(), limits].filter(Boolean).join(" ");
@@ -184,7 +186,10 @@ export function RunFileInput({
         isMultiple={multiple}
         mode="dropzone"
         placeholder={
-          multiple ? t("flow_runs_input_choose_files") : t("flow_runs_input_choose_file")
+          // A touch screen has nothing to drag a file from.
+          multiple
+            ? t(coarse ? "flow_runs_input_choose_files_touch" : "flow_runs_input_choose_files")
+            : t(coarse ? "flow_runs_input_choose_file_touch" : "flow_runs_input_choose_file")
         }
         status={message ? { type: "error", message } : undefined}
         statusVariant="detached"

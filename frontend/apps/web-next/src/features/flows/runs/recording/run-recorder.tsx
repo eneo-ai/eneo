@@ -24,6 +24,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import type { RecordingPartInfo, UploadEntry } from "../run-contract";
 import {
   liveSocketUrl,
@@ -91,16 +92,23 @@ export function lengthText(ms: number, t: Translator): string {
   return t("flow_transcript_length_hours_minutes", { hours, minutes });
 }
 
-function problemText(problem: RecorderProblem, t: Translator): string {
+/** `touch`: a phone or tablet, where there is no address bar icon and no microphone to plug in. */
+function problemText(problem: RecorderProblem, t: Translator, touch: boolean): string {
   switch (problem) {
     case "unsupported":
       return t("flow_transcript_rec_unsupported");
     case "insecure":
       return t("flow_transcript_rec_insecure");
     case "permission_denied":
-      return t("flow_transcript_rec_permission_denied");
+      return t(
+        touch
+          ? "flow_transcript_rec_permission_denied_touch"
+          : "flow_transcript_rec_permission_denied"
+      );
     case "no_microphone":
-      return t("flow_transcript_rec_no_microphone");
+      return t(
+        touch ? "flow_transcript_rec_no_microphone_touch" : "flow_transcript_rec_no_microphone"
+      );
     case "microphone_busy":
       return t("flow_transcript_rec_microphone_busy");
     case "microphone_failed":
@@ -294,6 +302,8 @@ export function RunRecorder({
   const t = useTranslations();
   const locale = useLocale();
   const announce = useAnnounce();
+  // A touch screen has no address bar icon to point at and no microphone to plug in.
+  const coarse = useMediaMatch("(pointer: coarse)");
   const [support] = useState(() => recordingSupport(browserEnvironment()));
   const [options] = useState(() =>
     selectRecordingOptions((type) =>
@@ -692,7 +702,7 @@ export function RunRecorder({
       <Banner
         status="info"
         title={t("flow_transcript_rec_heading")}
-        description={problemText(support, t)}
+        description={problemText(support, t, coarse)}
         collapsible={false}
       />
     );
@@ -790,7 +800,7 @@ export function RunRecorder({
         <Banner
           status="error"
           title={t("flow_transcript_rec_problem_title")}
-          description={problemText(problem, t)}
+          description={problemText(problem, t, coarse)}
           collapsible={false}
         />
       ) : null}

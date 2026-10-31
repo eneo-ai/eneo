@@ -6,6 +6,7 @@ import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/r
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeFlow } from "../../flow-fixtures";
 import { makeContract, makeInput } from "../run-fixtures";
 import type { RunContract, RunPublic } from "../runs-api";
@@ -297,6 +298,27 @@ describe("RunRecorder in the start dialog", () => {
       await within(dialog).findByText(messages.flow_transcript_rec_permission_denied)
     ).toBeTruthy();
     await expectNoAxeViolations(document.body);
+  });
+
+  it("points a phone to its settings, not to an address bar icon or a microphone to plug in", async () => {
+    setViewport("phone");
+    installBrowser();
+    microphone.mockRejectedValue(new DOMException("denied", "NotAllowedError"));
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    expect(
+      await within(dialog).findByText(messages.flow_transcript_rec_permission_denied_touch)
+    ).toBeTruthy();
+    expect(within(dialog).queryByText(/adressfältet/)).toBeNull();
+    cleanup();
+
+    microphone.mockRejectedValue(new DOMException("none", "NotFoundError"));
+    const second = await openDialog(audioContract());
+    fireEvent.click(button(second.dialog, messages.flow_transcript_rec_start));
+    expect(
+      await within(second.dialog).findByText(messages.flow_transcript_rec_no_microphone_touch)
+    ).toBeTruthy();
+    expect(within(second.dialog).queryByText(/Anslut en mikrofon/)).toBeNull();
   });
 
   it("records, pauses, stops and starts the run with the recording as the step's audio", async () => {
