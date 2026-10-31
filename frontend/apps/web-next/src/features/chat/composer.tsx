@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
 import { useAnnounce, useMergedRefs } from "@astryxdesign/core/hooks";
 import { Kbd } from "@astryxdesign/core/Kbd";
@@ -293,6 +294,8 @@ export function Composer({
   textareaRef
 }: ComposerProps) {
   const t = useTranslations();
+  // A touch screen has no Shift, Ctrl or Enter key to point at.
+  const coarse = useMediaMatch("(pointer: coarse)");
   const announce = useAnnounce();
   const hintId = useId();
   const problemId = useId();
@@ -438,7 +441,7 @@ export function Composer({
         </p>
       )}
       <span id={hintId} className="sr-only">
-        {t("chat_composer_hint")}
+        {t(coarse ? "chat_composer_hint_touch" : "chat_composer_hint")}
       </span>
       {contextBar}
       <p className="text-ax-text-secondary flex items-center justify-center gap-1.5 text-center text-xs">

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import { Composer } from "./composer";
 import { useAttachments } from "./use-attachments";
 
@@ -70,6 +71,13 @@ describe("Composer", () => {
     expect(descriptionOf(textarea)).toBe(
       "Retur ger en ny rad. Skicka med Skicka-knappen, Kommando+Retur eller Ctrl+Retur."
     );
+  });
+
+  it("does not point a touch screen at keys it does not have in the field's description", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderComposer();
+    const textarea = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
+    expect(descriptionOf(textarea)).toBe("Retur ger en ny rad. Skicka med Skicka-knappen.");
   });
 
   it("adds a line on Return and sends on ⌘ or Ctrl+Return and with Send (decision 3)", () => {

@@ -2214,7 +2214,7 @@
   "tools": "Verktyg",
   "sync_tools": "Synkronisera verktyg",
   "no_tools_found": "Inga verktyg tillgängliga",
-  "click_sync_to_discover_tools": "Klicka på \"Synkronisera verktyg\" för att upptäcka verktyg från denna server.",
+  "click_sync_to_discover_tools": "Välj \"Synkronisera verktyg\" för att upptäcka verktyg från denna server.",
   "pending_description_change": "Beskrivningsändring väntar på godkännande",
   "removed_from_server": "Borttagen från server",
   "approve": "Godkänn",
@@ -7042,5 +7042,10 @@
   "api_keys_admin_more_filters": "Fler filter",
   "chat_announce_generating": "Assistenten skriver ett svar",
   "upload_dropzone_prompt_touch": "Välj filer att ladda upp",
-  "drop_files_here_touch": "Bifoga filer från din enhet"
+  "drop_files_here_touch": "Bifoga filer från din enhet",
+  "workspace_preview_table_hint_touch": "Markera rader med kryssrutorna för att fråga om dem, eller markera text för att citera den.",
+  "chat_composer_hint_touch": "Retur ger en ny rad. Skicka med Skicka-knappen.",
+  "mcp_tags_placeholder_touch": "Lägg till en tagg",
+  "skills_reference_placeholder_touch": "Beskriv hur Skillen ska hjälpa till.",
+  "skills_reference_hint_touch": "Tryck på Infoga referens för att lägga till en Skill, funktion eller MCP."
 }

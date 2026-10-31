@@ -2181,7 +2181,7 @@
   "tools": "Tools",
   "sync_tools": "Sync Tools",
   "no_tools_found": "No tools available",
-  "click_sync_to_discover_tools": "Click \"Sync Tools\" to discover tools from this server.",
+  "click_sync_to_discover_tools": "Choose \"Sync Tools\" to discover tools from this server.",
   "pending_description_change": "Description change pending approval",
   "removed_from_server": "Removed from server",
   "approve": "Approve",
@@ -7042,5 +7042,10 @@
   "api_keys_admin_more_filters": "More filters",
   "chat_announce_generating": "The assistant is writing a reply",
   "upload_dropzone_prompt_touch": "Choose files to upload",
-  "drop_files_here_touch": "Attach files from your device"
+  "drop_files_here_touch": "Attach files from your device",
+  "workspace_preview_table_hint_touch": "Select rows with the checkboxes to ask about them, or select text to quote it.",
+  "chat_composer_hint_touch": "Return adds a line. Send with the Send button.",
+  "mcp_tags_placeholder_touch": "Add a tag",
+  "skills_reference_placeholder_touch": "Describe how this Skill should help.",
+  "skills_reference_hint_touch": "Tap Insert reference to add a Skill, function or MCP."
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
@@ -99,6 +100,8 @@ function McpServerForm({
   onOpenChange: (open: boolean) => void;
 }) {
   const t = useTranslations();
+  // A touch screen has no Shift, Ctrl or Enter key to point at.
+  const coarse = useMediaMatch("(pointer: coarse)");
 
   const { data: security } = useQuery(securityClassificationsQueryOptions(browserApi));
   const securityEnabled = security?.security_enabled ?? false;
@@ -266,7 +269,7 @@ function McpServerForm({
               id="mcp-tags"
               value={tags}
               onChange={setTags}
-              placeholder={t("mcp_tags_placeholder")}
+              placeholder={t(coarse ? "mcp_tags_placeholder_touch" : "mcp_tags_placeholder")}
             />
           </div>
           <div className="flex flex-col gap-2">

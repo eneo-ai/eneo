@@ -1,6 +1,7 @@
 "use client";
 
 import { useQueryClient } from "@tanstack/react-query";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ExternalLink } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -18,6 +19,8 @@ const trim = (value: string) => value.trim();
 
 export function OverviewTab({ server }: { server: McpServer }) {
   const t = useTranslations();
+  // A touch screen has no Shift, Ctrl or Enter key to point at.
+  const coarse = useMediaMatch("(pointer: coarse)");
   const queryClient = useQueryClient();
 
   const save = useCallback(
@@ -117,7 +120,11 @@ export function OverviewTab({ server }: { server: McpServer }) {
       <SettingsGroup title={t("mcp_section_presentation")}>
         <SettingsRow title={t("mcp_tags")} description={t("mcp_tags_hint")}>
           <div id="mcp-tags">
-            <TagInput value={tags} onChange={commitTags} placeholder={t("mcp_tags_placeholder")} />
+            <TagInput
+              value={tags}
+              onChange={commitTags}
+              placeholder={t(coarse ? "mcp_tags_placeholder_touch" : "mcp_tags_placeholder")}
+            />
           </div>
         </SettingsRow>
         <SettingsRow title={t("mcp_icon_url")} htmlFor="mcp-icon-input">
