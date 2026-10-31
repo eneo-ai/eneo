@@ -282,7 +282,10 @@ function AuditCard() {
           {logs.map((log) => (
             <li key={log.id} className="flex min-w-0 items-start gap-3 py-2 text-sm">
               <Badge label={actionLabel(t, log.action)} />
-              <span className="min-w-0 flex-1 truncate" title={log.description}>
+              <span
+                className="min-w-0 flex-1 truncate pointer-coarse:break-words pointer-coarse:whitespace-normal"
+                title={log.description}
+              >
                 {log.description}
               </span>
               <span className="text-ax-text-secondary shrink-0 text-xs">

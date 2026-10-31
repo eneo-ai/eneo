@@ -213,7 +213,11 @@ export function ModulesPage({ title }: { title: string }) {
                           <dd className="mt-1 space-y-1">
                             {(installation.redirect_uris ?? []).length > 0
                               ? installation.redirect_uris?.map((uri) => (
-                                  <div key={uri} className="truncate" title={uri}>
+                                  <div
+                                    key={uri}
+                                    className="truncate pointer-coarse:break-words pointer-coarse:whitespace-normal"
+                                    title={uri}
+                                  >
                                     {uri}
                                   </div>
                                 ))

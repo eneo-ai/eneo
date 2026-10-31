@@ -341,7 +341,10 @@ export function FolderDocuments({
       width: proportional(1, { minWidth: 96 }),
       sortable: true,
       renderCell: (row) => (
-        <span className="text-ax-text-secondary block truncate" title={row.relative_path}>
+        <span
+          className="text-ax-text-secondary block truncate pointer-coarse:break-words pointer-coarse:whitespace-normal"
+          title={row.relative_path}
+        >
           {row.relative_path}
         </span>
       )

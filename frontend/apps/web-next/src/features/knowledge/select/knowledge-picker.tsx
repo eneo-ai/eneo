@@ -69,7 +69,10 @@ function SelectedRow({
   return (
     <div className="flex h-12 w-full items-center gap-2 rounded-xl border px-3">
       {icon}
-      <span className="min-w-0 flex-1 truncate text-sm" title={name}>
+      <span
+        className="min-w-0 flex-1 truncate text-sm pointer-coarse:break-words pointer-coarse:whitespace-normal"
+        title={name}
+      >
         {name}
         {!modelEnabled && <span className="text-destructive"> ({t("model_disabled")})</span>}
       </span>
@@ -270,7 +273,10 @@ function SelectedKnowledgeRow({
           disabled={!expandable}
           className="min-w-0 flex-1 rounded-md text-left text-sm font-medium hover:underline disabled:hover:no-underline"
         >
-          <span className="truncate" title={title}>
+          <span
+            className="truncate pointer-coarse:break-words pointer-coarse:whitespace-normal"
+            title={title}
+          >
             {title}
             {!modelEnabled ? (
               <span className="text-destructive"> ({t("model_disabled")})</span>

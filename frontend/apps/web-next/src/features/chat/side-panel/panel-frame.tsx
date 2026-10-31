@@ -45,7 +45,10 @@ function PanelTitle({
   if (!switcher || count < 2) {
     return (
       <>
-        <h2 className="truncate text-sm font-semibold" title={title}>
+        <h2
+          className="truncate text-sm font-semibold pointer-coarse:break-words pointer-coarse:whitespace-normal"
+          title={title}
+        >
           {title}
         </h2>
         {detail && <p className="text-ax-text-secondary truncate text-xs tabular-nums">{detail}</p>}

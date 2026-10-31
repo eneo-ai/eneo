@@ -205,7 +205,10 @@ export function SharePointFolderTree({
                     ) : (
                       <FileIcon name={item.name} />
                     )}
-                    <span className="flex-1 truncate text-sm" title={item.name}>
+                    <span
+                      className="flex-1 truncate text-sm pointer-coarse:break-words pointer-coarse:whitespace-normal"
+                      title={item.name}
+                    >
                       {item.name}
                     </span>
                     {item.type !== "folder" && item.size != null && (

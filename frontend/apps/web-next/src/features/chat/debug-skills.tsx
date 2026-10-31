@@ -263,7 +263,10 @@ export function SkillActivationSection({
       >
         {stats.map(([label, value]) => (
           <div key={label} className="bg-ax-surface min-w-0 px-3 py-1.5">
-            <dt className="text-ax-text-secondary truncate text-xs leading-4" title={label}>
+            <dt
+              className="text-ax-text-secondary truncate text-xs leading-4 pointer-coarse:break-words pointer-coarse:whitespace-normal"
+              title={label}
+            >
               {label}
             </dt>
             <dd className="mt-0.5 text-sm font-semibold tabular-nums">{value}</dd>
