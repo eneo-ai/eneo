@@ -14,6 +14,12 @@ const TOKENS: Partial<
   queued: { label: "queued", color: "gray", Icon: Clock }
 };
 
+/** The visible run-status label, shared by tokens and result sorting. */
+export function appRunStatusLabel(status: AppRunStatus, t: (key: string) => string): string {
+  const token = TOKENS[status];
+  return token ? t(token.label) : status;
+}
+
 /**
  * A run's status in words: a small Token with a still icon, no pulsing, as a
  * run can take minutes. Not a live region; the job toast every run raises
@@ -27,7 +33,7 @@ export function AppRunStatusToken({ status }: { status: AppRunStatus }) {
     <Token
       size="sm"
       color={token?.color ?? "gray"}
-      label={token ? t(token.label) : status}
+      label={appRunStatusLabel(status, t)}
       icon={<Icon className="size-3.5" aria-hidden="true" />}
     />
   );

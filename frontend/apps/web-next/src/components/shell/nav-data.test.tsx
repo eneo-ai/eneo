@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { screen, within } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { SpacesList } from "@/features/spaces/list/spaces-list";
 import { setRoute } from "@/test/navigation";
@@ -33,13 +34,17 @@ it("shares prefetched spaces between the page and the shell's SideNav", () => {
     [{ id: "s1", name: "Upphandling", description: null, personal: false, organization: false }]
   );
 
-  const { container } = renderInApp(
+  renderInApp(
     <AppShellFrame>
       <SpacesList title="Ytor" />
     </AppShellFrame>,
     { queryClient: prefetched }
   );
 
-  expect(container.innerHTML).toContain('aria-label="Upphandling"');
+  expect(
+    within(screen.getByRole("table", { name: "Ytor" }))
+      .getByRole("link", { name: "Upphandling" })
+      .getAttribute("href")
+  ).toBe("/spaces/s1/overview");
   expect(browserGet.mock.calls.some(([url]) => url === "/api/v1/spaces/")).toBe(false);
 });

@@ -44,6 +44,7 @@ import { SpacesList } from "@/features/spaces/list/spaces-list";
 
 afterEach(() => {
   cleanup();
+  window.localStorage.clear();
   api.deleted.length = 0;
   api.created.length = 0;
 });
@@ -99,6 +100,7 @@ describe("SpacesList", () => {
       space({ id: "org", name: "Organisation", organization: true })
     ];
     const { container } = await show();
+    fireEvent.click(screen.getByRole("button", { name: "Kort" }));
 
     expect(screen.getAllByRole("button", { name: "Skapa yta" })).toHaveLength(1);
     const list = screen.getAllByRole("list")[0]!;
@@ -230,4 +232,30 @@ describe("SpacesList on a phone (decision 9)", () => {
     ).toBeTruthy();
     await expectNoAxeViolations(container);
   });
+});
+
+it("opens spaces as a name-sortable list, switches to cards and remembers that view", async () => {
+  api.spaces = [space({}), space({ id: "s2", name: "HR", permissions: ["read"] })];
+  await show();
+  const table = screen.getByRole("table", { name: "Ytor" });
+  expect(within(table).queryByRole("columnheader", { name: /Status/ })).toBeNull();
+  const links = () =>
+    within(table)
+      .getAllByRole("link")
+      .map((link) => link.textContent);
+  expect(links()).toEqual(["HR", "Upphandling"]);
+  fireEvent.click(
+    within(within(table).getByRole("columnheader", { name: /Namn/ })).getByRole("button")
+  );
+  expect(links()).toEqual(["Upphandling", "HR"]);
+  const readOnly = within(table)
+    .getAllByRole("row")
+    .find((row) => row.textContent?.includes("HR"))!;
+  expect(within(readOnly).queryByRole("button")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Kort" }));
+  expect(screen.queryByRole("table")).toBeNull();
+  cleanup();
+  await show();
+  expect(screen.getByRole("button", { name: "Kort" }).getAttribute("aria-pressed")).toBe("true");
+  expect(screen.queryByRole("table")).toBeNull();
 });

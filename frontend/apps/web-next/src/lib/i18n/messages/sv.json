@@ -7057,5 +7057,10 @@
   "assistant_context_unavailable": "Kontexten kunde inte uppskattas. Du kan fortsätta redigera.",
   "assistant_context_scope": "Uppskattning för instruktioner, aktiva skills och bilagor som läses in direkt. Chatthistorik och hämtat innehåll tillkommer.",
   "assistant_context_reserve": "{tokens} tokens reserveras för frågan.",
-  "assistant_context_near": "Instruktionerna och bilagorna närmar sig gränsen för utrymmet som återstår efter reservationen för frågan."
+  "assistant_context_near": "Instruktionerna och bilagorna närmar sig gränsen för utrymmet som återstår efter reservationen för frågan.",
+  "resource_view": "Visning",
+  "resource_sort": "Sortera",
+  "resource_sort_ascending": "Stigande",
+  "resource_sort_descending": "Fallande",
+  "resource_filter_results": "Filtrera resultat"
 }
