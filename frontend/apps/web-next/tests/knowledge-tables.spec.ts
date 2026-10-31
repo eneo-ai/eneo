@@ -170,7 +170,7 @@ test.describe("knowledge on a phone", () => {
   );
 
   test(
-    "a table that fits keeps its pinned cells on their own columns",
+    "file metadata scrolls within its table and keeps the name visible",
     { tag: "@vite" },
     async ({ page }) => {
       const space = await createSpace(page, uniqueName("E2E Filer"));
@@ -191,8 +191,8 @@ test.describe("knowledge on a phone", () => {
         table.getByRole("button", { name: "Strandskydd.pdf", exact: true })
       ).toBeVisible();
 
-      // The files fit a phone: nothing to scroll, and every header cell starts
-      // where the one before it ends (a pinned one sits on its own column).
+      // Created metadata needs more than a phone's width. The table owns that
+      // scroll, while its pinned name remains available beside the other columns.
       const layout = await table.evaluate((el) => {
         const scroller = el.closest(".astryx-table-scroll-wrapper")!;
         const cells = [...el.querySelectorAll("thead th")].map((th) => th.getBoundingClientRect());
@@ -209,8 +209,52 @@ test.describe("knowledge on a phone", () => {
       });
       // Edge to edge on a phone, over the page's gutters.
       expect(layout.edges).toEqual([0, 0]);
-      expect(layout.overflow).toBeLessThanOrEqual(0);
+      expect(layout.overflow).toBeGreaterThan(0);
       expect(layout.starts).toEqual(layout.ends);
+      await table.evaluate((el) => {
+        const scroller = el.closest(".astryx-table-scroll-wrapper")!;
+        scroller.scrollLeft = scroller.scrollWidth;
+      });
+      const name = table.getByRole("button", { name: "Strandskydd.pdf", exact: true });
+      expect(
+        await name.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          return el.contains(document.elementFromPoint(box.left + 4, box.top + box.height / 2));
+        })
+      ).toBe(true);
+      expect(
+        await page.evaluate(() => document.documentElement.scrollWidth - innerWidth)
+      ).toBeLessThanOrEqual(0);
+
+      // Keyboard focus can bring metadata controls out from under the pinned name.
+      const created = table.getByRole("button", { name: /skapad|created/i });
+      await created.focus();
+      await expect(created).toBeFocused();
+      expect(
+        await created.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          return el.contains(
+            document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2)
+          );
+        })
+      ).toBe(true);
+
+      // Retain the fit regression: when there is enough width, pinning must not
+      // shift a cell over its neighbor or introduce an unnecessary scrollbar.
+      await page.setViewportSize({ width: 820, height: 1180 });
+      const fit = await table.evaluate((el) => {
+        const scroller = el.closest(".astryx-table-scroll-wrapper")!;
+        const cells = [...el.querySelectorAll("thead th")].map((th) => th.getBoundingClientRect());
+        return {
+          overflow: scroller.scrollWidth - scroller.clientWidth,
+          starts: cells.map((box) => Math.round(box.left)),
+          ends: [scroller.getBoundingClientRect().left, ...cells.map((box) => box.right)]
+            .slice(0, -1)
+            .map(Math.round)
+        };
+      });
+      expect(fit.overflow).toBeLessThanOrEqual(0);
+      expect(fit.starts).toEqual(fit.ends);
     }
   );
 });

@@ -798,45 +798,73 @@ describe("KnowledgePage", () => {
     );
   });
 
-  it("stops every active crawl from the toolbar after a confirmation", async () => {
-    const running = (id: string, name: string) =>
-      makeWebsite({
-        id,
-        name,
-        latest_crawl: {
-          ...(makeWebsite().latest_crawl as object),
-          id: `run-${id}`,
-          status: "in progress",
-          phase: "running",
-          outcome: null
-        }
+  it.each([1, 0])(
+    "reports stopping active crawls, including when they already ended (%s stopped)",
+    async (stopped) => {
+      const running = (id: string, name: string) =>
+        makeWebsite({
+          id,
+          name,
+          latest_crawl: {
+            ...(makeWebsite().latest_crawl as object),
+            id: `run-${id}`,
+            status: "in progress",
+            phase: "running",
+            outcome: null
+          }
+        });
+      show(
+        makeSpace({ websites: [running("w1", "Intranätet"), makeWebsite({ id: "w2" })] }),
+        "websites"
+      );
+
+      fireEvent.click(screen.getByRole("button", { name: "Stoppa alla aktiva (1)" }));
+      const dialog = await screen.findByRole("alertdialog", {
+        name: "Stoppa aktiva synkroniseringar? (1)"
       });
+      state.bulkResult = {
+        total: 1,
+        stopped,
+        not_running: 1 - stopped,
+        failed: 0,
+        crawl_runs: [],
+        errors: []
+      };
+      fireEvent.click(within(dialog).getByRole("button", { name: "Stoppa" }));
+
+      await waitFor(() =>
+        expect(state.posted).toEqual([
+          { path: "/api/v1/websites/bulk/stop/", body: { website_ids: ["w1"] } }
+        ])
+      );
+      await waitFor(() =>
+        expect(state.toasts).toEqual([
+          stopped
+            ? { kind: "success", message: "Skickade stoppbegäranden: 1." }
+            : { kind: "info", message: "De valda synkroniseringarna hade redan avslutats." }
+        ])
+      );
+    }
+  );
+
+  it("lets a delete-only user select websites and only removes those they may delete", async () => {
     show(
-      makeSpace({ websites: [running("w1", "Intranätet"), makeWebsite({ id: "w2" })] }),
+      makeSpace({
+        resourcePermissions: ["read", "delete"],
+        websites: [makeWebsite(), makeWebsite({ id: "read-only", permissions: ["read"] })]
+      }),
       "websites"
     );
-
-    fireEvent.click(screen.getByRole("button", { name: "Stoppa alla aktiva (1)" }));
-    const dialog = await screen.findByRole("alertdialog", {
-      name: "Stoppa aktiva synkroniseringar? (1)"
-    });
-    state.bulkResult = {
-      total: 1,
-      stopped: 1,
-      not_running: 0,
-      failed: 0,
-      crawl_runs: [],
-      errors: []
-    };
-    fireEvent.click(within(dialog).getByRole("button", { name: "Stoppa" }));
-
+    fireEvent.click(screen.getByRole("checkbox", { name: "Markera alla rader" }));
+    expect(screen.queryByRole("button", { name: /Synkronisera valda/ })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ta bort valda (1)" }));
+    const dialog = await screen.findByRole("alertdialog", { name: "Ta bort webbplatskällor? (1)" });
+    state.bulkResult = { total: 1, deleted: 1, not_found: 0, failed: 0, errors: [] };
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort källor" }));
     await waitFor(() =>
       expect(state.posted).toEqual([
-        { path: "/api/v1/websites/bulk/stop/", body: { website_ids: ["w1"] } }
+        { path: "/api/v1/websites/bulk/delete/", body: { website_ids: ["website-1"] } }
       ])
-    );
-    await waitFor(() =>
-      expect(state.toasts).toEqual([{ kind: "success", message: "Skickade stoppbegäranden: 1." }])
     );
   });
 
