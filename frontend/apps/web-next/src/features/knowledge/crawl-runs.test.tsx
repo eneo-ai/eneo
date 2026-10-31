@@ -76,8 +76,10 @@ describe("CrawlRunsTable", () => {
     expect(rows).toHaveLength(3);
     // The newest first, as the table's default order.
     expect(within(rows[0]!).getByRole("button", { name: /5 mars 2024|2024-03-05/ })).toBeTruthy();
-    for (const row of rows)
-      expect(within(row).getAllByText(/Varaktighet/).length).toBeGreaterThan(0);
+    // A finished run says how long it took; the unfinished one says when it started.
+    expect(rows[0]!.textContent).toMatch(/Varaktighet: \d/);
+    expect(rows[1]!.textContent).not.toMatch(/Varaktighet/);
+    expect(rows[1]!.textContent).toMatch(/Startad/);
   });
 
   it("lists runs newest first with their state as a status dot and text", async () => {

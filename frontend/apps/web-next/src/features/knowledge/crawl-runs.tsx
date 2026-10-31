@@ -201,7 +201,9 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
                   </div>
                   <CrawlResultCell run={run} onShowFailures={(kind) => select(run, kind)} />
                   <span className="text-ax-text-secondary text-xs">
-                    {t("duration")}: <CrawlDurationCell crawl={run} />
+                    {/* A running one says when it started, which needs no label. */}
+                    {run.finished_at ? `${t("duration")}: ` : null}
+                    <CrawlDurationCell crawl={run} />
                   </span>
                 </li>
               ))}
