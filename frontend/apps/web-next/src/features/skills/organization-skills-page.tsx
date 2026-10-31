@@ -225,7 +225,7 @@ export function OrganizationSkillsPage() {
       <QueryStateBoundary query={skills} rows={3}>
         {() =>
           items.length === 0 ? (
-            <div className="flex max-w-3xl flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
+            <div className="border-ax-border-strong flex max-w-3xl flex-col items-center gap-3 rounded-xl border border-dashed p-10 text-center">
               <BookOpenCheck className="text-muted-foreground size-9" />
               {/* Under the tab's h2. */}
               <h3 className="font-medium">

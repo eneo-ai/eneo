@@ -204,7 +204,7 @@ export function ScheduleTable({
       aria-label={t("admin_crawler_schedule_caption")}
       plugins={{ sort: sortPlugin }}
       pinnedColumn="url"
-      className="min-w-[1100px]"
+      className="min-w-[1100px] [--table-sticky-background:var(--color-ax-surface)]"
     />
   );
 }

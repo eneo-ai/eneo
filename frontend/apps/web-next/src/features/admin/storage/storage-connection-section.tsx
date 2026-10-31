@@ -875,7 +875,7 @@ export function StorageConnectionSection({
                   >
                     <select
                       id="object-store-addressing"
-                      className="border-input bg-background h-9 w-full rounded-md border px-3 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
+                      className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                       disabled={submitting}
                       value={input.addressing_style}
                       onChange={(event) =>

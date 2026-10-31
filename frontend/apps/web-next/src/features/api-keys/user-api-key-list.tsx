@@ -201,7 +201,7 @@ function KeyRow({
         {apiKey.created_at ? <ClientTime value={apiKey.created_at} format="date" /> : "—"}
       </TableCell>
       {/* Pinned: the menu is the only way to act on a key, and on a phone the wide table scrolls. */}
-      <TableCell className="bg-background sticky end-0 text-end">
+      <TableCell className="bg-ax-surface sticky end-0 text-end">
         <ApiKeyActions apiKey={apiKey} mode="user" scopeName={scopeName} onRotated={onRotated} />
       </TableCell>
     </TableRow>
@@ -354,7 +354,7 @@ export function UserApiKeyList({
                           <TableHead>{t("api_keys_last_used")}</TableHead>
                           <TableHead>{t("api_keys_expires")}</TableHead>
                           <TableHead>{t("api_keys_created")}</TableHead>
-                          <TableHead className="bg-background sticky end-0 w-14 min-w-14" />
+                          <TableHead className="bg-ax-surface sticky end-0 w-14 min-w-14" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>

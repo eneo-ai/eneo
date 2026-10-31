@@ -310,9 +310,9 @@ function PolicyEditor({
                 className="w-full min-w-[44rem] text-sm"
                 aria-labelledby="skill-models-heading"
               >
-                <thead className="bg-background sticky top-0">
+                <thead className="bg-card sticky top-0">
                   <tr className="border-b text-left">
-                    <th className="bg-background sticky start-0 z-10 p-3">
+                    <th className="bg-card sticky start-0 z-10 p-3">
                       {t("skills_runtime_models_model")}
                     </th>
                     <th className="p-3 text-right">{t("skills_runtime_models_input_window")}</th>
@@ -323,7 +323,7 @@ function PolicyEditor({
                 <tbody>
                   {modelProjections.models.map((model) => (
                     <tr key={model.completion_model_id} className="border-b last:border-0">
-                      <td className="bg-background sticky start-0 p-3 font-medium">
+                      <td className="bg-card sticky start-0 p-3 font-medium">
                         {model.nickname ?? model.name}
                         {model.nickname && (
                           <span className="text-muted-foreground block text-xs">{model.name}</span>

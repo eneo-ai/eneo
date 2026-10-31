@@ -535,7 +535,7 @@ export function SkillBindingsEditor({
                     <label className="flex max-w-xs flex-col gap-1 text-sm">
                       {t("skills_activation_mode_label", { name })}
                       <select
-                        className="border-input bg-background h-9 rounded-md border px-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
+                        className="border-input h-9 rounded-md border bg-transparent px-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                         value={binding.activation_mode ?? "always"}
                         disabled={
                           !canEdit ||

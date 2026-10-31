@@ -652,7 +652,7 @@ export function CrawlerPage() {
                 idKey="id"
                 aria-labelledby={tabId(view)}
                 pinnedColumn="website"
-                className="min-w-[960px]"
+                className="min-w-[960px] [--table-sticky-background:var(--color-ax-surface)]"
               />
             )
           ) : null}

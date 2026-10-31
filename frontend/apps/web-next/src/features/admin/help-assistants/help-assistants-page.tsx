@@ -243,7 +243,7 @@ export function HelpAssistantsPage() {
       <p className="text-muted-foreground max-w-3xl">{t("admin_help_assistants_page_intro")}</p>
 
       {roles.length === 0 ? (
-        <div className="text-muted-foreground rounded-md border border-dashed px-5 py-10 text-center">
+        <div className="text-muted-foreground border-ax-border-strong rounded-md border border-dashed px-5 py-10 text-center">
           {t("admin_help_assistants_roles_empty")}
         </div>
       ) : (
@@ -256,7 +256,7 @@ export function HelpAssistantsPage() {
             onChange={(event) => setFilter(event.target.value)}
           />
           {filteredRoles.length === 0 ? (
-            <div className="text-muted-foreground rounded-md border border-dashed px-5 py-10 text-center">
+            <div className="text-muted-foreground border-ax-border-strong rounded-md border border-dashed px-5 py-10 text-center">
               {t("admin_help_assistants_filter_empty")}
             </div>
           ) : (

@@ -187,7 +187,7 @@ function NotificationPreferences({
                       key={day}
                       label={t("api_keys_notifications_add_day", { days: day })}
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       isDisabled={!parsedDays}
                       isLoading={updateDays.isPending}
                       isInterruptible

@@ -357,7 +357,7 @@ export function OrganizationSkillAdoption({
                 <label className="flex items-center gap-2 text-sm">
                   {t("organization_skills_adoption_filter_kind_label")}
                   <select
-                    className="bg-background rounded-md border p-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
+                    className="rounded-md border bg-transparent p-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                     value={kind}
                     onChange={(event) => {
                       setKind(event.target.value as KindFilter);
@@ -374,7 +374,7 @@ export function OrganizationSkillAdoption({
                 <label className="flex items-center gap-2 text-sm">
                   {t("organization_skills_adoption_filter_status_label")}
                   <select
-                    className="bg-background rounded-md border p-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
+                    className="rounded-md border bg-transparent p-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                     value={drift}
                     onChange={(event) => {
                       setDrift(event.target.value as DriftFilter);
@@ -433,7 +433,7 @@ export function OrganizationSkillAdoption({
                 </div>
               )}
               {items.length === 0 ? (
-                <p className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
+                <p className="text-muted-foreground border-ax-border-strong rounded-lg border border-dashed p-8 text-center text-sm">
                   {search || kind !== "all" || drift !== "all"
                     ? t("organization_skills_adoption_filtered_empty")
                     : t("organization_skills_adoption_resources_empty")}

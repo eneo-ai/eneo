@@ -165,7 +165,7 @@ export function ModulesPage({ title }: { title: string }) {
         <QueryStateBoundary queries={[installations, serviceKeys]} rows={2} height={48}>
           {() =>
             (installations.data ?? []).length === 0 ? (
-              <div className="rounded-lg border border-dashed px-6 py-10 text-center">
+              <div className="border-ax-border-strong rounded-lg border border-dashed px-6 py-10 text-center">
                 <p className="font-medium">{t("module_admin_empty_title")}</p>
                 <p className="text-muted-foreground mt-1 text-sm">
                   {t("module_admin_empty_description")}
@@ -301,7 +301,7 @@ export function ModulesPage({ title }: { title: string }) {
               }}
               required
               disabled={saving || loading}
-              className="bg-background border-input focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-base focus-visible:ring-2 focus-visible:outline-none pointer-coarse:min-h-11 md:pointer-fine:text-sm"
+              className="border-input focus-visible:ring-ring h-9 w-full rounded-md border bg-transparent px-3 text-base focus-visible:ring-2 focus-visible:outline-none pointer-coarse:min-h-11 md:pointer-fine:text-sm"
             >
               <option value="" disabled>
                 {t("module_admin_service_key_placeholder")}
