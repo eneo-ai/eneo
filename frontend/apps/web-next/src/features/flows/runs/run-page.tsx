@@ -22,7 +22,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { PHONE_QUERY, useMediaMatch, usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { CopyableValue } from "@/features/chat/debug-section";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
@@ -109,7 +109,11 @@ function RunResult({ flowId, run }: { flowId: string; run: RunDetail }) {
   if (!result) {
     return (
       <p className="text-ax-text-secondary text-sm">
-        {run.status === "completed" ? t("flow_runs_result_none") : t("flow_runs_result_pending")}
+        {run.status === "completed"
+          ? t("flow_runs_result_none")
+          : run.status === "failed" || run.status === "cancelled"
+            ? t("flow_runs_result_none_stopped")
+            : t("flow_runs_result_pending")}
       </p>
     );
   }
@@ -241,8 +245,19 @@ function FoldSection({
   if (!phone) return <Section title={title}>{children}</Section>;
   return (
     <section aria-label={title} className="border-ax-border border-t pt-1">
-      <Collapsible trigger={title} defaultIsOpen={defaultOpen} className="w-full">
-        <div className="pt-2 pb-1">{children}</div>
+      <Collapsible
+        // A thumb's height, not the text's.
+        trigger={
+          <span className="inline-flex min-h-6 items-center pointer-coarse:min-h-11">{title}</span>
+        }
+        defaultIsOpen={defaultOpen}
+        className="w-full"
+      >
+        <div className="pt-2 pb-1">
+          {/* The section's heading, so what is inside does not read as part of the section above. */}
+          <h2 className="sr-only">{title}</h2>
+          {children}
+        </div>
       </Collapsible>
     </section>
   );
@@ -267,6 +282,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   // A phone has the space's header above the page already: no breadcrumbs here, a narrower
   // gutter, and the sections after the result folded.
   const phone = usePhoneScreen();
+  // The space's phone header stands in for the breadcrumbs below 768 px; sideways, the tablet's does not.
+  const narrow = useMediaMatch(PHONE_QUERY);
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const [clock] = useState(() => createPollClock());
   const [notice, setNotice] = useState<Notice | null>(null);
@@ -490,7 +507,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           title={title}
           headingRef={headingRef}
           breadcrumbs={
-            phone
+            narrow
               ? undefined
               : [
                   { label: spaceName, href: spaceLandingHref(sections, routeId) },

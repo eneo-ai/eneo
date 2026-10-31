@@ -1728,7 +1728,28 @@ describe("FlowRunPage on a phone", () => {
     act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
     expect(screen.getByRole("button", { name: messages.flow_runs_steps_heading })).toBe(steps);
     expect(steps.getAttribute("aria-expanded")).toBe("true");
-    expect(screen.queryByRole("link", { name: "Flöden" })).toBeNull();
+    // The tablet's chrome has no flow crumb, so the page keeps its own.
+    expect(screen.getByRole("link", { name: "Flöden" })).toBeTruthy();
+  });
+
+  it("gives each fold its own heading, so what is inside does not read as part of the result", async () => {
+    setViewport("phone");
+    answerRun(makeRunSummary());
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_runs_steps_heading }));
+    expect(
+      screen.getByRole("heading", { level: 2, name: messages.flow_runs_steps_heading })
+    ).toBeTruthy();
+  });
+
+  it("does not promise a result that will show when a failed run is done", async () => {
+    setViewport("phone");
+    const failed = makeRunSummary({ status: "failed" });
+    answerRun(failed, makeRunDetail({ ...failed, result: null }));
+    renderRun();
+    expect(await screen.findByText(messages.flow_runs_result_none_stopped)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_result_pending)).toBeNull();
   });
 
   it("has no breadcrumbs, and keeps them from a tablet up", async () => {

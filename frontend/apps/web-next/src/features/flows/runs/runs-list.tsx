@@ -101,11 +101,11 @@ function RunLink({ id, run, href }: { id: string; run: RunSummary; href: string 
   const time = useClientTimeText(startedAt, "date_time");
   const label = run.run_label?.trim();
   const linkClass =
-    "text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center font-medium pointer-coarse:min-h-11 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2";
+    "text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 max-w-full items-center font-medium pointer-coarse:min-h-11 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2";
   if (label) {
     return (
       <span className="flex min-w-0 flex-col items-start">
-        <Link id={id} href={href} className={`${linkClass} break-words`}>
+        <Link id={id} href={href} className={`${linkClass} [overflow-wrap:anywhere]`}>
           {label}
         </Link>
         <span className="text-ax-text-secondary text-xs">
@@ -455,7 +455,7 @@ export function FlowRunsList({
               ? t("flow_run_journey_search_empty")
               : status
                 ? t("flow_run_extras_status_empty")
-                : publishedVersion === null
+                : publishedVersion === null && !phone
                   ? t("flow_runs_empty_description_unpublished")
                   : t("flow_runs_empty_description")
           }
