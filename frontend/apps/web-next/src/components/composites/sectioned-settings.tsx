@@ -38,8 +38,11 @@ export type SettingsSection = {
 
 /** What a phone's settings index needs (decision 21): its page bar. */
 export type SettingsPhoneIndex = {
-  /** The list the resource sits in: where the index's back link goes. */
-  parent: { label: string; href: string };
+  /**
+   * The list the resource sits in: where the index's back link goes. Without it the index has no
+   * page bar of its own, for a page whose frame already supplies one (a space's settings).
+   */
+  parent?: { label: string; href: string };
   /** The resource's name: the bar's title, and the page's h1 on a phone. */
   title: string;
   /** The index bar's actions ("Testa"). */
@@ -347,7 +350,7 @@ function SettingsLayout({
                 </span>
               }
             />
-          ) : (
+          ) : views.phone.parent ? (
             <PageBar
               until="md"
               parent={views.phone.parent}
@@ -358,7 +361,7 @@ function SettingsLayout({
                 views.phone.actions ? <span className="pe-2.5">{views.phone.actions}</span> : null
               }
             />
-          )}
+          ) : null}
           {/* The header is the tablet's. A phone shows the name in the bar,
               the h1 for assistive technology, and the save state: here on
               the index, in the bar on a section, where it stays in view. */}

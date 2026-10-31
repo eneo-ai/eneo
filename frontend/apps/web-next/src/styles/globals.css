@@ -1196,6 +1196,14 @@
       display: none !important;
     }
   }
+  /* A phone's space settings open a section as a screen of its own, with a page bar back to
+     the index: the space's bar above gives way, so two bars do not stack. */
+  @media (width < 48rem) {
+    main:has([data-editor-view="section"]) [data-phone-page-bar]:not([data-editor-view] *) {
+      /* !important: the bar sets display through a utility (grid), a later layer. */
+      display: none !important;
+    }
+  }
   /* A dialog with a text field hangs from the top on a touch screen instead of
      centring: the software keyboard rises over the lower half, and a centred
      dialog's field, and the buttons under it, end up behind it. The margin

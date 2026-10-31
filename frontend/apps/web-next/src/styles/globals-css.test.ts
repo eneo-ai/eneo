@@ -243,6 +243,19 @@ describe("globals.css", () => {
     expect(bars[0]![1]).toEqual({ display: "none" });
   });
 
+  it("hides the space's page bar on a phone while a settings section has its own", () => {
+    const rules = [...declarationsOf("components", "(width < 48rem)").entries()].filter(
+      ([selector]) => selector.includes('[data-editor-view="section"]')
+    );
+    expect(rules).toHaveLength(1);
+    const [selector, declarations] = rules[0]!;
+    // Only the bar outside the settings view: a section's own bar is inside it.
+    expect(selector).toBe(
+      'main:has([data-editor-view="section"]) [data-phone-page-bar]:not([data-editor-view] *)'
+    );
+    expect(declarations).toEqual({ display: "none" });
+  });
+
   it("hangs a dialog with a text field from the top on touch, under a dvh cap", () => {
     const rules = [...declarationsOf("components", "(pointer: coarse)").entries()].filter(
       ([selector]) => selector.startsWith(".astryx-dialog:has(")

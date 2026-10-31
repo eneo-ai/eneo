@@ -54,6 +54,7 @@ import {
 import { mcpServersQueryOptions } from "@/features/admin/mcp/mcp";
 import { parseRetentionDays } from "@/features/spaces/retention-days";
 import { invalidateSpaces, invalidateSpacesList, type Space } from "@/features/spaces/space";
+import { editorSummaries } from "@/features/spaces/editor-summaries";
 import { useSpace } from "@/features/spaces/use-space";
 import { PageHeader } from "@/components/composites/page-header";
 import {
@@ -809,16 +810,30 @@ function SpaceCapabilitiesSection() {
 export function SpaceSettings() {
   const t = useTranslations();
   const { space, can } = useSpace();
+  const summary = editorSummaries(t);
   const isOrgSpace = space.organization;
   const showDanger = !isOrgSpace && can("delete", "space");
+  // A phone's index lists the sections under these headings (decision 21).
+  const own = t("space_settings_group_space");
+  const model = t("editor_group_model");
+  const access = t("editor_group_access");
   const sections: SettingsSection[] = [
     ...(!isOrgSpace
       ? [
-          { id: "general", label: t("general"), icon: SlidersHorizontal, node: <GeneralSection /> },
+          {
+            id: "general",
+            label: t("general"),
+            icon: SlidersHorizontal,
+            group: own,
+            summary: summary.description(space.description),
+            node: <GeneralSection />
+          },
           {
             id: "security",
             label: t("security_and_privacy"),
             icon: ShieldCheck,
+            group: own,
+            summary: summary.retention(space.data_retention_days),
             node: <SecuritySection />
           }
         ]
@@ -827,23 +842,45 @@ export function SpaceSettings() {
       id: "models",
       label: t("space_settings_models_title"),
       icon: Bot,
+      group: model,
       // Pending model overrides belong to one space; remount when navigating.
       node: <ModelsSection key={space.id} />
     },
-    { id: "tools", label: t("space_settings_tools_title"), icon: Plug, node: <ToolsSection /> },
+    {
+      id: "tools",
+      label: t("space_settings_tools_title"),
+      icon: Plug,
+      group: model,
+      node: <ToolsSection />
+    },
     ...(!isOrgSpace
       ? [
           {
             id: "capabilities",
             label: t("capabilities"),
             icon: Sparkles,
+            group: model,
             node: <SpaceCapabilitiesSection />
           }
         ]
       : []),
-    { id: "api-keys", label: t("api_keys"), icon: KeyRound, node: <SpaceApiKeysSection /> },
+    {
+      id: "api-keys",
+      label: t("api_keys"),
+      icon: KeyRound,
+      group: access,
+      node: <SpaceApiKeysSection />
+    },
     ...(showDanger
-      ? [{ id: "danger", label: t("danger_zone"), icon: TriangleAlert, node: <DangerSection /> }]
+      ? [
+          {
+            id: "danger",
+            label: t("danger_zone"),
+            icon: TriangleAlert,
+            group: access,
+            node: <DangerSection />
+          }
+        ]
       : [])
   ];
 
@@ -852,6 +889,9 @@ export function SpaceSettings() {
       <SectionedSettings
         navigationLabel={t("settings")}
         sections={sections}
+        // The space's own page bar sits above the index (a phone's settings are a page of the
+        // space, not a pushed screen), so the index has none; a section has one back to it.
+        phone={{ title: t("settings") }}
         header={
           <PageHeader
             headingLevel={2}

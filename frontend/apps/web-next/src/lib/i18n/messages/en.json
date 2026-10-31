@@ -5725,6 +5725,7 @@
   "space_filter_files_label": "Filter files",
   "space_filter_integrations_label": "Filter integrations",
   "space_list_description": "Shared spaces for teams and areas of work appear here. Your personal space and the organization space are separate in the menu.",
+  "space_settings_group_space": "The space",
   "space_settings_models_title": "Models",
   "space_settings_models_description": "Choose which models this space can use for conversations, knowledge and audio.",
   "space_settings_chat_models": "Chat models",
