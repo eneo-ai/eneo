@@ -10,6 +10,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
+import { queuePartnerUpdate } from "./partner-updates";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -204,6 +205,41 @@ function ask(question: string) {
 }
 
 describe("ChatView streaming an answer", () => {
+  it("says that an answer is coming when the request goes, not while it waits for a model save", async () => {
+    spies.mode = "answer";
+    let release!: () => void;
+    const save = queuePartnerUpdate(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+    try {
+      renderInApp(<Harness />);
+      ask("Vilken gräns gäller?");
+
+      // Waiting behind the save: nothing has been sent, so nothing is announced.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(spies.sent).toHaveLength(0);
+      expect(spies.announce).not.toHaveBeenCalledWith("Assistenten skriver ett svar");
+
+      await act(async () => {
+        release();
+        await save;
+      });
+      await waitFor(() => expect(spies.sent).toHaveLength(1));
+      expect(
+        spies.announce.mock.calls.filter(([text]) => text === "Assistenten skriver ett svar")
+      ).toHaveLength(1);
+    } finally {
+      // The save queue is module state: never leave it waiting for the next test.
+      release();
+      await save;
+    }
+  });
+
   it("renders the answer, announces it once, reports the session and asks for a title", async () => {
     spies.mode = "answer";
     const onSessionCreated = vi.fn();

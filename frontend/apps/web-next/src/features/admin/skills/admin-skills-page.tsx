@@ -93,9 +93,10 @@ export function AdminSkillsPage() {
           )
         }
       </QueryStateBoundary>
-      {/* Once the policy has loaded, with the editor: shown first, it sat in view and
-          was pushed off the screen when the editor arrived above it (layout shift). */}
-      {!policy.isPending && (
+      {/* With the editor, not before it: shown first, it sat in view and was pushed off the
+          screen when the editor (which waits for the policy and the model projections)
+          arrived above it (layout shift). A failed policy still leaves the catalogue. */}
+      {!policy.isPending && (policy.isError || !projections.isPending) && (
         <SettingsGroup
           id="skill-catalogue"
           title={t("admin_skills_catalogue_title")}

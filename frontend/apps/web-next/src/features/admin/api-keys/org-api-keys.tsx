@@ -143,6 +143,14 @@ export function OrgApiKeysPage() {
         })
       )
   });
+  // The settings below the keys show once the keys, or the lookup that replaced them, have
+  // settled, and stay: tied to the list alone they never came back when a lookup disabled it.
+  const keysSettled =
+    lookup === null
+      ? !list.isPending
+      : lookup.status !== "pending" && (foundId === null || !found.isPending);
+  const [settingsReady, setSettingsReady] = useState(false);
+  if (keysSettled && !settingsReady) setSettingsReady(true);
 
   /**
    * Applies the filters; a whole key is looked up first. A retry keeps the
@@ -324,7 +332,7 @@ export function OrgApiKeysPage() {
 
       {/* After the list: shown while it loads, they sat in view and were pushed
           off the screen when the rows arrived (layout shift). */}
-      {!list.isPending && (
+      {settingsReady && (
         <>
           <SettingsGroup title={t("api_keys_admin_runtime_settings_title")}>
             <ExpiryNotificationsSwitch />

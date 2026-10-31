@@ -177,6 +177,40 @@ describe("OrgApiKeysPage", () => {
     expect(JSON.stringify(api.GET.mock.calls)).not.toContain(secret);
   });
 
+  it("keeps the settings below the keys when the list failed and a lookup took its place", async () => {
+    serve();
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/admin/api-keys"
+        ? Promise.resolve({
+            error: { message: "Down" },
+            response: new Response("{}", { status: 503 })
+          })
+        : path === "/api/v1/admin/api-keys/{id}"
+          ? ok({ ...apiKey, name: "Hittad nyckel" })
+          : path === "/api/v1/audit/config/actions"
+            ? ok({ actions: [] })
+            : ok({ items: [] })
+    );
+    renderInApp(<OrgApiKeysPage />, {
+      appContext: testAppContext({
+        permissions: ["admin"],
+        settings: { api_key_expiry_notifications: true }
+      })
+    });
+    await screen.findByRole("button", { name: /Försök igen/ });
+    // The settings do not depend on the keys, and show once the keys have settled.
+    expect(await screen.findByText("API-nyckel runtime-inställningar")).toBeTruthy();
+
+    api.POST.mockReturnValue(ok({ api_key: { id: "key-9" }, match_reason: "exact_secret" }));
+    fireEvent.change(screen.getByLabelText("Sök"), { target: { value: secret } });
+    fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
+    expect(await screen.findByText("Hittad nyckel")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Alla statusar" }));
+
+    // The list query is disabled in a lookup and never loaded: it must not take them away.
+    expect(screen.getByText("API-nyckel runtime-inställningar")).toBeTruthy();
+  });
+
   it("searches a whole key that matched nothing by its suffix", async () => {
     show();
     await screen.findByText("Ärendesystemet");
