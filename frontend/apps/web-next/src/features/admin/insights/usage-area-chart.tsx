@@ -99,18 +99,22 @@ export function UsageAreaChart({
           <SegmentedControlItem value="sessions" label={t("new_conversations")} />
           <SegmentedControlItem value="questions" label={t("new_questions")} />
         </SegmentedControl>
-        <SegmentedControl
-          label={t("insights_chart_grouping")}
-          value={grouping}
-          onChange={(value) =>
-            setGrouping(value === "hour" || value === "weekday" ? value : "date")
-          }
-          size="sm"
-        >
-          <SegmentedControlItem value="date" label={t("by_date")} />
-          <SegmentedControlItem value="weekday" label={t("by_weekday")} />
-          <SegmentedControlItem value="hour" label={t("by_hour")} />
-        </SegmentedControl>
+        <div className="max-w-full min-w-0">
+          <SegmentedControl
+            label={t("insights_chart_grouping")}
+            value={grouping}
+            onChange={(value) =>
+              setGrouping(value === "hour" || value === "weekday" ? value : "date")
+            }
+            size="sm"
+            layout="fill"
+            className="[&>button]:whitespace-normal"
+          >
+            <SegmentedControlItem value="date" label={t("by_date")} />
+            <SegmentedControlItem value="weekday" label={t("by_weekday")} />
+            <SegmentedControlItem value="hour" label={t("by_hour")} />
+          </SegmentedControl>
+        </div>
       </div>
       {!hasActivity ? (
         <div className="text-ax-text-secondary flex h-80 items-center justify-center text-sm">

@@ -174,6 +174,16 @@ for (const colorScheme of ["light", "dark"] as const) {
       expect(
         (await page.getByRole("radio", { name: "Efter timme", exact: true }).boundingBox())!.height
       ).toBeGreaterThanOrEqual(44);
+      for (const control of await page.getByRole("radio").all()) {
+        expect(
+          await control.evaluate((element) => {
+            const bounds = element.getBoundingClientRect();
+            const figure = element.closest("figure")!.getBoundingClientRect();
+            return bounds.left >= figure.left && bounds.right <= figure.right;
+          })
+        ).toBe(true);
+      }
+      await page.getByText("Ingen aktivitet", { exact: true }).scrollIntoViewIfNeeded();
       await page.screenshot({ path: testInfo.outputPath("phone-empty.png"), fullPage: true });
     });
   });
