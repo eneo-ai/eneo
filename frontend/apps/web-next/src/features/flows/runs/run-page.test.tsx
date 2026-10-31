@@ -818,6 +818,32 @@ describe("FlowRunPage", () => {
       expect(calls(DETAIL)).toHaveLength(1);
     });
 
+    it("docks the decision under the thumb on a phone, and leaves it in the page elsewhere", async () => {
+      setViewport("phone");
+      answerReview();
+      renderRun(["flows_view", "flows_manage"]);
+      const panel = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
+      const docked = within(panel).getByRole("group", { name: messages.flow_runs_review_actions });
+      expect(
+        within(docked).getByRole("button", { name: messages.flow_runs_review_approve })
+      ).toBeTruthy();
+      expect(
+        within(docked).getByRole("button", { name: messages.flow_runs_review_reject })
+      ).toBeTruthy();
+      cleanup();
+
+      setViewport("tablet-portrait");
+      answerReview();
+      renderRun(["flows_view", "flows_manage"]);
+      const wide = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
+      expect(
+        within(wide).queryByRole("group", { name: messages.flow_runs_review_actions })
+      ).toBeNull();
+      expect(
+        within(wide).getByRole("button", { name: messages.flow_runs_review_approve })
+      ).toBeTruthy();
+    });
+
     it("offers no decision once the review time has run out", async () => {
       answerReview(makeCheckpoint({ expires_at: "2026-10-01T00:00:00Z" }));
       renderRun(["flows_view", "flows_manage"]);

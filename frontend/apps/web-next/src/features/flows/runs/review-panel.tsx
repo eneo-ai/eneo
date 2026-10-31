@@ -13,7 +13,9 @@ import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { ClientTime } from "@/components/composites/client-time";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { EneoApiError } from "@/lib/api/errors";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { CitationSummary } from "./run-citations";
 import { focusFirstControl } from "./run-form-fields";
 import { JsonValue } from "./run-json";
@@ -204,6 +206,20 @@ function SpeakersEditor({
  * resumed. Refusals show where they belong, and a checkpoint someone else
  * changed is read again.
  */
+/**
+ * The row of decision buttons. On a phone it is docked at the bottom, under the
+ * thumb: a reviewer reads a long draft and the decision must not wait at its end.
+ */
+function DecisionBar({ children }: { children: React.ReactNode }) {
+  const t = useTranslations();
+  const phone = useMediaMatch(PHONE_QUERY);
+  return phone ? (
+    <DockedActions label={t("flow_runs_review_actions")}>{children}</DockedActions>
+  ) : (
+    <div className="flex flex-wrap gap-2">{children}</div>
+  );
+}
+
 export function ReviewPanel({
   checkpoint,
   mayReview,
@@ -574,7 +590,7 @@ export function ReviewPanel({
         <p className="text-ax-error m-0 text-sm">{approvalHeld}</p>
       ) : null}
       {options.canDecide && !rejecting ? (
-        <div className="flex flex-wrap gap-2">
+        <DecisionBar>
           <Button
             label={changed ? t("flow_runs_review_approve_changed") : t("flow_runs_review_approve")}
             variant="primary"
@@ -618,7 +634,7 @@ export function ReviewPanel({
               focusFirstControl(`${baseId}-reason`);
             }}
           />
-        </div>
+        </DecisionBar>
       ) : null}
       {options.canResume ? (
         <div className="flex flex-col gap-2">

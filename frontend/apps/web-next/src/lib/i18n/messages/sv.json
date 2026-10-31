@@ -8014,6 +8014,7 @@
   "flow_phone_not_published": "Flödet är inte publicerat och kan inte köras ännu.",
   "flow_edit_on_desktop": "Redigera flödet på dator.",
   "flow_phone_actions": "Åtgärder för flödet",
+  "flow_runs_review_actions": "Åtgärder för granskningen",
   "flows_new_title": "Nytt flöde",
   "flows_new_description": "Ge flödet ett namn. Stegen lägger du till på flödets sida, för hand eller i chatten.",
   "flows_new_description_hint": "Vad flödet gör och för vem, så att kollegor hittar rätt.",
