@@ -15,7 +15,7 @@ const entries = Object.values(baseline).flat();
  * to ship a screen that is worse on a phone, and shows up in review as this
  * line.
  */
-const BASELINE_BUDGET = 171;
+const BASELINE_BUDGET = 165;
 
 describe("the responsive contract's baseline", () => {
   it("never grows", () => {

@@ -240,9 +240,7 @@
  "phone-320|/admin/api-keys": [
   "outside a:/admin/users",
   "outside button[tab]:alla statusar",
-  "outside button[tab]:utgången",
-  "small button[radio]:",
-  "small input[combobox]:"
+  "outside button[tab]:utgången"
  ],
  "phone-320|/admin/crawler": [
   "outside button[tab]:schemaschema",
@@ -382,10 +380,7 @@
  "phone-390|/account/integrations": [],
  "phone-390|/account/password": [],
  "phone-390|/admin": [],
- "phone-390|/admin/api-keys": [
-  "small button[radio]:",
-  "small input[combobox]:"
- ],
+ "phone-390|/admin/api-keys": [],
  "phone-390|/admin/crawler": [
   "small button[combobox]:alla statusar",
   "small button[combobox]:idag"
@@ -494,10 +489,7 @@
  "phone-landscape|/account/integrations": [],
  "phone-landscape|/account/password": [],
  "phone-landscape|/admin": [],
- "phone-landscape|/admin/api-keys": [
-  "small button[radio]:",
-  "small input[combobox]:"
- ],
+ "phone-landscape|/admin/api-keys": [],
  "phone-landscape|/admin/crawler": [
   "small button[combobox]:alla statusar",
   "small button[combobox]:idag"
