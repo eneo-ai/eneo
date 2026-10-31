@@ -1293,8 +1293,10 @@ async def read_run(
     status, timing, tokens, error and result in short, and each step in one
     line: its status, duration, tokens, whether its prompt was cut, its
     long-material coverage, its diagnostics, its error and its review's
-    outcome, so you can say which step costs or failed and why. Section
-    "all" pages the whole run detail. Both are audited evidence reads."""
+    outcome, so you can say which step costs or failed and why; open_review
+    names a review still waiting for a decision and whether its result can
+    be edited. Section "all" pages the whole run detail. Both are audited
+    evidence reads."""
 
     async def operation(container, chat, request):
         from starlette.responses import Response

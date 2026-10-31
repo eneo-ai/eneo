@@ -215,6 +215,45 @@ describe("FlowRunCard", () => {
     expect(onAskChat).toHaveBeenCalledTimes(3);
   });
 
+  it("offers to correct the result while the run waits for review, and to say it is wrong once it ended", async () => {
+    answerRun(makeRunSummary({ status: "awaiting_review", finished_at: null }), [
+      { order: 1, label: "Skriv svar", status: "completed" }
+    ]);
+    const onAskChat = vi.fn();
+    renderInApp(
+      <FlowRunCard
+        flowId="flow-1"
+        flowName="Förslagstest A"
+        runId="run-1"
+        spaceRouteId="space-1"
+        onAskChat={onAskChat}
+      />
+    );
+    const card = await screen.findByRole("region", { name: "Körning av Förslagstest A" });
+    expect(await within(card).findByText(messages.flow_runs_status_awaiting_review)).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Rätta resultatet" }));
+    expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("Läs granskningen"));
+    expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("run-1"));
+    // The review, not the ended run's paths: nothing to explain or improve yet.
+    expect(within(card).queryByRole("button", { name: "Resultatet blev fel" })).toBeNull();
+    expect(within(card).queryByRole("button", { name: "Förbättra utifrån körningen" })).toBeNull();
+    cleanup();
+    answerRun(makeRunSummary(), [{ order: 1, label: "Skriv svar", status: "completed" }]);
+    renderInApp(
+      <FlowRunCard
+        flowId="flow-1"
+        flowName="Förslagstest A"
+        runId="run-1"
+        spaceRouteId="space-1"
+        onAskChat={onAskChat}
+      />
+    );
+    const ended = await screen.findByRole("region", { name: "Körning av Förslagstest A" });
+    fireEvent.click(await within(ended).findByRole("button", { name: "Resultatet blev fel" }));
+    expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("kommande körningar"));
+    expect(within(ended).queryByRole("button", { name: "Rätta resultatet" })).toBeNull();
+  });
+
   it("offers no explanation for a run that completed, and nothing without a chat to ask", async () => {
     answerRun(makeRunSummary(), [{ order: 1, label: "Sammanfatta", status: "completed" }]);
     const onAskChat = vi.fn();

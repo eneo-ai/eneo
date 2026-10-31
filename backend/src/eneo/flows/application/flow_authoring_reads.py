@@ -236,6 +236,10 @@ def _result_summary(result: Any) -> dict[str, Any] | None:
     return item
 
 
+_OPEN_REVIEW_STATES = frozenset({"awaiting_review", "edited"})
+"""The checkpoint states in which a review still waits for a decision."""
+
+
 def run_summary(
     detail: Any,
     steps: Sequence[Any],
@@ -246,13 +250,23 @@ def run_summary(
     timing, tokens, error and result in short, and each step in one line
     (status, duration, tokens, whether its prompt was cut, its long-material
     coverage, its diagnostics, its error, its review's latest outcome), so the
-    chat can say which step costs or failed and why. ``detail`` is the run's
-    audited detail, ``steps`` its step results, ``labels`` the step names of
-    the run's version by order and ``checkpoints`` its review checkpoints."""
+    chat can say which step costs or failed and why. ``open_review`` names the
+    checkpoint still waiting for a decision, and whether its step's review
+    lets the result be edited: that is the one place a run's content can
+    still be corrected. ``detail`` is the run's audited detail, ``steps`` its
+    step results, ``labels`` the step names of the run's version by order and
+    ``checkpoints`` its review checkpoints."""
     reviews: dict[int, Any] = {}
+    open_review: dict[str, Any] | None = None
     for checkpoint in checkpoints:
         # Ordered by step and attempt: the last one is the step's latest.
         reviews[checkpoint.step_order] = checkpoint
+        if _value(checkpoint.state) in _OPEN_REVIEW_STATES:
+            open_review = {
+                "step_order": checkpoint.step_order,
+                "checkpoint_id": str(checkpoint.id),
+                "editable": _value(getattr(checkpoint, "review_mode", None)) == "edit",
+            }
     tokens = getattr(detail, "token_usage", None)
     error = getattr(detail, "error", None)
     items: list[dict[str, Any]] = []
@@ -285,7 +299,12 @@ def run_summary(
                 else None
             ),
             "review": (
-                {"state": _value(review.state), "attempt": review.attempt_no}
+                {
+                    "state": _value(review.state),
+                    "attempt": review.attempt_no,
+                    "mode": _value(getattr(review, "review_mode", None)),
+                    "open": _value(review.state) in _OPEN_REVIEW_STATES,
+                }
                 if review is not None
                 else None
             ),
@@ -322,6 +341,7 @@ def run_summary(
             else None
         ),
         "result": _result_summary(getattr(detail, "result", None)),
+        "open_review": open_review,
         "steps": items,
     }
 

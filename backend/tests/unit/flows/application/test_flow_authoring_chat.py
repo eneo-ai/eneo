@@ -101,11 +101,24 @@ def test_the_instructions_tell_a_runs_kinds_of_failure_apart() -> None:
 
     assert "read it with read_run first" in instructions
     assert "A transient error never changes a prompt" in instructions
-    assert "correct this run's result through its review" in instructions
+    assert "For content, follow the correction rules below" in instructions
     assert "call a token impact an estimate" in instructions
     assert "offer it only for a transient error" in instructions
     assert "call it only after a yes" in instructions
     assert "the way is a new run once it is published, not a retry" in instructions
+
+
+def test_the_instructions_correct_content_in_the_run_or_in_the_instruction() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "correct this run's result, or change the instruction" in instructions
+    assert "Offer the first only while the run waits for review" in instructions
+    assert "a result of an ended run cannot be changed" in instructions
+    assert "call review_run with action edit only after a yes" in instructions
+    assert "never approve, reject or resume a review on your own" in instructions
+    assert "corrected by the person in the run's own transcript" in instructions
+    assert "this run stays as it is" in instructions
+    assert "say that, and offer both" in instructions
 
 
 def test_the_instructions_keep_every_secret_out_of_the_chat() -> None:

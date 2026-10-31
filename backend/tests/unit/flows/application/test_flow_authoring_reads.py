@@ -210,8 +210,12 @@ def test_a_run_summary_names_each_step_with_what_it_cost_and_how_it_ended():
         ),
     ]
     checkpoints = [
-        SimpleNamespace(step_order=1, attempt_no=1, state="rejected"),
-        SimpleNamespace(step_order=1, attempt_no=2, state="approved"),
+        SimpleNamespace(
+            id=uuid4(), step_order=1, attempt_no=1, state="rejected", review_mode="edit"
+        ),
+        SimpleNamespace(
+            id=uuid4(), step_order=1, attempt_no=2, state="approved", review_mode="edit"
+        ),
     ]
 
     summary = run_summary(
@@ -249,8 +253,10 @@ def test_a_run_summary_names_each_step_with_what_it_cost_and_how_it_ended():
         "coverage": None,
         "diagnostics": [],
         "error": None,
-        "review": {"state": "approved", "attempt": 2},
+        "review": {"state": "approved", "attempt": 2, "mode": "edit", "open": False},
     }
+    # No review waits for a decision: the run's content is what it is.
+    assert summary["open_review"] is None
     assert summary["steps"][1] == {
         "step_order": 2,
         "name": "Skriv svaret",
@@ -263,6 +269,71 @@ def test_a_run_summary_names_each_step_with_what_it_cost_and_how_it_ended():
         "diagnostics": [{"code": "material_left_out", "severity": "warning"}],
         "error": {"code": "flow_step_timeout", "message": "Step timed out."},
         "review": None,
+    }
+
+
+def test_a_run_summary_names_the_review_that_still_waits_and_whether_its_result_can_be_edited():
+    detail = SimpleNamespace(
+        id=uuid4(),
+        status="awaiting_review",
+        flow_version=1,
+        purpose="production",
+        started_at=_at(0),
+        finished_at=None,
+        token_usage=None,
+        error=None,
+        result=None,
+    )
+    step = SimpleNamespace(
+        step_order=1,
+        status="completed",
+        current_attempt_no=1,
+        started_at=_at(0),
+        finished_at=_at(0, 5),
+        num_tokens_input=1,
+        num_tokens_output=1,
+        effective_prompt_truncated=False,
+        long_material=None,
+        diagnostics=[],
+        error_code=None,
+        error_message=None,
+    )
+    checkpoint_id = uuid4()
+    waiting = SimpleNamespace(
+        id=checkpoint_id,
+        step_order=1,
+        attempt_no=1,
+        state="edited",
+        review_mode="edit",
+    )
+
+    summary = run_summary(detail, [step], {1: "Skriv svaret"}, [waiting])
+
+    # An edited review still waits for its decision, so the result can
+    # still be corrected there.
+    assert summary["open_review"] == {
+        "step_order": 1,
+        "checkpoint_id": str(checkpoint_id),
+        "editable": True,
+    }
+    assert summary["steps"][0]["review"] == {
+        "state": "edited",
+        "attempt": 1,
+        "mode": "edit",
+        "open": True,
+    }
+    # A review that only approves leaves the result as it is.
+    viewing = SimpleNamespace(
+        id=checkpoint_id,
+        step_order=1,
+        attempt_no=1,
+        state="awaiting_review",
+        review_mode="view",
+    )
+    assert run_summary(detail, [step], {}, [viewing])["open_review"] == {
+        "step_order": 1,
+        "checkpoint_id": str(checkpoint_id),
+        "editable": False,
     }
 
 

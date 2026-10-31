@@ -726,7 +726,15 @@ async def test_read_run_summarises_a_run_from_its_audited_reads(monkeypatch):
     monkeypatch.setattr(flow_run_steps_router, "get_flow_graph", graph)
     repo = container.flow_run_review_checkpoint_repo.return_value
     repo.list_review_checkpoints_for_run = AsyncMock(
-        return_value=[SimpleNamespace(step_order=1, attempt_no=1, state="approved")]
+        return_value=[
+            SimpleNamespace(
+                id=uuid4(),
+                step_order=1,
+                attempt_no=1,
+                state="approved",
+                review_mode="view",
+            )
+        ]
     )
     container.user.return_value = SimpleNamespace(tenant_id=uuid4())
 
@@ -748,9 +756,15 @@ async def test_read_run_summarises_a_run_from_its_audited_reads(monkeypatch):
             "coverage": None,
             "diagnostics": [],
             "error": None,
-            "review": {"state": "approved", "attempt": 1},
+            "review": {
+                "state": "approved",
+                "attempt": 1,
+                "mode": "view",
+                "open": False,
+            },
         }
     ]
+    assert summary["open_review"] is None
     assert result.structuredContent == {
         "flow_id": str(chat.flow_id),
         "run_id": str(run_id),

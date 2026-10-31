@@ -85,8 +85,11 @@ function resultText(run: RunDetail | undefined): string | null {
  * reads it, so the model does not have to wait for it), the result when it
  * is done, why it failed when it did, and the way to the run's own page.
  * Reopening the conversation shows the run as it ended. Once the run has
- * ended, "Förklara felet" and "Förbättra utifrån körningen" put a prepared
- * request about this run in the composer (`onAskChat`), never send it.
+ * ended, "Förklara felet", "Förbättra utifrån körningen" and "Resultatet
+ * blev fel" put a prepared request about this run in the composer
+ * (`onAskChat`), never send it; while it waits for review, "Rätta
+ * resultatet" asks the chat to propose the correction in the review, the
+ * one place a run's content can still change.
  */
 export function FlowRunCard({
   flowId,
@@ -288,6 +291,22 @@ export function FlowRunCard({
             variant="ghost"
             label={t("flows_run_card_improve")}
             onClick={() => onAskChat(t("flows_run_card_improve_request", { run: runId }))}
+          />
+        ) : null}
+        {onAskChat && status === "completed" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_wrong")}
+            onClick={() => onAskChat(t("flows_run_card_wrong_request", { run: runId }))}
+          />
+        ) : null}
+        {onAskChat && status === "awaiting_review" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_correct")}
+            onClick={() => onAskChat(t("flows_run_card_correct_request", { run: runId }))}
           />
         ) : null}
         {status && isCancellable(status) ? (
