@@ -39,7 +39,8 @@ describe("signed file URLs", () => {
 
   it.each([
     ["download", "/api/v1/files/file-1/download/"],
-    ["original", "/api/v1/files/file-1/original/download/"]
+    ["original", "/api/v1/files/file-1/original/download/"],
+    ["info-blob-original", "/api/v1/info-blobs/file-1/original/download/"]
   ] as const)("keeps only the %s path and its token, never the signing host", (kind, path) => {
     expect(proxiedDownloadPath(`http://backend:8000${path}?token=t`, "file-1", kind)).toBe(
       `${API_BASE}${path}?token=t`
@@ -54,7 +55,17 @@ describe("signed file URLs", () => {
     ["original", "http://backend:8000/api/v1/files/file-1/download/?token=t"],
     ["original", "http://backend:8000/api/v1/files/other/original/download/?token=t"],
     ["original", "http://backend:8000/api/v1/files/file-1/original/download/?token="],
-    ["original", "http://evil.example/steal?token=t"]
+    ["original", "http://evil.example/steal?token=t"],
+    ["info-blob-original", "http://backend:8000/api/v1/files/file-1/original/download/?token=t"],
+    [
+      "info-blob-original",
+      "http://backend:8000/api/v1/info-blobs/other/original/download/?token=t"
+    ],
+    [
+      "info-blob-original",
+      "http://backend:8000/api/v1/info-blobs/file-1/original/download/?token="
+    ],
+    ["info-blob-original", "http://evil.example/steal?token=t"]
   ] as const)("refuses for the %s kind: %s", (kind, url) => {
     expect(() => proxiedDownloadPath(url, "file-1", kind)).toThrow("Unexpected signed file URL");
   });

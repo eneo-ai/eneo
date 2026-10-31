@@ -253,7 +253,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
           </Button>
         </PageHeader>
       )}
-      <RuntimeStatusCard status={bundledTools.data?.runtime} />
+      {!embedded && <RuntimeStatusCard status={bundledTools.data?.runtime} />}
       <p className="text-muted-foreground max-w-2xl text-sm">{t("tools_functions_description")}</p>
       {notice && notice.purpose === null && (
         <p role="status" className="text-sm">
@@ -461,6 +461,14 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
           key={`${editing.purpose}:${editing.server?.id ?? "new"}`}
           purpose={editing.purpose}
           server={editing.server}
+          replacesDefault={
+            servers.find(
+              (source) =>
+                source.purpose === editing.purpose &&
+                source.is_enabled &&
+                source.audience !== "groups"
+            )?.name
+          }
           onClose={() => setEditing(null)}
           onSaved={(inactive) => {
             setEditing(null);

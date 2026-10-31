@@ -12,8 +12,20 @@ import { readFresh } from "@/lib/api/query";
 import { resourceTitle } from "@/lib/route-head";
 import { notFoundOn404 } from "@/lib/route-helpers";
 import { runtimeConfig } from "@/lib/runtime-config";
+import { readWebsiteContentSearch } from "@/features/knowledge/website-content-search";
+import { stringifySearch } from "@/lib/router/search";
 
 export const Route = createFileRoute("/_app/spaces/$spaceId/knowledge/websites/$websiteId")({
+  validateSearch: (search: Record<string, unknown>) => {
+    const { tab, prefix, q } = readWebsiteContentSearch(
+      new URLSearchParams(stringifySearch(search))
+    );
+    return {
+      tab: tab === "blobs" ? tab : undefined,
+      prefix: prefix || undefined,
+      q: q || undefined
+    };
+  },
   loader: {
     staleReloadMode: "blocking",
     handler: async ({ context, params }) => {

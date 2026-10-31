@@ -25,7 +25,9 @@ export async function signedFileUrl(
 
 const SIGNED_PATHS = {
   download: (fileId: string) => `/api/v1/files/${encodeURIComponent(fileId)}/download/`,
-  original: (fileId: string) => `/api/v1/files/${encodeURIComponent(fileId)}/original/download/`
+  original: (fileId: string) => `/api/v1/files/${encodeURIComponent(fileId)}/original/download/`,
+  "info-blob-original": (fileId: string) =>
+    `/api/v1/info-blobs/${encodeURIComponent(fileId)}/original/download/`
 };
 
 /**

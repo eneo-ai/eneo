@@ -19,6 +19,7 @@ import { navigateTo } from "@/lib/navigate-to";
 import { AccountProfile } from "@/features/account/account-profile";
 import { ChangePasswordCard } from "@/features/account/change-password";
 import { useCopyFormatLabel } from "@/features/account/copy-format";
+import { AccountVersions } from "./account-versions";
 
 /**
  * /account: below 1024 px, where the drawer is, Konto as one page (decision
@@ -47,7 +48,7 @@ export function AccountHome() {
  */
 function Konto() {
   const t = useTranslations();
-  const { user, tenant, federationStatus, links, versions, can } = useAppContext();
+  const { user, tenant, federationStatus, links, can } = useAppContext();
   const { enabled: whatsNewEnabled, hasUnseen } = useWhatsNew();
   const locale = useLocale();
   const { theme } = useTheme();
@@ -171,7 +172,7 @@ function Konto() {
           onClick={() => navigateTo("/logout")}
         />
         <p className="text-ax-text-secondary text-center text-sm">
-          {t("shell_versions", { frontend: versions.frontend, backend: versions.backend || "–" })}
+          <AccountVersions />
         </p>
       </div>
     </div>

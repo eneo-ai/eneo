@@ -1,29 +1,47 @@
 "use client";
 
-import { useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ExternalLink } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useAutosave, useAutosaveField } from "@/components/composites/use-autosave";
+import { useSetSaveStatus } from "@/components/composites/save-status";
+import {
+  useAutosave,
+  useAutosaveField,
+  useDirtySaveStatus
+} from "@/components/composites/use-autosave";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@astryxdesign/core/Switch";
+import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { MCP_KEY, type McpServer, type McpServerUpdatePayload, updateMcpServer } from "../mcp";
 import { initials } from "../mcp-helpers";
 import { TagInput } from "../tag-input";
+import { sendsCredentialOverPlainHttp } from "../credential-transport";
+import { catalogDraft, catalogProblems, CATALOG_LIMITS } from "../mcp-settings";
+import { CAPABILITIES } from "@/features/capabilities/capabilities";
+import { useSettingSwitch } from "@/features/admin/use-setting-switch";
+import { invalidateSpaces } from "@/features/spaces/space";
 
 const trim = (value: string) => value.trim();
 
 export function OverviewTab({ server }: { server: McpServer }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
+  const setSaveStatus = useSetSaveStatus();
+  const managed = server.http_auth_type === "internal" || server.http_auth_type === "bundled";
 
   const save = useCallback(
     async (body: McpServerUpdatePayload) => {
       await updateMcpServer(browserApi, server.id, body);
-      await queryClient.invalidateQueries({ queryKey: MCP_KEY });
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: MCP_KEY }),
+        invalidateSpaces(queryClient)
+      ]);
     },
     [server.id, queryClient]
   );
@@ -47,8 +65,35 @@ export function OverviewTab({ server }: { server: McpServer }) {
     key: "mcp-url",
     value: server.http_url,
     normalize: trim,
-    validate: (value) => value.length > 0,
+    validate: (value) =>
+      !managed && value.length > 0 && !sendsCredentialOverPlainHttp(server.http_auth_type, value),
     save: (value) => save({ http_url: value })
+  });
+  const urlProblem = !urlField.value.trim()
+    ? t("required_field")
+    : sendsCredentialOverPlainHttp(server.http_auth_type, urlField.value)
+      ? t("mcp_credential_requires_https")
+      : null;
+  const [forwardIdentity, setForwardIdentity] = useSettingSwitch(
+    `mcp-forward-identity:${server.id}`,
+    server.forward_identity ?? false,
+    (value) => save({ forward_identity: value }),
+    { onSaved: () => {} }
+  );
+  const [purpose, setPurpose] = useState<NonNullable<McpServerUpdatePayload["purpose"]> | null>(
+    null
+  );
+  const runPurpose = useAutosave("mcp-purpose-input");
+  useDirtySaveStatus(
+    "mcp-purpose-input",
+    Boolean(purpose && purpose !== (server.purpose ?? "general"))
+  );
+  const purposeSave = useMutation({
+    mutationFn: (purpose: NonNullable<McpServerUpdatePayload["purpose"]>) =>
+      runPurpose(async () => {
+        await save({ purpose });
+        setPurpose(null);
+      })
   });
 
   const iconField = useAutosaveField({
@@ -102,16 +147,98 @@ export function OverviewTab({ server }: { server: McpServer }) {
             onBlur={() => descriptionField.commit()}
           />
         </SettingsRow>
-        <SettingsRow title={t("url")} description={t("mcp_url_edit_hint")} htmlFor="mcp-url-input">
-          <Input
-            id="mcp-url-input"
-            type="url"
-            value={urlField.value}
-            aria-invalid={urlField.value.trim().length === 0}
-            onChange={(event) => urlField.setValue(event.target.value)}
-            onBlur={() => urlField.commit()}
-          />
-        </SettingsRow>
+        {!managed && (
+          <SettingsRow
+            title={t("url")}
+            description={t("mcp_url_edit_hint")}
+            htmlFor="mcp-url-input"
+          >
+            <Input
+              id="mcp-url-input"
+              type="url"
+              value={urlField.value}
+              {...fieldProblemProps("mcp-url-input", urlProblem)}
+              onChange={(event) => urlField.setValue(event.target.value)}
+              onBlur={() => urlField.commit()}
+            />
+            <FieldProblem id="mcp-url-input" problem={urlProblem} />
+          </SettingsRow>
+        )}
+        {!managed && (
+          <SettingsRow title={t("mcp_purpose_label")} htmlFor="mcp-purpose-input">
+            <select
+              id="mcp-purpose-input"
+              className="border-input min-h-11 w-full rounded-md border bg-transparent px-2 text-base"
+              value={purpose ?? server.purpose ?? "general"}
+              disabled={purposeSave.isPending}
+              onChange={(event) => {
+                const value = event.target.value;
+                if (
+                  value === "general" ||
+                  CAPABILITIES.some((capability) => capability.purpose === value)
+                ) {
+                  setPurpose(value as NonNullable<McpServerUpdatePayload["purpose"]>);
+                  if (value === (server.purpose ?? "general"))
+                    setSaveStatus?.("mcp-purpose-input", null);
+                }
+              }}
+            >
+              <option value="general">{t("mcp_purpose_general_tools")}</option>
+              {CAPABILITIES.map(({ purpose }) => (
+                <option key={purpose} value={purpose}>
+                  {t(purpose)}
+                </option>
+              ))}
+            </select>
+            <p className="text-muted-foreground text-sm">
+              {purpose && purpose !== (server.purpose ?? "general")
+                ? purpose === "general"
+                  ? t("mcp_purpose_demote_hint")
+                  : t("mcp_purpose_promote_hint", { capability: t(purpose) })
+                : t("mcp_purpose_hint")}
+            </p>
+            {purpose && purpose !== (server.purpose ?? "general") && (
+              <div className="flex gap-2">
+                <Button
+                  aria-busy={purposeSave.isPending || undefined}
+                  onClick={() => purposeSave.mutate(purpose)}
+                >
+                  {t("save")}
+                </Button>
+                <Button
+                  variant="ghost"
+                  disabled={purposeSave.isPending}
+                  onClick={() => {
+                    setPurpose(null);
+                    setSaveStatus?.("mcp-purpose-input", null);
+                  }}
+                >
+                  {t("cancel")}
+                </Button>
+              </div>
+            )}
+          </SettingsRow>
+        )}
+        {!managed && (
+          <SettingsRow title={t("mcp_forward_identity")}>
+            <Switch
+              label={t("mcp_forward_identity")}
+              value={forwardIdentity}
+              onChange={setForwardIdentity}
+              description={t(
+                server.purpose && server.purpose !== "general"
+                  ? `${server.purpose}_forward_identity_hint`
+                  : "mcp_forward_identity_hint"
+              )}
+            />
+          </SettingsRow>
+        )}
+      </SettingsGroup>
+
+      <SettingsGroup title={t("mcp_catalog_safety")} description={t("mcp_catalog_safety_hint")}>
+        {CATALOG_LIMITS.map((limit) => (
+          <CatalogLimitRow key={limit.field} server={server} limit={limit} save={save} />
+        ))}
       </SettingsGroup>
 
       <SettingsGroup title={t("mcp_section_presentation")}>
@@ -161,5 +288,47 @@ export function OverviewTab({ server }: { server: McpServer }) {
         </SettingsRow>
       </SettingsGroup>
     </div>
+  );
+}
+
+function CatalogLimitRow({
+  server,
+  limit,
+  save
+}: {
+  server: McpServer;
+  limit: (typeof CATALOG_LIMITS)[number];
+  save: (body: McpServerUpdatePayload) => Promise<void>;
+}) {
+  const t = useTranslations();
+  const { field, api, label, hint, max, unit } = limit;
+  const valid = (value: string) =>
+    catalogProblems({ ...catalogDraft(server), [field]: Number(value) }).every(
+      (problem) => problem.field !== field
+    );
+  const input = useAutosaveField({
+    key: `mcp-${field}`,
+    value: String(catalogDraft(server)[field]),
+    validate: valid,
+    save: (value) => save({ [api]: Number(value) * unit })
+  });
+  const problem = valid(input.value)
+    ? null
+    : t("form_problem_whole_number_between", { min: 1, max });
+  return (
+    <SettingsRow title={t(label)} description={t(hint)} htmlFor={`mcp-${field}`}>
+      <Input
+        id={`mcp-${field}`}
+        type="number"
+        min={1}
+        max={max}
+        step={1}
+        value={input.value}
+        onChange={(event) => input.setValue(event.target.value)}
+        onBlur={() => input.commit()}
+        {...fieldProblemProps(`mcp-${field}`, problem)}
+      />
+      <FieldProblem id={`mcp-${field}`} problem={problem} />
+    </SettingsRow>
   );
 }

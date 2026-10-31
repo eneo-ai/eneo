@@ -406,6 +406,8 @@ export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: Tab
     refetchInterval: pollSpaceFast ? ACTIVE_CRAWL_REFRESH_MS : IDLE_CRAWL_REFRESH_MS
   });
   const visibleWebsites = filterWebsites(websites, filter);
+  const canSelect =
+    canCreate || websites.some((website) => website.permissions?.includes("delete"));
   // Only what is on screen counts as selected: rows the filter hides and
   // websites that were deleted meanwhile are never synced.
   const selectedIds = visibleWebsites
@@ -484,6 +486,7 @@ export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: Tab
       } else {
         if (result.stopped > 0)
           toast.success(t("crawls_stop_requested", { count: result.stopped }));
+        else toast.info(t("crawls_not_running"));
         setSelected(new Set());
       }
       setStopTargets(null);
@@ -717,7 +720,7 @@ export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: Tab
               <WebsitesTable
                 websites={rows}
                 sortConfig={sortConfig}
-                selectable={canCreate}
+                selectable={canSelect}
                 selectedKeys={selected}
                 setSelectedKeys={setSelected}
                 name={headingId ? { "aria-labelledby": headingId } : name}

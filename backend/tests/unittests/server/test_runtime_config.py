@@ -115,6 +115,18 @@ def test_help_center_requires_flag(test_settings: Settings):
     assert rejected.help_center_url is None
 
 
+def test_help_center_flag_uses_default_unless_operator_clears_it(
+    test_settings: Settings,
+):
+    shown = build_runtime_config(_settings(test_settings, show_help_center=True))
+    cleared = build_runtime_config(
+        _settings(test_settings, show_help_center=True, help_center_url="")
+    )
+
+    assert shown.help_center_url == "https://www.eneo.ai/en/external-support-assistant"
+    assert cleared.help_center_url is None
+
+
 @pytest.mark.parametrize(
     ("base_url", "origin"),
     [

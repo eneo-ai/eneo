@@ -18,9 +18,9 @@ import { Table } from "@/components/astryx/table";
 import { useRecentInfoBlobIds } from "@/features/jobs/recent-results";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, FileText, Pencil, SearchX, Trash2 } from "lucide-react";
+import { Check, Copy, Download, FileText, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { SourceMetadataList, type SourceMetadataEntry } from "./source-metadata";
@@ -52,6 +52,9 @@ import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { matchesSearch } from "@/lib/search";
 import type { InfoBlob } from "./knowledge";
 import { TableFrame } from "@/components/composites/table-frame";
+import { saveBlob, saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
+import { signedInfoBlobOriginalUrl } from "./signed-original-url";
+import { ClientTime } from "@/components/composites/client-time";
 
 const PAGE_SIZE = 100;
 
@@ -73,7 +76,7 @@ export function BlobPreviewDialog({
   onOpenChange,
   properties = []
 }: {
-  blob: { id: string; metadata: { title?: string | null } };
+  blob: { id: string; metadata: { title?: string | null; url?: string | null } };
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The document's source properties (SharePoint columns), shown above its text. */
@@ -82,22 +85,54 @@ export function BlobPreviewDialog({
   const t = useTranslations();
   const content = useQuery({
     queryKey: ["info-blobs", blob.id],
-    queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } } })),
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } }, signal })
+      ),
     enabled: open
   });
   const data = content.data;
   const { copy, isCopied } = useCopy();
+  const [downloading, setDownloading] = useState(false);
+  const downloadRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => downloadRequest.current?.abort(), [blob.id, open]);
 
   async function copyText() {
     if (data?.text) await copy(data.text);
+  }
+
+  function downloadText() {
+    if (!data?.text) return;
+    const title = blob.metadata.title || t("untitled");
+    saveBlob(
+      new Blob([data.text], { type: "text/plain;charset=utf-8" }),
+      title.endsWith(".txt") ? title : `${title}.txt`
+    );
+  }
+
+  async function downloadOriginal() {
+    if (downloadRequest.current && !downloadRequest.current.signal.aborted) return;
+    const request = new AbortController();
+    downloadRequest.current = request;
+    setDownloading(true);
+    try {
+      const url = await signedInfoBlobOriginalUrl(browserApi, blob.id, request.signal);
+      if (!request.signal.aborted) saveUrl(url, blob.metadata.title ?? "");
+    } catch (error) {
+      if (!request.signal.aborted) toastDownloadError(error, t);
+    } finally {
+      if (downloadRequest.current === request) {
+        downloadRequest.current = null;
+        setDownloading(false);
+      }
+    }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{blob.metadata.title ?? blob.id}</DialogTitle>
+          <DialogTitle>{blob.metadata.title || blob.metadata.url || t("untitled")}</DialogTitle>
         </DialogHeader>
         <SourceMetadataList entries={properties} />
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-4 text-sm">
@@ -110,11 +145,26 @@ export function BlobPreviewDialog({
             {(blobContent) => <Streamdown>{blobContent.text ?? ""}</Streamdown>}
           </QueryStateBoundary>
         </div>
-        <DialogFooter>
+        <DialogFooter className="sm:flex-wrap">
+          <AstryxButton
+            label={t("download_extracted_text")}
+            icon={<Download aria-hidden="true" />}
+            onClick={downloadText}
+            isDisabled={!data?.text}
+          />
           <Button variant="outline" onClick={() => void copyText()} disabled={!data?.text}>
             {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
             {isCopied ? t("copied_to_clipboard") : t("copy_to_clipboard")}
           </Button>
+          {data?.original_available && (
+            <AstryxButton
+              label={downloading ? t("downloading") : t("download_original")}
+              icon={<Download aria-hidden="true" />}
+              isLoading={downloading}
+              isInterruptible
+              onClick={() => void downloadOriginal()}
+            />
+          )}
           <Button onClick={() => onOpenChange(false)}>{t("close")}</Button>
         </DialogFooter>
       </DialogContent>
@@ -215,6 +265,7 @@ function BlobActions({ blob }: { blob: InfoBlob }) {
 
 /** The file name opens a preview of its extracted text. */
 function BlobNameCell({ blob }: { blob: InfoBlob }) {
+  const t = useTranslations();
   const [showPreview, setShowPreview] = useState(false);
   return (
     <>
@@ -229,8 +280,15 @@ function BlobNameCell({ blob }: { blob: InfoBlob }) {
         >
           <FileText className="size-4" />
         </span>
-        <span className="break-words">{blob.metadata.title}</span>
+        <span className="break-words whitespace-normal">
+          {blob.metadata.title || blob.metadata.url || t("untitled")}
+        </span>
       </button>
+      {blob.metadata.url && (
+        <p className="text-ax-text-secondary mt-1 text-xs break-all whitespace-normal">
+          {blob.metadata.url}
+        </p>
+      )}
       {showPreview && (
         <BlobPreviewDialog blob={blob} open={showPreview} onOpenChange={setShowPreview} />
       )}
@@ -238,19 +296,22 @@ function BlobNameCell({ blob }: { blob: InfoBlob }) {
   );
 }
 
-type BlobSortKey = "name" | "size";
+type BlobSortKey = "name" | "created" | "size";
 
 function blobComparators(
   compare: (a: string, b: string) => number
 ): Record<BlobSortKey, TableSortComparator<InfoBlob>> {
   return {
-    name: (a, b) => compare(a.metadata.title ?? "", b.metadata.title ?? ""),
+    name: (a, b) =>
+      compare(a.metadata.title || a.metadata.url || "", b.metadata.title || b.metadata.url || ""),
+    created: (a, b) =>
+      (Date.parse(a.created_at ?? "") || 0) - (Date.parse(b.created_at ?? "") || 0),
     size: (a, b) => a.metadata.size - b.metadata.size
   };
 }
 
 /**
- * Files of a collection or website: a search box, name and size sortable by
+ * Files of a collection or website: a search box, name, created date and size sortable by
  * their headers (unsorted keeps the upload order), and pages of 100 (the
  * pager only shows when there is more than one). `labelledBy` names the table
  * after what the page shows it under: the collection's title or the website's
@@ -259,11 +320,15 @@ function blobComparators(
 export function BlobTable({
   blobs,
   canEdit,
-  labelledBy
+  labelledBy,
+  filterable = true,
+  paginate = true
 }: {
   blobs: InfoBlob[];
   canEdit: boolean;
   labelledBy: string;
+  filterable?: boolean;
+  paginate?: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -271,7 +336,9 @@ export function BlobTable({
   const [filter, setFilter] = useState("");
   const [page, setPage] = useState(1);
 
-  const filtered = blobs.filter((blob) => matchesSearch([blob.metadata.title], filter));
+  const filtered = blobs.filter((blob) =>
+    matchesSearch([blob.metadata.title, blob.metadata.url], filter)
+  );
   const comparators = useMemo(() => blobComparators(collator.compare), [collator]);
   const { sortedData, sortConfig } = useTableSortableState<InfoBlob, BlobSortKey>({
     data: filtered,
@@ -310,9 +377,17 @@ export function BlobTable({
     {
       key: "name",
       header: t("name"),
-      width: proportional(1),
+      width: proportional(1, { minWidth: 176 }),
       sortable: true,
       renderCell: (blob) => <BlobNameCell blob={blob} />
+    },
+    {
+      key: "created",
+      header: t("created"),
+      width: pixel(160),
+      sortable: true,
+      renderCell: (blob) =>
+        blob.created_at ? <ClientTime value={blob.created_at} format="date_time" /> : "—"
     },
     {
       key: "size",
@@ -332,27 +407,33 @@ export function BlobTable({
 
   return (
     <div className="flex flex-col gap-3">
-      <ResourceFilterInput
-        value={filter}
-        label={t("space_filter_files_label")}
-        placeholder={t("space_filter_files_label")}
-        resultCount={filtered.length}
-        onChange={(value) => {
-          setFilter(value);
-          setPage(1);
-        }}
-      />
+      {filterable && (
+        <ResourceFilterInput
+          value={filter}
+          label={t("space_filter_files_label")}
+          placeholder={t("space_filter_files_label")}
+          resultCount={filtered.length}
+          onChange={(value) => {
+            setFilter(value);
+            setPage(1);
+          }}
+        />
+      )}
       {filtered.length === 0 ? (
         <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
       ) : (
         <TableFrame>
           <Table
-            data={paginateData(sortedData, currentPage, PAGE_SIZE)}
+            data={paginate ? paginateData(sortedData, currentPage, PAGE_SIZE) : sortedData}
             columns={columns}
             idKey="id"
             aria-labelledby={labelledBy}
             pinnedColumn="name"
-            plugins={{ sort: sortPlugin, pagination: paginationPlugin, rowStatus: rowStatusPlugin }}
+            plugins={{
+              sort: sortPlugin,
+              ...(paginate ? { pagination: paginationPlugin } : {}),
+              rowStatus: rowStatusPlugin
+            }}
           />
         </TableFrame>
       )}

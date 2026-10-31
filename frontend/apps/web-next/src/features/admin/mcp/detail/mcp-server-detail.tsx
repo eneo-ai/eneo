@@ -189,7 +189,7 @@ export function McpServerDetail({
             <OverviewTab server={server} />
           </TabsContent>
           <TabsContent value="tools" className="pt-4">
-            <ToolsTab serverId={server.id} />
+            <ToolsTab server={server} />
           </TabsContent>
           {securityEnabled && (
             <TabsContent value="security" className="pt-4">

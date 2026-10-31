@@ -24,7 +24,12 @@ import { flattenPages } from "@/lib/api/pagination";
 import { pollWhile } from "@/lib/api/query";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
-import { BlobTable } from "@/features/knowledge/blobs";
+import { WebsiteContent } from "@/features/knowledge/website-content";
+import {
+  readWebsiteContentSearch,
+  websiteContentHref
+} from "@/features/knowledge/website-content-search";
+import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
 import { CrawlRunDetailsDialog } from "@/features/knowledge/crawl-run-details";
 import {
   canRequestCrawlStop,
@@ -199,7 +204,10 @@ export function WebsiteDetail({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const { space, routeId } = useSpace();
-  const [tab, setTab] = useState<WebsiteTab>("crawls");
+  const pathname = usePathname();
+  const params = useSearchParams();
+  const view = readWebsiteContentSearch(params);
+  const { tab } = view;
   const [startOpen, setStartOpen] = useState(false);
   const [selection, setSelection] = useState<RunSelection | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -224,9 +232,7 @@ export function WebsiteDetail({
 
   const history = flattenPages<CrawlRun>(runPages.data.pages);
   const runs = mergeLatestCrawlRun(history, latest ?? null);
-  const blobs = flattenPages(blobPages.data.pages);
   const runTotal = runPages.data.pages.at(-1)?.total_count ?? history.length;
-  const blobTotal = blobPages.data.pages.at(-1)?.total_count ?? blobs.length;
 
   const latestRun = runs[0];
   const previousLatestRun = useRef<{ id: string; state: string } | null | undefined>(undefined);
@@ -291,7 +297,14 @@ export function WebsiteDetail({
           role="tablist"
           aria-label={t("ui_website_tabs_label")}
           value={tab}
-          onChange={(value) => setTab(value === "blobs" ? "blobs" : "crawls")}
+          onChange={(value) =>
+            replaceUrl(
+              websiteContentHref(pathname, params, {
+                ...view,
+                tab: value === "blobs" ? "blobs" : "crawls"
+              })
+            )
+          }
           hasDivider
         >
           <Tab id={tabId("crawls")} value="crawls" label={t("crawls")} panelId={panelId} />
@@ -324,13 +337,10 @@ export function WebsiteDetail({
               {latestCompletedRun && hasCrawlIssues(latestCompletedRun) ? (
                 <ContentIssuesBanner run={latestCompletedRun} onShowFailures={showFailures} />
               ) : null}
-              <BlobTable blobs={blobs} canEdit={false} labelledBy={tabId("blobs")} />
-              <LoadMore
-                label={t("website_indexed_content_load_more", {
-                  current: blobs.length,
-                  total: blobTotal
-                })}
-                query={blobPages}
+              <WebsiteContent
+                websiteId={websiteId}
+                labelledBy={tabId("blobs")}
+                total={blobPages.data.pages.at(-1)?.total_count ?? 0}
               />
             </>
           )}

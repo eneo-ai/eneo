@@ -47,6 +47,29 @@ const described = (field: HTMLElement) =>
 const pdf = (name: string, bytes: number) =>
   new File(["x".repeat(bytes)], name, { type: "application/pdf" });
 
+it("removes one oversized file, restores focus, and adds more without losing the other files", async () => {
+  api.GET.mockImplementation(async (path: string) => ({
+    data: path === "/api/v1/users/me/" ? appContext.user : { items: [] },
+    response: new Response("{}")
+  }));
+  const { upload, field } = show();
+  const first = pdf("protokoll.pdf", 10);
+  const second = pdf("beslut.pdf", 20);
+  fireEvent.change(field, { target: { files: [first, pdf("stor.pdf", 2000)] } });
+  const remove = screen.getByRole("button", { name: "Ta bort stor.pdf" });
+  remove.focus();
+  fireEvent.click(remove);
+  await waitFor(() => expect(document.activeElement).toBe(field));
+  expect(screen.queryByText(/Filen är för stor/)).toBeNull();
+  expect(screen.getByText("protokoll.pdf")).toBeTruthy();
+  const choose = vi.spyOn(field, "click");
+  fireEvent.click(screen.getByRole("button", { name: "Lägg till fler filer" }));
+  expect(choose).toHaveBeenCalledTimes(1);
+  fireEvent.change(field, { target: { files: [second] } });
+  fireEvent.click(upload);
+  await waitFor(() => expect(queueUploads).toHaveBeenCalledWith("collection-1", [first, second]));
+});
+
 it("shows a missing or too large file at the file field on upload, which takes focus", () => {
   api.GET.mockResolvedValue({ data: { items: [] }, response: new Response("{}") });
   const { upload, field } = show();

@@ -8,6 +8,12 @@ import { bundleReport } from "./scripts/vite-bundle-report";
 // their own vitest.config.mts, without the router plugin, so a test run never
 // rewrites the route tree.
 export default defineConfig(({ command, mode }) => ({
+  // Only these public build identifiers cross into browser code. Runtime
+  // backend configuration cannot identify an already-loaded frontend build.
+  define: {
+    "import.meta.env.APP_VERSION": JSON.stringify(process.env.APP_VERSION || ""),
+    "import.meta.env.APP_REVISION": JSON.stringify(process.env.APP_REVISION || "")
+  },
   plugins: [
     // Paths come from tsr.config.json, shared with the `tsr` CLI. The plugin
     // reads that file from process.cwd() when it is constructed, so the build

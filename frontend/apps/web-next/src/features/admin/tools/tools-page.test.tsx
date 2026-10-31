@@ -55,6 +55,33 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("Verktyg", () => {
+  it.each(["functions", "mcp-servers"] as const)(
+    "shows one runtime status above the %s tab",
+    async (tab) => {
+      get.mockImplementation((path?: string) => {
+        if (path === "/api/v1/mcp-servers/bundled/")
+          return ok({
+            items: [],
+            count: 0,
+            runtime: {
+              configured: true,
+              state: "ready",
+              expected_version: "1.4.0",
+              version: "1.4.0",
+              warnings: []
+            }
+          });
+        if (path === "/api/v1/security-classifications/")
+          return ok({ security_enabled: false, security_classifications: [] });
+        return ok({ items: [] });
+      });
+      renderInApp(<ToolsPage tab={tab} />);
+      const runtime = await screen.findByRole("heading", { name: "Eneos verktygstjänst" });
+      expect(screen.getAllByRole("heading", { name: "Eneos verktygstjänst" })).toHaveLength(1);
+      const tabs = screen.getByRole("navigation", { name: "Verktyg" });
+      expect(runtime.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    }
+  );
   it("reads the tab from the address and opens the functions by default", () => {
     expect(toolsTabOf(undefined)).toBe("functions");
     expect(toolsTabOf("mcp-servers")).toBe("mcp-servers");

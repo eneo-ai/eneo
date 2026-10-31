@@ -5,7 +5,10 @@ import type { Schema } from "@/lib/api/models";
 
 export type McpServer = Schema<"MCPServerSettingsPublic">;
 export type McpServerTool = Schema<"MCPServerToolPublic">;
-export type McpAuthType = "none" | "bearer";
+export type McpAuthType = Extract<
+  Schema<"MCPServerCreate">["http_auth_type"],
+  "none" | "bearer" | "api_key_header"
+>;
 export type McpServerCreatePayload = Schema<"MCPServerCreate">;
 export type McpServerUpdatePayload = Schema<"MCPServerUpdate">;
 export type McpServerCreateResponse = Schema<"MCPServerCreateResponse">;
@@ -82,6 +85,33 @@ export function mcpServerFlowUsageQueryOptions(api: EneoClient, serverId: string
         })
       )
   });
+}
+
+export function mcpToolViewQueryOptions(api: EneoClient, serverId: string, tool: McpServerTool) {
+  return queryOptions({
+    queryKey: [...mcpToolsKey(serverId), tool.id, "view", tool.pending_ui_resource_sha256],
+    queryFn: ({ signal }) =>
+      unwrap(
+        api.GET("/api/v1/mcp-servers/{id}/tools/{tool_id}/view/", {
+          params: { path: { id: serverId, tool_id: tool.id } },
+          signal
+        })
+      )
+  });
+}
+
+export function renameMcpTool(
+  api: EneoClient,
+  serverId: string,
+  toolId: string,
+  displayName: string | null
+) {
+  return unwrap(
+    api.PUT("/api/v1/mcp-servers/{id}/tools/{tool_id}/display-name/", {
+      params: { path: { id: serverId, tool_id: toolId } },
+      body: { display_name: displayName }
+    })
+  );
 }
 
 /**
