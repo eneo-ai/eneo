@@ -35,9 +35,12 @@ test("creates a header-auth server with safe transport, identity and catalog set
   const writes: unknown[] = [];
   await page.route("**/api/v1/mcp-servers/settings/", (route) =>
     route.fulfill({
-      json: { items: server ? [server] : [] },
+      json: { items: server ? [server] : [], count: server ? 1 : 0 },
       headers: sessionResponseHeaders(route)
     })
+  );
+  await page.route("**/api/v1/mcp-servers/fixture-source/tools/", (route) =>
+    route.fulfill({ json: { items: [], count: 0 }, headers: sessionResponseHeaders(route) })
   );
   await page.route("**/api/v1/mcp-servers/", (route) => {
     const body = route.request().postDataJSON();
@@ -57,8 +60,11 @@ test("creates a header-auth server with safe transport, identity and catalog set
   await dialog.getByRole("combobox", { name: "Autentisering" }).click();
   await page.getByRole("option", { name: "API-nyckel i header" }).click();
   await dialog.getByLabel("Headernamn", { exact: true }).fill("X-Api-Key");
-  await dialog.getByLabel("API-nyckel", { exact: true }).fill(" synthetic-key ");
-  await dialog.getByLabel("Bekräfta API-nyckel", { exact: true }).fill(" synthetic-key ");
+  await dialog
+    .getByLabel(/^API-nyckel/)
+    .and(dialog.locator("input"))
+    .fill(" synthetic-key ");
+  await dialog.getByLabel(/^Bekräfta API-nyckel/).fill(" synthetic-key ");
   await dialog.getByRole("button", { name: "Lägg till MCP-server", exact: true }).click();
   await expect(url).toBeFocused();
   await expect(url).toHaveAttribute("aria-invalid", "true");
@@ -70,6 +76,7 @@ test("creates a header-auth server with safe transport, identity and catalog set
   await dialog.getByLabel("Maximal katalogstorlek (MiB)").fill("32");
   await dialog.getByRole("button", { name: "Lägg till MCP-server", exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/mcp-servers\/fixture-source$/);
+  await expect(page.getByRole("heading", { name: "Header fixture", level: 1 })).toBeVisible();
   expect(writes).toEqual([
     expect.objectContaining({
       http_auth_type: "api_key_header",
@@ -88,7 +95,10 @@ test("preserves API-header auth on token replacement and explains purpose change
   let server = serverFixture();
   const writes: unknown[] = [];
   await page.route("**/api/v1/mcp-servers/settings/", (route) =>
-    route.fulfill({ json: { items: [server] }, headers: sessionResponseHeaders(route) })
+    route.fulfill({ json: { items: [server], count: 1 }, headers: sessionResponseHeaders(route) })
+  );
+  await page.route("**/api/v1/mcp-servers/fixture-source/tools/", (route) =>
+    route.fulfill({ json: { items: [], count: 0 }, headers: sessionResponseHeaders(route) })
   );
   await page.route("**/api/v1/mcp-servers/fixture-source/", (route) => {
     const body = route.request().postDataJSON();
@@ -102,10 +112,10 @@ test("preserves API-header auth on token replacement and explains purpose change
   );
   await page.getByRole("button", { name: "Byt token" }).click();
   await page
-    .getByLabel("API-nyckel", { exact: true })
+    .getByLabel(/^API-nyckel/)
     .and(page.locator("input"))
     .fill("synthetic-replacement");
-  await page.getByLabel("Bekräfta API-nyckel", { exact: true }).fill("synthetic-replacement");
+  await page.getByLabel(/^Bekräfta API-nyckel/).fill("synthetic-replacement");
   await page.getByRole("button", { name: "Spara", exact: true }).click();
   await expect(page.getByRole("button", { name: "Byt token" })).toBeFocused();
   expect(writes).toEqual([
@@ -139,16 +149,18 @@ test.describe("image source on a touch screen", () => {
     };
     const server = serverFixture({
       http_auth_type: "internal",
+      has_credentials: false,
+      credential_preview: null,
       purpose: "image_generation",
       image_model_id: model.id,
       is_enabled: false,
       readiness_reason: "model_disabled"
     });
     await page.route("**/api/v1/mcp-servers/settings/", (route) =>
-      route.fulfill({ json: { items: [server] }, headers: sessionResponseHeaders(route) })
+      route.fulfill({ json: { items: [server], count: 1 }, headers: sessionResponseHeaders(route) })
     );
     await page.route("**/api/v1/image-models/", (route) =>
-      route.fulfill({ json: { items: [model] }, headers: sessionResponseHeaders(route) })
+      route.fulfill({ json: { items: [model], count: 1 }, headers: sessionResponseHeaders(route) })
     );
     await page.route("**/api/v1/admin/model-providers/", (route) =>
       route.fulfill({
