@@ -106,6 +106,20 @@ describe("selectedIntegrationDisplay", () => {
     expect(display).toHaveLength(1);
     expect(display[0]).toMatchObject({ type: "single", key: "integration:a" });
   });
+
+  it("does not group equally sized selections that miss a current item id", () => {
+    const old = integration("old", { wrapper_id: "w", wrapper_name: "Wrapper" });
+    const display = selectedIntegrationDisplay([all[0]!, old], all);
+    expect(display.map((entry) => entry.key)).toEqual(["integration:a", "integration:old"]);
+  });
+
+  it("keeps every selected item when the selection covers all current wrapper ids", () => {
+    const extra = integration("extra", { wrapper_id: "w", wrapper_name: "Wrapper" });
+    const display = selectedIntegrationDisplay([...all, extra], all);
+    expect(display).toMatchObject([
+      { type: "wrapper", wrapper: { items: [{ id: "a" }, { id: "b" }, { id: "extra" }] } }
+    ]);
+  });
 });
 
 describe("availableKnowledge", () => {
