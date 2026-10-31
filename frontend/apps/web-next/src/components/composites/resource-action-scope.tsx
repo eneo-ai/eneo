@@ -41,25 +41,40 @@ export function createResourceActions<Resource, Kind extends string>() {
     focusTarget: RefObject<HTMLElement | null>;
     children: ReactNode;
   }) {
-    const [selection, setSelection] = useState<{ kind: Kind; resource: Resource } | null>(null);
-    // The control that opened the dialog: a menu's button, not its item.
-    const opener = useRef<HTMLElement | null>(null);
+    // `opener`: the control that opened the dialog, a menu's button and not its item.
+    const [selection, setSelection] = useState<{
+      kind: Kind;
+      resource: Resource;
+      opener: HTMLElement | null;
+    } | null>(null);
+    const latest = useRef(selection);
     const rescue = useFocusRescue();
 
     const open = (kind: Kind, resource: Resource) => {
-      opener.current = returnTarget();
-      setSelection({ kind, resource });
+      latest.current = { kind, resource, opener: returnTarget() };
+      setSelection(latest.current);
     };
-    const close = () => {
+    const close = (closing: NonNullable<typeof selection>) => {
+      // A request can outlive its dialog (a move cancelled while it runs) and finish
+      // after another dialog was opened: it closes its own dialog, never that one.
+      if (latest.current !== closing) return;
+      latest.current = null;
       setSelection(null);
-      rescue(opener.current?.isConnected ? opener.current : focusTarget.current);
-      opener.current = null;
+      // Asked when the rescue runs: publishing moves the item to another list, which
+      // removes the opener after the dialog has closed.
+      rescue(() => (closing.opener?.isConnected ? closing.opener : focusTarget.current));
     };
 
     return (
       <OpenContext value={open}>
         {children}
-        {selection ? <Dialog {...selection} onClose={close} /> : null}
+        {selection ? (
+          <Dialog
+            kind={selection.kind}
+            resource={selection.resource}
+            onClose={() => close(selection)}
+          />
+        ) : null}
       </OpenContext>
     );
   }

@@ -7,6 +7,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
+import { queuePartnerUpdate } from "./partner-updates";
 
 const spies = vi.hoisted(() => ({ announce: vi.fn(), toastError: vi.fn() }));
 
@@ -231,6 +232,28 @@ describe("ChatView composer drafts", () => {
     // Whitespace is not work, and emptied it is not asked about.
     fireEvent.change(textarea, { target: { value: "   " } });
     expect(unloadAsks()).toBe(false);
+  });
+
+  it("keeps asking after Send while the question waits for a model switch to be saved", async () => {
+    sessionStorage.clear();
+    renderInApp(<Harness partner={assistant} />);
+    // A model or reasoning switch made in the composer is saved before the question goes.
+    let saved!: () => void;
+    void queuePartnerUpdate(() => new Promise<void>((resolve) => (saved = resolve)));
+
+    fireEvent.change(screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" }), {
+      target: { value: "Skicka när modellen är sparad" }
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+
+    // The composer is empty and nothing has left yet: a reload would end the question.
+    expect(unloadAsks()).toBe(true);
+
+    // Saved: the question goes (and, with no transport in jsdom, comes back to the composer).
+    await act(async () => {
+      await Promise.resolve();
+      saved();
+    });
   });
 
   it("keeps a draft for the account that typed it, and gives it to no other", async () => {

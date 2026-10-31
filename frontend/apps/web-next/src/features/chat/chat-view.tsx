@@ -234,9 +234,6 @@ function ConversationView({
     chatDraftOwner(tenant.id, user.id),
     `${partner.type}:${partner.id}:${initialSessionId ?? "new"}`
   );
-  // A reload or a closed tab ends what is typed or attached and not yet sent: the
-  // draft survives a reload but not a closed tab, and files survive neither.
-  useBeforeUnloadWarning(input.trim() !== "" || attachments.attachments.length > 0);
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
@@ -251,6 +248,17 @@ function ConversationView({
   // composer, put back if it fails before the answer starts.
   const pendingSendRef = useRef<{ text: string; attachments: Attachment[] } | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionState | null>(null);
+  // A reload or a closed tab ends what is typed or attached and not yet sent: the
+  // draft survives a reload but not a closed tab, and files survive neither.
+  // A question taken out of the composer is still unsent while it waits for a model or
+  // reasoning switch to be saved (`queuedSend`) or for its uploads (`pendingQuestion`).
+  const [queuedSend, setQueuedSend] = useState(false);
+  useBeforeUnloadWarning(
+    input.trim() !== "" ||
+      attachments.attachments.length > 0 ||
+      queuedSend ||
+      pendingQuestion !== null
+  );
   // Ends the wait for the pending question's uploads (a stop while it waits).
   const pendingAbort = useRef<AbortController | null>(null);
   // The last question and its files, for "Försök igen" after an error.
@@ -748,8 +756,14 @@ function ConversationView({
     const send = () => sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
     // A model or reasoning switch made in the composer is saved on the
     // assistant; the backend answers with what is stored, so that save lands first.
-    if (hasPendingPartnerUpdates()) void awaitPartnerUpdates().then(send);
-    else void send();
+    if (hasPendingPartnerUpdates()) {
+      setQueuedSend(true);
+      void awaitPartnerUpdates().then(() => {
+        // Sent from here on: the request itself outlasts the answer, not the wait.
+        setQueuedSend(false);
+        void send();
+      });
+    } else void send();
   }
 
   /** Takes a waiting question back out of the conversation; nothing was sent. */

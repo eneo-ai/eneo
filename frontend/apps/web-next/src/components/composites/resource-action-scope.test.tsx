@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
@@ -21,8 +21,14 @@ function Menu({ item }: { item: Item }) {
   );
 }
 
+/** What each dialog was given to close itself with, for a request that finishes late. */
+const closers: Record<string, () => void> = {};
+
 function RenameDialog({ resource, onClose }: { resource: Item; onClose: () => void }) {
   const [text, setText] = useState("");
+  useEffect(() => {
+    closers[resource.id] = onClose;
+  });
   return (
     <div role="dialog" aria-label={`Byt namn på ${resource.name}`}>
       <input
@@ -42,15 +48,21 @@ const items: Item[] = [
   { id: "a2", name: "Avtal" }
 ];
 
+const controls = { removeFirst: () => {} };
+
 function Page() {
   const heading = useRef<HTMLHeadingElement>(null);
+  const [shown, setShown] = useState(items);
+  useEffect(() => {
+    controls.removeFirst = () => setShown((current) => current.slice(1));
+  });
   return (
     <ResourceActionScope Dialog={RenameDialog} focusTarget={heading}>
       <h1 ref={heading} tabIndex={-1}>
         Appar
       </h1>
       <ResourceCollection>
-        {items.map((item) => (
+        {shown.map((item) => (
           <ResourceCard
             key={item.id}
             href={`/spaces/s1/apps/${item.id}`}
@@ -108,6 +120,36 @@ describe("a resource's dialog across 768 px (a phone turned)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Avtal" }));
     act(() => setViewport("tablet-portrait"));
     fireEvent.click(screen.getByRole("button", { name: "Stäng" }));
+
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Appar" }))
+    );
+  });
+
+  it("lets a request that finishes late close its own dialog, not the one opened since", async () => {
+    setViewport("phone");
+    renderInApp(<Page />);
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Protokoll" }));
+    const first = closers["a1"]!;
+    fireEvent.click(screen.getByRole("button", { name: "Stäng" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Avtal" }));
+    expect(screen.getByRole("dialog", { name: "Byt namn på Avtal" })).toBeTruthy();
+    // The first dialog's move, cancelled while it ran, is done now.
+    act(() => first());
+    expect(screen.getByRole("dialog", { name: "Byt namn på Avtal" })).toBeTruthy();
+  });
+
+  it("finds the heading when the control that opened a dialog leaves after the dialog closed", async () => {
+    setViewport("phone");
+    renderInApp(<Page />);
+    const menu = screen.getByRole("button", { name: "Fler åtgärder för Protokoll" });
+    act(() => menu.focus());
+    fireEvent.click(menu);
+    fireEvent.click(screen.getByRole("button", { name: "Stäng" }));
+    // Publishing moves the item to another list: its menu is gone once the lists refetch.
+    act(() => controls.removeFirst());
 
     await waitFor(() =>
       expect(document.activeElement).toBe(screen.getByRole("heading", { name: "Appar" }))
