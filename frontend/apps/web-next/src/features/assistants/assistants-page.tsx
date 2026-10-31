@@ -12,6 +12,7 @@ import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
+import { ChatAppActionScope } from "./actions";
 import { spaceChatItems, type ChatAppItem } from "./assistants";
 import { CreateChatAppMenu } from "./create-menu";
 import { ChatAppTile } from "./tile";
@@ -67,57 +68,59 @@ export function AssistantsPage() {
 
   return (
     <RemovalFocusScope target={headingRef}>
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
-          headingLevel={2}
-          headingRef={headingRef}
-          title={t("assistants")}
-          actions={canCreate && items.length > 0 ? <CreateChatAppMenu /> : undefined}
-        />
-        {items.length === 0 ? (
-          <EmptyState
-            icon={<Bot />}
-            hue={AREA_HUES.assistants}
-            title={t("space_assistants_empty_title")}
-            description={t("space_assistants_empty_description")}
-            headingLevel={3}
-            actions={canCreate ? <CreateChatAppMenu /> : undefined}
+      <ChatAppActionScope focusTarget={headingRef}>
+        <div className="flex w-full flex-col gap-6">
+          <PageHeader
+            headingLevel={2}
+            headingRef={headingRef}
+            title={t("assistants")}
+            actions={canCreate && items.length > 0 ? <CreateChatAppMenu /> : undefined}
           />
-        ) : (
-          <>
-            <ResourceFilterInput
-              value={filter}
-              onChange={setFilter}
-              label={t("space_filter_assistants_label")}
-              placeholder={t("filter_assistants_placeholder")}
-              resultCount={filteredItems.length}
+          {items.length === 0 ? (
+            <EmptyState
+              icon={<Bot />}
+              hue={AREA_HUES.assistants}
+              title={t("space_assistants_empty_title")}
+              description={t("space_assistants_empty_description")}
+              headingLevel={3}
+              actions={canCreate ? <CreateChatAppMenu /> : undefined}
             />
-            {filteredItems.length === 0 ? (
-              <EmptyState
-                icon={<SearchX />}
-                title={t("no_results_found")}
-                headingLevel={3}
-                isCompact
+          ) : (
+            <>
+              <ResourceFilterInput
+                value={filter}
+                onChange={setFilter}
+                label={t("space_filter_assistants_label")}
+                placeholder={t("filter_assistants_placeholder")}
+                resultCount={filteredItems.length}
               />
-            ) : groupByStatus ? (
-              <div className="flex flex-col gap-6">
-                <TileGroup
-                  title={t("published")}
-                  items={filteredItems.filter((item) => item.published)}
-                  showStatus={false}
+              {filteredItems.length === 0 ? (
+                <EmptyState
+                  icon={<SearchX />}
+                  title={t("no_results_found")}
+                  headingLevel={3}
+                  isCompact
                 />
-                <TileGroup
-                  title={t("drafts")}
-                  items={filteredItems.filter((item) => !item.published)}
-                  showStatus={false}
-                />
-              </div>
-            ) : (
-              <TileGrid items={filteredItems} showStatus={showStatus} />
-            )}
-          </>
-        )}
-      </div>
+              ) : groupByStatus ? (
+                <div className="flex flex-col gap-6">
+                  <TileGroup
+                    title={t("published")}
+                    items={filteredItems.filter((item) => item.published)}
+                    showStatus={false}
+                  />
+                  <TileGroup
+                    title={t("drafts")}
+                    items={filteredItems.filter((item) => !item.published)}
+                    showStatus={false}
+                  />
+                </div>
+              ) : (
+                <TileGrid items={filteredItems} showStatus={showStatus} />
+              )}
+            </>
+          )}
+        </div>
+      </ChatAppActionScope>
     </RemovalFocusScope>
   );
 }

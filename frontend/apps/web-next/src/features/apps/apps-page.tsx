@@ -8,10 +8,12 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { PageHeader } from "@/components/composites/page-header";
 import { ResourceCollection } from "@/components/composites/resource-tile";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
+import { AppActionScope } from "./actions";
 import { spaceApps, type AppSparse } from "./apps";
 import { CreateAppButton } from "./create-app";
 import { AppTile } from "./tile";
@@ -56,55 +58,63 @@ export function AppsPage() {
 
   return (
     <RemovalFocusScope target={headingRef}>
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
-          headingLevel={2}
-          headingRef={headingRef}
-          title={t("apps")}
-          actions={canCreate && items.length > 0 ? <CreateAppButton /> : undefined}
-        />
-        {items.length === 0 ? (
-          <EmptyState
-            icon={<AppWindow />}
-            hue={AREA_HUES.apps}
-            title={t("space_apps_empty_title")}
-            description={t("space_apps_empty_description")}
-            headingLevel={3}
-            actions={canCreate ? <CreateAppButton /> : undefined}
+      <AppActionScope focusTarget={headingRef}>
+        <div className="flex w-full flex-col gap-6">
+          <PageHeader
+            headingLevel={2}
+            headingRef={headingRef}
+            title={t("apps")}
+            actions={
+              canCreate && items.length > 0 ? (
+                <DockedActions label={t("space_apps_actions")}>
+                  <CreateAppButton />
+                </DockedActions>
+              ) : undefined
+            }
           />
-        ) : (
-          <>
-            <ResourceFilterInput
-              value={filter}
-              onChange={setFilter}
-              label={t("space_filter_apps_label")}
-              placeholder={t("filter_apps_placeholder")}
-              resultCount={filteredItems.length}
+          {items.length === 0 ? (
+            <EmptyState
+              icon={<AppWindow />}
+              hue={AREA_HUES.apps}
+              title={t("space_apps_empty_title")}
+              description={t("space_apps_empty_description")}
+              headingLevel={3}
+              actions={canCreate ? <CreateAppButton /> : undefined}
             />
-            {filteredItems.length === 0 ? (
-              <EmptyState
-                icon={<SearchX />}
-                title={t("no_results_found")}
-                headingLevel={3}
-                isCompact
+          ) : (
+            <>
+              <ResourceFilterInput
+                value={filter}
+                onChange={setFilter}
+                label={t("space_filter_apps_label")}
+                placeholder={t("filter_apps_placeholder")}
+                resultCount={filteredItems.length}
               />
-            ) : groupByStatus ? (
-              <div className="flex flex-col gap-6">
-                <TileGroup
-                  title={t("published")}
-                  items={filteredItems.filter((app) => app.published)}
+              {filteredItems.length === 0 ? (
+                <EmptyState
+                  icon={<SearchX />}
+                  title={t("no_results_found")}
+                  headingLevel={3}
+                  isCompact
                 />
-                <TileGroup
-                  title={t("drafts")}
-                  items={filteredItems.filter((app) => !app.published)}
-                />
-              </div>
-            ) : (
-              <TileGrid items={filteredItems} showStatus={showStatus} />
-            )}
-          </>
-        )}
-      </div>
+              ) : groupByStatus ? (
+                <div className="flex flex-col gap-6">
+                  <TileGroup
+                    title={t("published")}
+                    items={filteredItems.filter((app) => app.published)}
+                  />
+                  <TileGroup
+                    title={t("drafts")}
+                    items={filteredItems.filter((app) => !app.published)}
+                  />
+                </div>
+              ) : (
+                <TileGrid items={filteredItems} showStatus={showStatus} />
+              )}
+            </>
+          )}
+        </div>
+      </AppActionScope>
     </RemovalFocusScope>
   );
 }
