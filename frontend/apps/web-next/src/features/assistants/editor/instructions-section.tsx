@@ -201,7 +201,7 @@ export function InstructionsSection({
         <div className="flex flex-wrap items-center justify-between gap-2">
           <AssistantContextMeter
             assistantId={assistant.id}
-            prompt={prompt}
+            prompt={promptLocked ? undefined : prompt}
             attachments={assistant.attachments ?? []}
             model={model}
             modelConfirmed={modelConfirmed}

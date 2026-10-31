@@ -25,8 +25,17 @@ vi.mock("@/features/spaces/use-space", () => ({
     can: () => true
   })
 }));
-afterEach(cleanup);
+const api = vi.hoisted(() => ({ POST: vi.fn() }));
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+afterEach(() => {
+  cleanup();
+  api.POST.mockReset();
+});
 it("renders the real shared AI section and adopts external model changes in the helper editor", async () => {
+  api.POST.mockResolvedValue({
+    data: { file_tokens: 0, prompt_tokens: 0 },
+    response: new Response("{}")
+  });
   const queryClient = testQueryClient();
   const assistant = {
     id: "helper",
@@ -48,4 +57,39 @@ it("renders the real shared AI section and adopts external model changes in the 
     })
   );
   expect(await screen.findByRole("button", { name: /Model B/ })).toBeTruthy();
+});
+
+it("leaves governed instructions to the server baseline instead of overriding with stored text", async () => {
+  api.POST.mockResolvedValue({
+    data: {
+      file_tokens: 0,
+      prompt_tokens: 700,
+      skill_context_tokens: 300,
+      context_reserve_tokens: 0
+    },
+    response: new Response("{}")
+  });
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(["assistants", "helper"], {
+    id: "helper",
+    name: "Governed helper",
+    completion_model: models[0],
+    completion_model_kwargs: {},
+    prompt: { text: "Short stored prompt" },
+    attachments: [],
+    effective_config: { prompt_locked: true, available_models: [] }
+  } as unknown as Assistant);
+  renderInApp(<HelpAssistantEditor assistantId="helper" helperKind="prompt_guide" />, {
+    queryClient
+  });
+  expect(await screen.findByRole("button", { name: /Kontextbudget: ~700/ })).toBeTruthy();
+  expect(api.POST).toHaveBeenCalledWith(
+    "/api/v1/conversations/preflight",
+    expect.objectContaining({
+      body: expect.not.objectContaining({ assistant_prompt: expect.anything() })
+    })
+  );
+  expect((screen.getByRole("textbox", { name: "Prompt" }) as HTMLTextAreaElement).disabled).toBe(
+    true
+  );
 });

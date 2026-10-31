@@ -85,3 +85,19 @@ it("cancels obsolete model inputs and hides failures without keeping an old esti
   expect(announce).toHaveBeenCalledWith(expect.stringMatching(/Kontexten kunde inte uppskattas/));
   expect(screen.queryByRole("button", { name: /Kontextbudget:/ })).toBeNull();
 });
+
+it("requests and counts a Skill-only server baseline with no local prompt or files", async () => {
+  api.POST.mockResolvedValue({
+    data: {
+      prompt_tokens: 700,
+      skill_context_tokens: 600,
+      file_tokens: 0,
+      context_reserve_tokens: 200
+    },
+    response: new Response("{}")
+  });
+  renderInApp(<AssistantContextMeter {...props} prompt="" attachments={[]} />);
+  expect(await screen.findByRole("button", { name: /Kontextbudget: ~700/ })).toBeTruthy();
+  expect(api.POST).toHaveBeenCalledOnce();
+  expect(screen.queryByRole("button", { name: /Kontextbudget: ~1,3/ })).toBeNull();
+});

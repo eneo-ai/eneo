@@ -17,7 +17,7 @@ export function AssistantContextMeter({
   revision
 }: {
   assistantId: string;
-  prompt: string;
+  prompt?: string;
   attachments: Schema<"AssistantAttachmentInput">[];
   model: Pick<Schema<"CompletionModelPublic">, "id" | "token_limit"> | null;
   modelConfirmed?: boolean;
@@ -34,7 +34,7 @@ export function AssistantContextMeter({
     assistant_id: assistantId,
     question: "",
     file_ids: [],
-    assistant_prompt: prompt,
+    ...(prompt === undefined ? {} : { assistant_prompt: prompt }),
     attachments: attachments.map((file) => ({ id: file.id, inline_text: file.inline_text ?? true }))
   } satisfies Schema<"PreflightRequest">;
   const key = JSON.stringify([
@@ -46,12 +46,7 @@ export function AssistantContextMeter({
     saving > 0
   ]);
   const debounced = useDebouncedValue(key, 400);
-  const enabled =
-    !!model?.token_limit &&
-    modelConfirmed &&
-    saving === 0 &&
-    key === debounced &&
-    (!!prompt.trim() || attachments.length > 0);
+  const enabled = !!model?.token_limit && modelConfirmed && saving === 0 && key === debounced;
   const query = useQuery({
     queryKey: ["assistant-material-preflight", key],
     queryFn: ({ signal }) =>
