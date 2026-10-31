@@ -223,22 +223,23 @@ test(
     });
     await page.goto(`${space}/apps/${appId}?tab=results`);
     const table = page.getByRole("table", { name: "Resultat", exact: true });
-    const names = () => table.getByRole("row").locator("td:first-child a").allTextContents();
-    expect(await names()).toEqual(["Indata: Alfa run", "Indata: Beta run", "Indata: Zeta run"]);
+    await expect(table).toBeVisible();
+    const names = table.getByRole("row").locator("td:first-child a");
+    await expect(names).toHaveText(["Indata: Alfa run", "Indata: Beta run", "Indata: Zeta run"]);
     const name = table.getByRole("columnheader", { name: /Namn/ });
     await name.getByRole("button").click();
     await name.getByRole("button").click();
-    expect(await names()).toEqual(["Indata: Zeta run", "Indata: Beta run", "Indata: Alfa run"]);
+    await expect(names).toHaveText(["Indata: Zeta run", "Indata: Beta run", "Indata: Alfa run"]);
     await table
       .getByRole("columnheader", { name: /Status/ })
       .getByRole("button")
       .click();
-    expect(await names()).toEqual(["Indata: Zeta run", "Indata: Alfa run", "Indata: Beta run"]);
+    await expect(names).toHaveText(["Indata: Zeta run", "Indata: Alfa run", "Indata: Beta run"]);
     await table
       .getByRole("columnheader", { name: /Skapad/ })
       .getByRole("button")
       .click();
-    expect(await names()).toEqual(["Indata: Zeta run", "Indata: Beta run", "Indata: Alfa run"]);
+    await expect(names).toHaveText(["Indata: Zeta run", "Indata: Beta run", "Indata: Alfa run"]);
     const filter = page.getByRole("textbox", { name: "Filtrera resultat", exact: true });
     await filter.fill("alfa");
     await expect(table.getByRole("link")).toHaveCount(1);
