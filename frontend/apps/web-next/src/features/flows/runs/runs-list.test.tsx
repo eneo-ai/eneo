@@ -5,6 +5,7 @@ import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeRunDetail, makeRunSummary } from "./run-fixtures";
 import type { RunListItem } from "./runs-api";
 
@@ -567,5 +568,52 @@ describe("FlowRunsList", () => {
     await act(() => queryClient.invalidateQueries({ queryKey: ["flows", "flow-1", "runs"] }));
     await vi.waitFor(() => expect(listCalls().length).toBeGreaterThan(1));
     expect(screen.getAllByRole("link", { name: "Ärende 7" })).toHaveLength(1);
+  });
+});
+
+describe("FlowRunsList on a phone", () => {
+  const withRun = () =>
+    renderInApp(<List />, {
+      appContext: testAppContext({ permissions: ["flows_view", "flows_run"] })
+    });
+
+  it("lists the runs as rows with their state, who started them and how long, and the retry of a failed one", async () => {
+    setViewport("phone");
+    answerList([
+      makeRunSummary({ id: "run-f", status: "failed" }),
+      {
+        ...makeRunSummary({ id: "run-ok" }),
+        token_usage: {
+          num_tokens_input: 1000,
+          num_tokens_output: 200,
+          num_tokens_total: 1200,
+          input_completeness: "complete",
+          output_completeness: "complete"
+        }
+      }
+    ]);
+    const { container } = withRun();
+
+    const list = await screen.findByRole("list", { name: messages.flow_runs_heading });
+    expect(screen.queryByRole("table")).toBeNull();
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]!).getByText(messages.flow_runs_status_failed)).toBeTruthy();
+    expect(within(rows[0]!).getByText("Anna Lind · 1 min 5 s")).toBeTruthy();
+    expect(within(rows[0]!).getByRole("link", { name: /./ }).getAttribute("href")).toBe(
+      "/spaces/space-1/flows/flow-1/runs/run-f"
+    );
+    expect(within(rows[0]!).getByRole("button", { name: messages.flow_runs_retry })).toBeTruthy();
+    expect(within(rows[1]!).queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
+    // What only a wide screen has room for.
+    expect(screen.queryByText(messages.flow_runs_usage_tokens_explainer)).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("keeps the table on a tablet", async () => {
+    setViewport("tablet-portrait");
+    answerList([makeRunSummary({ id: "run-f", status: "failed" })]);
+    withRun();
+    expect(await screen.findByRole("table", { name: messages.flow_runs_heading })).toBeTruthy();
   });
 });

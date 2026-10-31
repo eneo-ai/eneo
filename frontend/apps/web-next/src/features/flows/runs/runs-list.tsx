@@ -31,6 +31,7 @@ import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { useDebouncedValue } from "../editor/use-debounced-value";
 import { formatCount, formatSeconds } from "./run-format";
@@ -100,7 +101,7 @@ function RunLink({ id, run, href }: { id: string; run: RunSummary; href: string 
   const time = useClientTimeText(startedAt, "date_time");
   const label = run.run_label?.trim();
   const linkClass =
-    "text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center font-medium underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2";
+    "text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 items-center font-medium pointer-coarse:min-h-11 underline-offset-2 hover:underline focus-visible:outline-2 focus-visible:outline-offset-2";
   if (label) {
     return (
       <span className="flex min-w-0 flex-col items-start">
@@ -228,6 +229,8 @@ export function FlowRunsList({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const headingId = useId();
   const linkId = (runId: string) => `${headingId}-run-${runId}`;
+  // A phone lists the runs as rows: six columns do not fit, and what it needs is the run, how it went, and the buttons.
+  const phone = useMediaMatch(PHONE_QUERY);
   const person = { canRun: can("flows_run"), userId: user.id, publishedVersion };
   const [mine, setMine] = useState(false);
   const [status, setStatus] = useState<RunStatusValue | null>(null);
@@ -286,6 +289,52 @@ export function FlowRunsList({
     count === undefined ? "" : ` (${formatCount(count, locale)})`;
   const total = counts ? Object.values(counts).reduce((sum, count) => sum + count, 0) : undefined;
 
+  /** A run's state, with the actions its state allows: send it again, try it again, cancel it. */
+  const statusCell = (run: Row) => {
+    const redispatch = canRedispatch(run, runs.dataUpdatedAt);
+    const offers = runActions(run, person);
+    return (
+      <span className="flex flex-col items-start gap-1">
+        <RunStatus status={run.status} purpose={run.purpose} />
+        {redispatch || offers.retry || offers.cancel ? (
+          <span className="flex flex-wrap gap-1">
+            {redispatch ? <RedispatchButton flowId={flowId} run={run} /> : null}
+            {offers.retry ? (
+              <RetryRunButton
+                spaceRouteId={spaceRouteId}
+                flowId={flowId}
+                runId={run.id}
+                report={report}
+                size="sm"
+              />
+            ) : null}
+            {offers.cancel ? (
+              <CancelRunButton
+                flowId={flowId}
+                runId={run.id}
+                report={report}
+                onCancelled={() =>
+                  rescue(() => document.getElementById(linkId(run.id)) ?? headingRef.current)
+                }
+                size="sm"
+              />
+            ) : null}
+          </span>
+        ) : null}
+      </span>
+    );
+  };
+  /** How long a run took, or took so far. */
+  const durationText = (run: Row) => {
+    const ms = runDurationMs(run);
+    if (ms !== null) return formatSeconds(ms / 1000, t);
+    // A run still going: how long so far, as of the list's last read.
+    const elapsed = runElapsedMs(run, runs.dataUpdatedAt);
+    return elapsed === null
+      ? "–"
+      : t("flow_run_more_elapsed", { time: formatSeconds(elapsed / 1000, t) });
+  };
+
   const columns: TableColumn<Row>[] = [
     {
       key: "started_at",
@@ -301,40 +350,7 @@ export function FlowRunsList({
       header: t("flow_runs_column_status"),
       width: proportional(3),
       sortable: true,
-      renderCell: (run) => {
-        const redispatch = canRedispatch(run, runs.dataUpdatedAt);
-        const offers = runActions(run, person);
-        return (
-          <span className="flex flex-col items-start gap-1">
-            <RunStatus status={run.status} purpose={run.purpose} />
-            {redispatch || offers.retry || offers.cancel ? (
-              <span className="flex flex-wrap gap-1">
-                {redispatch ? <RedispatchButton flowId={flowId} run={run} /> : null}
-                {offers.retry ? (
-                  <RetryRunButton
-                    spaceRouteId={spaceRouteId}
-                    flowId={flowId}
-                    runId={run.id}
-                    report={report}
-                    size="sm"
-                  />
-                ) : null}
-                {offers.cancel ? (
-                  <CancelRunButton
-                    flowId={flowId}
-                    runId={run.id}
-                    report={report}
-                    onCancelled={() =>
-                      rescue(() => document.getElementById(linkId(run.id)) ?? headingRef.current)
-                    }
-                    size="sm"
-                  />
-                ) : null}
-              </span>
-            ) : null}
-          </span>
-        );
-      }
+      renderCell: statusCell
     },
     {
       key: "principal",
@@ -347,15 +363,7 @@ export function FlowRunsList({
       header: t("flow_runs_column_duration"),
       width: proportional(2),
       sortable: true,
-      renderCell: (run) => {
-        const ms = runDurationMs(run);
-        if (ms !== null) return formatSeconds(ms / 1000, t);
-        // A run still going: how long so far, as of the list's last read.
-        const elapsed = runElapsedMs(run, runs.dataUpdatedAt);
-        return elapsed === null
-          ? "–"
-          : t("flow_run_more_elapsed", { time: formatSeconds(elapsed / 1000, t) });
-      }
+      renderCell: durationText
     },
     {
       key: "usage",
@@ -449,14 +457,35 @@ export function FlowRunsList({
         />
       ) : (
         <>
-          <Table<Row>
-            data={items as Row[]}
-            columns={columns}
-            idKey="id"
-            aria-labelledby={headingId}
-            plugins={{ sort: sortPlugin }}
-          />
-          {items.some((run) => run.token_usage) ? (
+          {phone ? (
+            <ul aria-labelledby={headingId} className="m-0 flex list-none flex-col p-0">
+              {(items as Row[]).map((run) => (
+                <li
+                  key={run.id}
+                  className="border-ax-border flex flex-col items-start gap-1.5 border-b py-3 first:pt-0 last:border-b-0"
+                >
+                  <RunLink
+                    id={linkId(run.id)}
+                    run={run}
+                    href={runHref(spaceRouteId, flowId, run.id)}
+                  />
+                  {statusCell(run)}
+                  <span className="text-ax-text-secondary text-sm">
+                    {[starterName(run, t), durationText(run)].join(" · ")}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <Table<Row>
+              data={items as Row[]}
+              columns={columns}
+              idKey="id"
+              aria-labelledby={headingId}
+              plugins={{ sort: sortPlugin }}
+            />
+          )}
+          {!phone && items.some((run) => run.token_usage) ? (
             <p className="text-ax-text-secondary m-0 max-w-prose text-xs">
               {t("flow_runs_usage_tokens_explainer")}
             </p>
