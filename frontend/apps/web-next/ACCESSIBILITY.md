@@ -350,6 +350,31 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - Ids are unique (`useId`), and `aria-*` references point at existing elements.
 - Don't add ARIA that native HTML already provides.
 
+## Phones and tablets (WCAG2Mobile)
+
+[Guidance on Applying WCAG 2.2 to Mobile Applications](https://www.w3.org/TR/wcag2mobile-22/)
+(WCAG2Mobile, a W3C draft note) is written for native apps. web-next is web
+content in a mobile browser, so WCAG 2.2 applies to it as it stands; the note
+is our list of what changes on a touch device. Where we stand on it:
+
+| Criterion                          | On a phone or tablet                                                   | Here                                                                                                                                   |
+| ---------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.3.4 Orientation                  | All four orientations work, none is locked                             | No lock in the manifest or code; a phone turned (667 × 300) is one of the contract's sizes                                             |
+| 1.4.4 Resize text, 1.4.10 Reflow   | Larger system text, 320 px wide                                        | `tests/responsive-text-size.spec.ts` (200% text), the contract at 320 px                                                               |
+| 1.4.12 Text spacing                | The reader's own line, letter, word and paragraph spacing              | `tests/responsive-text-size.spec.ts` applies the 1.4.12 values to every screen                                                         |
+| 2.4.11 Focus not obscured          | A bar fixed to the screen must not hide the focused control            | `DockedActions` publishes its height and the panel reserves it; toasts lift clear (rule 3)                                             |
+| 2.5.1, 2.5.7 Gestures and dragging | Every swipe, pinch or drag has a single tap alternative                | Rule 9; no multi-finger or path gesture exists                                                                                         |
+| 2.5.2 Pointer cancellation         | An action runs on release, so a finger can slide off                   | Native buttons and links; the few `pointerdown` listeners only track state (a drag handle starts a drag, with keys as the alternative) |
+| 2.5.3 Label in name                | Voice Control says what the control shows                              | Rule 8: the visible label is in the accessible name                                                                                    |
+| 2.5.4 Motion actuation             | Nothing runs on shake or tilt                                          | No device-motion API is used; one that is added needs a button and a way to turn it off                                                |
+| 2.5.8 Target size                  | 24 px is the AA floor                                                  | axe checks 24 px; we hold 44 px on a coarse pointer, measured by the contract                                                          |
+| 1.3.5, 3.3.7, 3.3.8 Forms          | Typing is costly: input purpose, autofill, paste and password managers | `autocomplete`, `inputMode` and `enterKeyHint` on the fields that take typed input (`KEYBOARD` presets); paste is not blocked (rule 8) |
+| 4.1.3 Status messages              | A screen reader hears results without focus moving                     | Rule 10                                                                                                                                |
+
+What stays with a person on a device: VoiceOver and TalkBack, Voice Control and
+Switch Control, the on-screen keyboard, and a real thumb (the manual protocol,
+below).
+
 ## How it is enforced
 
 Run from `frontend/apps/web-next`.
