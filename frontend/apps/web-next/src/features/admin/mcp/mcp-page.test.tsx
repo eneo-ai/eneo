@@ -27,9 +27,11 @@ const servers = vi.hoisted(() => ({ items: [] as unknown[] }));
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const remove = vi.hoisted(() => vi.fn());
+const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     DELETE: remove,
+    POST: post,
     GET: (path: string) =>
       Promise.resolve({
         data:
@@ -50,6 +52,97 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   remove.mockReset();
+  post.mockReset();
+});
+
+it("keeps the function-server filter reachable when the tenant has only function sources", async () => {
+  servers.items = [
+    { ...server("images", "Images"), purpose: "image_generation", is_enabled: false }
+  ];
+  renderInApp(<McpServersPage />);
+  fireEvent.click(await screen.findByRole("switch", { name: "Visa funktionsservrar" }));
+  expect(await screen.findByRole("link", { name: "Images" })).toBeTruthy();
+});
+
+it("uses capability state and activate/deactivate endpoints for function sources", async () => {
+  const provider = {
+    ...server("images", "Images"),
+    purpose: "image_generation",
+    is_enabled: false,
+    is_org_enabled: true
+  };
+  servers.items.push(provider);
+  post.mockImplementation(() => {
+    provider.is_enabled = !provider.is_enabled;
+    return Promise.resolve({ data: {}, response: new Response("{}") });
+  });
+  renderInApp(<McpServersPage />);
+  fireEvent.click(await screen.findByRole("switch", { name: "Visa funktionsservrar" }));
+  const toggle = await screen.findByRole("switch", { name: "Aktivera Images" });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith("/api/v1/mcp-servers/{id}/activate/", {
+      params: { path: { id: "images" } }
+    })
+  );
+  await waitFor(() => expect(toggle.getAttribute("aria-busy")).not.toBe("true"));
+  fireEvent.click(toggle);
+  await waitFor(() =>
+    expect(post).toHaveBeenCalledWith("/api/v1/mcp-servers/{id}/deactivate/", {
+      params: { path: { id: "images" } }
+    })
+  );
+  expect(remove).not.toHaveBeenCalled();
+});
+
+it("shows a refused activation beside its server and restores the saved state", async () => {
+  servers.items.push({
+    ...server("images", "Images"),
+    purpose: "image_generation",
+    is_enabled: false,
+    is_org_enabled: false
+  });
+  post.mockResolvedValue({
+    error: { detail: "No approved tools" },
+    response: new Response("{}", { status: 400 })
+  });
+  renderInApp(<McpServersPage />);
+  fireEvent.click(await screen.findByRole("switch", { name: "Visa funktionsservrar" }));
+  const toggle = await screen.findByRole("switch", { name: "Aktivera Images" });
+  fireEvent.click(toggle);
+  expect((await screen.findByRole("alert")).textContent).toContain("No approved tools");
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
+});
+
+it("finds providers by description, classification and audience, and filters by capability state", async () => {
+  servers.items.push({
+    ...server("images", "Images"),
+    description: "Illustrationer",
+    purpose: "image_generation",
+    is_enabled: false,
+    is_org_enabled: true,
+    http_auth_type: "api_key_header",
+    audience: "groups",
+    user_groups: [{ id: "editors", name: "Redaktionen" }],
+    security_classification: { id: "internal", name: "Intern information" },
+    forward_identity: true
+  });
+  renderInApp(<McpServersPage />);
+  fireEvent.click(await screen.findByRole("switch", { name: "Visa funktionsservrar" }));
+  expect(await screen.findByText("API-nyckel i header")).toBeTruthy();
+  expect(screen.getByText("Redaktionen")).toBeTruthy();
+  expect(screen.getByText("Användaridentitet vidarebefordras till denna server.")).toBeTruthy();
+  const search = screen.getByRole("textbox", { name: "Sök MCP-servrar" });
+  for (const value of ["illustrationer", "intern information", "redaktionen"]) {
+    fireEvent.change(search, { target: { value } });
+    expect(screen.getByRole("link", { name: "Images" })).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Diariet" })).toBeNull();
+  }
+  fireEvent.change(search, { target: { value: "" } });
+  fireEvent.click(screen.getByRole("button", { name: "Inaktiva" }));
+  expect(screen.getByRole("link", { name: "Images" })).toBeTruthy();
+  expect(screen.queryByRole("link", { name: "Diariet" })).toBeNull();
 });
 
 const pendingTile = async () => {
