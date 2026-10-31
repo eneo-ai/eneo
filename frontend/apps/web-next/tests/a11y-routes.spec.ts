@@ -40,6 +40,8 @@ const VARIANTS = [
   { name: "phone", width: 390, height: 844, scheme: "dark" },
   { name: "ipad", width: 820, height: 1180, scheme: "light" },
   { name: "ipad", width: 820, height: 1180, scheme: "dark" },
+  // An iPad mini upright is 744 px: below 768, so the phone layout on a tall screen.
+  { name: "ipad-mini", width: 744, height: 1133, scheme: "light" },
   // Held sideways the iPad has the side navigation: a layout of its own.
   { name: "ipad-landscape", width: 1180, height: 820, scheme: "light" },
   { name: "ipad-landscape", width: 1180, height: 820, scheme: "dark" }

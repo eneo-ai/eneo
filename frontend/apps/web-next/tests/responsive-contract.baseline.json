@@ -18,6 +18,7 @@
   "small a:/admin/users"
  ],
  "ipad-landscape|/admin/api-keys": [
+  "outside button:fler åtgärder för kontrollny",
   "small button[radio]:",
   "small input[combobox]:"
  ],
@@ -57,6 +58,7 @@
   "small button:anslut en extern mcp-server"
  ],
  "ipad-landscape|/admin/usage": [],
+ "ipad-landscape|/admin/usage/users/$": [],
  "ipad-landscape|/admin/user-groups": [],
  "ipad-landscape|/admin/users": [
   "small button[combobox]:alla roller"
@@ -140,6 +142,7 @@
   "small a:/admin/users"
  ],
  "ipad-portrait|/admin/api-keys": [
+  "outside button:fler åtgärder för kontrollny",
   "small button[radio]:",
   "small input[combobox]:"
  ],
@@ -179,6 +182,7 @@
   "small button:anslut en extern mcp-server"
  ],
  "ipad-portrait|/admin/usage": [],
+ "ipad-portrait|/admin/usage/users/$": [],
  "ipad-portrait|/admin/user-groups": [],
  "ipad-portrait|/admin/users": [
   "small button[combobox]:alla roller"
@@ -269,6 +273,7 @@
  ],
  "phone-320|/admin/api-keys": [
   "outside a:/admin/users",
+  "outside button:fler åtgärder för kontrollny",
   "outside button[tab]:alla statusar",
   "outside button[tab]:utgången",
   "small button[radio]:",
@@ -291,12 +296,7 @@
  "phone-320|/admin/modules": [
   "small a:/admin/api-keys"
  ],
- "phone-320|/admin/personal-assistant": [
-  "clipped x section:bilagorinaktiv",
-  "clipped x section:gemensam promptinaktiv – ing",
-  "clipped x section:resonemanginaktiv",
-  "clipped x section:verktyginaktiv – inga verkty"
- ],
+ "phone-320|/admin/personal-assistant": [],
  "phone-320|/admin/prompt-library": [],
  "phone-320|/admin/roles": [],
  "phone-320|/admin/security-classifications": [],
@@ -321,6 +321,7 @@
   "outside button:sortera efter totalt tokens",
   "outside button:sortera efter utmatning toke"
  ],
+ "phone-320|/admin/usage/users/$": [],
  "phone-320|/admin/user-groups": [],
  "phone-320|/admin/users": [
   "outside button[tab]:inaktiva användareinaktiva a",
@@ -423,6 +424,7 @@
  "phone-390|/account/password": [],
  "phone-390|/admin": [],
  "phone-390|/admin/api-keys": [
+  "outside button:fler åtgärder för kontrollny",
   "small button[radio]:",
   "small input[combobox]:"
  ],
@@ -463,6 +465,7 @@
   "outside button:sortera efter totalt tokens",
   "outside button:sortera efter utmatning toke"
  ],
+ "phone-390|/admin/usage/users/$": [],
  "phone-390|/admin/user-groups": [],
  "phone-390|/admin/users": [
   "small button[combobox]:alla roller"
@@ -540,6 +543,7 @@
  "phone-landscape|/account/password": [],
  "phone-landscape|/admin": [],
  "phone-landscape|/admin/api-keys": [
+  "outside button:fler åtgärder för kontrollny",
   "small button[radio]:",
   "small input[combobox]:"
  ],
@@ -578,6 +582,7 @@
  "phone-landscape|/admin/usage": [
   "outside button:sortera efter beräknad kostn"
  ],
+ "phone-landscape|/admin/usage/users/$": [],
  "phone-landscape|/admin/user-groups": [],
  "phone-landscape|/admin/users": [
   "small button[combobox]:alla roller"
