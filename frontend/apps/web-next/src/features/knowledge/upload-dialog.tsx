@@ -45,19 +45,24 @@ const session = sessionQueries(browserApi);
 export function UploadBlobsButton({
   collectionId,
   collectionName,
-  disabled
+  disabled,
+  disabledReason
 }: {
   collectionId: string;
   collectionName: string;
   disabled?: boolean;
+  disabledReason?: string;
 }) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   return (
     <>
-      <Button disabled={disabled} onClick={() => setOpen(true)}>
-        {t("upload_files")}
-      </Button>
+      <AstryxButton
+        label={t("upload_files")}
+        isDisabled={disabled}
+        tooltip={disabledReason}
+        onClick={() => setOpen(true)}
+      />
       <UploadBlobsDialog
         collectionId={collectionId}
         collectionName={collectionName}

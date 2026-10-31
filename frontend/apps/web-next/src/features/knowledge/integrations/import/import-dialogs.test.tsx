@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
@@ -279,9 +279,16 @@ it("SharePoint: tells how many imports failed when only some were queued", async
   });
   fireEvent.click(within(dialog).getByRole("button", { name: "Importera" }));
 
-  await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
-  expect(toast.warning).toHaveBeenCalledWith("1 av 2 importer köades. 1 misslyckades.");
+  expect(await within(dialog).findByRole("heading", { name: "Import köad" })).toBeTruthy();
+  expect(within(dialog).getByText("1 objekt kunde inte köas.")).toBeTruthy();
+  expect(within(dialog).getByText("Rutiner: Mappen finns inte")).toBeTruthy();
+  expect(within(dialog).getByRole("link", { name: "Visa importen" }).getAttribute("href")).toBe(
+    "/spaces/space-1/knowledge/integrations/ik-1"
+  );
+  expect(onOpenChange).not.toHaveBeenCalled();
   expect(toast.error).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getAllByRole("button", { name: "Stäng" }).at(-1)!);
+  expect(onOpenChange).toHaveBeenCalledWith(false);
 });
 
 it("SharePoint: shows why a batch could not start at all, and lets the import be tried again", async () => {
@@ -449,3 +456,89 @@ it("Confluence and SharePoint: the source search ignores a trailing space", asyn
   expect(within(sites).getByRole("button", { name: "Ekonomi" })).toBeTruthy();
   expect(within(sites).queryByRole("button", { name: "Intranätet" })).toBeNull();
 });
+
+it.each(["bulk", "accumulated"])(
+  "SharePoint: preserves an oversized %s selection until it is reduced to the batch limit",
+  async (mode) => {
+    space.current = makeSpace();
+    const files = Array.from({ length: 51 }, (_, index) => ({
+      id: `file-${index}`,
+      type: "file",
+      name: `Fil ${index}.pdf`,
+      path: `/Policyer/Fil ${index}.pdf`
+    }));
+    api.GET.mockImplementation((path: string, args?: { params: { query: { q?: string } } }) => {
+      if (path.endsWith("/preview/"))
+        return ok({
+          items: [{ key: "site", type: "site", name: "Intranätet", url: "https://sp/intra" }]
+        });
+      const q = args?.params.query.q;
+      return ok({
+        items: path.endsWith("/search/")
+          ? q === "first"
+            ? files.slice(0, 49)
+            : q === "last"
+              ? files.slice(49)
+              : files
+          : [
+              {
+                id: "parent",
+                type: "folder",
+                name: "Policyer",
+                path: "/Policyer",
+                has_children: true
+              }
+            ],
+        current_path: "/",
+        drive_id: "drive"
+      });
+    });
+    api.POST.mockImplementation(() => new Promise(() => {}));
+    renderInApp(
+      <SharePointImportDialog
+        open
+        onOpenChange={() => {}}
+        onBack={() => {}}
+        integration={integration("sharepoint")}
+      />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Intranätet" }));
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: mode === "bulk" ? "all" : "first" } });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: `Välj alla träffar (${mode === "bulk" ? 51 : 49})`
+      })
+    );
+    if (mode === "accumulated") {
+      fireEvent.change(search, { target: { value: "last" } });
+      fireEvent.click(await screen.findByRole("button", { name: "Välj alla träffar (2)" }));
+    }
+    fireEvent.change(screen.getByRole("textbox", { name: /^Gruppnamn/ }), {
+      target: { value: "Policyer" }
+    });
+    expect(screen.getByText("51 av 50 objekt valda")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Importera högst 50 objekt åt gången. Ta bort valda filer eller mappar för att fortsätta."
+      )
+    ).toBeTruthy();
+    expect(screen.getAllByRole("textbox", { name: /^Importnamn för/ })).toHaveLength(51);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Importera" }));
+    });
+    expect(api.POST).not.toHaveBeenCalled();
+    if (mode === "bulk") {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Fil 50.pdf" }));
+      expect(screen.getByText("50 av 50 objekt valda")).toBeTruthy();
+    } else {
+      fireEvent.change(search, { target: { value: "" } });
+      fireEvent.click(await screen.findByRole("checkbox", { name: "Policyer" }));
+      expect(screen.getByText("1 av 50 objekt valda")).toBeTruthy();
+      expect(screen.getAllByRole("textbox", { name: /^Importnamn för/ })).toHaveLength(1);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Importera" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(api.POST.mock.calls[0]?.[1].body.items).toHaveLength(mode === "bulk" ? 50 : 1);
+  }
+);

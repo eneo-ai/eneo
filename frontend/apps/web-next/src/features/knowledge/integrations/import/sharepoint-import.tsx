@@ -1,10 +1,12 @@
 "use client";
 
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Globe, Search } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   FieldProblem,
   fieldProblemProps,
@@ -24,13 +26,15 @@ import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { formatBytes } from "@/lib/format";
 import { matchesSearch } from "@/lib/search";
-import { toast } from "@/lib/toast";
+import type { Schema } from "@/lib/api/models";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "../../embedding-model-select";
 import { trackImports } from "../import-completion";
+import { sourceHref } from "../sources";
 import { KNOWLEDGE_NAME_MAX_LENGTH } from "../knowledge-names";
 import {
   integrationPreviewQueryOptions,
@@ -43,10 +47,13 @@ import { ImportPreviewError } from "./preview-state";
 import {
   buildBatchItems,
   buildSelectionKey,
-  dedupeNestedSelection,
+  selectImportItems,
   type SelectedImportItem,
   type SelectedTreeItem
 } from "./selection";
+
+// CreateSpaceIntegrationKnowledgeBatchRequest accepts at most 50 items.
+const MAX_SHAREPOINT_IMPORT_ITEMS = 50;
 
 /** One batch import, as the form hands it to the dialog that owns the request. */
 type SharePointBatch = {
@@ -146,22 +153,6 @@ export function SharePointImportDialog({
       );
       trackJob(result.items.flatMap((item) => (item.job ? [item.job] : [])));
       void queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
-      if (result.created_count === 0) {
-        toast.error(
-          t("sharepoint_batch_import_all_failed", { failed: String(result.failed_count) })
-        );
-        return;
-      }
-      if (result.failed_count > 0) {
-        toast.warning(
-          t("sharepoint_batch_import_partial", {
-            created: String(result.created_count),
-            total: String(result.items.length),
-            failed: String(result.failed_count)
-          })
-        );
-      }
-      onOpenChange(false);
     },
     onError: (error) => toastApiError(error, t)
   });
@@ -172,7 +163,8 @@ export function SharePointImportDialog({
         {/* DialogContent remounts on every opening, so each import starts over. */}
         <SharePointImportForm
           pending={importBatch.isPending}
-          onImport={(batch) => importBatch.mutate(batch)}
+          onImport={(batch) => importBatch.mutateAsync(batch)}
+          onClose={() => onOpenChange(false)}
           onBack={onBack}
           integration={integration}
         />
@@ -184,18 +176,42 @@ export function SharePointImportDialog({
 function SharePointImportForm({
   pending,
   onImport,
+  onClose,
   onBack,
   integration
 }: {
   pending: boolean;
-  onImport: (batch: SharePointBatch) => void;
+  onImport: (
+    batch: SharePointBatch
+  ) => Promise<Schema<"CreateSpaceIntegrationKnowledgeBatchResponse">>;
+  onClose: () => void;
   onBack: () => void;
   integration: UserIntegration;
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const { space } = useSpace();
+  const announce = useAnnounce();
+  const { space, routeId } = useSpace();
 
+  const stepHeading = useRef<HTMLHeadingElement>(null);
+  const rescueFocus = useFocusRescue();
+  const [result, setResult] =
+    useState<Schema<"CreateSpaceIntegrationKnowledgeBatchResponse"> | null>(null);
+  useEffect(() => {
+    if (result)
+      announce(
+        t(
+          result.created_count > 0
+            ? "sharepoint_batch_import_partial"
+            : "sharepoint_batch_import_all_failed",
+          {
+            created: String(result.created_count),
+            total: String(result.items.length),
+            failed: String(result.failed_count)
+          }
+        )
+      );
+  }, [announce, result, t]);
   const [search, setSearch] = useState("");
   const [showPublicTeams, setShowPublicTeams] = useState(true);
   const [site, setSite] = useState<IntegrationPreview | null>(null);
@@ -230,16 +246,20 @@ function SharePointImportForm({
   );
   const settingsHref = space.personal ? "/account/integrations" : null;
 
-  const deduped = dedupeNestedSelection(selected);
-  const requiresWrapperName = deduped.effectiveEntries.length > 1;
+  const requiresWrapperName = selected.length > 1;
   const wrapperNameMissing = requiresWrapperName && wrapperName.trim().length === 0;
 
   const noModels = space.embedding_models.length === 0 || !embeddingModelId;
   const siteProblem = !site ? t("form_problem_choose_sharepoint_site") : null;
-  const itemsProblem =
-    site && deduped.effectiveEntries.length === 0
+  const selectionTooLarge = selected.length > MAX_SHAREPOINT_IMPORT_ITEMS;
+  const itemsProblem = !site
+    ? null
+    : selected.length === 0
       ? t("form_problem_choose_sharepoint_items")
-      : null;
+      : selectionTooLarge
+        ? t("sharepoint_import_selection_limit", { limit: MAX_SHAREPOINT_IMPORT_ITEMS })
+        : null;
+  const visibleItemsProblem = submitted || selectionTooLarge ? itemsProblem : null;
   const wrapperNameProblem = wrapperNameMissing ? t("sharepoint_wrapper_name_missing_hint") : null;
   const shown = (problem: string | null) => (submitted ? problem : null);
 
@@ -258,7 +278,7 @@ function SharePointImportForm({
     setSelected((current) =>
       current.some((entry) => entry.selectionKey === key)
         ? current.filter((entry) => entry.selectionKey !== key)
-        : [...current, { selectionKey: key, item, importName: item.name }]
+        : selectImportItems(current, [item])
     );
   }
 
@@ -272,13 +292,14 @@ function SharePointImportForm({
   // warning; otherwise what is missing (a site, content, the group name)
   // shows at its place, and focus moves there.
   function submit() {
+    if (pending) return;
     const target = noModels
       ? document.getElementById("sharepoint-no-models")
       : siteProblem
         ? (document.querySelector<HTMLElement>("#sharepoint-sites button") ??
           document.getElementById("sharepoint-site-search"))
         : itemsProblem
-          ? (document.querySelector<HTMLElement>("#sharepoint-tree [role=checkbox]") ??
+          ? (document.querySelector<HTMLElement>("#sharepoint-tree input[type=checkbox]") ??
             document.getElementById("sharepoint-tree"))
           : wrapperNameProblem
             ? document.getElementById("sharepoint-wrapper-name")
@@ -294,23 +315,99 @@ function SharePointImportForm({
       revealProblems(() => setSubmitted(true), target);
       return;
     }
-    onImport({
+    void onImport({
       embeddingModelId,
       wrapperName: requiresWrapperName ? wrapperName.trim() : undefined,
       items: buildBatchItems(
         { key: site.key, name: site.name, url: site.url, type: site.type },
-        deduped.effectiveEntries
+        selected
       ),
       batchName: requiresWrapperName ? wrapperName.trim() : site.name
-    });
+    })
+      .then((result) => {
+        rescueFocus(() => stepHeading.current);
+        setResult(result);
+      })
+      .catch(() => {
+        // The request owner reports errors; the mounted form retains the selection.
+      });
   }
 
   const selectedKeys = new Set(selected.map((entry) => entry.selectionKey));
 
+  if (result) {
+    const createdId = result.items.find(
+      (item) => item.status === "created" && item.integration_knowledge_id
+    )?.integration_knowledge_id;
+    return (
+      <>
+        <DialogHeader>
+          <DialogTitle tabIndex={-1}>{t("import_knowledge_from_sharepoint")}</DialogTitle>
+        </DialogHeader>
+        <section className="flex flex-col gap-3 py-4">
+          <h3 ref={stepHeading} tabIndex={-1} className="text-lg font-semibold">
+            {result.created_count > 0
+              ? t("integration_import_complete_title")
+              : t("sharepoint_batch_import_all_failed", { failed: String(result.failed_count) })}
+          </h3>
+          {result.created_count > 0 && (
+            <p className="text-ax-text-secondary text-sm">
+              {result.created_count === 1
+                ? t("integration_import_complete_description_one")
+                : t("integration_import_complete_description", { count: result.created_count })}
+            </p>
+          )}
+          {result.failed_count > 0 && (
+            <>
+              <p className="text-sm">
+                {result.failed_count === 1
+                  ? t("integration_import_complete_failed_one")
+                  : t("integration_import_complete_failed", { failed: result.failed_count })}
+              </p>
+              <ul className="max-h-[30dvh] overflow-y-auto text-sm">
+                {result.items
+                  .filter((item) => item.status === "failed")
+                  .map((item) => (
+                    <li key={item.index} className="break-words">
+                      {item.name}
+                      {item.error ? `: ${item.error}` : ""}
+                    </li>
+                  ))}
+              </ul>
+            </>
+          )}
+        </section>
+        <DialogFooter>
+          {createdId && (
+            <AstryxButton
+              label={t("integration_import_view_site")}
+              href={sourceHref(routeId, { kind: "item", id: createdId })}
+              onClick={onClose}
+              variant="secondary"
+            />
+          )}
+          {result.created_count === 0 && (
+            <AstryxButton
+              label={t("retry")}
+              onClick={() => {
+                rescueFocus(() => stepHeading.current);
+                setResult(null);
+              }}
+              variant="secondary"
+            />
+          )}
+          <AstryxButton label={t("close")} onClick={onClose} />
+        </DialogFooter>
+      </>
+    );
+  }
+
   return (
     <>
       <DialogHeader>
-        <DialogTitle>{t("import_knowledge_from_sharepoint")}</DialogTitle>
+        <DialogTitle ref={stepHeading} tabIndex={-1}>
+          {t("import_knowledge_from_sharepoint")}
+        </DialogTitle>
       </DialogHeader>
 
       {space.embedding_models.length === 0 && (
@@ -349,7 +446,7 @@ function SharePointImportForm({
             id="sharepoint-sites"
             role="group"
             aria-label={t("sharepoint_available_sources")}
-            className="max-h-[40vh] overflow-y-auto rounded-md border p-1"
+            className="max-h-[40dvh] overflow-y-auto rounded-md border p-1"
             {...fieldProblemProps("sharepoint-sites", shown(siteProblem))}
           >
             {userIntegrationId.length === 0 ? (
@@ -406,37 +503,45 @@ function SharePointImportForm({
           <FieldProblem id="sharepoint-sites" problem={shown(siteProblem)} />
         </div>
       ) : (
-        <div className="flex max-h-[56vh] min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+        <div className="flex max-h-[56dvh] min-h-0 flex-col gap-3 overflow-y-auto pr-1">
           <div
             id="sharepoint-tree"
             role="group"
             tabIndex={-1}
             aria-label={t("sharepoint_step_content")}
-            {...fieldProblemProps("sharepoint-tree", shown(itemsProblem))}
+            {...fieldProblemProps("sharepoint-tree", visibleItemsProblem)}
           >
             <SharePointFolderTree
               userIntegrationId={userIntegrationId}
               spaceId={space.id}
               site={{ key: site.key, name: site.name, type: site.type }}
               selectedKeys={selectedKeys}
+              selectedPaths={selected
+                .filter((entry) => entry.item.type !== "file")
+                .map((entry) => entry.item.path)}
               onToggleSelect={toggleSelect}
+              onSelectMany={(items) => {
+                setSubmitted(false);
+                setSelected((current) => selectImportItems(current, items));
+              }}
+              onDeselectMany={(items) => {
+                setSubmitted(false);
+                const keys = new Set(items.map(buildSelectionKey));
+                setSelected((current) => current.filter((entry) => !keys.has(entry.selectionKey)));
+              }}
             />
           </div>
-          <FieldProblem id="sharepoint-tree" problem={shown(itemsProblem)} />
+          <FieldProblem id="sharepoint-tree" problem={visibleItemsProblem} />
 
           {selected.length > 0 && (
             <>
               <div className="bg-accent rounded-md border px-3 py-2">
                 <div className="text-sm font-medium">
-                  {t("sharepoint_selected_items_count", { count: String(selected.length) })}
+                  {t("sharepoint_import_selection_count", {
+                    count: selected.length,
+                    limit: MAX_SHAREPOINT_IMPORT_ITEMS
+                  })}
                 </div>
-                {deduped.excludedKeys.size > 0 && (
-                  <div className="text-muted-foreground mt-1 text-xs">
-                    {t("sharepoint_nested_selection_notice", {
-                      count: String(deduped.excludedKeys.size)
-                    })}
-                  </div>
-                )}
               </div>
 
               {requiresWrapperName && (
@@ -489,9 +594,6 @@ function SharePointImportForm({
                       <span className="min-w-0 flex-1 truncate">{entry.item.path}</span>
                       {entry.item.size != null && (
                         <span className="shrink-0">({formatBytes(entry.item.size, locale)})</span>
-                      )}
-                      {deduped.excludedKeys.has(entry.selectionKey) && (
-                        <span className="shrink-0">{t("sharepoint_nested_selection_skipped")}</span>
                       )}
                     </div>
                   </div>

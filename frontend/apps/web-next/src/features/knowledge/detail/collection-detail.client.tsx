@@ -44,11 +44,20 @@ export function CollectionDetail({ collectionId }: { collectionId: string }) {
             {t("knowledge")}
           </Link>
           <PageHeader title={collection.name} headingRef={headingRef} headingId={headingId}>
-            <AddTextDialog collectionId={collection.id} disabled={readonly || modelDisabled} />
+            <AddTextDialog
+              collectionId={collection.id}
+              disabled={readonly || modelDisabled}
+              disabledReason={
+                modelDisabled && !readonly ? t("collection_enable_model_to_add_text") : undefined
+              }
+            />
             <UploadBlobsButton
               collectionId={collection.id}
               collectionName={collection.name}
               disabled={readonly || modelDisabled}
+              disabledReason={
+                modelDisabled && !readonly ? t("collection_enable_model_to_add_text") : undefined
+              }
             />
           </PageHeader>
         </div>

@@ -1794,5 +1794,7 @@
   "api_keys_notifications_add_day": "Add {days} days",
   "form_problem_confirm_migration_warning": "Confirm that you want to continue despite the compatibility warnings.",
   "model_huggingface_link": "View on HuggingFace",
-  "admin_models_retiring_description": "{models}: choose a replacement and migrate usage before retirement."
+  "admin_models_retiring_description": "{models}: choose a replacement and migrate usage before retirement.",
+  "sharepoint_import_selection_count": "{count} of {limit} items selected",
+  "sharepoint_import_selection_limit": "Import at most {limit} items at a time. Remove selected files or folders to continue."
 }

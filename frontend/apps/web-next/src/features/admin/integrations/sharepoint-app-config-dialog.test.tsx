@@ -1,8 +1,8 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testQueryClient } from "@/test/render";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
 const toast = vi.hoisted(() => ({
@@ -30,10 +30,11 @@ const configured = {
   updated_at: "2026-01-01T00:00:00Z"
 };
 
-async function renderDialog(config: typeof configured | null) {
+async function renderDialog(config: typeof configured | null, queryClient = testQueryClient()) {
   api.GET.mockImplementation(() => ok(config));
   renderInApp(
-    <SharePointAppConfigDialog open onOpenChange={() => {}} onRequestDelete={() => {}} />
+    <SharePointAppConfigDialog open onOpenChange={() => {}} onRequestDelete={() => {}} />,
+    { queryClient }
   );
   const dialog = screen.getByRole("dialog", { name: "Konfigurera SharePoint-app" });
   // Loaded: the current configuration, or the fields for a first one.
@@ -48,6 +49,58 @@ const field = (dialog: HTMLElement, name: RegExp) =>
 afterEach(() => vi.clearAllMocks());
 
 describe("SharePointAppConfigDialog", () => {
+  it.each(["success", "error"] as const)(
+    "keeps a submitted secret out of caches while pending and after %s",
+    async (outcome) => {
+      const queryClient = testQueryClient();
+      const secret = "synthetic-sharepoint-client-secret";
+      let finish!: (result: unknown) => void;
+      api.POST.mockImplementation(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          })
+      );
+      const dialog = await renderDialog(configured, queryClient);
+      fireEvent.click(within(dialog).getByRole("button", { name: "Uppdatera secret" }));
+      fireEvent.change(field(dialog, /^Ny Client Secret/), { target: { value: secret } });
+      fireEvent.change(field(dialog, /^Bekräfta klienthemlighet/), { target: { value: secret } });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Spara" }));
+      await waitFor(() =>
+        expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/sharepoint/app", {
+          body: {
+            client_id: configured.client_id,
+            client_secret: secret,
+            tenant_domain: configured.tenant_domain
+          }
+        })
+      );
+      const cacheState = () =>
+        JSON.stringify({
+          mutations: queryClient
+            .getMutationCache()
+            .getAll()
+            .map((mutation) => mutation.state),
+          queries: queryClient
+            .getQueryCache()
+            .getAll()
+            .map((query) => query.state)
+        });
+      expect(cacheState()).not.toContain(secret);
+      await act(async () =>
+        finish(
+          outcome === "success"
+            ? { data: null, response: new Response("{}") }
+            : { error: { message: "Refused" }, response: new Response("{}", { status: 403 }) }
+        )
+      );
+      await waitFor(() =>
+        expect(queryClient.getMutationCache().getAll()[0]?.state.status).toBe(outcome)
+      );
+      expect(cacheState()).not.toContain(secret);
+    }
+  );
+
   it("shows each missing field's problem at the field, and focus moves to the first", async () => {
     const dialog = await renderDialog(null);
     const signIn = within(dialog).getByRole("button", { name: "Logga in med Microsoft" });

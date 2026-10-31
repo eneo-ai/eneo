@@ -444,10 +444,12 @@ export function BlobTable({
 /** "Add text" — creates an info-blob from pasted text. */
 export function AddTextDialog({
   collectionId,
-  disabled
+  disabled,
+  disabledReason
 }: {
   collectionId: string;
   disabled?: boolean;
+  disabledReason?: string;
 }) {
   const t = useTranslations();
   const invalidateBlobs = useInvalidateBlobs();
@@ -494,7 +496,12 @@ export function AddTextDialog({
 
   return (
     <>
-      <AstryxButton label={t("add_text")} isDisabled={disabled} onClick={() => setOpen(true)} />
+      <AstryxButton
+        label={t("add_text")}
+        isDisabled={disabled}
+        tooltip={disabledReason}
+        onClick={() => setOpen(true)}
+      />
       <Dialog open={open} onOpenChange={changeOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>

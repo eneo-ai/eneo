@@ -21,7 +21,7 @@ export const Route = createFileRoute("/_app/spaces/$spaceId/knowledge/websites/$
       new URLSearchParams(stringifySearch(search))
     );
     return {
-      tab: tab === "blobs" ? tab : undefined,
+      tab: tab !== "crawls" ? tab : undefined,
       prefix: prefix || undefined,
       q: q || undefined
     };

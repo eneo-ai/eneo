@@ -1794,5 +1794,7 @@
   "api_keys_notifications_add_day": "Lägg till {days} dagar",
   "form_problem_confirm_migration_warning": "Bekräfta att du vill fortsätta trots kompatibilitetsvarningarna.",
   "model_huggingface_link": "Visa på HuggingFace",
-  "admin_models_retiring_description": "{models}: välj en ersättare och migrera användningen före utfasningen."
+  "admin_models_retiring_description": "{models}: välj en ersättare och migrera användningen före utfasningen.",
+  "sharepoint_import_selection_count": "{count} av {limit} objekt valda",
+  "sharepoint_import_selection_limit": "Importera högst {limit} objekt åt gången. Ta bort valda filer eller mappar för att fortsätta."
 }
