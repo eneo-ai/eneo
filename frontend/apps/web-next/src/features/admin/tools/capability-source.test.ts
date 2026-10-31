@@ -30,6 +30,28 @@ const external: McpServer = {
 };
 
 describe("sourceDraftProblems", () => {
+  it("requires the API key again when replacing a saved header name", () => {
+    const server = { ...external, http_auth_type: "api_key_header" };
+    const draft = { ...sourceDraft(server), headerName: "X-Replacement" };
+    expect(sourceDraftProblems(draft, server)).toEqual([{ field: "token", kind: "required" }]);
+  });
+  it("refuses a remote HTTP URL carrying a credential, but identity forwarding alone is allowed", () => {
+    const draft = { ...sourceDraft(external), url: "http://remote.example/mcp" };
+    expect(sourceDraftProblems(draft, external)).toContainEqual({
+      field: "url",
+      kind: "credential-transport"
+    });
+    expect(
+      sourceDraftProblems({ ...draft, auth: "none", forwardIdentity: true }, external)
+    ).toEqual([]);
+    expect(
+      sourceDraftProblems(
+        { ...draft, auth: "none", url: "http://user@remote.example/mcp" },
+        external
+      )
+    ).toContainEqual({ field: "url", kind: "credential-transport" });
+  });
+
   it("lists the problems in the order of the form's fields", () => {
     const draft = {
       ...sourceDraft(),
@@ -59,6 +81,48 @@ describe("sourceDraftProblems", () => {
 });
 
 describe("capability source payloads", () => {
+  it("preserves secret bytes, omits blank saved secrets and lets the backend refuse control characters", () => {
+    const server = { ...external, http_auth_type: "api_key_header" };
+    const draft = sourceDraft(server);
+    expect(
+      updateSourcePayload(server, { ...draft, token: " synthetic-key " }).http_auth_config_schema
+    ).toEqual({ token: " synthetic-key " });
+    expect(
+      updateSourcePayload(server, { ...draft, token: "   " }).http_auth_config_schema
+    ).toBeUndefined();
+    expect(
+      updateSourcePayload(server, { ...draft, token: "synthetic\n" }).http_auth_config_schema
+    ).toEqual({ token: "synthetic\n" });
+    expect(
+      createSourcePayload("web_search", {
+        ...draft,
+        token: " synthetic-key ",
+        headerName: " X-Api-Key "
+      }).http_auth_config_schema
+    ).toEqual({ token: " synthetic-key ", header_name: "X-Api-Key" });
+  });
+  it("keeps API-header metadata edits credential-free and supports a token-only replacement", () => {
+    const server = { ...external, http_auth_type: "api_key_header" };
+    const draft = sourceDraft(server);
+    expect(updateSourcePayload(server, draft).http_auth_config_schema).toBeUndefined();
+    expect(
+      updateSourcePayload(server, { ...draft, token: "synthetic-key" }).http_auth_config_schema
+    ).toEqual({ token: "synthetic-key" });
+    expect(
+      updateSourcePayload(server, { ...draft, token: "synthetic-key", headerName: "X-Replacement" })
+        .http_auth_config_schema
+    ).toEqual({ header_name: "X-Replacement", token: "synthetic-key" });
+  });
+
+  it.each([
+    ["toolCatalogMaxCount", 4097],
+    ["toolCatalogMaxMiB", 65],
+    ["toolDefinitionMaxKiB", 1025]
+  ] as const)("refuses a catalog %s beyond its backend bound", (field, value) => {
+    expect(sourceDraftProblems({ ...sourceDraft(external), [field]: value }, external)).toEqual([
+      expect.objectContaining({ field, kind: "whole-number" })
+    ]);
+  });
   it("creates an external source inactive with its audience and credentials", () => {
     const draft = {
       ...sourceDraft(),

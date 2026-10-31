@@ -24,7 +24,7 @@ import {
   supportsOutboundHeaders,
   type HeaderRow
 } from "./outbound-headers";
-import { blockingError } from "@/components/composites/query-state";
+import { blockingError, QueryStateBoundary } from "@/components/composites/query-state";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { KeyExpiryField } from "./key-expiry-field";
 import { ModelCatalogStep } from "./model-catalog-step";
@@ -79,11 +79,16 @@ function defaultModelKind(modes: string[] | undefined): ModelKind {
 export function AddModelWizard({
   open,
   onOpenChange,
-  initialProviderId
+  initialProviderId,
+  fixedKind,
+  onCreated
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   initialProviderId?: string;
+  /** Limit a contextual creation flow to one model kind. */
+  fixedKind?: ModelKind;
+  onCreated?: (ids: string[]) => void;
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
@@ -91,14 +96,23 @@ export function AddModelWizard({
   const capsQuery = useQuery({ ...providerCapabilitiesQueryOptions(browserApi), enabled: open });
   const caps: ProviderCapabilities | undefined = capsQuery.data;
 
-  const hasProviders = (providers.data?.length ?? 0) > 0;
+  const eligibleProviders = (providers.data ?? []).filter(
+    (provider) => !fixedKind || caps?.providers[provider.provider_type]?.modes.includes(fixedKind)
+  );
+  const hasProviders = eligibleProviders.length > 0;
 
   const favoritesQuery = useQuery({
     ...favoriteProvidersQueryOptions(browserApi),
     enabled: open
   });
   const favorites = useMemo(() => new Set(favoritesQuery.data ?? []), [favoritesQuery.data]);
-  const options = useMemo(() => (caps ? providerOptions(caps) : []), [caps]);
+  const options = useMemo(
+    () =>
+      caps
+        ? providerOptions(caps).filter((option) => !fixedKind || option.modes.includes(fixedKind))
+        : [],
+    [caps, fixedKind]
+  );
 
   const setFavoritesMut = useMutation({
     mutationFn: (next: string[]) => setFavoriteProviders(browserApi, next),
@@ -142,6 +156,7 @@ export function AddModelWizard({
   const [keyExpiresOn, setKeyExpiresOn] = useState<string | null>(null);
   const [providerId, setProviderId] = useState<string | null>(null);
   const [modelKind, setModelKind] = useState<ModelKind>("completion");
+  const [catalogBusy, setCatalogBusy] = useState(false);
   const [credentialsSubmitted, setCredentialsSubmitted] = useState(false);
   const [existingSubmitted, setExistingSubmitted] = useState(false);
   /** A name the create was refused for: another provider has it. */
@@ -153,7 +168,7 @@ export function AddModelWizard({
   useReturnFocus(open, noTrigger);
 
   function reset() {
-    const preselect = initialProviderId ?? providers.data?.[0]?.id ?? "";
+    const preselect = initialProviderId ?? eligibleProviders[0]?.id ?? "";
     // Default to the provider gallery ("new"); the existing-provider path is a
     // secondary link. Adding models to a specific provider jumps past this step.
     setStep(initialProviderId ? "models" : "provider");
@@ -170,8 +185,11 @@ export function AddModelWizard({
     setExistingSubmitted(false);
     setTakenName(null);
     setProviderId(initialProviderId ?? null);
+    setCatalogBusy(false);
     const provider = providers.data?.find((item) => item.id === preselect);
-    setModelKind(defaultModelKind(caps?.providers[provider?.provider_type ?? ""]?.modes));
+    setModelKind(
+      fixedKind ?? defaultModelKind(caps?.providers[provider?.provider_type ?? ""]?.modes)
+    );
   }
 
   // The dialog is opened from outside (no Radix trigger), so Radix never
@@ -217,7 +235,7 @@ export function AddModelWizard({
       setProviderId(provider.id);
       setExistingId(provider.id);
       setMode("existing");
-      setModelKind(defaultModelKind(caps?.providers[provider.provider_type]?.modes));
+      setModelKind(fixedKind ?? defaultModelKind(caps?.providers[provider.provider_type]?.modes));
       setStep("models");
     },
     // A taken name is shown at the name field; the toast's generic text
@@ -261,7 +279,7 @@ export function AddModelWizard({
   }
 
   function requestOpenChange(next: boolean) {
-    if (!next && createProviderMut.isPending) return;
+    if (!next && (createProviderMut.isPending || catalogBusy)) return;
     onOpenChange(next);
   }
 
@@ -274,10 +292,16 @@ export function AddModelWizard({
     providers.data?.find((provider) => provider.id === existingId) ?? createdProvider;
   const targetProviderType =
     mode === "existing" ? (existingProvider?.provider_type ?? "") : providerType;
-  const targetProviderModes = supportedModelKinds(caps?.providers[targetProviderType]?.modes);
-  const effectiveModelKind = targetProviderModes.includes(modelKind)
-    ? modelKind
-    : (targetProviderModes[0] ?? "completion");
+  const targetProviderModes = fixedKind
+    ? caps?.providers[targetProviderType]?.modes.includes(fixedKind)
+      ? [fixedKind]
+      : []
+    : supportedModelKinds(caps?.providers[targetProviderType]?.modes);
+  const effectiveModelKind =
+    fixedKind ??
+    (targetProviderModes.includes(modelKind)
+      ? modelKind
+      : (targetProviderModes[0] ?? "completion"));
 
   // A step change removes the control that had focus (the tile, "Nästa"):
   // focus moves into the new step instead of the page.
@@ -348,6 +372,13 @@ export function AddModelWizard({
   }
 
   function providerStep() {
+    if (fixedKind && (!caps || !providers.data)) {
+      return frame(
+        <QueryStateBoundary queries={[providers, capsQuery]} rows={4}>
+          {() => null}
+        </QueryStateBoundary>
+      );
+    }
     if (mode === "existing") {
       return frame(
         <div className="flex flex-col gap-4">
@@ -363,7 +394,7 @@ export function AddModelWizard({
           )}
           <Selector
             label={t("provider")}
-            options={(providers.data ?? []).map((provider) => ({
+            options={eligibleProviders.map((provider) => ({
               value: provider.id,
               label: provider.name
             }))}
@@ -378,7 +409,9 @@ export function AddModelWizard({
             onChange={(id) => {
               setExistingId(id);
               const provider = providers.data?.find((item) => item.id === id);
-              setModelKind(defaultModelKind(caps?.providers[provider?.provider_type ?? ""]?.modes));
+              setModelKind(
+                fixedKind ?? defaultModelKind(caps?.providers[provider?.provider_type ?? ""]?.modes)
+              );
             }}
           />
         </div>,
@@ -411,7 +444,7 @@ export function AddModelWizard({
               setProviderType(type);
               // Seed the editable name from the chosen provider, like Svelte.
               setProviderName(providerDisplayName(type));
-              setModelKind(defaultModelKind(caps?.providers[type]?.modes));
+              setModelKind(fixedKind ?? defaultModelKind(caps?.providers[type]?.modes));
               setCredentialsSubmitted(false);
               setStep("credentials");
             }}
@@ -531,18 +564,35 @@ export function AddModelWizard({
           ? providerStep()
           : step === "credentials"
             ? credentialsStep()
-            : targetProviderId && (
+            : targetProviderId &&
+              (fixedKind && targetProviderModes.length === 0 ? (
+                frame(
+                  <QueryStateBoundary queries={[providers, capsQuery]} rows={2}>
+                    {() => (
+                      <FieldProblem
+                        id="model-provider-kind"
+                        problem={t("form_problem_choose_provider")}
+                      />
+                    )}
+                  </QueryStateBoundary>,
+                  <Button label={t("back")} onClick={() => setStep("provider")} />
+                )
+              ) : (
                 <ModelCatalogStep
                   providerId={targetProviderId}
                   providerType={targetProviderType}
                   mode={effectiveModelKind}
                   supportedModes={targetProviderModes}
                   onModeChange={setModelKind}
-                  onCreated={() => onOpenChange(false)}
+                  onBusyChange={setCatalogBusy}
+                  onCreated={(ids) => {
+                    onCreated?.(ids);
+                    onOpenChange(false);
+                  }}
                   onBack={() => setStep("provider")}
                   frame={frame}
                 />
-              )}
+              ))}
     </Dialog>
   );
 }

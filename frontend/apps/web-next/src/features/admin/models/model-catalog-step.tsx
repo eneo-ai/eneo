@@ -13,7 +13,7 @@ import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, Search } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
 import {
@@ -122,6 +122,7 @@ export function ModelCatalogStep({
   supportedModes,
   onModeChange,
   onCreated,
+  onBusyChange,
   onBack,
   frame
 }: {
@@ -130,7 +131,8 @@ export function ModelCatalogStep({
   mode?: ModelKind;
   supportedModes?: ModelKind[];
   onModeChange?: (mode: ModelKind) => void;
-  onCreated: () => void;
+  onCreated: (ids: string[]) => void;
+  onBusyChange?: (busy: boolean) => void;
   onBack: () => void;
   frame: (content: React.ReactNode, footer: React.ReactNode) => React.ReactNode;
 }) {
@@ -374,19 +376,34 @@ export function ModelCatalogStep({
       if (models.length > 0 && failures.length === models.length) {
         throw (failures[0] as PromiseRejectedResult).reason;
       }
-      return { total: models.length, failed: failures.length };
+      return {
+        total: models.length,
+        failed: failures.length,
+        ids: results.flatMap((result) => (result.status === "fulfilled" ? [result.value.id] : []))
+      };
     },
-    onSuccess: ({ total, failed }) => {
+    onSuccess: ({ total, failed, ids }) => {
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
       resetOutcome();
       if (failed === 0) toast.success(t("models_added_count", { count: total }));
       else toast.warning(t("models_added_partial", { added: total - failed, total }));
-      onCreated();
+      onCreated(ids);
     },
     onError: (error) => toastApiError(error, t)
   });
 
   const busy = create.isPending || validating;
+  // Closing during validation can still lead to a write; release the parent's
+  // close guard when this step leaves, including after a failed operation.
+  useLayoutEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+  useLayoutEffect(
+    () => () => {
+      onBusyChange?.(false);
+    },
+    [onBusyChange]
+  );
   const canList = !NO_SUGGESTIONS_PROVIDERS.has(providerType);
   const modes = supportedModes?.length ? supportedModes : [mode];
 

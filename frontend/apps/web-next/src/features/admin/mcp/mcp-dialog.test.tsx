@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -36,6 +36,123 @@ const add = (dialog: HTMLElement) =>
   within(dialog).getByRole("button", { name: "Lägg till MCP-server" }) as HTMLButtonElement;
 
 describe("McpServerDialog", () => {
+  it.each([true, false])(
+    "keeps create credentials outside mutation state while pending and after success=%s",
+    async (succeeds) => {
+      let finish!: (response: unknown) => void;
+      api.GET.mockImplementation(() =>
+        ok({ security_enabled: false, security_classifications: [] })
+      );
+      api.POST.mockReturnValue(
+        new Promise((resolve) => {
+          finish = resolve;
+        })
+      );
+      const { queryClient } = renderInApp(<McpServerDialog open onOpenChange={() => {}} />);
+      const dialog = screen.getByRole("dialog");
+      fireEvent.change(screen.getByLabelText("Namn"), { target: { value: "Diariet" } });
+      fireEvent.change(screen.getByLabelText("URL"), {
+        target: { value: "https://remote.example/mcp" }
+      });
+      chooseBearer(dialog);
+      fireEvent.change(field(/^Bearer-token/), { target: { value: "synthetic-private-token" } });
+      fireEvent.change(field(/^Bekräfta Bearer-token/), {
+        target: { value: "synthetic-private-token" }
+      });
+      fireEvent.click(add(dialog));
+      await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+      const cached = () =>
+        JSON.stringify(
+          queryClient
+            .getMutationCache()
+            .getAll()
+            .map((mutation) => mutation.state)
+        );
+      expect(cached()).not.toContain("synthetic-private-token");
+      await act(async () =>
+        finish(
+          succeeds
+            ? {
+                data: { server: { id: "created" }, connection: { tools_discovered: 0 } },
+                response: new Response()
+              }
+            : {
+                error: { message: "fixture refusal" },
+                response: new Response("{}", { status: 400 })
+              }
+        )
+      );
+      await waitFor(() => expect(queryClient.isMutating()).toBe(0));
+      expect(cached()).not.toContain("synthetic-private-token");
+    }
+  );
+  it("opens catalog safety and focuses its invalid limit without submitting", () => {
+    const dialog = renderDialog();
+    fireEvent.change(screen.getByLabelText("Namn"), { target: { value: "Diariet" } });
+    fireEvent.change(screen.getByLabelText("URL"), {
+      target: { value: "https://remote.example/mcp" }
+    });
+    const catalog = screen.getByLabelText("Maximal katalogstorlek (MiB)");
+    fireEvent.change(catalog, { target: { value: "65" } });
+    fireEvent.click(add(dialog));
+    expect(document.activeElement).toBe(catalog);
+    expect(catalog.closest("details")?.open).toBe(true);
+    expect(catalog.getAttribute("aria-invalid")).toBe("true");
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+  it("creates API-header authentication with identity forwarding and catalog limits", async () => {
+    api.POST.mockReturnValue(new Promise(() => {}));
+    const dialog = renderDialog();
+    fireEvent.change(screen.getByLabelText("Namn"), { target: { value: "Diariet" } });
+    fireEvent.change(screen.getByLabelText("URL"), {
+      target: { value: "https://remote.example/mcp" }
+    });
+    fireEvent.keyDown(screen.getByRole("combobox", { name: "Autentisering" }), {
+      key: "ArrowDown"
+    });
+    fireEvent.keyDown(screen.getByRole("option", { name: "API-nyckel i header" }), {
+      key: "Enter"
+    });
+    fireEvent.change(screen.getByLabelText("Headernamn"), { target: { value: "X-Api-Key" } });
+    fireEvent.change(field(/^API-nyckel/), { target: { value: " synthetic-key " } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: " synthetic-key " } });
+    fireEvent.click(screen.getByLabelText("Vidarebefordra användaridentitet"));
+    fireEvent.change(screen.getByLabelText("Maximalt antal verktyg"), {
+      target: { value: "1024" }
+    });
+    fireEvent.change(screen.getByLabelText("Maximal katalogstorlek (MiB)"), {
+      target: { value: "32" }
+    });
+    fireEvent.click(add(dialog));
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/mcp-servers/", {
+        body: expect.objectContaining({
+          http_auth_type: "api_key_header",
+          http_auth_config_schema: { header_name: "X-Api-Key", token: " synthetic-key " },
+          forward_identity: true,
+          tool_catalog_max_count: 1024,
+          tool_catalog_max_bytes: 32 * 1048576,
+          tool_definition_max_bytes: 64 * 1024
+        })
+      })
+    );
+  });
+
+  it("refuses credentials over remote plain HTTP before submitting", () => {
+    const dialog = renderDialog();
+    fireEvent.change(screen.getByLabelText("Namn"), { target: { value: "Diariet" } });
+    fireEvent.change(screen.getByLabelText("URL"), {
+      target: { value: "http://remote.example/mcp" }
+    });
+    chooseBearer(dialog);
+    fireEvent.change(field(/^Bearer-token/), { target: { value: "synthetic-token" } });
+    fireEvent.change(field(/^Bekräfta Bearer-token/), { target: { value: "synthetic-token" } });
+    fireEvent.click(add(dialog));
+    expect(api.POST).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("URL").getAttribute("aria-invalid")).toBe("true");
+    expect(document.activeElement).toBe(screen.getByLabelText("URL"));
+  });
+
   it("keeps a pending add pending when closed and reopened, so it is not sent twice", async () => {
     api.GET.mockImplementation(() => ok({ security_enabled: false, security_classifications: [] }));
     api.POST.mockImplementation(() => new Promise(() => {}));
@@ -143,9 +260,11 @@ describe("McpServerDialog", () => {
     await expectNoAxeViolations(document.body);
   });
 
-  it("creates the server with the token once both entries match", async () => {
+  it("creates the server with the token once both entries match without caching its secret", async () => {
     api.POST.mockReturnValue(new Promise(() => {}));
-    const dialog = renderDialog();
+    api.GET.mockImplementation(() => ok({ security_enabled: false, security_classifications: [] }));
+    const { queryClient } = renderInApp(<McpServerDialog open onOpenChange={() => {}} />);
+    const dialog = screen.getByRole("dialog");
     fireEvent.change(within(dialog).getByLabelText("Namn"), { target: { value: "Diariet" } });
     fireEvent.change(within(dialog).getByLabelText("URL"), {
       target: { value: "https://diariet.example.se/mcp" }
@@ -165,5 +284,13 @@ describe("McpServerDialog", () => {
         })
       })
     );
+    expect(
+      JSON.stringify(
+        queryClient
+          .getMutationCache()
+          .getAll()
+          .map((mutation) => mutation.state)
+      )
+    ).not.toContain("token-1234");
   });
 });

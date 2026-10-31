@@ -43,6 +43,14 @@ import { toast } from "@/lib/toast";
 import { createMcpServer, MCP_KEY, type McpAuthType, type McpServerCreatePayload } from "./mcp";
 import { initials } from "./mcp-helpers";
 import { TagInput } from "./tag-input";
+import { sendsCredentialOverPlainHttp } from "./credential-transport";
+import {
+  catalogDraft,
+  catalogPayload,
+  catalogProblems,
+  CATALOG_LIMITS,
+  credentialPayload
+} from "./mcp-settings";
 
 const NO_CLASSIFICATION = "__none__";
 
@@ -60,10 +68,14 @@ export function McpServerDialog({
   const t = useTranslations();
   const router = useRouter();
   const queryClient = useQueryClient();
+  const pendingBody = useRef<McpServerCreatePayload | null>(null);
 
   // Owned here, not by the form: a pending add outlives a close and reopen.
   const save = useMutation({
-    mutationFn: (body: McpServerCreatePayload) => createMcpServer(browserApi, body),
+    mutationFn: () => createMcpServer(browserApi, pendingBody.current!),
+    onSettled: () => {
+      pendingBody.current = null;
+    },
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: MCP_KEY });
       toast.success(
@@ -81,7 +93,10 @@ export function McpServerDialog({
         {/* DialogContent remounts on every opening, so each add starts empty. */}
         <McpServerForm
           pending={save.isPending}
-          onSave={(body) => save.mutate(body)}
+          onSave={(body) => {
+            pendingBody.current = body;
+            save.mutate();
+          }}
           onOpenChange={onOpenChange}
         />
       </DialogContent>
@@ -110,6 +125,9 @@ function McpServerForm({
   const [authType, setAuthType] = useState<McpAuthType>("none");
   const [bearerToken, setBearerToken] = useState("");
   const [bearerTokenConfirmation, setBearerTokenConfirmation] = useState("");
+  const [headerName, setHeaderName] = useState("");
+  const [forwardIdentity, setForwardIdentity] = useState(false);
+  const [catalog, setCatalog] = useState(catalogDraft);
   const [tags, setTags] = useState<string[]>([]);
   const [iconUrl, setIconUrl] = useState("");
   const [documentationUrl, setDocumentationUrl] = useState("");
@@ -119,11 +137,16 @@ function McpServerForm({
   const urlRef = useRef<HTMLInputElement>(null);
   const tokenRef = useRef<HTMLInputElement>(null);
   const tokenConfirmationRef = useRef<HTMLInputElement>(null);
+  const headerRef = useRef<HTMLInputElement>(null);
 
   const nameProblem = name.trim() ? null : t("required_field");
-  const urlProblem = httpUrl.trim() ? null : t("required_field");
+  const urlProblem = !httpUrl.trim()
+    ? t("required_field")
+    : sendsCredentialOverPlainHttp(authType, httpUrl)
+      ? t("mcp_credential_requires_https")
+      : null;
   const tokenProblem =
-    authType === "bearer"
+    authType !== "none"
       ? confirmedSecretProblem({
           value: bearerToken,
           confirmation: bearerTokenConfirmation,
@@ -131,7 +154,10 @@ function McpServerForm({
         })
       : null;
   // Only spaces is no token either.
-  const tokenBlank = authType === "bearer" && bearerToken !== "" && bearerToken.trim() === "";
+  const tokenBlank = authType !== "none" && bearerToken !== "" && bearerToken.trim() === "";
+  const headerProblem =
+    authType === "api_key_header" && !headerName.trim() ? t("required_field") : null;
+  const limitProblems = catalogProblems(catalog);
   const shown = (problem: string | null) => (submitted ? problem : null);
 
   function payload(): McpServerCreatePayload {
@@ -142,11 +168,12 @@ function McpServerForm({
       description: description.trim() || null,
       tags: tags.length > 0 ? tags : null,
       icon_url: iconUrl.trim() || null,
-      documentation_url: documentationUrl.trim() || null
+      documentation_url: documentationUrl.trim() || null,
+      forward_identity: forwardIdentity,
+      ...catalogPayload(catalog)
     };
-    if (authType === "bearer" && bearerToken) {
-      body.http_auth_config_schema = { token: bearerToken };
-    }
+    const credentials = credentialPayload({ auth: authType, token: bearerToken, headerName });
+    if (credentials) body.http_auth_config_schema = credentials;
     if (securityEnabled && classificationId !== NO_CLASSIFICATION) {
       body.security_classification = { id: classificationId };
     }
@@ -158,13 +185,20 @@ function McpServerForm({
       ? nameRef
       : urlProblem
         ? urlRef
-        : tokenProblem === "required" || tokenBlank
-          ? tokenRef
-          : tokenProblem === "mismatch"
-            ? tokenConfirmationRef
-            : null;
+        : headerProblem
+          ? headerRef
+          : tokenProblem === "required" || tokenBlank
+            ? tokenRef
+            : tokenProblem === "mismatch"
+              ? tokenConfirmationRef
+              : null;
     if (firstProblem) {
       revealProblems(() => setSubmitted(true), firstProblem.current);
+      return;
+    }
+    const firstLimitProblem = limitProblems[0];
+    if (firstLimitProblem) {
+      revealProblems(() => setSubmitted(true), `mcp-${firstLimitProblem.field}`);
       return;
     }
     onSave(payload());
@@ -233,13 +267,27 @@ function McpServerForm({
               <SelectContent>
                 <SelectItem value="none">{t("mcp_auth_none")}</SelectItem>
                 <SelectItem value="bearer">{t("mcp_auth_bearer")}</SelectItem>
+                <SelectItem value="api_key_header">{t("api_key_header_auth")}</SelectItem>
               </SelectContent>
             </Select>
           </div>
-          {authType === "bearer" && (
+          {authType === "api_key_header" && (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="mcp-header">{t("api_key_header_name")}</Label>
+              <Input
+                id="mcp-header"
+                ref={headerRef}
+                value={headerName}
+                onChange={(event) => setHeaderName(event.target.value)}
+                {...fieldProblemProps("mcp-header", shown(headerProblem))}
+              />
+              <FieldProblem id="mcp-header" problem={shown(headerProblem)} />
+            </div>
+          )}
+          {authType !== "none" && (
             <ConfirmedSecretInput
-              label={t("bearer_token")}
-              confirmLabel={t("confirm_bearer_token")}
+              label={t(authType === "bearer" ? "bearer_token" : "mcp_api_key_token")}
+              confirmLabel={t(authType === "bearer" ? "confirm_bearer_token" : "confirm_api_key")}
               value={bearerToken}
               confirmation={bearerTokenConfirmation}
               onValueChange={setBearerToken}
@@ -254,6 +302,54 @@ function McpServerForm({
               confirmationRef={tokenConfirmationRef}
             />
           )}
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="mcp-forward-identity" className="flex min-h-11 items-center gap-2">
+              <input
+                id="mcp-forward-identity"
+                type="checkbox"
+                checked={forwardIdentity}
+                onChange={(event) => setForwardIdentity(event.target.checked)}
+                aria-describedby="mcp-forward-identity-hint"
+              />
+              {t("mcp_forward_identity")}
+            </Label>
+            <p id="mcp-forward-identity-hint" className="text-muted-foreground text-sm">
+              {t("mcp_forward_identity_hint")}
+            </p>
+          </div>
+          <details>
+            <summary className="cursor-pointer text-sm font-medium">
+              {t("mcp_catalog_safety")}
+            </summary>
+            <p className="text-muted-foreground mt-2 text-sm">{t("mcp_catalog_safety_hint")}</p>
+            <div className="mt-3 flex flex-col gap-3">
+              {CATALOG_LIMITS.map(({ field, label, hint, max }) => {
+                const problem = limitProblems.find((problem) => problem.field === field);
+                const message = problem
+                  ? t("form_problem_whole_number_between", { min: 1, max })
+                  : null;
+                return (
+                  <div key={field} className="flex flex-col gap-2">
+                    <Label htmlFor={`mcp-${field}`}>{t(label)}</Label>
+                    <Input
+                      id={`mcp-${field}`}
+                      type="number"
+                      min={1}
+                      max={max}
+                      step={1}
+                      value={catalog[field]}
+                      onChange={(event) =>
+                        setCatalog({ ...catalog, [field]: Number(event.target.value) })
+                      }
+                      {...fieldProblemProps(`mcp-${field}`, shown(message))}
+                    />
+                    <p className="text-muted-foreground text-sm">{t(hint)}</p>
+                    <FieldProblem id={`mcp-${field}`} problem={shown(message)} />
+                  </div>
+                );
+              })}
+            </div>
+          </details>
         </fieldset>
 
         <fieldset className="flex flex-col gap-4">

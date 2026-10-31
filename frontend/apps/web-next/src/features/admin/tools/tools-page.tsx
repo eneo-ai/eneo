@@ -1,11 +1,15 @@
 "use client";
 
 import { Tab, TabList } from "@astryxdesign/core/TabList";
+import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { McpServersPage } from "../mcp/mcp-page";
 import { CapabilityProvidersPage } from "./capability-providers-page";
 import { TOOLS_TAB_HREF, type ToolsTab } from "./tools-tabs";
+import { bundledToolsQueryOptions } from "../mcp/mcp";
+import { browserApi } from "@/lib/api/browser";
+import { RuntimeStatusCard } from "./runtime-status";
 
 // Links navigate; the TabList only needs the value to mark the current tab.
 function ignoreSelection() {}
@@ -19,9 +23,11 @@ function ignoreSelection() {}
  */
 export function ToolsPage({ tab }: { tab: ToolsTab }) {
   const t = useTranslations();
+  const bundledTools = useQuery(bundledToolsQueryOptions(browserApi));
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
       <PageHeader title={t("tools")} tour="admin-tools" />
+      <RuntimeStatusCard status={bundledTools.data?.runtime} />
       <TabList
         value={tab}
         onChange={ignoreSelection}

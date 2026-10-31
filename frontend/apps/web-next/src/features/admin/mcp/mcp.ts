@@ -5,7 +5,10 @@ import type { Schema } from "@/lib/api/models";
 
 export type McpServer = Schema<"MCPServerSettingsPublic">;
 export type McpServerTool = Schema<"MCPServerToolPublic">;
-export type McpAuthType = "none" | "bearer";
+export type McpAuthType = Extract<
+  Schema<"MCPServerCreate">["http_auth_type"],
+  "none" | "bearer" | "api_key_header"
+>;
 export type McpServerCreatePayload = Schema<"MCPServerCreate">;
 export type McpServerUpdatePayload = Schema<"MCPServerUpdate">;
 export type McpServerCreateResponse = Schema<"MCPServerCreateResponse">;
