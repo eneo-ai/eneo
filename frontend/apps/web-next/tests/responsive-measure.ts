@@ -65,10 +65,14 @@ export function measure(page: Page): Promise<PageMeasure> {
     const targets: { element: Element; box: DOMRect }[] = [];
     // A text field is tapped anywhere in its frame, not only on the <input>
     // inside it: Astryx draws the 44 px frame around a 23 px input.
+    // The same goes for a selector: its frame opens it wherever a finger lands,
+    // and the <button> inside is only the 16 px label and chevron.
     const hitArea = (element: Element) =>
       element.matches("input:not([type=checkbox], [type=radio], [type=file]), textarea")
         ? (element.closest("label, [class*='text-input'], [class*='textarea']") ?? element)
-        : element;
+        : element.matches("button[aria-haspopup]")
+          ? (element.closest(".astryx-selector") ?? element)
+          : element;
     // A control under something else at its centre cannot be tapped: a list
     // clipped by its scroll area, a menu under another. Below the fold or
     // beside the screen it is reachable by scrolling, so it still counts.

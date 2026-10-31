@@ -1,7 +1,6 @@
 {
  "ipad-landscape|/*": [],
  "ipad-landscape|/account": [
-  "small button[combobox]:svenska",
   "small button[radio]:"
  ],
  "ipad-landscape|/account/api-keys": [],
@@ -16,10 +15,7 @@
   "small button[radio]:",
   "small input[combobox]:"
  ],
- "ipad-landscape|/admin/crawler": [
-  "small button[combobox]:alla statusar",
-  "small button[combobox]:idag"
- ],
+ "ipad-landscape|/admin/crawler": [],
  "ipad-landscape|/admin/federation": [],
  "ipad-landscape|/admin/help-assistants": [],
  "ipad-landscape|/admin/insights": [],
@@ -45,9 +41,7 @@
  "ipad-landscape|/admin/usage": [],
  "ipad-landscape|/admin/usage/users/$": [],
  "ipad-landscape|/admin/user-groups": [],
- "ipad-landscape|/admin/users": [
-  "small button[combobox]:alla roller"
- ],
+ "ipad-landscape|/admin/users": [],
  "ipad-landscape|/dashboard": [],
  "ipad-landscape|/dashboard/$/*": [],
  "ipad-landscape|/dashboard/app/$": [
@@ -71,20 +65,16 @@
  ],
  "ipad-landscape|/spaces/$/apps/$/edit": [
   "outside a:api-nycklarapi-nycklar",
-  "outside a:publiceringpublicering",
-  "small button:chattmodell: ee mock"
+  "outside a:publiceringpublicering"
  ],
  "ipad-landscape|/spaces/$/apps/$/results/$": [],
  "ipad-landscape|/spaces/$/assistants": [],
  "ipad-landscape|/spaces/$/assistants/$/edit": [
   "outside a:api-nycklarapi-nycklar",
   "outside a:publiceringpublicering",
-  "outside a:säkerhet & integritetsäkerhe",
-  "small button:chattmodell: ee mock"
+  "outside a:säkerhet & integritetsäkerhe"
  ],
- "ipad-landscape|/spaces/$/chat": [
-  "small button:chattmodell: ee mock"
- ],
+ "ipad-landscape|/spaces/$/chat": [],
  "ipad-landscape|/spaces/$/group-chats/$/edit": [],
  "ipad-landscape|/spaces/$/knowledge": [],
  "ipad-landscape|/spaces/$/knowledge/collections/$": [],
@@ -120,10 +110,7 @@
   "small button[radio]:",
   "small input[combobox]:"
  ],
- "ipad-portrait|/admin/crawler": [
-  "small button[combobox]:alla statusar",
-  "small button[combobox]:idag"
- ],
+ "ipad-portrait|/admin/crawler": [],
  "ipad-portrait|/admin/federation": [],
  "ipad-portrait|/admin/help-assistants": [],
  "ipad-portrait|/admin/insights": [],
@@ -149,9 +136,7 @@
  "ipad-portrait|/admin/usage": [],
  "ipad-portrait|/admin/usage/users/$": [],
  "ipad-portrait|/admin/user-groups": [],
- "ipad-portrait|/admin/users": [
-  "small button[combobox]:alla roller"
- ],
+ "ipad-portrait|/admin/users": [],
  "ipad-portrait|/dashboard": [],
  "ipad-portrait|/dashboard/$/*": [],
  "ipad-portrait|/dashboard/app/$": [
@@ -176,20 +161,16 @@
  "ipad-portrait|/spaces/$/apps/$/edit": [
   "outside a:api-nycklarapi-nycklar",
   "outside a:publiceringpublicering",
-  "outside a:säkerhet & integritetsäkerhe",
-  "small button:chattmodell: ee mock"
+  "outside a:säkerhet & integritetsäkerhe"
  ],
  "ipad-portrait|/spaces/$/apps/$/results/$": [],
  "ipad-portrait|/spaces/$/assistants": [],
  "ipad-portrait|/spaces/$/assistants/$/edit": [
   "outside a:api-nycklarapi-nycklar",
   "outside a:publiceringpublicering",
-  "outside a:säkerhet & integritetsäkerhe",
-  "small button:chattmodell: ee mock"
+  "outside a:säkerhet & integritetsäkerhe"
  ],
- "ipad-portrait|/spaces/$/chat": [
-  "small button:chattmodell: ee mock"
- ],
+ "ipad-portrait|/spaces/$/chat": [],
  "ipad-portrait|/spaces/$/group-chats/$/edit": [],
  "ipad-portrait|/spaces/$/knowledge": [],
  "ipad-portrait|/spaces/$/knowledge/collections/$": [],
@@ -237,9 +218,7 @@
   "outside button[tab]:utgången"
  ],
  "phone-320|/admin/crawler": [
-  "outside button[tab]:schemaschema",
-  "small button[combobox]:alla statusar",
-  "small button[combobox]:idag"
+  "outside button[tab]:schemaschema"
  ],
  "phone-320|/admin/federation": [],
  "phone-320|/admin/help-assistants": [],
@@ -247,8 +226,7 @@
  "phone-320|/admin/integrations": [],
  "phone-320|/admin/mcp-servers": [],
  "phone-320|/admin/models": [
-  "outside button[tab]:inställningarinställningar",
-  "small button[combobox]:modelltyp: alla ()"
+  "outside button[tab]:inställningarinställningar"
  ],
  "phone-320|/admin/modules": [
   "small a:/admin/api-keys"
@@ -277,8 +255,7 @@
  "phone-320|/admin/usage/users/$": [],
  "phone-320|/admin/user-groups": [],
  "phone-320|/admin/users": [
-  "outside button[tab]:inaktiva användareinaktiva a",
-  "small button[combobox]:alla roller"
+  "outside button[tab]:inaktiva användareinaktiva a"
  ],
  "phone-320|/dashboard": [
   "small a:/"
@@ -316,18 +293,14 @@
   "outside a:/spaces/$/knowledge"
  ],
  "phone-320|/spaces/$/assistants/$/edit": [],
- "phone-320|/spaces/$/chat": [
-  "small button:chattmodell: ee mock"
- ],
+ "phone-320|/spaces/$/chat": [],
  "phone-320|/spaces/$/group-chats/$/edit": [],
  "phone-320|/spaces/$/knowledge": [
-  "outside a:/spaces/$/overview",
-  "small button[combobox]:samlingar"
+  "outside a:/spaces/$/overview"
  ],
  "phone-320|/spaces/$/knowledge/collections/$": [],
  "phone-320|/spaces/$/knowledge/integrations": [
-  "outside a:/spaces/$/overview",
-  "small button[combobox]:integrationer"
+  "outside a:/spaces/$/overview"
  ],
  "phone-320|/spaces/$/knowledge/websites/$": [],
  "phone-320|/spaces/$/members": [],
@@ -369,18 +342,13 @@
  "phone-390|/account/password": [],
  "phone-390|/admin": [],
  "phone-390|/admin/api-keys": [],
- "phone-390|/admin/crawler": [
-  "small button[combobox]:alla statusar",
-  "small button[combobox]:idag"
- ],
+ "phone-390|/admin/crawler": [],
  "phone-390|/admin/federation": [],
  "phone-390|/admin/help-assistants": [],
  "phone-390|/admin/insights": [],
  "phone-390|/admin/integrations": [],
  "phone-390|/admin/mcp-servers": [],
- "phone-390|/admin/models": [
-  "small button[combobox]:modelltyp: alla ()"
- ],
+ "phone-390|/admin/models": [],
  "phone-390|/admin/modules": [
   "small a:/admin/api-keys"
  ],
@@ -404,9 +372,7 @@
  ],
  "phone-390|/admin/usage/users/$": [],
  "phone-390|/admin/user-groups": [],
- "phone-390|/admin/users": [
-  "small button[combobox]:alla roller"
- ],
+ "phone-390|/admin/users": [],
  "phone-390|/dashboard": [],
  "phone-390|/dashboard/$/*": [],
  "phone-390|/dashboard/app/$": [
@@ -432,9 +398,7 @@
  "phone-390|/spaces/$/apps/$/results/$": [],
  "phone-390|/spaces/$/assistants": [],
  "phone-390|/spaces/$/assistants/$/edit": [],
- "phone-390|/spaces/$/chat": [
-  "small button:chattmodell: ee mock"
- ],
+ "phone-390|/spaces/$/chat": [],
  "phone-390|/spaces/$/group-chats/$/edit": [],
  "phone-390|/spaces/$/knowledge": [],
  "phone-390|/spaces/$/knowledge/collections/$": [],
@@ -472,18 +436,13 @@
  "phone-landscape|/account/password": [],
  "phone-landscape|/admin": [],
  "phone-landscape|/admin/api-keys": [],
- "phone-landscape|/admin/crawler": [
-  "small button[combobox]:alla statusar",
-  "small button[combobox]:idag"
- ],
+ "phone-landscape|/admin/crawler": [],
  "phone-landscape|/admin/federation": [],
  "phone-landscape|/admin/help-assistants": [],
  "phone-landscape|/admin/insights": [],
  "phone-landscape|/admin/integrations": [],
  "phone-landscape|/admin/mcp-servers": [],
- "phone-landscape|/admin/models": [
-  "small button[combobox]:modelltyp: alla ()"
- ],
+ "phone-landscape|/admin/models": [],
  "phone-landscape|/admin/modules": [
   "small a:/admin/api-keys"
  ],
@@ -505,9 +464,7 @@
  ],
  "phone-landscape|/admin/usage/users/$": [],
  "phone-landscape|/admin/user-groups": [],
- "phone-landscape|/admin/users": [
-  "small button[combobox]:alla roller"
- ],
+ "phone-landscape|/admin/users": [],
  "phone-landscape|/dashboard": [],
  "phone-landscape|/dashboard/$/*": [],
  "phone-landscape|/dashboard/app/$": [
@@ -533,9 +490,7 @@
  "phone-landscape|/spaces/$/apps/$/results/$": [],
  "phone-landscape|/spaces/$/assistants": [],
  "phone-landscape|/spaces/$/assistants/$/edit": [],
- "phone-landscape|/spaces/$/chat": [
-  "small button:chattmodell: ee mock"
- ],
+ "phone-landscape|/spaces/$/chat": [],
  "phone-landscape|/spaces/$/group-chats/$/edit": [],
  "phone-landscape|/spaces/$/knowledge": [],
  "phone-landscape|/spaces/$/knowledge/collections/$": [],
