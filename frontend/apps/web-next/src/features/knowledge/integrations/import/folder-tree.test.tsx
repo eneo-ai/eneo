@@ -61,7 +61,12 @@ it("searches the entire library and hides stale selections immediately, cancelli
   fireEvent.change(search, { target: { value: "report" } });
   expect(screen.queryByRole("checkbox", { name: "Docs" })).toBeNull();
   await screen.findByRole("checkbox", { name: "Report.pdf" });
-  expect(screen.getByText(/Sökningen är ofullständig/)).toBeTruthy();
+  await waitFor(() =>
+    expect(document.querySelector("[data-astryx-live-region='polite']")?.textContent).toContain(
+      "Sökningen är ofullständig"
+    )
+  );
+  expect(screen.getByText(/Sökningen är ofullständig/, { selector: "p" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Välj alla träffar (1)" }));
   expect(props.onSelectMany).toHaveBeenCalledWith([file]);
   const searchCall = api.GET.mock.calls.find(([path]) => path.endsWith("/search/"));
@@ -89,7 +94,12 @@ it("keeps root facets while browsing and sends removable server filters", async 
   );
   show();
   await screen.findByRole("checkbox", { name: "Docs" });
-  expect(screen.getByText(/Alla objekt i mappen visas inte/)).toBeTruthy();
+  await waitFor(() =>
+    expect(document.querySelector("[data-astryx-live-region='polite']")?.textContent).toContain(
+      "Alla objekt i mappen visas inte"
+    )
+  );
+  expect(screen.getByText(/Alla objekt i mappen visas inte/, { selector: "p" })).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Öppna mapp" }));
   await screen.findByRole("checkbox", { name: "Report.pdf" });
   fireEvent.click(screen.getByRole("button", { name: /Filtrera på dokumentegenskaper, 0 aktiva/ }));
