@@ -12,6 +12,7 @@ it.each(["ready", "object_store_not_configured", "store_degraded", undefined] as
     const capability: Schema<"CapabilityPublic"> | undefined = readiness
       ? {
           target: "object_store",
+          maximum_bytes: null,
           configured: readiness !== "object_store_not_configured",
           selectable: readiness === "ready",
           readiness_code: readiness

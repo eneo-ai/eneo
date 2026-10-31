@@ -337,6 +337,7 @@ test("model parity: object storage shows availability and a setup guide", async 
     capabilities: [
       {
         target: "object_store",
+        maximum_bytes: null,
         configured: false,
         selectable: false,
         readiness_code: "object_store_not_configured"
@@ -368,7 +369,13 @@ test("model parity: object storage shows availability and a setup guide", async 
     "https://docs.eneo.ai/guides/object-content-storage"
   );
   policy.capabilities = [
-    { target: "object_store", configured: true, selectable: true, readiness_code: "ready" }
+    {
+      target: "object_store",
+      maximum_bytes: null,
+      configured: true,
+      selectable: true,
+      readiness_code: "ready"
+    }
   ];
   await page.reload();
   await expect(card.locator("[data-slot=badge]")).toHaveText("Redo att användas");

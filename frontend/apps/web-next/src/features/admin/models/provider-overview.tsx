@@ -351,7 +351,7 @@ export function ProviderOverview({
 
       <AttentionBanner attention={attention} onShowProvider={showProvider} />
       {attention.retiring.length > 0 && (
-        <QuietBanner
+        <Banner
           status="warning"
           collapsible={false}
           title={t(
