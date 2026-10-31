@@ -344,7 +344,7 @@ export function UserApiKeyList({
                   {visibleKeys.length === 0 ? (
                     <EmptyState title={t("api_keys_no_search_matches")} />
                   ) : (
-                    <Table aria-label={t("api_keys")} className="min-w-[52rem]">
+                    <Table aria-label={t("api_keys")} className="min-w-[44rem]">
                       <TableHeader>
                         <TableRow>
                           <TableHead>{t("name")}</TableHead>

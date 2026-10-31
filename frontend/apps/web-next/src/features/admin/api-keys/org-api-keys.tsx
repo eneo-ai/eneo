@@ -605,7 +605,7 @@ function KeyTable({
                   the owner links on a phone. */}
               <TableCell>
                 <div className="flex items-start justify-between gap-2">
-                  <div className="flex min-w-0 flex-col gap-1">
+                  <div className="flex max-w-48 min-w-0 flex-col gap-1 wrap-break-word xl:max-w-80">
                     <span className="font-medium">{apiKey.name}</span>
                     <code className="text-muted-foreground font-mono text-xs">
                       {apiKey.key_prefix}…{apiKey.key_suffix}
