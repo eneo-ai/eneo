@@ -122,6 +122,10 @@ function renderWizard({
         const mode = options?.params?.query?.mode;
         if (mode === "image") return ok(imageModels);
         if (mode === "rerank") return ok(liveRerankModels);
+        if (mode === "embedding")
+          return ok([
+            { name: "multilingual-e5-large", mode: "embedding", output_vector_size: 1024 }
+          ]);
         return ok(liveModels);
       }
       if (path.endsWith("/model-defaults/")) return ok({ error: "not found" });
@@ -249,9 +253,9 @@ describe("the add-provider wizard's credentials", () => {
         }
       }
     ]);
-    const search = await within(dialog).findByRole("textbox", { name: "Filtrera katalogen" });
-    // The step's first control, not the page.
-    await waitFor(() => expect(document.activeElement).toBe(search));
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    // Focus follows the step's first setting.
+    await waitFor(() => expect(document.activeElement).toBe(hosting));
     expect(within(dialog).getByText("Modeller")).toBeTruthy();
   });
 
@@ -736,7 +740,7 @@ describe("the add-model wizard's catalog", () => {
         name: "gpt-image-1",
         display_name: "GPT Image 1",
         family: "openai",
-        hosting: "swe",
+        hosting: "usa",
         cost_per_image: 0.04,
         default_size: "auto",
         default_quality: "auto",
@@ -744,6 +748,31 @@ describe("the add-model wizard's catalog", () => {
       }
     });
     expect(toast.success).toHaveBeenCalledWith("1 modell tillagd");
+  });
+
+  it("lets an embedding model use E5 and an explicitly chosen hosting region", async () => {
+    const { dialog, onOpenChange } = renderWizard({
+      initialProviderId: "p-vllm",
+      fixedKind: "embedding",
+      caps: {
+        ...capabilities,
+        providers: { openai: { ...capabilities.providers.openai, modes: ["embedding"] } }
+      }
+    });
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("USA");
+    fireEvent.keyDown(hosting, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Frankrike" }));
+    fireEvent.keyDown(within(dialog).getByRole("combobox", { name: /^Modellfamilj/ }), {
+      key: "Enter"
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "E5 (HuggingFace)" }));
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /multilingual-e5-large/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/embedding/", {
+      body: expect.objectContaining({ family: "e5", hosting: "fra" })
+    });
   });
 
   it("creates a rerank model, leaving factor and cap to the backend's defaults", async () => {
@@ -782,7 +811,7 @@ describe("the add-model wizard's catalog", () => {
         name: "Qwen/Qwen3-Reranker-4B",
         display_name: "Qwen/Qwen3-Reranker-4B",
         family: "openai",
-        hosting: "swe",
+        hosting: "usa",
         security_classification: null
       }
     });
