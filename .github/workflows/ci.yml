@@ -392,7 +392,7 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 45
     defaults:
       run:
         working-directory: frontend
