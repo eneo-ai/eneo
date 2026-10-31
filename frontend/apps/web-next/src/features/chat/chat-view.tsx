@@ -901,6 +901,7 @@ function ConversationView({
     attachments: composerAttachments,
     onOpenFileDialog: openAttachmentDialog,
     knowledge: partner.knowledge,
+    knowledgeMode: partner.knowledgeMode,
     tools,
     skills,
     mention,

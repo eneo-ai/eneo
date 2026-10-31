@@ -1,3 +1,4 @@
+import { selectEffectiveModelId } from "@/features/ai-models/select-effective-chat-model";
 import type { Schema } from "@/lib/api/models";
 
 export type AssistantEffectiveConfig = Schema<"EffectiveConfigPublic"> | null | undefined;
@@ -45,21 +46,22 @@ export function lockedAssistantModel<Model extends ModelRef>(
 
 type ToolModelRef = ModelRef & { supports_tool_calling?: boolean | null };
 
-/**
- * The model whose tool-calling support gates the tool pickers: a policy-locked
- * model overrides the assistant's pick at ask time, the space catalog entry
- * carries the capability flags, and the stored sparse model is the fallback
- * when the model is no longer offered in the space. Null when no model is
- * picked at all, which the editor treats as a separate state.
- */
+/** Resolve the ask-time model, preferring live catalog capabilities over sparse data. */
 export function assistantToolModel<Model extends ToolModelRef>(
   models: Model[],
   assistant: { completion_model?: ToolModelRef | null; effective_config?: AssistantEffectiveConfig }
 ): ToolModelRef | null {
-  const locked = lockedAssistantModel(models, assistant.effective_config);
-  const pickedId = locked?.id ?? assistant.completion_model?.id;
+  const config = assistant.effective_config;
+  const locked = lockedAssistantModel(models, config);
+  const pickedId = locked?.id ?? selectEffectiveModelId(assistant.completion_model?.id, config);
+  const policyModels = config
+    ? [config.locked_model, config.default_model, ...config.available_models]
+    : [];
   return (
-    models.find((model) => model.id === pickedId) ?? locked ?? assistant.completion_model ?? null
+    models.find((model) => model.id === pickedId) ??
+    policyModels.find((model) => model?.id === pickedId) ??
+    (assistant.completion_model?.id === pickedId ? assistant.completion_model : null) ??
+    null
   );
 }
 

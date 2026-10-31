@@ -7053,5 +7053,9 @@
   "insights_first_activity_in_period": "First recorded activity in the selected period: {date}.",
   "insights_token_usage_link": "View token usage",
   "insights_question_details": "Question details",
-  "insights_logged_json": "Logged record as JSON"
+  "insights_logged_json": "Logged record as JSON",
+  "assistant_context_unavailable": "Context could not be estimated. You can keep editing.",
+  "assistant_context_scope": "Estimate for instructions, active skills and attachments read directly. Conversation history and retrieved content add to this.",
+  "assistant_context_reserve": "{tokens} tokens are reserved for the question.",
+  "assistant_context_near": "Instructions and attachments are approaching the space remaining after the reserve for the question."
 }

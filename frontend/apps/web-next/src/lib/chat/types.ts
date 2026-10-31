@@ -49,6 +49,7 @@ export type ChatPartner = {
   securityClassification?: string | null;
   /** Collections and websites the partner searches (named activity steps and sources). */
   knowledge?: KnowledgeOrigin[];
+  knowledgeMode?: Schema<"KnowledgeMode">;
 };
 
 export type CompletionModelInfo = {
