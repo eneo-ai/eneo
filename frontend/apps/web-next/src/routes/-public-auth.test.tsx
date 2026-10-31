@@ -275,26 +275,28 @@ it("filters organisations by display name, name or slug and announces matches", 
   });
   await route("/login?tenant=");
   const search = await screen.findByRole("textbox", { name: messages.search_organizations });
+  search.focus();
+  const announced = () =>
+    [...document.querySelectorAll('[aria-live="polite"]')]
+      .map((region) => region.textContent)
+      .join(" ");
   for (const term of ["  SECOND  ", "internal", "other-slug"]) {
     fireEvent.change(search, { target: { value: term } });
     expect(screen.getByRole("link", { name: "Second organisation" }).getAttribute("href")).toBe(
       "/api/v1/auth/browser/initiate?tenant=other-slug"
     );
     expect(screen.queryByRole("link", { name: "Sundsvalls kommun" })).toBeNull();
-    expect(screen.getByRole("status", { name: messages.search_organizations }).textContent).toBe(
-      messages.tenant_results_one
-    );
+    await waitFor(() => expect(announced()).toContain(messages.tenant_results_one));
+    expect(document.activeElement).toBe(search);
   }
   fireEvent.change(search, { target: { value: "no match" } });
   expect(screen.getByText(messages.no_organizations_found)).toBeTruthy();
-  expect(screen.getByRole("status", { name: messages.search_organizations }).textContent).toBe(
-    "0 organisationer hittades"
-  );
+  await waitFor(() => expect(announced()).toContain("0 organisationer hittades"));
+  expect(document.activeElement).toBe(search);
   fireEvent.change(search, { target: { value: "" } });
   expect(screen.getByRole("link", { name: "Sundsvalls kommun" })).toBeTruthy();
-  expect(screen.getByRole("status", { name: messages.search_organizations }).textContent).toBe(
-    "2 organisationer hittades"
-  );
+  await waitFor(() => expect(announced()).toContain("2 organisationer hittades"));
+  expect(document.activeElement).toBe(search);
   expect(navigate).not.toHaveBeenCalled();
   await expectNoAxeViolations();
 });

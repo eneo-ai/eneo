@@ -33,13 +33,17 @@ test("organisation search and login reference copy remain usable with a federati
   await search.fill("south");
   await expect(page.getByRole("link", { name: "Södra kommunen" })).toBeVisible();
   await expect(page.getByRole("link", { name: "Norra kommunen" })).toHaveCount(0);
-  await expect(page.getByRole("status", { name: "Sök organisationer" })).toHaveText(
-    "1 organisation hittades"
-  );
+  const announcements = page.locator('[aria-live="polite"]');
+  await expect(announcements.filter({ hasText: "1 organisation hittades" })).toHaveCount(1);
+  await expect(search).toBeFocused();
   await search.fill("missing");
   await expect(page.getByText("Inga organisationer hittades", { exact: true })).toBeVisible();
+  await expect(announcements.filter({ hasText: "0 organisationer hittades" })).toHaveCount(1);
+  await expect(search).toBeFocused();
   await search.fill("");
   await expect(page.getByRole("link", { name: "Norra kommunen" })).toBeVisible();
+  await expect(announcements.filter({ hasText: "2 organisationer hittades" })).toHaveCount(1);
+  await expect(search).toBeFocused();
 
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await page.goto("/login/failed?detailCode=no_code_received&correlation=browser-reference");

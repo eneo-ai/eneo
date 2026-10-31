@@ -7,6 +7,7 @@ import { TextInput } from "@/components/astryx/text-input";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { navigateTo } from "@/lib/navigate-to";
 import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { federationHref } from "./sso-entry";
@@ -55,6 +56,15 @@ export function TenantFederationLogin({
       ? explicitRecovery || previous?.slug
       : undefined;
   const onlyTenant = tenants.length === 1 ? tenants[0] : undefined;
+  const resultCount = query.isSuccess && !direct && !selectedSlug ? matches.length : null;
+  useAnnounceChange(
+    resultCount === null
+      ? null
+      : t(resultCount === 1 ? "tenant_results_one" : "tenant_results_other", {
+          count: resultCount
+        }),
+    resultCount
+  );
 
   useEffect(() => {
     const candidate =
@@ -147,11 +157,6 @@ export function TenantFederationLogin({
                 hasClear
                 width="100%"
               />
-              <p role="status" aria-label={t("search_organizations")} className="sr-only">
-                {t(matches.length === 1 ? "tenant_results_one" : "tenant_results_other", {
-                  count: matches.length
-                })}
-              </p>
               {matches.length === 0 && (
                 <p className="text-ax-text-secondary text-center text-sm">
                   {t("no_organizations_found")}
