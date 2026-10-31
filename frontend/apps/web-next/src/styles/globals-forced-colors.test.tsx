@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { readFileSync } from "node:fs";
 import path from "node:path";
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { CommandPalette } from "@astryxdesign/core/CommandPalette";
 import { DropdownMenu, DropdownMenuItem } from "@astryxdesign/core/DropdownMenu";
 import { Pagination } from "@astryxdesign/core/Pagination";
@@ -10,6 +11,9 @@ import { createStaticSource } from "@astryxdesign/core/Typeahead";
 import { fireEvent, screen } from "@testing-library/react";
 import postcss, { type AtRule, type Rule } from "postcss";
 import { describe, expect, it } from "vitest";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { renderInApp } from "@/test/render";
 
@@ -108,5 +112,51 @@ describe("forced-colours rules", () => {
     expect(
       matching('[data-slot="tabs-trigger"][data-state="active"]').map((el) => el.textContent)
     ).toEqual(["Tokens"]);
+  });
+
+  it("find a filled button and not a ghost one, in both libraries and as a trigger", () => {
+    renderInApp(
+      <>
+        <Button>Spara</Button>
+        <Button variant="ghost">Avbryt</Button>
+        <Button asChild data-slot="dialog-trigger">
+          <button type="button">Skapa</button>
+        </Button>
+        <AstryxButton variant="primary" label="Lägg till" />
+        <AstryxButton variant="primary" label="Gå till" href="/spaces/list" />
+        <AstryxButton variant="ghost" label="Mer" />
+      </>
+    );
+    expect(
+      matching(
+        ':is(button, a)[data-variant][data-size]:not([data-variant="ghost"], [data-variant="link"])'
+      ).map((el) => el.textContent)
+    ).toEqual(["Spara", "Skapa", "Lägg till", "Gå till"]);
+  });
+
+  it("find a pressed toggle, the legacy switch with its thumb, and a filled badge", () => {
+    renderInApp(
+      <>
+        <button type="button" aria-pressed="true">
+          Alla
+        </button>
+        <button type="button" aria-pressed="false">
+          Kunskap
+        </button>
+        <Switch aria-label="Läge" defaultChecked />
+        <Badge>Ny</Badge>
+        <Badge variant="outline">Utkast</Badge>
+      </>
+    );
+    expect(matching('button[aria-pressed="true"]').map((el) => el.textContent)).toEqual(["Alla"]);
+    expect(matching('[data-slot="switch"]')).toHaveLength(1);
+    expect(matching('[data-slot="switch"][data-state="checked"]')).toHaveLength(1);
+    expect(matching('[data-slot="switch-thumb"]')).toHaveLength(1);
+    expect(
+      matching('[data-slot="switch"][data-state="checked"] > [data-slot="switch-thumb"]')
+    ).toHaveLength(1);
+    expect(
+      matching('[data-slot="badge"]:not([data-variant="outline"])').map((el) => el.textContent)
+    ).toEqual(["Ny"]);
   });
 });

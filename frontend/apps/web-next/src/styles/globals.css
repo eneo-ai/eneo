@@ -795,6 +795,48 @@
     background-color: Highlight;
     color: HighlightText;
   }
+
+  /* A filled button is drawn as a fill alone; the fill becomes Canvas, the page's
+     own colour, and a primary action reads as plain text. Give it the border a
+     native button has. Both libraries' buttons carry data-variant and data-size
+     (a legacy one used as a trigger loses its data-slot to Radix's Slot). Ghost
+     buttons are text, outline ones have a border already. */
+  :is(button, a)[data-variant][data-size]:not([data-variant="ghost"], [data-variant="link"]) {
+    border: 1px solid ButtonText;
+  }
+
+  /* A pressed toggle (a filter chip, a period preset) shows it as a fill: in
+     Highlight, the label in HighlightText, whatever its children colour. */
+  button[aria-pressed="true"] {
+    forced-color-adjust: none;
+    background-color: Highlight;
+    color: HighlightText;
+  }
+  button[aria-pressed="true"] * {
+    color: inherit;
+  }
+
+  /* The legacy switch is a coloured track with a coloured thumb: both Canvas, it
+     shows no state. An outline in the text colour, a Highlight track when on, and
+     a thumb that is the text colour off and HighlightText on. */
+  [data-slot="switch"] {
+    border-color: CanvasText;
+  }
+  [data-slot="switch"][data-state="checked"] {
+    background-color: Highlight;
+    border-color: Highlight;
+  }
+  [data-slot="switch-thumb"] {
+    background-color: CanvasText;
+  }
+  [data-slot="switch"][data-state="checked"] > [data-slot="switch-thumb"] {
+    background-color: HighlightText;
+  }
+
+  /* A filled badge keeps its shape with the text colour's border. */
+  [data-slot="badge"]:not([data-variant="outline"]) {
+    border-color: CanvasText;
+  }
 }
 
 /*

@@ -132,7 +132,10 @@ export function WhatsNewPage({ title }: { title: string }) {
                   {!release.date && <span className="text-xs">{t("whats_new_upcoming")}</span>}
                   {seenAtOpen !== null && !isReadRelease(release, seenAtOpen) && (
                     <>
-                      <span aria-hidden="true" className="bg-success size-2 rounded-full" />
+                      <span
+                        aria-hidden="true"
+                        className="bg-success size-2 rounded-full forced-colors:bg-[CanvasText]"
+                      />
                       <span className="sr-only">{t("whats_new_new_for_you")}</span>
                     </>
                   )}

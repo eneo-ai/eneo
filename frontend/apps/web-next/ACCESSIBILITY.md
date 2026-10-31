@@ -486,7 +486,10 @@ mode:
 6. **Forced colours.** Windows contrast themes, or Chrome DevTools → Rendering
    → "Emulate CSS forced-colors: active": focus, control borders, icons and
    selected states stay visible. A state shown only as a background tint needs
-   a `forced-colors:` fallback (border or outline).
+   a `forced-colors:` fallback (border or outline). `tests/forced-colors.spec.ts`
+   finds the mechanical case on every route: a control whose fill becomes the
+   page's colour and that has no border, and a legacy switch with no visible
+   state. Fix it once in `globals.css` section 10, not per page.
 
 Write what you checked in the PR's **Accessibility** section.
 
