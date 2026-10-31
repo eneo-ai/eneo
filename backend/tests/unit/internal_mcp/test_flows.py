@@ -884,6 +884,16 @@ async def test_a_turn_in_ask_mode_gets_no_tool_that_changes_the_flow():
     assert {tool.name for tool in editing.tools} - offered == flows.EDIT_MODE_TOOLS
 
 
+async def test_the_chat_has_no_tool_to_unpublish_a_flow():
+    """Taking a published flow out of service is the person's action in the
+    editor; the chat can only say so and wait."""
+    editing = await flows.build_flows_mcp_server(
+        token="t", tenant_id=uuid4(), editing=True
+    )
+    assert "unpublish_flow" not in {tool.name for tool in editing.tools}
+    assert "publish_flow" in {tool.name for tool in editing.tools}
+
+
 # --- Reading the flow by section ---------------------------------------------
 
 

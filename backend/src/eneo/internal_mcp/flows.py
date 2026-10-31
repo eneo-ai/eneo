@@ -129,7 +129,9 @@ async def _call(
                     lock=editing or changes_draft,
                 )
                 if editing or changes_draft:
-                    await require_authoring_edit(scope.container, chat)
+                    await require_authoring_edit(
+                        scope.container, chat, draft=changes_draft
+                    )
                 request = scoped_request(chat.space_id)
                 if not changes_draft:
                     return await operation(scope.container, chat, request)
@@ -1066,27 +1068,6 @@ async def publish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
 
 
 @mcp.tool()
-async def unpublish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
-    """Unpublish the flow after the user explicitly requests editing a published flow."""
-
-    async def operation(container, chat, request):
-        from eneo.flows.application.flow_authoring_operations import (
-            unpublish_flow as unpublish,
-        )
-
-        flow = await unpublish(
-            chat.flow_id, request, container, expected_revision=expected_revision
-        )
-        return page_result(
-            {"published_version": flow.published_version},
-            flow_id=chat.flow_id,
-            revision=flow.draft_revision,
-        )
-
-    return await _call(ctx, operation, editing=True)
-
-
-@mcp.tool()
 async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
     """Read the MCP tools a tool step may call unattended, and why others are
     refused, with pagination. It says nothing about HTTP steps: http_get and
@@ -1390,17 +1371,20 @@ async def read_run(
         steps = await list_flow_run_steps(
             id=chat.flow_id, run_id=run_id, request=request, container=container
         )
-        graph = await get_flow_graph(
-            id=chat.flow_id, request=request, run_id=run_id, container=container
-        )
+        # The graph and checkpoint reads run on the chat's session, which does
+        # not begin a transaction by itself as a request's session does.
+        async with container.session().begin():
+            graph = await get_flow_graph(
+                id=chat.flow_id, request=request, run_id=run_id, container=container
+            )
+            checkpoints = await container.flow_run_review_checkpoint_repo().list_review_checkpoints_for_run(
+                run_id=run_id, tenant_id=container.user().tenant_id
+            )
         labels = {
             node.step_order: node.label
             for node in graph.nodes
             if node.step_order is not None
         }
-        checkpoints = await container.flow_run_review_checkpoint_repo().list_review_checkpoints_for_run(
-            run_id=run_id, tenant_id=container.user().tenant_id
-        )
         page = page_result(
             run_summary(result, steps, labels, checkpoints),
             flow_id=chat.flow_id,
@@ -1521,7 +1505,6 @@ EDIT_MODE_TOOLS = frozenset(
         "move_step",
         "remove_step",
         "publish_flow",
-        "unpublish_flow",
         "apply_flow_suggestions",
         "dismiss_flow_suggestion",
     }

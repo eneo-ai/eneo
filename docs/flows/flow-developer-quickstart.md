@@ -345,7 +345,8 @@ ends over one core path, not separate engines.
   Flow only through the loopback flow tools
   (`backend/src/eneo/internal_mcp/flows.py`): `read_flow`,
   `update_flow_settings`, `read_step_assistant`, `update_step`, `add_step`,
-  `move_step`, `remove_step`, `publish_flow`, `unpublish_flow`,
+  `move_step`, `remove_step`, `publish_flow` (unpublishing stays the editor's
+  action; the chat has no tool for it),
   `read_tool_options`, `read_flow_suggestions`, `apply_flow_suggestions`,
   `dismiss_flow_suggestion`, and the run tools `run_flow`, `read_run`,
   `cancel_run`, `read_review` and `review_run`. The chat starts in view mode; tools that

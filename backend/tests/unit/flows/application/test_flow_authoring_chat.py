@@ -121,6 +121,14 @@ def test_the_instructions_correct_content_in_the_run_or_in_the_instruction() -> 
     assert "say that, and offer both" in instructions
 
 
+def test_the_instructions_leave_unpublishing_to_the_person() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "you have no tool to unpublish it" in instructions
+    assert '"Avpublicera för att ändra" in the editor' in instructions
+    assert "only after the person has unpublished it in the editor" in instructions
+
+
 def test_the_instructions_keep_every_secret_out_of_the_chat() -> None:
     instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
 
@@ -148,3 +156,32 @@ def test_the_chat_gets_the_tool_runtime_functions_its_space_offers_and_a_provide
         ["file_creation", "charts", "file_analysis", "web_search"], states
     ) == ["file_analysis", "file_creation"]
     assert tool_runtime_capabilities([], states) == []
+
+
+async def test_a_change_to_a_published_flow_is_refused_before_anything_happens(
+    monkeypatch,
+) -> None:
+    """The chat cannot unpublish a flow, so a draft change to a published one
+    is refused with the one message that names the editor's action."""
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock, MagicMock
+    from uuid import uuid4
+
+    import pytest
+
+    from eneo.flows.application import flow_authoring_chat
+    from eneo.main.exceptions import BadRequestException
+
+    access = SimpleNamespace(flow=SimpleNamespace(published_version=2))
+    monkeypatch.setattr(
+        flow_authoring_chat, "require_flow_edit_access", AsyncMock(return_value=access)
+    )
+    chat = SimpleNamespace(editing=True, space_id=uuid4(), flow_id=uuid4())
+
+    with pytest.raises(BadRequestException) as refused:
+        await flow_authoring_chat.require_authoring_edit(MagicMock(), chat, draft=True)
+    assert refused.value.code == "flow_published"
+    assert "Avpublicera för att ändra" in str(refused.value)
+
+    # Publishing itself is not a draft change and passes the same flow.
+    await flow_authoring_chat.require_authoring_edit(MagicMock(), chat)

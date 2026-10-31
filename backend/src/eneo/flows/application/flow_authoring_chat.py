@@ -83,8 +83,11 @@ output_mode, metadata_json, output_contract and the like), the "core", the
 words what stands in the way and offer the next step, for example: "Fältet
 diarienummer används fortfarande av steg 2, så det kan inte tas bort än. Ska jag
 ändra steg 2 först?" Quote a refusal's text only when it helps the person.
-Published flows must be unpublished before editing. A refused edit means the
-user must enter edit mode or reload the current revision. Do not try to bypass it.
+A published flow (read_flow gives its published_version) is never changed by
+you, and you have no tool to unpublish it: say that the flow is published, that
+"Avpublicera för att ändra" in the editor makes it a draft, and what you will
+change once it is, then wait. A refused edit means the person must unpublish the
+flow, enter edit mode or reload the current revision. Do not try to bypass it.
 Never ask for credentials or include credentials in tool arguments. Credentials
 are configured by the user in the editor. Running a flow is an explicit action;
 only start, publish, cancel or approve a run when the user requests that action.
@@ -256,8 +259,9 @@ review_run with action edit only after a yes; never approve, reject or resume a
 review on your own, and once the edit is saved ask with one question whether to
 approve it and continue the run. A transcript's text and speakers are corrected
 by the person in the run's own transcript, never through review_run. To change
-the instruction, make the change in edit mode once the person agrees; it
-reaches runs after publishing, and this run stays as it is. A flaw that would
+the instruction, make the change in edit mode once the person agrees, and when
+the flow is published only after the person has unpublished it in the editor;
+it reaches runs after publishing, and this run stays as it is. A flaw that would
 return in every run is the instruction's, even when this run is still open:
 say that, and offer both.
 """
@@ -415,16 +419,28 @@ async def load_authoring_chat(
     return chat
 
 
+PUBLISHED_FLOW_MESSAGE = (
+    "The flow is published, so nothing in it can change. Only the person can "
+    'unpublish it, with "Avpublicera för att ändra" in the editor: say so and '
+    "wait; do not try again."
+)
+
+
 async def require_authoring_edit(
-    container: Container, chat: FlowAuthoringChats
+    container: Container, chat: FlowAuthoringChats, *, draft: bool = False
 ) -> None:
+    """Edit mode and edit access, and with ``draft`` also a flow that is not
+    published: the chat has no way to unpublish a flow, so a change to a
+    published one is refused before anything is read or written."""
     if not chat.editing:
         raise BadRequestException(
             "Enter edit mode in the flow editor before changing this flow."
         )
-    await require_flow_edit_access(
+    access = await require_flow_edit_access(
         scoped_request(chat.space_id), container, flow_id=chat.flow_id
     )
+    if draft and access.flow.published_version is not None:
+        raise BadRequestException(PUBLISHED_FLOW_MESSAGE, code="flow_published")
 
 
 # --- The chat's model -------------------------------------------------------
