@@ -309,15 +309,7 @@
  ],
  "phone-320|/spaces/$/services": [],
  "phone-320|/spaces/$/services/$": [],
- "phone-320|/spaces/$/settings": [
-  "outside a:api-nycklarapi-nycklar",
-  "outside a:farozonfarozon",
-  "outside a:funktionerfunktioner",
-  "outside a:modellermodeller",
-  "outside a:verktyg och anslutningarverk",
-  "outside button[tab]:utgångenutgången",
-  "outside button[tab]:återkalladåterkallad"
- ],
+ "phone-320|/spaces/$/settings": [],
  "phone-320|/spaces/$/skills": [],
  "phone-320|/spaces/$/skills/new": [],
  "phone-320|/spaces/list": [
@@ -408,14 +400,7 @@
  "phone-390|/spaces/$/overview": [],
  "phone-390|/spaces/$/services": [],
  "phone-390|/spaces/$/services/$": [],
- "phone-390|/spaces/$/settings": [
-  "outside a:api-nycklarapi-nycklar",
-  "outside a:farozonfarozon",
-  "outside a:funktionerfunktioner",
-  "outside a:modellermodeller",
-  "outside a:verktyg och anslutningarverk",
-  "outside button[tab]:utgångenutgången"
- ],
+ "phone-390|/spaces/$/settings": [],
  "phone-390|/spaces/$/skills": [],
  "phone-390|/spaces/$/skills/new": [],
  "phone-390|/spaces/list": [],
@@ -500,11 +485,7 @@
  "phone-landscape|/spaces/$/overview": [],
  "phone-landscape|/spaces/$/services": [],
  "phone-landscape|/spaces/$/services/$": [],
- "phone-landscape|/spaces/$/settings": [
-  "outside a:api-nycklarapi-nycklar",
-  "outside a:farozonfarozon",
-  "outside a:funktionerfunktioner"
- ],
+ "phone-landscape|/spaces/$/settings": [],
  "phone-landscape|/spaces/$/skills": [],
  "phone-landscape|/spaces/$/skills/new": [],
  "phone-landscape|/spaces/list": [],
