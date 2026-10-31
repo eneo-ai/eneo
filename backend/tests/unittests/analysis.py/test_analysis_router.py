@@ -1,13 +1,25 @@
+import json
 from datetime import datetime, timedelta, timezone
-from unittest.mock import MagicMock
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
 
 import pytest
 
+from eneo.ai_models.completion_models.completion_model import (
+    Completion,
+    ResponseType,
+    TokenUsage,
+)
+from eneo.analysis.analysis import AskAnalysis
 from eneo.analysis.analysis_router import (
     _normalize_datetime_range,
+    ask_question_about_questions,
+    ask_unified_questions_about_questions,
     get_metadata_aggregated,
 )
-from eneo.main.exceptions import BadRequestException
+from eneo.analysis.analysis_service import NO_QUESTIONS_ANSWER
+from eneo.main.exceptions import BadRequestException, InternalServerException
 
 
 def test_both_dates_none_falls_back_to_days_since():
@@ -91,3 +103,115 @@ async def test_aggregated_metadata_rejects_invalid_zone_before_reading(time_zone
     with pytest.raises(BadRequestException, match="Invalid IANA time zone"):
         await get_metadata_aggregated(container=container, time_zone=time_zone)
     container.analysis_service.assert_not_called()
+
+
+@pytest.fixture(
+    params=[ask_question_about_questions, ask_unified_questions_about_questions]
+)
+def analysis_endpoint(request):
+    return request.param
+
+
+async def _analysis_response(endpoint, chunks, closed):
+    async def completion_stream():
+        try:
+            for chunk in chunks:
+                yield chunk
+        finally:
+            closed.append(True)
+
+    service = AsyncMock()
+    result = SimpleNamespace(completion=completion_stream())
+    service.ask_question_on_questions.return_value = result
+    service.unified_ask_question_on_questions.return_value = result
+    service.should_queue_unified_analysis_job.return_value = False
+    container = MagicMock()
+    container.analysis_service.return_value = service
+    return await endpoint(
+        assistant_id=uuid4(),
+        ask_analysis=AskAnalysis(question="What are the trends?", stream=True),
+        container=container,
+    )
+
+
+def _body(send):
+    return b"".join(call.args[0].get("body", b"") for call in send.call_args_list)
+
+
+async def test_analysis_provider_error_fails_after_partial_output_and_closes_source(
+    analysis_endpoint,
+):
+    closed = []
+    response = await _analysis_response(
+        analysis_endpoint,
+        [
+            Completion(text="Partial analysis"),
+            Completion(
+                text="",
+                error="private-provider-detail",
+                response_type=ResponseType.ERROR,
+                stop=True,
+            ),
+        ],
+        closed,
+    )
+    send = AsyncMock()
+    with pytest.raises(InternalServerException) as error:
+        await response.stream_response(send)
+    assert _body(send) == b'data: {"answer":"Partial analysis"}\r\n\r\n'
+    assert "private-provider-detail" not in str(error.value)
+    assert not any(
+        call.args[0]["type"] == "http.response.body" and not call.args[0]["more_body"]
+        for call in send.call_args_list
+    )
+    assert closed == [True]
+
+
+@pytest.mark.parametrize("terminal_text", ["", "First second"])
+async def test_analysis_terminal_usage_does_not_repeat_streamed_text(
+    analysis_endpoint, terminal_text
+):
+    closed = []
+    response = await _analysis_response(
+        analysis_endpoint,
+        [
+            Completion(text="First"),
+            Completion(text=" second"),
+            Completion(
+                text=terminal_text,
+                stop=True,
+                usage=TokenUsage(prompt_tokens=10, completion_tokens=2),
+            ),
+        ],
+        closed,
+    )
+    send = AsyncMock()
+    await response.stream_response(send)
+    assert _body(send) == (
+        b'data: {"answer":"First"}\r\n\r\ndata: {"answer":" second"}\r\n\r\n'
+    )
+    assert send.call_args.args[0]["more_body"] is False
+    assert closed == [True]
+
+
+async def test_analysis_stream_emits_the_terminal_no_questions_answer(
+    analysis_endpoint,
+):
+    closed = []
+    response = await _analysis_response(
+        analysis_endpoint,
+        [Completion(text=NO_QUESTIONS_ANSWER, stop=True)],
+        closed,
+    )
+    send = AsyncMock()
+    await response.stream_response(send)
+    expected = json.dumps(
+        {"answer": NO_QUESTIONS_ANSWER}, separators=(",", ":")
+    ).encode()
+    assert _body(send) == b"data: " + expected + b"\r\n\r\n"
+    assert send.call_args.args[0] == {
+        "type": "http.response.body",
+        "body": b"",
+        "more_body": False,
+    }
+    assert closed == [True]

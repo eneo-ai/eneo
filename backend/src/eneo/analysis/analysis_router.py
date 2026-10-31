@@ -5,7 +5,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query
 
-from eneo.ai_models.completion_models.completion_model import Completion
+from eneo.ai_models.completion_models.completion_model import Completion, ResponseType
 from eneo.analysis import analysis_protocol
 from eneo.analysis.analysis import (
     AnalysisAnswer,
@@ -33,7 +33,11 @@ from eneo.jobs.job_manager import job_manager
 from eneo.jobs.job_models import Task
 from eneo.jobs.task_models import AnalyzeConversationInsightsTask
 from eneo.main.container.container import Container
-from eneo.main.exceptions import BadRequestException, NotFoundException
+from eneo.main.exceptions import (
+    BadRequestException,
+    InternalServerException,
+    NotFoundException,
+)
 from eneo.main.logging import get_logger
 from eneo.main.models import CursorPaginatedResponse, PaginatedResponse
 from eneo.questions import question_protocol
@@ -375,6 +379,22 @@ async def get_assistant_feedback_counts(
     )
 
 
+async def _analysis_answer_stream(
+    completion_stream: AsyncIterator[Completion],
+) -> AsyncIterator[str]:
+    has_answer = False
+    async with closing(completion_stream, "analysis stream") as chunks:
+        async for chunk in chunks:
+            if chunk.response_type == ResponseType.ERROR or chunk.error is not None:
+                raise InternalServerException("Analysis generation failed")
+            # A sole terminal answer is valid; later terminal text repeats the answer
+            # already streamed and otherwise only carries usage.
+            if chunk.stop and (has_answer or not chunk.text):
+                continue
+            has_answer = has_answer or bool(chunk.text)
+            yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
+
+
 @router.post(
     "/assistants/{assistant_id}/",
     response_model=None,
@@ -427,17 +447,9 @@ async def ask_question_about_questions(
     )
 
     if ask_analysis.stream:
-
-        async def event_stream():
-            completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
-            async with closing(completion_stream, "analysis stream") as chunks:
-                async for chunk in chunks:
-                    if chunk.stop:
-                        continue
-                    yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
-
+        completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
         return ClosingEventSourceResponse(
-            event_stream(), closes=[ai_response.completion]
+            _analysis_answer_stream(completion_stream), closes=[completion_stream]
         )
 
     completion = ai_response.completion
@@ -561,17 +573,9 @@ async def ask_unified_questions_about_questions(
     )
 
     if ask_analysis.stream:
-
-        async def event_stream():
-            completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
-            async with closing(completion_stream, "analysis stream") as chunks:
-                async for chunk in chunks:
-                    if chunk.stop:
-                        continue
-                    yield AnalysisAnswer(answer=chunk.text or "").model_dump_json()
-
+        completion_stream = cast(AsyncIterator[Completion], ai_response.completion)
         return ClosingEventSourceResponse(
-            event_stream(), closes=[ai_response.completion]
+            _analysis_answer_stream(completion_stream), closes=[completion_stream]
         )
 
     completion = ai_response.completion

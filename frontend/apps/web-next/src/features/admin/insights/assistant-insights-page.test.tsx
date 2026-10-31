@@ -335,6 +335,29 @@ describe("AssistantInsightsPage", () => {
     expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
   });
 
+  it("keeps partial analysis on a failed stream and never announces completion", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    spies.nextStream = new ReadableStream({
+      start(value) {
+        controller = value;
+      }
+    });
+    renderPage();
+    const field = screen.getByRole("textbox", { name: /Fråga om insikter/ });
+    fireEvent.change(field, { target: { value: "Vad frågar folk?" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    act(() => controller.enqueue(new TextEncoder().encode('data: {"answer":"Delvis svar"}\n\n')));
+    await screen.findByText("Delvis svar");
+    act(() => controller.error(new Error("Stream interrupted")));
+    const errorMessage = await screen.findByText("Något gick fel. Försök igen.");
+    expect(errorMessage.closest('[role="alert"]')).not.toBeNull();
+    expect(screen.queryByText("Stream interrupted")).toBeNull();
+    expect(screen.getByText("Delvis svar")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Skicka din fråga" })).toBeTruthy();
+    expect(spies.announce).toHaveBeenCalledWith("Något gick fel. Försök igen.");
+    expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
+  });
+
   it("aborts a changed analysis context, hides its old answer and ignores late parts", async () => {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     spies.nextStream = new ReadableStream({
