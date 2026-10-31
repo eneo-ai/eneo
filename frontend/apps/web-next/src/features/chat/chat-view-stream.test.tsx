@@ -221,6 +221,10 @@ describe("ChatView streaming an answer", () => {
     expect(spies.titled).toEqual(["session-1"]);
     // A new assistant-first send sends the assistant id, not a session.
     expect(spies.sent[0]?.body).toMatchObject({ assistant_id: "assistant-1", session_id: null });
+    // Sent and answered: nothing unsent is left for a reload to end.
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
   });
 
   it("refreshes the partner's history and the recent list once the answer is saved", async () => {
