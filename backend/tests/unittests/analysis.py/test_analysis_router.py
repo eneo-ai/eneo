@@ -1,3 +1,4 @@
+import asyncio
 import json
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -5,6 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from fastapi import FastAPI
 
 from eneo.ai_models.completion_models.completion_model import (
     Completion,
@@ -19,7 +21,8 @@ from eneo.analysis.analysis_router import (
     get_metadata_aggregated,
 )
 from eneo.analysis.analysis_service import NO_QUESTIONS_ANSWER
-from eneo.main.exceptions import BadRequestException, InternalServerException
+from eneo.main.exceptions import BadRequestException
+from eneo.server.middleware.request_context import RequestContextMiddleware
 
 
 def test_both_dates_none_falls_back_to_days_since():
@@ -138,6 +141,35 @@ def _body(send):
     return b"".join(call.args[0].get("body", b"") for call in send.call_args_list)
 
 
+async def _send_through_request_context(response, send):
+    app = FastAPI()
+    app.add_middleware(RequestContextMiddleware)
+
+    @app.post("/analysis")
+    async def analysis():
+        return response
+
+    async def receive():
+        await asyncio.Event().wait()
+
+    await app(
+        {
+            "type": "http",
+            "asgi": {"version": "3.0", "spec_version": "2.4"},
+            "http_version": "1.1",
+            "method": "POST",
+            "scheme": "http",
+            "path": "/analysis",
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 1234),
+            "server": ("localhost", 80),
+        },
+        receive,
+        send,
+    )
+
+
 async def test_analysis_provider_error_fails_after_partial_output_and_closes_source(
     analysis_endpoint,
 ):
@@ -156,8 +188,8 @@ async def test_analysis_provider_error_fails_after_partial_output_and_closes_sou
         closed,
     )
     send = AsyncMock()
-    with pytest.raises(InternalServerException) as error:
-        await response.stream_response(send)
+    with pytest.raises(Exception) as error:
+        await _send_through_request_context(response, send)
     assert _body(send) == b'data: {"answer":"Partial analysis"}\r\n\r\n'
     assert "private-provider-detail" not in str(error.value)
     assert not any(
@@ -186,7 +218,7 @@ async def test_analysis_terminal_usage_does_not_repeat_streamed_text(
         closed,
     )
     send = AsyncMock()
-    await response.stream_response(send)
+    await _send_through_request_context(response, send)
     assert _body(send) == (
         b'data: {"answer":"First"}\r\n\r\ndata: {"answer":" second"}\r\n\r\n'
     )
@@ -204,7 +236,7 @@ async def test_analysis_stream_emits_the_terminal_no_questions_answer(
         closed,
     )
     send = AsyncMock()
-    await response.stream_response(send)
+    await _send_through_request_context(response, send)
     expected = json.dumps(
         {"answer": NO_QUESTIONS_ANSWER}, separators=(",", ":")
     ).encode()

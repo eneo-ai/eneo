@@ -1,9 +1,8 @@
 """A client that hangs up on a streamed answer, over a real socket.
 
-uvicorn, RequestContextMiddleware (BaseHTTPMiddleware, whose unbuffered
-inner stream parks the body at ``send`` once the client is gone) and a raw
-TCP client that closes mid-stream: the body's cleanup must run promptly, on
-the task that streamed it, and finish its awaits.
+uvicorn, the production RequestContextMiddleware and a real HTTP client:
+disconnects must finish cleanup on the streaming task, and an upstream error
+must not become successful HTTP completion.
 """
 
 import asyncio
@@ -13,6 +12,7 @@ from contextlib import asynccontextmanager
 import pytest
 import uvicorn
 from fastapi import FastAPI
+from httpx import AsyncClient, RemoteProtocolError
 
 from eneo.main.stream_lifecycle import finalizing
 from eneo.server.middleware.request_context import RequestContextMiddleware
@@ -98,11 +98,8 @@ async def test_hanging_up_mid_stream_runs_the_cleanup_on_the_streaming_task():
 
 @pytest.mark.asyncio
 async def test_hanging_up_during_work_stops_it_and_finishes_the_cleanup():
-    # Rests on Starlette's BaseHTTPMiddleware forwarding ``http.disconnect`` to
-    # the inner app while the body is parked in an await (no send pending):
-    # that message is what stops the work. If a Starlette bump stops the
-    # forwarding, this times out waiting for the cleanup and the assumption,
-    # not the response, is what broke.
+    # The SSE response must receive http.disconnect while parked in work,
+    # even when no body send is pending.
     cleanup = _Cleanup()
     work_cancelled = asyncio.Event()
 
@@ -127,4 +124,35 @@ async def test_hanging_up_during_work_stops_it_and_finishes_the_cleanup():
             await cleanup.done.wait()
 
     assert work_cancelled.is_set()
+    assert cleanup.finished_on is cleanup.iterating_task
+
+
+@pytest.mark.asyncio
+async def test_stream_failure_after_partial_output_is_not_a_successful_http_eof():
+    cleanup = _Cleanup()
+
+    async def body() -> AsyncGenerator[str, None]:
+        cleanup.iterating_task = asyncio.current_task()
+        try:
+            yield '{"answer":"Partial analysis"}'
+            raise RuntimeError("upstream stream failed")
+        finally:
+            with finalizing("cleanup"):
+                await asyncio.sleep(0.01)
+                cleanup.finished_on = asyncio.current_task()
+                cleanup.done.set()
+
+    received = []
+    async with _serve(_app(body())) as port:
+        async with AsyncClient() as client:
+            with pytest.raises(RemoteProtocolError):
+                async with client.stream(
+                    "GET", f"http://127.0.0.1:{port}/stream"
+                ) as response:
+                    assert response.status_code == 200
+                    async for part in response.aiter_bytes():
+                        received.append(part)
+
+    assert b'data: {"answer":"Partial analysis"}' in b"".join(received)
+    assert cleanup.done.is_set()
     assert cleanup.finished_on is cleanup.iterating_task
