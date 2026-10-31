@@ -152,13 +152,23 @@ export function LoginFailedPage({ search, accessibilityStatementUrl }: Props) {
     ? `/login?${new URLSearchParams({ next: safeNextPath(search.next) })}`
     : "/login";
   return (
-    <PublicPage title={t("login_failed")} accessibilityStatementUrl={accessibilityStatementUrl}>
+    <PublicPage
+      title={t("login_failed")}
+      accessibilityStatementUrl={accessibilityStatementUrl}
+      footer={
+        <Button
+          label={t("try_logging_in_again")}
+          href={retry}
+          as={DocumentLink}
+          variant="primary"
+        />
+      }
+    >
       {diagnostics ? (
         <LoginDiagnosticsAlert diagnostics={diagnostics} />
       ) : (
         <p className="text-ax-text-secondary text-sm">{t("failed_to_login")}</p>
       )}
-      <Button label={t("try_logging_in_again")} href={retry} as={DocumentLink} variant="primary" />
     </PublicPage>
   );
 }

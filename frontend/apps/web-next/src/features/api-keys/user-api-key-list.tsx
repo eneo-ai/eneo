@@ -131,7 +131,7 @@ function KeyRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="max-w-56 wrap-anywhere whitespace-normal">
+      <TableCell className="max-w-56 wrap-break-word whitespace-normal">
         <div className="flex flex-col items-start gap-1">
           <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
             {t(`api_keys_status_${apiKey.state}`)}
@@ -150,7 +150,7 @@ function KeyRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="max-w-48 wrap-anywhere whitespace-normal">
+      <TableCell className="max-w-48 wrap-break-word whitespace-normal">
         {t(`api_keys_scope_${apiKey.scope_type}`)}
         {apiKey.scope_id && (
           <span className="text-ax-text-secondary block text-xs">

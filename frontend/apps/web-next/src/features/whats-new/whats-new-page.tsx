@@ -240,7 +240,7 @@ export function WhatsNewPage({ title }: { title: string }) {
                     )}
                   </div>
                   <h3 className="font-medium">{entry.title[locale] ?? entry.title.en}</h3>
-                  <p className="text-muted-foreground text-sm leading-relaxed">
+                  <p className="text-muted-foreground max-w-prose text-sm leading-relaxed">
                     {entry.body[locale] ?? entry.body.en}
                   </p>
                   {entry.showMe && (
