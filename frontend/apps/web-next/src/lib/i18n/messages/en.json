@@ -7031,5 +7031,7 @@
   "api_keys_no_search_matches": "No matching API keys",
   "api_keys_notifications_reminder_days_label": "Reminder days",
   "api_keys_notifications_reminder_days_description": "Enter the number of days before expiry, separated by commas.",
-  "api_keys_notifications_add_day": "Add {days} days"
+  "api_keys_notifications_add_day": "Add {days} days",
+  "space_apps_actions": "Apps, actions",
+  "space_services_actions": "Services, actions"
 }

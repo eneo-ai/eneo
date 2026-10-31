@@ -1642,8 +1642,8 @@
   "eneo": "Eneo",
   "group_settings": "Gruppinställningar",
   "response_labels": "Svarsetiketter",
-  "enable_mentions": "Aktivera erhållanden",
-  "disable_mentions": "Inaktivera erhållanden",
+  "enable_mentions": "Aktivera omnämnanden",
+  "disable_mentions": "Inaktivera omnämnanden",
   "show_labels": "Visa etiketter",
   "hide_labels": "Dölj etiketter",
   "give_group_chat_name_displayed_to_users": "Ge denna gruppchatt ett namn som visas för dess användare.",
@@ -7031,5 +7031,7 @@
   "api_keys_no_search_matches": "Inga matchande API-nycklar",
   "api_keys_notifications_reminder_days_label": "Påminnelsedagar",
   "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
-  "api_keys_notifications_add_day": "Lägg till {days} dagar"
+  "api_keys_notifications_add_day": "Lägg till {days} dagar",
+  "space_apps_actions": "Appar, åtgärder",
+  "space_services_actions": "Tjänster, åtgärder"
 }

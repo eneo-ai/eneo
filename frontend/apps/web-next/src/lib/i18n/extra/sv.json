@@ -1788,5 +1788,9 @@
   "api_keys_notifications_days_validation": "Ange positiva heltal separerade med kommatecken, inom organisationens gräns.",
   "api_keys_notifications_reminder_days_label": "Påminnelsedagar",
   "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
-  "api_keys_notifications_add_day": "Lägg till {days} dagar"
+  "api_keys_notifications_add_day": "Lägg till {days} dagar",
+  "enable_mentions": "Aktivera omnämnanden",
+  "disable_mentions": "Inaktivera omnämnanden",
+  "space_apps_actions": "Appar, åtgärder",
+  "space_services_actions": "Tjänster, åtgärder"
 }
