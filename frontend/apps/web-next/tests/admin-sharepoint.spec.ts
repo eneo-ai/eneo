@@ -125,6 +125,7 @@ test(
       .getByRole("alertdialog")
       .getByRole("button", { name: m.confirm, exact: true })
       .click();
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
     await expect(
       page
         .locator("[data-sonner-toast]")
