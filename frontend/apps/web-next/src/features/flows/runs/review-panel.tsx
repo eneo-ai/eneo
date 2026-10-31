@@ -197,16 +197,6 @@ function SpeakersEditor({
 }
 
 /**
- * A run paused for review at one step: what the step produced, a deadline,
- * and the reviewer's choices. In edit mode the output can be corrected (a
- * text as text, a flat JSON object field by field, other JSON as JSON
- * text); approving saves the correction first and then lets the run go on in
- * one request. Rejecting needs a reason and cancels the run. After the
- * deadline nothing can be decided; an approval made in time can still be
- * resumed. Refusals show where they belong, and a checkpoint someone else
- * changed is read again.
- */
-/**
  * The row of decision buttons. On a phone it is docked at the bottom, under the
  * thumb: a reviewer reads a long draft and the decision must not wait at its end.
  */
@@ -220,6 +210,16 @@ function DecisionBar({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * A run paused for review at one step: what the step produced, a deadline,
+ * and the reviewer's choices. In edit mode the output can be corrected (a
+ * text as text, a flat JSON object field by field, other JSON as JSON
+ * text); approving saves the correction first and then lets the run go on in
+ * one request. Rejecting needs a reason and cancels the run. After the
+ * deadline nothing can be decided; an approval made in time can still be
+ * resumed. Refusals show where they belong, and a checkpoint someone else
+ * changed is read again.
+ */
 export function ReviewPanel({
   checkpoint,
   mayReview,

@@ -15,8 +15,8 @@ import { StartRunDialog } from "./runs/start-run-dialog";
 /**
  * The form that starts a run of a flow, and what follows a start. It belongs
  * to the flow's page, above the lean phone page and the workspace, not to
- * either: a phone turned across 768 px swaps one for the other, and the form
- * (a recording in it, files uploaded) must outlive the swap.
+ * either: a tablet split down to a phone's width swaps one for the other, and the
+ * form (a recording in it, files uploaded) must outlive the swap.
  */
 export function FlowRunStarter({
   flowId,

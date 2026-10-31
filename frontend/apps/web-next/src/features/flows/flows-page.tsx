@@ -160,20 +160,16 @@ export function FlowsPage() {
               description={t("flows_empty_description")}
               actions={createButton}
             />
+          ) : phone ? (
+            <FlowRows flows={items} base={base} showStatus={canManage} />
           ) : (
-            <>
-              {phone ? (
-                <FlowRows flows={items} base={base} showStatus={canManage} />
-              ) : (
-                <Table
-                  data={items}
-                  columns={columns}
-                  idKey="id"
-                  aria-label={t("flows")}
-                  pinnedColumn="name"
-                />
-              )}
-            </>
+            <Table
+              data={items}
+              columns={columns}
+              idKey="id"
+              aria-label={t("flows")}
+              pinnedColumn="name"
+            />
           )
         }
       </QueryStateBoundary>
