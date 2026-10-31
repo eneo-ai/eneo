@@ -243,6 +243,19 @@ describe("Eneo's own servers", () => {
 });
 
 describe("eneo tool metadata", () => {
+  it("uses the result snapshot after a streamed call finishes", async () => {
+    const { eneoToolMetadata } = await import("./tool-presentation");
+    const input = { server_name: "Ask a file", approved: null, result_status: "approved" };
+    const result = { ...input, approved: true, result_status: "succeeded" };
+    expect(
+      eneoToolMetadata({
+        toolName: "query_table",
+        callProviderMetadata: { eneo: input },
+        resultProviderMetadata: { eneo: result }
+      })
+    ).toEqual(result);
+  });
+
   it("reads live (AI SDK v6) and saved-session metadata alike", async () => {
     const { eneoToolMetadata } = await import("./tool-presentation");
     const eneo = { server_name: "skills", title: "Upphandling" };

@@ -14,6 +14,17 @@ export function uniqueName(prefix: string) {
   return `${prefix} ${Date.now()} ${counter}`;
 }
 
+export function collectAssetFailures(page: Page) {
+  const failures: string[] = [];
+  page.on("response", (response) => {
+    const pathname = new URL(response.url()).pathname;
+    if (pathname.startsWith("/assets/") && response.status() >= 400) {
+      failures.push(`${response.status()} ${pathname}`);
+    }
+  });
+  return failures;
+}
+
 /**
  * The chat stream request in either build: Next's /api/chat proxy, or the
  * backend's v3 conversations endpoint the Vite build calls directly.
@@ -199,7 +210,12 @@ export async function apiRequest<T>(
 
 /** A same-origin write returning the created resource's id. */
 export async function apiPost(page: Page, path: string, data: object): Promise<string> {
-  return (await apiRequest<{ id: string }>(page, path, { method: "POST", body: data })).id;
+  return (await apiPostJson<{ id: string }>(page, path, data)).id;
+}
+
+/** The same browser-session write for endpoints returning a result rather than a resource id. */
+export async function apiPostJson<T>(page: Page, path: string, data: object): Promise<T> {
+  return apiRequest<T>(page, path, { method: "POST", body: data });
 }
 
 /**

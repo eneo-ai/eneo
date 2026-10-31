@@ -3,4 +3,6 @@ services:
     environment:
       BROWSER_SESSION_ENABLED: "true"
       WEB_APP_ENABLED: "true"
-      # Browse localhost:8124; 127.0.0.1:8124 is the MCP content origin.
+      # Tool frames allow the actual Vite host, not the Svelte E2E port.
+      PUBLIC_ORIGIN: http://localhost:8124
+      # 127.0.0.1:8124 remains the separate MCP content origin.
