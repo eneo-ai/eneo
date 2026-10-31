@@ -7,15 +7,15 @@ import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
 import { PageBar } from "@/components/shell/page-bar";
 import { useSpace } from "../use-space";
-import { useSpaceDisplayName } from "./space-header";
-import { phoneSections, spaceLandingHref, spaceSections, type SpaceRoute } from "./space-sections";
+import { useSpaceDisplayName, useSpaceSections } from "./space-header";
+import { phoneSections, spaceLandingHref, type SpaceRoute } from "./space-sections";
 import { SpaceTabs } from "./space-tabs";
 
 /**
  * A space on a phone (decision 24), in place of the header with breadcrumbs.
  * A shared space is pushed from Ytor: a page bar back to Ytor and to the
  * space chat, then the name with its classification and the content tabs
- * (Översikt, Assistenter, Appar, Kunskap). What manages the space is listed
+ * (Översikt, Assistenter, Appar, Flöden where the tenant has them, Kunskap). What manages the space is listed
  * under "Hantera ytan" on Översikt, and opens as a screen of its own, back to
  * the space. A page below a tab goes back to that tab. The personal and
  * organisation spaces are reached from the menu, so their tabs keep the
@@ -36,7 +36,8 @@ export function SpacePhoneHeader({
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const name = useSpaceDisplayName();
-  const sections = spaceSections(space, can, routeId);
+  // The sections the sidebar lists: flows are among them where the tenant has them.
+  const sections = useSpaceSections();
   const { tabs, manage } = phoneSections(sections);
   const section = sections.find((candidate) => candidate.id === route.section) ?? null;
   const tabbed = route.isSectionRoot && tabs.some((tab) => tab.id === route.section);

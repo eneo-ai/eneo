@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import type { Permission } from "@/lib/auth/permissions";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { flowPermissions, makeFlow } from "./flow-fixtures";
@@ -182,5 +183,75 @@ describe("FlowsPage", () => {
     expect(
       within(allowed).queryByText(new RegExp(messages.flow_delete_evidence_export_off))
     ).toBeNull();
+  });
+});
+
+describe("FlowsPage on a phone", () => {
+  const flows = () => [
+    sparse({
+      id: "f1",
+      name: "Mötesprotokoll",
+      description: "Skriver ut mötet och gör ett protokoll.",
+      input_type: "audio",
+      output_type: "docx",
+      published_version: 2
+    }),
+    sparse({
+      id: "f2",
+      name: "Svar på ärende",
+      description: null,
+      input_type: null,
+      output_type: "text",
+      published_version: null,
+      permissions: flowPermissions({ can_delete: true })
+    })
+  ];
+
+  it("lists the flows as rows that say what they take and give", async () => {
+    setViewport("phone");
+    const { container } = renderPage(flows());
+    expect(screen.queryByRole("table")).toBeNull();
+    const list = screen.getByRole("list", { name: "Flöden" });
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(
+      within(rows[0]!)
+        .getByRole("link", { name: /Mötesprotokoll/ })
+        .getAttribute("href")
+    ).toBe("/spaces/space-1/flows/f1");
+    expect(within(rows[0]!).getByText("Skriver ut mötet och gör ett protokoll.")).toBeTruthy();
+    expect(within(rows[0]!).getByText("Indata: Ljud · Resultat: Word-dokument")).toBeTruthy();
+    // Typed text or a form has no upload to name: only the result is said.
+    expect(within(rows[1]!).getByText("Resultat: Text")).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("offers neither creating, importing nor deleting, and says where that is done", () => {
+    setViewport("phone");
+    renderPage(flows());
+    expect(screen.queryByRole("button", { name: "Nytt flöde" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Importera" })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Ta bort/ })).toBeNull();
+    expect(screen.getByText("Skapa och redigera flöden görs på dator.")).toBeTruthy();
+    // The state is for those who manage flows.
+    expect(screen.getByText("Utkast")).toBeTruthy();
+    cleanup();
+    renderPage(flows(), ["flows_view"]);
+    expect(screen.queryByText("Skapa och redigera flöden görs på dator.")).toBeNull();
+    expect(screen.queryByText("Utkast")).toBeNull();
+  });
+
+  it("does not offer a first flow to create on an empty list", () => {
+    setViewport("phone");
+    renderPage([]);
+    expect(screen.getByRole("heading", { name: "Inga flöden än" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Nytt flöde" })).toBeNull();
+  });
+
+  it("keeps the table on a tablet", () => {
+    setViewport("tablet-portrait");
+    renderPage(flows());
+    expect(screen.getByRole("table", { name: "Flöden" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Nytt flöde" })).toBeTruthy();
   });
 });

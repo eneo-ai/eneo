@@ -21,6 +21,12 @@ const OUTPUT_TYPE_KEYS: Record<Schema<"FlowOutputType">, string> = {
   docx: "flows_output_type_docx"
 };
 
+const RUNTIME_INPUT_KEYS: Record<Schema<"FlowRuntimeInputFormat">, string> = {
+  document: "flow_runtime_input_format_document",
+  audio: "flow_runtime_input_format_audio",
+  file: "flow_runtime_input_format_file"
+};
+
 const OUTPUT_MODE_KEYS: Record<Schema<"FlowOutputMode">, string> = {
   pass_through: "flows_output_mode_pass_through",
   compose_text: "flows_output_mode_compose_text",
@@ -48,6 +54,16 @@ export function stepLabel(step: Pick<FlowStep, "user_description" | "step_order"
 
 export function inputTypeLabel(value: string, t: Translate): string {
   return labelOf(INPUT_TYPE_KEYS, value, t);
+}
+
+/** What a flow's run asks the user to upload ("Ljud", "Dokument", "Fil"). */
+export function runtimeInputLabel(value: string, t: Translate): string {
+  return labelOf(RUNTIME_INPUT_KEYS, value, t);
+}
+
+/** What a flow hands back ("Text", "Word-dokument", "PDF-dokument"). */
+export function outputTypeLabel(value: string, t: Translate): string {
+  return labelOf(OUTPUT_TYPE_KEYS, value, t);
 }
 
 /** What a step produces: its output type and how it makes it ("Text · Bearbetas med AI"). */

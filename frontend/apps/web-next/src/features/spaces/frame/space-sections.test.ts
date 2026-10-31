@@ -172,6 +172,15 @@ describe("phoneSections (decision 24)", () => {
     expect(ids(manage)).toEqual(["members", "settings", "skills", "services"]);
   });
 
+  it("keeps flows among the tabs, beside the apps, where the tenant has them", () => {
+    const space = makeSpace();
+    const { tabs, manage } = phoneSections(
+      spaceSections(space, canFor(space), "space-1", { flows: true })
+    );
+    expect(ids(tabs)).toEqual(["overview", "assistants", "apps", "flows", "knowledge"]);
+    expect(ids(manage)).toEqual(["members", "settings", "skills", "services"]);
+  });
+
   it("lists only what the user may manage", () => {
     const space = makeSpace({
       overrides: { personal: true, members: { items: [], count: 0, permissions: [] } },
