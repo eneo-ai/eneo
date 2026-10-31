@@ -61,6 +61,21 @@ it("writes at once when the page is hidden, before the pause is over", () => {
   Reflect.deleteProperty(document, "visibilityState");
 });
 
+it("moves a follow-up draft into the new session when metadata arrives during typing", () => {
+  const draft = renderHook(({ scope }) => useChatDraft(ME, scope), {
+    initialProps: { scope: "assistant:a1:new" }
+  });
+  act(() => draft.result.current[1]("En följdfråga medan svaret förbereds"));
+  act(() => void vi.advanceTimersByTime(400));
+  draft.rerender({ scope: "assistant:a1:saved" });
+  act(() => void vi.advanceTimersByTime(400));
+  draft.unmount();
+  expect(renderHook(() => useChatDraft(ME, "assistant:a1:new")).result.current[0]).toBe("");
+  expect(renderHook(() => useChatDraft(ME, "assistant:a1:saved")).result.current[0]).toBe(
+    "En följdfråga medan svaret förbereds"
+  );
+});
+
 it("works as before when storage is blocked", () => {
   const blocked = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => {
     throw new Error("blocked");

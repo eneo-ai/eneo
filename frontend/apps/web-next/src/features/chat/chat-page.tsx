@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
-import { replaceUrl, useRouter, useSearchParams } from "@/lib/navigation";
+import { replaceUrl, useRouter, useSearchParams, type UrlOptions } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -184,14 +184,14 @@ export function ChatPage({
     setActive(savedConversationState(detail.data));
   }
 
-  function updateUrl(sessionId: string | null) {
+  function updateUrl(sessionId: string | null, options?: UrlOptions) {
     // The navigation seam commits same-route updates without waiting for
     // background session refreshes, so streaming stays responsive.
     if (buildSessionUrl) {
       const url = new URL(buildSessionUrl(sessionId), window.location.href);
       if (tab === "insights") url.searchParams.set("tab", "insights");
       else url.searchParams.delete("tab");
-      replaceUrl(url);
+      replaceUrl(url, options);
     }
   }
 
@@ -384,7 +384,7 @@ export function ChatPage({
                 }
                 onSessionCreated={(id) => {
                   setActive((current) => (current ? { ...current, sessionId: id } : current));
-                  updateUrl(id);
+                  updateUrl(id, { ignoreBlocker: true });
                 }}
                 activity={activity}
                 onActivityChange={onActivityChange}

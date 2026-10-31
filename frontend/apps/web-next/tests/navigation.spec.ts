@@ -1,6 +1,7 @@
 import { expect, test } from "./csp";
 import {
   askChatQuestion,
+  chatComposer,
   apiPost,
   conversationLog,
   createSpace,
@@ -89,6 +90,7 @@ test("the session URL arrives during streaming without remounting or scrolling t
   await expect
     .poll(() => page.evaluate(() => (window as unknown as StreamWindow).navigationStream.ready))
     .toBe(true);
+  await chatComposer(page).fill("En följdfråga medan svaret förbereds");
   const log = conversationLog(page);
   await expect(log).toBeVisible();
   await log.evaluate((element) => {
@@ -109,6 +111,8 @@ test("the session URL arrives during streaming without remounting or scrolling t
       (window as unknown as StreamWindow).navigationStream.releaseSession()
     );
     await expect(page).toHaveURL(/session_id=/);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await expect(chatComposer(page)).toHaveValue("En följdfråga medan svaret förbereds");
     await expect(
       page.getByRole("button", { name: "Stoppa generering", exact: true })
     ).toBeVisible();

@@ -77,6 +77,8 @@ export function useChatDraft(owner: string, scope: string) {
   const latest = useRef({ owner, scope, value });
   // Written once typing pauses, and when the page goes away or into the background.
   useEffect(() => {
+    // This mounted conversation acquired its session id; a different conversation remounts it.
+    if (latest.current.scope !== scope) write(latest.current.owner, latest.current.scope, "");
     latest.current = { owner, scope, value };
     // Sending must clear the old draft before session metadata changes its key.
     if (!value.trim()) {

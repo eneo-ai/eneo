@@ -5,7 +5,7 @@ import { useState } from "react";
 import { expect, it, vi } from "vitest";
 import { renderWithRouter } from "@/test/router";
 import Link from "./link";
-import { pushUrl, useLeaveConfirmation, useRouter } from "./navigation";
+import { pushUrl, replaceUrl, useLeaveConfirmation, useRouter } from "./navigation";
 
 vi.unmock("@/lib/link");
 
@@ -22,6 +22,9 @@ function Editor({ initialDirty = true }: { initialDirty?: boolean }) {
       <button onClick={() => router.push("/b?tab=x#details")}>Push</button>
       <button onClick={() => router.replace("/b?tab=x#details")}>Replace</button>
       <button onClick={() => pushUrl("/a?tab=x")}>Update URL</button>
+      <button onClick={() => replaceUrl("/a?session_id=saved", { ignoreBlocker: true })}>
+        Session metadata
+      </button>
       <Link href="/b?tab=x#details">Page B</Link>
       <Link href="/a#details">Section</Link>
       <Link href="https://example.test/">External</Link>
@@ -141,6 +144,17 @@ it("allows a fragment on the same page without abandoning edits", async () => {
   expect(blocked()).toBe("Idle");
 });
 
+it("updates the displayed conversation's metadata without consuming departure protection", async () => {
+  const { router } = await renderWithRouter(<Editor />, { route: "/a", routes });
+  await click("Session metadata");
+  await waitFor(() => expect(router.state.location.href).toBe("/a?session_id=saved"));
+  expect(blocked()).toBe("Idle");
+  await click("Push");
+  await waitFor(() => expect(blocked()).toBe("Blocked"));
+  await click("Stay");
+  expect(router.state.location.href).toBe("/a?session_id=saved");
+});
+
 it("leaves modified and external link clicks to the browser", async () => {
   const { router } = await renderWithRouter(<Editor />, { route: "/a", routes });
   const preventBrowserNavigation = (event: Event) => event.preventDefault();
@@ -180,6 +194,54 @@ it("keeps browser unload protection only while edits are unsaved and removes it 
     history.destroy();
   }
 });
+
+it.each([false, true])(
+  "confirms a departure once, then re-arms after its loader settles (failure: %s)",
+  async (fail) => {
+    window.history.replaceState(null, "", "/a");
+    const history = createBrowserHistory();
+    let release!: () => void;
+    const pending = new Promise<void>((resolve) => (release = resolve));
+    const { router, unmount } = await renderWithRouter(<Editor />, {
+      history,
+      routes: (root) => [
+        createRoute({ getParentRoute: () => root, path: "/a", component: () => <h1>Page A</h1> }),
+        createRoute({
+          getParentRoute: () => root,
+          path: "/b",
+          loader: async () => {
+            await pending;
+            if (fail) throw new Error("Destination unavailable");
+          },
+          component: () => <h1>Page B</h1>,
+          errorComponent: () => <h1>Destination unavailable</h1>
+        })
+      ]
+    });
+    const unload = () => {
+      const event = new Event("beforeunload", { cancelable: true });
+      window.dispatchEvent(event);
+      return event.defaultPrevented;
+    };
+    try {
+      expect(unload()).toBe(true);
+      await click("Push");
+      await waitFor(() => expect(blocked()).toBe("Blocked"));
+      await click("Leave");
+      await waitFor(() => expect(router.state.isLoading).toBe(true));
+      // The user's decision also covers a deployment recovery while loading B.
+      expect(unload()).toBe(false);
+      release();
+      await screen.findByRole("heading", { name: fail ? "Destination unavailable" : "Page B" });
+      // This fixture keeps its editor mounted across routes: later work is protected.
+      await waitFor(() => expect(unload()).toBe(true));
+    } finally {
+      release();
+      unmount();
+      history.destroy();
+    }
+  }
+);
 
 it.each(["Stay", "Leave"])(
   "keeps the latest decision reachable after two native Back presses: %s",

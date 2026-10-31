@@ -23,7 +23,6 @@ import {
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
-import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
@@ -233,8 +232,6 @@ function ConversationView({
     chatDraftOwner(tenant.id, user.id),
     `${partner.type}:${partner.id}:${initialSessionId ?? "new"}`
   );
-  // A closed tab loses the draft; a reload also loses unsent attachments.
-  useBeforeUnloadWarning(input.trim() !== "" || attachments.attachments.length > 0);
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
@@ -967,9 +964,21 @@ function ConversationView({
     </ChatSystemMessage>
   ) : null;
 
+  // A closed tab loses the draft; a reload also loses unsent attachments.
+  const unsentQuestionOnly = !panel.dirty && attachments.attachments.length === 0;
+  const leaveConfirmation = (
+    <LeaveConfirmation
+      active={panel.dirty || input.trim() !== "" || attachments.attachments.length > 0}
+      title={unsentQuestionOnly ? t("chat_unsent_navigation_title") : undefined}
+      description={unsentQuestionOnly ? t("chat_unsent_navigation_description") : undefined}
+      confirmLabel={unsentQuestionOnly ? t("chat_unsent_navigation_leave") : undefined}
+    />
+  );
+
   if (!started) {
     return (
       <>
+        {leaveConfirmation}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
           <StartState
             partner={partner}
@@ -1043,7 +1052,7 @@ function ConversationView({
 
   return (
     <ToolApprovalsContext value={approvalsHere}>
-      <LeaveConfirmation active={panel.dirty} />
+      {leaveConfirmation}
       <SidePanel
         panel={panel}
         messages={messages}

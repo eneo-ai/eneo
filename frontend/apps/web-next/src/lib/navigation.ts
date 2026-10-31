@@ -12,7 +12,7 @@ import {
   type AnyRouter,
   type ParsedLocation
 } from "@tanstack/react-router";
-import { useEffect, useEffectEvent, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useEffectEvent, useMemo, useRef, useSyncExternalStore } from "react";
 export type LeaveConfirmationState = {
   blocked: boolean;
   leave(): void;
@@ -47,7 +47,11 @@ export type UrlState = {
   settingsSectionFromIndex?: boolean;
 };
 
-export type UrlOptions = { state?: UrlState };
+export type UrlOptions = {
+  state?: UrlState;
+  /** Metadata for the already displayed view, such as a newly assigned session id. */
+  ignoreBlocker?: boolean;
+};
 
 import { stringifySearch } from "./router/search";
 
@@ -155,6 +159,7 @@ function navigateUrl(href: string | URL, replace: boolean, options?: UrlOptions)
   void router.navigate({
     href: url.pathname + url.search + url.hash,
     replace,
+    ignoreBlocker: options?.ignoreBlocker,
     state: (current) => ({ ...(replace ? current : {}), ...options?.state }),
     ...scrollOptions(false)
   });
@@ -175,17 +180,31 @@ export const useLeaveConfirmation: (
   active: boolean,
   onLeave?: () => void
 ) => LeaveConfirmationState = (active, onLeave) => {
+  const router = useTanStackRouter();
+  const departureAccepted = useRef(false);
+  useEffect(
+    () =>
+      router.subscribe("onResolved", () => {
+        departureAccepted.current = false;
+      }),
+    [router]
+  );
   const blocker = useBlocker({
-    shouldBlockFn: ({ current, next }) =>
-      active &&
-      (current.pathname !== next.pathname ||
-        stringifySearch(current.search) !== stringifySearch(next.search)),
+    shouldBlockFn: ({ current, next }) => {
+      const leaving =
+        current.pathname !== next.pathname ||
+        stringifySearch(current.search) !== stringifySearch(next.search);
+      if (leaving) departureAccepted.current = false;
+      return active && leaving;
+    },
     withResolver: true,
-    enableBeforeUnload: active
+    // A confirmed SPA departure also covers a recovery reload while its route loads.
+    enableBeforeUnload: () => active && !departureAccepted.current
   });
   const leave = () => {
     if (blocker.proceed) {
       onLeave?.();
+      departureAccepted.current = true;
       blocker.proceed();
     }
   };
