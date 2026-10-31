@@ -2,22 +2,27 @@ import { Button } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
+import type { RefObject } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { QueryStateBoundary } from "@/components/composites/query-state";
+import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
 import { useCopy } from "@/lib/hooks/use-copy";
 import { questionLogQueryOptions, type AssistantInsightQuestion } from "./insights";
 
 export function QuestionDetails({
   question,
+  triggerRef,
   onClose
 }: {
   question: AssistantInsightQuestion;
+  triggerRef: RefObject<HTMLElement | null>;
   onClose: () => void;
 }) {
   const t = useTranslations();
   const query = useQuery(questionLogQueryOptions(browserApi, question.id));
   const { copy, isCopied } = useCopy();
+  useReturnFocus(true, triggerRef);
   return (
     <Dialog
       isOpen

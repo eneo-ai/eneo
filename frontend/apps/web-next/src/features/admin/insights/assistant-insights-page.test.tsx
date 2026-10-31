@@ -138,6 +138,7 @@ describe("AssistantInsightsPage", () => {
     await expectNoAxeViolations(document.body);
     fireEvent.click(within(dialog).getByRole("button", { name: "Klar" }));
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "Frågedetaljer" })).toBeNull());
+    expect(document.activeElement).toBe(trigger);
   });
 
   it("shows a logging refusal and retries without passing a row off as a full log", async () => {

@@ -316,6 +316,7 @@ function QuestionsTab({
   const announce = useAnnounce();
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<AssistantInsightQuestion | null>(null);
+  const questionTrigger = useRef<HTMLButtonElement | null>(null);
   const deferredSearch = useDeferredValue(search.trim());
 
   const query = useInfiniteQuery({
@@ -361,7 +362,10 @@ function QuestionsTab({
           variant="ghost"
           label={item.question || t("untitled")}
           className="max-w-full text-left whitespace-normal"
-          onClick={() => setSelected(item)}
+          onClick={(event) => {
+            questionTrigger.current = event.currentTarget;
+            setSelected(item);
+          }}
         />
       )
     },
@@ -423,7 +427,12 @@ function QuestionsTab({
       ) : null}
       <LoadMore query={query} label={t("load_more_questions")} />
       {selected ? (
-        <QuestionDetails key={selected.id} question={selected} onClose={() => setSelected(null)} />
+        <QuestionDetails
+          key={selected.id}
+          question={selected}
+          triggerRef={questionTrigger}
+          onClose={() => setSelected(null)}
+        />
       ) : null}
     </Card>
   );
