@@ -49,7 +49,7 @@ export type UrlState = {
 
 export type UrlOptions = {
   state?: UrlState;
-  /** Metadata for the already displayed view, such as a newly assigned session id. */
+  /** Metadata for the displayed view; ignored once another navigation owns the URL. */
   ignoreBlocker?: boolean;
 };
 
@@ -154,8 +154,11 @@ function navigateUrl(href: string | URL, replace: boolean, options?: UrlOptions)
   const router = boundRouter;
   if (!router) throw new Error("URL updates need the app's router: createAppRouter binds it.");
   // Relative to the address the hooks report, as the page that calls it sees it.
-  const url = new URL(href, router.origin + renderedLocation(router).get().href);
+  const displayed = renderedLocation(router).get();
+  const url = new URL(href, router.origin + displayed.href);
   if (url.origin !== router.origin) throw new Error(`URL updates stay on this origin: ${url}`);
+  // A late session id may update local chat state, but cannot take back an accepted departure.
+  if (options?.ignoreBlocker && router.state.location.href !== displayed.href) return;
   void router.navigate({
     href: url.pathname + url.search + url.hash,
     replace,

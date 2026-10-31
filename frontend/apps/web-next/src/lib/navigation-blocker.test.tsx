@@ -155,6 +155,36 @@ it("updates the displayed conversation's metadata without consuming departure pr
   expect(router.state.location.href).toBe("/a?session_id=saved");
 });
 
+it("does not let late session metadata supersede an accepted loading departure", async () => {
+  let release!: () => void;
+  const pending = new Promise<void>((resolve) => (release = resolve));
+  const { router } = await renderWithRouter(<Editor />, {
+    route: "/a",
+    routes: (root) => [
+      createRoute({ getParentRoute: () => root, path: "/a", component: () => <h1>Page A</h1> }),
+      createRoute({
+        getParentRoute: () => root,
+        path: "/b",
+        loader: () => pending,
+        component: () => <h1>Page B</h1>
+      })
+    ]
+  });
+  try {
+    await click("Push");
+    await waitFor(() => expect(blocked()).toBe("Blocked"));
+    await click("Leave");
+    await waitFor(() => expect(router.state.isLoading).toBe(true));
+    await click("Session metadata");
+    expect(router.state.location.pathname).toBe("/b");
+    release();
+    await screen.findByRole("heading", { name: "Page B" });
+    expect(router.state.location.href).toBe("/b?tab=x#details");
+  } finally {
+    release();
+  }
+});
+
 it("leaves modified and external link clicks to the browser", async () => {
   const { router } = await renderWithRouter(<Editor />, { route: "/a", routes });
   const preventBrowserNavigation = (event: Event) => event.preventDefault();
