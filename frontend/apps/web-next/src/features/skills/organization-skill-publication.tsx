@@ -20,6 +20,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
+import { SkillRolloutReceipt } from "./skill-rollout-receipt";
 import {
   advancePublishedBindings,
   initialRollout,
@@ -52,8 +53,6 @@ export function OrganizationSkillPublication({
   const busy = running !== null;
   const [error, setError] = useState<unknown>(null);
   const [rollout, setRollout] = useState<RolloutProgress | null>(null);
-  const [rolloutScope, setRolloutScope] = useState<RolloutScope | null>(null);
-  const [rolloutRevisionId, setRolloutRevisionId] = useState<string | null>(null);
   const published = useQuery({
     queryKey: [...ORGANIZATION_SKILLS_KEY, skill.id, "published"],
     enabled: skill.published_revision_number !== null,
@@ -91,27 +90,28 @@ export function OrganizationSkillPublication({
     await queryClient.invalidateQueries({ queryKey: ORGANIZATION_SKILLS_KEY });
   }
 
-  async function beginRollout(revisionId: string, scope: RolloutScope, reviewed: Adoption | null) {
+  async function beginRollout(
+    revisionId: string,
+    scope: RolloutScope,
+    reviewed: Adoption | null,
+    previous?: RolloutProgress | null
+  ) {
     stop.current = false;
-    setRolloutScope(scope);
-    setRolloutRevisionId(revisionId);
-    setRollout(initialRollout(scope, reviewed, revisionId));
+    const next = initialRollout(scope, reviewed, revisionId, previous);
+    setRollout(next);
     await advancePublishedBindings({
       skillId: skill.id,
       revisionId,
       adoption: reviewed,
       scope,
+      resume: next,
       stopped: () => stop.current,
       onProgress: (update) =>
         setRollout(
           (current) =>
             current && {
               ...current,
-              ...update,
-              assistants: current.assistants + (update.assistants ?? 0),
-              apps: current.apps + (update.apps ?? 0),
-              incompatible: current.incompatible + (update.incompatible ?? 0),
-              concurrent: current.concurrent + (update.concurrent ?? 0)
+              ...update
             }
         )
     });
@@ -150,8 +150,6 @@ export function OrganizationSkillPublication({
         await beginRollout(next.current_revision_id, scope, reviewed);
       else {
         setRollout(null);
-        setRolloutScope(null);
-        setRolloutRevisionId(null);
         await refresh();
       }
     } catch (cause) {
@@ -165,13 +163,20 @@ export function OrganizationSkillPublication({
       skill.published_revision_number === skill.current_revision_number
         ? skill.current_revision_id
         : published.data?.revision_id;
-    const revisionId = currentPublishedRevisionId ?? rolloutRevisionId;
-    const scope = rolloutScope ?? { assistants: true, apps: true };
+    const revisionId = currentPublishedRevisionId ?? rollout?.revisionId;
+    const scope = rollout
+      ? { assistants: rollout.assistants !== null, apps: rollout.apps !== null }
+      : { assistants: true, apps: true };
     if (!revisionId || rollout?.status === "running" || busy) return;
     setRunning(control);
     try {
       const reviewed = await adoption.refetch();
-      await beginRollout(revisionId, scope, reviewed.data ?? null);
+      await beginRollout(
+        revisionId,
+        scope,
+        reviewed.data ?? null,
+        control === "restart" ? rollout : null
+      );
     } finally {
       setRunning(null);
     }
@@ -274,38 +279,20 @@ export function OrganizationSkillPublication({
           </div>
         )}
       {rollout && (
-        <div className="space-y-3 rounded-lg border p-4" role="status">
+        <div className="space-y-3 rounded-lg border p-4">
           <h3 className="font-medium">{t("organization_skills_rollout_title")}</h3>
           <Badge variant={rollout.status === "failed" ? "destructive" : "outline"}>
             {t(`organization_skills_rollout_status_${rollout.status}`)}
           </Badge>
-          <dl className="grid grid-cols-2 gap-2 text-sm">
-            <div>
-              <dt>{t("assistants")}</dt>
-              <dd>{rollout.assistants}</dd>
-            </div>
-            <div>
-              <dt>{t("apps")}</dt>
-              <dd>{rollout.apps}</dd>
-            </div>
-            <div>
-              <dt>{t("organization_skills_rollout_concurrent_change")}</dt>
-              <dd>{rollout.concurrent}</dd>
-            </div>
-            <div>
-              <dt>{t("organization_skills_rollout_incompatible")}</dt>
-              <dd>{rollout.incompatible}</dd>
-            </div>
-          </dl>
-          <p className="text-muted-foreground text-xs">
-            {t(`organization_skills_rollout_personal_chat_${rollout.personalChat}`)}
-          </p>
+          <SkillRolloutReceipt rollout={rollout} />
           {rollout.status === "running" ? (
             <Button
               variant="outline"
               onClick={() => {
                 stop.current = true;
+                setRollout((current) => current && { ...current, stopRequested: true });
               }}
+              disabled={rollout.stopRequested}
             >
               {t("organization_skills_rollout_stop")}
             </Button>

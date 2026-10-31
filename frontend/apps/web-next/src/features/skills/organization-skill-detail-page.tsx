@@ -13,7 +13,7 @@ import { blockingError, ListError, RefreshError } from "@/components/composites/
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { ORGANIZATION_SKILLS_KEY, type SkillRemovalResult } from "./organization-skills";
-import { SkillRemovalDialog } from "./organization-skills-page";
+import { SkillRemovalDialog, skillRemovalMessage } from "./organization-skills-page";
 import { SkillForm } from "./skill-form";
 import { skillReferenceCatalog } from "./skill-reference-catalog";
 import { SkillRevisionHistory } from "./skill-revision-history";
@@ -44,9 +44,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
 
   async function removed(result: SkillRemovalResult) {
     setRemovalOpen(false);
-    setAnnouncement(
-      t("organization_skills_removed_success", { count: String(result.removed_ids.length) })
-    );
+    setAnnouncement(skillRemovalMessage(result, t));
     await queryClient.invalidateQueries({ queryKey: ORGANIZATION_SKILLS_KEY });
   }
 
@@ -163,7 +161,7 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
         <OrganizationSkillAdoption skill={value} rolloutRunning={rolloutRunning} />
       )}
       <SkillRevisionHistory
-        key={value.current_revision_id}
+        key={value.id}
         skill={value}
         unsaved={dirty}
         scope={{ type: "organization" }}

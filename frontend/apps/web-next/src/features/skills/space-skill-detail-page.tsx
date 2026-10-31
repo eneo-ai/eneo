@@ -171,7 +171,7 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
         </aside>
       </section>
       <SkillRevisionHistory
-        key={value.current_revision_id}
+        key={value.id}
         skill={value}
         unsaved={dirty}
         scope={{ type: "space", spaceId: space.id }}
