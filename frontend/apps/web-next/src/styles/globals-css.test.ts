@@ -249,10 +249,12 @@ describe("globals.css", () => {
     );
     expect(rules).toHaveLength(1);
     const [selector, declarations] = rules[0]!;
-    // Only the bar outside the settings view: a section's own bar is inside it.
-    expect(selector).toBe(
+    // Only the bar outside the settings view (a section's own bar is inside it), and the
+    // connection banner right under it: two offline banners do not stack either.
+    expect(selector).toContain(
       'main:has([data-editor-view="section"]) [data-phone-page-bar]:not([data-editor-view] *)'
     );
+    expect(selector).toContain("+ [data-connection-banner]");
     expect(declarations).toEqual({ display: "none" });
   });
 

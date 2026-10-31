@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
@@ -51,6 +51,19 @@ describe("AssistantsPage filter", () => {
     cleanup();
     show(7);
     expect(screen.getByRole("textbox", { name: /Filtrera/ })).toBeTruthy();
+  });
+
+  it("stops filtering when the field goes (a turned screen), so nothing is left hidden for good", () => {
+    setViewport("tablet-portrait");
+    show(3);
+    fireEvent.change(screen.getByRole("textbox", { name: /Filtrera/ }), {
+      target: { value: "Assistent 1" }
+    });
+    expect(screen.queryByText("Assistent 2")).toBeNull();
+
+    act(() => setViewport("phone"));
+    expect(screen.queryByRole("textbox", { name: /Filtrera/ })).toBeNull();
+    expect(screen.getByText("Assistent 2")).toBeTruthy();
   });
 
   it("is always there from a tablet up", () => {

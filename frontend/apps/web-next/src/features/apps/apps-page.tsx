@@ -52,7 +52,8 @@ export function AppsPage() {
 
   const items = spaceApps(space, collator.compare);
   const filterShown = useFilterShown(items.length);
-  const filteredItems = filterSpaceResources(items, filter);
+  // A filter that is typed and then hidden (fewer items, a turned screen) no longer applies.
+  const filteredItems = filterSpaceResources(items, filterShown ? filter : "");
   const showStatus = !space.personal;
   const groupByStatus = can("publish", "app");
   const canCreate = can("create", "app");

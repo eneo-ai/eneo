@@ -163,7 +163,24 @@ it("opens on a phone with an index of the sections, as the assistant editor does
   expect(container.querySelector("[data-phone-page-bar]")).toBeNull();
   // What the space holds is said on the row, so the index tells before it is opened.
   expect(rows[1]!.textContent).toMatch(/^Säkerhet & Integritet, .*30/);
+  // The index names itself (the frame's bar shows its title only after a scroll), under the
+  // frame's h1, not beside it.
+  const names = [...container.querySelectorAll("h2.md\\:hidden")].map(
+    (heading) => heading.textContent
+  );
+  expect(names).toEqual(["Inställningar"]);
+  expect(container.querySelector("h1")).toBeNull();
   await expectNoAxeViolations(container);
+});
+
+it("says nothing about a space's security while it keeps nothing back", () => {
+  setViewport("phone");
+  state.space = makeSpace({ overrides: { data_retention_days: null } });
+  showSettings(undefined, [], [], "space-1", state.space);
+  const rows = within(document.querySelector<HTMLElement>("[data-editor-index]")!).getAllByRole(
+    "link"
+  );
+  expect(rows[1]!.textContent).toBe("Säkerhet & Integritet");
 });
 
 it("lists each model type in the models section once the models have loaded", async () => {

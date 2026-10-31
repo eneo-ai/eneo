@@ -202,7 +202,9 @@ so a draft and its pending save outlive a trip to the index or a turn to the
 tablet layout; never render a section only in one view. A section's
 `SettingsGroup` drops its card frame and repeated title there by itself. A
 resource just created opens on General, so its name field is in view. Space
-settings uses the layout without `phone` and keeps one page on every width.
+settings uses it too, but with only a `title`: the space's own page bar sits above
+the index (a globals.css rule hides it, and its connection banner, while a section is
+open), so the index has no bar of its own and names itself with a heading.
 
 ## How it is wired
 

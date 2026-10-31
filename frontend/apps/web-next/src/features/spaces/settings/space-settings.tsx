@@ -833,7 +833,10 @@ export function SpaceSettings() {
             label: t("security_and_privacy"),
             icon: ShieldCheck,
             group: own,
-            summary: summary.retention(space.data_retention_days),
+            // No limit set says nothing: "Ytans gallring" is for what lives in a space.
+            summary: space.data_retention_days
+              ? summary.retention(space.data_retention_days)
+              : undefined,
             node: <SecuritySection />
           }
         ]

@@ -24,6 +24,7 @@ export function ConnectionBanner({ className }: { className?: string }) {
         title={t("offline_banner_title")}
         description={t("offline_banner_description")}
         collapsible={false}
+        data-connection-banner=""
         className={cn("m-3 lg:m-4", className)}
       />
     );
