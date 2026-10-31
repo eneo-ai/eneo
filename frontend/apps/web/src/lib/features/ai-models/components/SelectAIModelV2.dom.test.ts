@@ -28,9 +28,18 @@ const models = [
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
 });
 
 beforeEach(() => {
+  vi.stubGlobal(
+    "ResizeObserver",
+    class {
+      observe = vi.fn();
+      unobserve = vi.fn();
+      disconnect = vi.fn();
+    }
+  );
   Object.defineProperty(Element.prototype, "scrollIntoView", {
     configurable: true,
     value: vi.fn()

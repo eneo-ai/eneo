@@ -8,6 +8,15 @@ test("a created assistant can be edited and used in chat", async ({ page, reques
   const prompt = "You are the e2e assistant authoring test. Answer through the mock provider.";
   const question = uniqueName("e2e assistant chat");
 
+  // The shared account may already have seen the announcement in another test.
+  await page.addLocatorHandler(
+    page.getByRole("dialog", { name: /^(New in Eneo|Nytt i Eneo)$/ }),
+    async (dialog) => {
+      await dialog.getByRole("button", { name: /^(Not interested|Inte intresserad)$/ }).click();
+    },
+    { times: 1 }
+  );
+
   await page.goto("/");
 
   const personalSpaceResponse = await backendFetch(page, request, "/api/v1/spaces/type/personal/");
