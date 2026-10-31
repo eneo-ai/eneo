@@ -25,6 +25,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
@@ -78,6 +79,7 @@ import { FlowStepList, showStepCard, stepControlId } from "./flow-step-list";
 import { orderWithMove, orderWithout, stepName, stepsInOrder } from "./flow-steps";
 import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
 import { runKeys } from "./runs/runs-api";
+import { FlowPhonePage } from "./flow-phone-page";
 import { FlowRunsList, runHref } from "./runs/runs-list";
 import { rememberStartedRun } from "./runs/runs-optimistic";
 import { StartRunDialog } from "./runs/start-run-dialog";
@@ -129,7 +131,7 @@ function focusMoveControl(stepId: string, delta: -1 | 1) {
  * the visit ("Räkna med de senaste körningarna"). An editor can dismiss a
  * suggestion for the flow ("Ignorera") and show the dismissed ones again.
  */
-export function FlowPage({ flowId }: { flowId: string }) {
+function FlowWorkspace({ flowId }: { flowId: string }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
@@ -975,4 +977,16 @@ export function FlowPage({ flowId }: { flowId: string }) {
       </div>
     </FlowReferences>
   );
+}
+
+/**
+ * A flow's page. A phone (a narrow screen you touch) runs flows and reads their
+ * runs and builds none, so it gets the lean page; everyone else the workspace.
+ * A desktop window dragged below 768 px keeps the workspace, and what is being
+ * edited in it.
+ */
+export function FlowPage({ flowId }: { flowId: string }) {
+  const phone = useMediaMatch(PHONE_QUERY);
+  const touch = useMediaMatch("(pointer: coarse)");
+  return phone && touch ? <FlowPhonePage flowId={flowId} /> : <FlowWorkspace flowId={flowId} />;
 }
