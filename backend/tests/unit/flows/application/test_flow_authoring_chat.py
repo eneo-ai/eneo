@@ -105,6 +105,19 @@ def test_the_instructions_tell_a_runs_kinds_of_failure_apart() -> None:
     assert "call a token impact an estimate" in instructions
 
 
+def test_the_instructions_keep_every_secret_out_of_the_chat() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "Build everything but the secret" in instructions
+    assert "Never ask for a key, token or password in the chat" in instructions
+    assert "never put one in a tool argument" in instructions
+    assert 'so its pill offers "Anslut tjänst"' in instructions
+    assert "an administrator must add the server or grant it to the space" in (
+        instructions
+    )
+    assert "Testing a connection is the person's action in the editor" in instructions
+
+
 def test_the_chat_gets_the_tool_runtime_functions_its_space_offers_and_a_provider_serves():
     states = [
         CapabilityAvailability(purpose="file_analysis", available=True),

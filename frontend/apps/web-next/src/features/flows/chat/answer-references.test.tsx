@@ -25,10 +25,20 @@ const flow = makeFlow({
   ]
 });
 
-function renderAnswer(text: string, onShowStep = vi.fn(() => true)) {
+function renderAnswer(
+  text: string,
+  onShowStep = vi.fn(() => true),
+  onConnectStep: ((stepId: string, anchor: string) => void) | undefined = undefined,
+  shown = flow
+) {
   const composer = { insertText: vi.fn(), insertToken: vi.fn() };
   const view = renderInApp(
-    <FlowReferences flow={flow} onShowStep={onShowStep} composer={composer}>
+    <FlowReferences
+      flow={shown}
+      onShowStep={onShowStep}
+      onConnectStep={onConnectStep}
+      composer={composer}
+    >
       <MessageResponse remarkPlugins={referenceRemarkPlugins} components={referenceComponents}>
         {text}
       </MessageResponse>
@@ -90,6 +100,35 @@ describe("references in an answer", () => {
         name: "Steg 2: Hämta register › fält, men steget svarar inte i fast format"
       })
     ).toBeTruthy();
+  });
+
+  it("names a step's service and opens the step at its connection field", async () => {
+    const onConnectStep = vi.fn();
+    const delivering = makeFlow({
+      steps: [
+        makeStep(1, { user_description: "Sammanfatta" }),
+        makeStep(2, {
+          user_description: "Skicka",
+          output_mode: "http_post",
+          output_config: {
+            url: "https://hooks.example.se/in",
+            auth: { mode: "bearer_token", token: "" }
+          }
+        })
+      ]
+    });
+    const view = renderAnswer(
+      "Anslut @[Skicka](step:step-2) först.",
+      undefined,
+      onConnectStep,
+      delivering
+    );
+    fireEvent.click(view.getByRole("button", { name: /Skicka/ }));
+    const card = await screen.findByRole("dialog", { name: "Referens" });
+    expect(within(card).getByText(/Skickar till hooks.example.se/)).toBeTruthy();
+    expect(within(card).getByText("uppgifter saknas")).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Anslut tjänst" }));
+    expect(onConnectStep).toHaveBeenCalledWith("step-2", "output_config.http");
   });
 
   it("draws a reference the answer put in backticks, spaces and all", () => {

@@ -66,6 +66,7 @@ import {
 } from "./flow-suggestions";
 import { FlowSettings } from "./flow-settings";
 import { FlowStatusBadge } from "./flow-status";
+import type { FieldAnchor } from "./editor/field-problems";
 import { FlowStepList, showStepCard, stepControlId } from "./flow-step-list";
 import { orderWithMove, orderWithout, stepName, stepsInOrder } from "./flow-steps";
 import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
@@ -179,6 +180,8 @@ export function FlowPage({ flowId }: { flowId: string }) {
   // The open step lives in ?step=, so a refresh or a shared link opens it
   // again (an id the flow does not have shows the list).
   const [openStepId, setOpenStepId] = useState<string | null>(() => searchParams.get("step"));
+  // The field the editor opens at when a step is opened to connect a service.
+  const [requestedAnchor, setRequestedAnchor] = useState<FieldAnchor | null>(null);
   const [chosenTab, setTab] = useState<PageTab>(
     searchParams.get("tab") === "runs" ? "runs" : "definition"
   );
@@ -520,9 +523,10 @@ export function FlowPage({ flowId }: { flowId: string }) {
       requestAnimationFrame(() => document.getElementById(stepControlId(id, "open"))?.focus());
   }
 
-  /** Opens a step (from the list, or the editor's previous and next) as a new history entry. */
-  function openStep(step: Pick<FlowStep, "id">) {
+  /** Opens a step (from the list, or the editor's previous and next) as a new history entry, at `anchor` when given. */
+  function openStep(step: Pick<FlowStep, "id">, anchor: FieldAnchor | null = null) {
     if (!step.id) return;
+    setRequestedAnchor(anchor);
     stepDepth.current += 1;
     window.history.pushState({ flowStepDepth: stepDepth.current }, "", stepUrl(step.id));
     showEditor(step.id);
@@ -737,7 +741,12 @@ export function FlowPage({ flowId }: { flowId: string }) {
     ) : undefined;
 
   return (
-    <FlowReferences flow={flow} onShowStep={showStep} composer={composer}>
+    <FlowReferences
+      flow={flow}
+      onShowStep={showStep}
+      onConnectStep={(stepId, anchor) => openStep({ id: stepId }, anchor)}
+      composer={composer}
+    >
       <div className="flex min-w-0 flex-1 flex-col lg:min-h-0">
         <div className="border-ax-border flex flex-col gap-3 border-b px-6 pt-4 pb-3">
           <PageHeader
@@ -843,6 +852,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
                   <FlowStepEditor
                     flow={flow}
                     stepId={openedStep.id}
+                    initialAnchor={requestedAnchor}
                     readOnly={!canEdit}
                     onAskChat={askChat}
                     suggestionFix={suggestionFix}

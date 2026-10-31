@@ -871,6 +871,8 @@ async def test_the_overview_lists_every_step_with_its_reads_and_readers(monkeypa
     assert [reader["step_order"] for reader in first["readers"]] == [2, 2]
     assert first["readers"][0]["name"] == public.steps[1].user_description
     assert second["readers"] == []
+    # Every step says what services it talks to, here none.
+    assert first["connections"] == [] and second["connections"] == []
 
 
 async def test_the_steps_section_gives_the_chosen_steps_in_full_with_prompts(

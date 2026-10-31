@@ -16,6 +16,8 @@ from enum import Enum
 from typing import Any, cast
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from eneo.flows.application.flow_suggestion_service import suggestion_flow
 from eneo.flows.domain.flow import Flow
 from eneo.flows.domain.flow_suggestion_model import (
@@ -24,6 +26,14 @@ from eneo.flows.domain.flow_suggestion_model import (
     describe_site,
 )
 from eneo.flows.flow_metadata import FlowFormSchemaParseMode, parse_flow_form_schema
+from eneo.flows.http_transport.authored_config import (
+    HTTP_CONFIG_KEYS,
+    HttpAuthApiKey,
+    HttpAuthBasicAuth,
+    HttpAuthBearer,
+    HttpAuthoredConfig,
+    is_secret_sentinel,
+)
 from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
 from eneo.flows.step_lineage import StepRead
 from eneo.main.exceptions import BadRequestException
@@ -109,6 +119,92 @@ def run_form_fields(metadata_json: Mapping[str, object] | None) -> list[dict[str
             item["options"] = field.options
         fields.append(item)
     return fields
+
+
+def _mapping(value: object) -> Mapping[str, Any]:
+    """``value`` as a mapping, or an empty one."""
+    return cast(Mapping[str, Any], value) if isinstance(value, Mapping) else {}
+
+
+def _credential_state(value: object) -> str:
+    """``stored`` for a kept credential (its sentinel, or a value on its way
+    to being stored), ``missing`` for none."""
+    if is_secret_sentinel(value):
+        return "stored"
+    return "stored" if isinstance(value, str) and value else "missing"
+
+
+def _http_connection(
+    config: Mapping[str, Any] | None, *, direction: str, field: str
+) -> dict[str, Any]:
+    item: dict[str, Any] = {"kind": "http", "direction": direction, "field": field}
+    try:
+        http = HttpAuthoredConfig.model_validate(
+            {
+                key: value
+                for key, value in (config or {}).items()
+                if key in HTTP_CONFIG_KEYS
+            }
+        )
+    except ValidationError:
+        return {**item, "unreadable": True}
+    auth = http.auth
+    if isinstance(auth, HttpAuthBearer):
+        credential = _credential_state(auth.token)
+    elif isinstance(auth, HttpAuthApiKey):
+        credential = _credential_state(auth.key)
+    elif isinstance(auth, HttpAuthBasicAuth):
+        credential = _credential_state(auth.password)
+    else:
+        credential = "none"
+    secret_headers = [header for header in http.custom_headers if header.secret]
+    headers_stored = all(
+        _credential_state(header.value) == "stored" for header in secret_headers
+    )
+    return {
+        **item,
+        # The address without its query, which may carry a key.
+        "url": http.url.split("?", 1)[0],
+        "auth_mode": auth.mode,
+        "credential": credential,
+        "secret_headers": len(secret_headers),
+        "configured": bool(http.url.strip())
+        and credential != "missing"
+        and headers_stored,
+    }
+
+
+def step_connections(step: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """The services a step talks to, without their secrets: an HTTP source
+    (``http_get`` input) or delivery (``http_post`` output) with its address,
+    auth mode and whether the credential is stored, and an MCP tool with its
+    server and tool. ``field`` names the editor field where the person
+    configures it. ``step`` is the step as read_flow dumps it."""
+    items: list[dict[str, Any]] = []
+    input_config = _mapping(step.get("input_config"))
+    output_config = _mapping(step.get("output_config"))
+    if step.get("input_source") == "http_get":
+        items.append(
+            _http_connection(input_config, direction="input", field="input_config.http")
+        )
+    if step.get("input_source") == "tool":
+        tool = _mapping(input_config.get("tool"))
+        items.append(
+            {
+                "kind": "mcp",
+                "direction": "input",
+                "field": "input_config.tool",
+                "mcp_server_id": tool.get("mcp_server_id"),
+                "tool_id": tool.get("tool_id"),
+            }
+        )
+    if step.get("output_mode") == "http_post":
+        items.append(
+            _http_connection(
+                output_config, direction="output", field="output_config.http"
+            )
+        )
+    return items
 
 
 def _value(item: object) -> object:

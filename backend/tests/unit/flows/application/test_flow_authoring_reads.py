@@ -11,6 +11,7 @@ from eneo.flows.application.flow_authoring_reads import (
     read_reference,
     run_form_fields,
     run_summary,
+    step_connections,
     step_reads_summary,
 )
 from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
@@ -302,3 +303,99 @@ def test_a_run_summary_shows_the_start_of_a_text_result_and_names_a_missing_step
     assert summary["duration_seconds"] is None
     assert summary["tokens"] is None
     assert summary["steps"][0]["name"] == "Steg 1"
+
+
+STORED = {"$secret": "stored"}
+
+
+def test_a_steps_connections_name_the_service_and_whether_its_secret_is_stored():
+    step = {
+        "input_source": "http_get",
+        "input_config": {
+            "url": "https://api.example.se/cases?key=hidden",
+            "auth": {"mode": "api_key", "header_name": "X-Key", "key": STORED},
+            "custom_headers": [
+                {"name": "X-Trace", "value": "abc", "secret": False},
+                {"name": "X-Signature", "value": STORED, "secret": True},
+            ],
+        },
+        "output_mode": "http_post",
+        "output_config": {
+            "url": "https://hooks.example.se/in",
+            "auth": {"mode": "bearer_token", "token": ""},
+        },
+    }
+
+    source, delivery = step_connections(step)
+
+    assert source == {
+        "kind": "http",
+        "direction": "input",
+        "field": "input_config.http",
+        "url": "https://api.example.se/cases",
+        "auth_mode": "api_key",
+        "credential": "stored",
+        "secret_headers": 1,
+        "configured": True,
+    }
+    assert delivery == {
+        "kind": "http",
+        "direction": "output",
+        "field": "output_config.http",
+        "url": "https://hooks.example.se/in",
+        "auth_mode": "bearer_token",
+        "credential": "missing",
+        "secret_headers": 0,
+        "configured": False,
+    }
+    # The secret itself never appears, only that it is stored.
+    assert "hidden" not in str([source, delivery])
+
+
+def test_a_tool_step_names_its_server_and_an_open_delivery_needs_no_credential():
+    tool = {
+        "input_source": "tool",
+        "input_config": {"tool": {"mcp_server_id": "srv-1", "tool_id": "t-1"}},
+        "output_mode": "pass_through",
+    }
+    assert step_connections(tool) == [
+        {
+            "kind": "mcp",
+            "direction": "input",
+            "field": "input_config.tool",
+            "mcp_server_id": "srv-1",
+            "tool_id": "t-1",
+        }
+    ]
+    open_delivery = {
+        "input_source": "previous_step",
+        "output_mode": "http_post",
+        "output_config": {
+            "url": "https://hooks.example.se/in",
+            "auth": {"mode": "none"},
+        },
+    }
+    (item,) = step_connections(open_delivery)
+    assert item["credential"] == "none" and item["configured"] is True
+    assert (
+        step_connections(
+            {"input_source": "previous_step", "output_mode": "pass_through"}
+        )
+        == []
+    )
+
+
+def test_an_http_configuration_the_core_refuses_is_marked_unreadable():
+    broken = {
+        "input_source": "http_get",
+        "input_config": {"url": "https://x", "auth": {"mode": "magic"}},
+        "output_mode": "pass_through",
+    }
+    assert step_connections(broken) == [
+        {
+            "kind": "http",
+            "direction": "input",
+            "field": "input_config.http",
+            "unreadable": True,
+        }
+    ]

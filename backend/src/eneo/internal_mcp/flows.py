@@ -40,7 +40,9 @@ say what you would change and that the person can switch the mode beside the sen
 button.
 read_flow's overview (the default) lists every step in short with what it reads and
 which later steps read it; section "steps" with steps=[...] gives those steps in
-full with their prompts, section "settings" the flow without its steps. Read a step
+full with their prompts, section "settings" the flow without its steps. Each step
+lists its connections (an HTTP source or delivery, an MCP tool) with the address,
+the auth mode and whether the credential is stored, never the value. Read a step
 in full before changing it. A change that reaches several steps goes in one
 update_steps call. When the person shows an example of what a step should give as
 JSON, contract_from_example gives the step the contract the example implies; the
@@ -353,6 +355,7 @@ async def read_flow(
         from eneo.flows.application.flow_authoring_reads import (
             output_fields,
             run_form_fields,
+            step_connections,
             step_reads_summary,
         )
 
@@ -376,16 +379,21 @@ async def read_flow(
             reads = step_reads_summary(saved, prompts)
             items: list[dict[str, Any]] = []
             for step in chosen:
+                dump = step.model_dump(mode="json")
                 if section == "overview":
-                    item = step.model_dump(
-                        mode="json", include=set(_OVERVIEW_STEP_FIELDS)
-                    )
+                    item = {
+                        key: value
+                        for key, value in dump.items()
+                        if key in _OVERVIEW_STEP_FIELDS
+                    }
                     item["output_fields"] = output_fields(step.output_contract)
                     item["review"] = step.review_policy is not None
                 else:
-                    item = step.model_dump(mode="json")
+                    item = dump
                     prompt = prompts.get(step.assistant_id)
                     item["prompt"] = prompt.text if prompt is not None else None
+                # The services the step talks to, never their secrets.
+                item["connections"] = step_connections(dump)
                 item.update(reads.get(step.step_order, {}))
                 items.append(item)
             value = {

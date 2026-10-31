@@ -239,6 +239,23 @@ a token impact an estimate.
 """
 
 
+_CONNECTIONS = """A step that talks to a service (an http_get source, an http_post delivery,
+an MCP tool) shows its connection in read_flow: the address, the auth mode and
+whether the credential is stored, never the value. Build everything but the
+secret: the address, the method, the body and the auth mode the service needs,
+through update_step. Never ask for a key, token or password in the chat and
+never put one in a tool argument; the chat only ever learns that a credential
+is stored. Then say the connection must be configured in the step, name the
+step as @[name](step:id) so its pill offers "Anslut tjänst", and ask with one
+question whether it is configured before you continue or start a run; when the
+person says it is, read the step again. A changed address keeps no stored
+credential on its own: say so. An MCP tool needs a server the space offers
+(read_tool_options); when it is not offered, say that an administrator must add
+the server or grant it to the space. Testing a connection is the person's
+action in the editor, never yours.
+"""
+
+
 def _suggestion_rules() -> str:
     """The catalogue's authoring rules, one per suggestion code."""
     return "".join(
@@ -265,6 +282,7 @@ AUTHORING_INSTRUCTIONS = (
     + _SUGGESTIONS_INTRODUCED
     + _SUGGESTIONS_ON_REQUEST
     + _RUN_HELP
+    + _CONNECTIONS
 )
 
 

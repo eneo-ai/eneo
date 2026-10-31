@@ -10,7 +10,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "next-intl";
-import { Suspense, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
+import { Suspense, useEffect, useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -105,6 +105,8 @@ type EditorProps = {
   navigation?: StepNavigation;
   /** For the page: whether leaving loses edits, and leaving after asking. */
   leaveRef?: Ref<EditorLeave>;
+  /** A field to focus once the form is on the page ("Anslut tjänst" opens a connection field). */
+  initialAnchor?: FieldAnchor | null;
 };
 
 /** Where the editor's top bar can go besides back to the list. */
@@ -307,7 +309,8 @@ function StepEditorSession({
   suggestionFix,
   suggestionDismissal,
   suggestionRuns = 0,
-  leaveRef
+  leaveRef,
+  initialAnchor = null
 }: Omit<EditorProps, "navigation">) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -376,6 +379,16 @@ function StepEditorSession({
 
   const pinnedSession = pinned ? sessionOf(pinned) : null;
   const session = pinnedSession?.dirty ? pinnedSession : sessionOf(latest);
+  // A requested field gets focus once the form is there: the page opened
+  // the step to configure it (a connection the chat pointed at).
+  const formReady = session !== null;
+  useEffect(() => {
+    if (!initialAnchor || !formReady) return;
+    const frame = requestAnimationFrame(() => {
+      focusAnchor(formId, initialAnchor);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [initialAnchor, formReady, formId]);
   const newerElsewhere =
     session !== null && session.dirty && session.flow.draft_revision < latest.draft_revision;
   const dirty = session?.dirty ?? false;

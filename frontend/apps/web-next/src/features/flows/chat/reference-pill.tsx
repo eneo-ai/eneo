@@ -4,7 +4,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Text } from "@astryxdesign/core/Text";
 import { Token } from "@astryxdesign/core/Token";
-import { CircleAlert, TriangleAlert } from "lucide-react";
+import { CircleAlert, Plug, TriangleAlert } from "lucide-react";
 import { useTranslations } from "next-intl";
 import {
   createContext,
@@ -18,7 +18,9 @@ import type { ComposerInsert } from "@/features/chat/chat-references";
 import { cn } from "@/lib/utils";
 import { meaningLabel, readWarning } from "../editor/step-labels";
 import type { FlowPublic } from "../editor/step-types";
+import type { FieldAnchor } from "../editor/field-problems";
 import { stepLabel } from "../flow-labels";
+import { connectionToOpen, stepConnections } from "./connections";
 import {
   referenceHint,
   referenceParts,
@@ -39,6 +41,8 @@ type FlowReferencesValue = {
   flow: Flow;
   /** Brings the step's card into view; false when the card is not on the page. */
   onShowStep: (stepId: string) => boolean;
+  /** Opens the step's editor at a connection field ("Anslut tjänst"); absent, it is not offered. */
+  onConnectStep?: (stepId: string, anchor: FieldAnchor) => void;
   /** The chat's composer, to put a reference into; null while there is none. */
   composer: ComposerInsert | null;
   card: Card | null;
@@ -225,6 +229,9 @@ function ReferenceCard({
   const tone = reference ? referenceTone(reference) : "reads";
   const note = reference ? referenceNote(reference, refs.flow, t) : null;
   const hint = reference ? referenceHint(reference, refs.flow) : null;
+  // The services the step talks to, and the one "Anslut tjänst" opens.
+  const connections = step ? stepConnections(step) : [];
+  const toConnect = connectionToOpen(connections);
   return (
     <Popover
       anchorRef={anchorRef}
@@ -286,7 +293,48 @@ function ReferenceCard({
                 </ul>
               </div>
             ) : null}
+            {connections.length > 0 ? (
+              <ul className="m-0 flex list-none flex-col gap-1 p-0 text-sm">
+                {connections.map((connection) => (
+                  <li key={connection.anchor} className="flex items-start gap-1.5">
+                    <Plug
+                      aria-hidden="true"
+                      className="text-ax-text-secondary mt-0.5 size-4 shrink-0"
+                    />
+                    <span>
+                      {t(
+                        connection.direction === "input"
+                          ? "flows_chat_reference_connection_input"
+                          : "flows_chat_reference_connection_output",
+                        { host: connection.host || "?" }
+                      )}
+                      {" · "}
+                      <span className={connection.configured ? undefined : "text-ax-warning"}>
+                        {t(
+                          connection.authMode === "none"
+                            ? "flows_chat_reference_connection_open"
+                            : connection.configured
+                              ? "flows_chat_reference_connection_stored"
+                              : "flows_chat_reference_connection_missing"
+                        )}
+                      </span>
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            ) : null}
             <div className="flex flex-wrap gap-2">
+              {step?.id && refs.onConnectStep && toConnect ? (
+                <Button
+                  size="sm"
+                  variant={toConnect.configured ? "ghost" : undefined}
+                  label={t("flows_chat_reference_connect")}
+                  onClick={() => {
+                    refs.onConnectStep?.(step.id!, toConnect.anchor);
+                    onClose();
+                  }}
+                />
+              ) : null}
               {refs.composer ? (
                 <Button
                   size="sm"
@@ -325,11 +373,13 @@ function ReferenceCard({
 export function FlowReferences({
   flow,
   onShowStep,
+  onConnectStep,
   composer = null,
   children
 }: {
   flow: Flow;
   onShowStep: (stepId: string) => boolean;
+  onConnectStep?: (stepId: string, anchor: FieldAnchor) => void;
   /** The chat's composer, for "Infoga i meddelandet"; null while there is none. */
   composer?: ComposerInsert | null;
   children: ReactNode;
@@ -339,12 +389,13 @@ export function FlowReferences({
     () => ({
       flow,
       onShowStep,
+      onConnectStep,
       composer,
       card,
       openCard: (reference, anchor) =>
         setCard((current) => (current?.anchor === anchor ? null : { reference, anchor }))
     }),
-    [flow, onShowStep, composer, card]
+    [flow, onShowStep, onConnectStep, composer, card]
   );
   const close = ({ refocus = true } = {}) => {
     // Focus goes back to the pill the card came from, unless it went elsewhere.
