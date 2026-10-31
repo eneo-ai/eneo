@@ -211,6 +211,51 @@ describe("ChatView start state on a phone (decisions 5 and 8)", () => {
   });
 });
 
+describe("ChatView composer drafts", () => {
+  /** What the browser asks before a reload or a closed tab: a cancelled beforeunload means "ask". */
+  const unloadAsks = () => {
+    const event = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+
+  it("asks before a reload or a closed tab while something is typed and not sent", () => {
+    sessionStorage.clear();
+    renderInApp(<Harness partner={assistant} />);
+    const textarea = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
+    expect(unloadAsks()).toBe(false);
+
+    fireEvent.change(textarea, { target: { value: "Hur ansöker jag om bygglov?" } });
+    expect(unloadAsks()).toBe(true);
+
+    // Whitespace is not work, and emptied it is not asked about.
+    fireEvent.change(textarea, { target: { value: "   " } });
+    expect(unloadAsks()).toBe(false);
+  });
+
+  it("keeps a draft for the account that typed it, and gives it to no other", async () => {
+    sessionStorage.clear();
+    const mine = renderInApp(<Harness partner={assistant} />);
+    fireEvent.change(screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" }), {
+      target: { value: "min fråga" }
+    });
+    mine.unmount();
+    expect(Object.keys(sessionStorage).some((key) => key.includes("tenant-1.user-1|"))).toBe(true);
+
+    renderInApp(<Harness partner={assistant} />, {
+      appContext: testAppContext({ user: { ...testAppContext().user, id: "user-2" } })
+    });
+    expect(
+      (
+        screen.getByRole("textbox", {
+          name: "Fråga Upphandlingsassistenten"
+        }) as HTMLTextAreaElement
+      ).value
+    ).toBe("");
+    expect(Object.keys(sessionStorage).some((key) => key.includes("tenant-1.user-1|"))).toBe(false);
+  });
+});
+
 describe("ChatView tool approval (decision 26)", () => {
   const waiting: EneoUIMessage[] = [
     {
