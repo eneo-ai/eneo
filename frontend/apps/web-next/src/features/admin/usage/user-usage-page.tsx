@@ -43,10 +43,10 @@ import {
 
 function Stat({ label, value, subvalue }: { label: string; value: string; subvalue?: string }) {
   return (
-    <Card className="flex flex-col gap-1 p-4">
+    <Card className="flex flex-row flex-wrap items-baseline justify-between gap-x-3 gap-y-1 p-4 sm:flex-col sm:items-start sm:justify-start">
       <span className="text-muted-foreground text-sm">{label}</span>
       <span className="text-2xl font-semibold tabular-nums">{value}</span>
-      {subvalue ? <span className="text-muted-foreground text-xs">{subvalue}</span> : null}
+      {subvalue ? <span className="text-muted-foreground w-full text-xs">{subvalue}</span> : null}
     </Card>
   );
 }

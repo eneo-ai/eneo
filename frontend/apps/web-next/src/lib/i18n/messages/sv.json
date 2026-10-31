@@ -7038,5 +7038,6 @@
   "website_detail_actions": "Webbplats, åtgärder",
   "space_integrations_empty_description": "Importera innehåll från en ansluten tjänst, till exempel SharePoint eller Confluence, så kan assistenterna söka i det.",
   "account_integrations_enable_in_admin": "Aktivera integrationer",
-  "space_assistants_actions": "Assistenter, åtgärder"
+  "space_assistants_actions": "Assistenter, åtgärder",
+  "api_keys_admin_more_filters": "Fler filter"
 }

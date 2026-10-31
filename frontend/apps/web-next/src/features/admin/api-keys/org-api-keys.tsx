@@ -2,7 +2,7 @@
 
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";
+import { ChevronDown, Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { Switch } from "@/components/astryx/switch";
@@ -355,6 +355,9 @@ function KeyFilterForm({
   const [filters, setFilters] = useState(initial);
   // A space, assistant or app the admin is not a member of is given by id.
   const [manualScopeId, setManualScopeId] = useState("");
+  // Below 768 px the filters after the search start folded, so the keys are not
+  // a screen away; from 768 px they are always shown.
+  const [moreOpen, setMoreOpen] = useState(false);
   const update = (patch: Partial<AdminKeyFilters>) =>
     setFilters((current) => ({ ...current, ...patch }));
   const queryClient = useQueryClient();
@@ -415,7 +418,21 @@ function KeyFilterForm({
           onChange={(event) => update({ search: event.target.value })}
         />
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <Button
+        type="button"
+        variant="outline"
+        className="justify-between md:hidden"
+        aria-expanded={moreOpen}
+        aria-controls={`${id}-more`}
+        onClick={() => setMoreOpen((open) => !open)}
+      >
+        {t("api_keys_admin_more_filters")}
+        <ChevronDown className={moreOpen ? "size-4 rotate-180" : "size-4"} aria-hidden="true" />
+      </Button>
+      <div
+        id={`${id}-more`}
+        className={`grid gap-4 md:grid-cols-2 ${moreOpen ? "" : "max-md:hidden"}`}
+      >
         <Typeahead
           label={t("user")}
           description={t("audit_user_search_hint", { count: MIN_SEARCH_LENGTH })}

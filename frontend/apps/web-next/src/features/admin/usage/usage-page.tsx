@@ -84,7 +84,7 @@ function useCompact() {
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <Card className="flex flex-col gap-1 p-4">
+    <Card className="flex flex-row flex-wrap items-baseline justify-between gap-x-3 gap-y-1 p-4 sm:flex-col sm:items-start sm:justify-start">
       <span className="text-muted-foreground text-sm">{label}</span>
       <span className="text-2xl font-semibold tabular-nums">{value}</span>
     </Card>

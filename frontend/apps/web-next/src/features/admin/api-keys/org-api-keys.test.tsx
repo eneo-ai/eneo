@@ -108,6 +108,21 @@ describe("OrgApiKeysPage", () => {
     await waitFor(() => expect(listQueries().at(-1)?.state).toBeUndefined());
   });
 
+  it("folds the filters after the search below 768 px, and keeps them in the form", async () => {
+    show();
+    await screen.findByText("Ärendesystemet");
+    const toggle = screen.getByRole("button", { name: "Fler filter" });
+    const more = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(more?.className).toContain("max-md:hidden");
+    // Folded, not removed: the fields stay in the form and apply with it.
+    expect(more?.contains(screen.getByLabelText("Utgår inom (dagar)"))).toBe(true);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(more?.className).not.toContain("max-md:hidden");
+  });
+
   it("applies the filters together: search, expiry window and page size", async () => {
     show();
     await screen.findByText("Ärendesystemet");
