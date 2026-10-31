@@ -587,6 +587,8 @@ export function RunRecorder({
 
   const laterId = useId();
   const startButton = useRef<HTMLButtonElement>(null);
+  const pauseButton = useRef<HTMLButtonElement>(null);
+  const resumeButton = useRef<HTMLButtonElement>(null);
   const [discardProblem, setDiscardProblem] = useState(false);
   const [filesFull, setFilesFull] = useState(false);
   const [backlogFull, setBacklogFull] = useState(false);
@@ -685,6 +687,22 @@ export function RunRecorder({
       onStarted: () => announce(t("flow_transcript_rec_restarted_announce"))
     });
   });
+
+  // The button that was pressed gives way to the one that follows it (Spela in, Pausa, Fortsätt,
+  // Spela in mer): focus goes on to that one instead of to the page, where a keyboard or a screen
+  // reader would start over. Only when focus was lost, so a person elsewhere in the form keeps it.
+  const shownPhase = snapshot.phase;
+  const lastPhase = useRef(shownPhase);
+  useEffect(() => {
+    const before = lastPhase.current;
+    lastPhase.current = shownPhase;
+    if (before === shownPhase) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    if (shownPhase === "recording") pauseButton.current?.focus();
+    else if (shownPhase === "paused") resumeButton.current?.focus();
+    else if (shownPhase === "idle" && before !== "starting") startButton.current?.focus();
+  }, [shownPhase]);
 
   if (!recordsInto(input, options.mimeType)) {
     return (
@@ -892,6 +910,7 @@ export function RunRecorder({
         ) : null}
         {phase === "recording" ? (
           <Button
+            ref={pauseButton}
             label={t("flow_transcript_rec_pause")}
             icon={<Pause aria-hidden="true" />}
             onClick={() => recorder.pause()}
@@ -899,6 +918,7 @@ export function RunRecorder({
         ) : null}
         {phase === "paused" ? (
           <Button
+            ref={resumeButton}
             label={t("flow_transcript_rec_resume")}
             icon={<Play aria-hidden="true" />}
             onClick={() => recorder.resume()}

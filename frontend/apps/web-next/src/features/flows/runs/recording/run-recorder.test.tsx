@@ -321,6 +321,46 @@ describe("RunRecorder in the start dialog", () => {
     expect(within(second.dialog).queryByText(/Anslut en mikrofon/)).toBeNull();
   });
 
+  it("keeps focus in the recorder as its buttons trade places", async () => {
+    installBrowser();
+    grantMicrophone();
+    const { dialog } = await openDialog(audioContract());
+    const start = button(dialog, messages.flow_transcript_rec_start);
+    start.focus();
+    fireEvent.click(start);
+    const pause = await within(dialog).findByRole("button", {
+      name: messages.flow_transcript_rec_pause
+    });
+    await waitFor(() => expect(document.activeElement).toBe(pause));
+
+    fireEvent.click(pause);
+    const resume = await within(dialog).findByRole("button", {
+      name: messages.flow_transcript_rec_resume
+    });
+    await waitFor(() => expect(document.activeElement).toBe(resume));
+
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_stop));
+    const more = await within(dialog).findByRole("button", {
+      name: messages.flow_transcript_rec_continue
+    });
+    await waitFor(() => expect(document.activeElement).toBe(more));
+  });
+
+  it("leaves focus where it is when someone is working elsewhere in the form", async () => {
+    installBrowser();
+    grantMicrophone();
+    const { dialog } = await openDialog(audioContract());
+    fireEvent.click(button(dialog, messages.flow_transcript_rec_start));
+    const pause = await within(dialog).findByRole("button", {
+      name: messages.flow_transcript_rec_pause
+    });
+    const name = within(dialog).getByLabelText(/^Namn på körningen/);
+    name.focus();
+    fireEvent.click(pause);
+    await within(dialog).findByRole("button", { name: messages.flow_transcript_rec_resume });
+    expect(document.activeElement).toBe(name);
+  });
+
   it("records, pauses, stops and starts the run with the recording as the step's audio", async () => {
     installBrowser();
     grantMicrophone();
