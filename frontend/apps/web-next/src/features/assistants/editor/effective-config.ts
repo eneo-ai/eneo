@@ -9,11 +9,7 @@ type ModelRef = {
   nickname?: string | null;
 };
 
-type McpServerRef = {
-  id: string;
-  name: string;
-  description?: string | null;
-};
+type McpServerRef = Pick<Schema<"MCPServerPublicDict">, "id" | "name" | "description" | "purpose">;
 
 export function isPromptLocked(config: AssistantEffectiveConfig): boolean {
   return config?.prompt_locked === true;

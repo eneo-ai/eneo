@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp, testQueryClient } from "@/test/render";
 import type { Assistant } from "@/features/assistants/editor/use-assistant";
@@ -15,7 +15,8 @@ const models = vi.hoisted(() =>
     nickname: `Model ${name}`,
     token_limit: 1000,
     max_input_tokens: 1000,
-    supports_tool_calling: true
+    supports_tool_calling: true,
+    supported_model_kwargs: { temperature: { supported: name !== "A" }, top_p: { supported: true } }
   }))
 );
 vi.mock("@/features/spaces/use-space", () => ({
@@ -25,11 +26,12 @@ vi.mock("@/features/spaces/use-space", () => ({
     can: () => true
   })
 }));
-const api = vi.hoisted(() => ({ POST: vi.fn() }));
+const api = vi.hoisted(() => ({ POST: vi.fn(), GET: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 afterEach(() => {
   cleanup();
   api.POST.mockReset();
+  api.GET.mockReset();
 });
 it("renders the real shared AI section and adopts external model changes in the helper editor", async () => {
   api.POST.mockResolvedValue({
@@ -50,6 +52,9 @@ it("renders the real shared AI section and adopts external model changes in the 
     queryClient
   });
   expect(screen.getByRole("button", { name: /Model A/ })).toBeTruthy();
+  expect(
+    (screen.getByRole("combobox", { name: "Modellbeteende" }) as HTMLButtonElement).disabled
+  ).toBe(true);
   act(() =>
     queryClient.setQueryData(["assistants", "helper"], {
       ...assistant,
@@ -91,5 +96,58 @@ it("leaves governed instructions to the server baseline instead of overriding wi
   );
   expect((screen.getByRole("textbox", { name: "Prompt" }) as HTMLTextAreaElement).disabled).toBe(
     true
+  );
+});
+
+it("records the historical version date through the existing assistant prompt save", async () => {
+  const assistant = {
+    id: "helper",
+    name: "Helper",
+    completion_model: models[0],
+    completion_model_kwargs: {},
+    prompt: { text: "Current body" },
+    attachments: []
+  } as unknown as Assistant;
+  const old = {
+    id: "old",
+    text: "Old body",
+    description: "Historic marker",
+    created_at: "2026-10-01T12:00:00Z",
+    is_selected: false,
+    user: { id: "user-1", email: "owner@example.se" }
+  };
+  api.GET.mockImplementation(async (path) => ({
+    data: path.includes("/prompts/{id}") ? old : { items: [old] },
+    response: new Response("{}")
+  }));
+  api.POST.mockImplementation(async (path, init) => ({
+    data: path.endsWith("/preflight")
+      ? { file_tokens: 0, prompt_tokens: 0 }
+      : { ...assistant, prompt: init.body.prompt },
+    response: new Response("{}")
+  }));
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(["assistants", "helper"], assistant);
+  renderInApp(<HelpAssistantEditor assistantId="helper" helperKind="prompt_guide" />, {
+    queryClient
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Visa prompthistorik" }));
+  fireEvent.click(await screen.findByRole("button", { name: /Historic marker/ }));
+  await screen.findByText("Old body");
+  fireEvent.click(
+    screen.getByRole("button", { name: /Återställ denna version|Använd denna version/ })
+  );
+  await waitFor(() =>
+    expect(api.POST).toHaveBeenCalledWith(
+      "/api/v1/assistants/{id}/",
+      expect.objectContaining({
+        body: {
+          prompt: {
+            text: "Old body",
+            description: expect.stringMatching(/^Återställd prompt från /)
+          }
+        }
+      })
+    )
   );
 });

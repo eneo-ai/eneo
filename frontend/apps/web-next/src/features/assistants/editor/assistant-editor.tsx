@@ -77,8 +77,6 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
 
   const chatHref = chatPartnerHref(routeId, { ...assistant, type: "assistant" as const });
 
-  const hasMcp =
-    (space.mcp_servers?.length ?? 0) > 0 || assistant.effective_config?.mcp_enforced === true;
   const permissions = assistant.permissions ?? [];
   const hasPublishing = permissions.includes("publish") || permissions.includes("insight_toggle");
   const summary = editorSummaries(t);
@@ -144,18 +142,14 @@ function AssistantEditorContent({ assistantId }: { assistantId: string }) {
           }
         ]
       : []),
-    ...(hasMcp
-      ? [
-          {
-            id: "mcp",
-            label: t("mcp_servers"),
-            icon: Plug,
-            group: content,
-            summary: summary.chosen(assistant.mcp_servers?.length ?? 0),
-            node: <McpSection assistant={assistant} />
-          }
-        ]
-      : []),
+    {
+      id: "mcp",
+      label: t("mcp_servers"),
+      icon: Plug,
+      group: content,
+      summary: summary.chosen(assistant.mcp_servers?.length ?? 0),
+      node: <McpSection assistant={assistant} />
+    },
     {
       id: "ai",
       label: t("ai_settings"),

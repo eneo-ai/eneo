@@ -2,11 +2,12 @@
 
 import { History } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { formatDateTime } from "@/lib/format";
 import { PromptVersionDialog } from "@/features/prompts/prompt-version-dialog";
 import type { App } from "../apps";
 import { useUpdateApp } from "./use-app";
@@ -16,10 +17,20 @@ export function InstructionsSection({ app }: { app: App }) {
   const update = useUpdateApp(app.id);
   const [showHistory, setShowHistory] = useState(false);
 
+  const promptDescription = useRef("");
   const prompt = useAutosaveField({
     key: "app-prompt",
     value: app.prompt?.text ?? "",
-    save: (value) => update.mutateAsync({ prompt: { text: value } }),
+    save: (value) =>
+      update.mutateAsync({
+        prompt: {
+          text: value,
+          ...(promptDescription.current ? { description: promptDescription.current } : {})
+        }
+      }),
+    onSaved: () => {
+      promptDescription.current = "";
+    },
     commitDebounceMs: 1500,
     commitOnVisibilityChange: true
   });
@@ -42,7 +53,10 @@ export function InstructionsSection({ app }: { app: App }) {
           id="app-prompt"
           value={prompt.value}
           rows={6}
-          onChange={(event) => prompt.setValue(event.target.value)}
+          onChange={(event) => {
+            promptDescription.current = "";
+            prompt.setValue(event.target.value);
+          }}
           onBlur={() => prompt.commit()}
         />
       </SettingsRow>
@@ -50,9 +64,12 @@ export function InstructionsSection({ app }: { app: App }) {
         resource={{ type: "app", id: app.id }}
         open={showHistory}
         onOpenChange={setShowHistory}
-        onUseVersion={(text) => {
-          prompt.setValue(text);
-          void prompt.commit(text);
+        onUseVersion={(version) => {
+          prompt.setValue(version.text);
+          promptDescription.current = t("prompt_restored_from_date", {
+            date: version.created_at ? formatDateTime(version.created_at) : t("unknown")
+          });
+          void prompt.commit(version.text);
         }}
       />
     </SettingsGroup>

@@ -231,10 +231,13 @@ export function InstructionsSection({
         resource={{ type: "assistant", id: assistant.id }}
         open={showHistory && !promptLocked}
         onOpenChange={setShowHistory}
-        onUseVersion={(text) => {
+        onUseVersion={(version) => {
           if (promptLocked) return;
-          editPrompt(text);
-          void promptField.commit(text);
+          editPrompt(version.text);
+          promptDescription.current = t("prompt_restored_from_date", {
+            date: version.created_at ? formatDateTime(version.created_at) : t("unknown")
+          });
+          void promptField.commit(version.text);
         }}
       />
       <Dialog open={expanded} onOpenChange={setExpanded}>
