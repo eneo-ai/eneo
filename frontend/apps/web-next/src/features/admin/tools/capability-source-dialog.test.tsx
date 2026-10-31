@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -66,6 +66,70 @@ beforeEach(() => {
 afterEach(() => vi.clearAllMocks());
 
 describe("image function source configuration", () => {
+  it("uses a loaded unclassified replacement without inheriting the saved model's classification", async () => {
+    const previousGet = api.GET.getMockImplementation();
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/image-models/"
+        ? ok({
+            items: [
+              model,
+              {
+                ...model,
+                id: "unclassified",
+                nickname: "Public model",
+                security_classification: null
+              }
+            ]
+          })
+        : previousGet?.(path)
+    );
+    const { queryClient } = renderInApp(
+      <CapabilitySourceDialog
+        purpose="image_generation"
+        server={{
+          ...server,
+          security_classification: {
+            id: "classification",
+            name: "Intern",
+            description: null,
+            security_level: 2
+          }
+        }}
+        onClose={() => {}}
+        onSaved={() => {}}
+      />
+    );
+    expect(await screen.findByText("Intern")).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("Bildmodell"), { target: { value: "unclassified" } });
+    expect(screen.queryByText("Intern")).toBeNull();
+    expect(screen.getByText("Ingen klassificering")).toBeTruthy();
+    await act(async () => queryClient.setQueryData(["image-models"], []));
+    expect(screen.queryByText("Intern")).toBeNull();
+  });
+
+  it("keeps the saved classification fallback while the unchanged model's details are unavailable", async () => {
+    const previousGet = api.GET.getMockImplementation();
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/image-models/" ? ok({ items: [] }) : previousGet?.(path)
+    );
+    renderInApp(
+      <CapabilitySourceDialog
+        purpose="image_generation"
+        server={{
+          ...server,
+          security_classification: {
+            id: "classification",
+            name: "Intern",
+            description: null,
+            security_level: 2
+          }
+        }}
+        onClose={() => {}}
+        onSaved={() => {}}
+      />
+    );
+    expect(await screen.findByText("Intern")).toBeTruthy();
+  });
   it("selects a model created in place and saves the existing source with its draft intact", async () => {
     let created = false;
     const defaultGet = api.GET.getMockImplementation();

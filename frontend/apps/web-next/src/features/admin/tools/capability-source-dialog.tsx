@@ -127,6 +127,11 @@ export function CapabilitySourceDialog({
       ? (models.data?.find((model) => model.id === server.image_model_id) ?? server.image_model)
       : null;
   const selectedModel = models.data?.find((model) => model.id === draft.imageModelId);
+  const inheritedClassification = selectedModel
+    ? selectedModel.security_classification
+    : draft.imageModelId === server?.image_model_id
+      ? server.security_classification
+      : null;
   const problems = sourceDraftProblems(draft, server);
   const tokenMismatch =
     draft.source === "external" &&
@@ -273,9 +278,7 @@ export function CapabilitySourceDialog({
                 {security?.security_enabled && (
                   <div className="space-y-1">
                     <p className="text-sm">
-                      {selectedModel?.security_classification?.name ??
-                        server?.security_classification?.name ??
-                        t("no_classification")}
+                      {inheritedClassification?.name ?? t("no_classification")}
                     </p>
                     <p className="text-muted-foreground text-sm">
                       {t("mcp_builtin_classification_inherited")}
