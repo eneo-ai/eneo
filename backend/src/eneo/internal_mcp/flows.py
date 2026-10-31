@@ -583,7 +583,11 @@ async def update_step(
         )
 
         flow = await get_flow(chat.flow_id, request, container)
-        edit = _step_edit(flow, step_id, changes, assistant_changes)
+        step = _saved_step(flow, step_id)
+        before = await _assistant_before(
+            container, request, chat.flow_id, step, assistant_changes
+        )
+        edit = _step_edit(step, changes, assistant_changes, before)
         updated = await apply_editor_update(
             chat.flow_id,
             request,
@@ -598,12 +602,14 @@ async def update_step(
             container,
         )
         saved_step = next(item for item in updated.steps if item.id == step_id)
-        return page_result(
+        return _change_result(
             {
                 "saved": True,
                 "step_id": str(step_id),
                 "assistant_id": str(saved_step.assistant_id),
+                "changes": edit.fields,
             },
+            [_changed_step(saved_step, edit.fields)],
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
         )
@@ -611,29 +617,88 @@ async def update_step(
     return await _call(ctx, operation, changes_draft=True)
 
 
-class _StepEdit:
-    """One step's part of an editor update, checked as update_step checks
-    it: the step exists, only configuration fields change, and no
-    credential is sent or retargeted."""
-
-    def __init__(
-        self, step_edits: list[dict[str, Any]], assistants: list[dict[str, Any]]
-    ):
-        self.step_edits = step_edits
-        self.assistants = assistants
-
-
-def _step_edit(
-    flow: Any,
-    step_id: UUID,
-    changes: dict[str, Any] | None,
-    assistant_changes: dict[str, Any] | None,
-) -> _StepEdit:
-    from eneo.flows.api.flow_models import FlowStepUpdateRequest
-
+def _saved_step(flow: Any, step_id: UUID) -> Any:
     step = next((item for item in flow.steps if item.id == step_id), None)
     if step is None:
         raise NotFoundException("Step not found.")
+    return step
+
+
+async def _assistant_before(
+    container, request, flow_id: UUID, step: Any, assistant_changes: Any
+) -> dict[str, Any] | None:
+    """The step's assistant as saved, read only when the change touches it,
+    so the change can say what each field was."""
+    if assistant_changes is None:
+        return None
+    from eneo.flows.api.flow_assistant_router import get_flow_assistant
+
+    assistant = await get_flow_assistant(
+        id=flow_id, assistant_id=step.assistant_id, request=request, container=container
+    )
+    return cast(
+        dict[str, Any],
+        assistant.model_dump(mode="json")
+        if hasattr(assistant, "model_dump")
+        else assistant,
+    )
+
+
+def _changed_step(saved_step: Any, fields: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "step_id": str(saved_step.id),
+        "step_order": saved_step.step_order,
+        "name": saved_step.user_description,
+        "fields": fields,
+    }
+
+
+def _change_result(
+    page: dict[str, Any],
+    changed: list[dict[str, Any]],
+    *,
+    flow_id: UUID,
+    revision: int,
+) -> CallToolResult:
+    """A change's page for the model, and the affected steps with each
+    field's value before and after in the structured content, which the
+    chat draws as a card and keeps with the conversation."""
+    result = page_result(page, flow_id=flow_id, revision=revision)
+    result.structuredContent = {
+        "flow_id": str(flow_id),
+        "draft_revision": revision,
+        "changes": changed,
+    }
+    return result
+
+
+class _StepEdit:
+    """One step's part of an editor update, checked as update_step checks
+    it: only configuration fields change, and no credential is sent or
+    retargeted. ``fields`` is what the edit changes, each with its value
+    before and after."""
+
+    def __init__(
+        self,
+        step_edits: list[dict[str, Any]],
+        assistants: list[dict[str, Any]],
+        fields: list[dict[str, Any]],
+    ):
+        self.step_edits = step_edits
+        self.assistants = assistants
+        self.fields = fields
+
+
+def _step_edit(
+    step: Any,
+    changes: dict[str, Any] | None,
+    assistant_changes: dict[str, Any] | None,
+    assistant_before: dict[str, Any] | None = None,
+) -> _StepEdit:
+    from eneo.flows.api.flow_models import FlowStepUpdateRequest
+    from eneo.flows.application.flow_authoring_reads import step_changes
+
+    step_id = step.id
     changes = changes or {}
     if set(changes) - (
         set(FlowStepUpdateRequest.model_fields) - {"id", "assistant_id", "step_order"}
@@ -647,6 +712,7 @@ def _step_edit(
     require_safe_model_configuration(changes, saved)
     return _StepEdit(
         step_edits=[{"step_id": str(step_id), "changes": changes}] if changes else [],
+        fields=step_changes(saved, changes, assistant_before, assistant_changes),
         assistants=(
             []
             if assistant_changes is None
@@ -701,6 +767,7 @@ async def update_steps(
         step_edits: list[dict[str, Any]] = []
         assistants: list[dict[str, Any]] = []
         edited: list[UUID] = []
+        fields: dict[UUID, list[dict[str, Any]]] = {}
         for edit in edits:
             if set(edit) - {"step_id", "changes", "assistant_changes"}:
                 raise BadRequestException(
@@ -716,12 +783,17 @@ async def update_steps(
                 raise BadRequestException(
                     f"The edit of step {step_id} changes nothing."
                 )
+            step = _saved_step(flow, step_id)
+            before = await _assistant_before(
+                container, request, chat.flow_id, step, edit.get("assistant_changes")
+            )
             part = _step_edit(
-                flow, step_id, edit.get("changes"), edit.get("assistant_changes")
+                step, edit.get("changes"), edit.get("assistant_changes"), before
             )
             step_edits.extend(part.step_edits)
             assistants.extend(part.assistants)
             edited.append(step_id)
+            fields[step_id] = part.fields
         updated = await apply_editor_update(
             chat.flow_id,
             request,
@@ -736,7 +808,7 @@ async def update_steps(
             container,
         )
         by_id = {step.id: step for step in updated.steps}
-        return page_result(
+        return _change_result(
             {
                 "saved": True,
                 "steps": [
@@ -745,10 +817,12 @@ async def update_steps(
                         "step_order": by_id[step_id].step_order,
                         "name": by_id[step_id].user_description,
                         "assistant_id": str(by_id[step_id].assistant_id),
+                        "changes": fields[step_id],
                     }
                     for step_id in edited
                 ],
             },
+            [_changed_step(by_id[step_id], fields[step_id]) for step_id in edited],
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
         )
@@ -798,8 +872,7 @@ async def contract_from_example(
             raise BadRequestException(_EXAMPLE_PROBLEMS[error.problem]) from error
         flow = await get_flow(chat.flow_id, request, container)
         edit = _step_edit(
-            flow,
-            step_id,
+            _saved_step(flow, step_id),
             {"output_type": "json", "output_contract": reading.contract},
             None,
         )

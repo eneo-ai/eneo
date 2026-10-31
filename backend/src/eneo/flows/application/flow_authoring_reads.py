@@ -10,6 +10,7 @@ suggestions and the publish rules are judged on, computed once per read.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from enum import Enum
@@ -344,6 +345,71 @@ def run_summary(
         "open_review": open_review,
         "steps": items,
     }
+
+
+CHANGE_PREVIEW_CHARS = 240
+"""How much of a changed value the chat's change card shows."""
+MAX_CHANGED_FIELDS = 12
+
+
+def _shown(value: object) -> object:
+    """A value as the change card shows it: a scalar as it is, text cut
+    short, a structure as compact JSON cut short."""
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    text = (
+        value
+        if isinstance(value, str)
+        else json.dumps(value, ensure_ascii=False, default=str, separators=(",", ":"))
+    )
+    if len(text) > CHANGE_PREVIEW_CHARS:
+        return text[:CHANGE_PREVIEW_CHARS] + "…"
+    return text
+
+
+def _assistant_value(field: str, value: object) -> object:
+    """An assistant field by what a person reads of it: a prompt by its
+    text, a model by its name."""
+    if not isinstance(value, Mapping):
+        return value
+    mapping = cast(Mapping[str, object], value)
+    if field == "prompt":
+        return mapping.get("text")
+    if field == "completion_model":
+        return mapping.get("name") or mapping.get("id")
+    return mapping
+
+
+def step_changes(
+    saved: Mapping[str, object],
+    changes: Mapping[str, object] | None,
+    assistant_before: Mapping[str, object] | None,
+    assistant_changes: Mapping[str, object] | None,
+) -> list[dict[str, Any]]:
+    """Each field a change sets to something else, with its value before and
+    after as short text: the step's own fields by name, its assistant's as
+    ``assistant.<field>``. ``saved`` and ``assistant_before`` are the API's
+    own reads, so a credential is a stored sentinel there, never the secret.
+    A field that keeps its value is left out."""
+    fields: list[dict[str, Any]] = []
+    for name, after in (changes or {}).items():
+        before = saved.get(name)
+        if before != after:
+            fields.append(
+                {"field": name, "before": _shown(before), "after": _shown(after)}
+            )
+    for name, value in (assistant_changes or {}).items():
+        before = _assistant_value(name, (assistant_before or {}).get(name))
+        after = _assistant_value(name, value)
+        if before != after:
+            fields.append(
+                {
+                    "field": f"assistant.{name}",
+                    "before": _shown(before),
+                    "after": _shown(after),
+                }
+            )
+    return fields[:MAX_CHANGED_FIELDS]
 
 
 def output_fields(output_contract: Mapping[str, object] | None) -> list[str] | None:

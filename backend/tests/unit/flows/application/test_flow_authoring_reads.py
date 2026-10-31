@@ -11,6 +11,7 @@ from eneo.flows.application.flow_authoring_reads import (
     read_reference,
     run_form_fields,
     run_summary,
+    step_changes,
     step_connections,
     step_reads_summary,
 )
@@ -470,3 +471,54 @@ def test_an_http_configuration_the_core_refuses_is_marked_unreadable():
             "unreadable": True,
         }
     ]
+
+
+def test_a_change_lists_each_field_it_sets_to_something_else_with_before_and_after():
+    saved = {
+        "user_description": "Skriv svaret",
+        "output_type": "text",
+        "input_config": {"url": "https://a.se", "auth": {"key": {"$secret": "stored"}}},
+    }
+    changes = {
+        "user_description": "Skriv svaret",
+        "output_type": "json",
+        "input_config": {"url": "https://b.se", "auth": {"key": {"$secret": "stored"}}},
+    }
+    assistant_before = {
+        "prompt": {"text": "Sammanfatta brevet."},
+        "completion_model": {"id": "m1", "name": "Modell A"},
+    }
+    assistant_changes = {
+        "prompt": {"text": "Sammanfatta brevet i tre punkter."},
+        "completion_model": {"id": "m1"},
+    }
+
+    fields = step_changes(saved, changes, assistant_before, assistant_changes)
+
+    # The unchanged name is left out; a structure shows as compact JSON with
+    # the credential's sentinel, never a secret; the prompt shows its text;
+    # the model keeps its name, so it is not a change.
+    assert fields == [
+        {"field": "output_type", "before": "text", "after": "json"},
+        {
+            "field": "input_config",
+            "before": '{"url":"https://a.se","auth":{"key":{"$secret":"stored"}}}',
+            "after": '{"url":"https://b.se","auth":{"key":{"$secret":"stored"}}}',
+        },
+        {
+            "field": "assistant.prompt",
+            "before": "Sammanfatta brevet.",
+            "after": "Sammanfatta brevet i tre punkter.",
+        },
+        {"field": "assistant.completion_model", "before": "Modell A", "after": "m1"},
+    ]
+
+
+def test_a_changed_value_is_cut_short_and_a_new_field_has_no_before():
+    long = "x" * 300
+    fields = step_changes({}, {"user_description": long}, None, None)
+
+    assert fields == [
+        {"field": "user_description", "before": None, "after": "x" * 240 + "…"}
+    ]
+    assert step_changes({"a": 1}, {"a": 1}, None, None) == []

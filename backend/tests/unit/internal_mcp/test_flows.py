@@ -508,6 +508,14 @@ def _changing_chat(
     )
     save = AsyncMock(return_value=SimpleNamespace(steps=[saved_step], draft_revision=5))
     monkeypatch.setattr(flow_authoring_operations, "apply_editor_update", save)
+    # The step's assistant as saved, read when a change touches it.
+    from eneo.flows.api import flow_assistant_router
+
+    assistant = MagicMock()
+    assistant.model_dump.return_value = {"prompt": {"text": before}}
+    monkeypatch.setattr(
+        flow_assistant_router, "get_flow_assistant", AsyncMock(return_value=assistant)
+    )
     return save
 
 
@@ -1035,6 +1043,14 @@ async def test_update_steps_saves_every_edit_and_the_settings_in_one_revision(
     assert request.definition.description == "Ny beskrivning"
     page = json.loads(result.content[0].text)
     assert page["draft_revision"] == 5
+    changes = [
+        {"field": "user_description", "before": None, "after": "Steg 2"},
+        {
+            "field": "assistant.prompt",
+            "before": "Sammanfatta.",
+            "after": _DUPLICATE_PROMPT,
+        },
+    ]
     assert json.loads(page["content"]) == {
         "saved": True,
         "steps": [
@@ -1043,6 +1059,21 @@ async def test_update_steps_saves_every_edit_and_the_settings_in_one_revision(
                 "step_order": 2,
                 "name": "Steg 2",
                 "assistant_id": str(_DRAFT_IDS[3]),
+                "changes": changes,
+            }
+        ],
+    }
+    # The affected steps, with each field before and after, travel with the
+    # call for the chat's change card.
+    assert result.structuredContent == {
+        "flow_id": page["flow_id"],
+        "draft_revision": 5,
+        "changes": [
+            {
+                "step_id": str(_DRAFT_IDS[1]),
+                "step_order": 2,
+                "name": "Steg 2",
+                "fields": changes,
             }
         ],
     }
