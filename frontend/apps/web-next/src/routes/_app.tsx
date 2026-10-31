@@ -16,7 +16,6 @@ export const Route = createFileRoute("/_app")({
     // Start the other resources together. Their mounted readers own pending/error UI.
     void loadSession(context.queryClient, browserApi).catch(() => {});
   },
-  pendingComponent: () => null,
   component: AppLayout
 });
 
