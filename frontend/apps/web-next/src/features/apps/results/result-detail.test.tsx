@@ -300,8 +300,11 @@ describe("ResultDetail", () => {
     const pending = Promise.withResolvers<{ data: { url: string }; response: Response }>();
     api.POST.mockReturnValueOnce(pending.promise);
     const download = screen.getByRole("button", { name: 'Ladda ner original "intervju.mp3"' });
+    download.focus();
     fireEvent.click(download);
     await waitFor(() => expect(download.getAttribute("aria-busy")).toBe("true"));
+    expect(download.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(download);
     fireEvent.click(download);
     expect(api.POST).toHaveBeenCalledTimes(2);
     fireEvent.click(screen.getByRole("tab", { name: "Resultat" }));

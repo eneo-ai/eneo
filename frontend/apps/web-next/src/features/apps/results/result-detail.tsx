@@ -183,6 +183,7 @@ function Transcription({
           aria-label={`${t("download_original")} "${file.name}"`}
           icon={<Download className="size-4" aria-hidden="true" />}
           isLoading={download.isPending}
+          isInterruptible
           onClick={() => {
             if (!download.isPending) download.mutate();
           }}
