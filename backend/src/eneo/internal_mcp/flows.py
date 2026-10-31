@@ -268,6 +268,7 @@ async def _call_runtime(
             return await operation(scope.container, binding, request)
     except (
         BadRequestException,
+        ConflictException,
         NotFoundException,
         UnauthorizedException,
         ValidationError,
@@ -1231,6 +1232,52 @@ async def run_flow(
         # FastAPI normally drains these tasks after the response; MCP must do it.
         await tasks()
         return _runtime_result(result, flow_id=chat.flow_id)
+
+    return await _call_runtime(ctx, operation)
+
+
+@mcp.tool()
+async def retry_run(ctx: Context, run_id: UUID, idempotency_key: str) -> CallToolResult:
+    """Start a failed run again from its failed step, on the same flow version
+    with the same inputs, keeping the steps that completed before it. Only
+    after the person has agreed, and only for a transient error (the run's
+    error is retryable); a setting error is fixed in the flow instead.
+    Refused when the run did not fail, when its version is no longer
+    published, or when no step completed before the failure. Reuse
+    idempotency_key after an uncertain response: the same key returns the
+    run it already started."""
+
+    async def operation(container, chat, request):
+        from fastapi import BackgroundTasks
+        from starlette.responses import Response
+
+        from eneo.flows.api.flow_run_retry_router import (
+            retry_flow_run_from_failed_step,
+        )
+
+        tasks = BackgroundTasks()
+        result = await retry_flow_run_from_failed_step(
+            id=chat.flow_id,
+            run_id=run_id,
+            request=request,
+            response=Response(),
+            background_tasks=tasks,
+            idempotency_key=idempotency_key,
+            container=container,
+        )
+        # The core has committed the run before this dispatch; MCP drains
+        # the tasks FastAPI would drain after the response.
+        await tasks()
+        page = _runtime_result(result, flow_id=chat.flow_id)
+        if not isinstance(result, Response):
+            # The new run, for the chat's run card.
+            page.structuredContent = {
+                "flow_id": str(chat.flow_id),
+                "run_id": str(result.run.id),
+                "source_run_id": str(result.source_run_id),
+                "created": result.created,
+            }
+        return page
 
     return await _call_runtime(ctx, operation)
 

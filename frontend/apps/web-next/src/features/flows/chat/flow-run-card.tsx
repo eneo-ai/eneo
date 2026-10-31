@@ -38,19 +38,19 @@ import {
   type RunDetail
 } from "../runs/runs-api";
 
-/** The tool of the flow chat that starts a run. */
-const RUN_FLOW_TOOL = "run_flow";
+/** The tools of the flow chat that start a run: a new one, or a failed one again. */
+const RUN_STARTING_TOOLS = new Set(["run_flow", "retry_run"]);
 
-/** The run a `run_flow` call of the flow chat started, from the call's data; null for any other call. */
+/** The run a `run_flow` or `retry_run` call of the flow chat started, from the call's data; null for any other call. */
 export function startedRunId(
   call: Pick<ToolCallRecord, "toolName" | "structuredContent" | "serverName" | "isInternal">
 ): string | null {
-  if (!isFlowsToolCall(call) || call.toolName !== RUN_FLOW_TOOL) return null;
+  if (!isFlowsToolCall(call) || !RUN_STARTING_TOOLS.has(call.toolName)) return null;
   const runId = call.structuredContent?.run_id;
   return typeof runId === "string" && runId ? runId : null;
 }
 
-/** The chat's card for a tool call: the run card for a run `run_flow` started, nothing for other calls. */
+/** The chat's card for a tool call: the run card for a run the chat started, nothing for other calls. */
 export function flowRunCardFor(
   call: ToolCallRecord,
   flow: { id: string; name: string },
@@ -264,6 +264,14 @@ export function FlowRunCard({
             label={t("copy")}
             icon={<Copy aria-hidden="true" className="size-4" />}
             onClick={() => void copy(text)}
+          />
+        ) : null}
+        {onAskChat && status === "failed" && detail.data?.error?.retryable ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_retry")}
+            onClick={() => onAskChat(t("flows_run_card_retry_request", { run: runId }))}
           />
         ) : null}
         {onAskChat && status === "failed" ? (

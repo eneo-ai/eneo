@@ -9,7 +9,7 @@ import pytest
 from eneo.flows.application import flow_authoring_chat, flow_authoring_operations
 from eneo.internal_mcp import flows
 from eneo.internal_mcp.foundation import ToolContext
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, ConflictException
 
 
 def test_large_read_has_explicit_continuation_and_no_false_complete_claim(monkeypatch):
@@ -759,6 +759,78 @@ async def test_read_run_summarises_a_run_from_its_audited_reads(monkeypatch):
     for read in (get_run, list_steps, graph):
         assert read.await_args.kwargs["id"] == chat.flow_id
         assert read.await_args.kwargs["run_id"] == run_id
+
+
+def _runtime_chat(monkeypatch):
+    """A chat whose runtime tools reach the flow's run endpoints."""
+    container = _transaction_container([])
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=False)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    monkeypatch.setattr(
+        flow_authoring_chat,
+        "FlowAuthoringChatPublic",
+        SimpleNamespace(model_validate=lambda item: item),
+    )
+    return container, chat
+
+
+async def test_retry_run_starts_the_failed_run_again_and_names_the_new_run(monkeypatch):
+    from eneo.flows.api import flow_run_retry_router
+
+    _, chat = _runtime_chat(monkeypatch)
+    source_id, new_id = uuid4(), uuid4()
+    public = MagicMock()
+    public.run = SimpleNamespace(id=new_id)
+    public.source_run_id = source_id
+    public.created = True
+    public.model_dump.return_value = {
+        "run": {"id": str(new_id), "status": "queued"},
+        "created": True,
+        "source_run_id": str(source_id),
+        "first_executed_step_order": 2,
+        "reused_step_orders": [1],
+    }
+    retry = AsyncMock(return_value=public)
+    monkeypatch.setattr(flow_run_retry_router, "retry_flow_run_from_failed_step", retry)
+
+    result = await flows.retry_run(MagicMock(), run_id=source_id, idempotency_key="k-1")
+
+    assert result.isError is not True
+    kwargs = retry.await_args.kwargs
+    assert kwargs["id"] == chat.flow_id
+    assert kwargs["run_id"] == source_id
+    assert kwargs["idempotency_key"] == "k-1"
+    page = json.loads(result.content[0].text)
+    assert json.loads(page["content"])["reused_step_orders"] == [1]
+    assert result.structuredContent == {
+        "flow_id": str(chat.flow_id),
+        "run_id": str(new_id),
+        "source_run_id": str(source_id),
+        "created": True,
+    }
+
+
+async def test_a_refused_retry_is_an_error_the_model_can_read(monkeypatch):
+    from eneo.flows.api import flow_run_retry_router
+
+    _runtime_chat(monkeypatch)
+    monkeypatch.setattr(
+        flow_run_retry_router,
+        "retry_flow_run_from_failed_step",
+        AsyncMock(
+            side_effect=ConflictException(
+                "The source run's flow version is no longer published."
+            )
+        ),
+    )
+
+    result = await flows.retry_run(MagicMock(), run_id=uuid4(), idempotency_key="k-2")
+
+    assert result.isError is True
+    assert "no longer published" in result.content[0].text
 
 
 def test_every_tool_that_needs_edit_mode_is_withheld_while_the_chat_asks():

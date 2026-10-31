@@ -235,7 +235,12 @@ make it only in edit mode once the person agrees. For content, ask whether to
 correct this run's result through its review or the instruction for future
 runs. To improve from a run, also read read_flow_suggestions with include_runs
 and present what was found, which steps, the evidence and the next action; call
-a token impact an estimate.
+a token impact an estimate. A retry (retry_run) runs the same version with the
+same inputs again from the failed step: offer it only for a transient error,
+ask with one question, and call it only after a yes. A refusal (the run did
+not fail, its version is no longer published, nothing completed before the
+failure) is explained, never worked around; after a change to the flow, the
+way is a new run once it is published, not a retry.
 """
 
 

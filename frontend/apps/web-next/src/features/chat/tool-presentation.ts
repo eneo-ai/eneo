@@ -120,6 +120,7 @@ const FLOW_TOOLS = new Set([
   "apply_flow_suggestions",
   "dismiss_flow_suggestion",
   "run_flow",
+  "retry_run",
   "read_run",
   "cancel_run",
   "read_review",

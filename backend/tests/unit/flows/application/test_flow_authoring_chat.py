@@ -103,6 +103,9 @@ def test_the_instructions_tell_a_runs_kinds_of_failure_apart() -> None:
     assert "A transient error never changes a prompt" in instructions
     assert "correct this run's result through its review" in instructions
     assert "call a token impact an estimate" in instructions
+    assert "offer it only for a transient error" in instructions
+    assert "call it only after a yes" in instructions
+    assert "the way is a new run once it is published, not a retry" in instructions
 
 
 def test_the_instructions_keep_every_secret_out_of_the_chat() -> None:

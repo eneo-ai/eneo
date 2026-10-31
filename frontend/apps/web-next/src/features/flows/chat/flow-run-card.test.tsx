@@ -90,6 +90,10 @@ afterEach(() => {
 });
 
 describe("startedRunId", () => {
+  it("names the run a retry_run call started too", () => {
+    expect(startedRunId(runFlowCall({ toolName: "retry_run" }))).toBe("run-1");
+  });
+
   it("names the run a run_flow call of the flow chat started, and nothing else", () => {
     expect(startedRunId(runFlowCall())).toBe("run-1");
     // Another tool of the flows server, a run_flow of an external server
@@ -201,12 +205,14 @@ describe("FlowRunCard", () => {
       />
     );
     const card = await screen.findByRole("region", { name: "Körning av Förslagstest A" });
-    fireEvent.click(await within(card).findByRole("button", { name: "Förklara felet" }));
+    fireEvent.click(await within(card).findByRole("button", { name: "Försök igen" }));
+    expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("Starta om den"));
+    fireEvent.click(within(card).getByRole("button", { name: "Förklara felet" }));
     expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("run-1"));
     expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("Förklara varför"));
     fireEvent.click(within(card).getByRole("button", { name: "Förbättra utifrån körningen" }));
     expect(onAskChat).toHaveBeenLastCalledWith(expect.stringContaining("Förbättra flödet"));
-    expect(onAskChat).toHaveBeenCalledTimes(2);
+    expect(onAskChat).toHaveBeenCalledTimes(3);
   });
 
   it("offers no explanation for a run that completed, and nothing without a chat to ask", async () => {
