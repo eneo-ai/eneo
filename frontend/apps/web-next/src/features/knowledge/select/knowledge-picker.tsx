@@ -1,8 +1,19 @@
 "use client";
 
-import { LoadingState } from "@/components/composites/loading-state";
-import { useQuery } from "@tanstack/react-query";
-import { ChevronDown, ChevronRight, Database, FileText, Globe, Plus, X } from "lucide-react";
+import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  ChevronDown,
+  ChevronRight,
+  Database,
+  FileText,
+  Folder,
+  Globe,
+  Plus,
+  X
+} from "lucide-react";
+import { Collapsible as AstryxCollapsible } from "@astryxdesign/core/Collapsible";
+import { IconButton } from "@astryxdesign/core/IconButton";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { BlobPreviewDialog } from "@/features/knowledge/blobs";
@@ -18,6 +29,7 @@ import {
 } from "@/components/ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { browserApi } from "@/lib/api/browser";
+import { flattenPages } from "@/lib/api/pagination";
 import { formatBytes } from "@/lib/format";
 import { spacesListQueryOptions } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
@@ -25,7 +37,7 @@ import { VendorIcon } from "../integrations/vendor";
 import {
   collectionBlobsQueryOptions,
   formatWebsiteName,
-  websiteBlobsQueryOptions,
+  websiteBlobPagesQueryOptions,
   type Collection,
   type InfoBlob,
   type IntegrationKnowledge,
@@ -55,6 +67,7 @@ function SelectedRow({
   name,
   modelEnabled,
   badges,
+  items,
   onRemove,
   disabled
 }: {
@@ -62,10 +75,69 @@ function SelectedRow({
   name: string;
   modelEnabled: boolean;
   badges?: React.ReactNode;
+  items?: IntegrationKnowledge[];
   onRemove: () => void;
   disabled?: boolean;
 }) {
   const t = useTranslations();
+  if (items) {
+    return (
+      <div className="flex min-w-0 items-start gap-2 rounded-xl border px-3">
+        <div className="min-w-0 flex-1">
+          <AstryxCollapsible
+            defaultIsOpen={false}
+            chevronPosition="start"
+            trigger={
+              <span className="flex min-w-0 flex-1 items-center gap-2">
+                {icon}
+                <span className="min-w-0 flex-1 truncate text-sm" title={name}>
+                  {name}
+                  {!modelEnabled && (
+                    <span className="text-destructive"> ({t("model_disabled")})</span>
+                  )}
+                </span>
+                {badges}
+              </span>
+            }
+          >
+            <ul className="flex flex-col gap-2 pb-3 text-sm">
+              {items.map((item) => (
+                <li key={item.id} className="flex min-w-0 items-center gap-2">
+                  {["folder", "site_root"].includes(
+                    (item.selected_item_type ?? "").toLowerCase()
+                  ) ? (
+                    <Folder className="size-4 shrink-0" aria-hidden="true" />
+                  ) : (
+                    <FileText className="size-4 shrink-0" aria-hidden="true" />
+                  )}
+                  <span className="min-w-0 flex-1 truncate" title={item.name}>
+                    {item.name}
+                  </span>
+                  {item.folder_path ? (
+                    <span
+                      className="text-ax-text-secondary max-w-1/2 truncate text-xs"
+                      title={item.folder_path}
+                    >
+                      {item.folder_path}
+                    </span>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </AstryxCollapsible>
+        </div>
+        <div className="py-2">
+          <IconButton
+            label={t("delete")}
+            icon={<X aria-hidden="true" />}
+            variant="ghost"
+            isDisabled={disabled}
+            onClick={onRemove}
+          />
+        </div>
+      </div>
+    );
+  }
   return (
     <div className="flex h-12 w-full items-center gap-2 rounded-xl border px-3">
       {icon}
@@ -132,29 +204,15 @@ function SelectedKnowledgeBlobRow({ blob }: { blob: InfoBlob }) {
 
 function SelectedKnowledgeBlobList({
   blobs,
-  loading,
-  error,
   emptyMessage
 }: {
-  blobs: InfoBlob[] | undefined;
-  loading: boolean;
-  error: boolean;
+  blobs: InfoBlob[];
   emptyMessage: string;
 }) {
   const t = useTranslations();
   const [page, setPage] = useState(0);
 
-  if (loading) {
-    return <LoadingState variant="text" rows={2} />;
-  }
-  if (error) {
-    return (
-      <div className="text-destructive px-3 py-3 text-sm">
-        {t("attachment_error_loading_content")}
-      </div>
-    );
-  }
-  if (!blobs || blobs.length === 0) {
+  if (blobs.length === 0) {
     return <div className="text-muted-foreground px-3 py-3 text-sm">{emptyMessage}</div>;
   }
 
@@ -198,6 +256,48 @@ function SelectedKnowledgeBlobList({
   );
 }
 
+function SelectedCollectionContent({ collectionId }: { collectionId: string }) {
+  const t = useTranslations();
+  const query = useQuery(collectionBlobsQueryOptions(browserApi, collectionId));
+  return (
+    <QueryStateBoundary
+      query={query}
+      variant="text"
+      rows={2}
+      errorTitle={t("attachment_error_loading_content")}
+    >
+      {(blobs) => (
+        <SelectedKnowledgeBlobList blobs={blobs} emptyMessage={t("knowledge_no_files_found")} />
+      )}
+    </QueryStateBoundary>
+  );
+}
+
+function SelectedWebsiteContent({ websiteId }: { websiteId: string }) {
+  const t = useTranslations();
+  const query = useInfiniteQuery(websiteBlobPagesQueryOptions(browserApi, websiteId));
+  const blobs = flattenPages(query.data?.pages);
+  const total = query.data?.pages.at(-1)?.total_count ?? 0;
+  return (
+    <QueryStateBoundary
+      query={query}
+      variant="text"
+      rows={2}
+      errorTitle={t("attachment_error_loading_content")}
+    >
+      {() => (
+        <>
+          <SelectedKnowledgeBlobList blobs={blobs} emptyMessage={t("noPagesFound")} />
+          <LoadMore
+            query={query}
+            label={t("website_indexed_content_load_more", { current: blobs.length, total })}
+          />
+        </>
+      )}
+    </QueryStateBoundary>
+  );
+}
+
 function SelectedKnowledgeRow({
   kind,
   item,
@@ -231,12 +331,6 @@ function SelectedKnowledgeRow({
   const expandable = isCollection
     ? collectionInfoBlobCount(item) > 0
     : websiteIndexedResultCount(item) > 0;
-  const blobsQuery = useQuery({
-    ...(isCollection
-      ? collectionBlobsQueryOptions(browserApi, item.id)
-      : websiteBlobsQueryOptions(browserApi, item.id)),
-    enabled: expanded && expandable
-  });
 
   return (
     <Collapsible open={expanded} onOpenChange={setExpanded} className="rounded-xl border">
@@ -303,12 +397,13 @@ function SelectedKnowledgeRow({
         </Button>
       </div>
       <CollapsibleContent>
-        <SelectedKnowledgeBlobList
-          blobs={blobsQuery.data}
-          loading={blobsQuery.isPending && expanded}
-          error={blobsQuery.isError}
-          emptyMessage={isCollection ? t("knowledge_no_files_found") : t("noPagesFound")}
-        />
+        {expanded && expandable ? (
+          isCollection ? (
+            <SelectedCollectionContent collectionId={item.id} />
+          ) : (
+            <SelectedWebsiteContent websiteId={item.id} />
+          )
+        ) : null}
       </CollapsibleContent>
     </Collapsible>
   );
@@ -479,6 +574,7 @@ export function KnowledgePicker({
                   : enabledModels.has(entry.knowledge.embedding_model.id)
               }
               badges={<IntegrationBadges entry={entry} />}
+              items={entry.type === "wrapper" ? entry.wrapper.items : undefined}
               disabled={disabled}
               onRemove={() => removeIntegration(entry)}
             />

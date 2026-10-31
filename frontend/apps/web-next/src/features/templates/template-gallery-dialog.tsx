@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/astryx/switch";
 import { FileKindIcon } from "@/features/chat/attachments";
 import { useFileDrop } from "@/features/files/use-file-drop";
 import { FileFormatDetails } from "@/features/files/file-format-details";
@@ -292,7 +293,11 @@ export function TemplateGalleryDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   pending: boolean;
-  onCreate: (fromTemplate: TemplateCreate, name: string) => Promise<void> | void;
+  onCreate: (
+    fromTemplate: TemplateCreate,
+    name: string,
+    openEditor?: boolean
+  ) => Promise<void> | void;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -300,6 +305,7 @@ export function TemplateGalleryDialog({
   const [selected, setSelected] = useState<TemplateOption | null>(null);
   const [name, setName] = useState("");
   const [submitted, setSubmitted] = useState(false);
+  const [openEditor, setOpenEditor] = useState(false);
   const templatesRef = useRef<HTMLDivElement>(null);
   const nameRef = useRef<HTMLInputElement>(null);
   const templateProblem = submitted && !selected ? t("select_a_template") : null;
@@ -330,6 +336,7 @@ export function TemplateGalleryDialog({
     setSelected(null);
     setName("");
     setSubmitted(false);
+    setOpenEditor(false);
     setStep("gallery");
     setKnowledgeSelections({ ...EMPTY_KNOWLEDGE_SELECTIONS });
   };
@@ -351,6 +358,7 @@ export function TemplateGalleryDialog({
 
   // What is missing (a template, its name) shows on submit, and focus moves there.
   async function submit() {
+    if (pending) return;
     if (!selected || !name.trim()) {
       revealProblems(
         () => setSubmitted(true),
@@ -385,7 +393,9 @@ export function TemplateGalleryDialog({
 
     const submittedFiles = uploads.detach();
     try {
-      await onCreate(buildTemplateCreate(selected.id, submission.additionalFields), name.trim());
+      const fromTemplate = buildTemplateCreate(selected.id, submission.additionalFields);
+      if (templateKind === "assistant") await onCreate(fromTemplate, name.trim(), openEditor);
+      else await onCreate(fromTemplate, name.trim());
       releasePreviews(submittedFiles);
       reset({ deleteUploaded: false });
     } catch {
@@ -472,6 +482,17 @@ export function TemplateGalleryDialog({
             uploading={uploading}
             onAddFiles={(files) => void addFiles(files)}
             onRemoveAttachment={uploads.remove}
+          />
+        ) : null}
+
+        {templateKind === "assistant" ? (
+          <Switch
+            label={t("open_assistant_editor_after_creation")}
+            value={openEditor}
+            onChange={(value) => {
+              if (!pending) setOpenEditor(value);
+            }}
+            aria-busy={pending || undefined}
           />
         ) : null}
 

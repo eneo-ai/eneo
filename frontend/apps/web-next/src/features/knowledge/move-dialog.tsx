@@ -60,7 +60,9 @@ export function MoveResourceDialog({
   const destinationProblem = submitted && !targetId ? t("select_a_space") : null;
 
   const { data: spaces } = useQuery({ ...spacesListQueryOptions(browserApi), enabled: open });
-  const targets = (spaces ?? []).filter((candidate) => candidate.id !== space.id);
+  const targets = (spaces ?? []).filter(
+    (candidate) => candidate.id !== space.id && !candidate.organization
+  );
 
   function move() {
     if (pending) return;
