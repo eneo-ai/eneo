@@ -2,11 +2,9 @@
 
 import { Brain, Eye, Wrench } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { useAppContext } from "@/components/providers/app-context";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
-import { useAutosave } from "@/components/composites/use-autosave";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -24,22 +22,22 @@ import { cn } from "@/lib/utils";
 import {
   BEHAVIOUR_LIST,
   behaviourFromKwargs,
-  filterSupportedKwargs,
   isSelectKwarg,
   kwargCapability,
   kwargsForBehaviour,
   modelSpecificKwargs,
   supportsBehaviorPresets,
   type ModelBehaviour,
-  type ModelKwargName,
-  type ModelKwargs
+  type ModelKwargName
 } from "./model-kwargs";
 import {
   effectiveAssistantModels,
   isModelsEnforced,
   lockedAssistantModel
 } from "./effective-config";
-import { useUpdateAssistant, type Assistant } from "./use-assistant";
+import type { Assistant } from "./use-assistant";
+import type { AssistantAiDraft } from "./use-assistant-ai-draft";
+import { Button as RetryButton } from "@astryxdesign/core/Button";
 
 type CompletionModel = Schema<"CompletionModelPublic">;
 
@@ -186,22 +184,11 @@ function ReasoningSegmentedControl({
   );
 }
 
-export function AiSection({ assistant }: { assistant: Assistant }) {
+export function AiSection({ assistant, draft }: { assistant: Assistant; draft: AssistantAiDraft }) {
   const t = useTranslations();
   const { space } = useSpace();
   const { tenant } = useAppContext();
-  const update = useUpdateAssistant(assistant.id);
-  const autosave = useAutosave("ai");
-
-  const savedModelId = assistant.completion_model?.id ?? "";
-  const savedKwargs = useMemo<ModelKwargs>(
-    () => assistant.completion_model_kwargs ?? {},
-    [assistant.completion_model_kwargs]
-  );
-  const [modelId, setModelId] = useState(savedModelId);
-  const [kwargs, setKwargs] = useState<ModelKwargs>(savedKwargs);
-
-  const model = space.completion_models.find((candidate) => candidate.id === modelId) ?? null;
+  const { modelId, kwargs, model, persist, changeModel, changeKwargs } = draft;
   const behaviour = behaviourFromKwargs(kwargs);
   const presetsSupported = model === null || supportsBehaviorPresets(model);
   const specificKwargs = modelSpecificKwargs(model);
@@ -214,46 +201,6 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
     lockedModel === null
       ? null
       : (space.completion_models.find((candidate) => candidate.id === lockedModel.id) ?? null);
-
-  // Adopt server changes (our own save landing, or an edit elsewhere) unless the
-  // user has diverged locally.
-  const savedKey = JSON.stringify([savedModelId, savedKwargs]);
-  const savedRef = useRef(savedKey);
-  useEffect(() => {
-    if (savedRef.current === savedKey) return;
-    const previous = savedRef.current;
-    savedRef.current = savedKey;
-    if (JSON.stringify([modelId, kwargs]) === previous) {
-      setModelId(savedModelId);
-      setKwargs(savedKwargs);
-    }
-  }, [savedKey, savedModelId, savedKwargs, modelId, kwargs]);
-
-  // Model + kwargs persist together. Selecting a model or a discrete option
-  // saves immediately; free-text numbers save on blur.
-  const persist = useCallback(
-    (nextModelId: string, nextKwargs: ModelKwargs) => {
-      const targetModel =
-        space.completion_models.find((candidate) => candidate.id === nextModelId) ?? null;
-      return autosave(() =>
-        update.mutateAsync({
-          completion_model: nextModelId ? { id: nextModelId } : null,
-          completion_model_kwargs: filterSupportedKwargs(nextKwargs, targetModel)
-        })
-      );
-    },
-    [autosave, space.completion_models, update]
-  );
-
-  function changeModel(nextModelId: string) {
-    setModelId(nextModelId);
-    void persist(nextModelId, kwargs);
-  }
-
-  function changeKwargs(next: ModelKwargs, save = true) {
-    setKwargs(next);
-    if (save) void persist(modelId, next);
-  }
 
   function selectBehaviour(next: ModelBehaviour) {
     const preset = kwargsForBehaviour(next);
@@ -288,6 +235,9 @@ export function AiSection({ assistant }: { assistant: Assistant }) {
               ? t("governance_assistant_locked_by_policy")
               : t("governance_assistant_models_filtered_hint")}
           </p>
+        )}
+        {draft.isError && (
+          <RetryButton label={t("retry")} onClick={() => void persist(modelId, kwargs)} />
         )}
         {(lockedSummaryModel ?? model) && (
           <ModelSummary

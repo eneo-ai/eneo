@@ -43,6 +43,7 @@ export function DashboardChat({
     description: assistant.description ?? null,
     iconId: assistant.icon_id ?? null,
     knowledge: partnerKnowledge(assistant),
+    knowledgeMode: assistant.knowledge_mode,
     mcpServers: assistant.mcp_servers ?? [],
     enabledCapabilities: assistant.enabled_capabilities,
     availableCapabilities: assistant.available_capabilities,

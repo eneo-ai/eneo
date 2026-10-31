@@ -25,6 +25,8 @@ import {
 } from "lucide-react";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
+import { Button as ModeButton } from "@astryxdesign/core/Button";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosave } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
@@ -44,6 +46,10 @@ import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 
 type Attachment = Schema<"FilePublic"> | Schema<"AssistantAttachmentPublic">;
+type AttachmentMode = {
+  fileReferencesEnabled: boolean;
+  selectedModel?: { id: string; supports_tool_calling?: boolean | null } | null;
+};
 
 // Assistants persist a read mode per attachment; Apps use the same editor
 // without that field. Preserve the server-owned mode when either is edited.
@@ -249,11 +255,13 @@ export function ResourceAttachmentsSection({
   attachments,
   allowedAttachments,
   description,
+  attachmentMode,
   onSave
 }: {
   attachments: Attachment[];
   allowedAttachments: Schema<"FileRestrictions">;
   description: string;
+  attachmentMode?: AttachmentMode;
   onSave: (attachments: Schema<"AssistantAttachmentInput">[]) => Promise<unknown>;
 }) {
   const t = useTranslations();
@@ -267,10 +275,23 @@ export function ResourceAttachmentsSection({
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState<Attachment | null>(null);
   const [query, setQuery] = useState("");
+  const [editingMode, setEditingMode] = useState<string | null>(null);
   const [sortAscending, setSortAscending] = useState(true);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const rules = fileRestrictionsRules(allowedAttachments);
   const atCapacity = Number.isFinite(rules.maxFiles) && files.length >= rules.maxFiles;
+
+  function lookupUnavailable(file: Attachment): string | null {
+    if (!attachmentMode) return null;
+    if (["image/", "audio/", "video/"].some((type) => file.mimetype.startsWith(type)))
+      return t("material_file_type_inline");
+    if (file.has_download_reference === false) return t("attachment_mode_lookup_unavailable");
+    if (!attachmentMode.fileReferencesEnabled) return t("material_file_references_unavailable");
+    if (!attachmentMode.selectedModel) return t("material_select_model");
+    if (attachmentMode.selectedModel.supports_tool_calling !== true)
+      return t("material_file_model_fallback");
+    return null;
+  }
 
   // Adopt server changes (our own save landing, or an edit elsewhere) unless the
   // user diverged locally. Attachments persist immediately on add/remove.
@@ -361,13 +382,15 @@ export function ResourceAttachmentsSection({
           })
         );
         added.push({
+          ...uploaded,
           id: uploaded.id,
           name: uploaded.name ?? file.name,
           mimetype: uploaded.mimetype ?? file.type,
           size: uploaded.size ?? file.size,
           created_at: uploaded.created_at ?? null,
           token_count: uploaded.token_count ?? null,
-          transcription: uploaded.transcription ?? null
+          transcription: uploaded.transcription ?? null,
+          ...(attachmentMode ? { inline_text: false } : {})
         });
       }
       if (added.length > 0) {
@@ -434,60 +457,118 @@ export function ResourceAttachmentsSection({
           <div className="-mx-4">
             {filteredFiles.length > 0 ? (
               <ul className="max-h-80 overflow-y-auto">
-                {filteredFiles.map((file) => (
-                  <li
-                    key={file.id}
-                    className="hover:bg-muted/40 flex items-center gap-3 border-t px-4 py-3"
-                  >
-                    <ResourceAttachmentIcon file={file} />
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-medium">{file.name}</p>
-                      <p className="text-muted-foreground truncate text-xs">{metaLine(file)}</p>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${t("preview")} ${file.name}`}
-                        onClick={() => setPreview(file)}
-                      >
-                        <Eye className="size-4" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${t("download")} ${file.name}`}
-                        disabled={downloadingId === file.id}
-                        onClick={() => void downloadFile(file)}
-                      >
-                        {downloadingId === file.id ? (
-                          <Spinner size="sm" shade="inherit" />
-                        ) : (
-                          <Download className="size-4" />
+                {filteredFiles.map((file) => {
+                  const unavailable = lookupUnavailable(file);
+                  const inline = attachmentReference(file).inline_text !== false;
+                  return (
+                    <li
+                      key={file.id}
+                      className="hover:bg-muted/40 flex flex-wrap items-center gap-3 border-t px-4 py-3"
+                    >
+                      <ResourceAttachmentIcon file={file} />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium">{file.name}</p>
+                        <p className="text-muted-foreground truncate text-xs">{metaLine(file)}</p>
+                        {attachmentMode && (
+                          <>
+                            <p className="text-ax-text-secondary text-sm">
+                              {t(
+                                inline || unavailable
+                                  ? "material_file_inline_status"
+                                  : "material_file_lookup_status"
+                              )}
+                            </p>
+                            {!inline && unavailable && (
+                              <p className="text-warning text-sm">{unavailable}</p>
+                            )}
+                          </>
                         )}
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        aria-label={`${t("remove")} ${file.name}`}
-                        onClick={() => {
-                          const previous = files;
-                          const next = files.filter((other) => other.id !== file.id);
-                          const wasSaved = saved.some((savedFile) => savedFile.id === file.id);
-                          setFiles(next);
-                          void persist(next, previous, {
-                            deleteOnSuccess: wasSaved ? [] : [file]
-                          });
-                        }}
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </div>
-                  </li>
-                ))}
+                      </div>
+                      <div className="flex items-center gap-1">
+                        {attachmentMode && (
+                          <ModeButton
+                            size="sm"
+                            label={t("material_change")}
+                            aria-label={t("material_change_file", { name: file.name })}
+                            aria-expanded={editingMode === file.id}
+                            aria-controls={`attachment-mode-${file.id}`}
+                            onClick={() => setEditingMode(editingMode === file.id ? null : file.id)}
+                          />
+                        )}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`${t("preview")} ${file.name}`}
+                          onClick={() => setPreview(file)}
+                        >
+                          <Eye className="size-4" />
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`${t("download")} ${file.name}`}
+                          disabled={downloadingId === file.id}
+                          onClick={() => void downloadFile(file)}
+                        >
+                          {downloadingId === file.id ? (
+                            <Spinner size="sm" shade="inherit" />
+                          ) : (
+                            <Download className="size-4" />
+                          )}
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          aria-label={`${t("remove")} ${file.name}`}
+                          onClick={() => {
+                            const previous = files;
+                            const next = files.filter((other) => other.id !== file.id);
+                            const wasSaved = saved.some((savedFile) => savedFile.id === file.id);
+                            setFiles(next);
+                            void persist(next, previous, {
+                              deleteOnSuccess: wasSaved ? [] : [file]
+                            });
+                          }}
+                        >
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
+                      {attachmentMode && editingMode === file.id && (
+                        <div id={`attachment-mode-${file.id}`} className="w-full">
+                          <RadioList
+                            label={t("material_change_file", { name: file.name })}
+                            description={t("attachment_mode_help")}
+                            value={inline ? "inline" : "lookup"}
+                            onChange={(value) => {
+                              const nextInline = value === "inline";
+                              if (nextInline === inline || (!nextInline && unavailable)) return;
+                              const previous = files;
+                              const next = files.map((other) =>
+                                other.id === file.id ? { ...other, inline_text: nextInline } : other
+                              );
+                              setFiles(next);
+                              void persist(next, previous);
+                            }}
+                          >
+                            <RadioListItem
+                              value="lookup"
+                              label={t("material_open_when_needed")}
+                              isDisabled={unavailable !== null && inline}
+                              description={unavailable ?? undefined}
+                            />
+                            <RadioListItem
+                              value="inline"
+                              label={t("material_file_always_option")}
+                            />
+                          </RadioList>
+                        </div>
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             ) : (
               <div className="text-muted-foreground flex min-h-24 items-center justify-center px-3 py-6 text-sm">

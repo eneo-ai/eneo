@@ -38,6 +38,7 @@ import { SkillBindingsSection } from "@/features/skills/skill-bindings-section";
 import { useCanAttachSkills } from "@/features/skills/use-can-attach-skills";
 import { chatPartnerHref } from "../assistants";
 import { AiSection } from "./ai-section";
+import { useAssistantAiDraft } from "./use-assistant-ai-draft";
 import { GeneralSection } from "./general-section";
 import { AttachmentsSection } from "./attachments-section";
 import { CapabilitiesSection, selectedCapabilities } from "./capabilities-section";
@@ -57,11 +58,20 @@ import { assistantQueryOptions, type Assistant, useUpdateAssistant } from "./use
  * "Skapa assistent", it focuses the (default) name and announces the creation.
  */
 export function AssistantEditor({ assistantId }: { assistantId: string }) {
+  return (
+    <SaveStatusProvider>
+      <AssistantEditorContent assistantId={assistantId} />
+    </SaveStatusProvider>
+  );
+}
+
+function AssistantEditorContent({ assistantId }: { assistantId: string }) {
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const canAttachSkills = useCanAttachSkills();
   const { data: assistant } = useSuspenseQuery(assistantQueryOptions(browserApi, assistantId));
   const update = useUpdateAssistant(assistantId);
+  const ai = useAssistantAiDraft(assistant);
   const created = useJustCreated("assistant", assistantId);
   useCreatedAnnouncement(created, t("assistant_created_announcement"));
 
@@ -91,7 +101,13 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
       icon: MessageSquare,
       group: content,
       summary: summary.instructions(assistant.prompt?.text),
-      node: <InstructionsSection assistant={assistant} />
+      node: (
+        <InstructionsSection
+          assistant={assistant}
+          contextModel={ai.effectiveModel}
+          modelConfirmed={ai.confirmed}
+        />
+      )
     },
     {
       id: "knowledge",
@@ -103,7 +119,12 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
           assistant.websites.length +
           assistant.integration_knowledge_list.length
       ),
-      node: <KnowledgeSection assistant={assistant} />
+      node: (
+        <KnowledgeSection
+          assistant={assistant}
+          modelSupportsTools={ai.toolModel?.supports_tool_calling === true}
+        />
+      )
     },
     ...(canAttachSkills && (!space.personal || space.default_assistant?.id !== assistant.id)
       ? [
@@ -141,7 +162,7 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
       icon: Sparkles,
       group: model,
       summary: summary.model(assistant.completion_model),
-      node: <AiSection assistant={assistant} />
+      node: <AiSection assistant={assistant} draft={ai} />
     },
     {
       id: "capabilities",
@@ -157,7 +178,7 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
       icon: Paperclip,
       group: model,
       summary: summary.files(assistant.attachments.length),
-      node: <AttachmentsSection assistant={assistant} />
+      node: <AttachmentsSection assistant={assistant} model={ai.toolModel} />
     },
     {
       id: "security",
@@ -217,14 +238,12 @@ export function AssistantEditor({ assistantId }: { assistantId: string }) {
   });
 
   return (
-    <SaveStatusProvider>
-      <SectionedSettings
-        navigationLabel={t("editor_sections_label")}
-        sections={sections}
-        phone={phone}
-        header={<EditorHeader section="assistants" name={assistant.name} actions={test} />}
-      />
-    </SaveStatusProvider>
+    <SectionedSettings
+      navigationLabel={t("editor_sections_label")}
+      sections={sections}
+      phone={phone}
+      header={<EditorHeader section="assistants" name={assistant.name} actions={test} />}
+    />
   );
 }
 

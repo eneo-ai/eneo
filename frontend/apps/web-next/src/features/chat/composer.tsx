@@ -30,7 +30,7 @@ import {
 } from "react";
 import { useFileDrop } from "@/features/files/use-file-drop";
 import { revealProblems } from "@/components/composites/field-problem";
-import type { KnowledgeOrigin } from "@/lib/chat/types";
+import type { ChatPartner, KnowledgeOrigin } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { ComposerAttachments } from "./attachments";
 import { tableQuoteSummary } from "./side-panel/question-quote";
@@ -126,11 +126,16 @@ function ComposerTextarea({
 
 /**
  * "Kunskap: <källa>" pill for partners with knowledge attached. Knowledge is
- * always searched (there is no per-message switch in the backend), so this is
- * not a toggle: it opens a list of the collections and websites the answer
- * draws on.
+ * read-only per conversation: the popover explains the configured search
+ * timing and lists the collections and websites the assistant can use.
  */
-function KnowledgePill({ knowledge }: { knowledge: KnowledgeOrigin[] }) {
+function KnowledgePill({
+  knowledge,
+  mode
+}: {
+  knowledge: KnowledgeOrigin[];
+  mode?: ChatPartner["knowledgeMode"];
+}) {
   const t = useTranslations();
   const [open, setOpen] = useState(false);
   const first = knowledge[0];
@@ -146,7 +151,15 @@ function KnowledgePill({ knowledge }: { knowledge: KnowledgeOrigin[] }) {
       width={288}
       content={
         <div className="flex flex-col gap-2 p-1">
-          <p className="text-ax-text-secondary text-xs">{t("chat_knowledge_popover_hint")}</p>
+          <p className="text-ax-text-secondary text-xs">
+            {t(
+              mode === "inject"
+                ? "knowledge_mode_inject_hint"
+                : mode === "tool"
+                  ? "knowledge_mode_tool_hint"
+                  : "chat_knowledge_popover_hint"
+            )}
+          </p>
           <ul className="flex flex-col gap-1">
             {knowledge.map((origin) => {
               const Icon = origin.kind === "website" ? Globe : Folder;
@@ -197,6 +210,7 @@ export type ComposerProps = {
   attachments: Attachments;
   onOpenFileDialog: () => void;
   knowledge?: KnowledgeOrigin[];
+  knowledgeMode?: ChatPartner["knowledgeMode"];
   /** Verktyg pill: the popover with a switch per capability and MCP server. */
   tools?: ReactNode;
   /** Personal chat: the Skills pill beside Verktyg. */
@@ -282,6 +296,7 @@ export function Composer({
   attachments,
   onOpenFileDialog,
   knowledge = [],
+  knowledgeMode,
   tools,
   skills,
   mention,
@@ -387,7 +402,7 @@ export function Composer({
                   <Plus aria-hidden="true" className="size-4" />
                 </button>
               )}
-              <KnowledgePill knowledge={knowledge} />
+              <KnowledgePill knowledge={knowledge} mode={knowledgeMode} />
               {tools}
               {skills}
               {mention}

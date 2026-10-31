@@ -7034,5 +7034,9 @@
   "api_keys_no_search_matches": "Inga matchande API-nycklar",
   "api_keys_notifications_reminder_days_label": "Påminnelsedagar",
   "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
-  "api_keys_notifications_add_day": "Lägg till {days} dagar"
+  "api_keys_notifications_add_day": "Lägg till {days} dagar",
+  "assistant_context_unavailable": "Kontexten kunde inte uppskattas. Du kan fortsätta redigera.",
+  "assistant_context_scope": "Uppskattning för instruktioner, aktiva skills och bilagor som läses in direkt. Chatthistorik och hämtat innehåll tillkommer.",
+  "assistant_context_reserve": "{tokens} tokens reserveras för frågan.",
+  "assistant_context_near": "Instruktionerna och bilagorna närmar sig gränsen för utrymmet som återstår efter reservationen för frågan."
 }

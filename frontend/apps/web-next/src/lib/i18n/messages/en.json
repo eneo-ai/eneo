@@ -7034,5 +7034,9 @@
   "api_keys_no_search_matches": "No matching API keys",
   "api_keys_notifications_reminder_days_label": "Reminder days",
   "api_keys_notifications_reminder_days_description": "Enter the number of days before expiry, separated by commas.",
-  "api_keys_notifications_add_day": "Add {days} days"
+  "api_keys_notifications_add_day": "Add {days} days",
+  "assistant_context_unavailable": "Context could not be estimated. You can keep editing.",
+  "assistant_context_scope": "Estimate for instructions, active skills and attachments read directly. Conversation history and retrieved content add to this.",
+  "assistant_context_reserve": "{tokens} tokens are reserved for the question.",
+  "assistant_context_near": "Instructions and attachments are approaching the space remaining after the reserve for the question."
 }

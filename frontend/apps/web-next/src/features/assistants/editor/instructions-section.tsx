@@ -4,7 +4,9 @@ import { useQuery } from "@tanstack/react-query";
 import { FileText, History, Maximize2, Sparkles } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
 import { useRef, useState } from "react";
-import { ContextBudget, type ContextSegment } from "@/components/composites/context-budget";
+import { AssistantContextMeter } from "./assistant-context-meter";
+import type { Schema } from "@/lib/api/models";
+import { assistantToolModel } from "./effective-config";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
@@ -29,8 +31,6 @@ import { useSpace } from "@/features/spaces/use-space";
 import { isPromptLocked } from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
-// Rough heuristic: ~4 characters per token. Good enough for a live editor hint.
-const CHARS_PER_TOKEN = 4;
 const PROMPT_AUTOSAVE_DEBOUNCE_MS = 1500;
 
 /** Right-aligned muted line: character count + a markdown hint. */
@@ -58,10 +58,14 @@ function PromptMeta({ text }: { text: string }) {
  */
 export function InstructionsSection({
   assistant,
-  promptGuide = true
+  promptGuide = true,
+  contextModel,
+  modelConfirmed = true
 }: {
   assistant: Assistant;
   promptGuide?: boolean;
+  contextModel?: Pick<Schema<"CompletionModelPublic">, "id" | "token_limit"> | null;
+  modelConfirmed?: boolean;
 }) {
   const t = useTranslations();
   const { space } = useSpace();
@@ -100,23 +104,11 @@ export function InstructionsSection({
     promptDescription.current = "";
   }
 
-  const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
-  const attachmentTokens = (assistant.attachments ?? []).reduce(
-    (sum, file) => sum + (file.token_count ?? 0),
-    0
-  );
+  const effectiveModelId = assistantToolModel(space.completion_models, assistant)?.id;
   const model =
-    space.completion_models.find((candidate) => candidate.id === assistant.completion_model?.id) ??
-    null;
-  const budgetSegments: ContextSegment[] = [
-    { key: "prompt", label: t("prompt"), tokens: promptTokens, className: "bg-chart-1" },
-    {
-      key: "attachments",
-      label: t("attachments"),
-      tokens: attachmentTokens,
-      className: "bg-chart-2"
-    }
-  ];
+    contextModel === undefined
+      ? (space.completion_models.find((candidate) => candidate.id === effectiveModelId) ?? null)
+      : contextModel;
 
   function promptGuideDisabledTooltip(
     reason: HelperAvailability["disabled_reason"] | null | undefined
@@ -207,7 +199,14 @@ export function InstructionsSection({
         />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <ContextBudget segments={budgetSegments} maxTokens={model?.token_limit ?? null} />
+          <AssistantContextMeter
+            assistantId={assistant.id}
+            prompt={prompt}
+            attachments={assistant.attachments ?? []}
+            model={model}
+            modelConfirmed={modelConfirmed}
+            revision={assistant.updated_at}
+          />
           <PromptMeta text={prompt} />
         </div>
       </div>

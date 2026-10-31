@@ -2,9 +2,12 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
+import { expectNoAxeViolations } from "@/test/axe";
 import { ResourceAttachmentsSection } from "./resource-attachments-section";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+const api = vi.hoisted(() => ({ POST: vi.fn(), DELETE: vi.fn() }));
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 afterEach(cleanup);
 
@@ -23,6 +26,80 @@ const second = {
   inline_text: true
 };
 const restrictions = { accepted_file_types: [], limit: { max_files: 10, max_size: 1000 } };
+const attachmentMode = {
+  fileReferencesEnabled: true,
+  selectedModel: { id: "model", supports_tool_calling: true }
+};
+
+it("changes an attachment reading mode through the existing save and rolls back a failed save for retry", async () => {
+  const save = vi.fn().mockRejectedValueOnce(new Error("save failed")).mockResolvedValue({});
+  renderInApp(
+    <ResourceAttachmentsSection
+      attachments={[first]}
+      allowedAttachments={restrictions}
+      description="Files"
+      attachmentMode={attachmentMode}
+      onSave={save}
+    />
+  );
+  expect(screen.getByText("Öppnas vid behov")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Ändra hur First.txt används" }));
+  const inline = screen.getByRole("radio", { name: "Läs in inför varje svar" });
+  fireEvent.click(inline);
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("radio", { name: "Öppna vid behov" }) as HTMLInputElement).checked
+    ).toBe(true)
+  );
+  fireEvent.click(inline);
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save).toHaveBeenLastCalledWith([{ id: "first", inline_text: true }]);
+  expect(screen.getByText("Läses in inför varje svar")).toBeTruthy();
+});
+
+it.each([true, false])(
+  "new uploads use the owning resource's reading default (assistant=%s)",
+  async (assistant) => {
+    const save = vi.fn().mockResolvedValue({});
+    api.POST.mockResolvedValue({
+      data: {
+        id: "uploaded",
+        name: "new.txt",
+        mimetype: "text/plain",
+        size: 4,
+        has_download_reference: true
+      },
+      response: new Response("{}")
+    });
+    const { container } = renderInApp(
+      <ResourceAttachmentsSection
+        attachments={[]}
+        allowedAttachments={{
+          accepted_file_types: [{ mimetype: "text/plain", size_limit: 1000, extensions: [".txt"] }],
+          limit: restrictions.limit
+        }}
+        description="Files"
+        attachmentMode={
+          assistant
+            ? {
+                fileReferencesEnabled: true,
+                selectedModel: { id: "model", supports_tool_calling: true }
+              }
+            : undefined
+        }
+        onSave={save}
+      />
+    );
+    fireEvent.change(container.querySelector('input[type="file"]')!, {
+      target: { files: [new File(["test"], "new.txt", { type: "text/plain" })] }
+    });
+    await waitFor(() =>
+      expect(save).toHaveBeenCalledWith([
+        assistant ? { id: "uploaded", inline_text: false } : { id: "uploaded" }
+      ])
+    );
+  }
+);
 
 it("formats compact token counts in the UI language", () => {
   renderInApp(
@@ -63,3 +140,51 @@ it("adopts a read mode changed in the other frontend before the next save", asyn
   fireEvent.click(screen.getByRole("button", { name: "Ta bort Second.txt" }));
   await waitFor(() => expect(save).toHaveBeenCalledWith([{ id: "first", inline_text: false }]));
 });
+
+it.each([
+  [
+    "image",
+    { ...first, mimetype: "image/png" },
+    attachmentMode,
+    /Den här filtypen läses in direkt/
+  ],
+  [
+    "original",
+    { ...first, has_download_reference: false },
+    attachmentMode,
+    /saknar ett lagrat original/
+  ],
+  [
+    "deployment",
+    first,
+    { ...attachmentMode, fileReferencesEnabled: false },
+    /Filåtkomst vid behov är inte tillgänglig/
+  ],
+  ["model", first, { ...attachmentMode, selectedModel: null }, /Välj en modell med verktygsstöd/],
+  [
+    "tools",
+    first,
+    { ...attachmentMode, selectedModel: { id: "model", supports_tool_calling: false } },
+    /Den valda modellen saknar verktygsstöd/
+  ]
+] as const)(
+  "explains the effective inline fallback and unavailable on-demand mode: %s",
+  async (_name, file, mode, reason) => {
+    const { container } = renderInApp(
+      <ResourceAttachmentsSection
+        attachments={[{ ...file, inline_text: true }]}
+        allowedAttachments={restrictions}
+        description="Files"
+        attachmentMode={mode}
+        onSave={vi.fn()}
+      />
+    );
+    expect(screen.getByText("Läses in inför varje svar")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Ändra hur First.txt används" }));
+    expect(screen.getByText(reason)).toBeTruthy();
+    expect(
+      (screen.getByRole("radio", { name: "Öppna vid behov" }) as HTMLInputElement).disabled
+    ).toBe(true);
+    if (_name === "tools") await expectNoAxeViolations(container);
+  }
+);
