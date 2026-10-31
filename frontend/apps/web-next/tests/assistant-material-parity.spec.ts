@@ -153,7 +153,11 @@ for (const colorScheme of ["light", "dark"] as const) {
       );
       phase = "over";
       await page.locator("#assistant-prompt").fill("Native meter over");
-      await expect(page.getByText(/annars går assistenten inte att spara/)).toBeVisible();
+      await expect(
+        page
+          .locator('[data-editor-section="instructions"]')
+          .getByText(/annars går assistenten inte att spara/)
+      ).toBeVisible();
       await expect(page.getByRole("button", { name: /Kontextbudget:/ })).toHaveClass(
         /text-destructive/
       );
