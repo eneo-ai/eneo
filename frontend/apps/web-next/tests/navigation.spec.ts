@@ -1,12 +1,309 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
 import {
   askChatQuestion,
+  chatComposer,
+  apiPost,
+  conversationLog,
+  createSpace,
   fetchChatStream,
   isChatStream,
   MOCK_REPLY,
+  productionAsset,
   sessionResponseHeaders,
   uniqueName
 } from "./helpers";
+
+type StreamWindow = Window & {
+  navigationStream: { ready: boolean; releaseSession(): void; releaseAnswer(): void };
+};
+
+async function gateChatStream(page: Page) {
+  // Playwright route.fulfill buffers a whole response. Gate consumption of the
+  // real backend's bytes instead, on either side of its data-session event.
+  await page.addInitScript(() => {
+    const controlled = window as unknown as StreamWindow;
+    let releaseSession!: () => void;
+    let releaseAnswer!: () => void;
+    const session = new Promise<void>((resolve) => (releaseSession = resolve));
+    const answer = new Promise<void>((resolve) => (releaseAnswer = resolve));
+    controlled.navigationStream = { ready: false, releaseSession, releaseAnswer };
+    const fetch = window.fetch.bind(window);
+    window.fetch = async (input, init) => {
+      const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+      if (url.pathname !== "/api/v1/conversations/" || url.searchParams.get("version") !== "3")
+        return fetch(input, init);
+      window.fetch = fetch;
+      const response = await fetch(input, init);
+      const body = await response.text();
+      const metadata = /data: [^\n]*"type"\s*:\s*"data-session"[^\n]*\r?\n\r?\n/.exec(body);
+      if (!response.ok || !metadata) throw new Error("Expected a real conversation session stream");
+      const boundary = metadata.index + metadata[0].length;
+      const encoder = new TextEncoder();
+      controlled.navigationStream.ready = true;
+      return new Response(
+        new ReadableStream({
+          async start(controller) {
+            await session;
+            controller.enqueue(encoder.encode(body.slice(0, boundary)));
+            await answer;
+            controller.enqueue(encoder.encode(body.slice(boundary)));
+            controller.close();
+          }
+        }),
+        response
+      );
+    };
+  });
+}
+
+test("one page link stays current across a saved chat and administration", async ({ page }) => {
+  await page.goto("/spaces/personal/chat");
+  await askChatQuestion(page, uniqueName("Current conversation"));
+  await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+  await expect(page).toHaveURL(/\/spaces\/personal\/chat\?session_id=/);
+  const savedChat = new URL(page.url()).pathname + new URL(page.url()).search;
+  const current = page.locator('a[aria-current="page"]');
+  await page.reload();
+  await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveAttribute("href", savedChat);
+
+  await page.getByRole("link", { name: "Administration", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Administration", exact: true })
+    .getByRole("link", { name: "Användare", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/admin\/users$/);
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveAttribute("href", "/admin/users");
+
+  await page.getByRole("link", { name: "Tillbaka till Eneo", exact: true }).click();
+  await page.locator(`nav a[href="${savedChat}"]`).click();
+  await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveAttribute("href", savedChat);
+});
+
+test("the session URL arrives during streaming without remounting or scrolling the conversation", async ({
+  page
+}) => {
+  await gateChatStream(page);
+  await page.goto("/spaces/personal/chat");
+  const question = uniqueName("Stream continuity") + "\n" + "A line to keep in view.\n".repeat(60);
+  await askChatQuestion(page, question);
+  await expect
+    .poll(() => page.evaluate(() => (window as unknown as StreamWindow).navigationStream.ready))
+    .toBe(true);
+  await chatComposer(page).fill("En följdfråga medan svaret förbereds");
+  const log = conversationLog(page);
+  await expect(log).toBeVisible();
+  await log.evaluate((element) => {
+    element.setAttribute("data-navigation-conversation", "original");
+    // Chat owns a scroll container inside main; main itself does not scroll.
+    let scroller = element.parentElement;
+    while (scroller && getComputedStyle(scroller).overflowY !== "auto")
+      scroller = scroller.parentElement;
+    if (!scroller) throw new Error("Expected the conversation scroll container");
+    scroller.setAttribute("data-navigation-scroll", "original");
+    scroller.scrollTop = 120;
+  });
+  const scroller = page.locator('[data-navigation-scroll="original"]');
+  await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(120);
+  await expect(page).not.toHaveURL(/session_id=/);
+  try {
+    await page.evaluate(() =>
+      (window as unknown as StreamWindow).navigationStream.releaseSession()
+    );
+    await expect(page).toHaveURL(/session_id=/);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
+    await expect(chatComposer(page)).toHaveValue("En följdfråga medan svaret förbereds");
+    await expect(
+      page.getByRole("button", { name: "Stoppa generering", exact: true })
+    ).toBeVisible();
+    await expect(log).toHaveAttribute("data-navigation-conversation", "original");
+    await expect(log.getByText(MOCK_REPLY)).toHaveCount(0);
+    await expect.poll(() => scroller.evaluate((element) => element.scrollTop)).toBe(120);
+
+    await page.evaluate(() => (window as unknown as StreamWindow).navigationStream.releaseAnswer());
+    await expect(log.getByText(MOCK_REPLY)).toBeVisible();
+    await expect(log).toHaveAttribute("data-navigation-conversation", "original");
+    await expect(page.getByRole("button", { name: "Stoppa generering", exact: true })).toHaveCount(
+      0
+    );
+  } finally {
+    await page.evaluate(() => {
+      const stream = (window as unknown as StreamWindow).navigationStream;
+      stream.releaseSession();
+      stream.releaseAnswer();
+    });
+  }
+});
+
+for (const control of ["new", "history", "same-URL new"] as const) {
+  test(`conversation controls keep unsent work until consent: ${control}`, async ({ page }) => {
+    let destinationId: string | null = null;
+    if (control === "same-URL new") await gateChatStream(page);
+    await page.goto("/spaces/personal/chat");
+    if (control !== "same-URL new") {
+      await askChatQuestion(page, uniqueName("History destination"));
+      await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+      destinationId = new URL(page.url()).searchParams.get("session_id");
+      expect(destinationId).toBeTruthy();
+      await page.getByRole("button", { name: "Ny konversation", exact: true }).click();
+    }
+    await askChatQuestion(page, uniqueName("Current conversation"));
+    if (control === "same-URL new") {
+      await expect
+        .poll(() => page.evaluate(() => (window as unknown as StreamWindow).navigationStream.ready))
+        .toBe(true);
+    } else {
+      await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+    }
+    const originalUrl = page.url();
+    const draft = "En oskickad fråga som ska vara kvar";
+    await chatComposer(page).fill(draft);
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "draft.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Unsent attachment")
+    });
+    const attachment = page.getByRole("button", { name: "Ta bort draft.txt", exact: true });
+    await expect(attachment).toBeVisible();
+    if (control === "history") {
+      await page.getByRole("button", { name: /^Konversationer med / }).click();
+    }
+    const switchConversation = () =>
+      control === "history"
+        ? page.locator(`button[data-session-row="${destinationId}"]`).click()
+        : page.getByRole("button", { name: "Ny konversation", exact: true }).click();
+    const confirmation = page.getByRole("alertdialog", { name: "Lämna sidan?", exact: true });
+    try {
+      await switchConversation();
+      await expect(confirmation).toBeVisible();
+      await expect(page).toHaveURL(originalUrl);
+      await expect(chatComposer(page)).toHaveValue(draft);
+      await expect(attachment).toBeVisible();
+      await confirmation.getByRole("button", { name: "Avbryt", exact: true }).click();
+      await expect(chatComposer(page)).toBeEditable();
+      await expect(chatComposer(page)).toHaveValue(draft);
+      await expect(page).toHaveURL(originalUrl);
+      await expect(attachment).toBeVisible();
+      await switchConversation();
+      await confirmation.getByRole("button", { name: "Lämna utan att spara", exact: true }).click();
+      await expect(attachment).toHaveCount(0);
+      if (control === "history") {
+        await expect
+          .poll(() => new URL(page.url()).searchParams.get("session_id"))
+          .toBe(destinationId);
+        await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+      } else {
+        await expect(page).not.toHaveURL(/session_id=/);
+        await expect(conversationLog(page)).toHaveCount(0);
+      }
+    } finally {
+      if (control === "same-URL new")
+        await page.evaluate(() => {
+          const stream = (window as unknown as StreamWindow).navigationStream;
+          stream.releaseSession();
+          stream.releaseAnswer();
+        });
+    }
+  });
+}
+
+for (const cached of [false, true]) {
+  test(`a pending ${cached ? "cached" : "new"} space keeps the current frame until its data arrives`, async ({
+    page
+  }) => {
+    // The sidebar only lists eight spaces; full-suite data can exceed that.
+    await page.goto("/spaces/personal/chat");
+    for (let index = 0; index < 8; index++)
+      await apiPost(page, "/spaces/", { name: uniqueName("Older space") });
+    const secondName = uniqueName("Next space");
+    const second = await createSpace(page, secondName);
+    const firstName = uniqueName("Current space");
+    const first = await createSpace(page, firstName);
+    // Prime the destination only for the cached-return case.
+    await page.goto(`${cached ? second : first}/overview`);
+    const nav = page.getByRole("navigation", { name: "Huvudmeny", exact: true });
+    const firstLink = nav.getByRole("link", { name: firstName, exact: true });
+    const secondLink = nav.getByRole("link", { name: secondName, exact: true });
+    const main = page.getByRole("main");
+    async function openSpace(name: string) {
+      await page.keyboard.press("ControlOrMeta+k");
+      const palette = page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ });
+      await palette.getByRole("combobox").fill(name);
+      await palette.getByRole("option", { name: new RegExp(name) }).click();
+    }
+    if (cached) await openSpace(firstName);
+    await expect(firstLink).toHaveAttribute("aria-current", "page");
+    await expect(main.getByRole("heading", { name: firstName, exact: true })).toBeVisible();
+    // Expire Query's 30 s freshness window without delaying the suite or its timers.
+    if (cached) await page.clock.setFixedTime(Date.now() + 31_000);
+
+    let held = 0;
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    await page.route(
+      (url) => url.pathname === `/api/v1${second}/`,
+      async (route) => {
+        held++;
+        await released;
+        await route.continue();
+      }
+    );
+    try {
+      await openSpace(secondName);
+      await expect.poll(() => held).toBeGreaterThan(0);
+      // Exercise the slow path past the router's 200 ms pending threshold and
+      // 400 ms minimum display time, not just the first frame after a click.
+      await page.waitForTimeout(1_000);
+      await expect(firstLink).toHaveAttribute("aria-current", "page");
+      await expect(nav.locator(`a[href="${second}/overview"][aria-current="page"]`)).toHaveCount(0);
+      await expect(main.getByRole("heading", { name: firstName, exact: true })).toBeVisible();
+      await expect(main.locator(`a[href="${first}/members"]`)).toBeVisible();
+      await expect(main.getByRole("heading", { name: secondName, exact: true })).toHaveCount(0);
+
+      release();
+      await expect(page).toHaveURL(new RegExp(`${second}/overview$`));
+      await expect(main.getByRole("heading", { name: secondName, exact: true })).toBeVisible();
+      await expect(secondLink).toHaveAttribute("aria-current", "page");
+      await expect(main.locator(`a[href="${second}/members"]`)).toBeVisible();
+    } finally {
+      release();
+      await page.unrouteAll({ behavior: "ignoreErrors" });
+    }
+  });
+}
+
+test("a direct space load shows progress while waiting for its data", async ({ page }) => {
+  const name = uniqueName("Direct space");
+  const space = await createSpace(page, name);
+  let held = 0;
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  await page.route(
+    (url) => url.pathname === `/api/v1${space}/`,
+    async (route) => {
+      held++;
+      await released;
+      await route.continue();
+    }
+  );
+  const loading = page.goto(`${space}/overview`);
+  try {
+    await expect.poll(() => held).toBeGreaterThan(0);
+    await expect(page.getByRole("status").filter({ hasText: "Laddar..." })).toBeVisible();
+    release();
+    await loading;
+    await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
+  } finally {
+    release();
+    await loading;
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+  }
+});
 
 test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
   test("Skills keep edits on cancelled Back and link navigation, then leave on confirmation", async ({
@@ -51,9 +348,11 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
     await expect(dialog).not.toBeVisible();
   });
 
-  test("chat document edits survive save failure and cancelled navigation, then save and leave", async ({
-    page
+  test("chat document edits survive chunk and save failures and cancelled navigation, then save and leave", async ({
+    page,
+    context
   }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const file = {
       id: "11111111-1111-4111-8111-111111111111",
       name: "Navigation.md",
@@ -121,6 +420,31 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
     const editor = page.locator('.tiptap[contenteditable="true"]');
     await expect(editor).toBeVisible();
     await editor.fill("Changed document.");
+    const clipboardAsset = productionAsset("src/components/ai-elements/answer-clipboard.ts");
+    await page.route(
+      (url) => url.pathname === clipboardAsset,
+      (route) =>
+        route.fulfill({ status: 404, contentType: "text/plain", body: "Removed deployment asset" })
+    );
+    await page
+      .getByRole("log")
+      .getByRole("button", { name: /fler åtgärder|more actions/i })
+      .click();
+    const unloading = page.waitForEvent("dialog");
+    const copy = page
+      .getByRole("menuitem", { name: /kopiera som rich text|copy as rich text/i })
+      .click();
+    const warning = await unloading;
+    expect(warning.type()).toBe("beforeunload");
+    await warning.dismiss();
+    await copy;
+    await expect(
+      page.getByText(
+        "Det gick inte att kopiera. Försök igen eller markera texten och kopiera den.",
+        { exact: true }
+      )
+    ).toBeVisible();
+    await expect(editor).toHaveText("Changed document.");
     await page.getByRole("button", { name: "Spara", exact: true }).click();
     await expect(
       page.getByText("Ändringarna kunde inte sparas. Försök igen.", { exact: true })

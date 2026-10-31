@@ -2,10 +2,11 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
-import { replaceUrl, useRouter, useSearchParams } from "@/lib/navigation";
+import { replaceUrl, useRouter, useSearchParams, type UrlOptions } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
+import type { LeaveConfirmationHandle } from "@/components/composites/leave-confirmation";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -118,6 +119,7 @@ export function ChatPage({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  const leaveConfirmation = useRef<LeaveConfirmationHandle>(null);
   const [active, setActive] = useState<ActiveConversation | null>(() =>
     urlSessionId ? null : { key: "new", sessionId: null, messages: [], title: null, started: false }
   );
@@ -184,14 +186,14 @@ export function ChatPage({
     setActive(savedConversationState(detail.data));
   }
 
-  function updateUrl(sessionId: string | null) {
+  function updateUrl(sessionId: string | null, options?: UrlOptions) {
     // The navigation seam commits same-route updates without waiting for
     // background session refreshes, so streaming stays responsive.
     if (buildSessionUrl) {
       const url = new URL(buildSessionUrl(sessionId), window.location.href);
       if (tab === "insights") url.searchParams.set("tab", "insights");
       else url.searchParams.delete("tab");
-      replaceUrl(url);
+      replaceUrl(url, options);
     }
   }
 
@@ -224,8 +226,12 @@ export function ChatPage({
   function selectSession(sessionId: string) {
     const showing = pendingSessionId ?? active?.sessionId ?? null;
     if (sessionId !== showing) {
-      openSession(sessionId);
-      updateUrl(sessionId);
+      confirmConversationChange(() => {
+        openSession(sessionId);
+        updateUrl(sessionId, { ignoreBlocker: true });
+        if (!historyInline) closeHistory();
+      });
+      return;
     }
     // On phones the panel is an overlay over the chat; close it so the picked
     // conversation is visible. On wider screens it sits inline, so keep it open.
@@ -236,9 +242,15 @@ export function ChatPage({
   function startConversation(focusComposer: boolean) {
     setActive(newConversationState({ focusComposer }));
     setActivity(null);
-    updateUrl(null);
+    updateUrl(null, { ignoreBlocker: true });
   }
-  const newConversation = () => startConversation(false);
+  function confirmConversationChange(action: () => void) {
+    // The current view owns both document edits and unsent attachments. Keep
+    // it mounted until it accepts a reset, including resets at the same URL.
+    if (leaveConfirmation.current) leaveConfirmation.current.confirm(action);
+    else action();
+  }
+  const newConversation = () => confirmConversationChange(() => startConversation(false));
 
   const onActivityChange = useCallback((next: ActivityState | null) => {
     if (next) setHistoryOpen(false);
@@ -366,6 +378,7 @@ export function ChatPage({
             {active ? (
               <ChatView
                 key={active.key}
+                leaveConfirmationRef={leaveConfirmation}
                 partner={partner}
                 initialSessionId={active.sessionId}
                 initialMessages={active.messages}
@@ -384,7 +397,7 @@ export function ChatPage({
                 }
                 onSessionCreated={(id) => {
                   setActive((current) => (current ? { ...current, sessionId: id } : current));
-                  updateUrl(id);
+                  updateUrl(id, { ignoreBlocker: true });
                 }}
                 activity={activity}
                 onActivityChange={onActivityChange}
@@ -420,7 +433,7 @@ export function ChatPage({
             activeSessionId={sessionId ?? pendingSessionId}
             onSelect={selectSession}
             onDeleted={(id) => {
-              if (active?.sessionId === id) newConversation();
+              if (active?.sessionId === id) startConversation(false);
             }}
             onRenamed={(id, name) =>
               setActive((current) =>

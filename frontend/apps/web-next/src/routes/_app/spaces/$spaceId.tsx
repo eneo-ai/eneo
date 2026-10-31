@@ -9,6 +9,8 @@ import { spaceTitle } from "@/lib/route-head";
 import { notFoundOn404, requirePermission } from "@/lib/route-helpers";
 
 export const Route = createFileRoute("/_app/spaces/$spaceId")({
+  // Keep the displayed space until the destination's existence check finishes.
+  pendingMs: Infinity,
   beforeLoad: async ({ context, params }) => {
     if (params.spaceId === "organization")
       await requirePermission(context, "admin", DEFAULT_LANDING);

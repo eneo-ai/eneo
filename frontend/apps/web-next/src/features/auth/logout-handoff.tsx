@@ -2,6 +2,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { LoadingState } from "@/components/composites/loading-state";
+import { clearChatDrafts } from "@/features/chat/use-chat-draft";
 import { getSessionSnapshot, handleRefusal, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
 import { safeNextPath } from "@/lib/auth/safe-next";
 import { navigateTo } from "@/lib/navigate-to";
@@ -53,8 +54,11 @@ export function LogoutHandoff({
     started.current = true;
     void signOut()
       .then((ok) => {
-        if (ok) navigateTo(target, { replace: true });
-        else setFailed(true);
+        if (ok) {
+          // What was typed in a chat stays with the account that typed it, not with the tab.
+          clearChatDrafts();
+          navigateTo(target, { replace: true });
+        } else setFailed(true);
       })
       .catch(() => setFailed(true));
   }, [target]);

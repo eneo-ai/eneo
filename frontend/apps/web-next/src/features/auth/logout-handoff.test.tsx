@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { StrictMode } from "react";
-import { screen, waitFor } from "@testing-library/react";
+import { cleanup, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { navigateTo } from "@/lib/navigate-to";
@@ -68,4 +68,23 @@ it("never clears a newer cookie from a stale bound document", async () => {
   expect(await screen.findByText("Utloggningen misslyckades. Försök igen.")).toBeTruthy();
   expect(fetchMock).not.toHaveBeenCalled();
   expect(navigateTo).not.toHaveBeenCalled();
+});
+
+it("clears what was typed in a chat once the session is over, and keeps it if signing out failed", async () => {
+  sessionStorage.setItem(
+    "eneo:chat-draft:tenant-1.user-1|assistant:a1:new",
+    "en halvskriven fråga"
+  );
+  fetchMock.mockResolvedValue(new Response(null, { status: 503 }));
+  renderInApp(<LogoutHandoff target="/login" />);
+  expect(await screen.findByText("Utloggningen misslyckades. Försök igen.")).toBeTruthy();
+  expect(sessionStorage.getItem("eneo:chat-draft:tenant-1.user-1|assistant:a1:new")).toBe(
+    "en halvskriven fråga"
+  );
+
+  cleanup();
+  fetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+  renderInApp(<LogoutHandoff target="/login" />);
+  await waitFor(() => expect(navigateTo).toHaveBeenCalledWith("/login", { replace: true }));
+  expect(sessionStorage.getItem("eneo:chat-draft:tenant-1.user-1|assistant:a1:new")).toBeNull();
 });

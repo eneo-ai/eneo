@@ -9570,5 +9570,8 @@
   "api_keys_no_search_matches": "No matching API keys",
   "api_keys_notifications_reminder_days_label": "Reminder days",
   "api_keys_notifications_reminder_days_description": "Enter the number of days before expiry, separated by commas.",
-  "api_keys_notifications_add_day": "Add {days} days"
+  "api_keys_notifications_add_day": "Add {days} days",
+  "chat_unsent_navigation_title": "Leave this chat?",
+  "chat_unsent_navigation_description": "You have a question that has not been sent. Do you want to leave this chat?",
+  "chat_unsent_navigation_leave": "Leave chat"
 }

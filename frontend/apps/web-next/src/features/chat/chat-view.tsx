@@ -20,6 +20,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentProps,
+  type Ref,
   type ReactNode
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
@@ -33,7 +34,10 @@ import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport"
 import type { AnswerRating, ChatPartner, EneoDataParts, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
+import {
+  LeaveConfirmation,
+  type LeaveConfirmationHandle
+} from "@/components/composites/leave-confirmation";
 import { conversationFiles, deriveActivity } from "./activity";
 import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
@@ -82,6 +86,7 @@ import { historyQueryKey } from "./session-actions";
 import { StartState, type StartHeadingLevel } from "./start-state";
 import { releasePreviews, useAttachments, type Attachment } from "./use-attachments";
 import { useToolChoices } from "./use-tool-choices";
+import { chatDraftOwner, useChatDraft } from "./use-chat-draft";
 
 const NO_MENTION = "__none__";
 /** The current time as ISO 8601 (the timestamp of a question sent now). */
@@ -182,6 +187,7 @@ function previewFilesKey(files: readonly PreviewFile[]): string {
 }
 
 type ChatViewProps = {
+  leaveConfirmationRef?: Ref<LeaveConfirmationHandle>;
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
@@ -251,6 +257,7 @@ export function ChatView(props: ChatViewProps) {
 }
 
 function ConversationView({
+  leaveConfirmationRef,
   partner,
   initialSessionId = null,
   initialMessages = [],
@@ -275,7 +282,7 @@ function ConversationView({
   placeholder
 }: ChatViewProps) {
   const t = useTranslations();
-  const { can } = useAppContext();
+  const { can, user, tenant } = useAppContext();
   const queryClient = useQueryClient();
   // A file sent earlier in this conversation is attached again as it is,
   // without another upload. The uploads come from the messages, set up below.
@@ -295,7 +302,10 @@ function ConversationView({
   useSyncExternalStore(timings.subscribe, timings.getVersion);
   const toolChoices = useToolChoices(partner);
 
-  const [input, setInput] = useState("");
+  const [input, setInput] = useChatDraft(
+    chatDraftOwner(tenant.id, user.id),
+    `${partner.type}:${partner.id}:${initialSessionId ?? "new"}`
+  );
   const [mentionId, setMentionId] = useState<string>(NO_MENTION);
   const fileInput = useRef<HTMLInputElement>(null);
   // Ref for event-time reads (send body, onFinish); state for render-time
@@ -633,7 +643,7 @@ function ConversationView({
         setInput((current) => (current.trim() ? `${current}\n${text}` : text));
         dockInputRef.current?.focus();
       }),
-    [panel]
+    [panel, setInput]
   );
 
   const preflight = usePreflight({
@@ -1069,15 +1079,29 @@ function ConversationView({
     </ChatSystemMessage>
   ) : null;
 
+  // A closed tab loses the draft; a reload also loses unsent attachments.
+  const unsentQuestionOnly = !panel.dirty && attachments.attachments.length === 0;
+  const leaveConfirmation = (
+    <LeaveConfirmation
+      ref={leaveConfirmationRef}
+      active={panel.dirty || input.trim() !== "" || attachments.attachments.length > 0}
+      title={unsentQuestionOnly ? t("chat_unsent_navigation_title") : undefined}
+      description={unsentQuestionOnly ? t("chat_unsent_navigation_description") : undefined}
+      confirmLabel={unsentQuestionOnly ? t("chat_unsent_navigation_leave") : undefined}
+    />
+  );
+
   if (!started) {
     return (
       <>
+        {leaveConfirmation}
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
           <StartState
             partner={partner}
             headingLevel={startHeadingLevel}
             onPickStarter={(prompt) => {
-              setInput(prompt);
+              // A starter never replaces what was already typed.
+              setInput((current) => (current.trim() ? current : prompt));
               startInput()?.focus();
             }}
             composer={
@@ -1145,7 +1169,7 @@ function ConversationView({
 
   return (
     <ToolApprovalsContext value={approvalsHere}>
-      <LeaveConfirmation active={panel.dirty} />
+      {leaveConfirmation}
       <SidePanel
         panel={panel}
         messages={messages}

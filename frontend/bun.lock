@@ -307,6 +307,7 @@
     "sonner@2.0.8": "patches/sonner@2.0.8.patch",
     "nextra-theme-docs@4.6.1": "patches/nextra-theme-docs@4.6.1.patch",
     "braces@3.0.3": "patches/braces@3.0.3.patch",
+    "@tanstack/react-router@1.170.45": "patches/@tanstack%2Freact-router@1.170.45.patch",
     "mermaid@11.16.1": "patches/mermaid@11.16.1.patch",
     "@astryxdesign/core@0.7.3": "patches/@astryxdesign%2Fcore@0.7.3.patch",
   },

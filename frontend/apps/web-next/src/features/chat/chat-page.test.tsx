@@ -359,6 +359,38 @@ describe("ChatPage history (decision 14: the conversation keeps 480 px)", () => 
       await screen.findByRole("button", { name: "Visa sidopanelen med filer och vyer" })
     );
 
+  it.each([false, true])(
+    "resets only after a confirmed history deletion succeeds (failure: %s)",
+    async (fails) => {
+      window.history.replaceState(null, "", "/chat?session_id=s-1");
+      setRoute("/chat?session_id=s-1");
+      if (fails) api.DELETE.mockRejectedValueOnce(new Error("Unavailable"));
+      renderPage("s-1");
+      await screen.findByRole("log", { name: "Konversation" });
+      layOut(1200);
+      const input = composer();
+      fireEvent.change(input, { target: { value: "Unsent follow-up" } });
+      openHistory();
+      fireEvent.click(await screen.findByRole("button", { name: "Åtgärder för Samtal s-1" }));
+      fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+      const confirmation = await screen.findByRole("alertdialog", {
+        name: "Ta bort konversationen"
+      });
+      fireEvent.click(within(confirmation).getByRole("button", { name: "Bekräfta borttagning" }));
+      if (fails) {
+        await waitFor(() => expect(spies.toastError).toHaveBeenCalled());
+        fireEvent.click(within(confirmation).getByRole("button", { name: "Avbryt" }));
+        expect(input.value).toBe("Unsent follow-up");
+        expect(window.location.search).toBe("?session_id=s-1");
+        expect(screen.getByRole("log")).toBeTruthy();
+      } else {
+        await waitFor(() => expect(screen.queryByRole("log")).toBeNull());
+        expect(screen.queryByRole("alertdialog")).toBeNull();
+        expect(window.location.pathname + window.location.search).toBe("/chat");
+      }
+    }
+  );
+
   it("sits beside the conversation when that keeps 480 px, an iPad held upright included", async () => {
     setViewport("tablet-portrait");
     renderPage(null);

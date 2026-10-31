@@ -174,6 +174,42 @@ Results go to `test-results-fastapi/`, with the CI HTML report in
 Playwright starts no server. Use `bun run dev` for interactive development, not
 this suite: the development server has neither production CSP nor hashed chunks.
 
+#### An open tab across a deployment
+
+`tests/two-release.spec.ts` exercises actual replacement builds. It is skipped
+unless `TWO_RELEASE_SWAP_CMD` names a local executable. The executable receives
+one argument, `A` or `B`, and must replace the server on the same origin, wait
+until it is ready, and exit nonzero on failure. Keep the database, signing keys
+and seeded credentials unchanged between releases. Run this against an isolated
+test stack.
+
+Prepare both builds before starting the test:
+
+- Build A from the candidate source; serve it with backend `APP_REVISION=release-A`.
+- For B, change `AdminUsersPage`'s `PageHeader` title in
+  `src/features/admin/users/users-page.tsx` to `Users release B`, and append
+  ` release B` to the clipboard renderer's `plainText` in
+  `src/components/ai-elements/answer-clipboard.ts`. Build it separately and use
+  backend `APP_REVISION=release-B`. Restore the original source after both builds.
+- Swap the complete served build and restart FastAPI; replacing files under a
+  running process does not replace its cached HTML. Do not retain A's assets in B:
+  this test must encounter real missing chunks.
+
+From `frontend/apps/web-next`, with the seeded credentials already exported:
+
+```bash
+E2E_BASE_URL=http://localhost:8124 TWO_RELEASE_SWAP_CMD=/absolute/path/to/swap-release \
+  bun run test:e2e tests/two-release.spec.ts --project=smoke --no-deps
+```
+
+The spec signs in for each case. It checks an unvisited route, cancellation and
+confirmation with an unsent question in new and saved conversations, and a lazy
+clipboard feature. Staying must retain the visible, editable composer and URL;
+leaving must reach usable B with one reload and no second confirmation. Native
+reload cancellation and dirty document edits are also covered by
+`chat-draft.spec.ts` and `navigation.spec.ts`. The deployment observations are
+attached to the Playwright report.
+
 ## Writing tests
 
 ### Unit test (`*.test.ts`)
