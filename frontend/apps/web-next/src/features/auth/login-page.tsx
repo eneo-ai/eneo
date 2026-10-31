@@ -158,7 +158,7 @@ export function LoginFailedPage({ search, accessibilityStatementUrl }: Props) {
       ) : (
         <p className="text-ax-text-secondary text-sm">{t("failed_to_login")}</p>
       )}
-      <Button label={t("try_logging_in_again")} href={retry} as={DocumentLink} />
+      <Button label={t("try_logging_in_again")} href={retry} as={DocumentLink} variant="primary" />
     </PublicPage>
   );
 }

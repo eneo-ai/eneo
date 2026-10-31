@@ -43,7 +43,9 @@ export function PublicPage({
           {description ? <p className="text-ax-text-secondary text-sm">{description}</p> : null}
         </header>
         <div className="flex flex-col gap-4">{children}</div>
-        {footer ? <footer className="flex justify-end gap-2">{footer}</footer> : null}
+        {footer ? (
+          <footer className="flex flex-col gap-2 sm:flex-row sm:justify-end">{footer}</footer>
+        ) : null}
       </Card>
       {accessibilityStatementUrl ? (
         <a
