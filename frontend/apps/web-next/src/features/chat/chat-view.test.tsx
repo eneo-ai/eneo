@@ -146,6 +146,17 @@ describe("ChatView start state", () => {
     expect(screen.queryByRole("region", { name: "Dina assistenter" })).toBeNull();
   });
 
+  it("keeps the assistants of other spaces out of a space's own assistant", async () => {
+    api.GET.mockClear();
+    renderInApp(<Harness partner={{ ...personal, id: "space-default", personalSpace: false }} />);
+    expect(screen.getByRole("heading", { level: 2, name: "Prova att fråga" })).toBeTruthy();
+    // The shortcut would list assistants of every shared space; none is asked for.
+    await waitFor(() =>
+      expect(screen.queryByRole("region", { name: "Dina assistenter" })).toBeNull()
+    );
+    expect(api.GET).not.toHaveBeenCalledWith("/api/v1/dashboard/");
+  });
+
   it("has no axe violations", async () => {
     const { container } = renderInApp(<Harness partner={personal} />);
     await screen.findByRole("region", { name: "Dina assistenter" });

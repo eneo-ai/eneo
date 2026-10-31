@@ -188,11 +188,14 @@ function QuickAssistants() {
 }
 
 /**
- * The empty conversation: a greeting (personal assistant) or the partner's
- * name and description; the composer, centred under it from 640px (on phones
- * the view docks it at the bottom, where it stays: decision 5); and for the
- * personal assistant "Prova att fråga" and "Dina assistenter" (decision 8),
- * side by side where the column is wide enough.
+ * The empty conversation: a greeting (a space's own assistant, or the personal
+ * chat) or the partner's name and description; the composer, centred under it
+ * from 640px (on phones the view docks it at the bottom, where it stays:
+ * decision 5); and for the default assistant "Prova att fråga" (decision 8),
+ * plus "Dina assistenter" in the personal chat only, side by side where the
+ * column is wide enough. A space's own assistant leaves the other assistants
+ * to its header's switcher, which lists the space's own: a shortcut to
+ * assistants of other spaces does not belong inside one.
  */
 export function StartState({
   partner,
@@ -267,7 +270,7 @@ export function StartState({
           // side panel narrows it); a lone section (no assistants yet) takes the width.
           <div className="grid w-full grid-cols-1 gap-x-6 gap-y-6 @2xl:grid-cols-2 @2xl:[&>:only-child]:col-span-2">
             <Starters onPick={onPickStarter} />
-            <QuickAssistants />
+            {partner.personalSpace && <QuickAssistants />}
           </div>
         )}
       </div>
