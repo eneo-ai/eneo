@@ -230,15 +230,19 @@ test(
     await expect(page.getByText("Policy.pdf", { exact: true })).toBeVisible();
     expect(cursors).toEqual([]);
     await page.getByRole("button", { name: "Handbok", exact: true }).click();
-    await expect(page.getByRole("button", { name: "Första sidan", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Första sidan 12 B", exact: true })
+    ).toBeVisible();
     expect(cursors).toEqual([null]);
     await page.getByRole("button", { name: /Läs in fler|Visa fler|Ladda fler/ }).click();
     const retry = page.getByRole("button", { name: /Försök igen/ });
     await expect(retry).toBeVisible();
-    await expect(page.getByRole("button", { name: "Första sidan", exact: true })).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Första sidan 12 B", exact: true })
+    ).toBeVisible();
     failMore = false;
     await retry.click();
-    await expect(page.getByRole("button", { name: "Andra sidan", exact: true })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Andra sidan 12 B", exact: true })).toBeVisible();
     expect(cursors).toEqual([null, "next", "next"]);
     await page.screenshot({
       path: testInfo.outputPath("selected-knowledge-pages.png"),
