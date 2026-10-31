@@ -7053,5 +7053,10 @@
   "insights_first_activity_in_period": "Första registrerade aktivitet i vald period: {date}.",
   "insights_token_usage_link": "Visa tokenanvändning",
   "insights_question_details": "Frågedetaljer",
-  "insights_logged_json": "Loggad information som JSON"
+  "insights_logged_json": "Loggad information som JSON",
+  "sharepoint_subscription_time_remaining": "{time} kvar",
+  "sharepoint_app_load_failed": "Kunde inte läsa SharePoint-konfigurationen",
+  "sharepoint_callback_state_invalid": "Inloggningen kunde inte kopplas till den här webbläsaren. Gå tillbaka och starta Microsoft-inloggningen igen.",
+  "sharepoint_callback_code_missing": "Microsoft skickade ingen inloggningskod. Gå tillbaka och starta inloggningen igen.",
+  "sharepoint_callback_storage_unavailable": "Webbläsaren kunde inte läsa inloggningens sparade uppgifter. Tillåt webbplatsdata och starta inloggningen igen."
 }
