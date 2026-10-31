@@ -83,7 +83,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
               const available = allMcpServers.find((server) => server.id === id)?.is_available;
               return (
                 <div key={id} className={selected ? "bg-muted/40" : ""}>
-                  <div className="flex items-center gap-3 py-2.5 pr-4 pl-1">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 pr-4 pl-1">
                     <span
                       className="flex size-8 shrink-0 items-center justify-center"
                       aria-hidden="true"
@@ -96,7 +96,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                       onCheckedChange={(on) => toggleCapability(capability.purpose, on)}
                       aria-label={t("governance_mcp_allow_aria", { name: t(capability.purpose) })}
                     />
-                    <div className="min-w-0 flex-1">
+                    <div className="min-w-0 flex-1 basis-40">
                       <span
                         className={
                           selected
@@ -145,10 +145,10 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                 ).length;
                 return (
                   <div key={server.id} className={isSelected ? "bg-muted/40" : ""}>
-                    <div className="flex items-center gap-3 py-2.5 pr-4 pl-1">
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2.5 pr-4 pl-1">
                       <button
                         type="button"
-                        className="text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md disabled:opacity-20"
+                        className="text-muted-foreground hover:text-foreground disabled:hover:text-muted-foreground flex size-8 shrink-0 items-center justify-center rounded-md disabled:opacity-20 pointer-coarse:size-11"
                         disabled={!isSelected || !hasTools}
                         onClick={() => toggleExpanded(server.id)}
                         aria-label={
@@ -167,7 +167,7 @@ export function McpRestrictionSection({ draft }: { draft: PolicyDraft }) {
                         onCheckedChange={(value) => toggleMcp(server.id, value)}
                         aria-label={t("governance_mcp_allow_aria", { name: server.name })}
                       />
-                      <div className="min-w-0 flex-1">
+                      <div className="min-w-0 flex-1 basis-40">
                         <div className="flex items-center gap-2">
                           <span
                             className={`text-sm font-medium ${isSelected ? "" : "text-muted-foreground"}`}
