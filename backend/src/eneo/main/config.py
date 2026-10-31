@@ -560,7 +560,7 @@ class Settings(BaseSettings):
     )
     # Runtime links and switches, under the env names web-next reads today.
     show_help_center: bool = False
-    help_center_url: Optional[str] = None
+    help_center_url: Optional[str] = "https://www.eneo.ai/en/external-support-assistant"
     legacy_app_url: Optional[str] = None
     accessibility_statement_url: Optional[str] = None
     request_integration_form_url: Optional[str] = None
