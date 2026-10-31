@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { replaceInstructionText } from "@/test/skill-instructions";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { EneoApiError } from "@/lib/api/errors";
+import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
@@ -75,6 +76,7 @@ afterEach(() => {
 function show(node: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(<QueryClientProvider client={client}>{node}</QueryClientProvider>);
+  return client;
 }
 
 describe("organisation skill detail", () => {
@@ -123,7 +125,16 @@ describe("organisation skill detail", () => {
     get.mockImplementation((path: string) =>
       path === "/api/v1/skills/organization/{skill_id}/" ? ok(latest) : originalGet(path)
     );
-    post.mockImplementation(() => {
+    post.mockRejectedValue(new EneoApiError("Changed meanwhile", { status: 409 }));
+    const client = show(<OrganizationSkillDetailPage skillId="skill-1" />);
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "skills_library_view_revision_aria" }))[1]!
+    );
+    await screen.findByText("Search fast");
+    fireEvent.click(
+      screen.getByRole("button", { name: "skills_library_restore_revision_from_preview" })
+    );
+    act(() => {
       latest = {
         ...skill,
         current_revision_id: "rev-3",
@@ -135,15 +146,12 @@ describe("organisation skill detail", () => {
           instructions: "Concurrent revision"
         }
       };
-      return Promise.reject(new EneoApiError("Changed meanwhile", { status: 409 }));
+      client.setQueryData([...ORGANIZATION_SKILLS_KEY, skill.id], latest);
     });
-    show(<OrganizationSkillDetailPage skillId="skill-1" />);
-    fireEvent.click(
-      (await screen.findAllByRole("button", { name: "skills_library_view_revision_aria" }))[1]!
-    );
-    await screen.findByText("Search fast");
-    fireEvent.click(
-      screen.getByRole("button", { name: "skills_library_restore_revision_from_preview" })
+    await waitFor(() =>
+      expect(screen.getByLabelText("skills_instructions_label").textContent).toBe(
+        "Concurrent revision"
+      )
     );
     fireEvent.click(
       within(screen.getByRole("alertdialog")).getByRole("button", {
@@ -155,6 +163,13 @@ describe("organisation skill detail", () => {
     expect(within(preview).getByText("Search fast")).toBeTruthy();
     expect(within(preview).getByText("Concurrent revision")).toBeTruthy();
     expect(post).toHaveBeenCalledTimes(1);
+    expect(post).toHaveBeenCalledWith(
+      "/api/v1/skills/organization/{skill_id}/revisions/{source_revision_id}/restore/",
+      {
+        params: { path: { skill_id: "skill-1", source_revision_id: "rev-1" } },
+        body: { reviewed_current_revision_id: "rev-2" }
+      }
+    );
   });
 
   it("allows an explicit restore with a visible warning about unsaved edits", async () => {

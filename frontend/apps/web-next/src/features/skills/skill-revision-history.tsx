@@ -86,7 +86,11 @@ export function SkillRevisionHistory({
   const locale = useLocale();
   const queryClient = useQueryClient();
   const [viewId, setViewId] = useState<string | null>(null);
-  const [restoreId, setRestoreId] = useState<string | null>(null);
+  const [restoreAction, setRestoreAction] = useState<{
+    sourceRevisionId: string;
+    sourceRevisionNumber: number;
+    reviewedCurrentRevisionId: string;
+  } | null>(null);
   const [restoring, setRestoring] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [announcement, setAnnouncement] = useState("");
@@ -108,17 +112,17 @@ export function SkillRevisionHistory({
   const items = flattenPages(revisions.data?.pages);
 
   async function restore() {
-    if (!restoreId || restoring || !canRestore) return;
+    if (!restoreAction || restoring || !canRestore) return;
     setRestoring(true);
     setError(null);
     try {
       const outcome = await restoreSkillRevision(
         scope,
         skill.id,
-        restoreId,
-        skill.current_revision_id
+        restoreAction.sourceRevisionId,
+        restoreAction.reviewedCurrentRevisionId
       );
-      setRestoreId(null);
+      setRestoreAction(null);
       setViewId(null);
       setAnnouncement(
         outcome.created
@@ -132,13 +136,13 @@ export function SkillRevisionHistory({
     } catch (cause) {
       setError(cause);
       if (cause instanceof EneoApiError && cause.status === 409) {
-        const sourceId = restoreId;
+        const sourceId = restoreAction.sourceRevisionId;
         try {
           await queryClient.invalidateQueries(
             { queryKey: [...key, skill.id] },
             { throwOnError: true }
           );
-          setRestoreId(null);
+          setRestoreAction(null);
           setViewId(sourceId);
         } catch (refreshError) {
           setError(refreshError);
@@ -205,7 +209,7 @@ export function SkillRevisionHistory({
       <Dialog
         open={viewId !== null}
         onOpenChange={(open) => {
-          if (!open && !restoreId) setViewId(null);
+          if (!open && !restoreAction) setViewId(null);
         }}
       >
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-5xl">
@@ -281,7 +285,11 @@ export function SkillRevisionHistory({
                 <Button
                   className="w-fit"
                   onClick={() => {
-                    setRestoreId(revision.id);
+                    setRestoreAction({
+                      sourceRevisionId: revision.id,
+                      sourceRevisionNumber: revision.revision_number,
+                      reviewedCurrentRevisionId: skill.current_revision_id
+                    });
                     setViewId(null);
                   }}
                 >
@@ -294,21 +302,21 @@ export function SkillRevisionHistory({
         </DialogContent>
       </Dialog>
       <AlertDialog
-        open={restoreId !== null}
+        open={restoreAction !== null}
         onOpenChange={(open) => {
-          if (!open && !restoring) setRestoreId(null);
+          if (!open && !restoring) setRestoreAction(null);
         }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
               {t("skills_library_restore_title", {
-                revision: String(items.find((item) => item.id === restoreId)?.revision_number ?? "")
+                revision: String(restoreAction?.sourceRevisionNumber ?? "")
               })}
             </AlertDialogTitle>
             <AlertDialogDescription>
               {t("skills_library_restore_description", {
-                revision: String(items.find((item) => item.id === restoreId)?.revision_number ?? "")
+                revision: String(restoreAction?.sourceRevisionNumber ?? "")
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>
