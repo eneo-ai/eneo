@@ -1,6 +1,7 @@
 import { expect, test } from "./csp";
 import {
   askChatQuestion,
+  apiPost,
   conversationLog,
   createSpace,
   fetchChatStream,
@@ -133,6 +134,10 @@ for (const cached of [false, true]) {
   test(`a pending ${cached ? "cached" : "new"} space keeps the current frame until its data arrives`, async ({
     page
   }) => {
+    // The sidebar only lists eight spaces; full-suite data can exceed that.
+    await page.goto("/spaces/personal/chat");
+    for (let index = 0; index < 8; index++)
+      await apiPost(page, "/spaces/", { name: uniqueName("Older space") });
     const secondName = uniqueName("Next space");
     const second = await createSpace(page, secondName);
     const firstName = uniqueName("Current space");
@@ -143,7 +148,13 @@ for (const cached of [false, true]) {
     const firstLink = nav.getByRole("link", { name: firstName, exact: true });
     const secondLink = nav.getByRole("link", { name: secondName, exact: true });
     const main = page.getByRole("main");
-    if (cached) await firstLink.click();
+    async function openSpace(name: string) {
+      await page.keyboard.press("ControlOrMeta+k");
+      const palette = page.getByRole("dialog", { name: /^(Sök i Eneo|Search Eneo)$/ });
+      await palette.getByRole("combobox").fill(name);
+      await palette.getByRole("option", { name: new RegExp(name) }).click();
+    }
+    if (cached) await openSpace(firstName);
     await expect(firstLink).toHaveAttribute("aria-current", "page");
     await expect(main.getByRole("heading", { name: firstName, exact: true })).toBeVisible();
     // Expire Query's 30 s freshness window without delaying the suite or its timers.
@@ -161,13 +172,13 @@ for (const cached of [false, true]) {
       }
     );
     try {
-      await secondLink.click();
+      await openSpace(secondName);
       await expect.poll(() => held).toBeGreaterThan(0);
       // Exercise the slow path past the router's 200 ms pending threshold and
       // 400 ms minimum display time, not just the first frame after a click.
       await page.waitForTimeout(1_000);
       await expect(firstLink).toHaveAttribute("aria-current", "page");
-      await expect(secondLink).not.toHaveAttribute("aria-current", "page");
+      await expect(nav.locator(`a[href="${second}/overview"][aria-current="page"]`)).toHaveCount(0);
       await expect(main.getByRole("heading", { name: firstName, exact: true })).toBeVisible();
       await expect(main.locator(`a[href="${first}/members"]`)).toBeVisible();
       await expect(main.getByRole("heading", { name: secondName, exact: true })).toHaveCount(0);
