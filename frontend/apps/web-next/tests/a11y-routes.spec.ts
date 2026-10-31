@@ -19,7 +19,8 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * tests/a11y.spec.ts scans the same pages with a menu, dialog or panel open;
  * this spec is about breadth. A rule that cannot hold on one screen goes in
  * EXCEPTIONS with the reason; nothing is excluded globally.
- * A11Y_ROUTES narrows a run to routes matching a regular expression and
+ * A11Y_ROUTES narrows a run to routes matching a regular expression,
+ * A11Y_VARIANTS=phone-light,ipad-light to those variants, and
  * A11Y_SHOTS=<dir> saves a screenshot of every screen it opens.
  */
 
@@ -64,6 +65,8 @@ async function contextFor(
 }
 
 for (const variant of VARIANTS) {
+  const only = process.env.A11Y_VARIANTS?.split(",");
+  if (only && !only.includes(`${variant.name}-${variant.scheme}`)) continue;
   test(
     `every screen passes axe on a ${variant.name}, ${variant.scheme} mode`,
     { tag: ["@vite", "@a11y-routes"] },

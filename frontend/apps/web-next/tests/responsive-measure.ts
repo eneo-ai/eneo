@@ -115,6 +115,9 @@ export function measure(page: Page): Promise<PageMeasure> {
       const style = getComputedStyle(element);
       const text = (element.textContent ?? "").trim();
       if (!text || !shown(element)) continue;
+      // Screen-reader text is clipped to a pixel on purpose.
+      const box = element.getBoundingClientRect();
+      if (box.width <= 1 && box.height <= 1) continue;
       const sideways =
         (style.overflowX === "hidden" || style.overflowX === "clip") &&
         style.textOverflow !== "ellipsis" &&
