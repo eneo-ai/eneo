@@ -80,6 +80,28 @@ describe("Composer", () => {
     expect(descriptionOf(textarea)).toBe("Retur ger en ny rad. Skicka med Skicka-knappen.");
   });
 
+  it("leaves the assistant switcher pill out below 768 px, where the header has it", () => {
+    renderInApp(
+      <Composer
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        sendBlocked={null}
+        busy={false}
+        onStop={vi.fn()}
+        label="Fråga"
+        placeholder="Fråga"
+        attachments={{ attachments: [] } as unknown as ReturnType<typeof useAttachments>}
+        onOpenFileDialog={vi.fn()}
+        knowledge={[]}
+        partnerToken={<button type="button">Byt assistent</button>}
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: "Byt assistent" }).parentElement?.className
+    ).toContain("max-md:hidden");
+  });
+
   it("adds a line on Return and sends on ⌘ or Ctrl+Return and with Send (decision 3)", () => {
     const onSubmit = vi.fn();
     renderComposer({ onSubmit, initial: "Hej" });

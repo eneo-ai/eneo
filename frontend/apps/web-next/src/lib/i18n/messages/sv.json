@@ -7047,5 +7047,6 @@
   "chat_composer_hint_touch": "Retur ger en ny rad. Skicka med Skicka-knappen.",
   "mcp_tags_placeholder_touch": "Lägg till en tagg",
   "skills_reference_placeholder_touch": "Beskriv hur Skillen ska hjälpa till.",
-  "skills_reference_hint_touch": "Tryck på Infoga referens för att lägga till en Skill, funktion eller MCP."
+  "skills_reference_hint_touch": "Tryck på Infoga referens för att lägga till en Skill, funktion eller MCP.",
+  "roles_view_users_short": "Användare"
 }

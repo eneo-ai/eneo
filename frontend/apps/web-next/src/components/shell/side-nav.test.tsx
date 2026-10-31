@@ -7,6 +7,7 @@ import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { setRoute } from "@/test/navigation";
 import { noopShell, renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import type { NavVariant } from "./routes";
 import { DesktopSideNav } from "./side-nav";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
@@ -174,6 +175,20 @@ describe("DesktopSideNav (main)", () => {
       expect(document.activeElement).toBe(link);
     }
     await expectNoAxeViolations(container);
+  });
+
+  it("puts who a recent conversation is with into its label on a touch screen, which has no tooltip", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderNav();
+    const recent = screen.getByRole("group", { name: "Senaste" });
+
+    expect(
+      within(recent).getByRole("link", {
+        name: "Sammanfatta KS-protokoll · Avtalsgranskaren i Upphandling"
+      })
+    ).toBeTruthy();
+    // The personal chat has no context to add.
+    expect(within(recent).getByRole("link", { name: "Upphandlingsanalys mot LOU" })).toBeTruthy();
   });
 
   it("shows Organisation and Administration to admins only", () => {

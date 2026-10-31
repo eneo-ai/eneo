@@ -355,7 +355,8 @@ export function UserApiKeyList({
                     <Table aria-label={t("api_keys")} className="min-w-[44rem]">
                       <TableHeader>
                         <TableRow>
-                          <TableHead>{t("name")}</TableHead>
+                          {/* A phone scrolls this table sideways: the name must not be crushed to a few letters. */}
+                          <TableHead className="min-w-40 md:min-w-0">{t("name")}</TableHead>
                           <TableHead>{t("status")}</TableHead>
                           <TableHead>{t("api_keys_scope")}</TableHead>
                           <TableHead>{t("api_keys_permission_level")}</TableHead>

@@ -350,6 +350,10 @@ export function ToolsTab({ serverId }: { serverId: string }) {
         <EmptyState title={t("no_tools_found")} description={t("click_sync_to_discover_tools")} />
       ) : (
         <>
+          {/* The chips' caution is a hover tooltip, which a touch screen never shows. */}
+          <p className="text-ax-text-secondary text-xs pointer-fine:hidden">
+            {t("mcp_risk_heuristic_hint")}
+          </p>
           {pending.length > 0 && (
             <Card className="border-warning/30 gap-3 p-4">
               <div className="flex items-center justify-between gap-2">

@@ -285,13 +285,15 @@ function AttachmentChip({
   const body = (
     <>
       <FileTypeTile mimetype={item.mimetype} size="sm" uploading={item.uploading} />
-      <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold">{item.name}</span>
+      <span className="min-w-0 flex-1 truncate text-[12.5px] font-semibold pointer-coarse:break-words pointer-coarse:whitespace-normal">
+        {item.name}
+      </span>
       <span className="text-ax-text-secondary shrink-0 text-[11.5px] tabular-nums">{detail}</span>
     </>
   );
   return (
     <div
-      className="border-ax-border bg-ax-surface rounded-ax-element flex h-8 max-w-full min-w-0 items-center gap-1 border ps-1 pe-0.5 pointer-coarse:h-11"
+      className="border-ax-border bg-ax-surface rounded-ax-element flex h-8 max-w-full min-w-0 items-center gap-1 border ps-1 pe-0.5 pointer-coarse:h-auto pointer-coarse:min-h-11"
       title={item.name}
     >
       {item.previewUrl ? (

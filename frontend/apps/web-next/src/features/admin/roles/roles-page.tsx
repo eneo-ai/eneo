@@ -557,6 +557,9 @@ function RoleRow({
               title={t("roles_view_users")}
             >
               <Users className="size-4" />
+              {/* A phone has no tooltip for the icon: a short word beside it (the full text
+                  stays the name, which contains it). */}
+              <span className="md:hidden">{t("roles_view_users_short")}</span>
               <span className="hidden md:inline">{t("roles_view_users")}</span>
             </Link>
           </Button>

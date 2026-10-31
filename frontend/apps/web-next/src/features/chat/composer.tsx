@@ -154,7 +154,9 @@ function KnowledgePill({ knowledge }: { knowledge: KnowledgeOrigin[] }) {
               return (
                 <li key={origin.id} className="flex min-w-0 items-center gap-2 text-[13px]">
                   <Icon aria-hidden="true" className="text-ax-text-secondary size-3.5 shrink-0" />
-                  <span className="truncate">{origin.name}</span>
+                  <span className="truncate pointer-coarse:break-words pointer-coarse:whitespace-normal">
+                    {origin.name}
+                  </span>
                 </li>
               );
             })}
@@ -375,7 +377,9 @@ export function Composer({
           }
           footerActions={
             <div className="flex min-w-0 flex-wrap items-center gap-1">
-              {partnerToken}
+              {/* Not on a phone: its header already carries this switcher, and the pill only
+                  took footer width the other controls need. */}
+              {partnerToken && <span className="contents max-md:hidden">{partnerToken}</span>}
               {canAttach && (
                 <button
                   type="button"

@@ -422,7 +422,9 @@ function UserTable({
             </Link>
           </Button>
           {user.email !== user.username ? (
-            <span className="text-ax-text-secondary max-w-full truncate text-xs">{user.email}</span>
+            <span className="text-ax-text-secondary max-w-full truncate text-xs pointer-coarse:break-words pointer-coarse:whitespace-normal">
+              {user.email}
+            </span>
           ) : null}
         </span>
       )
@@ -649,7 +651,9 @@ function SpaceTable({ spaces, labelledBy }: { spaces: SpaceRow[]; labelledBy: st
       renderCell: (space) => (
         <span className="flex min-w-0 items-center gap-2">
           <EntityAvatar name={space.name} id={space.id} size="sm" />
-          <span className="truncate font-medium">{space.name}</span>
+          <span className="truncate font-medium pointer-coarse:break-words pointer-coarse:whitespace-normal">
+            {space.name}
+          </span>
         </span>
       )
     },
