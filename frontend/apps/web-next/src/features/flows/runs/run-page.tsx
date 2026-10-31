@@ -279,8 +279,8 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const { can, user } = useAppContext();
   const spaceName = useSpaceDisplayName();
   const sections = useSpaceSections();
-  // A phone has the space's header above the page already: no breadcrumbs here, a narrower
-  // gutter, and the sections after the result folded.
+  // A phone has the space's header above the page already: no breadcrumbs here, no gutter of
+  // its own (the space's frame gives one), and the sections after the result folded.
   const phone = usePhoneScreen();
   // The space's phone header stands in for the breadcrumbs below 768 px; sideways, the tablet's does not.
   const narrow = useMediaMatch(PHONE_QUERY);
@@ -502,7 +502,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">
-      <div className="border-ax-border flex flex-col gap-3 border-b px-4 pt-4 pb-3 md:px-6">
+      <div className="border-ax-border flex flex-col gap-3 border-b pt-4 pb-3 md:px-6">
         <PageHeader
           title={title}
           headingRef={headingRef}
@@ -565,7 +565,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
         ) : null}
       </div>
 
-      <div className="flex w-full max-w-5xl flex-col gap-6 px-4 py-4 md:gap-8 md:px-6 md:py-5">
+      <div className="flex w-full max-w-5xl flex-col gap-6 py-4 md:gap-8 md:px-6 md:py-5">
         {progress.isPending ? (
           <LoadingState rows={4} label={t("flow_runs_run_loading")} />
         ) : progress.isError ? (
