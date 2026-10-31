@@ -92,3 +92,17 @@ it("clears every draft on sign-out and leaves the tab's other values alone", () 
   expect(sessionStorage.getItem(`eneo:chat-draft:${ME}|assistant:a1:new`)).toBeNull();
   expect(sessionStorage.getItem("something-else")).toBe("kvar");
 });
+
+it("removes an emptied draft at once, so a scope change before the pause cannot leave the sent text behind", () => {
+  const view = renderHook(({ scope }) => useChatDraft(ME, scope), {
+    initialProps: { scope: "assistant:a1:new" }
+  });
+  act(() => view.result.current[1]("Vad kostar ett bygglov?"));
+  act(() => void vi.advanceTimersByTime(400));
+  expect(sessionStorage.getItem(`eneo:chat-draft:${ME}|assistant:a1:new`)).not.toBeNull();
+
+  // Sent: the composer empties, and the session id arrives before the 300 ms pause.
+  act(() => view.result.current[1](""));
+  view.rerender({ scope: "assistant:a1:session-1" });
+  expect(sessionStorage.getItem(`eneo:chat-draft:${ME}|assistant:a1:new`)).toBeNull();
+});

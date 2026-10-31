@@ -78,6 +78,13 @@ export function useChatDraft(owner: string, scope: string) {
   // Written once typing pauses, and when the page goes away or into the background.
   useEffect(() => {
     latest.current = { owner, scope, value };
+    // An emptied draft (a question sent) is removed at once: a conversation key left behind
+    // while the pause runs would hold the sent text when the scope changes (the session id
+    // arrives) before the write. Typing is what waits.
+    if (!value.trim()) {
+      write(owner, scope, value);
+      return;
+    }
     const id = setTimeout(() => write(owner, scope, value), WRITE_DELAY_MS);
     return () => clearTimeout(id);
   }, [owner, scope, value]);
