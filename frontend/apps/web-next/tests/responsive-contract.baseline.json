@@ -83,10 +83,7 @@
   "small button:chattmodell: ee mock"
  ],
  "ipad-landscape|/spaces/$/chat": [
-  "small button:chattmodell: ee mock",
-  "small button:gör en plansteg",
-  "small button:sammanfatta någotprotokoll",
-  "small button:skriv ett utkasttjänsteskriv"
+  "small button:chattmodell: ee mock"
  ],
  "ipad-landscape|/spaces/$/group-chats/$/edit": [],
  "ipad-landscape|/spaces/$/knowledge": [],
@@ -191,10 +188,7 @@
   "small button:chattmodell: ee mock"
  ],
  "ipad-portrait|/spaces/$/chat": [
-  "small button:chattmodell: ee mock",
-  "small button:gör en plansteg",
-  "small button:sammanfatta någotprotokoll",
-  "small button:skriv ett utkasttjänsteskriv"
+  "small button:chattmodell: ee mock"
  ],
  "ipad-portrait|/spaces/$/group-chats/$/edit": [],
  "ipad-portrait|/spaces/$/knowledge": [],
@@ -323,9 +317,7 @@
  ],
  "phone-320|/spaces/$/assistants/$/edit": [],
  "phone-320|/spaces/$/chat": [
-  "small button:chattmodell: ee mock",
-  "small button:sammanfatta någotprotokoll",
-  "small button:skriv ett utkasttjänsteskriv"
+  "small button:chattmodell: ee mock"
  ],
  "phone-320|/spaces/$/group-chats/$/edit": [],
  "phone-320|/spaces/$/knowledge": [
@@ -337,11 +329,7 @@
   "outside a:/spaces/$/overview",
   "small button[combobox]:integrationer"
  ],
- "phone-320|/spaces/$/knowledge/websites/$": [
-  "outside button:sortera efter resultat",
-  "outside button:sortera efter status",
-  "outside button:sortera efter varaktighet"
- ],
+ "phone-320|/spaces/$/knowledge/websites/$": [],
  "phone-320|/spaces/$/members": [],
  "phone-320|/spaces/$/overview": [
   "outside a:/spaces/$/knowledge"
@@ -445,19 +433,13 @@
  "phone-390|/spaces/$/assistants": [],
  "phone-390|/spaces/$/assistants/$/edit": [],
  "phone-390|/spaces/$/chat": [
-  "small button:chattmodell: ee mock",
-  "small button:gör en plansteg",
-  "small button:sammanfatta någotprotokoll",
-  "small button:skriv ett utkasttjänsteskriv"
+  "small button:chattmodell: ee mock"
  ],
  "phone-390|/spaces/$/group-chats/$/edit": [],
  "phone-390|/spaces/$/knowledge": [],
  "phone-390|/spaces/$/knowledge/collections/$": [],
  "phone-390|/spaces/$/knowledge/integrations": [],
- "phone-390|/spaces/$/knowledge/websites/$": [
-  "outside button:sortera efter resultat",
-  "outside button:sortera efter varaktighet"
- ],
+ "phone-390|/spaces/$/knowledge/websites/$": [],
  "phone-390|/spaces/$/members": [],
  "phone-390|/spaces/$/overview": [],
  "phone-390|/spaces/$/services": [],
@@ -552,10 +534,7 @@
  "phone-landscape|/spaces/$/assistants": [],
  "phone-landscape|/spaces/$/assistants/$/edit": [],
  "phone-landscape|/spaces/$/chat": [
-  "small button:chattmodell: ee mock",
-  "small button:gör en plansteg",
-  "small button:sammanfatta någotprotokoll",
-  "small button:skriv ett utkasttjänsteskriv"
+  "small button:chattmodell: ee mock"
  ],
  "phone-landscape|/spaces/$/group-chats/$/edit": [],
  "phone-landscape|/spaces/$/knowledge": [],
