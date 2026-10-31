@@ -155,6 +155,7 @@ export function ProviderOverview({
   onAddProvider: () => void;
 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const typeLabel = useModelTypeLabel();
   const announce = useAnnounce();
   const providers = useQuery(modelProvidersQueryOptions(browserApi));
@@ -349,6 +350,24 @@ export function ProviderOverview({
       </div>
 
       <AttentionBanner attention={attention} onShowProvider={showProvider} />
+      {attention.retiring.length > 0 && (
+        <QuietBanner
+          status="warning"
+          collapsible={false}
+          title={t(
+            attention.retiring.length === 1
+              ? "models_retiring_banner_one"
+              : "models_retiring_banner_other",
+            { count: attention.retiring.length }
+          )}
+          description={t("admin_models_retiring_description", {
+            models: format.list(
+              attention.retiring.map(({ model }) => modelDisplayName(model)),
+              { type: "conjunction" }
+            )
+          })}
+        />
+      )}
 
       <QueryStateBoundary
         queries={[providers, capabilities]}

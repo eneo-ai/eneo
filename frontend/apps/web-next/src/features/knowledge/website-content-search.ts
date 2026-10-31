@@ -1,4 +1,8 @@
-export type WebsiteContentSearch = { tab: "crawls" | "blobs"; prefix: string; q: string };
+export type WebsiteContentSearch = {
+  tab: "crawls" | "blobs" | "problems";
+  prefix: string;
+  q: string;
+};
 
 /** Match the website API's URL-directory and search bounds before making a request. */
 export function readWebsiteContentSearch(
@@ -6,7 +10,12 @@ export function readWebsiteContentSearch(
 ): WebsiteContentSearch {
   const prefix = params.get("prefix") ?? "";
   return {
-    tab: params.get("tab") === "blobs" ? "blobs" : "crawls",
+    tab:
+      params.get("tab") === "blobs"
+        ? "blobs"
+        : params.get("tab") === "problems"
+          ? "problems"
+          : "crawls",
     prefix: /^https?:\/\/[^?#]+\/$/.test(prefix) && prefix.length <= 2048 ? prefix : "",
     q: (params.get("q") ?? "").trim().slice(0, 200)
   };

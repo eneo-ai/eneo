@@ -2,7 +2,7 @@
 
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
-import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
+import { pushUrl, replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
@@ -18,9 +18,10 @@ import { auditLogsQueryOptions, type AuditFilters } from "./audit";
 import { AuditConfig } from "./audit-config";
 import { AuditFilterBar } from "./audit-filters";
 import { AuditTable } from "./audit-table";
-import { auditFiltersSearchParams, parseAuditFilters } from "./audit-url-filters";
+import { auditFiltersSearchParams, parseAuditFilters, parseAuditTab } from "./audit-url-filters";
 import { ExportDialog } from "./export-dialog";
 import { JustificationForm } from "./justification-form";
+import { RetentionPolicySection } from "./retention-policy-section";
 
 function LogsTab() {
   const t = useTranslations();
@@ -131,24 +132,39 @@ function LogsTab() {
       )}
 
       <ExportDialog open={showExport} onOpenChange={setShowExport} filters={filters} />
+      <RetentionPolicySection />
     </div>
   );
 }
 
 export function AuditPage() {
   const t = useTranslations();
+  const searchParams = useSearchParams();
+  const pathname = usePathname();
+  const tab = parseAuditTab(searchParams.get("tab"));
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
       <PageHeader title={t("audit_logs")} />
-      <Tabs defaultValue="logs">
+      <Tabs
+        value={tab}
+        onValueChange={(value) => {
+          const next = parseAuditTab(value);
+          if (next === tab) return;
+          const params = new URLSearchParams(searchParams.toString());
+          if (next === "config") params.set("tab", "config");
+          else params.delete("tab");
+          const query = params.toString();
+          pushUrl(query ? `${pathname}?${query}` : pathname);
+        }}
+      >
         <TabsList>
           <TabsTrigger value="logs">{t("audit_logs")}</TabsTrigger>
-          <TabsTrigger value="categories">{t("audit_categories")}</TabsTrigger>
+          <TabsTrigger value="config">{t("audit_categories")}</TabsTrigger>
         </TabsList>
         <TabsContent value="logs" className="pt-4">
           <LogsTab />
         </TabsContent>
-        <TabsContent value="categories" className="pt-4">
+        <TabsContent value="config" className="pt-4">
           <AuditConfig />
         </TabsContent>
       </Tabs>

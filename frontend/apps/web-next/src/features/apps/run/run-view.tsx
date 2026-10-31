@@ -1,10 +1,11 @@
 "use client";
 
 import { useMutation } from "@tanstack/react-query";
-import { AppWindow, Play } from "lucide-react";
+import { AppWindow, Play, Upload } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import {
   FieldProblem,
   fieldProblemProps,
@@ -20,6 +21,8 @@ import type { App } from "../apps";
 import { AppInputs } from "./app-inputs";
 import { releasePreviews } from "@/features/files/use-file-uploads";
 import { useAppRunInputs, type RunFile } from "./use-app-run";
+import { useFileDrop } from "@/features/files/use-file-drop";
+import { inputFieldRules } from "@/features/files/upload-plan";
 
 /**
  * The "run" surface of an app: its identity, the dynamic input form, and a
@@ -33,6 +36,19 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
 
   const icon = iconUrl(app.icon_id);
   const hasModel = app.completion_model !== null && app.completion_model !== undefined;
+  const dropField = app.input_fields.find((field) =>
+    ["text-upload", "audio-upload", "image-upload"].includes(field.type)
+  );
+  const { dragging, handlers } = useFileDrop(
+    (files) => {
+      if (hasModel && dropField) void inputs.addFiles(files, inputFieldRules(dropField));
+    },
+    { enabled: hasModel && dropField !== undefined }
+  );
+  const announce = useAnnounce();
+  useEffect(() => {
+    if (dragging) announce(t("drop_files_here_upload", { appName: app.name }));
+  }, [dragging, announce, t, app.name]);
 
   const run = useMutation({
     mutationFn: ({ files, text }: { files: RunFile[]; text: string }) =>
@@ -81,7 +97,15 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
   }
 
   return (
-    <div className="flex w-full flex-1 flex-col items-center justify-center p-4">
+    <div className="flex w-full flex-1 flex-col items-center justify-center p-4" {...handlers}>
+      {dragging && (
+        <div className="bg-ax-surface border-ax-accent pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 border-2 p-6 text-center">
+          <Upload className="text-ax-text-secondary size-10" />
+          <p className="max-w-full text-xl font-semibold break-words">
+            {t("drop_files_here_upload", { appName: app.name })}
+          </p>
+        </div>
+      )}
       <div className="border-border bg-card flex w-full max-w-[64ch] flex-col gap-4 rounded-xl border p-4 shadow-lg">
         <div className="flex flex-col items-center gap-3 pt-2">
           <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-2xl">

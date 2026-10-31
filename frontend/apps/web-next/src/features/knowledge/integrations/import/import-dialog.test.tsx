@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import type { Space } from "@/features/spaces/space";
 
 const api = vi.hoisted(() => ({ GET: vi.fn() }));
@@ -38,6 +38,27 @@ const integration = (
   tenant_integration_id: id,
   connected,
   auth_type: "user_oauth"
+});
+
+it.each([
+  { personal: true, admin: false, href: "/account/integrations?tab=providers" },
+  { personal: false, admin: true, href: "/admin/integrations?tab=providers" },
+  { personal: false, admin: false, href: null }
+])("offers the authorized setup from an empty dialog: %j", async ({ personal, admin, href }) => {
+  space.current = makeSpace({ overrides: { personal } });
+  api.GET.mockImplementation(() => ok({ items: [] }));
+  renderInApp(<ImportKnowledgeDialog open onOpenChange={() => {}} />, {
+    appContext: testAppContext({ permissions: admin ? ["admin"] : [] })
+  });
+  await screen.findByText("Inga integrationer tillgängliga.");
+  if (href)
+    expect(
+      screen.getByRole("link", { name: "Konfigurera integrationer" }).getAttribute("href")
+    ).toBe(href);
+  else {
+    expect(screen.queryByRole("link", { name: "Konfigurera integrationer" })).toBeNull();
+    expect(screen.getByText(/administratör/i)).toBeTruthy();
+  }
 });
 
 it("offers the integrations as a radio group; one not connected says why", async () => {

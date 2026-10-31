@@ -1,10 +1,18 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { EneoClient } from "@/lib/api/browser";
 import type { ActionType, AuditFilters } from "./audit";
 import { auditExportRequest, auditLogsQueryOptions } from "./audit";
-import { auditFiltersSearchParams, parseAuditFilters } from "./audit-url-filters";
+import { auditFiltersSearchParams, parseAuditFilters, parseAuditTab } from "./audit-url-filters";
 
 const action = (value: string) => value as ActionType;
+
+it.each([undefined, null, "categories", "other", ["config"], {}])(
+  "defaults an invalid tab %j to logs",
+  (value) => {
+    expect(parseAuditTab(value)).toBe("logs");
+  }
+);
+it("accepts the configuration deep link", () => expect(parseAuditTab("config")).toBe("config"));
 
 describe("parseAuditFilters", () => {
   it.each(["bad", "2026-99-99", "2026-02-30", "2025-02-29"])(
@@ -54,10 +62,10 @@ describe("parseAuditFilters", () => {
     });
   });
 
-  it("keeps the user endpoint filter canonical when a user is selected", () => {
+  it("keeps action and text filters together with a selected actor", () => {
     const filters = parseAuditFilters(
       new URLSearchParams(
-        "user_id=user-1&user_label=user%40example.com&search=ignored&actions=login&page=2"
+        "user_id=user-1&user_label=user%40example.com&search=invoice&actions=login&page=2"
       )
     );
 
@@ -65,8 +73,8 @@ describe("parseAuditFilters", () => {
       page: 2,
       from_date: undefined,
       to_date: undefined,
-      actions: [],
-      search: "",
+      actions: [action("login")],
+      search: "invoice",
       userId: "user-1",
       userLabel: "user@example.com"
     });
@@ -91,13 +99,13 @@ describe("auditExportRequest", () => {
     expect(body).toEqual({
       from_date: "2026-01-01",
       to_date: "2026-01-31",
-      user_id: undefined,
+      actor_id: undefined,
       action: "login",
       format: "csv"
     });
   });
 
-  it("uses the GDPR user export filter and omits action filters for user views", () => {
+  it("exports the selected actor and action without broadening to GDPR subject events", () => {
     const body = auditExportRequest(
       {
         page: 1,
@@ -111,11 +119,12 @@ describe("auditExportRequest", () => {
       "jsonl"
     );
 
+    expect(body).not.toHaveProperty("user_id");
     expect(body).toEqual({
       from_date: "2026-01-01",
       to_date: "2026-01-31",
-      user_id: "user-1",
-      action: undefined,
+      actor_id: "user-1",
+      action: "login",
       format: "jsonl"
     });
   });
@@ -142,7 +151,7 @@ describe("auditFiltersSearchParams", () => {
     expect(params.get("actions")).toBe("login,logout");
   });
 
-  it("omits action and search filters for a user-specific log view", () => {
+  it("serializes action and search filters together with the actor", () => {
     const filters: AuditFilters = {
       page: 1,
       actions: [action("login")],
@@ -155,12 +164,38 @@ describe("auditFiltersSearchParams", () => {
 
     expect(params.get("user_id")).toBe("user-1");
     expect(params.get("user_label")).toBe("user@example.com");
-    expect(params.has("search")).toBe(false);
-    expect(params.has("actions")).toBe(false);
+    expect(params.get("search")).toBe("ignored");
+    expect(params.get("actions")).toBe("login");
   });
 });
 
 describe("auditLogsQueryOptions", () => {
+  it("requests the ordinary logs endpoint with all filters and actor_id", async () => {
+    const GET = vi.fn().mockResolvedValue({ data: { logs: [] }, response: new Response() });
+    const filters: AuditFilters = {
+      page: 1,
+      actions: ["user_created"],
+      search: " invoice ",
+      userId: "user-1",
+      from_date: "2026-01-01",
+      to_date: "2026-01-31"
+    };
+    const options = auditLogsQueryOptions({ GET } as unknown as EneoClient, filters);
+    await options.queryFn!({} as never);
+    expect(GET).toHaveBeenCalledWith("/api/v1/audit/logs", {
+      params: {
+        query: {
+          page: 1,
+          page_size: 100,
+          actor_id: "user-1",
+          actions: ["user_created"],
+          search: "invoice",
+          from_date: "2026-01-01",
+          to_date: "2026-01-31"
+        }
+      }
+    });
+  });
   it("keys on the trimmed search, so trailing whitespace reuses the cached logs", () => {
     const api = {} as EneoClient;
     const filters: AuditFilters = { page: 1, actions: [], search: "abc" };

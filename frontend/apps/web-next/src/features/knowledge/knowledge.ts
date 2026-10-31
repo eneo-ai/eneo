@@ -184,9 +184,10 @@ export function crawlFailuresQueryOptions(
   return infiniteQueryOptions({
     ...cursorPagination,
     queryKey: ["crawl-runs", runId, "failures", kind],
-    queryFn: ({ pageParam }): Promise<CrawlFailurePage> =>
+    queryFn: ({ pageParam, signal }): Promise<CrawlFailurePage> =>
       unwrap(
         api.GET("/api/v1/crawl-runs/{id}/failures/", {
+          signal,
           params: {
             path: { id: runId },
             query: { limit: CRAWL_FAILURES_PAGE_SIZE, cursor: pageParam, kind }

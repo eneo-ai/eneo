@@ -47,6 +47,15 @@ import {
 } from "./models";
 import { useFieldFocus } from "./provider-form-fields";
 
+import {
+  defaultModelHosting,
+  EMBEDDING_FAMILIES,
+  HOSTING_REGIONS,
+  isEmbeddingFamily,
+  isHostingRegion,
+  type EmbeddingFamily
+} from "./model-metadata-options";
+
 const NO_CLASSIFICATION = "__none__";
 
 /** Where the tenant's models of each type are listed. */
@@ -184,6 +193,8 @@ export function ModelCatalogStep({
   const [manualBusy, setManualBusy] = useState(false);
   /** An id typed in that the provider has already. */
   const [manualTaken, setManualTaken] = useState<string | null>(null);
+  const [hosting, setHosting] = useState(() => defaultModelHosting(providerType));
+  const [embeddingFamily, setEmbeddingFamily] = useState<EmbeddingFamily>("openai");
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
   const [validating, setValidating] = useState(false);
   const [createAnyway, setCreateAnyway] = useState(false);
@@ -308,10 +319,10 @@ export function ModelCatalogStep({
               provider_id: providerId,
               name: model.name,
               display_name: displayName,
-              family: providerType,
+              family: embeddingFamily,
               dimensions: model.output_vector_size ?? null,
               max_input: model.max_input_tokens ?? null,
-              hosting: "swe",
+              hosting,
               input_cost_per_token: model.input_cost_per_token ?? null,
               output_cost_per_token: model.output_cost_per_token ?? null,
               security_classification: selectedClassification
@@ -323,7 +334,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting: "swe",
+              hosting,
               cost_per_image: model.cost_per_image ?? null,
               // The request defaults are edited afterwards; "auto" lets the model decide.
               default_size: "auto",
@@ -338,7 +349,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting: "swe",
+              hosting,
               security_classification: selectedClassification
             });
           }
@@ -348,7 +359,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting: "swe",
+              hosting,
               cost_per_minute: model.cost_per_minute ?? null,
               security_classification: selectedClassification
             });
@@ -362,7 +373,7 @@ export function ModelCatalogStep({
             vision: model.supports_vision,
             reasoning: model.supports_reasoning,
             supports_tool_calling: model.supports_function_calling,
-            hosting: "swe",
+            hosting,
             family: providerType,
             input_cost_per_token: model.input_cost_per_token ?? null,
             output_cost_per_token: model.output_cost_per_token ?? null,
@@ -465,6 +476,29 @@ export function ModelCatalogStep({
             setSelected(new Map());
             setSubmitted(false);
             resetOutcome();
+          }}
+        />
+      )}
+
+      <Selector
+        label={t("hosting_region")}
+        options={HOSTING_REGIONS.map((value) => ({ value, label: t(`hosting_${value}`) }))}
+        value={hosting}
+        onChange={(value) => {
+          if (isHostingRegion(value)) setHosting(value);
+        }}
+      />
+      {mode === "embedding" && (
+        <Selector
+          label={t("model_family")}
+          description={t("model_family_help")}
+          options={EMBEDDING_FAMILIES.map((value) => ({
+            value,
+            label: t(`model_family_${value}`)
+          }))}
+          value={embeddingFamily}
+          onChange={(value) => {
+            if (isEmbeddingFamily(value)) setEmbeddingFamily(value);
           }}
         />
       )}

@@ -1,5 +1,7 @@
 "use client";
 
+import { embeddingModelGroupTitle } from "./embedding-model-label";
+
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
@@ -469,8 +471,7 @@ export function CollectionsTab({ canCreate, name }: { canCreate: boolean; name: 
           <div key={model?.id ?? "all"} className="flex flex-col gap-2">
             {model && (
               <h3 id={headingId} className="text-ax-text-secondary text-sm font-semibold">
-                {model.name}
-                {model.inSpace ? "" : ` (${t("disabled")})`}
+                {embeddingModelGroupTitle(model, model.inSpace, t)}
               </h3>
             )}
             <RowsOrTable

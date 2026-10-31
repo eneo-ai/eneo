@@ -82,7 +82,7 @@ const CLEARED: Partial<AuditFilters> = {
   userLabel: undefined
 };
 
-/** Actor-by-user filter: finds a user by email and pins the per-user (GDPR) log view. */
+/** Finds an actor by email while preserving the other log filters. */
 function UserField({
   userId,
   userLabel,
@@ -119,8 +119,7 @@ function UserField({
       onChange={(item) =>
         onChange(
           item
-            ? // The per-user endpoint takes only a date range: the other filters go.
-              { userId: item.id, userLabel: item.label, actions: [], search: "" }
+            ? { userId: item.id, userLabel: item.label }
             : { userId: undefined, userLabel: undefined }
         )
       }
@@ -215,9 +214,7 @@ function AuditFilterFields({
     <div className="flex flex-col gap-4">
       <p className="text-ax-text-secondary text-sm">{t("audit_filters_description")}</p>
       <UserField userId={filters.userId} userLabel={filters.userLabel} onChange={onChange} />
-      {!filters.userId && (
-        <ActionField selected={filters.actions} onChange={(actions) => onChange({ actions })} />
-      )}
+      <ActionField selected={filters.actions} onChange={(actions) => onChange({ actions })} />
       <PeriodField from={filters.from_date} to={filters.to_date} onChange={onChange} />
       <div className="flex justify-end">
         <Button variant="primary" label={t("done")} onClick={onDone} />
@@ -289,14 +286,13 @@ function chipsFor(filters: AuditFilters, t: Translate, locale: string): Chip[] {
       icon: <User aria-hidden="true" className="size-3.5" />,
       remove: { userId: undefined, userLabel: undefined }
     });
-  } else {
-    for (const action of filters.actions) {
-      chips.push({
-        key: `action:${action}`,
-        label: actionLabel(t, action),
-        remove: { actions: filters.actions.filter((item) => item !== action) }
-      });
-    }
+  }
+  for (const action of filters.actions) {
+    chips.push({
+      key: `action:${action}`,
+      label: actionLabel(t, action),
+      remove: { actions: filters.actions.filter((item) => item !== action) }
+    });
   }
   const { from_date: from, to_date: to } = filters;
   if (from || to) {
@@ -327,7 +323,6 @@ export function AuditFilterBar({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const filteringByUser = Boolean(filters.userId);
   const chips = chipsFor(filters, t, locale);
   const hasFilters = chips.length > 0 || filters.search !== "";
 
@@ -335,14 +330,11 @@ export function AuditFilterBar({
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
         <div className="min-w-56 flex-1">
-          {/* The per-user endpoint has no free text: the field says why it waits. */}
           <TextInput
             label={t("search")}
             placeholder={t("audit_search_placeholder_entity")}
             value={filters.search}
             onChange={(value) => onChange({ search: value })}
-            isDisabled={filteringByUser}
-            disabledMessage={filteringByUser ? t("audit_filtering_by_user") : undefined}
             hasClear
             width="100%"
           />

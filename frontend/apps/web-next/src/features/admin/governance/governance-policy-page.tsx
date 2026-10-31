@@ -2,6 +2,7 @@
 
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
+import { useAppContext } from "@/components/providers/app-context";
 import { PageHeader } from "@/components/composites/page-header";
 import { browserApi } from "@/lib/api/browser";
 import { SkillBindingsEditor } from "@/features/skills/skill-bindings-section";
@@ -29,6 +30,7 @@ import { usePolicyDraft } from "./use-policy-draft";
  */
 export function GovernancePolicyPage() {
   const t = useTranslations();
+  const { settings } = useAppContext();
   const { data: policy } = useSuspenseQuery(governancePolicyQueryOptions(browserApi));
   const { data: models } = useSuspenseQuery(adminModelsQueryOptions(browserApi));
   const { data: providers } = useSuspenseQuery(modelProvidersQueryOptions(browserApi));
@@ -53,7 +55,7 @@ export function GovernancePolicyPage() {
         <ReasoningPolicySection draft={draft} />
         <McpRestrictionSection draft={draft} />
         <PromptEnforcementSection draft={draft} />
-        <FilePolicySection draft={draft} />
+        {settings.file_references_enabled === true && <FilePolicySection draft={draft} />}
         <SkillBindingsEditor
           resource="personal_chat"
           spaceId="organization"

@@ -41,6 +41,7 @@ const state = vi.hoisted(() => ({
   blobTitle: "lou.html",
   contentQueries: [] as { q?: string; prefix?: string }[],
   folderQueries: [] as string[],
+  failureRunIds: [] as string[],
   requests: [] as string[]
 }));
 const post = vi.hoisted(() => vi.fn());
@@ -58,9 +59,16 @@ vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (
       path: string,
-      options?: { params?: { query?: { cursor?: string | null; q?: string; prefix?: string } } }
+      options?: {
+        params?: {
+          path?: { id: string };
+          query?: { cursor?: string | null; q?: string; prefix?: string };
+        };
+      }
     ) => {
       const cursor = options?.params?.query?.cursor ?? null;
+      if (path === "/api/v1/crawl-runs/{id}/failures/")
+        state.failureRunIds.push(options?.params?.path?.id ?? "");
       const filters = options?.params?.query;
       if (path === "/api/v1/websites/{id}/info-blobs/page/")
         state.contentQueries.push(filters ?? {});
@@ -142,6 +150,7 @@ afterEach(() => {
   state.requests = [];
   state.contentQueries = [];
   state.folderQueries = [];
+  state.failureRunIds = [];
   post.mockReset();
 });
 
@@ -388,4 +397,23 @@ describe("WebsiteDetail", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Kör om hela webbplatsen" }));
     expect(await screen.findByRole("alertdialog", { name: "Synkronisera webbplats" })).toBeTruthy();
   });
+});
+
+it("opens Problems from the URL and lets an older completed crawl be chosen after loading history", async () => {
+  setRuns(run(), [run({ id: "crawl-1", created_at: "2026-09-20T08:00:00Z" })]);
+  renderInApp(<WebsiteDetail websiteId="website-1" />, {
+    route: "/spaces/space-1/knowledge/websites/website-1?tab=problems"
+  });
+  const tab = await screen.findByRole("tab", { name: "Problem" });
+  expect(tab.getAttribute("aria-selected")).toBe("true");
+  await waitFor(() => expect(state.failureRunIds).toEqual(["crawl-2"]));
+  expect(screen.getByRole("heading", { name: "Senaste avslutade inläsningen" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Visa äldre genomsökningar (1/2)" }));
+  const chooser = await screen.findByRole("combobox", { name: "Inläsning" });
+  fireEvent.click(chooser);
+  const options = await screen.findAllByRole("option");
+  fireEvent.click(options[1]!);
+  await waitFor(() => expect(state.failureRunIds).toEqual(["crawl-2", "crawl-1"]));
+  expect(screen.getByRole("heading", { name: "Tidigare inläsning" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Kör om hela webbplatsen" })).toBeTruthy();
 });

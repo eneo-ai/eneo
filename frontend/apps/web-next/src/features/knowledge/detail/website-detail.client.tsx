@@ -2,6 +2,7 @@
 
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { Selector } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import {
   useMutation,
@@ -17,7 +18,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
 import { LoadMore } from "@/components/composites/query-state";
-import { useClientTimeText } from "@/components/composites/client-time";
+import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { flattenPages } from "@/lib/api/pagination";
@@ -26,11 +27,15 @@ import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { WebsiteContent } from "@/features/knowledge/website-content";
 import {
+  type WebsiteContentSearch,
   readWebsiteContentSearch,
   websiteContentHref
 } from "@/features/knowledge/website-content-search";
 import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
-import { CrawlRunDetailsDialog } from "@/features/knowledge/crawl-run-details";
+import {
+  CrawlRunDetailsContent,
+  CrawlRunDetailsDialog
+} from "@/features/knowledge/crawl-run-details";
 import {
   canRequestCrawlStop,
   crawlRunState,
@@ -56,7 +61,7 @@ import { CrawlLimitationsBanner } from "@/features/knowledge/notices";
 import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 
-type WebsiteTab = "crawls" | "blobs";
+type WebsiteTab = WebsiteContentSearch["tab"];
 
 /** The latest run first, then the history without it. */
 export function mergeLatestCrawlRun(history: CrawlRun[], latest: CrawlRun | null): CrawlRun[] {
@@ -209,6 +214,7 @@ export function WebsiteDetail({
   const view = readWebsiteContentSearch(params);
   const { tab } = view;
   const [startOpen, setStartOpen] = useState(false);
+  const [selectedProblemRun, setSelectedProblemRun] = useState<CrawlRun | null>(null);
   const [selection, setSelection] = useState<RunSelection | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const baseId = useId();
@@ -260,7 +266,15 @@ export function WebsiteDetail({
 
   const readonly = website.space_id !== space.id;
   const activeRun = latestRun && isActiveCrawlRun(latestRun) ? latestRun : undefined;
-  const latestCompletedRun = runs.find((run) => !isActiveCrawlRun(run));
+  const completedRuns = runs.filter((run) => !isActiveCrawlRun(run));
+  const latestCompletedRun = completedRuns[0];
+  const problemRun = selectedProblemRun
+    ? (completedRuns.find((run) => run.id === selectedProblemRun.id) ?? selectedProblemRun)
+    : latestCompletedRun;
+  const problemRunChoices =
+    selectedProblemRun && !completedRuns.some((run) => run.id === selectedProblemRun.id)
+      ? [...completedRuns, selectedProblemRun]
+      : completedRuns;
   const onRerun = !readonly && !activeRun ? () => setStartOpen(true) : undefined;
   const websiteDisplay = website.name ? `${website.name} (${website.url})` : website.url;
 
@@ -301,7 +315,7 @@ export function WebsiteDetail({
             replaceUrl(
               websiteContentHref(pathname, params, {
                 ...view,
-                tab: value === "blobs" ? "blobs" : "crawls"
+                tab: value === "blobs" ? "blobs" : value === "problems" ? "problems" : "crawls"
               })
             )
           }
@@ -309,8 +323,14 @@ export function WebsiteDetail({
         >
           <Tab id={tabId("crawls")} value="crawls" label={t("crawls")} panelId={panelId} />
           <Tab id={tabId("blobs")} value="blobs" label={t("indexed_content")} panelId={panelId} />
+          <Tab
+            id={tabId("problems")}
+            value="problems"
+            label={t("source_tab_problems")}
+            panelId={panelId}
+          />
         </TabList>
-        {/* One panel whose content follows the selected tab, so both tabs'
+        {/* One panel whose content follows the selected tab, so the tabs'
             aria-controls point at an element that exists. */}
         <div
           role="tabpanel"
@@ -324,6 +344,69 @@ export function WebsiteDetail({
           {tab === "crawls" ? (
             <>
               <CrawlRunsTable runs={runs} onRerun={onRerun} />
+              <LoadMore
+                label={t("website_crawl_history_load_more", {
+                  current: runs.length,
+                  total: runTotal
+                })}
+                query={runPages}
+              />
+            </>
+          ) : tab === "problems" ? (
+            <>
+              {problemRun ? (
+                <>
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <h2 className="font-semibold">
+                      {t(
+                        problemRun.id === latestCompletedRun?.id
+                          ? "website_source_latest_completed"
+                          : "website_source_previous_crawl"
+                      )}
+                    </h2>
+                    {problemRunChoices.length > 1 && (
+                      <Selector
+                        label={t("website_source_choose_crawl")}
+                        value={problemRun.id}
+                        options={problemRunChoices.map((run) => ({
+                          value: run.id,
+                          label: run.created_at ?? ""
+                        }))}
+                        renderOption={(option) => (
+                          <ClientTime value={option.label ?? ""} format="date_time" />
+                        )}
+                        renderValue={(option) => (
+                          <ClientTime value={option.label ?? ""} format="date_time" />
+                        )}
+                        onChange={(id) =>
+                          setSelectedProblemRun(
+                            id === latestCompletedRun?.id
+                              ? null
+                              : (problemRunChoices.find((run) => run.id === id) ?? null)
+                          )
+                        }
+                      />
+                    )}
+                  </div>
+                  <ProblemRunDetails key={problemRun.id} run={problemRun} />
+                  {onRerun && (
+                    <div className="border-ax-border flex flex-col items-start gap-2 border-t pt-3">
+                      <p className="text-ax-text-secondary text-xs">
+                        {t("crawl_retry_whole_website_help")}
+                      </p>
+                      <AstryxButton
+                        label={t("crawl_retry_whole_website")}
+                        variant="secondary"
+                        onClick={onRerun}
+                      />
+                    </div>
+                  )}
+                </>
+              ) : (
+                <p className="text-ax-text-secondary py-4 text-sm">
+                  {t("website_source_no_completed")}
+                </p>
+              )}
               <LoadMore
                 label={t("website_crawl_history_load_more", {
                   current: runs.length,
@@ -356,5 +439,18 @@ export function WebsiteDetail({
         />
       ) : null}
     </div>
+  );
+}
+
+function ProblemRunDetails({ run }: { run: CrawlRun }) {
+  const t = useTranslations();
+  const date = useClientTimeText(run.created_at, "date_time");
+  return (
+    <>
+      <p className="text-ax-text-secondary text-sm">
+        {t("website_source_problems_description", { date: date ?? "" })}
+      </p>
+      <CrawlRunDetailsContent run={run} grouped />
+    </>
   );
 }

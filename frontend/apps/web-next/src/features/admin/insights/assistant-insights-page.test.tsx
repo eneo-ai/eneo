@@ -1,10 +1,18 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
 
-type QuestionQuery = { from_date?: string; limit?: number; q?: string };
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+
+type QuestionQuery = {
+  from_date?: string;
+  to_date?: string;
+  include_followups?: boolean;
+  limit?: number;
+  q?: string;
+};
 
 const QUESTIONS = [
   {
@@ -24,12 +32,25 @@ const QUESTIONS = [
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   questionQueries: [] as QuestionQuery[],
-  asked: [] as unknown[]
+  asked: [] as unknown[],
+  log: null as unknown,
+  logFails: false,
+  nextStream: null as ReadableStream<Uint8Array> | null,
+  signal: null as AbortSignal | null
 }));
 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: vi.fn(async (path: string, init?: { params?: { query?: QuestionQuery } }) => {
+      if (path === "/api/v1/logging/{message_id}/")
+        return spies.logFails
+          ? {
+              error: { message: "Question was not logged." },
+              response: new Response(null, { status: 400 })
+            }
+          : { data: spies.log, response: new Response("{}") };
+      if (path === "/api/v1/analysis/assistants/{assistant_id}/feedback/")
+        return { data: { positive: 0, negative: 0 }, response: new Response("{}") };
       if (path !== "/api/v1/analysis/assistants/{assistant_id}/questions/") {
         throw new Error(`Unexpected GET ${path}`);
       }
@@ -47,9 +68,21 @@ vi.mock("@/lib/api/browser", () => ({
         response: new Response("{}")
       };
     }),
-    POST: vi.fn(async (_path: string, init: unknown) => {
+    POST: vi.fn(async (_path: string, init: { signal?: AbortSignal }) => {
       spies.asked.push(init);
-      return { data: { answer: "De flesta frågor gäller LOU." }, response: new Response("{}") };
+      spies.signal = init.signal ?? null;
+      const data =
+        spies.nextStream ??
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(
+              new TextEncoder().encode('data: {"answer":"De flesta frågor gäller LOU."}\n\n')
+            );
+            controller.close();
+          }
+        });
+      spies.nextStream = null;
+      return { data, response: new Response("{}") };
     })
   }
 }));
@@ -65,18 +98,67 @@ afterEach(() => {
   spies.announce.mockReset();
   spies.questionQueries.length = 0;
   spies.asked.length = 0;
+  spies.log = null;
+  spies.logFails = false;
+  spies.nextStream = null;
+  spies.signal = null;
 });
 
-function renderPage() {
+function renderPage(route?: string) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["assistants", "assistant-1"], {
     id: "assistant-1",
     name: "Upphandlingsassistenten"
   });
-  return renderInApp(<AssistantInsightsPage assistantId="assistant-1" />, { queryClient });
+  return renderInApp(<AssistantInsightsPage assistantId="assistant-1" />, { queryClient, route });
 }
 
 describe("AssistantInsightsPage", () => {
+  it("opens the complete logged record as text and copies it", async () => {
+    const full = {
+      ...QUESTIONS[0],
+      answer: "Logged answer",
+      logging_details: { prompt: "<img src=x onerror=alert(1)>" }
+    };
+    spies.log = full;
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText } });
+    renderPage();
+    fireEvent.click(screen.getByRole("tab", { name: "Frågehistorik" }));
+    const trigger = await screen.findByRole("button", { name: QUESTIONS[0]!.question });
+    trigger.focus();
+    fireEvent.click(trigger);
+    const dialog = await screen.findByRole("dialog", { name: "Frågedetaljer" });
+    expect(await within(dialog).findByText("session-1")).toBeTruthy();
+    const raw = await within(dialog).findByRole("region", { name: "Loggad information som JSON" });
+    expect(raw.textContent).toBe(JSON.stringify(full, null, 2));
+    expect(raw.querySelector("img")).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Kopiera" }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith(JSON.stringify(full, null, 2)));
+    await expectNoAxeViolations(document.body);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Klar" }));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "Frågedetaljer" })).toBeNull());
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("shows a logging refusal and retries without passing a row off as a full log", async () => {
+    spies.logFails = true;
+    renderPage("/admin/insights/assistant/assistant-1?tab=questions");
+    fireEvent.click(await screen.findByRole("button", { name: QUESTIONS[0]!.question }));
+    const dialog = screen.getByRole("dialog", { name: "Frågedetaljer" });
+    expect(await within(dialog).findByText("Question was not logged.")).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: "Kopiera" })).toBeNull();
+    expect(
+      within(dialog).queryByRole("region", { name: "Loggad information som JSON" })
+    ).toBeNull();
+    spies.logFails = false;
+    spies.log = { ...QUESTIONS[0], logging_details: { prompt: "fixture" } };
+    fireEvent.click(within(dialog).getByRole("button", { name: "Försök igen" }));
+    expect(
+      await within(dialog).findByRole("region", { name: "Loggad information som JSON" })
+    ).toBeTruthy();
+  });
+
   it("moves between the analysis and the question history as keyboard tabs", async () => {
     const { container } = renderPage();
 
@@ -158,7 +240,7 @@ describe("AssistantInsightsPage", () => {
 
     expect(await screen.findByText("De flesta frågor gäller LOU.")).toBeTruthy();
     expect(spies.asked[0]).toMatchObject({
-      body: { question: "Vad frågar folk mest om?", stream: false }
+      body: { question: "Vad frågar folk mest om?", stream: true }
     });
     expect(spies.announce).toHaveBeenCalledWith("Svaret är klart");
     // The answer itself is not read out.
@@ -201,24 +283,127 @@ describe("AssistantInsightsPage", () => {
     expect(within(table).queryByText("Vilka regler gäller för direktupphandling?")).toBeNull();
   });
 
-  it("filters from the start of the chosen day and shows that day", async () => {
-    // East of UTC the day starts on the previous UTC date (22:00Z in summer).
+  it("loads URL filters as full local days and keeps changes in the URL", async () => {
     vi.stubEnv("TZ", "Europe/Stockholm");
     try {
-      renderPage();
-      const from = screen.getByRole("combobox", { name: "Från" });
-
-      fireEvent.change(from, { target: { value: "2026-09-10" } });
-      fireEvent.blur(from);
-
+      renderPage(
+        "/admin/insights/assistant/assistant-1?from=2026-09-10&to=2026-09-30&followups=false&tab=questions"
+      );
+      expect(screen.getByRole("tab", { name: "Frågehistorik" }).getAttribute("aria-selected")).toBe(
+        "true"
+      );
       await waitFor(() =>
         expect(
-          spies.questionQueries.some((query) => query.from_date === "2026-09-09T22:00:00.000Z")
+          spies.questionQueries.some(
+            (query) =>
+              query.from_date === "2026-09-09T22:00:00.000Z" &&
+              query.to_date === "2026-09-30T21:59:59.999999Z" &&
+              query.include_followups === false
+          )
         ).toBe(true)
       );
-      expect((from as HTMLInputElement).value).toMatch(/^10 sep\.? 2026$/);
+      fireEvent.click(screen.getByRole("switch", { name: "Inkludera uppföljningsfrågor" }));
+      expect(new URLSearchParams(window.location.search).get("followups")).toBe("true");
+      expect(new URLSearchParams(window.location.search).get("from")).toBe("2026-09-10");
     } finally {
       vi.unstubAllEnvs();
     }
+  });
+
+  it("shows partial answers immediately and stop keeps the partial result without announcing completion", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const cancel = vi.fn();
+    spies.nextStream = new ReadableStream({
+      start(value) {
+        controller = value;
+      },
+      cancel
+    });
+    renderPage();
+    const field = screen.getByRole("textbox", { name: /Fråga om insikter/ });
+    fireEvent.change(field, { target: { value: "Vad frågar folk?" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    act(() => controller.enqueue(new TextEncoder().encode('data: {"answer":"Delvis svar"}\n\n')));
+    expect(await screen.findByText("Delvis svar")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Stoppa generering" }));
+    expect(spies.signal!.aborted).toBe(true);
+    act(() => controller.enqueue(new TextEncoder().encode('data: {"answer":" sent"}\n\n')));
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(screen.getByText("Delvis svar")).toBeTruthy();
+    expect(screen.queryByText("Delvis svar sent")).toBeNull();
+    expect(spies.announce).toHaveBeenCalledWith("Svaret stoppades");
+    expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
+  });
+
+  it("keeps partial analysis on a failed stream and never announces completion", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    spies.nextStream = new ReadableStream({
+      start(value) {
+        controller = value;
+      }
+    });
+    renderPage();
+    const field = screen.getByRole("textbox", { name: /Fråga om insikter/ });
+    fireEvent.change(field, { target: { value: "Vad frågar folk?" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    act(() => controller.enqueue(new TextEncoder().encode('data: {"answer":"Delvis svar"}\n\n')));
+    await screen.findByText("Delvis svar");
+    act(() => controller.error(new Error("Stream interrupted")));
+    const errorMessage = await screen.findByText("Något gick fel. Försök igen.");
+    expect(errorMessage.closest('[role="alert"]')).not.toBeNull();
+    expect(screen.queryByText("Stream interrupted")).toBeNull();
+    expect(screen.getByText("Delvis svar")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Skicka din fråga" })).toBeTruthy();
+    expect(spies.announce).toHaveBeenCalledWith("Något gick fel. Försök igen.");
+    expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
+  });
+
+  it("aborts a changed analysis context, hides its old answer and ignores late parts", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    spies.nextStream = new ReadableStream({
+      start(value) {
+        controller = value;
+      }
+    });
+    renderPage();
+    const field = screen.getByRole("textbox", { name: /Fråga om insikter/ });
+    fireEvent.change(field, { target: { value: "Vad frågar folk?" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    act(() => controller.enqueue(new TextEncoder().encode('data: {"answer":"Gammalt svar"}\n\n')));
+    await screen.findByText("Gammalt svar");
+    fireEvent.click(screen.getByRole("switch", { name: "Inkludera uppföljningsfrågor" }));
+    expect(spies.signal!.aborted).toBe(true);
+    expect(screen.queryByText("Gammalt svar")).toBeNull();
+    act(() => {
+      controller.enqueue(new TextEncoder().encode('data: {"answer":" sent"}\n\n'));
+      controller.close();
+    });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Skicka din fråga" })).toBeTruthy()
+    );
+    fireEvent.click(screen.getByRole("switch", { name: "Inkludera uppföljningsfrågor" }));
+    expect(screen.queryByText("Gammalt svar")).toBeNull();
+    expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
+    expect((field as HTMLTextAreaElement).value).toBe("Vad frågar folk?");
+  });
+  it("aborts its own request on unmount and never announces a late completion", async () => {
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    const cancel = vi.fn();
+    spies.nextStream = new ReadableStream({
+      start(value) {
+        controller = value;
+      },
+      cancel
+    });
+    const { unmount } = renderPage();
+    const field = screen.getByRole("textbox", { name: /Fråga om insikter/ });
+    fireEvent.change(field, { target: { value: "Vad frågar folk?" } });
+    fireEvent.keyDown(field, { key: "Enter" });
+    await waitFor(() => expect(spies.signal).not.toBeNull());
+    unmount();
+    expect(spies.signal!.aborted).toBe(true);
+    act(() => controller.enqueue(new TextEncoder().encode('data: {"answer":"För sent"}\n\n')));
+    await waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+    expect(spies.announce).not.toHaveBeenCalledWith("Svaret är klart");
   });
 });

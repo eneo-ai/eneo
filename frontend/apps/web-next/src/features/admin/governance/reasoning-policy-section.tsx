@@ -12,6 +12,7 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { reasoningEffortLabel } from "@/features/chat/reasoning-effort";
 import { PolicySection } from "./policy-section";
 import type { PolicyDraft } from "./use-policy-draft";
 
@@ -19,18 +20,6 @@ const DEFAULT = "__default";
 
 export function ReasoningPolicySection({ draft }: { draft: PolicyDraft }) {
   const t = useTranslations();
-  const optionLabel = (option: string) => {
-    const labels: Record<string, string> = {
-      none: t("none"),
-      minimal: t("parameter_option_minimal"),
-      low: t("parameter_option_low"),
-      medium: t("parameter_option_medium"),
-      high: t("parameter_option_high"),
-      xhigh: t("parameter_option_extra_high"),
-      max: t("parameter_option_maximum")
-    };
-    return labels[option] ?? option.replaceAll("_", " ");
-  };
 
   return (
     <PolicySection
@@ -78,7 +67,7 @@ export function ReasoningPolicySection({ draft }: { draft: PolicyDraft }) {
               <SelectItem value={DEFAULT}>{t("default_behavior")}</SelectItem>
               {draft.reasoningOptions.map((option) => (
                 <SelectItem key={option} value={option}>
-                  {optionLabel(option)}
+                  {reasoningEffortLabel(option, t)}
                 </SelectItem>
               ))}
             </SelectContent>

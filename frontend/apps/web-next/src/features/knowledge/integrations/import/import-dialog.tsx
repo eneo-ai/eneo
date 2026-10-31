@@ -1,7 +1,7 @@
 "use client";
 
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
-import { Spinner } from "@astryxdesign/core/Spinner";
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
@@ -17,9 +17,12 @@ import {
   DialogTitle
 } from "@/components/ui/dialog";
 import { browserApi } from "@/lib/api/browser";
+import { QueryStateBoundary } from "@/components/composites/query-state";
+import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
 import { availableIntegrationsQueryOptions, type UserIntegration } from "../queries";
 import { VENDOR, VendorIcon } from "../vendor";
+import { integrationSetupAction } from "../setup-action";
 import { ConfluenceImportDialog } from "./confluence-import";
 import { SharePointImportDialog } from "./sharepoint-import";
 
@@ -29,21 +32,18 @@ import { SharePointImportDialog } from "./sharepoint-import";
  * personal spaces offer user-OAuth integrations while shared/org spaces offer
  * admin-configured tenant apps.
  */
-export function useImportableIntegrations(): {
-  integrations: UserIntegration[];
-  isPending: boolean;
-} {
+export function useImportableIntegrations() {
   const { space } = useSpace();
-  const { data, isPending } = useQuery(availableIntegrationsQueryOptions(browserApi, space.id));
+  const query = useQuery(availableIntegrationsQueryOptions(browserApi, space.id));
 
-  const importable = (data ?? []).filter(
+  const importable = (query.data ?? []).filter(
     (entry) => entry.integration_type === "sharepoint" || entry.integration_type === "confluence"
   );
   const integrations = space.personal
     ? importable.filter((entry) => entry.auth_type === "user_oauth" || !entry.connected)
     : importable.filter((entry) => entry.connected && entry.auth_type === "tenant_app");
 
-  return { integrations, isPending };
+  return { integrations, isPending: query.isPending, query };
 }
 
 /**
@@ -90,7 +90,8 @@ export function ImportKnowledgeDialog({
 }) {
   const t = useTranslations();
   const { space } = useSpace();
-  const { integrations, isPending } = useImportableIntegrations();
+  const { integrations, query } = useImportableIntegrations();
+  const { can } = useAppContext();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [step, setStep] = useState<"select" | "import">("select");
 
@@ -98,7 +99,13 @@ export function ImportKnowledgeDialog({
   const selected =
     integrations.find((entry) => entry.tenant_integration_id === selectedId) ?? firstConnected;
 
-  const settingsHref = space.personal ? "/account/integrations" : null;
+  const setup = integrationSetupAction({
+    importableCount: 0,
+    personal: space.personal,
+    organization: space.organization,
+    isAdmin: can("admin")
+  });
+  const settingsHref = setup.kind === "link" ? setup.href : null;
 
   return (
     <>
@@ -112,33 +119,35 @@ export function ImportKnowledgeDialog({
                 : t("import_knowledge_from_org_integrations")}{" "}
               {settingsHref && (
                 <Link href={settingsHref} className="underline">
-                  {t("personal_account")}
+                  {t(space.personal ? "personal_account" : "admin_settings")}
                 </Link>
               )}
             </DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-2">
-            {isPending ? (
-              <div
-                role="status"
-                className="text-muted-foreground flex items-center justify-center gap-2 py-8"
-              >
-                <Spinner size="sm" aria-hidden /> {t("loading_integrations")}
-              </div>
-            ) : integrations.length === 0 ? (
-              <p className="text-muted-foreground py-8 text-center text-sm">
-                {t("no_integrations_available")}
-              </p>
-            ) : (
-              <RadioList
-                label={t("integrations")}
-                isLabelHidden
-                value={selected?.tenant_integration_id ?? ""}
-                onChange={setSelectedId}
-              >
-                {integrations.map((integration) => integrationOption(integration, t))}
-              </RadioList>
-            )}
+            <QueryStateBoundary query={query} rows={2} loadingLabel={t("loading_integrations")}>
+              {() =>
+                integrations.length === 0 ? (
+                  <div className="flex flex-col items-center gap-3 py-8 text-center text-sm">
+                    <p className="text-ax-text-secondary">{t("no_integrations_available")}</p>
+                    {setup.kind === "link" ? (
+                      <AstryxButton label={t("configure_integrations")} href={setup.href} />
+                    ) : setup.kind === "message" ? (
+                      <p>{t(setup.messageKey)}</p>
+                    ) : null}
+                  </div>
+                ) : (
+                  <RadioList
+                    label={t("integrations")}
+                    isLabelHidden
+                    value={selected?.tenant_integration_id ?? ""}
+                    onChange={setSelectedId}
+                  >
+                    {integrations.map((integration) => integrationOption(integration, t))}
+                  </RadioList>
+                )
+              }
+            </QueryStateBoundary>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>

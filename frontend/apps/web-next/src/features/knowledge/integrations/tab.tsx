@@ -11,6 +11,7 @@ import { DockedActions } from "@/components/shell/docked-actions";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
+import { embeddingModelGroupTitle } from "../embedding-model-label";
 import { embeddingModelsInUse } from "../knowledge";
 import { NoCreatePermissionInfo } from "../no-create-permission-info";
 import { IntegrationsBetaNotice } from "../notices";
@@ -34,21 +35,17 @@ function useIntegrationSetup() {
 }
 
 /** Import from a connected integration, or where to connect one first. */
-function ImportAction({ action }: { action: ReturnType<typeof integrationSetupAction> }) {
+function ImportAction({
+  action,
+  onImport
+}: {
+  action: ReturnType<typeof integrationSetupAction>;
+  onImport: () => void;
+}) {
   const t = useTranslations();
-  const [showImport, setShowImport] = useState(false);
 
   if (action.kind === "import") {
-    return (
-      <>
-        <Button
-          label={t("import_knowledge")}
-          variant="primary"
-          onClick={() => setShowImport(true)}
-        />
-        {showImport && <ImportKnowledgeDialog open={showImport} onOpenChange={setShowImport} />}
-      </>
-    );
+    return <Button label={t("import_knowledge")} variant="primary" onClick={onImport} />;
   }
   if (action.kind === "link") {
     return <Button label={t("configure_integrations")} href={action.href} />;
@@ -68,6 +65,7 @@ export function IntegrationsTab({
 }) {
   const t = useTranslations();
   const collator = useCollator();
+  const [showImport, setShowImport] = useState(false);
   const { space } = useSpace();
 
   const items = space.knowledge.integration_knowledge_list.items.filter(
@@ -88,7 +86,7 @@ export function IntegrationsTab({
           : [
               {
                 key: model.id,
-                heading: model.inSpace ? model.name : `${model.name} (${t("disabled")})`,
+                heading: embeddingModelGroupTitle(model, model.inSpace, t),
                 sources: modelSources
               }
             ];
@@ -100,10 +98,10 @@ export function IntegrationsTab({
   const action = !canCreate ? (
     <NoCreatePermissionInfo resourceType={t("resource_integrations")} />
   ) : setup.kind === "message" ? (
-    <ImportAction action={setup} />
+    <ImportAction action={setup} onImport={() => setShowImport(true)} />
   ) : (
     <DockedActions label={t("space_knowledge_actions")}>
-      <ImportAction action={setup} />
+      <ImportAction action={setup} onImport={() => setShowImport(true)} />
     </DockedActions>
   );
 
@@ -112,6 +110,7 @@ export function IntegrationsTab({
       {integrationRequestFormUrl ? (
         <IntegrationsBetaNotice integrationRequestFormUrl={integrationRequestFormUrl} />
       ) : null}
+      <ImportKnowledgeDialog open={showImport} onOpenChange={setShowImport} />
       {items.length === 0 ? (
         // Nothing to list yet: the empty state carries the one action.
         <EmptyState

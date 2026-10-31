@@ -45,6 +45,34 @@ function openDetails() {
 }
 
 describe("AuditTable", () => {
+  it("shows enriched actor names and emails as text in the table and details", () => {
+    const actor = { name: "<script>Testperson</script>", email: "testperson@example.se" };
+    renderInApp(<AuditTable logs={[{ ...log, metadata: { actor } }]} />);
+    const table = screen.getByRole("table");
+    expect(within(table).getByText(actor.name)).toBeTruthy();
+    expect(within(table).getByText(actor.email)).toBeTruthy();
+    expect(table.querySelector("script")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: /^Användare skapad/ }));
+    const dialog = screen.getByRole("dialog", { name: "Användare skapad" });
+    expect(within(dialog).getByText(actor.name)).toBeTruthy();
+    expect(within(dialog).getByText(actor.email)).toBeTruthy();
+  });
+
+  it("distinguishes system events from user events with missing or malformed actor metadata", () => {
+    renderInApp(
+      <AuditTable
+        logs={[
+          { ...log, id: "system", actor_type: "system", actor_id: null },
+          { ...log, id: "missing", metadata: { actor: { name: 123, email: ["invalid"] } } }
+        ]}
+      />
+    );
+    const table = screen.getByRole("table");
+    expect(within(table).getByText("System")).toBeTruthy();
+    expect(within(table).getByText("Användare")).toBeTruthy();
+    expect(within(table).getByText(log.actor_id.slice(0, 8))).toBeTruthy();
+    expect(within(table).queryByText("invalid")).toBeNull();
+  });
   it("holds each event in view where the table scrolls sideways (decision 9)", async () => {
     renderInApp(<AuditTable logs={[log, { ...log, id: "log-9", outcome: "failure" }]} />);
     // Named like the tab and page it sits in, and so is its scroll region.
@@ -68,7 +96,8 @@ describe("AuditTable", () => {
 
     expect(within(dialog).getAllByText(/^25 sep\. 2026/).length).toBeGreaterThan(0);
     // The kind of actor with its id.
-    expect(within(dialog).getByText(`Användare · ${log.actor_id}`)).toBeTruthy();
+    expect(within(dialog).getByText("Användare")).toBeTruthy();
+    expect(within(dialog).getByText(log.actor_id)).toBeTruthy();
     const json = within(dialog).getByRole("region", { name: "Metadata (JSON)" });
     expect(json.tabIndex).toBe(0);
     await expectNoAxeViolations(document.body);

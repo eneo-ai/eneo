@@ -20,9 +20,9 @@ const history: ModelMigrationHistory[] = [
     initiated_by_id: "u1",
     initiated_by_name: "Anna Lind",
     completed_at: "2026-09-01T10:00:00Z",
-    duration: 2500,
+    duration: 2.5,
     migration_details: { assistants: 10, apps: 2, total: 12 },
-    warnings: ["Target model lacks vision support"],
+    warnings: ["lacks_vision", "Legacy migration warning"],
     model_type: "completion"
   },
   {
@@ -41,9 +41,9 @@ const history: ModelMigrationHistory[] = [
 
 afterEach(cleanup);
 
-function renderPanel() {
+function renderPanel(rows = history) {
   const client = new QueryClient({ defaultOptions: { queries: { staleTime: Infinity } } });
-  client.setQueryData(MODEL_MIGRATION_HISTORY_KEY, history);
+  client.setQueryData(MODEL_MIGRATION_HISTORY_KEY, rows);
   render(
     <IntlProvider locale="sv" messages={messages}>
       <QueryClientProvider client={client}>
@@ -67,10 +67,19 @@ it("lists migrations with a status label and a disclosure per row", async () => 
 
   expect(toggle.getAttribute("aria-expanded")).toBe("true");
   const detail = document.getElementById(toggle.getAttribute("aria-controls")!);
-  expect(detail?.textContent).toContain("Target model lacks vision support");
   expect(detail?.textContent).toContain("2.5s");
+  expect(detail?.textContent).toContain("Målmodellen saknar stöd för bildförståelse.");
+  expect(detail?.textContent).toContain("Legacy migration warning");
 
   await expectNoAxeViolations(document.body);
+});
+
+it("shows a subsecond API duration in milliseconds", () => {
+  renderPanel(history.map((row) => ({ ...row, duration: 0.25 })));
+  const toggle = screen.getByRole("button", { name: "Detaljer för GPT-4 till GPT-4o" });
+  fireEvent.click(toggle);
+  const detail = document.getElementById(toggle.getAttribute("aria-controls")!);
+  expect(detail?.textContent).toContain("250ms");
 });
 
 it("searches and announces how many migrations match", async () => {

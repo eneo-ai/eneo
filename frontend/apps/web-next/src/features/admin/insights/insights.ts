@@ -1,8 +1,10 @@
-import type { ISODateString } from "@astryxdesign/core/utils";
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
+import { insightRangeParams, type InsightRange } from "@/features/insights/insights-range";
+import { isoDate, type IsoDate } from "@/lib/calendar-date";
+import { readEventStream } from "@/lib/api/event-stream";
 
 export type Counts = Schema<"Counts">;
 export type MetadataStatistics = Schema<"MetadataStatistics">;
@@ -18,21 +20,34 @@ export type AssistantInsightFilters = InsightsRange & { includeFollowups: boolea
 
 export const ASSISTANT_INSIGHT_QUESTION_LIMIT = 100;
 
-export function insightCountsQueryOptions(api: EneoClient) {
+/** Logs are loaded only while their details dialog is mounted. Backend resource access stays authoritative. */
+export function questionLogQueryOptions(api: EneoClient, questionId: string) {
   return queryOptions({
-    queryKey: ["admin-insights-counts"],
-    queryFn: (): Promise<Counts> => unwrap(api.GET("/api/v1/analysis/counts/"))
+    queryKey: ["admin-insights-question-log", questionId],
+    gcTime: 0,
+    queryFn: ({ signal }): Promise<Schema<"MessageLogging">> =>
+      unwrap(
+        api.GET("/api/v1/logging/{message_id}/", {
+          params: { path: { message_id: questionId } },
+          signal
+        })
+      )
   });
 }
 
-/** Per-day time series of assistants / sessions / questions over a date range. */
-export function insightAggregatedQueryOptions(api: EneoClient, range: InsightsRange) {
+/** Hourly counts of assistants / sessions / questions over a date range. */
+export function insightAggregatedQueryOptions(
+  api: EneoClient,
+  range: InsightsRange,
+  timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone
+) {
   return queryOptions({
-    queryKey: ["admin-insights-aggregated", range],
-    queryFn: (): Promise<MetadataStatisticsAggregated> =>
+    queryKey: ["admin-insights-aggregated", range, timeZone],
+    queryFn: ({ signal }): Promise<MetadataStatisticsAggregated> =>
       unwrap(
         api.GET("/api/v1/analysis/metadata-statistics/aggregated/", {
-          params: { query: { start_date: range.start, end_date: range.end } }
+          params: { query: { start_date: range.start, end_date: range.end, time_zone: timeZone } },
+          signal
         })
       )
   });
@@ -135,14 +150,18 @@ export async function askAssistantInsightQuestion({
   api,
   assistantId,
   filters,
-  question
+  question,
+  signal,
+  onAnswer
 }: {
   api: EneoClient;
   assistantId: string;
   filters: AssistantInsightFilters;
   question: string;
+  signal?: AbortSignal;
+  onAnswer?: (part: string) => void;
 }): Promise<string> {
-  const response = await unwrap(
+  const body = await unwrap(
     api.POST("/api/v1/analysis/assistants/{assistant_id}/", {
       params: {
         path: { assistant_id: assistantId },
@@ -152,10 +171,24 @@ export async function askAssistantInsightQuestion({
           include_followups: filters.includeFollowups
         }
       },
-      body: { question, stream: false }
+      body: { question, stream: true } satisfies Schema<"AskAnalysis">,
+      parseAs: "stream",
+      signal
     })
   );
-  return analysisAnswerText(response) ?? "";
+  if (!body) throw new Error("The analysis response had no stream.");
+  let answer = "";
+  await readEventStream(body, (data) => {
+    signal?.throwIfAborted();
+    if (!data) return;
+    const part = analysisAnswerText(JSON.parse(data));
+    if (part === null) throw new Error("The analysis stream contained an invalid answer.");
+    answer += part;
+    onAnswer?.(part);
+  });
+  signal?.throwIfAborted();
+  if (!answer.trim()) throw new Error("The analysis stream returned no answer.");
+  return answer;
 }
 
 export function analysisAnswerText(response: unknown): string | null {
@@ -205,40 +238,81 @@ export function assistantActivityRows(data: MetadataStatistics, limit = 6): Assi
     .slice(0, limit);
 }
 
-/**
- * Merge the three per-day series into chart rows keyed by day. Buckets present
- * in any series are filled (missing → 0) so the chart has no gaps.
- */
-export function mergeInsightSeries(
-  data: MetadataStatisticsAggregated
-): { date: string; assistants: number; sessions: number; questions: number }[] {
-  const byDay = new Map<string, { assistants: number; sessions: number; questions: number }>();
-  const ensure = (iso: string) => {
-    const day = iso.slice(0, 10);
-    let row = byDay.get(day);
+/** Inclusive datetime endpoints need the last microsecond before the next local midnight. */
+export function insightPeriod(range: InsightRange): InsightsRange {
+  const { startTime, endTime } = insightRangeParams(range);
+  return {
+    start: startTime,
+    end: new Date(new Date(endTime).getTime() - 1).toISOString().replace(".999Z", ".999999Z")
+  };
+}
+
+export function shiftInsightDate(value: string, days: number): IsoDate {
+  const date = new Date(`${value}T12:00:00`);
+  date.setDate(date.getDate() + days);
+  return isoDate(date);
+}
+
+export function insightDayCount(range: InsightRange): number {
+  return Math.round((Date.parse(range.end) - Date.parse(range.start)) / 86_400_000) + 1;
+}
+
+/** Equal number of calendar days, including across a change of UTC offset. */
+export function previousInsightRange(range: InsightRange): InsightRange {
+  const days = insightDayCount(range);
+  return { start: shiftInsightDate(range.start, -days), end: shiftInsightDate(range.start, -1) };
+}
+
+export function periodTotals(data: MetadataStatisticsAggregated): Counts {
+  const sum = (points: MetadataStatisticsAggregated["sessions"]) =>
+    points.reduce((total, point) => total + point.count, 0);
+  return {
+    assistants: sum(data.assistants),
+    sessions: sum(data.sessions),
+    questions: sum(data.questions)
+  };
+}
+
+/** A zero baseline with new activity has no finite percentage. */
+export function insightTrend(current: number, previous: number): number | null {
+  return previous === 0
+    ? current === 0
+      ? 0
+      : null
+    : Math.round(((current - previous) / previous) * 100);
+}
+
+export type InsightGrouping = "date" | "weekday" | "hour";
+export type InsightChartRow = Counts & { date: string };
+
+/** Backend buckets are instants; all grouping follows the viewer's local day, like the range picker. */
+export function groupedInsightSeries(
+  data: MetadataStatisticsAggregated,
+  grouping: InsightGrouping
+): InsightChartRow[] {
+  const rows = new Map<string, InsightChartRow>();
+  const ensure = (date: string) => {
+    let row = rows.get(date);
     if (!row) {
-      row = { assistants: 0, sessions: 0, questions: 0 };
-      byDay.set(day, row);
+      row = { date, assistants: 0, sessions: 0, questions: 0 };
+      rows.set(date, row);
     }
     return row;
   };
-  for (const point of data.assistants) ensure(point.created_at).assistants += point.count;
-  for (const point of data.sessions) ensure(point.created_at).sessions += point.count;
-  for (const point of data.questions) ensure(point.created_at).questions += point.count;
-  return [...byDay.entries()]
-    .sort((a, b) => (a[0] < b[0] ? -1 : 1))
-    .map(([date, counts]) => ({ date, ...counts }));
-}
-
-/** The viewer's calendar day of an instant, as date fields show it (YYYY-MM-DD). */
-export function localDate(iso: string): ISODateString {
-  const date = new Date(iso);
-  const pad = (value: number) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` as ISODateString;
-}
-
-/** The start or the end of the viewer's day `value` (YYYY-MM-DD), as an instant. */
-export function isoFromDateInput(value: string, boundary: "start" | "end"): string {
-  const time = boundary === "start" ? "00:00:00" : "23:59:59";
-  return new Date(`${value}T${time}`).toISOString();
+  if (grouping !== "date") {
+    for (let index = 0; index < (grouping === "hour" ? 24 : 7); index++) ensure(String(index));
+  }
+  for (const metric of ["assistants", "sessions", "questions"] as const) {
+    for (const point of data[metric]) {
+      const instant = new Date(point.created_at);
+      const key =
+        grouping === "date"
+          ? isoDate(instant)
+          : String(grouping === "hour" ? instant.getHours() : (instant.getDay() + 6) % 7);
+      ensure(key)[metric] += point.count;
+    }
+  }
+  return [...rows.values()].sort((a, b) =>
+    grouping === "date" ? a.date.localeCompare(b.date) : Number(a.date) - Number(b.date)
+  );
 }

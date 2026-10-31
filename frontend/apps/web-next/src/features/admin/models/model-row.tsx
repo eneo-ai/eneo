@@ -202,10 +202,6 @@ export function ModelRow({
   const t = useTranslations();
   const typeLabel = useModelTypeLabel();
   const queryClient = useQueryClient();
-  // Embedding models have no detail view; image models get the properties
-  // without a usage tab (no usage endpoint).
-  const canViewDetail = kind !== "embedding";
-
   const label = modelDisplayName(model);
   // Each returns the refetch, so a mutation stays pending until the list has
   // the new state. One mutation per control, so a pending write on one never
@@ -247,6 +243,7 @@ export function ModelRow({
 
   // The technical id under the display name, unless the name already is the id.
   const technicalId = modelTechnicalId(model);
+  const migrated = "migrated_to_model_id" in model && Boolean(model.migrated_to_model_id);
   const locked = model.is_locked ?? false;
   const readonly = "readonly" in model && model.readonly === true;
   const isDefault = hasDefault(model) && model.is_org_default === true;
@@ -268,9 +265,7 @@ export function ModelRow({
   const deleteBlocked = usedBy.length > 0;
   const lifecycle = modelLifecycle(model);
   // Menu groups: open/change the model · org-wide flags · delete.
-  const hasModelActions = canViewDetail || canEdit || canMigrate;
   const hasFlagActions = supportsDefault || supportsClassification;
-  const hasMenu = hasModelActions || hasFlagActions || canDelete;
 
   // Shows the latest press while writes and the refetch are in flight;
   // falls back to the saved state when the last write failed.
@@ -282,35 +277,28 @@ export function ModelRow({
       isLabelHidden
       value={enabled}
       onChange={(next) => enable.mutate(next)}
-      isDisabled={locked}
-      disabledMessage={locked ? t("api_credentials_required_for_provider") : undefined}
+      isDisabled={locked || migrated}
+      disabledMessage={
+        migrated
+          ? t("model_tooltip_migrated")
+          : locked
+            ? t("api_credentials_required_for_provider")
+            : undefined
+      }
     />
   );
   const name = (
-    <>
-      {canViewDetail ? (
-        <button
-          type="button"
-          aria-haspopup="dialog"
-          onClick={() => onAction("detail")}
-          className={cn(
-            "focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 min-w-0 items-center text-start font-semibold [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11",
-            enabled ? "text-ax-text" : "text-ax-text-secondary"
-          )}
-        >
-          {label}
-        </button>
-      ) : (
-        <span
-          className={cn(
-            "min-w-0 font-semibold [overflow-wrap:anywhere]",
-            enabled ? "text-ax-text" : "text-ax-text-secondary"
-          )}
-        >
-          {label}
-        </span>
+    <button
+      type="button"
+      aria-haspopup="dialog"
+      onClick={() => onAction("detail")}
+      className={cn(
+        "focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 min-w-0 items-center text-start font-semibold [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11",
+        enabled ? "text-ax-text" : "text-ax-text-secondary"
       )}
-    </>
+    >
+      {label}
+    </button>
   );
   const badges = (
     <>
@@ -326,85 +314,79 @@ export function ModelRow({
   );
   const menu = (
     <>
-      {hasMenu && (
-        <DropdownMenu
-          button={{
-            label: t("admin_models_row_menu", { name: label }),
-            tooltip: t("admin_models_row_menu", { name: label }),
-            icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
-            isIconOnly: true,
-            variant: "ghost",
-            size: "sm"
-          }}
-          hasChevron={false}
-          alignment="end"
-        >
-          {canViewDetail && (
-            <DropdownMenuItem
-              icon={Info}
-              label={t("model_details")}
-              onClick={() => onAction("detail")}
-            />
-          )}
-          {canEdit && (
-            <DropdownMenuItem icon={Pencil} label={t("edit")} onClick={() => onAction("edit")} />
-          )}
-          {canMigrate && (
-            <DropdownMenuItem
-              icon={ArrowLeftRight}
-              label={t("migrate")}
-              onClick={() => onAction("migrate")}
-            />
-          )}
-          {hasModelActions && hasFlagActions && <DropdownMenuDivider />}
-          {supportsDefault && (
-            <DropdownMenuItem
-              icon={Star}
-              label={t("set_as_default_model")}
-              isDisabled={isDefault || !enabled || makeDefault.isPending}
-              onClick={() => makeDefault.mutate()}
-            />
-          )}
-          {supportsClassification && (
-            <DropdownMenuSubMenu icon={ShieldCheck} label={t("security_classification")}>
-              <DropdownMenuRadioGroup
-                label={t("security_classification")}
-                value={currentClassification?.id ?? NO_CLASSIFICATION}
-                onChange={(value) =>
-                  classify.mutate(
-                    classifications.find((classification) => classification.id === value) ?? null
-                  )
-                }
-              >
-                <DropdownMenuRadioItem value={NO_CLASSIFICATION} label={t("none")} />
-                {classifications.map((classification) => (
-                  <DropdownMenuRadioItem
-                    key={classification.id}
-                    value={classification.id}
-                    label={classification.name}
-                  />
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuSubMenu>
-          )}
-          {canDelete && (hasModelActions || hasFlagActions) && <DropdownMenuDivider />}
-          {canDelete && (
-            <DropdownMenuItem
-              icon={Trash2}
-              label={t("delete")}
-              // The reason is at the action, and the item stays reachable:
-              // Astryx menus skip disabled items, reason and all.
-              description={
-                deleteBlocked
-                  ? t("model_delete_blocked_used_by", { names: usedByNames })
-                  : undefined
+      <DropdownMenu
+        button={{
+          label: t("admin_models_row_menu", { name: label }),
+          tooltip: t("admin_models_row_menu", { name: label }),
+          icon: <MoreHorizontal className="size-4" aria-hidden="true" />,
+          isIconOnly: true,
+          variant: "ghost",
+          size: "sm"
+        }}
+        hasChevron={false}
+        alignment="end"
+      >
+        <DropdownMenuItem
+          icon={Info}
+          label={t("model_details")}
+          onClick={() => onAction("detail")}
+        />
+        {canEdit && (
+          <DropdownMenuItem icon={Pencil} label={t("edit")} onClick={() => onAction("edit")} />
+        )}
+        {canMigrate && (
+          <DropdownMenuItem
+            icon={ArrowLeftRight}
+            label={t("migrate")}
+            onClick={() => onAction("migrate")}
+          />
+        )}
+        {hasFlagActions && <DropdownMenuDivider />}
+        {supportsDefault && (
+          <DropdownMenuItem
+            icon={Star}
+            label={t("set_as_default_model")}
+            isDisabled={isDefault || !enabled || makeDefault.isPending}
+            onClick={() => makeDefault.mutate()}
+          />
+        )}
+        {supportsClassification && (
+          <DropdownMenuSubMenu icon={ShieldCheck} label={t("security_classification")}>
+            <DropdownMenuRadioGroup
+              label={t("security_classification")}
+              value={currentClassification?.id ?? NO_CLASSIFICATION}
+              onChange={(value) =>
+                classify.mutate(
+                  classifications.find((classification) => classification.id === value) ?? null
+                )
               }
-              variant="destructive"
-              onClick={() => onAction("delete")}
-            />
-          )}
-        </DropdownMenu>
-      )}
+            >
+              <DropdownMenuRadioItem value={NO_CLASSIFICATION} label={t("none")} />
+              {classifications.map((classification) => (
+                <DropdownMenuRadioItem
+                  key={classification.id}
+                  value={classification.id}
+                  label={classification.name}
+                />
+              ))}
+            </DropdownMenuRadioGroup>
+          </DropdownMenuSubMenu>
+        )}
+        {canDelete && <DropdownMenuDivider />}
+        {canDelete && (
+          <DropdownMenuItem
+            icon={Trash2}
+            label={t("delete")}
+            // The reason is at the action, and the item stays reachable:
+            // Astryx menus skip disabled items, reason and all.
+            description={
+              deleteBlocked ? t("model_delete_blocked_used_by", { names: usedByNames }) : undefined
+            }
+            variant="destructive"
+            onClick={() => onAction("delete")}
+          />
+        )}
+      </DropdownMenu>
     </>
   );
   if (layout === "list") {
