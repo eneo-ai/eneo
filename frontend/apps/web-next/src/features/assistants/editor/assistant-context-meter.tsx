@@ -70,7 +70,13 @@ export function AssistantContextMeter({
     variant === "neutral"
       ? null
       : t(variant === "error" ? "config_attachment_meter_over_budget" : "assistant_context_near");
-  useAnnounceChange(enabled && !query.isFetching && !query.isError ? warning : null);
+  useAnnounceChange(
+    enabled && !query.isFetching
+      ? query.isError
+        ? t("assistant_context_unavailable")
+        : warning
+      : null
+  );
   if (!enabled || !model) return null;
   if (query.isError)
     return (

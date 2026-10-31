@@ -165,7 +165,14 @@ for (const colorScheme of ["light", "dark"] as const) {
       await page.screenshot({ path: testInfo.outputPath("phone-context.png"), fullPage: true });
       phase = "error";
       await page.locator("#assistant-prompt").fill("Native meter failure");
-      await expect(page.getByText(/Kontexten kunde inte uppskattas/)).toBeVisible();
+      await expect(
+        page
+          .locator('[data-editor-section="instructions"]')
+          .getByText(/Kontexten kunde inte uppskattas/)
+      ).toBeVisible();
+      await expect(page.locator('[data-astryx-live-region="polite"]')).toContainText(
+        "Kontexten kunde inte uppskattas"
+      );
       await expect(page.locator("#assistant-prompt")).toBeEnabled();
       await expect(page.getByRole("button", { name: /Kontextbudget:/ })).toHaveCount(0);
       await page.goto(`${editor}?section=knowledge`);

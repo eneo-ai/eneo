@@ -5,10 +5,13 @@ import { renderInApp } from "@/test/render";
 import { AssistantContextMeter } from "./assistant-context-meter";
 
 const api = vi.hoisted(() => ({ POST: vi.fn() }));
+const announce = vi.hoisted(() => vi.fn());
+vi.mock("@/lib/hooks/use-announce-change", () => ({ useAnnounceChange: announce }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 afterEach(() => {
   cleanup();
   api.POST.mockReset();
+  announce.mockClear();
 });
 const props = {
   assistantId: "assistant",
@@ -79,5 +82,6 @@ it("cancels obsolete model inputs and hides failures without keeping an old esti
   api.POST.mockRejectedValue(new Error("advisory failure"));
   view.rerender(<AssistantContextMeter {...props} model={{ id: "model-b", token_limit: 500 }} />);
   expect(await screen.findByText(/Kontexten kunde inte uppskattas/)).toBeTruthy();
+  expect(announce).toHaveBeenCalledWith(expect.stringMatching(/Kontexten kunde inte uppskattas/));
   expect(screen.queryByRole("button", { name: /Kontextbudget:/ })).toBeNull();
 });
