@@ -35,9 +35,10 @@ generated through `AuditExportService`.
 | Best-effort operational  | Executed Flow HTTP calls and transcription summary events                                                                                                                                                                  | Preserve the authoritative runtime records even if the extra admin audit summary fails. Executed HTTP calls use persisted step/attempt or webhook-delivery state; transcription uses required `FlowProviderCalls` evidence. |
 
 Routine status polling and run-history summaries deliberately exclude accepted
-input, results, result-file metadata, and usage data, so they are not business
-audit events. Retrieving run detail or an active review payload is a required,
-fail-closed access event. Side-effect-free package validation/import planning is
+input, results, and result-file metadata, so they are not business
+audit events. History includes aggregated token and transcription usage for the
+returned page; status polling omits usage. Retrieving run detail or an active
+review payload is a required, fail-closed access event. Side-effect-free package validation/import planning is
 also not a business audit event.
 
 The authoring-time **Test HTTP request** action differs from an executed Flow HTTP

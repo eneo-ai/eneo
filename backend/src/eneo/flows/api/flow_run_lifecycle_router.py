@@ -41,6 +41,7 @@ from eneo.flows.api.flow_models import (
     PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE,
     FlowRunCreateRequest,
     FlowRunDetailPublic,
+    FlowRunListItemPublic,
     FlowRunListPublic,
     FlowRunPublic,
     FlowRunRedispatchRequest,
@@ -257,8 +258,9 @@ _FLOW_RUN_LIST_DESCRIPTION = """
     current page, not the total number of matching runs across all pages. `has_more` reports
     whether another page exists after this offset window.
 
-    Items use the same content-free lifecycle projection as the dedicated run-status endpoint.
-    Accepted input, terminal errors, terminal output, result-file metadata, provider usage, and
+    Items extend the run-status lifecycle projection with recorded token and transcription
+    usage, aggregated for this page. The status endpoint does not aggregate usage.
+    Accepted input, terminal errors, terminal output, result-file metadata, and
     webhook deliveries are deliberately omitted so background history refresh does not expose
     or repeatedly read sensitive content. Retrieve one run's audited detail when that content
     is needed. The caller-supplied `run_label` is run metadata and is included.
@@ -708,13 +710,24 @@ async def list_flow_runs(
     )
     page_runs = runs[:limit]
     started_by = await started_by_for_runs(container, page_runs)
+    usage_by_run_id = await run_service.usage_for_listed_runs(runs=page_runs)
     assembler = FlowAssembler()
+    items: list[FlowRunListItemPublic] = []
+    for run in page_runs:
+        usage = usage_by_run_id.get(run.id)
+        items.append(
+            assembler.to_run_list_item_public(
+                run,
+                started_by=started_by.get(run.id),
+                token_usage=usage.token_usage if usage is not None else None,
+                transcription_usage=(
+                    usage.transcription_usage if usage is not None else None
+                ),
+            )
+        )
     return {
         "count": len(page_runs),
-        "items": [
-            assembler.to_run_summary_public(run, started_by=started_by.get(run.id))
-            for run in page_runs
-        ],
+        "items": items,
         "has_more": len(runs) > limit,
         "status_counts": (
             None

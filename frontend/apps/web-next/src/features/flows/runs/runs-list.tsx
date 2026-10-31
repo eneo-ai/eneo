@@ -38,6 +38,7 @@ import { CancelRunButton, RetryRunButton, runActions, type RunActionNotice } fro
 import { refusalText } from "./run-messages";
 import { runHref } from "./run-routes";
 import { starterName } from "./run-starter";
+import { RunUsage } from "./run-usage";
 import { useStartedRuns, withStartedRuns } from "./runs-optimistic";
 import {
   canRedispatch,
@@ -58,10 +59,11 @@ import {
   type RunsFilter,
   type RunsSort,
   type RunStatus as RunStatusValue,
-  type RunSummary
+  type RunSummary,
+  type RunListItem
 } from "./runs-api";
 
-type Row = RunSummary & Record<string, unknown>;
+type Row = RunListItem & Record<string, unknown>;
 
 /** The status filter's "every status" choice; no run status has this name. */
 const ANY_STATUS = "any";
@@ -356,6 +358,12 @@ export function FlowRunsList({
       }
     },
     {
+      key: "usage",
+      header: t("flow_runs_usage_heading"),
+      width: proportional(3, { minWidth: 240 }),
+      renderCell: (run) => <RunUsage run={run} compact />
+    },
+    {
       key: "version",
       header: t("flow_runs_column_version"),
       width: proportional(1),
@@ -448,6 +456,11 @@ export function FlowRunsList({
             aria-labelledby={headingId}
             plugins={{ sort: sortPlugin }}
           />
+          {items.some((run) => run.token_usage) ? (
+            <p className="text-ax-text-secondary m-0 max-w-prose text-xs">
+              {t("flow_runs_usage_tokens_explainer")}
+            </p>
+          ) : null}
           {runs.hasNextPage ? (
             <div className="flex justify-center">
               <Button

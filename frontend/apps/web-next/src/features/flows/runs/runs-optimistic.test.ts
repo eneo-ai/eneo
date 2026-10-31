@@ -36,7 +36,7 @@ describe("runSummaryOf", () => {
     expect(summary).toMatchObject({ id: "run-5", run_label: "Ärende 5", status: "completed" });
     expect(summary).not.toHaveProperty("input_payload_json");
     expect(summary).not.toHaveProperty("result");
-    expect(summary).not.toHaveProperty("token_usage");
+    expect(summary.token_usage).toEqual(makeRunDetail().token_usage);
   });
 });
 

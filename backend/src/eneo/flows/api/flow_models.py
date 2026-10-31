@@ -1702,6 +1702,13 @@ class FlowRunStatusCountsPublic(BaseModel):
     )
 
 
+class FlowRunListItemPublic(FlowRunSummaryPublic):
+    """Run metadata and recorded provider usage, without run content."""
+
+    token_usage: FlowRunTokenUsagePublic | None = None
+    transcription_usage: FlowRunTranscriptionUsagePublic | None = None
+
+
 class FlowRunListPublic(BaseModel):
     """One page of a flow's run history."""
 
@@ -1710,7 +1717,7 @@ class FlowRunListPublic(BaseModel):
         json_schema_extra={"example": PAGINATED_FLOW_RUN_RESPONSE_EXAMPLE},
     )
 
-    items: list[FlowRunSummaryPublic] = Field(
+    items: list[FlowRunListItemPublic] = Field(
         description="The returned page of runs, in the requested order."
     )
     count: int = Field(description="Number of runs in `items`, not a total.")

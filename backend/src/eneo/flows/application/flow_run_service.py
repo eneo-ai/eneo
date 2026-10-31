@@ -963,6 +963,22 @@ class FlowRunService:
             listing=listing,
         )
 
+    async def usage_for_listed_runs(
+        self, *, runs: Sequence[FlowRunStatusSnapshot]
+    ) -> dict[UUID, FlowRunUsage]:
+        """Batch provider usage for a page already filtered by list_run_statuses.
+
+        This projection does not read run content or recording metadata from steps.
+        """
+        if not runs:
+            return {}
+        for run in runs:
+            if run.tenant_id != self.user.tenant_id:
+                self.access_policy.deny_run_access(auth_layer="flow_run_argument")
+        return await self.provider_call_repo.list_usage_for_runs(
+            run_ids=[run.id for run in runs], tenant_id=self.user.tenant_id
+        )
+
     async def evidence_access(
         self, run: FlowRunStatusSnapshot, *, history: bool = False
     ) -> FlowRunEvidenceAccess:

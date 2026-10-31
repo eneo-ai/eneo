@@ -4,7 +4,7 @@ import {
   type RunPublic,
   type RunsFilter,
   type RunStatusCounts,
-  type RunSummary
+  type RunListItem
 } from "./runs-api";
 
 /**
@@ -16,7 +16,7 @@ import {
  */
 
 /** A run this tab started, and when. */
-export type StartedRun = { run: RunSummary; startedAt: number };
+export type StartedRun = { run: RunListItem; startedAt: number };
 
 /** Client state, never fetched: the runs this tab started, newest first. */
 export function startedRunsKey(flowId: string) {
@@ -24,7 +24,7 @@ export function startedRunsKey(flowId: string) {
 }
 
 /** The run as the content-free list shows it: its summary, without its input or result. */
-export function runSummaryOf(run: RunPublic): RunSummary {
+export function runSummaryOf(run: RunPublic): RunListItem {
   return {
     id: run.id,
     flow_id: run.flow_id,
@@ -49,7 +49,9 @@ export function runSummaryOf(run: RunPublic): RunSummary {
     started_at: run.started_at,
     finished_at: run.finished_at,
     cancelled_at: run.cancelled_at,
-    updated_at: run.updated_at
+    updated_at: run.updated_at,
+    token_usage: run.token_usage,
+    transcription_usage: run.transcription_usage
   };
 }
 
@@ -72,7 +74,7 @@ export function rememberStartedRun(
  * and a status filter the run's status passes. The caller started the run,
  * so "only mine" passes too.
  */
-function showsFirst(filter: RunsFilter, run: RunSummary): boolean {
+function showsFirst(filter: RunsFilter, run: RunListItem): boolean {
   if (filter.search) return false;
   if (filter.status && filter.status !== run.status) return false;
   return !filter.sort || (filter.sort.key === "started_at" && filter.sort.order === "desc");
@@ -84,12 +86,12 @@ function showsFirst(filter: RunsFilter, run: RunSummary): boolean {
  * a run started before it is in that answer or, by the filter, is not shown.
  */
 export function withStartedRuns(
-  listed: readonly RunSummary[],
+  listed: readonly RunListItem[],
   counts: RunStatusCounts | undefined,
   started: readonly StartedRun[],
   filter: RunsFilter,
   listedAt: number
-): { items: RunSummary[]; counts: RunStatusCounts | undefined } {
+): { items: RunListItem[]; counts: RunStatusCounts | undefined } {
   const ids = new Set(listed.map((run) => run.id));
   const extra = started
     .filter(

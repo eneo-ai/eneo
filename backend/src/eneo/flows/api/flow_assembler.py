@@ -13,6 +13,7 @@ from eneo.flows.api.flow_models import (
     FlowRunDetailPublic,
     FlowRunErrorPublic,
     FlowRunEvidenceAccessPublic,
+    FlowRunListItemPublic,
     FlowRunPublic,
     FlowRunReviewCheckpointPublic,
     FlowRunStartedByPublic,
@@ -199,6 +200,30 @@ class FlowAssembler:
     ) -> FlowRunSummaryPublic:
         return FlowRunSummaryPublic.model_validate(run).model_copy(
             update={"started_by": started_by}
+        )
+
+    @staticmethod
+    def to_run_list_item_public(
+        run: FlowRunStatusSnapshot,
+        *,
+        started_by: FlowRunStartedByPublic | None = None,
+        token_usage: FlowRunTokenUsage | None = None,
+        transcription_usage: FlowRunTranscriptionUsage | None = None,
+    ) -> FlowRunListItemPublic:
+        return FlowRunListItemPublic.model_validate(run).model_copy(
+            update={
+                "started_by": started_by,
+                "token_usage": (
+                    FlowRunTokenUsagePublic.model_validate(token_usage)
+                    if token_usage is not None
+                    else None
+                ),
+                "transcription_usage": (
+                    FlowRunTranscriptionUsagePublic.model_validate(transcription_usage)
+                    if transcription_usage is not None
+                    else None
+                ),
+            }
         )
 
     def to_run_detail_public(

@@ -2,7 +2,6 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import {
   keepPreviousData,
   useMutation,
@@ -11,7 +10,7 @@ import {
   useSuspenseQuery
 } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
-import { useLocale, useTranslations } from "use-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
@@ -28,18 +27,19 @@ import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
 import { useSpace } from "@/features/spaces/use-space";
 import { formFieldsOf } from "../flow-form-fields";
 import { flowQueryOptions, type FlowPublic } from "../flows-api";
-import { formatCount, formatSeconds } from "./run-format";
+import { formatSeconds } from "./run-format";
 import { RunFailure } from "./run-failure";
 import { RunWebhookDeliveries } from "./run-webhooks";
 import { RunFiles } from "./run-files";
 import { JsonValue } from "./run-json";
 import { refusalText, runErrorText } from "./run-messages";
-import { progressSignature, runStepViews, tokenTotal, type RunStepView } from "./run-progress";
+import { progressSignature, runStepViews, type RunStepView } from "./run-progress";
 import { RunLiveProgress } from "./run-live-progress";
 import { RunKnowledge } from "./run-knowledge";
 import { starterName } from "./run-starter";
 import { RunSteps, stepTitle } from "./run-steps";
 import { RunText } from "./run-text";
+import { RunUsage } from "./run-usage";
 import { RunTrace } from "./run-trace";
 import { RunTranscripts } from "./run-transcript";
 import { reviewTranscriptTarget, transcriptTargets } from "./transcript";
@@ -159,50 +159,6 @@ function RunInput({ flow, run }: { flow: FlowPublic; run: RunDetail }) {
     <JsonValue
       value={Object.fromEntries(entries.map(([key, value]) => [labels.get(key) ?? key, value]))}
     />
-  );
-}
-
-/**
- * What the run used from providers: tokens, with what a token is and what
- * the count covers, and audio for a transcription.
- */
-function RunUsage({ run }: { run: RunDetail }) {
-  const t = useTranslations();
-  const locale = useLocale();
-  const tokens = run.token_usage;
-  const audio = run.transcription_usage;
-  if (!tokens && !audio) return null;
-  const total = tokens ? tokenTotal(tokens.num_tokens_input, tokens.num_tokens_output) : null;
-  const list = (
-    <MetadataList columns="multi">
-      {tokens && total !== null ? (
-        <MetadataListItem label={t("flow_runs_usage_tokens")}>
-          {t("flow_runs_usage_tokens_value", {
-            total: formatCount(total, locale),
-            input: formatCount(tokens.num_tokens_input, locale),
-            output: formatCount(tokens.num_tokens_output, locale)
-          })}
-          {tokens.input_completeness === "incomplete" || tokens.output_completeness === "incomplete"
-            ? ` ${t("flow_runs_usage_incomplete")}`
-            : ""}
-        </MetadataListItem>
-      ) : null}
-      {audio ? (
-        <MetadataListItem label={t("flow_runs_usage_audio")}>
-          {formatSeconds(audio.audio_seconds, t)}
-          {audio.completeness === "incomplete" ? ` ${t("flow_runs_usage_incomplete")}` : ""}
-        </MetadataListItem>
-      ) : null}
-    </MetadataList>
-  );
-  if (!tokens || total === null) return list;
-  return (
-    <div className="flex flex-col gap-2">
-      {list}
-      <p className="text-ax-text-secondary m-0 max-w-prose text-xs">
-        {t("flow_runs_usage_tokens_explainer")}
-      </p>
-    </div>
   );
 }
 

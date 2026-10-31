@@ -155,6 +155,7 @@ describe("RunTrace", () => {
     expect(
       screen.queryByRole("heading", { name: messages.flow_run_extras_trace_heading })
     ).toBeNull();
+    expect(calls(EVIDENCE)).toHaveLength(0);
   });
 
   it("reads the evidence only when asked, then shows attempts and calls", async () => {
@@ -224,6 +225,57 @@ describe("RunTrace", () => {
         screen.getByRole("table", { name: messages.flow_run_extras_calls_heading })
       ).getAllByRole("row")
     ).toHaveLength(3);
+  });
+
+  it("opens and copies an attempt's returned evidence without another read", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+    const response = evidence();
+    const completed = response.step_attempts[1]!;
+    completed.provider = "test-provider";
+    completed.provenance_json = { credential: { $secret: "stored" } };
+    state.routes[EVIDENCE] = () => ({ body: response });
+    const { container } = renderTrace();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
+    const attempts = await screen.findByRole("list", { name: "Steg 2: Skriv svar" });
+    const rows = within(attempts).getAllByRole("listitem");
+    expect(
+      within(rows[0]!).getByText(new RegExp(messages.flow_run_token_usage_not_recorded))
+    ).toBeTruthy();
+    expect(within(rows[1]!).getByText(/1\s200 token \(1\s000 in, 200 ut\)/)).toBeTruthy();
+    expect(within(rows[1]!).queryByText("requested_model")).toBeNull();
+
+    const trigger = within(rows[1]!).getByRole("button", { name: "Detaljer för försök 2" });
+    trigger.focus();
+    fireEvent.click(trigger);
+    expect(document.activeElement).toBe(trigger);
+    expect(trigger.getAttribute("aria-expanded")).toBe("true");
+    expect(within(rows[1]!).getByText("model-large")).toBeTruthy();
+    expect(within(rows[1]!).getByText("model-large-2026")).toBeTruthy();
+    expect(within(rows[1]!).getByText("test-provider")).toBeTruthy();
+    expect(within(rows[1]!).getByText(messages.flow_runs_secret_stored)).toBeTruthy();
+    fireEvent.click(within(rows[1]!).getByRole("button", { name: "Kopiera försök 2" }));
+    await vi.waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
+    expect(JSON.parse(writeText.mock.calls[0]![0] as string)).toEqual(completed);
+    expect(calls(EVIDENCE)).toHaveLength(1);
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(trigger);
+    expect(within(rows[1]!).queryByText("requested_model")).toBeNull();
+    expect(document.activeElement).toBe(trigger);
+  });
+
+  it("keeps a recorded zero distinct from a missing token count", async () => {
+    const response = evidence();
+    response.step_attempts[0]!.num_tokens_input = 0;
+    response.step_attempts[0]!.num_tokens_output = 0;
+    response.step_attempts[1]!.num_tokens_input = null;
+    state.routes[EVIDENCE] = () => ({ body: response });
+    renderTrace();
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_trace_show }));
+    const attempts = await screen.findByRole("list", { name: "Steg 2: Skriv svar" });
+    expect(within(attempts).getByText(/0 token \(0 in, 0 ut\)/)).toBeTruthy();
+    expect(within(attempts).getByText(/200 token \(– in, 200 ut\) \(ofullständigt\)/)).toBeTruthy();
   });
 
   it("writes out the diagnostic export only to copy or save it", async () => {

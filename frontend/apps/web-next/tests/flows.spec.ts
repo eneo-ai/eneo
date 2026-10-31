@@ -126,6 +126,13 @@ test(
     });
     await page.goto(`${flowUrl}?tab=runs`);
     await expect(page.getByRole("link", { name: runName, exact: true })).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Användning", exact: true })).toBeVisible();
+    const historyRow = page.getByRole("row").filter({
+      has: page.getByRole("link", { name: runName, exact: true })
+    });
+    await expect(
+      historyRow.getByText("Ingen registrerad användning", { exact: true })
+    ).toBeVisible();
     await page.screenshot({
       path: test.info().outputPath("flow-run-history-desktop.png"),
       fullPage: true
@@ -148,5 +155,22 @@ test(
     expect(historyAxe.violations).toEqual([]);
     await page.getByRole("link", { name: runName, exact: true }).click();
     await expect(page).toHaveURL(runUrl);
+    await page.getByRole("button", { name: "Försök", exact: true }).click();
+    const attemptDetails = page.getByRole("button", { name: "Detaljer för försök 1", exact: true });
+    await attemptDetails.focus();
+    await page.keyboard.press("Enter");
+    await expect(attemptDetails).toHaveAttribute("aria-expanded", "true");
+    await expect(attemptDetails).toBeFocused();
+    await expect(page.getByRole("button", { name: "Kopiera försök 1", exact: true })).toBeVisible();
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true);
+    await page.screenshot({
+      path: test.info().outputPath("flow-attempt-details-mobile-dark.png"),
+      fullPage: true
+    });
+    await page.keyboard.press("Enter");
+    await expect(attemptDetails).toHaveAttribute("aria-expanded", "false");
+    await expect(attemptDetails).toBeFocused();
   }
 );

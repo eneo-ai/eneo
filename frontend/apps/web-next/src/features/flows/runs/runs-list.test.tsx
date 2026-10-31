@@ -6,7 +6,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { makeRunDetail, makeRunSummary } from "./run-fixtures";
-import type { RunSummary } from "./runs-api";
+import type { RunListItem } from "./runs-api";
 
 const state = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -49,7 +49,7 @@ const NO_COUNTS = {
   cancelled: 0
 };
 
-function answerList(items: RunSummary[], hasMore = false, statusCounts = NO_COUNTS) {
+function answerList(items: RunListItem[], hasMore = false, statusCounts = NO_COUNTS) {
   state.routes[LIST] = () => ({
     body: { count: items.length, items, has_more: hasMore, status_counts: statusCounts }
   });
@@ -113,6 +113,49 @@ describe("FlowRunsList", () => {
     const { container } = renderInApp(<List />);
     expect(await screen.findByText(messages.flow_runs_empty_title)).toBeTruthy();
     expect(screen.getByText(messages.flow_runs_empty_description)).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
+  it("shows page usage with missing, zero and incomplete measurements without detail reads", async () => {
+    answerList([
+      {
+        ...makeRunSummary({ id: "with-usage" }),
+        token_usage: {
+          num_tokens_input: 1000,
+          num_tokens_output: 200,
+          num_tokens_total: 1200,
+          input_completeness: "complete",
+          output_completeness: "incomplete"
+        },
+        transcription_usage: { audio_seconds: 65, completeness: "incomplete" }
+      },
+      {
+        ...makeRunSummary({ id: "zero-usage" }),
+        token_usage: {
+          num_tokens_input: 0,
+          num_tokens_output: 0,
+          num_tokens_total: 0,
+          input_completeness: "complete",
+          output_completeness: "complete"
+        }
+      },
+      makeRunSummary({ id: "without-usage" })
+    ]);
+    const { container } = renderInApp(<List />);
+    const table = await screen.findByRole("table");
+    expect(
+      within(table).getByRole("columnheader", { name: messages.flow_runs_usage_heading })
+    ).toBeTruthy();
+    const rows = within(table).getAllByRole("row");
+    expect(
+      within(rows[1]!).getByText(/1\s200 totalt \(1\s000 in, 200 ut\).*ofullständigt/)
+    ).toBeTruthy();
+    expect(within(rows[1]!).getByText(/1 min 5 s.*ofullständigt/)).toBeTruthy();
+    expect(within(rows[2]!).getByText("0 totalt (0 in, 0 ut)")).toBeTruthy();
+    expect(within(rows[3]!).queryByText(/totalt/)).toBeNull();
+    expect(within(rows[3]!).getByText(messages.flow_runs_usage_not_recorded)).toBeTruthy();
+    expect(state.stub.calls).toHaveLength(1);
+    expect(listCalls()).toHaveLength(1);
     await expectNoAxeViolations(container);
   });
 

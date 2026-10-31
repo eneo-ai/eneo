@@ -897,11 +897,15 @@ Current run status values:
 `awaiting_review` is non-terminal. Keep polling and call the active checkpoint
 endpoint before deciding whether to edit, approve, reject, or resume the run.
 
-Three response models make the sensitivity boundary explicit. `POST /runs/`
-returns `FlowRunPublic`. History and `GET /runs/{run_id}/status/` return
+The response models make the sensitivity boundary explicit. `POST /runs/`
+returns `FlowRunPublic`. `GET /runs/{run_id}/status/` returns
 `FlowRunSummaryPublic`, which omits accepted input, result, result-file metadata,
-terminal errors, provider usage, and webhook deliveries. `GET /runs/{run_id}/`
-returns the content-bearing `FlowRunDetailPublic`, which is `FlowRunPublic` plus
+terminal errors, provider usage, and webhook deliveries. History returns
+`FlowRunListItemPublic`: the same metadata plus recorded `token_usage` and
+`transcription_usage`, aggregated for the returned page. Missing measurements
+are null; incomplete totals carry completeness flags. The list does not read
+run content, and it does not include the recording length measured by steps.
+`GET /runs/{run_id}/` returns the content-bearing `FlowRunDetailPublic`, which is `FlowRunPublic` plus
 an always-present `webhook_deliveries` array. Detail access is audit-logged and
 returns `503` without content if the required record cannot be committed.
 

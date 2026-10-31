@@ -14,9 +14,11 @@ from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.database.tables.audit_log_table import AuditLog as AuditLogTable
 from eneo.database.tables.files_table import Files
 from eneo.database.tables.flow_tables import (
+    FlowProviderCalls,
     FlowRunReviewCheckpoints,
     FlowRuns,
     FlowRuntimeUploadedFiles,
+    FlowStepAttemptResolvedInputs,
     FlowStepAttempts,
     FlowStepResults,
     FlowVersionFileReferences,
@@ -2051,7 +2053,7 @@ async def test_flow_run_public_projects_file_backed_text_overflow(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-async def test_flow_run_list_omits_content_and_skips_enrichment_queries(
+async def test_flow_run_list_batches_usage_without_reading_content(
     client,
     db_container,
     admin_token,
@@ -2140,12 +2142,65 @@ async def test_flow_run_list_omits_content_and_skips_enrichment_queries(
         output_payload_json={"text": "current"},
     )
 
+    run_ids = [UUID(run["id"]) for run in (version_one_run, version_two_run)]
+    for run in (version_one_run, version_two_run):
+        await _mark_first_step_completed(
+            db_container=db_container,
+            run_id=run["id"],
+            flow_id=flow["id"],
+            tenant_id=run["tenant_id"],
+        )
+    async with db_container() as container:
+        session = container.session()
+        attempts = (
+            await session.scalars(
+                sa.select(FlowStepAttempts).where(
+                    FlowStepAttempts.flow_run_id.in_(run_ids)
+                )
+            )
+        ).all()
+        for attempt in attempts:
+            session.add(
+                FlowStepAttemptResolvedInputs(
+                    flow_step_attempt_id=attempt.id,
+                    resolved_input_edges_jsonb={"schema_version": 1, "edges": []},
+                )
+            )
+        await session.flush()
+        for attempt in attempts:
+            session.add(
+                FlowProviderCalls(
+                    flow_step_attempt_id=attempt.id,
+                    resolved_inputs_attempt_id=attempt.id,
+                    ordinal=1,
+                    call_kind="completion",
+                    status="completed",
+                    request_schema_version=2,
+                    provider_request_hash="a" * 64,
+                    requested_model="gpt-4o-mini",
+                    response_format="none",
+                    requested_capabilities=[],
+                    resolved_input_edge_indexes=[],
+                    call_reason="initial",
+                    num_tokens_input=3,
+                    num_tokens_output=5,
+                    input_source="provider",
+                    output_source="provider",
+                    requested_at=attempt.started_at,
+                    finished_at=attempt.finished_at,
+                )
+            )
+
     selected_table_counts = {
         "flow_versions": 0,
         "flow_run_step_result_files": 0,
         "flow_step_attempts": 0,
+        "flow_provider_calls": 0,
+        "flow_step_results": 0,
+        "flow_step_attempt_resolved_inputs": 0,
     }
     flow_run_selects: list[str] = []
+    usage_selects: list[str] = []
 
     def count_bulk_selects(
         _conn,
@@ -2161,6 +2216,8 @@ async def test_flow_run_list_omits_content_and_skips_enrichment_queries(
         compact = " ".join(normalized.split())
         if " from flow_runs " in f" {compact} ":
             flow_run_selects.append(compact)
+        if " from flow_provider_calls " in f" {compact} ":
+            usage_selects.append(compact)
         for table_name in selected_table_counts:
             if table_name in normalized:
                 selected_table_counts[table_name] += 1
@@ -2184,14 +2241,30 @@ async def test_flow_run_list_omits_content_and_skips_enrichment_queries(
         assert "input_payload_json" not in summary
         assert "result" not in summary
         assert "result_files" not in summary
-        assert "token_usage" not in summary
-        assert "transcription_usage" not in summary
+        assert summary["token_usage"] == {
+            "num_tokens_input": 3,
+            "num_tokens_output": 5,
+            "num_tokens_total": 8,
+            "input_completeness": "complete",
+            "output_completeness": "complete",
+        }
+        assert summary["transcription_usage"] is None
         assert "error" not in summary
     assert selected_table_counts == {
         "flow_versions": 0,
         "flow_run_step_result_files": 0,
-        "flow_step_attempts": 0,
+        "flow_step_attempts": 1,
+        "flow_provider_calls": 1,
+        "flow_step_results": 0,
+        "flow_step_attempt_resolved_inputs": 0,
     }
+    assert len(usage_selects) == 1
+    for content_column in (
+        "input_payload_json",
+        "output_payload_json",
+        "provenance_json",
+    ):
+        assert f"flow_step_attempts.{content_column}" not in usage_selects[0]
     # One read for the page, one for the per-status counts; neither reads content.
     assert len(flow_run_selects) == 2
     assert "group by flow_runs.status" in flow_run_selects[1]
@@ -2205,6 +2278,10 @@ async def test_flow_run_list_omits_content_and_skips_enrichment_queries(
         headers={"Authorization": f"Bearer {admin_token}"},
     )
     assert version_one_detail_response.status_code == 200
+    assert (
+        version_one_detail_response.json()["token_usage"]
+        == runs_by_id[version_one_run["id"]]["token_usage"]
+    )
     assert version_one_detail_response.json()["result"] == {
         "kind": "structured",
         "value": {"answer": "historical"},

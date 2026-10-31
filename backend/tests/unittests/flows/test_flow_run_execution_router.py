@@ -58,6 +58,8 @@ from eneo.flows.application.flow_run_service import (
 )
 from eneo.flows.domain.flow import (
     FlowRunStatus,
+    FlowRunTokenUsage,
+    FlowRunTranscriptionUsage,
     FlowStepResultAnnotation,
 )
 from eneo.flows.domain.flow_run_listing import FlowRunListing
@@ -70,6 +72,7 @@ from eneo.flows.enums import (
     FlowStepResultStatus,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
+from eneo.flows.infrastructure.flow_provider_call_repo import FlowRunUsage
 from eneo.flows.infrastructure.flow_run_webhook_delivery_repo import (
     FlowRunWebhookDeliveryRead,
 )
@@ -793,7 +796,24 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         updated_at=delivery_now,
     )
     run_service = AsyncMock()
-    run_service.list_run_statuses.return_value = [run]
+    run_service.list_run_statuses.return_value = [
+        run,
+        run.model_copy(update={"id": uuid4()}),
+    ]
+    run_service.usage_for_listed_runs.return_value = {
+        run.id: FlowRunUsage(
+            token_usage=FlowRunTokenUsage(
+                num_tokens_input=0,
+                num_tokens_output=8,
+                num_tokens_total=8,
+                input_completeness="incomplete",
+                output_completeness="complete",
+            ),
+            transcription_usage=FlowRunTranscriptionUsage(
+                audio_seconds=51.25, completeness="complete"
+            ),
+        )
+    }
     run_service.count_run_statuses.return_value = dict.fromkeys(FlowRunStatus, 0)
     run_service.get_run_detail_with_result_files_and_usage.return_value = (
         FlowRunDetailView(
@@ -837,7 +857,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     list_response = await list_flow_runs(
         id=flow_id,
         request=request,
-        limit=20,
+        limit=1,
         offset=2,
         container=container,
     )
@@ -861,16 +881,22 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
     )
 
     assert list_response["count"] == 1
-    assert list_response["has_more"] is False
+    assert list_response["has_more"] is True
     assert list_response["items"][0].id == run.id
     assert "input_payload_json" not in list_response["items"][0].model_dump()
     assert "result" not in list_response["items"][0].model_dump()
     assert "result_files" not in list_response["items"][0].model_dump()
+    assert list_response["items"][0].token_usage.num_tokens_input == 0
+    assert list_response["items"][0].token_usage.input_completeness == "incomplete"
+    assert list_response["items"][0].transcription_usage.audio_seconds == 51.25
+    run_service.usage_for_listed_runs.assert_awaited_once_with(runs=[run])
     assert get_response.id == run.id
     assert get_response.result_files == [result_file]
     assert len(get_response.webhook_deliveries) == 1
     assert status_response.id == run.id
     assert "input_payload_json" not in status_response.model_dump()
+    assert "token_usage" not in status_response.model_dump()
+    assert "transcription_usage" not in status_response.model_dump()
     public_delivery = get_response.webhook_deliveries[0]
     assert public_delivery.delivery_status == "dead_lettered"
     assert public_delivery.delivery_attempts == 5
@@ -898,7 +924,7 @@ async def test_flow_run_endpoints_delegate_to_run_service(monkeypatch):
         flow_id=flow_id,
         statuses=None,
         mine=False,
-        limit=21,
+        limit=2,
         offset=2,
         history=True,
         listing=FlowRunListing(),

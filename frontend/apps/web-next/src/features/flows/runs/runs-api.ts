@@ -21,6 +21,7 @@ export type RunFormField = Schema<"FormFieldPublic">;
 export type RuntimeInput = Schema<"FlowRuntimeInputContractPublic">;
 export type RunCreateRequest = Schema<"FlowRunCreateRequest">;
 export type RunSummary = Schema<"FlowRunSummaryPublic">;
+export type RunListItem = Schema<"FlowRunListItemPublic">;
 export type RunPublic = Schema<"FlowRunPublic">;
 export type RunDetail = Schema<"FlowRunDetailPublic">;
 export type RunStatus = Schema<"FlowRunStatus">;

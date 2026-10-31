@@ -173,6 +173,15 @@ Only when every step's answer looks right on the short input, run the long one.
 
 ## Read the run evidence
 
+In the React frontend, **History** (**Historik**) shows recorded token and audio
+usage beside each run. Token counts include input and output across all attempts.
+An incomplete total is marked; no recorded usage is different from a measured zero.
+
+Open a run and expand a step's **Attempts** (**Försök**) to compare retries.
+Each attempt shows its token counts and has a details disclosure for the returned
+model, provider, timing and evidence fields. The copy action copies that attempt's
+returned evidence, with the same masking and access restrictions as the evidence view.
+
 Every run keeps evidence per step: tokens in and out, requests made, sections
 read, refusals, and the answer each step produced. When a run is slow, expensive,
 or wrong, the evidence names the step. Look for:

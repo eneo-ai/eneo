@@ -62,7 +62,10 @@ from eneo.flows.enums import (
     FlowStepResultStatus,
 )
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
-from eneo.flows.flow_api_exceptions import FlowBadRequestException
+from eneo.flows.flow_api_exceptions import (
+    FlowBadRequestException,
+    FlowUnauthorizedException,
+)
 from eneo.flows.flow_evidence_policy import (
     FlowHistoryAccessContext,
     flow_evidence_metadata_facts,
@@ -2481,6 +2484,38 @@ async def test_get_run_status_uses_content_free_repository_projection(user):
         flow_id=run.flow_id,
     )
     flow_run_repo.get.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_list_usage_batches_only_supplied_runs_without_reading_content(user):
+    flow_run_repo = flow_run_repo_mock()
+    provider_call_repo = _provider_call_repo()
+    runs = [_run(user=user, flow_id=uuid4()) for _ in range(2)]
+    usage = FlowRunUsage(token_usage=None, transcription_usage=None)
+    provider_call_repo.list_usage_for_runs.return_value = {runs[0].id: usage}
+    service = _flow_run_service(
+        user=user,
+        flow_repo=_flow_repo(),
+        flow_run_repo=flow_run_repo,
+        provider_call_repo=provider_call_repo,
+        flow_version_repo=AsyncMock(),
+        runtime_upload_repo=_runtime_upload_repo(),
+    )
+
+    assert await service.usage_for_listed_runs(runs=runs) == {runs[0].id: usage}
+    provider_call_repo.list_usage_for_runs.assert_awaited_once_with(
+        run_ids=[run.id for run in runs], tenant_id=user.tenant_id
+    )
+    flow_run_repo.get.assert_not_awaited()
+    flow_run_repo.list_result_files_for_runs.assert_not_awaited()
+    flow_run_repo.recording_seconds_by_run_ids.assert_not_awaited()
+    assert await service.usage_for_listed_runs(runs=[]) == {}
+    assert provider_call_repo.list_usage_for_runs.await_count == 1
+
+    foreign_run = runs[0].model_copy(update={"tenant_id": uuid4()})
+    with pytest.raises(FlowUnauthorizedException):
+        await service.usage_for_listed_runs(runs=[foreign_run])
+    assert provider_call_repo.list_usage_for_runs.await_count == 1
 
 
 @pytest.mark.asyncio
