@@ -272,7 +272,21 @@ export function ResourceAttachmentsSection({
 
   const saved: Attachment[] = useMemo(() => attachments, [attachments]);
   const [files, setFiles] = useState<Attachment[]>(saved);
-  const [uploading, setUploading] = useState(false);
+  const [operation, setOperation] = useState<"upload" | "save" | null>(null);
+  // The ref also rejects a second event before React renders the busy state.
+  const operationInProgress = useRef(false);
+  const busy = operation !== null;
+  const uploading = operation === "upload";
+  function beginOperation(next: "upload" | "save") {
+    if (operationInProgress.current) return false;
+    operationInProgress.current = true;
+    setOperation(next);
+    return true;
+  }
+  function endOperation() {
+    operationInProgress.current = false;
+    setOperation(null);
+  }
   const [preview, setPreview] = useState<Attachment | null>(null);
   const [query, setQuery] = useState("");
   const [editingMode, setEditingMode] = useState<string | null>(null);
@@ -363,13 +377,13 @@ export function ResourceAttachmentsSection({
   }
 
   async function uploadFiles(selected: File[]) {
-    if (selected.length === 0) return;
+    if (operationInProgress.current || selected.length === 0) return;
     const plan = planFileUploads(selected, files, rules);
     const shown = { maxFiles: false };
     for (const rejection of plan.rejected) toastUploadRejection(rejection, t, locale, shown);
     if (plan.accepted.length === 0) return;
 
-    setUploading(true);
+    if (!beginOperation("upload")) return;
     const added: Attachment[] = [];
     try {
       for (const file of plan.accepted) {
@@ -397,17 +411,18 @@ export function ResourceAttachmentsSection({
         const previous = files;
         const next = [...previous, ...added];
         setFiles(next);
-        void persist(next, previous, { deleteOnFailure: added });
+        await persist(next, previous, { deleteOnFailure: added });
       }
     } catch (error) {
       if (added.length > 0) void deleteUploadedFiles(added);
       toastApiError(error, t);
     } finally {
-      setUploading(false);
+      endOperation();
     }
   }
 
   const { dragging, handlers } = useFileDrop((dropped) => void uploadFiles(dropped), {
+    enabled: !busy,
     onError: (error) => toastApiError(error, t)
   });
 
@@ -490,9 +505,14 @@ export function ResourceAttachmentsSection({
                             size="sm"
                             label={t("material_change")}
                             aria-label={t("material_change_file", { name: file.name })}
+                            aria-busy={busy || undefined}
+                            aria-disabled={busy || undefined}
                             aria-expanded={editingMode === file.id}
                             aria-controls={`attachment-mode-${file.id}`}
-                            onClick={() => setEditingMode(editingMode === file.id ? null : file.id)}
+                            onClick={() => {
+                              if (!operationInProgress.current)
+                                setEditingMode(editingMode === file.id ? null : file.id);
+                            }}
                           />
                         )}
                         <Button
@@ -523,34 +543,46 @@ export function ResourceAttachmentsSection({
                           variant="ghost"
                           size="icon"
                           aria-label={`${t("remove")} ${file.name}`}
+                          aria-busy={busy || undefined}
+                          aria-disabled={busy || undefined}
                           onClick={() => {
+                            if (!beginOperation("save")) return;
                             const previous = files;
                             const next = files.filter((other) => other.id !== file.id);
                             const wasSaved = saved.some((savedFile) => savedFile.id === file.id);
                             setFiles(next);
                             void persist(next, previous, {
                               deleteOnSuccess: wasSaved ? [] : [file]
-                            });
+                            }).finally(endOperation);
                           }}
                         >
                           <Trash2 className="size-4" />
                         </Button>
                       </div>
                       {attachmentMode && editingMode === file.id && (
-                        <div id={`attachment-mode-${file.id}`} className="w-full">
+                        <div
+                          id={`attachment-mode-${file.id}`}
+                          className="w-full"
+                          aria-busy={busy || undefined}
+                        >
                           <RadioList
                             label={t("material_change_file", { name: file.name })}
                             description={t("attachment_mode_help")}
                             value={inline ? "inline" : "lookup"}
                             onChange={(value) => {
                               const nextInline = value === "inline";
-                              if (nextInline === inline || (!nextInline && unavailable)) return;
+                              if (
+                                nextInline === inline ||
+                                (!nextInline && unavailable) ||
+                                !beginOperation("save")
+                              )
+                                return;
                               const previous = files;
                               const next = files.map((other) =>
                                 other.id === file.id ? { ...other, inline_text: nextInline } : other
                               );
                               setFiles(next);
-                              void persist(next, previous);
+                              void persist(next, previous).finally(endOperation);
                             }}
                           >
                             <RadioListItem
@@ -596,10 +628,12 @@ export function ResourceAttachmentsSection({
               size="sm"
               className="shrink-0"
               disabled={atCapacity}
-              // Uploading, it stays enabled so it keeps focus (the busy
-              // spinner replaces its icon); a press meanwhile is ignored.
-              aria-busy={uploading || undefined}
-              onClick={() => fileInput.current?.click()}
+              // Keep focus while a mutation runs; repeated actions are ignored.
+              aria-busy={busy || undefined}
+              aria-disabled={busy || undefined}
+              onClick={() => {
+                if (!operationInProgress.current) fileInput.current?.click();
+              }}
             >
               {!uploading && <Paperclip className="size-4" />}
               {t("attach_files")}

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -9,7 +9,11 @@ vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const api = vi.hoisted(() => ({ POST: vi.fn(), DELETE: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  api.POST.mockReset();
+  api.DELETE.mockReset();
+});
 
 const first = {
   id: "first",
@@ -188,3 +192,132 @@ it.each([
     if (_name === "tools") await expectNoAxeViolations(container);
   }
 );
+
+it("keeps the confirmed mode after rapid opposite changes and deferred save failures", async () => {
+  let rejectFirst!: (error: Error) => void;
+  let rejectSecond!: (error: Error) => void;
+  const save = vi
+    .fn()
+    .mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectFirst = reject;
+      })
+    )
+    .mockReturnValueOnce(
+      new Promise((_, reject) => {
+        rejectSecond = reject;
+      })
+    )
+    .mockResolvedValue({});
+  renderInApp(
+    <ResourceAttachmentsSection
+      attachments={[first]}
+      allowedAttachments={restrictions}
+      description="Files"
+      attachmentMode={attachmentMode}
+      onSave={save}
+    />
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Ändra hur First.txt används" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Läs in inför varje svar" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Öppna vid behov" }));
+  await act(async () => rejectFirst(new Error("first failed")));
+  if (save.mock.calls.length > 1) await act(async () => rejectSecond(new Error("second failed")));
+  await waitFor(() =>
+    expect(
+      (screen.getByRole("radio", { name: "Öppna vid behov" }) as HTMLInputElement).checked
+    ).toBe(true)
+  );
+  expect(save).toHaveBeenCalledTimes(1);
+});
+
+it("blocks add, remove and drop during a mode save, then retries from the confirmed files", async () => {
+  let fail!: (error: Error) => void;
+  const save = vi
+    .fn()
+    .mockReturnValueOnce(
+      new Promise((_, reject) => {
+        fail = reject;
+      })
+    )
+    .mockResolvedValue({});
+  api.POST.mockResolvedValue({
+    data: { id: "new", name: "new.txt", mimetype: "text/plain", size: 4 },
+    response: new Response("{}")
+  });
+  const { container } = renderInApp(
+    <ResourceAttachmentsSection
+      attachments={[first]}
+      allowedAttachments={{
+        ...restrictions,
+        accepted_file_types: [{ mimetype: "text/plain", extensions: [".txt"], size_limit: 1000 }]
+      }}
+      description="Files"
+      attachmentMode={attachmentMode}
+      onSave={save}
+    />
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Ändra hur First.txt används" }));
+  fireEvent.click(screen.getByRole("radio", { name: "Läs in inför varje svar" }));
+  fireEvent.click(screen.getByRole("button", { name: "Ta bort First.txt" }));
+  const input = container.querySelector('input[type="file"]')!;
+  const file = new File(["test"], "new.txt", { type: "text/plain" });
+  fireEvent.change(input, { target: { files: [file] } });
+  fireEvent.drop(screen.getByText("Släpp filer här").parentElement!, {
+    dataTransfer: { types: ["Files"], files: [file], items: [] }
+  });
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(api.POST).not.toHaveBeenCalled();
+  expect(screen.getByText("First.txt")).toBeTruthy();
+  await act(async () => fail(new Error("save failed")));
+  fireEvent.change(input, { target: { files: [file] } });
+  await waitFor(() => expect(save).toHaveBeenCalledTimes(2));
+  expect(save).toHaveBeenLastCalledWith([
+    { id: "first", inline_text: false },
+    { id: "new", inline_text: false }
+  ]);
+});
+
+it("keeps existing files unchanged while a native upload is pending", async () => {
+  let finish!: (value: unknown) => void;
+  api.POST.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  const save = vi.fn().mockResolvedValue({});
+  const { container } = renderInApp(
+    <ResourceAttachmentsSection
+      attachments={[first]}
+      allowedAttachments={{
+        ...restrictions,
+        accepted_file_types: [{ mimetype: "text/plain", extensions: [".txt"], size_limit: 1000 }]
+      }}
+      description="Files"
+      attachmentMode={attachmentMode}
+      onSave={save}
+    />
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Ändra hur First.txt används" }));
+  fireEvent.change(container.querySelector('input[type="file"]')!, {
+    target: { files: [new File(["test"], "new.txt", { type: "text/plain" })] }
+  });
+  fireEvent.click(screen.getByRole("radio", { name: "Läs in inför varje svar" }));
+  fireEvent.click(screen.getByRole("button", { name: "Ta bort First.txt" }));
+  expect(save).not.toHaveBeenCalled();
+  expect((screen.getByRole("radio", { name: "Öppna vid behov" }) as HTMLInputElement).checked).toBe(
+    true
+  );
+  await act(async () =>
+    finish({
+      data: { id: "new", name: "new.txt", mimetype: "text/plain", size: 4 },
+      response: new Response("{}")
+    })
+  );
+  await waitFor(() =>
+    expect(save).toHaveBeenCalledWith([
+      { id: "first", inline_text: false },
+      { id: "new", inline_text: false }
+    ])
+  );
+});
