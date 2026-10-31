@@ -562,9 +562,9 @@ jobs:
     if: needs.changes.outputs.web_next_e2e == 'true'
     runs-on: ubuntu-24.04
     # During migration this job runs both Next and Vite suites sequentially.
-    # Setup plus both suites takes about 30 minutes; leave room for runner
-    # variation while still bounding a hung stack or browser.
-    timeout-minutes: 45
+    # The combined Flows build and Next suite take about 32 minutes before
+    # the native suite starts; leave room for both suites and runner variation.
+    timeout-minutes: 75
     env:
       # env.ts validates at import time, during the build and in `next start`.
       # The server talks to the stack's backend on the loopback port.

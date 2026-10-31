@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import type { Page } from "@playwright/test";
+import type { Schema } from "../src/lib/api/models";
 import type { FederationView } from "../src/features/admin/federation/federation";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "../src/components/shell/side-nav-preference";
 import { assertDocumented, WCAG_22_AA_TAGS } from "../src/test/wcag";
@@ -8,6 +9,7 @@ import {
   activityPill,
   addActivityToAnswers,
   apiPost,
+  apiRequest,
   askChatQuestion,
   auditLogs,
   chatComposer,
@@ -686,11 +688,13 @@ for (const colorScheme of ["light", "dark"] as const) {
       async ({ page }) => {
         const space = await createSpace(page, uniqueName(`E2E A11y Flows ${colorScheme}`));
         await page.goto(`${space}/overview`);
-        const flowsTab = page.getByRole("link", { name: /^(Flöden|Flows)$/ });
+        // A loading tab or its item count must not be mistaken for a disabled feature.
+        const settings = await apiRequest<Schema<"SettingsPublic">>(page, "/settings/");
         test.skip(
-          (await flowsTab.count()) === 0,
+          settings.flows_enabled !== true,
           "The tenant's flows_core gate is off in this stack, so the flow routes 404."
         );
+        await expect(page.getByRole("link", { name: /^(Flöden|Flows)( \(\d+\))?$/ })).toBeVisible();
 
         await scan(page, `${space}/flows`, async () => {
           await expect(
