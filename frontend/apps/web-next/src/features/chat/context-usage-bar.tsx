@@ -325,7 +325,7 @@ export function ContextUsageBar({
               <div
                 key={seg.key}
                 className={cn(
-                  "absolute top-0 bottom-0 my-auto h-[calc(100%-2px)] rounded-full transition-all duration-300 ease-out",
+                  "absolute top-0 bottom-0 my-auto h-[calc(100%-2px)] rounded-full transition-[left,width] duration-(--duration-medium-min) ease-[cubic-bezier(0.22,1,0.36,1)]",
                   segmentClass(seg.key)
                 )}
                 style={{

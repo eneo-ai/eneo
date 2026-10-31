@@ -565,18 +565,19 @@
   }
 }
 
-/* Radix keeps closing content mounted until its exit keyframe ends. */
+/* Radix keeps closing content mounted until its exit keyframe ends. One
+   reversible motion (an accordion): the same duration and curve both ways. */
 @layer components {
   .space-model-collapse {
     overflow: hidden;
   }
 
   .space-model-collapse[data-state="open"] {
-    animation: space-model-open var(--duration-fast-max) ease-out;
+    animation: space-model-open var(--duration-medium-min) cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .space-model-collapse[data-state="closed"] {
-    animation: space-model-close var(--duration-fast-max) ease-in;
+    animation: space-model-close var(--duration-medium-min) cubic-bezier(0.22, 1, 0.36, 1);
   }
 }
 
@@ -1178,6 +1179,14 @@
     }
   }
   .astryx-mobile-nav {
+    --duration-medium: var(--duration-medium-min);
+  }
+  /* What opens takes the drawer's 225 ms. Astryx's Dialog opens in 400 ms (and closes at once) and its
+     BottomSheet takes 300 ms each way; a sheet is the <dialog> that holds .astryx-bottom-sheet. */
+  .astryx-dialog {
+    --duration-medium-max: var(--duration-medium-min);
+  }
+  dialog:has(.astryx-bottom-sheet) {
     --duration-medium: var(--duration-medium-min);
   }
   .astryx-mobile-nav > div:first-child {
