@@ -66,6 +66,33 @@ export function mcpServerToolsQueryOptions(api: EneoClient, serverId: string) {
   });
 }
 
+export function mcpToolViewQueryOptions(api: EneoClient, serverId: string, tool: McpServerTool) {
+  return queryOptions({
+    queryKey: [...mcpToolsKey(serverId), tool.id, "view", tool.pending_ui_resource_sha256],
+    queryFn: ({ signal }) =>
+      unwrap(
+        api.GET("/api/v1/mcp-servers/{id}/tools/{tool_id}/view/", {
+          params: { path: { id: serverId, tool_id: tool.id } },
+          signal
+        })
+      )
+  });
+}
+
+export function renameMcpTool(
+  api: EneoClient,
+  serverId: string,
+  toolId: string,
+  displayName: string | null
+) {
+  return unwrap(
+    api.PUT("/api/v1/mcp-servers/{id}/tools/{tool_id}/display-name/", {
+      params: { path: { id: serverId, tool_id: toolId } },
+      body: { display_name: displayName }
+    })
+  );
+}
+
 /**
  * Create a global MCP server. The backend validates the connection and returns
  * a 400 on failure, so the resolved response always carries a successful
