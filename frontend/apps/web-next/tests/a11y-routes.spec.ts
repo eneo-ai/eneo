@@ -11,7 +11,8 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
 /*
  * axe (WCAG 2.2 A/AA: contrast, target size, names, structure) on every screen
- * of tests/responsive-routes.ts, on a phone and an iPad, in both colour modes.
+ * of tests/responsive-routes.ts, on a phone and an iPad (upright and sideways),
+ * in both colour modes.
  * The route list is the one the responsive contract walks, so a screen added
  * to the app is scanned here the day the contract learns about it. A screen
  * the list skips is skipped here too (its reason is in that file).
@@ -38,7 +39,10 @@ const VARIANTS = [
   { name: "phone", width: 390, height: 844, scheme: "light" },
   { name: "phone", width: 390, height: 844, scheme: "dark" },
   { name: "ipad", width: 820, height: 1180, scheme: "light" },
-  { name: "ipad", width: 820, height: 1180, scheme: "dark" }
+  { name: "ipad", width: 820, height: 1180, scheme: "dark" },
+  // Held sideways the iPad has the side navigation: a layout of its own.
+  { name: "ipad-landscape", width: 1180, height: 820, scheme: "light" },
+  { name: "ipad-landscape", width: 1180, height: 820, scheme: "dark" }
 ] as const;
 
 let fixtures: Fixtures;
