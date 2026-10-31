@@ -22,6 +22,16 @@ export const MOBILE_QUERY = `not all and ${MEDIA.lg}`;
 export const HANDHELD_QUERY =
   "(pointer: coarse) and (width < 48rem), (pointer: coarse) and (height < 31.25rem) and (width < 64rem)";
 
+/**
+ * A phone's layout: narrower than a phone, or a phone in a hand held sideways. A screen built for a
+ * phone with this stays built for one when the phone is turned, and keeps what is open on it.
+ */
+export function usePhoneScreen(): boolean {
+  const narrow = useMediaMatch(PHONE_QUERY);
+  const handheld = useMediaMatch(HANDHELD_QUERY);
+  return narrow || handheld;
+}
+
 /** Match the current viewport immediately and follow changes.
  * Astryx's useMediaQuery returns false until its effect measures the viewport.
  */

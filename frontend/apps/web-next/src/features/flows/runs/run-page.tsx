@@ -22,7 +22,7 @@ import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { CopyableValue } from "@/features/chat/debug-section";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
@@ -237,7 +237,7 @@ function FoldSection({
   defaultOpen?: boolean;
   children: React.ReactNode;
 }) {
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   if (!phone) return <Section title={title}>{children}</Section>;
   return (
     <section aria-label={title} className="border-ax-border border-t pt-1">
@@ -266,7 +266,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const sections = useSpaceSections();
   // A phone has the space's header above the page already: no breadcrumbs here, a narrower
   // gutter, and the sections after the result folded.
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const { data: flow } = useSuspenseQuery(flowQueryOptions(browserApi, flowId));
   const [clock] = useState(() => createPollClock());
   const [notice, setNotice] = useState<Notice | null>(null);

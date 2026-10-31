@@ -1715,6 +1715,22 @@ describe("FlowRunPage on a phone", () => {
     expect(steps.getAttribute("aria-expanded")).toBe("true");
   });
 
+  it("is the same page, still folded, when the phone is held sideways", async () => {
+    setViewport("phone");
+    answerRun(makeRunSummary());
+    renderRun();
+    await screen.findByText("Beslutet är fattat.");
+    const steps = screen.getByRole("button", { name: messages.flow_runs_steps_heading });
+    fireEvent.click(steps);
+    expect(steps.getAttribute("aria-expanded")).toBe("true");
+
+    // 844 px wide, but a phone in a hand: nothing remounts, so what is open stays open.
+    act(() => setViewport({ width: 844, height: 390, pointer: "coarse" }));
+    expect(screen.getByRole("button", { name: messages.flow_runs_steps_heading })).toBe(steps);
+    expect(steps.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.queryByRole("link", { name: "Flöden" })).toBeNull();
+  });
+
   it("has no breadcrumbs, and keeps them from a tablet up", async () => {
     setViewport("phone");
     answerRun(makeRunSummary());

@@ -248,6 +248,14 @@ describe("FlowsPage on a phone", () => {
     expect(screen.queryByRole("button", { name: "Nytt flöde" })).toBeNull();
   });
 
+  it("stays rows, with nothing to create, when the phone is held sideways", () => {
+    setViewport({ width: 844, height: 390, pointer: "coarse" });
+    renderPage(flows());
+    expect(screen.queryByRole("table")).toBeNull();
+    expect(screen.getByRole("list", { name: "Flöden" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Nytt flöde" })).toBeNull();
+  });
+
   it("keeps the table on a tablet", () => {
     setViewport("tablet-portrait");
     renderPage(flows());

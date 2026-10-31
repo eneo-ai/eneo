@@ -15,7 +15,7 @@ import { TextInput } from "@astryxdesign/core/TextInput";
 import { ClientTime } from "@/components/composites/client-time";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { EneoApiError } from "@/lib/api/errors";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { CitationSummary } from "./run-citations";
 import { focusFirstControl } from "./run-form-fields";
 import { JsonValue } from "./run-json";
@@ -212,7 +212,7 @@ function SpeakersEditor({
  */
 function DecisionBar({ children }: { children: React.ReactNode }) {
   const t = useTranslations();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   return phone ? (
     <DockedActions label={t("flow_runs_review_actions")}>{children}</DockedActions>
   ) : (

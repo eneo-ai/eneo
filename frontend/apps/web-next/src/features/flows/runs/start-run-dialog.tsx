@@ -15,7 +15,12 @@ import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
-import { HANDHELD_QUERY, PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import {
+  HANDHELD_QUERY,
+  PHONE_QUERY,
+  useMediaMatch,
+  usePhoneScreen
+} from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import { restrictedBeforeApproval } from "../flow-form-fields";
@@ -592,7 +597,7 @@ export function StartRunDialog({
   // footer that stacks with the primary action first, under the thumb. Held sideways it is wider
   // than a phone but just as short: the whole screen still, so the form scrolls above its footer.
   const phone = useMediaMatch(PHONE_QUERY);
-  const whole = useMediaMatch(HANDHELD_QUERY) || phone;
+  const whole = usePhoneScreen();
   const formId = useId();
   const [pending, setPending] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);

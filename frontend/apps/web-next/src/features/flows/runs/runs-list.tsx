@@ -31,7 +31,7 @@ import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { useDebouncedValue } from "../editor/use-debounced-value";
 import { formatCount, formatSeconds } from "./run-format";
@@ -230,7 +230,7 @@ export function FlowRunsList({
   const headingId = useId();
   const linkId = (runId: string) => `${headingId}-run-${runId}`;
   // A phone lists the runs as rows: six columns do not fit, and what it needs is the run, how it went, and the buttons.
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const person = { canRun: can("flows_run"), userId: user.id, publishedVersion };
   const [mine, setMine] = useState(false);
   const [status, setStatus] = useState<RunStatusValue | null>(null);
