@@ -44,6 +44,7 @@ const api = { GET: browserGet } as unknown as EneoClient;
 const env: AppContextEnv = {
   links: { accessibilityStatement: null, helpCenter: null, legacyApp: null },
   frontendVersion: "0.1.0",
+  frontendRevision: "frontend-commit",
   backendVersion: "1.2.3"
 };
 const signedIn = testAppContext();
@@ -106,6 +107,11 @@ const requested = () => browserGet.mock.calls.map(([path]) => path as string).so
 it("uses the loaded context without another request", async () => {
   await renderApp();
   expect(screen.getByTestId("user").textContent).toBe("Anna Lind");
+  expect(contextValues.at(-1)?.versions).toEqual({
+    frontend: "0.1.0",
+    frontendRevision: "frontend-commit",
+    backend: "1.2.3"
+  });
   expect(contextValues.at(-1)?.featureFlags.federation).toBe(false);
   await settle();
   expect(browserGet).not.toHaveBeenCalled();

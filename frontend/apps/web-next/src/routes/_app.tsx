@@ -9,6 +9,10 @@ import { loadSession, sessionQueries } from "@/lib/api/session";
 import { runtimeConfig } from "@/lib/runtime-config";
 import packageJson from "../../package.json";
 
+const frontendVersion = import.meta.env.APP_VERSION || packageJson.version;
+const buildRevision = import.meta.env.APP_REVISION;
+const frontendRevision = buildRevision && buildRevision !== "unknown" ? buildRevision : null;
+
 export const Route = createFileRoute("/_app")({
   beforeLoad: async ({ context }) => {
     await requireBrowserSession();
@@ -29,7 +33,8 @@ function AppLayout() {
         accessibilityStatement: config.accessibility_statement_url,
         helpCenter: config.help_center_url
       },
-      frontendVersion: packageJson.version,
+      frontendVersion,
+      frontendRevision,
       backendVersion: config.version,
       federationEnabled: config.federation_enabled
     }),

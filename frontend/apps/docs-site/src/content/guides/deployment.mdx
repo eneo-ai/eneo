@@ -1431,7 +1431,14 @@ docker buildx build --build-context web=./frontend -t eneo-backend:local backend
 ```
 
 The named `web` context is required. Published backend images already include
-the build. Configure the following in `env_backend.env`; the optional Compose
+the build. The image build arguments `APP_VERSION` and `APP_REVISION` identify
+both the bundled frontend and backend; the release workflow supplies them
+automatically. Custom builds can supply the same arguments. The account page
+shows the frontend's build version and, when supplied, commit alongside the
+backend's runtime version. Changing runtime environment variables does not
+change the identity embedded in the frontend assets.
+
+Configure the following in `env_backend.env`; the optional Compose
 overlay sets the two enable flags itself.
 
 | Variable | Default | Meaning |

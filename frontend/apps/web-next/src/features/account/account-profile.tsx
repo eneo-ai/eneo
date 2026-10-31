@@ -61,6 +61,12 @@ export function AccountProfile() {
       <SettingsRow title={t("version")}>
         <p className="text-muted-foreground text-sm">
           {t("version_frontend")} {versions.frontend}
+          {versions.frontendRevision ? (
+            <>
+              {" "}
+              (<code className="break-all">{versions.frontendRevision}</code>)
+            </>
+          ) : null}
           {versions.backend ? ` · ${t("version_backend")} ${versions.backend}` : null}
         </p>
       </SettingsRow>

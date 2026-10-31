@@ -19,7 +19,7 @@ export type AppContextData = {
     helpCenter: string | null;
     legacyApp: string | null;
   };
-  versions: { frontend: string; backend: string };
+  versions: { frontend: string; frontendRevision?: string | null; backend: string };
 };
 
 export type AppContextValue = AppContextData & {

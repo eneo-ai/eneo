@@ -8,12 +8,12 @@ import { WhatsNewProvider } from "@/features/whats-new/whats-new-provider";
 import { AppContextProvider, type AppContextData } from "./app-context";
 
 /**
- * What comes with the deployment rather than the session: in Next the server's
- * env and the backend version it read; runtime config in the Vite app.
+ * Deployment metadata, kept separate from the signed-in session queries.
  */
 export type AppContextEnv = {
   links: AppContextData["links"];
   frontendVersion: string;
+  frontendRevision?: string | null;
   backendVersion: string;
   federationEnabled?: boolean;
 };
@@ -21,8 +21,8 @@ export type AppContextEnv = {
 const session = sessionQueries(browserApi);
 
 /**
- * The signed-in app context from the session queries. Next hydrates these;
- * Vite starts them together in its route gate and suspends until they arrive.
+ * The signed-in app context from the session queries. The route gate starts
+ * them together and the mounted readers suspend until they arrive.
  * A failed refetch keeps the previous data (a suspense query throws only
  * while it has none).
  */
@@ -50,7 +50,11 @@ export function QueryAppContextProvider({
       featureFlags: { federation: env.federationEnabled ?? false },
       limits,
       links: env.links,
-      versions: { frontend: env.frontendVersion, backend: env.backendVersion }
+      versions: {
+        frontend: env.frontendVersion,
+        frontendRevision: env.frontendRevision,
+        backend: env.backendVersion
+      }
     }),
     [user, tenant, settings, federationStatus, limits, env]
   );

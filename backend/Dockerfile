@@ -1,3 +1,6 @@
+ARG APP_VERSION=0.0.0-dev
+ARG APP_REVISION=unknown
+
 FROM ghcr.io/astral-sh/uv:python3.11-bookworm-slim AS builder
 
 # Install system dependencies
@@ -49,6 +52,8 @@ RUN bun install --frozen-lockfile --ignore-scripts
 
 COPY --from=web apps/web-next ./apps/web-next
 WORKDIR /repo/apps/web-next
+ARG APP_VERSION
+ARG APP_REVISION
 RUN npm run build:vite
 
 # Production stage
@@ -88,6 +93,6 @@ WORKDIR /app
 USER 1000
 
 CMD ["sh", "-c", "./run.sh"]
-ARG APP_VERSION=0.0.0-dev
-ARG APP_REVISION=unknown
+ARG APP_VERSION
+ARG APP_REVISION
 ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}

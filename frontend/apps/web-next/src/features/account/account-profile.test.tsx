@@ -34,6 +34,19 @@ it("shows the frontend's and the backend's version", () => {
   expect(screen.getByText("Frontend 0.1.0 · Backend 2.3.0")).toBeTruthy();
 });
 
+it("identifies the frontend build separately from the backend version", () => {
+  const revision = "123456789abcdef123456789abcdef123456789ab";
+  renderInApp(<AccountProfile />, {
+    appContext: testAppContext({
+      versions: { frontend: "2.4.0", frontendRevision: revision, backend: "2.3.0" }
+    })
+  });
+
+  const commit = screen.getByText(revision);
+  expect(commit.tagName).toBe("CODE");
+  expect(commit.closest("p")?.textContent).toBe(`Frontend 2.4.0 (${revision}) · Backend 2.3.0`);
+});
+
 it("shows a username that differs from the email", () => {
   renderInApp(<AccountProfile />, {
     appContext: testAppContext({ user: { username: "anna.legacy" } })
