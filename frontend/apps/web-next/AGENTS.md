@@ -619,6 +619,7 @@ unchecked: add its route, with a way to open it.
 | WCAG 2.2 A/AA by axe (contrast, names, target size, structure) on every route, phone and iPad, light and dark        | `tests/a11y-routes.spec.ts` (`A11Y_ROUTES`, `A11Y_VARIANTS`, `A11Y_SHOTS=<dir>` saves a picture) |
 | The same with a dialog, menu or panel open, and what axe cannot see (collapsed table columns, reflow at 320)         | `tests/a11y.spec.ts`                                                                             |
 | A whole screen scrolling sideways with the text at 200% (a bar whose rem-sized controls no longer fit in a row)      | `tests/responsive-text-size.spec.ts`                                                             |
+| The skip link first, and a visible focus on each of the first 30 Tab stops, on every route (2.4.1, 2.4.7)            | `tests/keyboard-focus.spec.ts`                                                                   |
 | Keyboard, safe areas, short screens, header and focus across a breakpoint                                            | `tests/touch-platform.spec.ts`, `tests/header-continuity.spec.ts`                                |
 | Patterns in the source: `vh`, a fixed bar without safe area, missing labels, label association                       | `eslint` (the `no-restricted-syntax` selectors and `jsx-a11y`)                                   |
 

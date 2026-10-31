@@ -454,6 +454,13 @@ a screen. Every e2e spec imports `test`/`expect` from `tests/csp.ts`, so a CSP
 violation fails the run. Locally, run it against a dev server with a seeded
 backend (see `playwright.config.ts`); in CI it runs on the isolated e2e stack.
 
+`tests/a11y-routes.spec.ts` runs axe on every route of the responsive route
+list (phone and iPad, both colour modes), `tests/keyboard-focus.spec.ts` walks
+the first 30 Tab stops of each (the skip link first; every stop must look
+different focused than blurred, 2.4.7), and `tests/responsive-text-size.spec.ts`
+checks 200% text and the 1.4.12 text spacing. A screen added to
+`tests/responsive-routes.ts` is covered by all of them.
+
 ## Manual test protocol
 
 For every PR that changes UI, on the screens it touches, in light and dark
