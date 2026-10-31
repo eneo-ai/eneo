@@ -652,6 +652,7 @@ describe("KnowledgePage", () => {
   it("offers the next step for integrations in the empty state", () => {
     show(makeSpace(), "integrations");
     expect(screen.getByRole("heading", { name: "Inga integrationer ännu" })).toBeTruthy();
+    expect(screen.getByText(/^Importera innehåll från en ansluten tjänst/)).toBeTruthy();
   });
 
   it("moves focus to the tab panel when a deleted collection's row goes away", async () => {

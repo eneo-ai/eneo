@@ -15,6 +15,7 @@ import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { BackLink } from "@/components/composites/back-link";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { PageHeader } from "@/components/composites/page-header";
 import { LoadMore } from "@/components/composites/query-state";
 import { useClientTimeText } from "@/components/composites/client-time";
@@ -269,14 +270,16 @@ export function WebsiteDetail({
         </BackLink>
         <PageHeader title={formatWebsiteName(website)}>
           {!readonly && (
-            <CrawlRunControls
-              websiteId={website.id}
-              websiteDisplay={websiteDisplay}
-              activeRun={activeRun}
-              hasHistory={runs.length > 0}
-              startOpen={startOpen}
-              onStartOpenChange={setStartOpen}
-            />
+            <DockedActions label={t("website_detail_actions")}>
+              <CrawlRunControls
+                websiteId={website.id}
+                websiteDisplay={websiteDisplay}
+                activeRun={activeRun}
+                hasHistory={runs.length > 0}
+                startOpen={startOpen}
+                onStartOpenChange={setStartOpen}
+              />
+            </DockedActions>
           )}
         </PageHeader>
       </div>

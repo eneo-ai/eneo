@@ -142,6 +142,12 @@ describe("WebsiteDetail", () => {
   it("offers Kör igen with a history and Synkronisera nu before the first run", async () => {
     renderInApp(<WebsiteDetail websiteId="website-1" />);
     expect(await screen.findByRole("button", { name: "Kör igen" })).toBeTruthy();
+    // Docked at the bottom on a phone, in its place in the header from 768 px.
+    expect(
+      within(screen.getByRole("group", { name: "Webbplats, åtgärder" })).getByRole("button", {
+        name: "Kör igen"
+      })
+    ).toBeTruthy();
     cleanup();
 
     setRuns(null);

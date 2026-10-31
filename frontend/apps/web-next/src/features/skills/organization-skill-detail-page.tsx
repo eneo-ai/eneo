@@ -1,9 +1,9 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "@/lib/link";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
+import { BackLink } from "@/components/composites/back-link";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -76,9 +76,9 @@ export function OrganizationSkillDetailPage({ skillId }: { skillId: string }) {
         )}
       </PageHeader>
       <RefreshError queries={[skill]} />
-      <Button asChild variant="link" className="w-fit px-0">
-        <Link href={LIST_PATH}>{t("skills")}</Link>
-      </Button>
+      <BackLink href={LIST_PATH} hideOnPhone>
+        {t("skills")}
+      </BackLink>
       <p role="status" className={announcement ? "text-sm" : "sr-only"}>
         {announcement}
       </p>

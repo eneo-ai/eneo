@@ -227,11 +227,14 @@ function ResultTabs({
 export function ResultDetail({
   runId,
   backHref,
+  hideBackOnPhone = false,
   editHref,
   newRunHref
 }: {
   runId: string;
   backHref: string;
+  /** Only below a space tab, whose page bar has the back link under 768 px. */
+  hideBackOnPhone?: boolean;
   editHref?: string;
   newRunHref: string;
 }) {
@@ -253,7 +256,7 @@ export function ResultDetail({
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <BackLink href={backHref} hideOnPhone>
+        <BackLink href={backHref} hideOnPhone={hideBackOnPhone}>
           {t("back")}
         </BackLink>
         <PageHeader
@@ -275,7 +278,7 @@ export function ResultDetail({
       {/* The summary comes first, so a phone shows the status above the
           result; from 1024 px it is the column on the right. */}
       <div className="flex flex-col gap-8 lg:flex-row-reverse lg:items-start">
-        <aside className="flex w-full flex-col gap-3 lg:sticky lg:top-6 lg:w-64">
+        <aside className="flex w-full flex-col gap-3 md:max-w-sm lg:sticky lg:top-6 lg:w-64">
           <div className="flex">
             <AppRunStatusToken status={run.status} />
           </div>

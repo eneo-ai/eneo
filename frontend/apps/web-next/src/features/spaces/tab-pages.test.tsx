@@ -62,6 +62,12 @@ describe("AssistantsPage", () => {
 
     expect(screen.getByRole("heading", { level: 2, name: "Assistenter" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa assistent" })).toHaveLength(1);
+    // Docked at the bottom on a phone, like the apps and services tabs.
+    expect(
+      within(screen.getByRole("group", { name: "Assistenter, åtgärder" })).getByRole("button", {
+        name: "Skapa assistent"
+      })
+    ).toBeTruthy();
     const published = screen.getByRole("region", { name: "Publicerad" });
     const card = within(published).getByRole("link", { name: "Upphandlingsassistenten" });
     expect(card.getAttribute("href")).toBe("/spaces/space-1/chat?type=assistant&id=assistant-1");

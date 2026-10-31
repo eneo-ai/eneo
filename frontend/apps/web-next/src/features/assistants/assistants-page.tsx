@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { PageHeader } from "@/components/composites/page-header";
 import { ResourceCollection } from "@/components/composites/resource-tile";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
@@ -74,7 +75,13 @@ export function AssistantsPage() {
             headingLevel={2}
             headingRef={headingRef}
             title={t("assistants")}
-            actions={canCreate && items.length > 0 ? <CreateChatAppMenu /> : undefined}
+            actions={
+              canCreate && items.length > 0 ? (
+                <DockedActions label={t("space_assistants_actions")}>
+                  <CreateChatAppMenu />
+                </DockedActions>
+              ) : undefined
+            }
           />
           {items.length === 0 ? (
             <EmptyState

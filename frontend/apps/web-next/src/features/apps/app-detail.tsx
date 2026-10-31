@@ -1,12 +1,11 @@
 "use client";
 
+import { Button } from "@astryxdesign/core/Button";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import Link from "@/lib/link";
 import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
-import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
@@ -40,13 +39,10 @@ export function AppDetail({ appId }: { appId: string }) {
         <BackLink href={`/spaces/${routeId}/apps`} hideOnPhone>
           {t("apps")}
         </BackLink>
-        <PageHeader title={app.name}>
-          {canEdit && (
-            <Button asChild variant="outline">
-              <Link href={`${base}/edit`}>{t("edit")}</Link>
-            </Button>
-          )}
-        </PageHeader>
+        <PageHeader
+          title={app.name}
+          actions={canEdit && <Button href={`${base}/edit`} label={t("edit")} />}
+        />
       </div>
 
       <Tabs value={tab} onValueChange={selectTab}>

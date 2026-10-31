@@ -118,6 +118,7 @@ export function IntegrationsTab({
           icon={<Plug />}
           hue={AREA_HUES.knowledge}
           title={t("fix_integrations_empty_title")}
+          description={t("space_integrations_empty_description")}
           headingLevel={3}
           actions={action}
         />

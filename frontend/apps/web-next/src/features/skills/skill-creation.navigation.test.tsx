@@ -44,7 +44,7 @@ it.each([
     await act(async () =>
       replaceInstructionText(screen.getByLabelText("Instruktioner"), "Search the archive")
     );
-    fireEvent.click(screen.getByRole("button", { name: "Skapa Skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skapa skill" }));
     await screen.findByRole("heading", { name: "Saved Skill" });
     expect(screen.queryByRole("alertdialog")).toBeNull();
   }
@@ -101,7 +101,7 @@ it.each(
     await act(async () =>
       replaceInstructionText(screen.getByLabelText("Instruktioner"), "Search the archive")
     );
-    fireEvent.click(screen.getByRole("button", { name: "Skapa Skill" }));
+    fireEvent.click(screen.getByRole("button", { name: "Skapa skill" }));
     fireEvent.click(screen.getByRole("link", { name: "Leave editor" }));
     await screen.findByRole("alertdialog");
     fireEvent.click(screen.getByRole("button", { name: "Lämna utan att spara" }));
@@ -157,7 +157,7 @@ it.each([
       await act(async () =>
         replaceInstructionText(screen.getByLabelText("Instruktioner"), "Search the archive")
       );
-      fireEvent.click(screen.getByRole("button", { name: "Skapa Skill" }));
+      fireEvent.click(screen.getByRole("button", { name: "Skapa skill" }));
       await act(async () => router.history.back());
       await screen.findByRole("alertdialog");
       await act(async () => finish());

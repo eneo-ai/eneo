@@ -99,7 +99,7 @@ export function CreateChatAppMenu() {
     <>
       <div className="flex max-w-full">
         <Button
-          className="min-w-0 shrink rounded-r-none"
+          className="min-w-0 shrink grow rounded-r-none"
           aria-busy={createAssistant.isPending || undefined}
           onClick={createBlankAssistant}
         >

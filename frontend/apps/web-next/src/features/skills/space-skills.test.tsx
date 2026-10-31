@@ -116,6 +116,22 @@ describe("space Skills", () => {
     );
   });
 
+  it("offers one create action: docked with a list, only the empty state's without", async () => {
+    show(<SpaceSkillsPage />);
+    await screen.findByText("Reports");
+    expect(
+      within(screen.getByRole("group", { name: "space_skills_actions" })).getByRole("link", {
+        name: "skills_library_create"
+      })
+    ).toBeTruthy();
+    cleanup();
+
+    get.mockImplementation(() => ok({ items: [], next_cursor: null }));
+    show(<SpaceSkillsPage />);
+    await screen.findByRole("link", { name: "skills_library_create_first" });
+    expect(screen.queryByRole("link", { name: "skills_library_create" })).toBeNull();
+  });
+
   it("moves focus to the heading when the deleted skill's row goes away", async () => {
     remove.mockImplementation(() => {
       get.mockImplementation(() => ok({ items: [], next_cursor: null }));
