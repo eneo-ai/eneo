@@ -58,6 +58,7 @@ export const ROUTES: Record<string, Entry> = {
   "/admin/security-classifications": open("/admin/security-classifications"),
   "/admin/settings": open("/admin/settings"),
   "/admin/skills": open("/admin/skills"),
+  "/admin/user-groups": open("/admin/user-groups"),
   "/admin/storage": open("/admin/storage"),
   "/admin/templates": open("/admin/templates"),
   "/admin/tools": open("/admin/tools"),

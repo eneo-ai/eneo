@@ -47,6 +47,9 @@ export type PageHeaderProps = {
   className?: string;
 };
 
+/** Astryx draws the crumb link 25 px tall; a thumb needs the full touch size. */
+export const CRUMB_TOUCH = "pointer-coarse:[&>a]:min-h-11 pointer-coarse:[&>a]:min-w-11";
+
 /**
  * Page title block: optional breadcrumbs, h1 (or h2), optional description
  * and an actions slot. Server-component safe (Astryx parts are client
@@ -84,6 +87,7 @@ export function PageHeader({
               href={crumb.current ? undefined : crumb.href}
               // Explicit false: Astryx would otherwise mark the last crumb current.
               isCurrent={crumb.current ?? false}
+              className={CRUMB_TOUCH}
             >
               {crumb.label}
             </BreadcrumbItem>

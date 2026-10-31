@@ -90,7 +90,12 @@ export function measure(page: Page): Promise<PageMeasure> {
         !!element.closest("p, li, span, td");
       if (box.right > width + 1 || box.left < -1)
         violations.push({ kind: "outside", key: name(element) });
-      if (!inline && (box.width < minTarget - 0.5 || box.height < minTarget - 0.5))
+      // A list row's link is stretched over the whole row by its ::after
+      // (globals.css 12b), so the row is what a finger lands on.
+      const tapBox = element.matches(".astryx-item > a")
+        ? (element.closest(".astryx-item")?.getBoundingClientRect() ?? box)
+        : box;
+      if (!inline && (tapBox.width < minTarget - 0.5 || tapBox.height < minTarget - 0.5))
         violations.push({ kind: "small", key: name(element) });
       targets.push({ element: area, box });
     }
