@@ -404,7 +404,7 @@ export function CrawlerPage() {
     {
       key: "result",
       header: t("admin_crawler_result"),
-      width: pixel(260),
+      width: pixel(400),
       renderCell: (item) => <CrawlRunCounts run={item.run} />
     },
     {

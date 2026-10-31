@@ -136,7 +136,11 @@ export function CrawlRunCounts({
         <tr>
           <td />
           {columns.map((column) => (
-            <th key={column.key} scope="col" className="ps-3 pb-1 text-end font-normal">
+            <th
+              key={column.key}
+              scope="col"
+              className="ps-3 pb-1 text-end font-normal whitespace-nowrap"
+            >
               {column.label}
             </th>
           ))}
@@ -145,7 +149,7 @@ export function CrawlRunCounts({
       <tbody>
         {rows.map((row) => (
           <tr key={row.kind}>
-            <th scope="row" className="py-0.5 text-start font-normal">
+            <th scope="row" className="py-0.5 text-start font-normal whitespace-nowrap">
               {row.label}
             </th>
             {columns.map((column) => {
