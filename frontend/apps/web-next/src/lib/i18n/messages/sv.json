@@ -7034,5 +7034,7 @@
   "api_keys_no_search_matches": "Inga matchande API-nycklar",
   "api_keys_notifications_reminder_days_label": "Påminnelsedagar",
   "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
-  "api_keys_notifications_add_day": "Lägg till {days} dagar"
+  "api_keys_notifications_add_day": "Lägg till {days} dagar",
+  "sharepoint_import_selection_count": "{count} av {limit} objekt valda",
+  "sharepoint_import_selection_limit": "Importera högst {limit} objekt åt gången. Ta bort valda filer eller mappar för att fortsätta."
 }

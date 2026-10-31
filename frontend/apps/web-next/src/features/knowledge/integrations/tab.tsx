@@ -110,7 +110,7 @@ export function IntegrationsTab({
       {integrationRequestFormUrl ? (
         <IntegrationsBetaNotice integrationRequestFormUrl={integrationRequestFormUrl} />
       ) : null}
-      {showImport && <ImportKnowledgeDialog open={showImport} onOpenChange={setShowImport} />}
+      <ImportKnowledgeDialog open={showImport} onOpenChange={setShowImport} />
       {items.length === 0 ? (
         // Nothing to list yet: the empty state carries the one action.
         <EmptyState

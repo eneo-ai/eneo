@@ -1791,5 +1791,7 @@
   "api_keys_notifications_days_validation": "Enter positive whole numbers separated by commas, within your organization's limit.",
   "api_keys_notifications_reminder_days_label": "Reminder days",
   "api_keys_notifications_reminder_days_description": "Enter the number of days before expiry, separated by commas.",
-  "api_keys_notifications_add_day": "Add {days} days"
+  "api_keys_notifications_add_day": "Add {days} days",
+  "sharepoint_import_selection_count": "{count} of {limit} items selected",
+  "sharepoint_import_selection_limit": "Import at most {limit} items at a time. Remove selected files or folders to continue."
 }

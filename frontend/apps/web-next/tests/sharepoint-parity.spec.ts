@@ -224,7 +224,7 @@ test.describe("SharePoint import on touch", () => {
       await expect(dialog.getByText("1 objekt kunde inte köas.", { exact: true })).toBeVisible();
       await expect(dialog.getByRole("link", { name: "Visa importen" })).toHaveAttribute(
         "href",
-        `${space}/knowledge/integrations/wrapper/created-wrapper`
+        `${space}/knowledge/integrations/created-source`
       );
       expect(batch).toMatchObject({
         wrapper_name: "Personal",
@@ -235,11 +235,114 @@ test.describe("SharePoint import on touch", () => {
         path: testInfo.outputPath("sharepoint-import-complete-phone.png"),
         fullPage: true
       });
-      await dialog.getByRole("button", { name: "Stäng", exact: true }).last().click();
+      await dialog.getByRole("link", { name: "Visa importen" }).click();
+      await expect(page).toHaveURL(
+        `${space}/knowledge/integrations/wrapper/created-wrapper?folder=created-source`
+      );
       await expect(dialog).toBeHidden();
     }
   );
 });
+
+test(
+  "keeps one pending import while closing and reopening through the source selector",
+  { tag: "@vite" },
+  async ({ page }, testInfo) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    const space = await createSpace(page, uniqueName("E2E Pending SharePoint"));
+    await page.route(/\/api\/v1\/integrations\/spaces\/[^/]+\/available\/$/, (route) =>
+      reply(route, {
+        items: [
+          {
+            id: "connection",
+            tenant_integration_id: "tenant-connection",
+            name: "SharePoint",
+            description: "",
+            integration_type: "sharepoint",
+            auth_type: "tenant_app",
+            connected: true
+          }
+        ]
+      })
+    );
+    await page.route(/\/api\/v1\/integrations\/connection\/preview\/$/, (route) =>
+      reply(route, {
+        items: [
+          { key: "site", type: "site", name: "Intranätet", url: "https://sharepoint.example.test/" }
+        ]
+      })
+    );
+    await page.route(/\/api\/v1\/integrations\/connection\/sharepoint\/tree\//, (route) =>
+      reply(route, { items: [], current_path: "/", drive_id: "drive" })
+    );
+    let posts = 0;
+    let release!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(
+      /\/api\/v1\/spaces\/[^/]+\/knowledge\/integrations\/add\/connection\/batch\/$/,
+      async (route) => {
+        posts += 1;
+        await finished;
+        await reply(route, {
+          created_count: 1,
+          failed_count: 0,
+          items: [
+            {
+              index: 0,
+              name: "Intranätet",
+              status: "created",
+              integration_knowledge_id: "created-source"
+            }
+          ]
+        });
+      }
+    );
+    await page.goto(`${space}/knowledge?tab=integrations`);
+    const start = async () => {
+      await page
+        .getByRole("main")
+        .getByRole("button", { name: "Importera kunskap", exact: true })
+        .click();
+      await page.getByRole("button", { name: "Fortsätt" }).click();
+    };
+    const choose = async () => {
+      await page.getByRole("button", { name: "Intranätet", exact: true }).click();
+      await page.getByRole("checkbox", { name: "Importera hela webbplatsen" }).check();
+    };
+    try {
+      await start();
+      await choose();
+      await page.getByRole("button", { name: "Importera", exact: true }).click();
+      await expect.poll(() => posts).toBe(1);
+      await page.getByRole("dialog").getByRole("button", { name: "Stäng", exact: true }).click();
+      await expect(page.getByRole("dialog")).toBeHidden();
+      await start();
+      await page.getByRole("button", { name: "Tillbaka", exact: true }).click();
+      await page.getByRole("button", { name: "Fortsätt" }).click();
+      await choose();
+      const draft = page.getByRole("textbox", { name: "Importnamn för Intranätet" });
+      await draft.fill("Ny draft");
+      const submit = page.getByRole("button", { name: "Importerar...", exact: true });
+      await expect(submit).toHaveAttribute("aria-busy", "true");
+      await submit.click();
+      expect(posts).toBe(1);
+      release();
+      await expect(page.getByRole("button", { name: "Importera", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "Import köad" })).toHaveCount(0);
+      await expect(draft).toHaveValue("Ny draft");
+      expect(posts).toBe(1);
+      await scan(page);
+      await page.screenshot({
+        path: testInfo.outputPath("sharepoint-reopened-draft.png"),
+        fullPage: true
+      });
+    } finally {
+      release();
+    }
+  }
+);
 
 const crawl = (id: string, created_at: string) => ({
   id,

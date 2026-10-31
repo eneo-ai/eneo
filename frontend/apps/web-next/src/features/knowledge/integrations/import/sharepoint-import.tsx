@@ -2,7 +2,6 @@
 
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { useCollator } from "@astryxdesign/core/i18n";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Globe, Search } from "lucide-react";
@@ -35,7 +34,7 @@ import { useJobs } from "@/features/jobs/use-jobs";
 import { useSpace } from "@/features/spaces/use-space";
 import { EmbeddingModelSelect } from "../../embedding-model-select";
 import { trackImports } from "../import-completion";
-import { groupIntegrationSources, sourceHref } from "../sources";
+import { sourceHref } from "../sources";
 import { KNOWLEDGE_NAME_MAX_LENGTH } from "../knowledge-names";
 import {
   integrationPreviewQueryOptions,
@@ -52,6 +51,9 @@ import {
   type SelectedImportItem,
   type SelectedTreeItem
 } from "./selection";
+
+// CreateSpaceIntegrationKnowledgeBatchRequest accepts at most 50 items.
+const MAX_SHAREPOINT_IMPORT_ITEMS = 50;
 
 /** One batch import, as the form hands it to the dialog that owns the request. */
 type SharePointBatch = {
@@ -188,7 +190,6 @@ function SharePointImportForm({
 }) {
   const t = useTranslations();
   const locale = useLocale();
-  const collator = useCollator();
   const announce = useAnnounce();
   const { space, routeId } = useSpace();
 
@@ -250,8 +251,15 @@ function SharePointImportForm({
 
   const noModels = space.embedding_models.length === 0 || !embeddingModelId;
   const siteProblem = !site ? t("form_problem_choose_sharepoint_site") : null;
-  const itemsProblem =
-    site && selected.length === 0 ? t("form_problem_choose_sharepoint_items") : null;
+  const selectionTooLarge = selected.length > MAX_SHAREPOINT_IMPORT_ITEMS;
+  const itemsProblem = !site
+    ? null
+    : selected.length === 0
+      ? t("form_problem_choose_sharepoint_items")
+      : selectionTooLarge
+        ? t("sharepoint_import_selection_limit", { limit: MAX_SHAREPOINT_IMPORT_ITEMS })
+        : null;
+  const visibleItemsProblem = submitted || selectionTooLarge ? itemsProblem : null;
   const wrapperNameProblem = wrapperNameMissing ? t("sharepoint_wrapper_name_missing_hint") : null;
   const shown = (problem: string | null) => (submitted ? problem : null);
 
@@ -328,21 +336,9 @@ function SharePointImportForm({
   const selectedKeys = new Set(selected.map((entry) => entry.selectionKey));
 
   if (result) {
-    const createdIds = new Set(
-      result.items
-        .filter((item) => item.status === "created" && item.integration_knowledge_id)
-        .map((item) => item.integration_knowledge_id!)
-    );
-    const sources = groupIntegrationSources(
-      space.knowledge.integration_knowledge_list.items.filter((item) => createdIds.has(item.id)),
-      collator.compare
-    );
-    const wrapper = sources.find((source) => source.kind === "wrapper");
-    const href = wrapper
-      ? sourceHref(routeId, wrapper)
-      : createdIds.size === 1
-        ? sourceHref(routeId, { kind: "item", id: [...createdIds][0]! })
-        : `/spaces/${routeId}/knowledge?tab=integrations`;
+    const createdId = result.items.find(
+      (item) => item.status === "created" && item.integration_knowledge_id
+    )?.integration_knowledge_id;
     return (
       <>
         <DialogHeader>
@@ -382,14 +378,15 @@ function SharePointImportForm({
           )}
         </section>
         <DialogFooter>
-          {result.created_count > 0 ? (
+          {createdId && (
             <AstryxButton
               label={t("integration_import_view_site")}
-              href={href}
+              href={sourceHref(routeId, { kind: "item", id: createdId })}
               onClick={onClose}
               variant="secondary"
             />
-          ) : (
+          )}
+          {result.created_count === 0 && (
             <AstryxButton
               label={t("retry")}
               onClick={() => {
@@ -512,7 +509,7 @@ function SharePointImportForm({
             role="group"
             tabIndex={-1}
             aria-label={t("sharepoint_step_content")}
-            {...fieldProblemProps("sharepoint-tree", shown(itemsProblem))}
+            {...fieldProblemProps("sharepoint-tree", visibleItemsProblem)}
           >
             <SharePointFolderTree
               userIntegrationId={userIntegrationId}
@@ -534,13 +531,16 @@ function SharePointImportForm({
               }}
             />
           </div>
-          <FieldProblem id="sharepoint-tree" problem={shown(itemsProblem)} />
+          <FieldProblem id="sharepoint-tree" problem={visibleItemsProblem} />
 
           {selected.length > 0 && (
             <>
               <div className="bg-accent rounded-md border px-3 py-2">
                 <div className="text-sm font-medium">
-                  {t("sharepoint_selected_items_count", { count: String(selected.length) })}
+                  {t("sharepoint_import_selection_count", {
+                    count: selected.length,
+                    limit: MAX_SHAREPOINT_IMPORT_ITEMS
+                  })}
                 </div>
               </div>
 

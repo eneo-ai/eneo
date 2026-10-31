@@ -22,7 +22,7 @@ vi.mock("@/features/spaces/use-space", async () => {
   return { useSpace: () => useSpaceFromQuery(() => space.current as Space) };
 });
 
-import { makeIntegration, makeSpace } from "@/features/spaces/testing/space-fixture";
+import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import type { UserIntegration } from "../queries";
 import { pendingImports, resetPendingImports } from "../import-completion";
 import { ConfluenceImportDialog } from "./confluence-import";
@@ -457,91 +457,88 @@ it("Confluence and SharePoint: the source search ignores a trailing space", asyn
   expect(within(sites).queryByRole("button", { name: "Intranätet" })).toBeNull();
 });
 
-it("SharePoint: links a queued batch to the wrapper returned by the refreshed space", async () => {
-  space.current = makeSpace();
-  api.GET.mockImplementation((path: string) =>
-    ok(
-      path.endsWith("/preview/")
-        ? { items: [{ key: "site", type: "site", name: "Intranätet", url: "https://sp/intra" }] }
-        : { items: [], current_path: "/", drive_id: "drive" }
-    )
-  );
-  api.POST.mockImplementation(() => {
-    space.current = makeSpace({
-      integrations: [makeIntegration({ id: "ik-1", wrapper_id: "wrapper-1" })]
-    });
-    return ok({
-      created_count: 1,
-      failed_count: 0,
-      items: [{ index: 0, name: "Intranätet", status: "created", integration_knowledge_id: "ik-1" }]
-    });
-  });
-  renderInApp(
-    <SharePointImportDialog
-      open
-      onOpenChange={() => {}}
-      onBack={() => {}}
-      integration={integration("sharepoint")}
-    />
-  );
-  fireEvent.click(await screen.findByRole("button", { name: "Intranätet" }));
-  fireEvent.click(await screen.findByRole("checkbox", { name: "Importera hela webbplatsen" }));
-  fireEvent.click(screen.getByRole("button", { name: "Importera" }));
-  await waitFor(() =>
-    expect(screen.getByRole("link", { name: "Visa importen" }).getAttribute("href")).toBe(
-      "/spaces/space-1/knowledge/integrations/wrapper/wrapper-1"
-    )
-  );
-});
-
-it("SharePoint: a late completed import cannot replace a reopened form or submit twice", async () => {
-  space.current = makeSpace();
-  api.GET.mockImplementation((path: string) =>
-    ok(
-      path.endsWith("/preview/")
-        ? { items: [{ key: "site", type: "site", name: "Intranätet", url: "https://sp/intra" }] }
-        : { items: [], current_path: "/", drive_id: "drive" }
-    )
-  );
-  let finish!: () => void;
-  api.POST.mockReturnValue(
-    new Promise((resolve) => {
-      finish = () =>
-        resolve({
-          data: {
-            created_count: 1,
-            failed_count: 0,
-            items: [
-              { index: 0, name: "Intranätet", status: "created", integration_knowledge_id: "ik-1" }
-            ]
-          },
-          response: new Response("{}")
+it.each(["bulk", "accumulated"])(
+  "SharePoint: preserves an oversized %s selection until it is reduced to the batch limit",
+  async (mode) => {
+    space.current = makeSpace();
+    const files = Array.from({ length: 51 }, (_, index) => ({
+      id: `file-${index}`,
+      type: "file",
+      name: `Fil ${index}.pdf`,
+      path: `/Policyer/Fil ${index}.pdf`
+    }));
+    api.GET.mockImplementation((path: string, args?: { params: { query: { q?: string } } }) => {
+      if (path.endsWith("/preview/"))
+        return ok({
+          items: [{ key: "site", type: "site", name: "Intranätet", url: "https://sp/intra" }]
         });
-    })
-  );
-  const dialog = (open: boolean) => (
-    <SharePointImportDialog
-      open={open}
-      onOpenChange={() => {}}
-      onBack={() => {}}
-      integration={integration("sharepoint")}
-    />
-  );
-  const { rerender } = renderInApp(dialog(true));
-  fireEvent.click(await screen.findByRole("button", { name: "Intranätet" }));
-  fireEvent.click(await screen.findByRole("checkbox", { name: "Importera hela webbplatsen" }));
-  fireEvent.click(screen.getByRole("button", { name: "Importera" }));
-  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
-  rerender(dialog(false));
-  rerender(dialog(true));
-  fireEvent.click(await screen.findByRole("button", { name: "Intranätet" }));
-  fireEvent.click(await screen.findByRole("checkbox", { name: "Importera hela webbplatsen" }));
-  fireEvent.click(screen.getByRole("button", { name: "Importerar..." }));
-  expect(api.POST).toHaveBeenCalledTimes(1);
-  await act(async () => {
-    finish();
-  });
-  await screen.findByRole("button", { name: "Importera" });
-  expect(screen.queryByRole("heading", { name: "Import köad" })).toBeNull();
-  expect(screen.getByRole("checkbox", { name: "Importera hela webbplatsen" })).toBeTruthy();
-});
+      const q = args?.params.query.q;
+      return ok({
+        items: path.endsWith("/search/")
+          ? q === "first"
+            ? files.slice(0, 49)
+            : q === "last"
+              ? files.slice(49)
+              : files
+          : [
+              {
+                id: "parent",
+                type: "folder",
+                name: "Policyer",
+                path: "/Policyer",
+                has_children: true
+              }
+            ],
+        current_path: "/",
+        drive_id: "drive"
+      });
+    });
+    api.POST.mockImplementation(() => new Promise(() => {}));
+    renderInApp(
+      <SharePointImportDialog
+        open
+        onOpenChange={() => {}}
+        onBack={() => {}}
+        integration={integration("sharepoint")}
+      />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Intranätet" }));
+    const search = screen.getByRole("searchbox");
+    fireEvent.change(search, { target: { value: mode === "bulk" ? "all" : "first" } });
+    fireEvent.click(
+      await screen.findByRole("button", {
+        name: `Välj alla träffar (${mode === "bulk" ? 51 : 49})`
+      })
+    );
+    if (mode === "accumulated") {
+      fireEvent.change(search, { target: { value: "last" } });
+      fireEvent.click(await screen.findByRole("button", { name: "Välj alla träffar (2)" }));
+    }
+    fireEvent.change(screen.getByRole("textbox", { name: /^Gruppnamn/ }), {
+      target: { value: "Policyer" }
+    });
+    expect(screen.getByText("51 av 50 objekt valda")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Importera högst 50 objekt åt gången. Ta bort valda filer eller mappar för att fortsätta."
+      )
+    ).toBeTruthy();
+    expect(screen.getAllByRole("textbox", { name: /^Importnamn för/ })).toHaveLength(51);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Importera" }));
+    });
+    expect(api.POST).not.toHaveBeenCalled();
+    if (mode === "bulk") {
+      fireEvent.click(screen.getByRole("checkbox", { name: "Fil 50.pdf" }));
+      expect(screen.getByText("50 av 50 objekt valda")).toBeTruthy();
+    } else {
+      fireEvent.change(search, { target: { value: "" } });
+      fireEvent.click(await screen.findByRole("checkbox", { name: "Policyer" }));
+      expect(screen.getByText("1 av 50 objekt valda")).toBeTruthy();
+      expect(screen.getAllByRole("textbox", { name: /^Importnamn för/ })).toHaveLength(1);
+    }
+    fireEvent.click(screen.getByRole("button", { name: "Importera" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(api.POST.mock.calls[0]?.[1].body.items).toHaveLength(mode === "bulk" ? 50 : 1);
+  }
+);
