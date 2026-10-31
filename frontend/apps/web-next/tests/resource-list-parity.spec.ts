@@ -1,4 +1,3 @@
-import type { Page } from "@playwright/test";
 import type { Space } from "../src/features/spaces/space";
 import type { Schema } from "../src/lib/api/models";
 import { expect, test } from "./csp";
