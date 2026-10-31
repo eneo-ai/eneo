@@ -24,6 +24,7 @@ export function AppSwitcher({ appId }: { appId: string }) {
       onOpenChange={setOpen}
       label={t("select_an_app")}
       closeButtonLabel={t("close")}
+      alignment="end"
       width="24rem"
       content={
         <nav aria-label={t("select_an_app")} className="max-h-80 overflow-y-auto p-2">
