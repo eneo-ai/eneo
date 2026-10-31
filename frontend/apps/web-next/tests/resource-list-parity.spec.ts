@@ -104,6 +104,19 @@ for (const kind of ["apps", "assistants"] as const) {
         "true"
       );
       await expect(published.getByRole("table")).toHaveCount(0);
+      await page.getByRole("button", { name: /^Sortera: Namn/ }).click();
+      await expect(
+        page.getByRole("menuitemradio", { name: "Namn · Stigande", exact: true })
+      ).toBeChecked();
+      await page.getByRole("menuitemradio", { name: "Namn · Fallande", exact: true }).click();
+      await expect(
+        page.getByRole("button", { name: "Sortera: Namn · Fallande", exact: true })
+      ).toBeVisible();
+      expect(
+        await published
+          .getByRole("link")
+          .evaluateAll((links) => links.map((link) => link.getAttribute("aria-label")))
+      ).toEqual([resources[1]!.name, resources[0]!.name]);
       await page.setViewportSize({ width: 320, height: 900 });
       await page.emulateMedia({ colorScheme: "dark" });
       await expect(listButton).toHaveCount(0);

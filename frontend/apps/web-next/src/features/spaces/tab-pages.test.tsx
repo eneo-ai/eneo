@@ -306,3 +306,22 @@ it("keeps an assistant with the schema's omitted publication default in Drafts",
     within(screen.getByRole("region", { name: "Utkast" })).getByRole("link", { name: draft.name })
   ).toBeTruthy();
 });
+
+it("exposes card sort choices as a checked radio group and applies the chosen direction", async () => {
+  const app = { id: "z", name: "Zeta", published: true, user_id: "u", permissions: ["read"] };
+  show(makeSpace({ apps: [app, { ...app, id: "a", name: "Alfa" }] }), <AppsPage />);
+  const sort = screen.getByRole("button", { name: /^Sortera: Namn/ });
+  fireEvent.click(sort);
+  expect(
+    (await screen.findByRole("menuitemradio", { name: "Namn · Stigande" })).getAttribute(
+      "aria-checked"
+    )
+  ).toBe("true");
+  fireEvent.click(screen.getByRole("menuitemradio", { name: "Namn · Fallande" }));
+  expect(screen.getByRole("button", { name: "Sortera: Namn · Fallande" })).toBeTruthy();
+  expect(
+    within(screen.getByRole("region", { name: "Publicerad" }))
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("aria-label"))
+  ).toEqual(["Zeta", "Alfa"]);
+});

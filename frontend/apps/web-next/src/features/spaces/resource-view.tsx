@@ -1,9 +1,13 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
-import { DropdownMenu, DropdownMenuItem } from "@astryxdesign/core/DropdownMenu";
+import {
+  DropdownMenu,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem
+} from "@astryxdesign/core/DropdownMenu";
 import type { UseTableSortableConfig } from "@astryxdesign/core/Table";
-import { ArrowDown, ArrowUp, Check, LayoutGrid, List } from "lucide-react";
+import { ArrowDown, ArrowUp, LayoutGrid, List } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
@@ -48,12 +52,22 @@ export function ResourceViewControls<Key extends string>({
   const t = useTranslations();
   const phone = useMediaMatch(PHONE_QUERY);
   const selected = sortConfig.sort[0];
-  const current = options.find((option) => option.key === selected?.sortKey) ?? options[0];
+  const choices = options.flatMap((option) =>
+    (["ascending", "descending"] as const).map((direction) => ({
+      sortKey: option.key,
+      direction,
+      value: `${option.key}:${direction}`,
+      label: `${option.label} · ${t(direction === "ascending" ? "resource_sort_ascending" : "resource_sort_descending")}`
+    }))
+  );
+  const current = choices.find(
+    (choice) => choice.sortKey === selected?.sortKey && choice.direction === selected.direction
+  );
   return (
     <div className="flex flex-wrap items-center gap-2">
       <DropdownMenu
         button={{
-          label: `${t("resource_sort")}: ${current?.label ?? ""}`,
+          label: `${t("resource_sort")}: ${current?.label ?? options[0]?.label ?? ""}`,
           icon:
             selected?.direction === "descending" ? (
               <ArrowDown aria-hidden="true" />
@@ -62,20 +76,19 @@ export function ResourceViewControls<Key extends string>({
             )
         }}
       >
-        {options.flatMap((option) =>
-          (["ascending", "descending"] as const).map((direction) => (
-            <DropdownMenuItem
-              key={`${option.key}-${direction}`}
-              label={`${option.label} · ${t(direction === "ascending" ? "resource_sort_ascending" : "resource_sort_descending")}`}
-              icon={
-                selected?.sortKey === option.key && selected.direction === direction
-                  ? Check
-                  : undefined
-              }
-              onClick={() => sortConfig.onSortChange([{ sortKey: option.key, direction }])}
-            />
-          ))
-        )}
+        <DropdownMenuRadioGroup
+          label={t("resource_sort")}
+          value={current?.value}
+          onChange={(value) => {
+            const choice = choices.find((choice) => choice.value === value);
+            if (choice)
+              sortConfig.onSortChange([{ sortKey: choice.sortKey, direction: choice.direction }]);
+          }}
+        >
+          {choices.map((choice) => (
+            <DropdownMenuRadioItem key={choice.value} value={choice.value} label={choice.label} />
+          ))}
+        </DropdownMenuRadioGroup>
       </DropdownMenu>
       {phone !== true && (
         <div role="group" aria-label={t("resource_view")} className="flex gap-1 max-md:hidden">
