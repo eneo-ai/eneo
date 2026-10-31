@@ -5,7 +5,7 @@ import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Button } from "@astryxdesign/core/Button";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { QuietBanner } from "@/components/astryx/banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime } from "@/components/composites/client-time";
@@ -217,13 +217,16 @@ export function UserApiKeyList({
   scope,
   limit,
   toolbar,
-  onRotated
+  onRotated,
+  onLoaded
 }: {
   scope?: { type: ResourceScopeType; id: string; name: string };
   limit: number;
   /** Beside the state tabs (the account page's Create). */
   toolbar?: ReactNode;
   onRotated: (secret: string) => void;
+  /** Called once the first page has arrived, or failed: what waits for it may show. */
+  onLoaded?: () => void;
 }) {
   const t = useTranslations();
   const [stateFilter, setStateFilter] = useState<ApiKeyStateFilter>("active");
@@ -252,6 +255,9 @@ export function UserApiKeyList({
         })
       )
   });
+  useEffect(() => {
+    if (!keys.isPending) onLoaded?.();
+  }, [keys.isPending, onLoaded]);
   const loadedKeys = flattenPages(keys.data?.pages);
   const searchTerm = search.trim().toLocaleLowerCase();
   const visibleKeys = loadedKeys.filter((key) =>
@@ -291,7 +297,8 @@ export function UserApiKeyList({
           <Button
             label={t("api_keys_refresh")}
             variant="secondary"
-            isLoading={keys.isFetching}
+            // Not for the first load: the spinner would widen the button (layout shift).
+            isLoading={keys.isRefetching}
             isInterruptible
             onClick={() => {
               if (!keys.isFetching) void keys.refetch();
@@ -301,17 +308,18 @@ export function UserApiKeyList({
         </div>
       </div>
 
-      {(loadedKeys.length > 3 || search !== "") && (
-        <TextInput
-          label={t("api_keys_search_label")}
-          value={search}
-          onChange={setSearch}
-          placeholder={t("api_keys_search_placeholder")}
-          description={t("api_keys_search_loaded_hint")}
-          width="100%"
-          {...KEYBOARD.search}
-        />
-      )}
+      {/* Always there, disabled while the keys load: shown only for a longer list, it
+          pushed the table down by its height when the keys arrived (layout shift). */}
+      <TextInput
+        label={t("api_keys_search_label")}
+        value={search}
+        onChange={setSearch}
+        isDisabled={keys.isPending}
+        placeholder={t("api_keys_search_placeholder")}
+        description={t("api_keys_search_loaded_hint")}
+        width="100%"
+        {...KEYBOARD.search}
+      />
 
       {/* The keys in the selected state: the state tabs' panel. */}
       <div

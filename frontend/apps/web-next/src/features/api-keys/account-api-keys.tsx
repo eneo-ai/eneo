@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@astryxdesign/core/Button";
 import { Bell } from "lucide-react";
-import { useId, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { useTranslations } from "use-intl";
 import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
@@ -249,12 +249,14 @@ export function ApiKeys() {
   const t = useTranslations();
   const { can } = useAppContext();
   const secrets = useSecretReveal();
+  const [keysLoaded, setKeysLoaded] = useState(false);
+  const onKeysLoaded = useCallback(() => setKeysLoaded(true), []);
 
   return (
     <div data-tour="account-api-keys" className="flex flex-col gap-4">
-      <NotificationPreferencesPanel />
       <UserApiKeyList
         limit={25}
+        onLoaded={onKeysLoaded}
         onRotated={secrets.reveal(t("api_keys_rotated_title"))}
         toolbar={
           can("api_keys") ? (
@@ -268,6 +270,10 @@ export function ApiKeys() {
           )
         }
       />
+      {/* Below the keys, and once they are there: above, it pushed the list down by its
+          whole height when it loaded; below but earlier, the rows pushed it off the
+          screen (layout shift both ways). */}
+      {keysLoaded && <NotificationPreferencesPanel />}
       {secrets.dialog}
     </div>
   );

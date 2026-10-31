@@ -93,24 +93,30 @@ export function AdminSkillsPage() {
           )
         }
       </QueryStateBoundary>
-      <SettingsGroup
-        id="skill-catalogue"
-        title={t("admin_skills_catalogue_title")}
-        description={t("admin_skills_catalogue_description")}
-        headerEnd={<Badge variant="outline">{t("admin_skills_catalogue_summary")}</Badge>}
-      >
-        <p className="text-muted-foreground text-sm">{t("admin_skills_catalogue_bindings_note")}</p>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild>
-            <Link href="/spaces/organization/skills">{t("governance_manage_skills_action")}</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/admin/personal-assistant">
-              {t("admin_skills_open_personal_assistant")}
-            </Link>
-          </Button>
-        </div>
-      </SettingsGroup>
+      {/* Once the policy has loaded, with the editor: shown first, it sat in view and
+          was pushed off the screen when the editor arrived above it (layout shift). */}
+      {!policy.isPending && (
+        <SettingsGroup
+          id="skill-catalogue"
+          title={t("admin_skills_catalogue_title")}
+          description={t("admin_skills_catalogue_description")}
+          headerEnd={<Badge variant="outline">{t("admin_skills_catalogue_summary")}</Badge>}
+        >
+          <p className="text-muted-foreground text-sm">
+            {t("admin_skills_catalogue_bindings_note")}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild>
+              <Link href="/spaces/organization/skills">{t("governance_manage_skills_action")}</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/admin/personal-assistant">
+                {t("admin_skills_open_personal_assistant")}
+              </Link>
+            </Button>
+          </div>
+        </SettingsGroup>
+      )}
     </div>
   );
 }

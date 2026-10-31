@@ -129,7 +129,9 @@ describe("UserApiKeyList", () => {
     state.items[0] = key("1", { description: "Target system" });
     state.next = [key("5", { name: "Target archive" })];
     renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
-    const search = await screen.findByRole("textbox", { name: "Sök API-nycklar" });
+    // The field is there from the start (disabled while loading): wait for the keys.
+    await screen.findByText("Integration 1");
+    const search = screen.getByRole("textbox", { name: "Sök API-nycklar" });
     fireEvent.change(search, { target: { value: "target" } });
     expect(screen.getByText("Integration 1")).toBeTruthy();
     expect(screen.queryByText("Integration 2")).toBeNull();
@@ -148,11 +150,23 @@ describe("UserApiKeyList", () => {
     expect(state.requests.at(-1)?.state).toBeNull();
   });
 
+  it("keeps the search field in place while the keys load, disabled, so the table does not move", async () => {
+    renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
+    const search = screen.getByRole("textbox", { name: "Sök API-nycklar" });
+    expect((search as HTMLInputElement).disabled).toBe(true);
+
+    await screen.findByText("Integration 1");
+    expect(
+      (screen.getByRole("textbox", { name: "Sök API-nycklar" }) as HTMLInputElement).disabled
+    ).toBe(false);
+  });
+
   it("retains loaded keys and a nonmatching search when a later page fails, then retries", async () => {
     state.next = [key("5", { name: "Target archive" })];
     state.failNext = true;
     renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
-    const search = await screen.findByRole("textbox", { name: "Sök API-nycklar" });
+    await screen.findByText("Integration 1");
+    const search = screen.getByRole("textbox", { name: "Sök API-nycklar" });
     fireEvent.change(search, { target: { value: "target" } });
     expect(screen.getByText("Inga matchande API-nycklar")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Ladda mer" }));

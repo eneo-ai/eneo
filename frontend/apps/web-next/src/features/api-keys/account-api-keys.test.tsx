@@ -94,6 +94,16 @@ describe("ApiKeys (account)", () => {
     expect(await within(table).findByText("Min integration")).toBeTruthy();
   });
 
+  it("shows the reminder settings after the keys, and only once they have loaded", async () => {
+    renderInApp(<ApiKeys />, { appContext: testAppContext({ permissions: ["api_keys"] }) });
+    // Earlier or above, they moved the list or were pushed off the screen by it: layout shift.
+    expect(screen.queryByRole("textbox", { name: "Påminnelsedagar" })).toBeNull();
+
+    const days = await screen.findByRole("textbox", { name: "Påminnelsedagar" });
+    const table = screen.getByRole("table", { name: "API-nycklar" });
+    expect(table.compareDocumentPosition(days) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it("shows the keys in the panel of the selected state tab", async () => {
     const { container } = renderInApp(<ApiKeys />, {
       appContext: testAppContext({ permissions: ["api_keys"] })

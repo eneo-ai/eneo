@@ -224,8 +224,10 @@ export function OrgApiKeysPage() {
       <PageHeader title={t("api_keys")} headingId={headingId}>
         <Button
           variant="ghost"
+          // Not while the page first loads: the spinner would widen this button and move
+          // the others (layout shift); a refresh asked for, or a lookup, shows it.
           aria-busy={
-            list.isFetching || found.isFetching || lookup?.status === "pending" || undefined
+            list.isRefetching || found.isRefetching || lookup?.status === "pending" || undefined
           }
           onClick={refresh}
         >
@@ -320,12 +322,18 @@ export function OrgApiKeysPage() {
         </div>
       )}
 
-      <SettingsGroup title={t("api_keys_admin_runtime_settings_title")}>
-        <ExpiryNotificationsSwitch />
-      </SettingsGroup>
-      <SettingsGroup title={t("api_keys_admin_tracking_title")}>
-        <KeyTrackingSwitches />
-      </SettingsGroup>
+      {/* After the list: shown while it loads, they sat in view and were pushed
+          off the screen when the rows arrived (layout shift). */}
+      {!list.isPending && (
+        <>
+          <SettingsGroup title={t("api_keys_admin_runtime_settings_title")}>
+            <ExpiryNotificationsSwitch />
+          </SettingsGroup>
+          <SettingsGroup title={t("api_keys_admin_tracking_title")}>
+            <KeyTrackingSwitches />
+          </SettingsGroup>
+        </>
+      )}
 
       {secrets.dialog}
     </div>
