@@ -6,6 +6,7 @@ import { replaceUrl, useRouter, useSearchParams, type UrlOptions } from "@/lib/n
 import { useTranslations } from "use-intl";
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
+import type { LeaveConfirmationHandle } from "@/components/composites/leave-confirmation";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
@@ -118,6 +119,7 @@ export function ChatPage({
 }) {
   const t = useTranslations();
   const router = useRouter();
+  const leaveConfirmation = useRef<LeaveConfirmationHandle>(null);
   const [active, setActive] = useState<ActiveConversation | null>(() =>
     urlSessionId ? null : { key: "new", sessionId: null, messages: [], title: null, started: false }
   );
@@ -224,8 +226,12 @@ export function ChatPage({
   function selectSession(sessionId: string) {
     const showing = pendingSessionId ?? active?.sessionId ?? null;
     if (sessionId !== showing) {
-      openSession(sessionId);
-      updateUrl(sessionId);
+      confirmConversationChange(() => {
+        openSession(sessionId);
+        updateUrl(sessionId, { ignoreBlocker: true });
+        if (!historyInline) closeHistory();
+      });
+      return;
     }
     // On phones the panel is an overlay over the chat; close it so the picked
     // conversation is visible. On wider screens it sits inline, so keep it open.
@@ -236,9 +242,15 @@ export function ChatPage({
   function startConversation(focusComposer: boolean) {
     setActive(newConversationState({ focusComposer }));
     setActivity(null);
-    updateUrl(null);
+    updateUrl(null, { ignoreBlocker: true });
   }
-  const newConversation = () => startConversation(false);
+  function confirmConversationChange(action: () => void) {
+    // The current view owns both document edits and unsent attachments. Keep
+    // it mounted until it accepts a reset, including resets at the same URL.
+    if (leaveConfirmation.current) leaveConfirmation.current.confirm(action);
+    else action();
+  }
+  const newConversation = () => confirmConversationChange(() => startConversation(false));
 
   const onActivityChange = useCallback((next: ActivityState | null) => {
     if (next) setHistoryOpen(false);
@@ -366,6 +378,7 @@ export function ChatPage({
             {active ? (
               <ChatView
                 key={active.key}
+                leaveConfirmationRef={leaveConfirmation}
                 partner={partner}
                 initialSessionId={active.sessionId}
                 initialMessages={active.messages}

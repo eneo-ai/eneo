@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 import { createBrowserHistory, createRoute, type AnyRootRoute } from "@tanstack/react-router";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { useState } from "react";
+import { useRef, useState } from "react";
+import {
+  LeaveConfirmation,
+  type LeaveConfirmationHandle
+} from "@/components/composites/leave-confirmation";
 import { expect, it, vi } from "vitest";
 import { renderWithRouter } from "@/test/router";
 import Link from "./link";
@@ -44,6 +48,39 @@ const click = async (name: string) =>
     fireEvent.click(screen.getByRole("button", { name }));
   });
 const blocked = () => screen.getByRole("status").textContent;
+
+it("shares the leave decision with an in-place reset and never runs it on teardown", async () => {
+  const reset = vi.fn();
+  function LocalEditor() {
+    const guard = useRef<LeaveConfirmationHandle>(null);
+    return (
+      <>
+        <LeaveConfirmation ref={guard} active />
+        <button onClick={() => guard.current?.confirm(reset)}>Reset editor</button>
+      </>
+    );
+  }
+  const { router, unmount } = await renderWithRouter(<LocalEditor />, { route: "/a", routes });
+  await click("Reset editor");
+  expect(screen.getByRole("alertdialog")).toBeTruthy();
+  expect(reset).not.toHaveBeenCalled();
+  await click("Avbryt");
+  expect(screen.queryByRole("alertdialog")).toBeNull();
+  expect(reset).not.toHaveBeenCalled();
+  await click("Reset editor");
+  await click("Lämna utan att spara");
+  expect(reset).toHaveBeenCalledTimes(1);
+  await click("Reset editor");
+  await act(async () => {
+    void router.navigate({ href: "/b" });
+  });
+  await click("Lämna utan att spara");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/b"));
+  expect(reset).toHaveBeenCalledTimes(1);
+  await click("Reset editor");
+  unmount();
+  expect(reset).toHaveBeenCalledTimes(1);
+});
 
 it("lets an inactive editor follow links", async () => {
   const { router } = await renderWithRouter(<Editor initialDirty={false} />, {

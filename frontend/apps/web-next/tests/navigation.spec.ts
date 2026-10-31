@@ -1,3 +1,4 @@
+import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
 import {
   askChatQuestion,
@@ -17,37 +18,7 @@ type StreamWindow = Window & {
   navigationStream: { ready: boolean; releaseSession(): void; releaseAnswer(): void };
 };
 
-test("one page link stays current across a saved chat and administration", async ({ page }) => {
-  await page.goto("/spaces/personal/chat");
-  await askChatQuestion(page, uniqueName("Current conversation"));
-  await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
-  await expect(page).toHaveURL(/\/spaces\/personal\/chat\?session_id=/);
-  const savedChat = new URL(page.url()).pathname + new URL(page.url()).search;
-  const current = page.locator('a[aria-current="page"]');
-  await page.reload();
-  await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
-  await expect(current).toHaveCount(1);
-  await expect(current).toHaveAttribute("href", savedChat);
-
-  await page.getByRole("link", { name: "Administration", exact: true }).click();
-  await page
-    .getByRole("navigation", { name: "Administration", exact: true })
-    .getByRole("link", { name: "Användare", exact: true })
-    .click();
-  await expect(page).toHaveURL(/\/admin\/users$/);
-  await expect(current).toHaveCount(1);
-  await expect(current).toHaveAttribute("href", "/admin/users");
-
-  await page.getByRole("link", { name: "Tillbaka till Eneo", exact: true }).click();
-  await page.locator(`nav a[href="${savedChat}"]`).click();
-  await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
-  await expect(current).toHaveCount(1);
-  await expect(current).toHaveAttribute("href", savedChat);
-});
-
-test("the session URL arrives during streaming without remounting or scrolling the conversation", async ({
-  page
-}) => {
+async function gateChatStream(page: Page) {
   // Playwright route.fulfill buffers a whole response. Gate consumption of the
   // real backend's bytes instead, on either side of its data-session event.
   await page.addInitScript(() => {
@@ -84,6 +55,40 @@ test("the session URL arrives during streaming without remounting or scrolling t
       );
     };
   });
+}
+
+test("one page link stays current across a saved chat and administration", async ({ page }) => {
+  await page.goto("/spaces/personal/chat");
+  await askChatQuestion(page, uniqueName("Current conversation"));
+  await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+  await expect(page).toHaveURL(/\/spaces\/personal\/chat\?session_id=/);
+  const savedChat = new URL(page.url()).pathname + new URL(page.url()).search;
+  const current = page.locator('a[aria-current="page"]');
+  await page.reload();
+  await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveAttribute("href", savedChat);
+
+  await page.getByRole("link", { name: "Administration", exact: true }).click();
+  await page
+    .getByRole("navigation", { name: "Administration", exact: true })
+    .getByRole("link", { name: "Användare", exact: true })
+    .click();
+  await expect(page).toHaveURL(/\/admin\/users$/);
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveAttribute("href", "/admin/users");
+
+  await page.getByRole("link", { name: "Tillbaka till Eneo", exact: true }).click();
+  await page.locator(`nav a[href="${savedChat}"]`).click();
+  await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+  await expect(current).toHaveCount(1);
+  await expect(current).toHaveAttribute("href", savedChat);
+});
+
+test("the session URL arrives during streaming without remounting or scrolling the conversation", async ({
+  page
+}) => {
+  await gateChatStream(page);
   await page.goto("/spaces/personal/chat");
   const question = uniqueName("Stream continuity") + "\n" + "A line to keep in view.\n".repeat(60);
   await askChatQuestion(page, question);
@@ -134,6 +139,78 @@ test("the session URL arrives during streaming without remounting or scrolling t
     });
   }
 });
+
+for (const control of ["new", "history", "same-URL new"] as const) {
+  test(`conversation controls keep unsent work until consent: ${control}`, async ({ page }) => {
+    let destinationId: string | null = null;
+    if (control === "same-URL new") await gateChatStream(page);
+    await page.goto("/spaces/personal/chat");
+    if (control !== "same-URL new") {
+      await askChatQuestion(page, uniqueName("History destination"));
+      await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+      destinationId = new URL(page.url()).searchParams.get("session_id");
+      expect(destinationId).toBeTruthy();
+      await page.getByRole("button", { name: "Ny konversation", exact: true }).click();
+    }
+    await askChatQuestion(page, uniqueName("Current conversation"));
+    if (control === "same-URL new") {
+      await expect
+        .poll(() => page.evaluate(() => (window as unknown as StreamWindow).navigationStream.ready))
+        .toBe(true);
+    } else {
+      await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+    }
+    const originalUrl = page.url();
+    const draft = "En oskickad fråga som ska vara kvar";
+    await chatComposer(page).fill(draft);
+    await page.locator('input[type="file"]').setInputFiles({
+      name: "draft.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("Unsent attachment")
+    });
+    const attachment = page.getByRole("button", { name: "Ta bort draft.txt", exact: true });
+    await expect(attachment).toBeVisible();
+    if (control === "history") {
+      await page.getByRole("button", { name: /^Konversationer med / }).click();
+    }
+    const switchConversation = () =>
+      control === "history"
+        ? page.locator(`button[data-session-row="${destinationId}"]`).click()
+        : page.getByRole("button", { name: "Ny konversation", exact: true }).click();
+    const confirmation = page.getByRole("alertdialog", { name: "Lämna sidan?", exact: true });
+    try {
+      await switchConversation();
+      await expect(confirmation).toBeVisible();
+      await expect(page).toHaveURL(originalUrl);
+      await expect(chatComposer(page)).toHaveValue(draft);
+      await expect(attachment).toBeVisible();
+      await confirmation.getByRole("button", { name: "Avbryt", exact: true }).click();
+      await expect(chatComposer(page)).toBeEditable();
+      await expect(chatComposer(page)).toHaveValue(draft);
+      await expect(page).toHaveURL(originalUrl);
+      await expect(attachment).toBeVisible();
+      await switchConversation();
+      await confirmation.getByRole("button", { name: "Lämna utan att spara", exact: true }).click();
+      await expect(attachment).toHaveCount(0);
+      if (control === "history") {
+        await expect
+          .poll(() => new URL(page.url()).searchParams.get("session_id"))
+          .toBe(destinationId);
+        await expect(conversationLog(page).getByText(MOCK_REPLY)).toBeVisible();
+      } else {
+        await expect(page).not.toHaveURL(/session_id=/);
+        await expect(conversationLog(page)).toHaveCount(0);
+      }
+    } finally {
+      if (control === "same-URL new")
+        await page.evaluate(() => {
+          const stream = (window as unknown as StreamWindow).navigationStream;
+          stream.releaseSession();
+          stream.releaseAnswer();
+        });
+    }
+  });
+}
 
 for (const cached of [false, true]) {
   test(`a pending ${cached ? "cached" : "new"} space keeps the current frame until its data arrives`, async ({

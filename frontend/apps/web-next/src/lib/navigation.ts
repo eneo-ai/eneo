@@ -49,7 +49,7 @@ export type UrlState = {
 
 export type UrlOptions = {
   state?: UrlState;
-  /** Metadata for the displayed view; ignored once another navigation owns the URL. */
+  /** Metadata or an already-confirmed view change; ignored once another navigation owns the URL. */
   ignoreBlocker?: boolean;
 };
 

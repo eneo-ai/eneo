@@ -19,6 +19,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentProps,
+  type Ref,
   type ReactNode
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
@@ -32,7 +33,10 @@ import { createChatTransport, type ChatSendOptions } from "@/lib/chat/transport"
 import type { AnswerRating, ChatPartner, EneoDataParts, EneoUIMessage } from "@/lib/chat/types";
 import { deriveContextUsage, usePreflight } from "@/lib/chat/use-preflight";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
+import {
+  LeaveConfirmation,
+  type LeaveConfirmationHandle
+} from "@/components/composites/leave-confirmation";
 import { conversationFiles, deriveActivity } from "./activity";
 import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityTimings } from "./activity-timings";
@@ -143,6 +147,7 @@ function ConversationMessage({
 }
 
 type ChatViewProps = {
+  leaveConfirmationRef?: Ref<LeaveConfirmationHandle>;
   partner: ChatPartner;
   initialSessionId?: string | null;
   initialMessages?: EneoUIMessage[];
@@ -191,6 +196,7 @@ export function ChatView(props: ChatViewProps) {
 }
 
 function ConversationView({
+  leaveConfirmationRef,
   partner,
   initialSessionId = null,
   initialMessages = [],
@@ -968,6 +974,7 @@ function ConversationView({
   const unsentQuestionOnly = !panel.dirty && attachments.attachments.length === 0;
   const leaveConfirmation = (
     <LeaveConfirmation
+      ref={leaveConfirmationRef}
       active={panel.dirty || input.trim() !== "" || attachments.attachments.length > 0}
       title={unsentQuestionOnly ? t("chat_unsent_navigation_title") : undefined}
       description={unsentQuestionOnly ? t("chat_unsent_navigation_description") : undefined}
