@@ -866,15 +866,17 @@ for (const colorScheme of ["light", "dark"] as const) {
       });
     });
 
-    test("admin flow settings", async ({ page }) => {
+    test("admin flow settings", { tag: "@vite" }, async ({ page }) => {
       await page.goto("/admin");
+      const settings = await apiRequest<Schema<"SettingsPublic">>(page, "/settings/");
+      test.skip(
+        settings.flows_enabled !== true,
+        "The tenant's flows_core gate is off in this stack, so /admin/flow-settings 404s."
+      );
       const flowsLink = page
         .getByRole("navigation", { name: /^Administration$/ })
         .getByRole("link", { name: /^(Flöden|Flows)$/ });
-      test.skip(
-        (await flowsLink.count()) === 0,
-        "The tenant's flows_core gate is off in this stack, so /admin/flow-settings 404s."
-      );
+      await expect(flowsLink).toBeVisible();
 
       await scan(page, "/admin/flow-settings", async () => {
         await expect(
@@ -885,6 +887,10 @@ for (const colorScheme of ["light", "dark"] as const) {
             name: /^(Tillåt nya steg som körs per fil|Allow new steps that run once per file)/
           })
         ).toBeVisible();
+      });
+      await page.screenshot({
+        path: test.info().outputPath(`flow-admin-settings-${colorScheme}.png`),
+        fullPage: true
       });
     });
 
