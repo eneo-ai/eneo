@@ -47,7 +47,7 @@ export async function createFixtures(
     permission: "read",
     scope_type: "tenant"
   });
-  // The release notice above the chat's starters shows once (the release is then
+  // The release notice above the chat's lists shows once (the release is then
   // announced) and is gone from the next visit on: on a fresh database it would be in the
   // first run's measurements and not in the second's. Seen and announced here, it never shows.
   await page.goto("/whats-new");

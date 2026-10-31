@@ -995,11 +995,6 @@ function ConversationView({
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
           <StartState
             partner={partner}
-            onPickStarter={(prompt) => {
-              // A starter never replaces what was already typed.
-              setInput((current) => (current.trim() ? current : prompt));
-              startTextarea()?.focus();
-            }}
             composer={
               phone !== true && (
                 // From 640px: centred under the greeting until the conversation starts.

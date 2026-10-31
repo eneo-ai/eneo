@@ -11,8 +11,22 @@ import { queuePartnerUpdate } from "./partner-updates";
 
 const spies = vi.hoisted(() => ({ announce: vi.fn(), toastError: vi.fn() }));
 
+/** What `/api/v1/conversations/recent/` answers: items, a failure, or a wait for `gate`. */
+const recents = vi.hoisted(() => ({
+  items: [] as unknown[],
+  fail: false,
+  gate: null as Promise<void> | null
+}));
+
 const api = vi.hoisted(() => ({
   GET: vi.fn(async (path: string) => {
+    if (path === "/api/v1/conversations/recent/") {
+      await recents.gate;
+      if (recents.fail) {
+        return { data: undefined, error: { message: "unavailable" }, response: new Response() };
+      }
+      return { data: { items: recents.items }, response: new Response() };
+    }
     if (path === "/api/v1/dashboard/") {
       return {
         data: {
@@ -25,7 +39,12 @@ const api = vi.hoisted(() => ({
                 organization: false,
                 applications: {
                   assistants: {
-                    items: [{ id: "assistant-9", name: "Upphandlingsassistenten", icon_id: null }]
+                    items: [
+                      { id: "assistant-9", name: "Upphandlingsassistenten", icon_id: null },
+                      { id: "assistant-10", name: "Bygglovsassistenten", icon_id: null },
+                      { id: "assistant-11", name: "Skrivhjälpen", icon_id: null },
+                      { id: "assistant-12", name: "Fjärde assistenten", icon_id: null }
+                    ]
                   }
                 }
               }
@@ -63,7 +82,27 @@ vi.mock("sonner", async (importOriginal) => {
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  recents.items = [];
+  recents.fail = false;
+  recents.gate = null;
 });
+
+/** A conversation as the recent list returns it: with the personal chat, or with an assistant of a space. */
+function conversation(id: string, name: string, withAssistant = false) {
+  const now = new Date().toISOString();
+  return {
+    id,
+    name,
+    created_at: now,
+    last_activity_at: now,
+    partner: withAssistant
+      ? { type: "assistant", id: "assistant-9", name: "Upphandlingsassistenten" }
+      : { type: "default-assistant", id: "personal-1", name: "Default" },
+    space: withAssistant
+      ? { id: "space-1", name: "Upphandling", personal: false, organization: false }
+      : { id: "personal-space", name: "Personligt", personal: true, organization: false }
+  };
+}
 
 // The backend names the personal space's default assistant "Default"; the
 // chat never shows that name (UX review C1).
@@ -122,21 +161,75 @@ function layOutConversation(width: number) {
   act(() => reportResize(region, { width, height: 600 }));
 }
 describe("ChatView start state", () => {
-  it("greets the user, fills the composer from a starter card and links their assistants", async () => {
+  it("greets the user, offers the two latest conversations and three of their assistants", async () => {
+    recents.items = [
+      conversation("c1", "Remissvar detaljplan"),
+      conversation("c2", "Granska förfrågningsunderlag", true),
+      conversation("c3", "Mötesanteckningar")
+    ];
     renderInApp(<Harness partner={personal} />);
     expect(
       screen.getByRole("heading", { level: 1, name: /^God (morgon|dag|kväll), Anna$/ })
     ).toBeTruthy();
 
-    const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
-    fireEvent.click(screen.getByRole("button", { name: /Gör en plan/ }));
-    expect((textarea as HTMLTextAreaElement).value).toBe("Gör en konkret plan för: ");
-    expect(document.activeElement).toBe(textarea);
+    const keepGoing = await screen.findByRole("region", { name: "Fortsätt" });
+    const rows = within(keepGoing).getAllByRole("link");
+    // Two of the three, each opening where it lives, the one with an assistant saying whom it is with.
+    expect(rows.map((row) => row.getAttribute("href"))).toEqual([
+      "/spaces/personal/chat?session_id=c1",
+      "/spaces/space-1/chat?type=assistant&id=assistant-9&session_id=c2"
+    ]);
+    expect(within(rows[1]!).getByText(/Upphandlingsassistenten/)).toBeTruthy();
+    expect(screen.queryByText("Beskriv uppgiften och vilket resultat du behöver.")).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Prova att fråga" })).toBeNull();
 
     const quickLinks = await screen.findByRole("region", { name: "Dina assistenter" });
-    const link = within(quickLinks).getByRole("link", { name: /Upphandlingsassistenten/ });
-    expect(link.getAttribute("href")).toBe("/spaces/space-1/chat?type=assistant&id=assistant-9");
-    expect(within(quickLinks).getByRole("link", { name: "Visa alla" })).toBeTruthy();
+    const links = within(quickLinks).getAllByRole("link");
+    // Three of the four assistants, and the catalog.
+    expect(links.map((link) => link.textContent)).toEqual([
+      "Visa alla",
+      expect.stringContaining("Upphandlingsassistenten"),
+      expect.stringContaining("Bygglovsassistenten"),
+      expect.stringContaining("Skrivhjälpen")
+    ]);
+    expect(
+      within(quickLinks)
+        .getByRole("link", { name: /Upphandlingsassistenten/ })
+        .getAttribute("href")
+    ).toBe("/spaces/space-1/chat?type=assistant&id=assistant-9");
+  });
+
+  it("tells someone with no conversations yet how to begin, under the same greeting", async () => {
+    renderInApp(<Harness partner={personal} />);
+    await screen.findByRole("region", { name: "Dina assistenter" });
+    expect(screen.getByText("Beskriv uppgiften och vilket resultat du behöver.")).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Fortsätt" })).toBeNull();
+  });
+
+  it("shows both lists together, so the one that arrives first is not pushed down by the other", async () => {
+    let release!: () => void;
+    recents.gate = new Promise<void>((resolve) => (release = resolve));
+    recents.items = [conversation("c1", "Remissvar detaljplan")];
+    renderInApp(<Harness partner={personal} />);
+    // The assistants are known, the conversations are not: neither list is shown yet.
+    await waitFor(() => expect(api.GET).toHaveBeenCalledWith("/api/v1/dashboard/"));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.queryByRole("region", { name: "Dina assistenter" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "Fortsätt" })).toBeNull();
+
+    release();
+    await screen.findByRole("region", { name: "Fortsätt" });
+    expect(screen.getByRole("region", { name: "Dina assistenter" })).toBeTruthy();
+  });
+
+  it("keeps the assistants, and says nothing about history, when the conversations fail to load", async () => {
+    recents.fail = true;
+    renderInApp(<Harness partner={personal} />);
+    await screen.findByRole("region", { name: "Dina assistenter" });
+    expect(screen.queryByRole("region", { name: "Fortsätt" })).toBeNull();
+    expect(screen.queryByText("Beskriv uppgiften och vilket resultat du behöver.")).toBeNull();
   });
 
   it("introduces other assistants by name and description", () => {
@@ -149,16 +242,24 @@ describe("ChatView start state", () => {
   it("keeps the assistants of other spaces out of a space's own assistant", async () => {
     api.GET.mockClear();
     renderInApp(<Harness partner={{ ...personal, id: "space-default", personalSpace: false }} />);
-    expect(screen.getByRole("heading", { level: 2, name: "Prova att fråga" })).toBeTruthy();
-    // The shortcut would list assistants of every shared space; none is asked for.
-    await waitFor(() =>
-      expect(screen.queryByRole("region", { name: "Dina assistenter" })).toBeNull()
-    );
+    expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
+    // The assistants of every shared space, and the user's conversations across them, are for the
+    // personal chat: neither list is asked for or shown.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+    expect(screen.queryAllByRole("heading", { level: 2 })).toHaveLength(0);
     expect(api.GET).not.toHaveBeenCalledWith("/api/v1/dashboard/");
+    expect(api.GET).not.toHaveBeenCalledWith("/api/v1/conversations/recent/", expect.anything());
   });
 
   it("has no axe violations", async () => {
+    recents.items = [
+      conversation("c1", "Remissvar detaljplan"),
+      conversation("c2", "Mötesanteckningar", true)
+    ];
     const { container } = renderInApp(<Harness partner={personal} />);
+    await screen.findByRole("region", { name: "Fortsätt" });
     await screen.findByRole("region", { name: "Dina assistenter" });
     await expectNoAxeViolations(container);
   });
@@ -168,24 +269,22 @@ describe("ChatView start state on a phone (decisions 5 and 8)", () => {
   const follows = (later: Node, earlier: Node) =>
     Boolean(earlier.compareDocumentPosition(later) & Node.DOCUMENT_POSITION_FOLLOWING);
 
-  it("docks the composer from the first frame, under the greeting, suggestions and assistants", async () => {
+  it("docks the composer from the first frame, under the greeting, conversations and assistants", async () => {
     setViewport("phone");
+    recents.items = [conversation("c1", "Remissvar detaljplan")];
     renderInApp(<Harness partner={personal} />);
     const quickLinks = await screen.findByRole("region", { name: "Dina assistenter" });
+    const keepGoing = screen.getByRole("region", { name: "Fortsätt" });
     // One composer once the width is known; read after everything it docks under.
     const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
     expect(follows(textarea, quickLinks)).toBe(true);
-    expect(screen.getByRole("heading", { level: 2, name: "Prova att fråga" })).toBeTruthy();
+    expect(follows(quickLinks, keepGoing)).toBe(true);
   });
 
-  it("fills and focuses the docked composer from a suggestion, and keeps focus there once asked", async () => {
+  it("keeps focus in the docked composer once a question is asked", async () => {
     setViewport("phone");
     renderInApp(<Harness partner={personal} />);
-    fireEvent.click(screen.getByRole("button", { name: /Gör en plan/ }));
     const textarea = screen.getByRole("textbox", { name: "Fråga Personlig assistent" });
-    expect((textarea as HTMLTextAreaElement).value).toBe("Gör en konkret plan för: ");
-    expect(document.activeElement).toBe(textarea);
-
     fireEvent.change(textarea, { target: { value: "Gör en plan för flytten" } });
     fireEvent.keyDown(textarea, { key: "Enter", ctrlKey: true });
     await screen.findByRole("log", { name: "Konversation" });
