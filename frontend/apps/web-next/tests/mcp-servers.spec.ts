@@ -38,7 +38,14 @@ test("activates a function source from the MCP list and explains a refusal", asy
   );
   await page.route("**/api/v1/mcp-servers/preferred/activate/", (route) => {
     expect(route.request().method()).toBe("POST");
-    if (refused) return route.fulfill({ status: 400, json: { detail: "No approved tools" } });
+    if (refused)
+      return route.fulfill({
+        status: 400,
+        json: {
+          message: "Provider has no enabled tools. Sync and approve its tools before activating.",
+          eneo_error_code: 9007
+        }
+      });
     preferred.is_enabled = true;
     previous.is_enabled = false;
     return route.fulfill({ json: {}, headers: sessionResponseHeaders(route) });
@@ -55,7 +62,7 @@ test("activates a function source from the MCP list and explains a refusal", asy
   await expect(page.getByText("API-nyckel i header", { exact: true })).toBeVisible();
   await preferredSwitch.focus();
   await page.keyboard.press("Space");
-  await expect(page.getByRole("alert")).toContainText("No approved tools");
+  await expect(page.getByRole("alert")).toContainText("Provider has no enabled tools");
   await expect(preferredSwitch).not.toBeChecked();
   await expect(preferredSwitch).toBeFocused();
   refused = false;

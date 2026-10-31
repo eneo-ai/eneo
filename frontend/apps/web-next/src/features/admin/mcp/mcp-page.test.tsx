@@ -104,14 +104,17 @@ it("shows a refused activation beside its server and restores the saved state", 
     is_org_enabled: false
   });
   post.mockResolvedValue({
-    error: { detail: "No approved tools" },
+    error: {
+      message: "Provider has no enabled tools. Sync and approve its tools before activating.",
+      eneo_error_code: 9007
+    },
     response: new Response("{}", { status: 400 })
   });
   renderInApp(<McpServersPage />);
   fireEvent.click(await screen.findByRole("switch", { name: "Visa funktionsservrar" }));
   const toggle = await screen.findByRole("switch", { name: "Aktivera Images" });
   fireEvent.click(toggle);
-  expect((await screen.findByRole("alert")).textContent).toContain("No approved tools");
+  expect((await screen.findByRole("alert")).textContent).toContain("Provider has no enabled tools");
   expect(toggle.getAttribute("aria-checked")).toBe("false");
 });
 
