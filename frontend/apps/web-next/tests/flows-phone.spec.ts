@@ -1,5 +1,6 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test } from "./csp";
+import { apiRequest } from "./helpers";
 import { audioFlow, silenceWav } from "./flows-fixture";
 import { WCAG_22_AA_TAGS } from "../src/test/wcag";
 
@@ -89,5 +90,9 @@ test(
     );
     await fitsTheWidth(page);
     await axeFindsNothing(page);
+
+    // The stack allows only a few active runs at a time: leave none of this test's behind.
+    const runId = new URL(page.url()).pathname.split("/").at(-1)!;
+    await apiRequest(page, `/flows/${flow.flowId}/runs/${runId}/cancel/`, { method: "POST" });
   }
 );
