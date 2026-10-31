@@ -1,5 +1,6 @@
 "use client";
 
+import { useHotkeys } from "@astryxdesign/core/hooks";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Shield } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -40,7 +41,7 @@ const MAX_DESCRIPTION = 500;
 
 /**
  * Access gate for audit logs: the user states a justification, the backend
- * opens a 1-hour HTTP-only access session (cookie, re-scoped by the proxy),
+ * opens a 1-hour audit access session with an HTTP-only cookie,
  * then we refetch the logs. Problems show at their fields on submit, and
  * focus moves to the first.
  */
@@ -52,6 +53,14 @@ export function JustificationForm() {
   const [submitted, setSubmitted] = useState(false);
   const categoryRef = useRef<HTMLButtonElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
+  const formRef = useRef<HTMLFormElement>(null);
+  const submitShortcut = (event: KeyboardEvent) => {
+    if (!event.repeat) formRef.current?.requestSubmit();
+  };
+  useHotkeys([
+    { keys: "ctrl+enter", allowInInputs: true, onPress: submitShortcut },
+    { keys: "meta+enter", allowInInputs: true, onPress: submitShortcut }
+  ]);
 
   const create = useMutation({
     mutationFn: () =>
@@ -86,6 +95,7 @@ export function JustificationForm() {
         </div>
 
         <form
+          ref={formRef}
           className="flex flex-col gap-5"
           noValidate
           onSubmit={(event) => {

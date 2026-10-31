@@ -2710,7 +2710,7 @@
   "audit_retention_months": "månader",
   "audit_retention_cutoff": "Loggar äldre än {date} raderas automatiskt vid daglig rensning kl. 02:00 UTC.",
   "audit_retention_warning_title": "Varning: Kortare gallringsperiod",
-  "audit_retention_warning_desc": "Loggar äldre än {date} raderas vid nästa rensning (imorgon kl. 02:00 UTC). Tidigare raderade loggar kan inte återställas.",
+  "audit_retention_warning_desc": "Loggar äldre än {date} raderas vid nästa dagliga rensning. Tidigare raderade loggar kan inte återställas.",
   "audit_retention_info_title": "Längre gallringsperiod",
   "audit_retention_info_desc": "Fler loggar kommer att bevaras framåt. Obs: Tidigare raderade loggar kan inte återställas.",
   "audit_just_now": "Nyss",
@@ -7039,5 +7039,10 @@
   "model_huggingface_link": "Visa på HuggingFace",
   "admin_models_retiring_description": "{models}: välj en ersättare och migrera användningen före utfasningen.",
   "sharepoint_import_selection_count": "{count} av {limit} objekt valda",
-  "sharepoint_import_selection_limit": "Importera högst {limit} objekt åt gången. Ta bort valda filer eller mappar för att fortsätta."
+  "sharepoint_import_selection_limit": "Importera högst {limit} objekt åt gången. Ta bort valda filer eller mappar för att fortsätta.",
+  "audit_config_saved": "Konfigurationen är sparad.",
+  "audit_config_partial_save": "Konfigurationen sparades delvis",
+  "audit_config_save_failed": "Det gick inte att spara konfigurationen",
+  "audit_config_server_unknown": "Serverläget kunde inte läsas om. Dina ändringar finns kvar.",
+  "audit_config_reload_server": "Läs in serverläget"
 }

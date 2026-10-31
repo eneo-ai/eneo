@@ -1796,5 +1796,11 @@
   "model_huggingface_link": "View on HuggingFace",
   "admin_models_retiring_description": "{models}: choose a replacement and migrate usage before retirement.",
   "sharepoint_import_selection_count": "{count} of {limit} items selected",
-  "sharepoint_import_selection_limit": "Import at most {limit} items at a time. Remove selected files or folders to continue."
+  "sharepoint_import_selection_limit": "Import at most {limit} items at a time. Remove selected files or folders to continue.",
+  "audit_retention_warning_desc": "Logs older than {date} will be deleted during the next daily cleanup. Previously deleted logs cannot be recovered.",
+  "audit_config_saved": "The configuration has been saved.",
+  "audit_config_partial_save": "The configuration was partially saved",
+  "audit_config_save_failed": "The configuration could not be saved",
+  "audit_config_server_unknown": "The server state could not be reloaded. Your changes are preserved.",
+  "audit_config_reload_server": "Reload server state"
 }

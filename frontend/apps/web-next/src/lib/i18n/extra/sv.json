@@ -1796,5 +1796,11 @@
   "model_huggingface_link": "Visa på HuggingFace",
   "admin_models_retiring_description": "{models}: välj en ersättare och migrera användningen före utfasningen.",
   "sharepoint_import_selection_count": "{count} av {limit} objekt valda",
-  "sharepoint_import_selection_limit": "Importera högst {limit} objekt åt gången. Ta bort valda filer eller mappar för att fortsätta."
+  "sharepoint_import_selection_limit": "Importera högst {limit} objekt åt gången. Ta bort valda filer eller mappar för att fortsätta.",
+  "audit_retention_warning_desc": "Loggar äldre än {date} raderas vid nästa dagliga rensning. Tidigare raderade loggar kan inte återställas.",
+  "audit_config_saved": "Konfigurationen är sparad.",
+  "audit_config_partial_save": "Konfigurationen sparades delvis",
+  "audit_config_save_failed": "Det gick inte att spara konfigurationen",
+  "audit_config_server_unknown": "Serverläget kunde inte läsas om. Dina ändringar finns kvar.",
+  "audit_config_reload_server": "Läs in serverläget"
 }

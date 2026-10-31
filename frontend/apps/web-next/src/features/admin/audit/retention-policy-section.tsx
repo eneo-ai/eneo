@@ -4,17 +4,25 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Pencil } from "lucide-react";
-import { useTranslations } from "use-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState, type SubmitEvent } from "react";
 import { TextInput } from "@/components/astryx/text-input";
+import { QuietBanner } from "@/components/astryx/banner";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { retentionPolicyQueryOptions } from "./audit";
 
 const MIN_DAYS = 1;
 const MAX_DAYS = 2555;
+const PRESETS = [
+  { days: 90, key: "audit_preset_3_months" },
+  { days: 365, key: "audit_preset_1_year" },
+  { days: 730, key: "audit_preset_2_years" },
+  { days: 2555, key: "audit_preset_7_years" }
+] as const;
 
 function parseDays(value: string): number | null {
   const days = Number(value.trim());
@@ -29,6 +37,7 @@ function parseDays(value: string): number | null {
  */
 export function RetentionPolicySection({ headingLevel = 2 }: { headingLevel?: 2 | 3 }) {
   const t = useTranslations();
+  const format = useFormatter();
   const queryClient = useQueryClient();
   const announce = useAnnounce();
   const baseId = useId();
@@ -36,10 +45,32 @@ export function RetentionPolicySection({ headingLevel = 2 }: { headingLevel?: 2 
   const editId = `${baseId}-edit`;
   const fieldRef = useRef<HTMLInputElement>(null);
   const Heading = `h${headingLevel}` as const;
+  const cutoff = (days: number) => {
+    const date = new Date();
+    date.setDate(date.getDate() - days);
+    return format.dateTime(date, { year: "numeric", month: "long", day: "numeric" });
+  };
 
   const policy = useQuery(retentionPolicyQueryOptions(browserApi));
   // null while viewing; the field's text while editing.
   const [draft, setDraft] = useState<string | null>(null);
+  const draftDays = draft === null ? null : parseDays(draft);
+  const periodChange =
+    draftDays !== null && policy.data && draftDays !== policy.data.retention_days
+      ? draftDays < policy.data.retention_days
+        ? "shorter"
+        : "longer"
+      : null;
+  useAnnounceChange(
+    periodChange
+      ? t(
+          periodChange === "shorter"
+            ? "audit_retention_warning_title"
+            : "audit_retention_info_title"
+        )
+      : null,
+    periodChange
+  );
   const [problem, setProblem] = useState<string | null>(null);
   // Set by Save and Cancel: once the field is gone, focus goes back to "Ändra".
   const returnFocus = useRef(false);
@@ -78,6 +109,7 @@ export function RetentionPolicySection({ headingLevel = 2 }: { headingLevel?: 2 
   }
 
   function cancel() {
+    if (update.isPending) return;
     returnFocus.current = true;
     setDraft(null);
     setProblem(null);
@@ -116,6 +148,9 @@ export function RetentionPolicySection({ headingLevel = 2 }: { headingLevel?: 2 
                   setDraft(String(data.retention_days));
                 }}
               />
+              <p className="text-ax-text-secondary w-full text-sm">
+                {t("audit_retention_cutoff", { date: cutoff(data.retention_days) })}
+              </p>
             </div>
           ) : (
             <form className="flex flex-wrap items-start gap-3" onSubmit={save} noValidate>
@@ -124,6 +159,7 @@ export function RetentionPolicySection({ headingLevel = 2 }: { headingLevel?: 2 
                 label={t("audit_retention_period_label")}
                 description={t("audit_retention_range")}
                 value={draft}
+                isDisabled={update.isPending}
                 onChange={(value) => {
                   setDraft(value);
                   setProblem(null);
@@ -142,8 +178,47 @@ export function RetentionPolicySection({ headingLevel = 2 }: { headingLevel?: 2 
                   isLoading={update.isPending}
                   isInterruptible
                 />
-                <Button variant="ghost" label={t("cancel")} onClick={cancel} />
+                <Button
+                  variant="ghost"
+                  label={t("cancel")}
+                  aria-disabled={update.isPending}
+                  onClick={cancel}
+                />
               </div>
+              <div className="flex w-full flex-wrap gap-2">
+                {PRESETS.map(({ days, key }) => (
+                  <Button
+                    key={days}
+                    type="button"
+                    size="sm"
+                    label={t(key)}
+                    aria-pressed={draftDays === days}
+                    aria-disabled={update.isPending}
+                    onClick={() => {
+                      if (update.isPending) return;
+                      setDraft(String(days));
+                      setProblem(null);
+                    }}
+                  />
+                ))}
+              </div>
+              {draftDays !== null && draftDays !== data.retention_days ? (
+                <div className="w-full">
+                  <QuietBanner
+                    status={draftDays < data.retention_days ? "warning" : "info"}
+                    title={t(
+                      draftDays < data.retention_days
+                        ? "audit_retention_warning_title"
+                        : "audit_retention_info_title"
+                    )}
+                    description={
+                      draftDays < data.retention_days
+                        ? t("audit_retention_warning_desc", { date: cutoff(draftDays) })
+                        : t("audit_retention_info_desc")
+                    }
+                  />
+                </div>
+              ) : null}
             </form>
           )
         }

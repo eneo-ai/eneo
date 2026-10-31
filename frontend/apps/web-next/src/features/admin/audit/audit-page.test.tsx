@@ -7,6 +7,7 @@ import { replaceUrl } from "@/test/navigation";
 
 const state = vi.hoisted(() => ({
   failLogs: false,
+  logsStatus: 500,
   requested: [] as string[],
   searches: [] as unknown[]
 }));
@@ -18,7 +19,12 @@ vi.mock("@/lib/api/browser", () => ({
       if (path === "/api/v1/audit/logs") {
         state.searches.push(options?.params?.query?.search);
         if (state.failLogs) {
-          return Promise.reject(new EneoApiError("boom", { status: 500, code: 9024 }));
+          return Promise.reject(
+            new EneoApiError("boom", {
+              status: state.logsStatus,
+              code: state.logsStatus === 401 ? 9070 : 9024
+            })
+          );
         }
         return Promise.resolve({
           data: {
@@ -47,7 +53,12 @@ vi.mock("@/lib/api/browser", () => ({
           response: new Response("{}")
         });
       }
-      return Promise.resolve({ data: { actions: [] }, response: new Response("{}") });
+      return Promise.resolve({
+        data: path.endsWith("retention-policy")
+          ? { retention_days: 365, purge_count: 0 }
+          : { categories: [], actions: [] },
+        response: new Response("{}")
+      });
     }
   }
 }));
@@ -56,6 +67,7 @@ import { AuditPage } from "./audit-page";
 
 beforeEach(() => {
   state.failLogs = false;
+  state.logsStatus = 500;
   state.requested = [];
   state.searches = [];
   window.history.replaceState(null, "", "/admin/audit");
@@ -101,7 +113,7 @@ describe("AuditPage", () => {
     }
   });
 
-  it("shows skeleton rows while the logs load, then the table, without the retention box", async () => {
+  it("shows skeleton rows while the logs load, then the table and retention policy", async () => {
     renderInApp(<AuditPage />, { route: "/admin/audit" });
     // Astryx controls carry their own (idle) live regions; the skeleton is the busy one.
     expect(
@@ -109,8 +121,50 @@ describe("AuditPage", () => {
     ).toBe(true);
 
     expect(await screen.findByRole("table", { name: "Granskningsloggar" })).toBeTruthy();
-    expect(screen.queryByText("Gallringspolicy")).toBeNull();
-    expect(state.requested).not.toContain("/api/v1/audit/retention-policy");
+    expect(await screen.findByText("Gallringspolicy")).toBeTruthy();
+    expect(state.requested).toContain("/api/v1/audit/retention-policy");
+  });
+
+  it("returns an expired audit access session to the justification form", async () => {
+    state.failLogs = true;
+    state.logsStatus = 401;
+    renderInApp(<AuditPage />, { route: "/admin/audit" });
+    expect(await screen.findByRole("button", { name: "Få åtkomst till loggar" })).toBeTruthy();
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("hides previously loaded records when an audit session expires during refresh", async () => {
+    const { queryClient } = renderInApp(<AuditPage />, { route: "/admin/audit" });
+    await screen.findByRole("table");
+    state.failLogs = true;
+    state.logsStatus = 401;
+    await act(() => queryClient.invalidateQueries({ queryKey: ["audit-logs"] }));
+    await screen.findByRole("button", { name: "Få åtkomst till loggar" });
+    expect(screen.queryByRole("table")).toBeNull();
+  });
+
+  it("opens config from the URL, preserves filters when switching and follows history", async () => {
+    window.history.replaceState(null, "", "/admin/audit?tab=config&search=invoice");
+    renderInApp(<AuditPage />, { route: "/admin/audit?tab=config&search=invoice" });
+    expect(screen.getByRole("tab", { name: "Kategorier" }).getAttribute("aria-selected")).toBe(
+      "true"
+    );
+    expect(screen.queryByRole("table")).toBeNull();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Granskningsloggar" }), {
+      button: 0,
+      ctrlKey: false
+    });
+    await screen.findByRole("table");
+    expect(new URLSearchParams(window.location.search).get("search")).toBe("invoice");
+    expect(new URLSearchParams(window.location.search).get("tab")).toBeNull();
+    act(() => window.history.back());
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Kategorier" }).getAttribute("aria-selected")).toBe(
+        "true"
+      )
+    );
+    act(() => window.history.forward());
+    await screen.findByRole("table");
   });
 
   it("shows the shared error state and loads the logs again on retry", async () => {
