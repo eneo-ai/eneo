@@ -104,6 +104,11 @@ export function measure(page: Page): Promise<PageMeasure> {
         const a = targets[i]!;
         const b = targets[j]!;
         if (a.element.contains(b.element) || b.element.contains(a.element)) continue;
+        // A docked bar is fixed over the page's end, which scrolls clear of it.
+        if (
+          a.element.closest("[data-docked-actions]") !== b.element.closest("[data-docked-actions]")
+        )
+          continue;
         const w = Math.min(a.box.right, b.box.right) - Math.max(a.box.left, b.box.left);
         const h = Math.min(a.box.bottom, b.box.bottom) - Math.max(a.box.top, b.box.top);
         if (w > 4 && h > 4)
