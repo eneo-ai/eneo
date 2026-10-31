@@ -1,5 +1,8 @@
 "use client";
 
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { Card as AstryxCard } from "@astryxdesign/core/Card";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
@@ -18,7 +21,7 @@ import {
 } from "@/features/admin/integrations/integrations";
 import { SharePointAppConfigDialog } from "./sharepoint-app-config-dialog";
 import { SharePointAppDeleteDialog } from "./sharepoint-app-delete-dialog";
-import { SharePointConnectionHealth } from "./sharepoint-connection-health";
+import { SharePointConnectionHealth, SharePointAuthBadge } from "./sharepoint-connection-health";
 
 function IntegrationCard({ integration }: { integration: TenantIntegration }) {
   const t = useTranslations();
@@ -83,7 +86,8 @@ function IntegrationCard({ integration }: { integration: TenantIntegration }) {
 function SharePointAdminSection() {
   const t = useTranslations();
   const headingId = useId();
-  const { data: config, isPending } = useQuery(sharepointAppQueryOptions(browserApi));
+  const configQuery = useQuery(sharepointAppQueryOptions(browserApi));
+  const config = configQuery.data;
   const [showConfig, setShowConfig] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
 
@@ -95,21 +99,32 @@ function SharePointAdminSection() {
         </h2>
         <p className="text-ax-text-secondary text-sm">{t("sharepoint_health_row_description")}</p>
       </div>
-      <Card className="flex flex-wrap items-center justify-between gap-2 p-4">
-        <div className="flex flex-col">
-          <span className="font-medium">SharePoint</span>
-          <span className="text-muted-foreground text-xs">
-            {isPending
-              ? t("loading_configuration")
-              : config
-                ? t("organization_access_enabled")
-                : t("configure_azure_ad_app")}
-          </span>
-        </div>
-        <Button variant="outline" size="sm" onClick={() => setShowConfig(true)}>
-          {config ? t("update_configuration") : t("configure_sharepoint_app")}
-        </Button>
-      </Card>
+      <AstryxCard padding={4} className="flex flex-col gap-3">
+        <QueryStateBoundary
+          query={configQuery}
+          rows={1}
+          loadingLabel={t("loading_configuration")}
+          errorTitle={t("sharepoint_app_load_failed")}
+        >
+          {(saved) => (
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex flex-col gap-1">
+                <span className="font-medium">SharePoint</span>
+                <span className="text-ax-text-secondary text-xs">
+                  {saved ? t("organization_access_enabled") : t("configure_azure_ad_app")}
+                </span>
+                {saved && <SharePointAuthBadge config={saved} />}
+              </div>
+              <AstryxButton
+                label={saved ? t("update_configuration") : t("configure_sharepoint_app")}
+                variant="secondary"
+                size="sm"
+                onClick={() => setShowConfig(true)}
+              />
+            </div>
+          )}
+        </QueryStateBoundary>
+      </AstryxCard>
 
       {config ? (
         <SharePointConnectionHealth config={config} onEdit={() => setShowConfig(true)} />

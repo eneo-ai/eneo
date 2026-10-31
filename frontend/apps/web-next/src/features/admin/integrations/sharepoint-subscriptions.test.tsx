@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { IntlProvider } from "use-intl";
@@ -24,6 +24,10 @@ vi.mock("@/lib/toast", () => ({ toast }));
 
 const subscription = (overrides: Record<string, unknown> = {}) => ({
   id: "sub-1",
+  user_integration_id: "ui-1",
+  subscription_id: "graph-1",
+  drive_id: "drive-1",
+  created_at: "2026-01-01T00:00:00Z",
   owner_type: "user",
   owner_email: "anna.lind@example.se",
   site_id: "site-0123456789abcdef",
@@ -35,6 +39,7 @@ const subscription = (overrides: Record<string, unknown> = {}) => ({
 });
 
 beforeEach(() => {
+  vi.clearAllMocks();
   listed.subscriptions = [subscription()];
 });
 
@@ -54,6 +59,133 @@ describe("SharePointSubscriptions", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("confirms recreating all once and reports partial results before refreshing rows", async () => {
+    let finish!: (value: unknown) => void;
+    post.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    renderInApp(<SharePointSubscriptions />);
+    await screen.findByRole("table");
+    const trigger = screen.getByRole("button", { name: "Återskapa alla prenumerationer" });
+    fireEvent.click(trigger);
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Avbryt" })
+    );
+    expect(post).not.toHaveBeenCalled();
+    fireEvent.click(trigger);
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Bekräfta" })
+    );
+    await waitFor(() =>
+      expect(post).toHaveBeenCalledExactlyOnceWith(
+        "/api/v1/admin/sharepoint/subscriptions/recreate-all"
+      )
+    );
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Återskapar..." })
+    );
+    expect(post).toHaveBeenCalledTimes(1);
+    const renew = screen.getByRole("button", { name: "Förnya" });
+    expect(renew.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(renew);
+    expect(post).toHaveBeenCalledTimes(1);
+    listed.subscriptions = [];
+    await act(async () => {
+      finish({
+        data: {
+          total_subscriptions: 3,
+          recreated: 2,
+          failed: 1,
+          errors: ["Microsoft nekade en prenumeration"]
+        },
+        response: new Response("{}")
+      });
+    });
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        "2 återskapade, 1 misslyckades. Fel: Microsoft nekade en prenumeration"
+      )
+    );
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(screen.queryByText("anna.lind@example.se")).toBeNull();
+  });
+
+  it.each([
+    {
+      result: { total_subscriptions: 0, recreated: 0, failed: 0 },
+      message: "Det finns inga prenumerationer att återskapa",
+      kind: "info" as const
+    },
+    {
+      result: { total_subscriptions: 1, recreated: 1, failed: 0 },
+      message: "1 prenumeration återskapad",
+      kind: "success" as const
+    }
+  ])("reports a completed recreate-all result: $message", async ({ result, message, kind }) => {
+    post.mockResolvedValue({ data: result, response: new Response("{}") });
+    renderInApp(<SharePointSubscriptions />);
+    await screen.findByRole("table");
+    fireEvent.click(screen.getByRole("button", { name: "Återskapa alla prenumerationer" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Bekräfta" })
+    );
+    await waitFor(() => expect(toast[kind]).toHaveBeenCalledWith(message));
+  });
+
+  it("keeps a failed recreate-all confirmation retryable and shows the API error", async () => {
+    post
+      .mockResolvedValueOnce({
+        error: { message: "Microsoft rejected webhook" },
+        response: new Response("{}", { status: 400 })
+      })
+      .mockResolvedValueOnce({
+        data: { total_subscriptions: 1, recreated: 1, failed: 0 },
+        response: new Response("{}")
+      });
+    renderInApp(<SharePointSubscriptions />);
+    await screen.findByRole("table");
+    fireEvent.click(screen.getByRole("button", { name: "Återskapa alla prenumerationer" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "Bekräfta" })
+    );
+    await waitFor(() =>
+      expect(JSON.stringify(toast.error.mock.calls)).toContain("Microsoft rejected webhook")
+    );
+    const retry = within(screen.getByRole("alertdialog")).getByRole("button", { name: "Bekräfta" });
+    await waitFor(() => expect(retry.getAttribute("aria-busy")).toBeNull());
+    fireEvent.click(retry);
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("1 prenumeration återskapad"));
+    expect(post).toHaveBeenCalledTimes(2);
+  });
+
+  it("shows lifetime, webhook/failure timestamps, drive and creation for each row", async () => {
+    const webhook = "2026-10-30T08:00:00Z";
+    const failure = "2026-10-31T08:00:00Z";
+    listed.subscriptions = [
+      subscription({ last_webhook_received_at: webhook }),
+      subscription({
+        id: "sub-2",
+        owner_email: "bob@example.se",
+        expires_in_hours: 25,
+        consecutive_renewal_failures: 1,
+        last_renewal_failed_at: failure
+      })
+    ];
+    renderInApp(<SharePointSubscriptions />);
+    const table = await screen.findByRole("table");
+    const anna = within(table).getByRole("row", { name: /anna.lind/ });
+    expect(within(anna).getByText("5d kvar")).toBeTruthy();
+    expect(within(anna).getByText(/drive-1/)).toBeTruthy();
+    expect(anna.querySelector(`time[datetime="${new Date(webhook).toISOString()}"]`)).toBeTruthy();
+    expect(anna.querySelector('time[datetime="2026-01-01T00:00:00.000Z"]')).toBeTruthy();
+    const bob = within(table).getByRole("row", { name: /bob@example/ });
+    expect(within(bob).getByText("1d 1h kvar")).toBeTruthy();
+    expect(bob.querySelector(`time[datetime="${new Date(failure).toISOString()}"]`)).toBeTruthy();
+  });
+
   it("keeps focus on a busy Förnya and renews once", async () => {
     post.mockReturnValue(new Promise(() => {}));
     renderInApp(<SharePointSubscriptions />);
@@ -67,6 +199,13 @@ describe("SharePointSubscriptions", () => {
     expect(busy.getAttribute("aria-busy")).toBe("true");
     expect(busy.hasAttribute("disabled")).toBe(false);
     expect(document.activeElement).toBe(busy);
+    const bulk = screen.getByRole("button", { name: "Återskapa alla prenumerationer" });
+    expect(bulk.hasAttribute("disabled")).toBe(false);
+    expect(bulk.getAttribute("aria-busy")).toBe("true");
+    bulk.focus();
+    fireEvent.click(bulk);
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+    expect(document.activeElement).toBe(bulk);
     fireEvent.click(busy);
     expect(post).toHaveBeenCalledTimes(1);
   });

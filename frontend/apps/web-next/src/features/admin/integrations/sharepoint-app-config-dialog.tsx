@@ -1,5 +1,13 @@
 "use client";
 
+import { Button as AstryxButton } from "@astryxdesign/core/Button";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
+import {
+  MicrosoftAuthErrorGuidance,
+  SharePointAuthBadge,
+  useServiceAccountReauthentication,
+  useStoredSharePointConnectionTest
+} from "./sharepoint-connection-health";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
@@ -55,10 +63,14 @@ export function SharePointAppConfigDialog({
 }) {
   const t = useTranslations();
   const queryClient = useQueryClient();
-  const { data: config, isPending } = useQuery({
+  const configQuery = useQuery({
     ...sharepointAppQueryOptions(browserApi),
     enabled: open
   });
+  const { data: config, isPending } = configQuery;
+  const storedTest = useStoredSharePointConnectionTest();
+  const reauth = useServiceAccountReauthentication();
+  const redirecting = reauth.isPending || reauth.isSuccess;
 
   const [authMethod, setAuthMethod] = useState<AuthMethod>("service_account");
   const [clientId, setClientId] = useState("");
@@ -197,23 +209,73 @@ export function SharePointAppConfigDialog({
           <DialogDescription>{t("sharepoint_app_config_description")}</DialogDescription>
         </DialogHeader>
 
-        {isPending ? (
+        <RefreshError queries={[configQuery]} />
+        {blockingError(configQuery) ? (
+          <ListError
+            error={configQuery.error}
+            title={t("sharepoint_app_load_failed")}
+            isRetrying={configQuery.isFetching}
+            onRetry={() => void configQuery.refetch()}
+          />
+        ) : isPending ? (
           <LoadingState rows={1} height={160} />
         ) : config ? (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-2 rounded-lg border p-3 text-sm">
               <span className="font-medium">{t("current_configuration")}</span>
-              <Field label={t("service_account_option")} value={config.auth_method} />
+              <Field
+                label={t("auth_method")}
+                value={
+                  config.auth_method === "service_account"
+                    ? t("service_account_option")
+                    : t("tenant_app_option")
+                }
+              />
               <Field label={t("client_id")} value={config.client_id} mono />
               <Field label={t("client_secret")} value={config.client_secret_masked} mono />
               <Field label={t("tenant_id_or_domain")} value={config.tenant_domain} />
               {config.service_account_email && (
-                <Field label={t("service_account_option")} value={config.service_account_email} />
+                <Field label={t("service_account_email")} value={config.service_account_email} />
               )}
+              <SharePointAuthBadge config={config} />
               <Badge variant={config.is_active ? "default" : "secondary"} className="w-fit">
                 {config.is_active ? t("active") : t("inactive")}
               </Badge>
             </div>
+            <div className="flex flex-wrap gap-2">
+              <AstryxButton
+                label={t("sharepoint_health_test_title")}
+                variant="secondary"
+                isLoading={storedTest.runTest.isPending}
+                isInterruptible
+                onClick={() => {
+                  if (!storedTest.runTest.isPending) storedTest.runTest.mutate();
+                }}
+              />
+              {config.auth_method === "service_account" && (
+                <AstryxButton
+                  label={redirecting ? t("redirecting") : t("sharepoint_reauth_with_microsoft")}
+                  variant="secondary"
+                  isLoading={redirecting}
+                  isInterruptible
+                  onClick={() => {
+                    if (!redirecting) reauth.mutate();
+                  }}
+                />
+              )}
+            </div>
+            {storedTest.result && (
+              <div className="flex flex-col gap-2">
+                <p className="text-sm break-words">
+                  {storedTest.result.success
+                    ? t("sharepoint_stored_connection_ok")
+                    : (storedTest.result.error_message ?? t("connection_failed"))}
+                </p>
+                {!storedTest.result.success && (
+                  <MicrosoftAuthErrorGuidance message={storedTest.result.error_message} />
+                )}
+              </div>
+            )}
             {updatingSecret ? (
               <ConfirmedSecretInput
                 label={t("new_client_secret")}
@@ -304,7 +366,7 @@ export function SharePointAppConfigDialog({
         )}
 
         <DialogFooter className="flex-wrap gap-2">
-          {config ? (
+          {isPending || blockingError(configQuery) ? null : config ? (
             updatingSecret ? (
               <>
                 <Button variant="outline" onClick={stopUpdatingSecret}>

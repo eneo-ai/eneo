@@ -122,19 +122,33 @@ function HealthCheck({
   );
 }
 
-function signInHealth(config: SharePointApp): HealthState {
+function signInHealth(config: Pick<SharePointApp, "auth_status">): HealthState {
   if (config.auth_status === "ok") return "ok";
   return config.auth_status === "error" ? "error" : "unknown";
 }
 
-function SignInCheck({ config, onEdit }: { config: SharePointApp; onEdit: () => void }) {
+export function SharePointAuthBadge({ config }: { config: Pick<SharePointApp, "auth_status"> }) {
   const t = useTranslations();
   const state = signInHealth(config);
-  const guidance = classifyMicrosoftAuthError(config.last_auth_error);
-  const errorAt = useClientTimeText(config.last_auth_error_at, "date_time");
-  const successAt = useClientTimeText(config.last_auth_success_at, "date_time");
+  return (
+    <Badge
+      variant={BADGE_VARIANTS[state]}
+      label={t(`sharepoint_auth_status_${config.auth_status ?? "unknown"}`)}
+    />
+  );
+}
 
-  const reauth = useMutation({
+export function MicrosoftAuthErrorGuidance({ message }: { message?: string | null }) {
+  const t = useTranslations();
+  const guidance = classifyMicrosoftAuthError(message);
+  return guidance ? (
+    <p className="text-ax-text-secondary text-sm">{t(`sharepoint_auth_guidance_${guidance}`)}</p>
+  ) : null;
+}
+
+export function useServiceAccountReauthentication() {
+  const t = useTranslations();
+  return useMutation({
     mutationFn: () =>
       unwrap(
         browserApi.POST("/api/v1/admin/sharepoint/service-account/auth/reauth", {
@@ -144,6 +158,16 @@ function SignInCheck({ config, onEdit }: { config: SharePointApp; onEdit: () => 
     onSuccess: (start) => followServiceAccountSignIn(start, t),
     onError: (error) => toastSignInError(error, t)
   });
+}
+
+function SignInCheck({ config, onEdit }: { config: SharePointApp; onEdit: () => void }) {
+  const t = useTranslations();
+  const state = signInHealth(config);
+  const guidance = classifyMicrosoftAuthError(config.last_auth_error);
+  const errorAt = useClientTimeText(config.last_auth_error_at, "date_time");
+  const successAt = useClientTimeText(config.last_auth_success_at, "date_time");
+
+  const reauth = useServiceAccountReauthentication();
   // Stays busy after success: the browser is on its way to Microsoft.
   const redirecting = reauth.isPending || reauth.isSuccess;
 
@@ -279,7 +303,7 @@ function WatchCheck({ watch }: { watch: ReturnType<typeof useWatchHealth> }) {
   );
 }
 
-function ConnectionTestCheck() {
+export function useStoredSharePointConnectionTest() {
   const t = useTranslations();
   const queryClient = useQueryClient();
   const announce = useAnnounce();
@@ -305,6 +329,12 @@ function ConnectionTestCheck() {
     onSettled: () => queryClient.invalidateQueries({ queryKey: SHAREPOINT_APP_KEY })
   });
 
+  return { result, runTest };
+}
+
+function ConnectionTestCheck() {
+  const t = useTranslations();
+  const { result, runTest } = useStoredSharePointConnectionTest();
   const state: HealthState = result === null ? "unknown" : result.success ? "ok" : "error";
 
   return (
@@ -332,6 +362,7 @@ function ConnectionTestCheck() {
               ? (result.error_message ?? t("sharepoint_health_state_error"))
               : t("sharepoint_health_test_description")}
       </p>
+      {!result?.success && <MicrosoftAuthErrorGuidance message={result?.error_message} />}
     </HealthCheck>
   );
 }
