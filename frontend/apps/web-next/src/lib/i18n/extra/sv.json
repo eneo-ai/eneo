@@ -1791,5 +1791,10 @@
   "api_keys_notifications_days_validation": "Ange positiva heltal separerade med kommatecken, inom organisationens gräns.",
   "api_keys_notifications_reminder_days_label": "Påminnelsedagar",
   "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
-  "api_keys_notifications_add_day": "Lägg till {days} dagar"
+  "api_keys_notifications_add_day": "Lägg till {days} dagar",
+  "resource_view": "Visning",
+  "resource_sort": "Sortera",
+  "resource_sort_ascending": "Stigande",
+  "resource_sort_descending": "Fallande",
+  "resource_filter_results": "Filtrera resultat"
 }

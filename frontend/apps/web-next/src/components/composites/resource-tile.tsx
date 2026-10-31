@@ -39,15 +39,19 @@ export function useResourceLayout(): ResourceLayout {
 export function ResourceCollection({
   children,
   trailing,
-  gridClassName = RESOURCE_GRID_CLASS
+  gridClassName = RESOURCE_GRID_CLASS,
+  desktopList
 }: {
   children: React.ReactNode;
   trailing?: React.ReactNode;
   gridClassName?: string;
+  /** Optional table for a chosen desktop List view; phones keep their resource rows. */
+  desktopList?: React.ReactNode;
 }) {
   const phone = useMediaMatch(PHONE_QUERY);
   const box = useRef<HTMLDivElement>(null);
-  useFocusAcrossLayouts(box, phone);
+  const layout = phone === null ? "pending" : phone ? "phone" : desktopList ? "table" : "cards";
+  useFocusAcrossLayouts(box, layout);
 
   return (
     <div ref={box} className="contents">
@@ -61,7 +65,9 @@ export function ResourceCollection({
           {trailing}
         </div>
       ) : null}
-      {phone !== true ? (
+      {phone !== true && desktopList ? (
+        <div className="max-md:hidden">{desktopList}</div>
+      ) : phone !== true ? (
         <ResourceLayoutContext value="cards">
           <ul className={cn(gridClassName, "max-md:hidden")}>
             {children}
