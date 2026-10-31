@@ -1279,7 +1279,7 @@
   "signup_same_email_note": "Säkerställ att de registrerar sig med samma e-postadress som du har registrerat.",
   "skills_bindings_save": "Spara skills",
   "skills_bindings_saved": "Skill-kopplingar sparade.",
-  "skills_create_action": "Skapa Skill",
+  "skills_create_action": "Skapa skill",
   "skills_description_description": "Förklara vad Skill gör och när den ska användas.",
   "skills_display_name_description": "Använd ett kort namn som beskriver förmågan.",
   "skills_instructions_description": "Skriv de specialiserade instruktionerna i Markdown. Det finns ingen fast gräns för antal tecken eller rader.",
@@ -1792,5 +1792,12 @@
   "enable_mentions": "Aktivera omnämnanden",
   "disable_mentions": "Inaktivera omnämnanden",
   "space_apps_actions": "Appar, åtgärder",
-  "space_services_actions": "Tjänster, åtgärder"
+  "space_services_actions": "Tjänster, åtgärder",
+  "to": "Till",
+  "api_keys_admin_search_placeholder": "Namn, nyckel, ägare eller omfångs-ID",
+  "space_skills_actions": "Skills, åtgärder",
+  "website_detail_actions": "Webbplats, åtgärder",
+  "space_integrations_empty_description": "Importera innehåll från en ansluten tjänst, till exempel SharePoint eller Confluence, så kan assistenterna söka i det.",
+  "account_integrations_enable_in_admin": "Aktivera integrationer",
+  "space_assistants_actions": "Assistenter, åtgärder"
 }

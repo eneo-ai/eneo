@@ -1792,5 +1792,12 @@
   "enable_mentions": "Enable mentions",
   "disable_mentions": "Disable mentions",
   "space_apps_actions": "Apps, actions",
-  "space_services_actions": "Services, actions"
+  "space_services_actions": "Services, actions",
+  "to": "To",
+  "api_keys_admin_search_placeholder": "Name, key, owner or scope ID",
+  "space_skills_actions": "Skills, actions",
+  "website_detail_actions": "Website, actions",
+  "space_integrations_empty_description": "Import content from a connected service, such as SharePoint or Confluence, so the assistants can search it.",
+  "account_integrations_enable_in_admin": "Enable integrations",
+  "space_assistants_actions": "Assistants, actions"
 }

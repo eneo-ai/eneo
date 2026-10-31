@@ -1128,7 +1128,7 @@
   "failure_reason_other": "Annat hämtningsfel",
   "title": "Titel",
   "users": "Användare",
-  "to": "till",
+  "to": "Till",
   "to_regain_access": "för att återfå åtkomst för din organisation.",
   "token_summary": "Token-sammanfattning (Senaste 30 dagarna)",
   "tokens": "Tokens",
@@ -2982,7 +2982,7 @@
   "api_keys_admin_filters_active": "{count} filter aktivt",
   "api_keys_admin_filters_active_plural": "{count} filter aktiva",
   "api_keys_admin_filters_description": "Filtrera API-nycklar efter omfång, status, ägare eller skapare",
-  "api_keys_admin_search_placeholder": "Sök efter namn, full nyckel, nyckelslut, ägare eller omfångs-ID...",
+  "api_keys_admin_search_placeholder": "Namn, nyckel, ägare eller omfångs-ID",
   "api_keys_admin_quick_secret": "Hemliga nycklar",
   "api_keys_admin_quick_public": "Publika nycklar",
   "api_keys_admin_scope_all": "Alla omfång",
@@ -3614,7 +3614,7 @@
   "skills_slug_description": "Skapas från namnet. Du kan ändra den före skapandet, men inte efteråt. Servern gör den slutliga valideringen.",
   "skills_required_field": "Fältet är obligatoriskt.",
   "skills_form_error_title": "Skillen kunde inte skapas",
-  "skills_create_action": "Skapa Skill",
+  "skills_create_action": "Skapa skill",
   "skills_creating": "Skapar…",
   "skills_unknown_skill": "Okänd skill",
   "skills_revision_label": "Version {revision}",
@@ -7033,5 +7033,10 @@
   "api_keys_notifications_reminder_days_description": "Ange antal dagar före utgång, separerade med kommatecken.",
   "api_keys_notifications_add_day": "Lägg till {days} dagar",
   "space_apps_actions": "Appar, åtgärder",
-  "space_services_actions": "Tjänster, åtgärder"
+  "space_services_actions": "Tjänster, åtgärder",
+  "space_skills_actions": "Skills, åtgärder",
+  "website_detail_actions": "Webbplats, åtgärder",
+  "space_integrations_empty_description": "Importera innehåll från en ansluten tjänst, till exempel SharePoint eller Confluence, så kan assistenterna söka i det.",
+  "account_integrations_enable_in_admin": "Aktivera integrationer",
+  "space_assistants_actions": "Assistenter, åtgärder"
 }

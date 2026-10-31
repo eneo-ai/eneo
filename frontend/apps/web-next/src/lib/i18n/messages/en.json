@@ -1139,7 +1139,7 @@
   "predefined": "Predefined",
   "custom": "Custom",
   "users": "Users",
-  "to": "to",
+  "to": "To",
   "to_regain_access": "to regain access for your organisation.",
   "token_summary": "Token summary (Last 30 days)",
   "tokens": "Tokens",
@@ -2949,7 +2949,7 @@
   "api_keys_admin_filters_active": "{count} filter active",
   "api_keys_admin_filters_active_plural": "{count} filters active",
   "api_keys_admin_filters_description": "Filter API keys by scope, state, owner, or creator",
-  "api_keys_admin_search_placeholder": "Search by name, full key, key suffix, owner, or scope ID...",
+  "api_keys_admin_search_placeholder": "Name, key, owner or scope ID",
   "api_keys_admin_quick_secret": "Secret keys",
   "api_keys_admin_quick_public": "Public keys",
   "api_keys_admin_scope_all": "All scopes",
@@ -7033,5 +7033,10 @@
   "api_keys_notifications_reminder_days_description": "Enter the number of days before expiry, separated by commas.",
   "api_keys_notifications_add_day": "Add {days} days",
   "space_apps_actions": "Apps, actions",
-  "space_services_actions": "Services, actions"
+  "space_services_actions": "Services, actions",
+  "space_skills_actions": "Skills, actions",
+  "website_detail_actions": "Website, actions",
+  "space_integrations_empty_description": "Import content from a connected service, such as SharePoint or Confluence, so the assistants can search it.",
+  "account_integrations_enable_in_admin": "Enable integrations",
+  "space_assistants_actions": "Assistants, actions"
 }
