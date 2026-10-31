@@ -114,6 +114,7 @@ function EntryForm({
         onChange={(name) => setDraft((current) => ({ ...current, name }))}
         isRequired
         htmlName="name"
+        maxLength={200}
         autoComplete="off"
         status={status(nameProblem)}
         width="100%"
