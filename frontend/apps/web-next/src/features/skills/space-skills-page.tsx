@@ -26,6 +26,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { PageHeader } from "@/components/composites/page-header";
 import { ClientTime } from "@/components/composites/client-time";
 import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
@@ -43,7 +44,7 @@ export function SpaceSkillsPage() {
   const { space, routeId, can } = useSpace();
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const search = useDebouncedValue(searchInput.trim());
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [deleteTarget, setDeleteTarget] = useState<Skill | null>(null);
   const [deleteError, setDeleteError] = useState<unknown>(null);
@@ -53,9 +54,10 @@ export function SpaceSkillsPage() {
   const skills = useInfiniteQuery({
     queryKey: [...key, search],
     ...cursorPagination,
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam, signal }) =>
       unwrap(
         browserApi.GET("/api/v1/spaces/{space_id}/skills/", {
+          signal,
           params: {
             path: { space_id: space.id },
             query: { limit: PAGE_SIZE, cursor: pageParam, q: search || undefined }
@@ -68,7 +70,6 @@ export function SpaceSkillsPage() {
 
   function submitSearch(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSearch(searchInput.trim());
   }
 
   // The error stays in the dialog, next to the action that failed.
@@ -208,9 +209,6 @@ export function SpaceSkillsPage() {
               onChange={(event) => setSearchInput(event.target.value)}
             />
           </div>
-          <Button type="submit" variant="outline">
-            {t("search")}
-          </Button>
         </form>
       ) : null}
       <QueryStateBoundary query={skills} rows={3}>
@@ -226,7 +224,6 @@ export function SpaceSkillsPage() {
                   <Button
                     variant="outline"
                     onClick={() => {
-                      setSearch("");
                       setSearchInput("");
                     }}
                   >

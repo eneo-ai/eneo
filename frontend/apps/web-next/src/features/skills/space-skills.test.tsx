@@ -87,16 +87,19 @@ describe("space Skills", () => {
     await screen.findByText("Reports");
     // Named like the page heading (translation keys stand in for the text here).
     expect(screen.getByRole("table", { name: "skills" })).toBeTruthy();
-    expect(get).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
-      params: {
-        path: { space_id: "space-1" },
-        query: { limit: 25, cursor: undefined, q: undefined }
-      }
-    });
+    expect(get).toHaveBeenCalledWith(
+      "/api/v1/spaces/{space_id}/skills/",
+      expect.objectContaining({
+        params: {
+          path: { space_id: "space-1" },
+          query: { limit: 25, cursor: undefined, q: undefined }
+        }
+      })
+    );
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "reports" } });
-    fireEvent.submit(screen.getByRole("search"));
     await waitFor(() =>
       expect(get).toHaveBeenCalledWith("/api/v1/spaces/{space_id}/skills/", {
+        signal: expect.anything(),
         params: {
           path: { space_id: "space-1" },
           query: { limit: 25, cursor: undefined, q: "reports" }

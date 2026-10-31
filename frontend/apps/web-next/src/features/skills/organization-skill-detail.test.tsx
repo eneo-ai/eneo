@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
+import { EneoApiError } from "@/lib/api/errors";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
@@ -21,13 +22,15 @@ import { OrganizationSkillPublication } from "./organization-skill-publication";
 
 const ok = (data: unknown) =>
   Promise.resolve({ data, response: new Response("{}", { status: 200 }) });
-const currentRevision = {
+const currentRevision: Schema<"SkillRevisionPublic"> = {
   id: "rev-2",
   skill_id: "skill-1",
   revision_number: 2,
   display_name: "Reports",
   description: "Report search",
   instructions: "Search carefully",
+  content_digest: "digest-2",
+  created_by_user_id: "user-1",
   created_at: "2026-09-01T12:00:00Z"
 };
 const olderRevision = {
@@ -75,6 +78,144 @@ function show(node: React.ReactNode) {
 }
 
 describe("organisation skill detail", () => {
+  it("announces the detached resources when removing from the detail page", async () => {
+    const originalGet = get.getMockImplementation()!;
+    get.mockImplementation((path: string) =>
+      path === "/api/v1/skills/organization/{skill_id}/"
+        ? ok({
+            ...skill,
+            usage: {
+              assistant_count: 1,
+              app_count: 1,
+              distinct_space_count: 1,
+              personal_chat_pinned: true
+            }
+          })
+        : originalGet(path)
+    );
+    post.mockImplementation(() =>
+      ok({
+        removed_ids: [skill.id],
+        detached: { assistant_count: 1, app_count: 1, personal_chat_count: 1 }
+      })
+    );
+    show(<OrganizationSkillDetailPage skillId="skill-1" />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "organization_skills_remove_action" })
+    );
+    const dialog = screen.getByRole("alertdialog");
+    const detach = within(dialog).getByRole("checkbox", {
+      name: /organization_skills_remove_detach_label/
+    }) as HTMLInputElement;
+    if (!detach.checked) fireEvent.click(detach);
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: "organization_skills_remove_action" })
+    );
+    expect(
+      await screen.findByText(
+        /organization_skills_removed_detached_success.*organization_skills_removed_personal_chat_updated/
+      )
+    ).toBeTruthy();
+  });
+  it("keeps a restore conflict visible and compares its source with the refreshed current revision", async () => {
+    let latest = skill;
+    const originalGet = get.getMockImplementation()!;
+    get.mockImplementation((path: string) =>
+      path === "/api/v1/skills/organization/{skill_id}/" ? ok(latest) : originalGet(path)
+    );
+    post.mockImplementation(() => {
+      latest = {
+        ...skill,
+        current_revision_id: "rev-3",
+        current_revision_number: 3,
+        current_revision: {
+          ...currentRevision,
+          id: "rev-3",
+          revision_number: 3,
+          instructions: "Concurrent revision"
+        }
+      };
+      return Promise.reject(new EneoApiError("Changed meanwhile", { status: 409 }));
+    });
+    show(<OrganizationSkillDetailPage skillId="skill-1" />);
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "skills_library_view_revision_aria" }))[1]!
+    );
+    await screen.findByText("Search fast");
+    fireEvent.click(
+      screen.getByRole("button", { name: "skills_library_restore_revision_from_preview" })
+    );
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "skills_library_restore_action"
+      })
+    );
+    expect(await screen.findByText("Changed meanwhile")).toBeTruthy();
+    const preview = await screen.findByRole("dialog");
+    expect(within(preview).getByText("Search fast")).toBeTruthy();
+    expect(within(preview).getByText("Concurrent revision")).toBeTruthy();
+    expect(post).toHaveBeenCalledTimes(1);
+  });
+
+  it("allows an explicit restore with a visible warning about unsaved edits", async () => {
+    show(<OrganizationSkillDetailPage skillId="skill-1" />);
+    replaceInstructionText(
+      await screen.findByLabelText("skills_instructions_label"),
+      "Unsaved work"
+    );
+    fireEvent.click(
+      (await screen.findAllByRole("button", { name: "skills_library_view_revision_aria" }))[1]!
+    );
+    await screen.findByText("Search fast");
+    const restore = screen.getByRole("button", {
+      name: "skills_library_restore_revision_from_preview"
+    });
+    expect(restore.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(restore);
+    const dialog = screen.getByRole("alertdialog");
+    expect(within(dialog).getByText("skills_library_restore_unsaved_warning")).toBeTruthy();
+    expect(
+      within(dialog)
+        .getByRole("button", { name: "skills_library_restore_action" })
+        .hasAttribute("disabled")
+    ).toBe(false);
+  });
+
+  it("disables Stop as soon as requested and keeps a separate pending app receipt", async () => {
+    let finish!: (value: unknown) => void;
+    post.mockImplementation((path: string) =>
+      path.endsWith("/publish/")
+        ? ok({ ...skill, published_revision_number: 2, publication_state: "published" })
+        : new Promise((resolve) => {
+            finish = resolve;
+          })
+    );
+    show(<OrganizationSkillPublication skill={skill} unsaved={false} />);
+    fireEvent.click(screen.getByRole("button", { name: "organization_skills_publish_action" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", {
+        name: "organization_skills_publish_action"
+      })
+    );
+    const stop = await screen.findByRole("button", { name: "organization_skills_rollout_stop" });
+    fireEvent.click(stop);
+    expect(stop.hasAttribute("disabled")).toBe(true);
+    expect(
+      screen.getByRole("table", { name: "organization_skills_rollout_apps_title" })
+    ).toBeTruthy();
+    expect(screen.getByText("organization_skills_rollout_apps_status_pending")).toBeTruthy();
+    finish({
+      data: {
+        counts: { advanced: 1, concurrent_change: 0, incompatible: 0 },
+        outcomes: [],
+        next_cursor: "next"
+      },
+      response: new Response("{}")
+    });
+    await screen.findByRole("button", { name: "organization_skills_rollout_restart" });
+    expect(post.mock.calls.some(([path]) => path.endsWith("apps/advance/"))).toBe(false);
+  });
+
   it("saves a changed content version through the revision endpoint", async () => {
     show(<OrganizationSkillDetailPage skillId="skill-1" />);
     await screen.findByLabelText("skills_instructions_label");

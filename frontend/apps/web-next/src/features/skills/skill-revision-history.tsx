@@ -41,9 +41,9 @@ type Revision = Schema<"SkillRevisionPublic">;
 function RevisionContent({ revision, current }: { revision: Revision; current: Revision }) {
   const t = useTranslations();
   return (
-    <dl className="grid gap-4 sm:grid-cols-2">
+    <dl className="space-y-4">
       {(["display_name", "description", "instructions"] as const).map((field) => (
-        <div key={field} className={field === "instructions" ? "sm:col-span-2" : ""}>
+        <div key={field}>
           <dt className="text-muted-foreground mb-1 flex gap-2 text-xs font-medium">
             {t(
               field === "display_name"
@@ -59,7 +59,7 @@ function RevisionContent({ revision, current }: { revision: Revision; current: R
           <dd
             className={
               field === "instructions"
-                ? "bg-muted/40 max-h-80 overflow-y-auto rounded-md border p-3 font-mono text-xs whitespace-pre-wrap"
+                ? "bg-muted/40 rounded-md border p-3 font-mono text-xs break-words whitespace-pre-wrap"
                 : "text-sm"
             }
           >
@@ -132,8 +132,17 @@ export function SkillRevisionHistory({
     } catch (cause) {
       setError(cause);
       if (cause instanceof EneoApiError && cause.status === 409) {
-        await queryClient.invalidateQueries({ queryKey: [...key, skill.id] });
-        setRestoreId(null);
+        const sourceId = restoreId;
+        try {
+          await queryClient.invalidateQueries(
+            { queryKey: [...key, skill.id] },
+            { throwOnError: true }
+          );
+          setRestoreId(null);
+          setViewId(sourceId);
+        } catch (refreshError) {
+          setError(refreshError);
+        }
       }
     } finally {
       setRestoring(false);
@@ -199,7 +208,7 @@ export function SkillRevisionHistory({
           if (!open && !restoreId) setViewId(null);
         }}
       >
-        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-5xl">
           <DialogHeader>
             <DialogTitle>
               {t("skills_library_view_revision_title", {
@@ -221,11 +230,56 @@ export function SkillRevisionHistory({
           ) : (
             <>
               <RefreshError queries={[preview]} />
-              <RevisionContent revision={revision} current={skill.current_revision} />
+              {error != null && (
+                <ListError error={error} title={t("skills_library_restore_error")} />
+              )}
+              {unsaved && (
+                <p className="text-muted-foreground text-sm">
+                  {t("skills_library_restore_unsaved_warning")}
+                </p>
+              )}
+              <div
+                className={
+                  revision.id === skill.current_revision_id ? "" : "grid gap-6 md:grid-cols-2"
+                }
+              >
+                <section className="min-w-0 space-y-3">
+                  <h3 className="font-semibold">
+                    {t("skills_revision_label", { revision: String(revision.revision_number) })}
+                    {revision.id === skill.current_revision_id && (
+                      <Badge className="ml-2" variant="secondary">
+                        {t("skills_library_current_revision")}
+                      </Badge>
+                    )}
+                  </h3>
+                  <p className="text-muted-foreground text-xs">
+                    {new Date(revision.created_at).toLocaleString(locale)}
+                  </p>
+                  <RevisionContent revision={revision} current={skill.current_revision} />
+                </section>
+                {revision.id !== skill.current_revision_id && (
+                  <section className="min-w-0 space-y-3">
+                    <h3 className="font-semibold">
+                      {t("skills_revision_label", {
+                        revision: String(skill.current_revision_number)
+                      })}
+                      <Badge className="ml-2" variant="secondary">
+                        {t("skills_library_current_revision")}
+                      </Badge>
+                    </h3>
+                    <p className="text-muted-foreground text-xs">
+                      {new Date(skill.current_revision.created_at).toLocaleString(locale)}
+                    </p>
+                    <RevisionContent
+                      revision={skill.current_revision}
+                      current={skill.current_revision}
+                    />
+                  </section>
+                )}
+              </div>
               {canRestore && revision.id !== skill.current_revision_id && (
                 <Button
                   className="w-fit"
-                  disabled={unsaved}
                   onClick={() => {
                     setRestoreId(revision.id);
                     setViewId(null);
@@ -259,14 +313,18 @@ export function SkillRevisionHistory({
             </AlertDialogDescription>
           </AlertDialogHeader>
           {error != null && <ListError error={error} title={t("skills_library_restore_error")} />}
+          {unsaved && (
+            <div className="space-y-1">
+              <p className="font-medium">{t("skills_library_restore_unsaved_title")}</p>
+              <p className="text-muted-foreground text-sm">
+                {t("skills_library_restore_unsaved_warning")}
+              </p>
+            </div>
+          )}
           <AlertDialogFooter>
             <AlertDialogCancel disabled={restoring}>{t("cancel")}</AlertDialogCancel>
             {/* Busy, it stays enabled so it keeps focus; restore() ignores a second press. */}
-            <Button
-              disabled={unsaved}
-              aria-busy={restoring || undefined}
-              onClick={() => void restore()}
-            >
+            <Button aria-busy={restoring || undefined} onClick={() => void restore()}>
               {restoring ? t("skills_library_restoring") : t("skills_library_restore_action")}
             </Button>
           </AlertDialogFooter>

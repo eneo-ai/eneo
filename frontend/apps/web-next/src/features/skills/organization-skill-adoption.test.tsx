@@ -1,13 +1,18 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
-vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({
+  useTranslations: () => (key: string, values?: Record<string, string>) =>
+    key === "organization_skills_adoption_resources_shown"
+      ? `${key}:${values?.shown}/${values?.total}`
+      : key
+}));
 
 import { OrganizationSkillAdoption } from "./organization-skill-adoption";
 
@@ -103,6 +108,103 @@ function show() {
 }
 
 describe("organisation Skill bindings", () => {
+  it("hides and resets drift when the Skill becomes unpublished", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const renderSkill = (value: typeof skill) => (
+      <QueryClientProvider client={client}>
+        <OrganizationSkillAdoption skill={value} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(renderSkill(skill));
+    await screen.findByText("Review app");
+    fireEvent.change(screen.getByLabelText("organization_skills_adoption_filter_status_label"), {
+      target: { value: "behind" }
+    });
+    await waitFor(() =>
+      expect(get.mock.calls.some(([, options]) => options.params?.query?.drift === "behind")).toBe(
+        true
+      )
+    );
+    rerender(
+      renderSkill({ ...skill, published_revision_number: null, publication_state: "draft" })
+    );
+    expect(screen.queryByLabelText("organization_skills_adoption_filter_status_label")).toBeNull();
+    rerender(renderSkill(skill));
+    expect(
+      (
+        screen.getByLabelText(
+          "organization_skills_adoption_filter_status_label"
+        ) as HTMLSelectElement
+      ).value
+    ).toBe("all");
+  });
+
+  it("explains adoption when no resource or personal chat uses the Skill", async () => {
+    get.mockImplementation((path: string) =>
+      path.endsWith("/adoption/")
+        ? ok({
+            ...page,
+            items: [],
+            summary: { ...page.summary, assistant_count: 0, app_count: 0, personal_chat: null }
+          })
+        : ok({ revision_id: "rev-2" })
+    );
+    show();
+    expect(await screen.findByText("organization_skills_adoption_empty_title")).toBeTruthy();
+    expect(screen.getByText("organization_skills_adoption_empty_description")).toBeTruthy();
+  });
+  it("shows personal-chat drift, revision pins and the server matched count", async () => {
+    get.mockImplementation((path: string) =>
+      path.endsWith("/adoption/")
+        ? ok({ ...page, matched_count: 9, next_cursor: "more" })
+        : ok({ revision_id: "rev-2" })
+    );
+    show();
+    await screen.findByText("Review app");
+    expect(screen.getByText(/organization_skills_adoption_pinned$/)).toBeTruthy();
+    expect(screen.getAllByText("organization_skills_adoption_drift_behind").length).toBeGreaterThan(
+      2
+    );
+    expect(screen.getByText("organization_skills_adoption_resources_shown:2/9")).toBeTruthy();
+  });
+
+  it("keeps an older search response out of the current live results", async () => {
+    let resolveOld!: (value: unknown) => void;
+    let oldSignal: AbortSignal | undefined;
+    get.mockImplementation(
+      (
+        path: string,
+        options: { signal?: AbortSignal; params?: { query?: { query?: string } } }
+      ) => {
+        if (!path.endsWith("/adoption/")) return ok({ revision_id: "rev-2" });
+        if (options.params?.query?.query === "Old") {
+          oldSignal = options.signal;
+          return new Promise((resolve) => {
+            resolveOld = resolve;
+          });
+        }
+        if (options.params?.query?.query === "New")
+          return ok({ ...page, items: [{ ...app, name: "New result" }] });
+        return ok(page);
+      }
+    );
+    show();
+    await screen.findByText("Review app");
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Old" } });
+    await waitFor(() => expect(resolveOld).toBeTypeOf("function"));
+    fireEvent.change(screen.getByRole("searchbox"), { target: { value: "New" } });
+    await screen.findByText("New result");
+    expect(oldSignal?.aborted).toBe(true);
+    await act(async () =>
+      resolveOld({
+        data: { ...page, items: [{ ...app, name: "Old result" }] },
+        response: new Response("{}")
+      })
+    );
+    expect(screen.queryByText("Old result")).toBeNull();
+    expect(screen.getByText("New result")).toBeTruthy();
+  });
+
   it("filters on the server and detaches only selected resources", async () => {
     show();
     await screen.findByText("Review app");
@@ -111,9 +213,9 @@ describe("organisation Skill bindings", () => {
       screen.getByRole("table", { name: "organization_skills_adoption_resources_heading" })
     ).toBeTruthy();
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "Review" } });
-    fireEvent.submit(screen.getByRole("search"));
     await waitFor(() =>
       expect(get).toHaveBeenCalledWith("/api/v1/skills/organization/{skill_id}/adoption/", {
+        signal: expect.anything(),
         params: {
           path: { skill_id: "skill-1" },
           query: {

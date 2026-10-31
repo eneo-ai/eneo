@@ -21,6 +21,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { cursorPagination, flattenPages } from "@/lib/api/pagination";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { ORGANIZATION_SKILLS_KEY } from "./organization-skills";
 
 type Skill = Schema<"OrganizationSkillPublic">;
@@ -53,7 +54,7 @@ export function OrganizationSkillAdoption({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const [searchInput, setSearchInput] = useState("");
-  const [search, setSearch] = useState("");
+  const search = useDebouncedValue(searchInput.trim());
   const [kind, setKind] = useState<KindFilter>("all");
   const [drift, setDrift] = useState<DriftFilter>("all");
   const [selected, setSelected] = useState<Resource[]>([]);
@@ -63,12 +64,18 @@ export function OrganizationSkillAdoption({
   const [receipt, setReceipt] = useState("");
   const resourcesHeadingId = useId();
   const path = { skill_id: skill.id };
+  const effectiveDrift = skill.published_revision_number === null ? "all" : drift;
+  if (skill.published_revision_number === null && drift !== "all") {
+    setDrift("all");
+    setSelected([]);
+  }
   const bindings = useInfiniteQuery({
-    queryKey: [...ORGANIZATION_SKILLS_KEY, skill.id, "adoption", search, kind, drift],
+    queryKey: [...ORGANIZATION_SKILLS_KEY, skill.id, "adoption", search, kind, effectiveDrift],
     ...cursorPagination,
-    queryFn: ({ pageParam }) =>
+    queryFn: ({ pageParam, signal }) =>
       unwrap(
         browserApi.GET("/api/v1/skills/organization/{skill_id}/adoption/", {
+          signal,
           params: {
             path,
             query: {
@@ -76,7 +83,7 @@ export function OrganizationSkillAdoption({
               cursor: pageParam,
               query: search || undefined,
               kind: kind === "all" ? undefined : kind,
-              drift: drift === "all" ? undefined : drift
+              drift: effectiveDrift === "all" ? undefined : effectiveDrift
             }
           }
         })
@@ -102,7 +109,6 @@ export function OrganizationSkillAdoption({
   function searchSubmit(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
     setSelected([]);
-    setSearch(searchInput.trim());
   }
 
   function toggle(resource: Resource, checked: boolean) {
@@ -258,180 +264,199 @@ export function OrganizationSkillAdoption({
       <p role="status" className={receipt ? "text-sm" : "sr-only"}>
         {receipt}
       </p>
-      <QueryStateBoundary
-        query={bindings}
-        rows={3}
-        loadingLabel={t("organization_skills_adoption_loading")}
-        errorTitle={t("organization_skills_adoption_error_title")}
-      >
-        {() => (
+      {summary &&
+        (summary.assistant_count === 0 &&
+        summary.app_count === 0 &&
+        summary.personal_chat === null ? (
+          <div className="space-y-2 rounded-lg border p-6 text-center">
+            <h3 className="font-medium">{t("organization_skills_adoption_empty_title")}</h3>
+            <p className="text-muted-foreground text-sm">
+              {t("organization_skills_adoption_empty_description")}
+            </p>
+          </div>
+        ) : (
           <>
-            {summary && (
-              <>
-                <dl className="grid grid-cols-2 gap-4 border-y py-4 sm:grid-cols-4">
-                  {(
-                    [
-                      ["organization_skills_adoption_assistants_label", summary.assistant_count],
-                      ["organization_skills_adoption_apps_label", summary.app_count],
-                      ["organization_skills_adoption_spaces_label", summary.distinct_space_count],
-                      ["organization_skills_adoption_behind_label", summary.behind_published_count]
-                    ] as const
-                  ).map(([label, count]) => (
-                    <div key={label}>
-                      <dt className="text-muted-foreground text-sm">{t(label)}</dt>
-                      <dd className="text-xl font-semibold tabular-nums">{count}</dd>
-                    </div>
-                  ))}
-                </dl>
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <div className="rounded-lg border p-4">
-                    <h3 className="font-medium">
-                      {t("organization_skills_adoption_personal_chat_heading")}
-                    </h3>
-                    <p className="text-muted-foreground mt-2 text-sm">
-                      {summary.personal_chat
-                        ? t("organization_skills_adoption_personal_chat_pinned", {
-                            version: String(summary.personal_chat.revision_number)
-                          })
-                        : t("organization_skills_adoption_personal_chat_not_pinned")}
-                    </p>
-                    {summary.personal_chat &&
-                      summary.personal_chat.revision_id !== revisionId &&
-                      canAdvance && (
-                        <Button
-                          className="mt-3"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setAction("personal")}
-                        >
-                          {t("organization_skills_adoption_personal_chat_advance_action")}
-                        </Button>
-                      )}
-                  </div>
-                  <div className="rounded-lg border p-4">
-                    <h3 className="font-medium">
-                      {t("organization_skills_adoption_revision_breakdown_heading")}
-                    </h3>
-                    <p className="text-muted-foreground mt-1 text-xs">
-                      {t("organization_skills_adoption_revision_breakdown_description")}
-                    </p>
-                    <ul className="mt-3 space-y-1 text-sm">
-                      {summary.revision_counts.map((entry) => (
-                        <li key={entry.revision_id} className="flex justify-between gap-3">
-                          <span>
-                            {t("organization_skills_version", {
-                              version: String(entry.revision_number)
-                            })}
-                          </span>
-                          <span>
-                            {entry.assistant_count} {t("assistants")} · {entry.app_count}{" "}
-                            {t("apps")}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
+            <dl className="grid grid-cols-2 gap-4 border-y py-4 sm:grid-cols-4">
+              {(
+                [
+                  ["organization_skills_adoption_assistants_label", summary.assistant_count],
+                  ["organization_skills_adoption_apps_label", summary.app_count],
+                  ["organization_skills_adoption_spaces_label", summary.distinct_space_count],
+                  ["organization_skills_adoption_behind_label", summary.behind_published_count]
+                ] as const
+              ).map(([label, count]) => (
+                <div key={label}>
+                  <dt className="text-muted-foreground text-sm">{t(label)}</dt>
+                  <dd className="text-xl font-semibold tabular-nums">{count}</dd>
                 </div>
-              </>
-            )}
-            <div className="space-y-3">
-              <h3 id={resourcesHeadingId} className="font-medium">
-                {t("organization_skills_adoption_resources_heading")}
-              </h3>
-              <p className="text-muted-foreground text-sm">
-                {t("organization_skills_adoption_resources_description")}
-              </p>
-              <form className="flex max-w-2xl gap-2" role="search" onSubmit={searchSubmit}>
-                <Input
-                  type="search"
-                  value={searchInput}
-                  placeholder={t("organization_skills_adoption_search_placeholder")}
-                  aria-label={t("organization_skills_adoption_search_placeholder")}
-                  onChange={(event) => setSearchInput(event.target.value)}
-                />
-                <Button variant="outline" type="submit">
-                  {t("search")}
-                </Button>
-              </form>
-              <div className="flex flex-wrap gap-3">
-                <label className="flex items-center gap-2 text-sm">
-                  {t("organization_skills_adoption_filter_kind_label")}
-                  <select
-                    className="bg-background rounded-md border p-2"
-                    value={kind}
-                    onChange={(event) => {
-                      setKind(event.target.value as KindFilter);
-                      setSelected([]);
-                    }}
-                  >
-                    <option value="all">{t("organization_skills_adoption_filter_kind_all")}</option>
-                    <option value="assistant">
-                      {t("organization_skills_adoption_resource_assistant")}
-                    </option>
-                    <option value="app">{t("organization_skills_adoption_resource_app")}</option>
-                  </select>
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  {t("organization_skills_adoption_filter_status_label")}
-                  <select
-                    className="bg-background rounded-md border p-2"
-                    value={drift}
-                    onChange={(event) => {
-                      setDrift(event.target.value as DriftFilter);
-                      setSelected([]);
-                    }}
-                  >
-                    <option value="all">
-                      {t("organization_skills_adoption_filter_status_all")}
-                    </option>
-                    <option value="current">
-                      {t("organization_skills_adoption_drift_current")}
-                    </option>
-                    <option value="behind">{t("organization_skills_adoption_drift_behind")}</option>
-                  </select>
-                </label>
-                {(search || kind !== "all" || drift !== "all") && (
-                  <Button
-                    variant="ghost"
-                    onClick={() => {
-                      setSearch("");
-                      setSearchInput("");
-                      setKind("all");
-                      setDrift("all");
-                      setSelected([]);
-                    }}
-                  >
-                    {t("organization_skills_adoption_clear_filters")}
-                  </Button>
+              ))}
+            </dl>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div className="rounded-lg border p-4">
+                <h3 className="font-medium">
+                  {t("organization_skills_adoption_personal_chat_heading")}
+                </h3>
+                <p className="text-muted-foreground mt-2 text-sm">
+                  {summary.personal_chat
+                    ? t("organization_skills_adoption_personal_chat_pinned", {
+                        version: String(summary.personal_chat.revision_number)
+                      })
+                    : t("organization_skills_adoption_personal_chat_not_pinned")}
+                </p>
+                {summary.personal_chat && (
+                  <Badge variant="outline">
+                    {t(`organization_skills_adoption_drift_${summary.personal_chat.drift}`)}
+                  </Badge>
                 )}
-              </div>
-              {selected.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2">
-                  <p className="text-muted-foreground text-sm">
-                    {t("organization_skills_adoption_selection_count", {
-                      count: String(selected.length),
-                      limit: String(SELECTION_LIMIT)
-                    })}
-                  </p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    // eslint-disable-next-line eneo/no-busy-disabled-button -- a rollout runs in the background (its progress shows on the page); detaching waits for it.
-                    disabled={rolloutRunning}
-                    onClick={() => setAction("detach")}
-                  >
-                    {t("organization_skills_adoption_detach_selected")}
-                  </Button>
-                  {canAdvance && selectedBehind.length > 0 && (
-                    <Button size="sm" onClick={() => setAction("advance")}>
-                      {t("organization_skills_adoption_advance_selected")}
+                {summary.personal_chat &&
+                  summary.personal_chat.revision_id !== revisionId &&
+                  canAdvance && (
+                    <Button
+                      className="mt-3"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setAction("personal")}
+                    >
+                      {t("organization_skills_adoption_personal_chat_advance_action")}
                     </Button>
                   )}
-                  <Button variant="ghost" size="sm" onClick={() => setSelected([])}>
-                    {t("clear")}
-                  </Button>
-                </div>
-              )}
+              </div>
+              <div className="rounded-lg border p-4">
+                <h3 className="font-medium">
+                  {t("organization_skills_adoption_revision_breakdown_heading")}
+                </h3>
+                <p className="text-muted-foreground mt-1 text-xs">
+                  {t("organization_skills_adoption_revision_breakdown_description")}
+                </p>
+                <ul className="mt-3 space-y-1 text-sm">
+                  {summary.revision_counts.map((entry) => (
+                    <li key={entry.revision_id} className="flex justify-between gap-3">
+                      <span>
+                        {t("organization_skills_version", {
+                          version: String(entry.revision_number)
+                        })}
+                      </span>
+                      <span>
+                        {entry.assistant_count} {t("assistants")} · {entry.app_count} {t("apps")}
+                        <span className="ml-2">
+                          {t("organization_skills_adoption_personal_chat_heading")}:{" "}
+                          {t(
+                            entry.personal_chat_pinned
+                              ? "organization_skills_adoption_pinned"
+                              : "organization_skills_adoption_not_pinned"
+                          )}
+                        </span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </>
+        ))}
+      <div className="space-y-3">
+        <h3 id={resourcesHeadingId} className="font-medium">
+          {t("organization_skills_adoption_resources_heading")}
+        </h3>
+        <p className="text-muted-foreground text-sm">
+          {t("organization_skills_adoption_resources_description")}
+        </p>
+        <form className="flex max-w-2xl gap-2" role="search" onSubmit={searchSubmit}>
+          <Input
+            type="search"
+            value={searchInput}
+            placeholder={t("organization_skills_adoption_search_placeholder")}
+            aria-label={t("organization_skills_adoption_search_placeholder")}
+            onChange={(event) => {
+              setSearchInput(event.target.value);
+              setSelected([]);
+            }}
+          />
+        </form>
+        <div className="flex flex-wrap gap-3">
+          <label className="flex items-center gap-2 text-sm">
+            {t("organization_skills_adoption_filter_kind_label")}
+            <select
+              className="bg-background rounded-md border p-2"
+              value={kind}
+              onChange={(event) => {
+                setKind(event.target.value as KindFilter);
+                setSelected([]);
+              }}
+            >
+              <option value="all">{t("organization_skills_adoption_filter_kind_all")}</option>
+              <option value="assistant">
+                {t("organization_skills_adoption_resource_assistant")}
+              </option>
+              <option value="app">{t("organization_skills_adoption_resource_app")}</option>
+            </select>
+          </label>
+          {skill.published_revision_number !== null && (
+            <label className="flex items-center gap-2 text-sm">
+              {t("organization_skills_adoption_filter_status_label")}
+              <select
+                className="bg-background rounded-md border p-2"
+                value={drift}
+                onChange={(event) => {
+                  setDrift(event.target.value as DriftFilter);
+                  setSelected([]);
+                }}
+              >
+                <option value="all">{t("organization_skills_adoption_filter_status_all")}</option>
+                <option value="current">{t("organization_skills_adoption_drift_current")}</option>
+                <option value="behind">{t("organization_skills_adoption_drift_behind")}</option>
+              </select>
+            </label>
+          )}
+          {(search || kind !== "all" || drift !== "all") && (
+            <Button
+              variant="ghost"
+              onClick={() => {
+                setSearchInput("");
+                setKind("all");
+                setDrift("all");
+                setSelected([]);
+              }}
+            >
+              {t("organization_skills_adoption_clear_filters")}
+            </Button>
+          )}
+        </div>
+        {selected.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <p className="text-muted-foreground text-sm">
+              {t("organization_skills_adoption_selection_count", {
+                count: String(selected.length),
+                limit: String(SELECTION_LIMIT)
+              })}
+            </p>
+            <Button
+              variant="outline"
+              size="sm"
+              // eslint-disable-next-line eneo/no-busy-disabled-button -- a rollout runs in the background (its progress shows on the page); detaching waits for it.
+              disabled={rolloutRunning}
+              onClick={() => setAction("detach")}
+            >
+              {t("organization_skills_adoption_detach_selected")}
+            </Button>
+            {canAdvance && selectedBehind.length > 0 && (
+              <Button size="sm" onClick={() => setAction("advance")}>
+                {t("organization_skills_adoption_advance_selected")}
+              </Button>
+            )}
+            <Button variant="ghost" size="sm" onClick={() => setSelected([])}>
+              {t("clear")}
+            </Button>
+          </div>
+        )}
+        <QueryStateBoundary
+          query={bindings}
+          rows={3}
+          loadingLabel={t("organization_skills_adoption_loading")}
+          errorTitle={t("organization_skills_adoption_error_title")}
+        >
+          {() => (
+            <>
               {items.length === 0 ? (
                 <p className="text-muted-foreground rounded-lg border border-dashed p-8 text-center text-sm">
                   {search || kind !== "all" || drift !== "all"
@@ -522,7 +547,9 @@ export function OrganizationSkillAdoption({
                             </p>
                           </td>
                           <td className="p-3">
-                            {resource.space_name}
+                            {resource.owner_name != null
+                              ? t("organization_skills_adoption_personal_space")
+                              : resource.space_name}
                             {resource.owner_name && (
                               <p className="text-muted-foreground text-xs">{resource.owner_name}</p>
                             )}
@@ -543,11 +570,19 @@ export function OrganizationSkillAdoption({
                   </table>
                 </div>
               )}
+              {items.length > 0 && bindings.data?.pages[0]?.matched_count != null && (
+                <p className="text-muted-foreground text-sm tabular-nums">
+                  {t("organization_skills_adoption_resources_shown", {
+                    shown: String(items.length),
+                    total: String(bindings.data.pages[0].matched_count)
+                  })}
+                </p>
+              )}
               <LoadMore query={bindings} label={t("organization_skills_adoption_load_more")} />
-            </div>
-          </>
-        )}
-      </QueryStateBoundary>
+            </>
+          )}
+        </QueryStateBoundary>
+      </div>
       <AlertDialog
         open={action !== null}
         onOpenChange={(open) => {
