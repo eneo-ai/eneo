@@ -5682,6 +5682,8 @@
   "space_role_viewer": "Visare",
   "space_view_all": "Visa alla",
   "space_view_all_assistants": "Visa alla assistenter",
+  "space_view_all_apps": "Visa alla appar",
+  "space_new_app_hint": "Skapa en app för en återkommande uppgift",
   "space_view_all_knowledge": "Visa alla kunskapskällor",
   "space_group_chat": "Gruppchatt",
   "space_new_assistant_hint": "Skapa en assistent eller en gruppchatt",

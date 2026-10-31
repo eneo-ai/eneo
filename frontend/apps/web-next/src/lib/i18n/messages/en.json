@@ -5682,6 +5682,8 @@
   "space_role_viewer": "Viewer",
   "space_view_all": "View all",
   "space_view_all_assistants": "View all assistants",
+  "space_view_all_apps": "View all apps",
+  "space_new_app_hint": "Create an app for a recurring task",
   "space_view_all_knowledge": "View all knowledge sources",
   "space_group_chat": "Group chat",
   "space_new_assistant_hint": "Create an assistant or a group chat",
