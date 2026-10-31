@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import type { App } from "../apps";
@@ -32,7 +32,7 @@ it("shows missing input at the inputs on submit, and moves focus to the first", 
   api.POST.mockResolvedValue({ data: { id: "run-1" }, response: new Response("{}") });
   renderInApp(<RunView app={app([{ type: "text-field" }])} resultHref={(id) => `/runs/${id}`} />);
 
-  const submit = screen.getByRole("button", { name: "Skicka" });
+  const submit = screen.getByRole("button", { name: "Kör appen" });
   expect(submit.hasAttribute("disabled")).toBe(false);
   fireEvent.click(submit);
 
@@ -59,7 +59,7 @@ it("shows missing input at the inputs on submit, and moves focus to the first", 
 it("moves focus to an upload input's file picker when it is the first input", () => {
   renderInApp(<RunView app={app([{ type: "text-upload" }])} resultHref={(id) => `/runs/${id}`} />);
 
-  fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
+  fireEvent.click(screen.getByRole("button", { name: "Kör appen" }));
 
   const group = screen.getByRole("group", { name: "Indata" });
   expect(document.activeElement?.tagName).toBe("BUTTON");
@@ -88,7 +88,7 @@ it("asks to wait while a file uploads, and keeps focus on a busy submit", async 
   });
   await screen.findByText("protokoll.pdf");
 
-  const submit = screen.getByRole("button", { name: "Skicka" });
+  const submit = screen.getByRole("button", { name: "Kör appen" });
   submit.focus();
   fireEvent.click(submit);
   const notice = await screen.findByText("Vänta tills filerna har laddats upp.");
@@ -99,11 +99,17 @@ it("asks to wait while a file uploads, and keeps focus on a busy submit", async 
   uploaded({ data: { id: "file-1" }, response: new Response("{}") });
   await waitFor(() => expect(notice.textContent).toBe(""));
   fireEvent.click(submit);
-  const busy = await screen.findByRole("button", { name: "Skickar..." });
+  const busy = await screen.findByRole("button", { name: "Startar…" });
   expect(busy).toBe(submit);
   expect(busy.getAttribute("aria-busy")).toBe("true");
   expect(document.activeElement).toBe(busy);
   fireEvent.click(busy);
   expect(api.POST).toHaveBeenCalledTimes(2);
   created({ data: { id: "run-1" }, response: new Response("{}") });
+});
+
+it("keeps the run button in the group a phone docks under the thumb", () => {
+  renderInApp(<RunView app={app([{ type: "text-field" }])} resultHref={(id) => `/runs/${id}`} />);
+  const docked = screen.getByRole("group", { name: "Åtgärder för appen" });
+  expect(within(docked).getByRole("button", { name: "Kör appen" })).toBeTruthy();
 });

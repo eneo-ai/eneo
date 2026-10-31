@@ -3,6 +3,7 @@ import { cleanup, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { setRoute } from "@/test/navigation";
+import { setViewport } from "@/test/setup-dom";
 import { AppDetail } from "./app-detail";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -33,4 +34,19 @@ it("follows external same-route tab changes and falls back for an unknown tab", 
   setRoute("/spaces/space-1/apps/app-1?tab=unknown");
   rerender(<AppDetail appId="app-1" />);
   expect(shown().textContent).toBe("Körvy");
+});
+
+it("offers Redigera as a pencil beside the name on a phone, and as a button elsewhere", () => {
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(["apps", "app-1"], { name: "Protokoll", permissions: ["edit"] });
+  setViewport("phone");
+  renderInApp(<AppDetail appId="app-1" />, { queryClient, route: "/spaces/space-1/apps/app-1" });
+  const edit = screen.getByRole("link", { name: "Redigera" });
+  expect(edit.getAttribute("href")).toBe("/spaces/space-1/apps/app-1/edit");
+  expect(edit.textContent?.trim()).toBe("");
+  cleanup();
+
+  setViewport("tablet-portrait");
+  renderInApp(<AppDetail appId="app-1" />, { queryClient, route: "/spaces/space-1/apps/app-1" });
+  expect(screen.getByRole("link", { name: "Redigera" }).textContent).toContain("Redigera");
 });

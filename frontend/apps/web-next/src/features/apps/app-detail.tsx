@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { Pencil } from "lucide-react";
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
@@ -9,6 +10,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { appQueryOptions, readAppTab } from "./apps";
 import { ResultsTable } from "./results/results-table";
 import { RunView } from "./run/run-view";
@@ -17,6 +19,7 @@ import { RunView } from "./run/run-view";
 export function AppDetail({ appId }: { appId: string }) {
   const t = useTranslations();
   const { routeId } = useSpace();
+  const phone = useMediaMatch(PHONE_QUERY);
   const searchParams = useSearchParams();
   const { data: app } = useSuspenseQuery(appQueryOptions(browserApi, appId));
 
@@ -41,7 +44,19 @@ export function AppDetail({ appId }: { appId: string }) {
         </BackLink>
         <PageHeader
           title={app.name}
-          actions={canEdit && <Button href={`${base}/edit`} label={t("edit")} />}
+          actions={
+            canEdit && (
+              // A phone has room for the name and a pencil, not a button of its own under it.
+              <Button
+                href={`${base}/edit`}
+                label={t("edit")}
+                tooltip={phone ? t("edit") : undefined}
+                isIconOnly={phone}
+                icon={phone ? <Pencil aria-hidden="true" /> : undefined}
+                variant={phone ? "ghost" : undefined}
+              />
+            )
+          }
         />
       </div>
 

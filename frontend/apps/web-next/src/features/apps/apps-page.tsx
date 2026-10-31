@@ -12,6 +12,7 @@ import { DockedActions } from "@/components/shell/docked-actions";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { useSpace } from "@/features/spaces/use-space";
 import { AppActionScope } from "./actions";
 import { spaceApps, type AppSparse } from "./apps";
@@ -42,6 +43,9 @@ function TileGroup({ title, items }: { title: string; items: AppSparse[] }) {
   );
 }
 
+/** A phone shows the filter from this many apps: with fewer, it only takes room from the list. */
+const PHONE_FILTER_FROM = 7;
+
 /** Apps in one grid, grouped into published/drafts for users who can publish. */
 export function AppsPage() {
   const t = useTranslations();
@@ -49,6 +53,7 @@ export function AppsPage() {
   const collator = useCollator();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [filter, setFilter] = useState("");
+  const phone = useMediaMatch(PHONE_QUERY);
 
   const items = spaceApps(space, collator.compare);
   const filteredItems = filterSpaceResources(items, filter);
@@ -83,13 +88,15 @@ export function AppsPage() {
             />
           ) : (
             <>
-              <ResourceFilterInput
-                value={filter}
-                onChange={setFilter}
-                label={t("space_filter_apps_label")}
-                placeholder={t("filter_apps_placeholder")}
-                resultCount={filteredItems.length}
-              />
+              {!phone || items.length >= PHONE_FILTER_FROM ? (
+                <ResourceFilterInput
+                  value={filter}
+                  onChange={setFilter}
+                  label={t("space_filter_apps_label")}
+                  placeholder={t("filter_apps_placeholder")}
+                  resultCount={filteredItems.length}
+                />
+              ) : null}
               {filteredItems.length === 0 ? (
                 <EmptyState
                   icon={<SearchX />}

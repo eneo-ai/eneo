@@ -11,6 +11,7 @@ import {
   revealProblems
 } from "@/components/composites/field-problem";
 import { iconUrl } from "@/components/composites/icon-field";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -113,16 +114,19 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
             </div>
             <FieldProblem id="app-run-inputs" problem={inputProblem} />
             <div>
-              {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-              <Button
-                size="lg"
-                className="w-full"
-                aria-busy={run.isPending || undefined}
-                onClick={submit}
-              >
-                <Play className="size-4" />
-                {run.isPending ? t("submitting") : t("submit")}
-              </Button>
+              {/* Never disabled: busy, it keeps focus and a second press is ignored. On a
+                  phone it is docked at the bottom, under the thumb. */}
+              <DockedActions label={t("app_run_actions")}>
+                <Button
+                  size="lg"
+                  className="w-full"
+                  aria-busy={run.isPending || undefined}
+                  onClick={submit}
+                >
+                  <Play className="size-4" />
+                  {run.isPending ? t("app_run_starting") : t("app_run_start")}
+                </Button>
+              </DockedActions>
               {/* Always rendered, so the notice is announced when it appears. */}
               <p role="status" className="text-muted-foreground mt-2 text-sm empty:mt-0">
                 {waitNoticed && inputs.uploading ? t("form_wait_for_uploads") : ""}
