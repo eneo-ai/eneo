@@ -2,8 +2,10 @@ import { config as configureZod } from "zod";
 import { loadMessages, readCspNonce, resolveLocale, showBootError } from "./boot";
 import { loadRuntimeConfig, setRuntimeConfig } from "./lib/runtime-config";
 import { initializeBrowserSession } from "./lib/api/refusal";
+import { installChunkRecovery } from "./lib/chunk-recovery";
 import "@/styles/globals.css";
 
+installChunkRecovery();
 const locale = resolveLocale(document);
 const messages = loadMessages(locale);
 const config = loadRuntimeConfig();

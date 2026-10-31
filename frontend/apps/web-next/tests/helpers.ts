@@ -27,11 +27,11 @@ export function productionAsset(source: string): string {
   return `/${chunks[0]!.fileName}`;
 }
 
-export function collectAssetFailures(page: Page) {
+export function collectAssetFailures(page: Page, expected: ReadonlySet<string> = new Set()) {
   const failures: string[] = [];
   page.on("response", (response) => {
     const pathname = new URL(response.url()).pathname;
-    if (pathname.startsWith("/assets/") && response.status() >= 400) {
+    if (pathname.startsWith("/assets/") && response.status() >= 400 && !expected.has(pathname)) {
       failures.push(`${response.status()} ${pathname}`);
     }
   });

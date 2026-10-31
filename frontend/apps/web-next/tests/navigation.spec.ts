@@ -7,6 +7,7 @@ import {
   fetchChatStream,
   isChatStream,
   MOCK_REPLY,
+  productionAsset,
   sessionResponseHeaders,
   uniqueName
 } from "./helpers";
@@ -266,9 +267,11 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
     await expect(dialog).not.toBeVisible();
   });
 
-  test("chat document edits survive save failure and cancelled navigation, then save and leave", async ({
-    page
+  test("chat document edits survive chunk and save failures and cancelled navigation, then save and leave", async ({
+    page,
+    context
   }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     const file = {
       id: "11111111-1111-4111-8111-111111111111",
       name: "Navigation.md",
@@ -336,6 +339,31 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
     const editor = page.locator('.tiptap[contenteditable="true"]');
     await expect(editor).toBeVisible();
     await editor.fill("Changed document.");
+    const clipboardAsset = productionAsset("src/components/ai-elements/answer-clipboard.ts");
+    await page.route(
+      (url) => url.pathname === clipboardAsset,
+      (route) =>
+        route.fulfill({ status: 404, contentType: "text/plain", body: "Removed deployment asset" })
+    );
+    await page
+      .getByRole("log")
+      .getByRole("button", { name: /fler åtgärder|more actions/i })
+      .click();
+    const unloading = page.waitForEvent("dialog");
+    const copy = page
+      .getByRole("menuitem", { name: /kopiera som rich text|copy as rich text/i })
+      .click();
+    const warning = await unloading;
+    expect(warning.type()).toBe("beforeunload");
+    await warning.dismiss();
+    await copy;
+    await expect(
+      page.getByText(
+        "Det gick inte att kopiera. Försök igen eller markera texten och kopiera den.",
+        { exact: true }
+      )
+    ).toBeVisible();
+    await expect(editor).toHaveText("Changed document.");
     await page.getByRole("button", { name: "Spara", exact: true }).click();
     await expect(
       page.getByText("Ändringarna kunde inte sparas. Försök igen.", { exact: true })
