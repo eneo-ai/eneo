@@ -497,7 +497,7 @@ export function ModelRow({
         </TableCell>
       )}
 
-      <TableCell className="text-end">{menu}</TableCell>
+      <TableCell className="bg-ax-card sticky end-0 text-end">{menu}</TableCell>
     </TableRow>
   );
 }

@@ -15,7 +15,7 @@ import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import { MOBILE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { StatusLabel } from "@/components/composites/status-label";
@@ -83,7 +83,8 @@ function ModelTable({
               {t("admin_models_column_security")}
             </TableHeaderCell>
           )}
-          <TableHeaderCell scope="col" className="w-14 min-w-14">
+          {/* The only way to edit, migrate or delete a model: it stays in view where the table scrolls. */}
+          <TableHeaderCell scope="col" className="bg-ax-sunken sticky end-0 w-14 min-w-14">
             <span className="sr-only">{t("actions")}</span>
           </TableHeaderCell>
         </TableRow>
@@ -133,7 +134,7 @@ export function ProviderCard({
   const headingId = useId();
   const cardRef = useRef<HTMLElement>(null);
   const rescueFocus = useFocusRescue();
-  const phone = useMediaMatch(MOBILE_QUERY);
+  const phone = useMediaMatch(PHONE_QUERY);
   const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
@@ -240,11 +241,10 @@ export function ProviderCard({
         </Text>
       ) : (
         <>
-          {/* Rows on a phone or an iPad held upright (decision 31), the table from
-              1024 px, where it has room for its menu column; both until
+          {/* Rows on a phone (decision 31), the table from 768 px; both until
               the width is known, CSS showing one. */}
           {phone !== false ? (
-            <div className="lg:hidden">
+            <div className="md:hidden">
               {/* The table's header in short: what the switch at each row's end is. */}
               <div
                 aria-hidden="true"
@@ -270,7 +270,7 @@ export function ProviderCard({
             </div>
           ) : null}
           {phone !== true ? (
-            <div className="max-lg:hidden">
+            <div className="max-md:hidden">
               <ModelTable
                 models={models}
                 onModelAction={setModelSelection}
