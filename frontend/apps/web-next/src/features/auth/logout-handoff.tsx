@@ -7,6 +7,7 @@ import { getSessionSnapshot, handleRefusal, SESSION_GENERATION_HEADER } from "@/
 import { safeNextPath } from "@/lib/auth/safe-next";
 import { navigateTo } from "@/lib/navigate-to";
 import { PublicPage } from "./public-page";
+import { forgetTenant } from "./tenant-choice";
 
 export function logoutTarget({ reason, next }: { reason?: string; next?: string }): string {
   const message = reason === "expired" || reason === "password_changed" ? reason : "logout";
@@ -41,9 +42,11 @@ async function signOut(): Promise<boolean> {
 /** Logout and organisation switch share one committed, full-document handoff. */
 export function LogoutHandoff({
   target,
+  switchOrganisation = false,
   accessibilityStatementUrl = null
 }: {
   target: string;
+  switchOrganisation?: boolean;
   accessibilityStatementUrl?: string | null;
 }) {
   const started = useRef(false);
@@ -57,11 +60,12 @@ export function LogoutHandoff({
         if (ok) {
           // What was typed in a chat stays with the account that typed it, not with the tab.
           clearChatDrafts();
+          if (switchOrganisation) forgetTenant();
           navigateTo(target, { replace: true });
         } else setFailed(true);
       })
       .catch(() => setFailed(true));
-  }, [target]);
+  }, [target, switchOrganisation]);
 
   return (
     <PublicPage title={t("logout")} accessibilityStatementUrl={accessibilityStatementUrl}>
@@ -69,7 +73,7 @@ export function LogoutHandoff({
         <>
           <Banner status="error" title={t("logout_failed")} />
           <a
-            href="/logout"
+            href={switchOrganisation ? "/login/switch-organisation" : "/logout"}
             className="text-ax-text-accent inline-flex min-h-11 items-center justify-center underline underline-offset-4"
           >
             {t("try_again")}

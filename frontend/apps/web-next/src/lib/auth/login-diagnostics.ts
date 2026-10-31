@@ -6,8 +6,16 @@ export type LoginDiagnostics = {
   rawDetail?: string;
 };
 
-/** Informational `?message=` values the login page renders itself; not failures. */
-const INFORMATIONAL_MESSAGES = new Set(["logout", "expired", "password_changed"]);
+/** Login notices are not authentication failures; the page uses this same classification. */
+export const loginNotices = new Map<string, { status: "info" | "warning"; message: string }>([
+  ["logout", { status: "info", message: "logout_success" }],
+  ["expired", { status: "info", message: "session_expired_please_login_again" }],
+  ["password_changed", { status: "info", message: "password_changed_login_again" }],
+  [
+    "password_changed_sessions_remain",
+    { status: "warning", message: "password_changed_sessions_remain" }
+  ]
+]);
 const OIDC_FORBIDDEN_CODES = new Set(["access_denied", "forbidden", "oidc_forbidden"]);
 const OIDC_UNAUTHORIZED_CODES = new Set(["unauthorized", "invalid_grant", "oidc_unauthorized"]);
 
@@ -19,7 +27,7 @@ export function loginDiagnosticsFromSearchParams(
   params: Pick<URLSearchParams, "get">
 ): LoginDiagnostics | null {
   const rawMessage = params.get("message") ?? undefined;
-  const message = rawMessage && INFORMATIONAL_MESSAGES.has(rawMessage) ? undefined : rawMessage;
+  const message = rawMessage && loginNotices.has(rawMessage) ? undefined : rawMessage;
   const legacyError = params.get("error") ?? undefined;
   const detailCode = params.get("detailCode") ?? legacyError ?? undefined;
   const diagnostics: LoginDiagnostics = {
@@ -46,6 +54,9 @@ export function loginDiagnosticMessageKey(diagnostics: LoginDiagnostics): string
   if (code && OIDC_FORBIDDEN_CODES.has(code)) return "oidc_error_forbidden";
   if (code && OIDC_UNAUTHORIZED_CODES.has(code)) return "oidc_error_unauthorized";
   if (code === "invalid_login_attempt") return "oidc_error_attempt_rejected";
+  if (code === "identity_provider_error") return "authentication_service_error";
+  if (code === "no_code_received" || code === "no_state_received")
+    return "authentication_incomplete";
   return "oidc_error_generic";
 }
 

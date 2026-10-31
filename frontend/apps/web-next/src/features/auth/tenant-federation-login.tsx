@@ -3,6 +3,7 @@ import { queryOptions, useQuery } from "@tanstack/react-query";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { QueryStateBoundary } from "@/components/composites/query-state";
+import { TextInput } from "@/components/astryx/text-input";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { useFocusRescue } from "@/lib/focus-rescue";
@@ -11,31 +12,14 @@ import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { federationHref } from "./sso-entry";
 import { DocumentLink } from "./document-link";
 import { FederationPending } from "./federation-pending";
+import { forgetTenant, rememberedTenant, rememberTenant } from "./tenant-choice";
 
-const LAST_TENANT_KEY = "eneo-last-tenant-slug";
 const tenantsQuery = queryOptions({
   queryKey: ["auth", "tenants"],
   queryFn: () => unwrap(browserApi.GET("/api/v1/auth/tenants")),
   staleTime: Infinity,
   refetchOnWindowFocus: false
 });
-
-function rememberedTenant() {
-  try {
-    return { available: true, slug: sessionStorage.getItem(LAST_TENANT_KEY) };
-  } catch {
-    return { available: false, slug: null };
-  }
-}
-
-function remember(slug: string): boolean {
-  try {
-    sessionStorage.setItem(LAST_TENANT_KEY, slug);
-    return true;
-  } catch {
-    return false;
-  }
-}
 
 export function TenantFederationLogin({
   next,
@@ -52,6 +36,7 @@ export function TenantFederationLogin({
   const [remembered] = useState(rememberedTenant);
   const search = useSearchParams();
   const [showSelector, setShowSelector] = useState(false);
+  const [filter, setFilter] = useState("");
   const started = useRef(false);
   const selectorHeading = useRef<HTMLParagraphElement>(null);
   const rescueFocus = useFocusRescue();
@@ -60,6 +45,10 @@ export function TenantFederationLogin({
   const explicitRecovery = failed && !showSelector ? explicit : undefined;
   const query = useQuery({ ...tenantsQuery, enabled: !direct && !explicitRecovery });
   const tenants = query.data?.tenants ?? [];
+  const term = filter.trim().toLowerCase();
+  const matches = tenants.filter((item) =>
+    [item.display_name, item.name, item.slug].some((value) => value?.toLowerCase().includes(term))
+  );
   const previous = tenants.find((item) => item.slug === (explicit ?? remembered.slug));
   const selectedSlug =
     !showSelector && (tenant === undefined || explicit)
@@ -75,7 +64,7 @@ export function TenantFederationLogin({
       started.current = true;
       // Without a remembered choice, a failed login would automatically start
       // again in the next document. Keep the explicit link usable instead.
-      const saved = remember(candidate);
+      const saved = rememberTenant(candidate);
       if (explicit || saved) {
         const href = federationHref(next, candidate);
         navigateTo(href);
@@ -105,17 +94,13 @@ export function TenantFederationLogin({
           }
           href={federationHref(next, selectedSlug)}
           as={DocumentLink}
-          onClick={() => remember(selectedSlug)}
+          onClick={() => rememberTenant(selectedSlug)}
         />
         <Button
           label={t("oidc_choose_another_org")}
           variant="ghost"
           onClick={() => {
-            try {
-              sessionStorage.removeItem(LAST_TENANT_KEY);
-            } catch {
-              /* The explicit selector still works when storage is blocked. */
-            }
+            forgetTenant();
             rescueFocus(() => selectorHeading.current);
             setShowSelector(true);
             const params = new URLSearchParams(search.toString());
@@ -153,17 +138,37 @@ export function TenantFederationLogin({
               {t("no_organizations_available")}
             </p>
           ) : (
-            <div className="grid max-h-64 gap-2 overflow-y-auto">
-              {tenants.map((tenant) => (
-                <Button
-                  key={tenant.slug}
-                  label={tenant.display_name || tenant.name}
-                  href={federationHref(next, tenant.slug)}
-                  as={DocumentLink}
-                  onClick={() => remember(tenant.slug)}
-                />
-              ))}
-            </div>
+            <>
+              <TextInput
+                label={t("search_organizations")}
+                placeholder={t("search_by_name_or_municipality")}
+                value={filter}
+                onChange={setFilter}
+                hasClear
+                width="100%"
+              />
+              <p role="status" aria-label={t("search_organizations")} className="sr-only">
+                {t(matches.length === 1 ? "tenant_results_one" : "tenant_results_other", {
+                  count: matches.length
+                })}
+              </p>
+              {matches.length === 0 && (
+                <p className="text-ax-text-secondary text-center text-sm">
+                  {t("no_organizations_found")}
+                </p>
+              )}
+              <div className="grid max-h-64 gap-2 overflow-y-auto">
+                {matches.map((tenant) => (
+                  <Button
+                    key={tenant.slug}
+                    label={tenant.display_name || tenant.name}
+                    href={federationHref(next, tenant.slug)}
+                    as={DocumentLink}
+                    onClick={() => rememberTenant(tenant.slug)}
+                  />
+                ))}
+              </div>
+            </>
           )
         }
       </QueryStateBoundary>

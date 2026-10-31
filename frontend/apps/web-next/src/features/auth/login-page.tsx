@@ -9,7 +9,7 @@ import { QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { getSessionSnapshot } from "@/lib/api/refusal";
 import { sessionQueries } from "@/lib/api/session";
-import { loginDiagnosticsFromRecord } from "@/lib/auth/login-diagnostics";
+import { loginDiagnosticsFromRecord, loginNotices } from "@/lib/auth/login-diagnostics";
 import { safeNextPath } from "@/lib/auth/safe-next";
 import { navigateTo } from "@/lib/navigate-to";
 import { LoginDiagnosticsAlert } from "./login-diagnostics-alert";
@@ -39,11 +39,6 @@ export const loginSearch = z.object({
 });
 
 type Props = { search: z.infer<typeof loginSearch>; accessibilityStatementUrl: string | null };
-const notices = new Map([
-  ["expired", "session_expired_please_login_again"],
-  ["logout", "logout_success"],
-  ["password_changed", "password_changed_login_again"]
-]);
 
 export function LoginPage({ search, accessibilityStatementUrl }: Props) {
   const t = useTranslations();
@@ -63,7 +58,7 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
   }, [bound, me.data, search.next]);
   const diagnostics = loginDiagnosticsFromRecord(search);
   const ssoHref = ssoEntry(federation.data, search.next);
-  const notice = search.message ? notices.get(search.message) : undefined;
+  const notice = search.message ? loginNotices.get(search.message) : undefined;
   // A failed discovery already exposed the form. Retrying must not discard
   // credentials the user has since entered by starting SSO automatically.
   const showCredentials =
@@ -104,7 +99,7 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
       ) : (
         <>
           {diagnostics ? <LoginDiagnosticsAlert diagnostics={diagnostics} /> : null}
-          {notice ? <QuietBanner status="info" title={t(notice)} /> : null}
+          {notice ? <QuietBanner status={notice.status} title={t(notice.message)} /> : null}
           <QueryStateBoundary
             query={federation}
             rows={1}

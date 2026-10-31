@@ -151,6 +151,35 @@ it("shows the failed-login fallback", async () => {
   expect(await screen.findByText(messages.failed_to_login)).toBeTruthy();
 });
 
+it("retains the Svelte password change warning without reporting an authentication failure", async () => {
+  await route("/login?message=password_changed_sessions_remain");
+  expect(await screen.findByText(messages.password_changed_sessions_remain)).toBeTruthy();
+  expect(screen.queryByText(messages.authentication_failed)).toBeNull();
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it("explains a legacy callback missing state without adding a legacy callback implementation", async () => {
+  await route("/login?message=no_state_received");
+  expect(await screen.findByText(messages.authentication_incomplete)).toBeTruthy();
+});
+
+it.each([
+  ["identity_provider_error", "authentication_service_error"],
+  ["no_code_received", "authentication_incomplete"]
+] as const)("explains the current federation failure %s", async (code, message) => {
+  await route(`/login?message=oidc_callback_failed&detailCode=${code}`);
+  expect(await screen.findByText(messages[message])).toBeTruthy();
+});
+
+it("copies the visible correlation reference from a failed login", async () => {
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  Object.defineProperty(navigator, "clipboard", { value: { writeText }, configurable: true });
+  await route("/login/failed?detailCode=no_code_received&correlation=reference-123");
+  fireEvent.click(await screen.findByRole("button", { name: messages.copy_correlation_id }));
+  await waitFor(() => expect(writeText).toHaveBeenCalledWith("reference-123"));
+  expect(screen.getByText("reference-123")).toBeTruthy();
+});
+
 it("uses a document link for global SSO, without an app-router preload or interception", async () => {
   replies.set("/api/v1/auth/federation-status", { has_global_oidc_config: true });
   const router = await route("/login?message=logout&next=%2Fadmin");
@@ -235,6 +264,48 @@ function multiTenant() {
     ]
   });
 }
+
+it("filters organisations by display name, name or slug and announces matches", async () => {
+  multiTenant();
+  replies.set("/api/v1/auth/tenants", {
+    tenants: [
+      { slug: "sundsvall", name: "Sundsvall", display_name: "Sundsvalls kommun" },
+      { slug: "other-slug", name: "Internal name", display_name: "Second organisation" }
+    ]
+  });
+  await route("/login?tenant=");
+  const search = await screen.findByRole("textbox", { name: messages.search_organizations });
+  for (const term of ["  SECOND  ", "internal", "other-slug"]) {
+    fireEvent.change(search, { target: { value: term } });
+    expect(screen.getByRole("link", { name: "Second organisation" }).getAttribute("href")).toBe(
+      "/api/v1/auth/browser/initiate?tenant=other-slug"
+    );
+    expect(screen.queryByRole("link", { name: "Sundsvalls kommun" })).toBeNull();
+    expect(screen.getByRole("status", { name: messages.search_organizations }).textContent).toBe(
+      messages.tenant_results_one
+    );
+  }
+  fireEvent.change(search, { target: { value: "no match" } });
+  expect(screen.getByText(messages.no_organizations_found)).toBeTruthy();
+  expect(screen.getByRole("status", { name: messages.search_organizations }).textContent).toBe(
+    "0 organisationer hittades"
+  );
+  fireEvent.change(search, { target: { value: "" } });
+  expect(screen.getByRole("link", { name: "Sundsvalls kommun" })).toBeTruthy();
+  expect(screen.getByRole("status", { name: messages.search_organizations }).textContent).toBe(
+    "2 organisationer hittades"
+  );
+  expect(navigate).not.toHaveBeenCalled();
+  await expectNoAxeViolations();
+});
+
+it("keeps the explicit organisation chooser open even with one eligible tenant", async () => {
+  multiTenant();
+  replies.set("/api/v1/auth/tenants", { tenants: [{ slug: "first", name: "First" }] });
+  await route("/login?tenant=");
+  expect(await screen.findByRole("link", { name: "First" })).toBeTruthy();
+  expect(navigate).not.toHaveBeenCalled();
+});
 
 it("starts and remembers an explicit tenant once with a safe continuation", async () => {
   multiTenant();
@@ -688,9 +759,10 @@ it.each([
     "/logout?reason=password_changed&next=%2Fadmin",
     "/login?message=password_changed&next=%2Fadmin"
   ],
-  ["/login/switch-organisation", "/login"]
+  ["/login/switch-organisation", "/login?tenant="]
 ])("commits %s once under StrictMode", async (path, destination) => {
   generation = "session-a";
+  sessionStorage.setItem("eneo-last-tenant-slug", "first");
   await route(path);
   await waitFor(() =>
     expect(navigate).toHaveBeenCalledExactlyOnceWith(destination, { replace: true })
@@ -698,4 +770,37 @@ it.each([
   expect(callsTo("/api/v1/auth/session/logout/")).toHaveLength(1);
   expect(document.querySelector("form")).toBeNull();
   expect(callsTo("/api/v1/auth/browser/initiate")).toHaveLength(0);
+  expect(sessionStorage.getItem("eneo-last-tenant-slug")).toBe(
+    path === "/login/switch-organisation" ? null : "first"
+  );
 });
+
+it.each([204, 503])(
+  "clears remembered organisation choices only after successful sign-out (%s)",
+  async (status) => {
+    generation = "session-a";
+    sessionStorage.setItem("eneo-last-tenant-slug", "first");
+    localStorage.setItem("eneo:last-tenant", "first");
+    replies.set("/api/v1/auth/session/logout/", new Response(null, { status }));
+    try {
+      await route("/login/switch-organisation");
+      if (status === 204) {
+        await waitFor(() =>
+          expect(navigate).toHaveBeenCalledWith("/login?tenant=", { replace: true })
+        );
+        expect(sessionStorage.getItem("eneo-last-tenant-slug")).toBeNull();
+        expect(localStorage.getItem("eneo:last-tenant")).toBeNull();
+      } else {
+        expect(await screen.findByText(messages.logout_failed)).toBeTruthy();
+        expect(screen.getByRole("link", { name: messages.try_again }).getAttribute("href")).toBe(
+          "/login/switch-organisation"
+        );
+        expect(navigate).not.toHaveBeenCalled();
+        expect(sessionStorage.getItem("eneo-last-tenant-slug")).toBe("first");
+        expect(localStorage.getItem("eneo:last-tenant")).toBe("first");
+      }
+    } finally {
+      localStorage.removeItem("eneo:last-tenant");
+    }
+  }
+);
