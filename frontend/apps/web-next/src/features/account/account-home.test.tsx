@@ -39,6 +39,19 @@ const konto = () =>
   screen.getByRole("heading", { level: 1, name: "Konto" }).closest<HTMLElement>(".lg\\:hidden")!;
 
 describe("Konto on a phone (decision 22)", () => {
+  it("shows the same frontend build identity in the phone account footer", () => {
+    setViewport("phone");
+    const revision = "123456789abcdef123456789abcdef123456789ab";
+    renderHome(
+      testAppContext({
+        versions: { frontend: "2.4.0", frontendRevision: revision, backend: "2.3.0" }
+      })
+    );
+
+    const commit = within(konto()).getByText(revision);
+    expect(commit.closest("p")?.textContent).toBe(`Frontend 2.4.0 (${revision}) · Backend 2.3.0`);
+  });
+
   it("is one page: who you are, the settings in groups, Logga ut last", async () => {
     setViewport("phone");
     const { container } = renderHome();

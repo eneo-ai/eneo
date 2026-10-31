@@ -8,12 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { LOCALE_LABELS, locales } from "@/lib/i18n/locales";
 import { useLocaleSwitch } from "@/lib/i18n/use-locale-switch";
 import { CopyFormatChoice } from "@/features/account/copy-format";
+import { AccountVersions } from "./account-versions";
 
 const LOCALE_OPTIONS = locales.map((value) => ({ value, label: LOCALE_LABELS[value] ?? value }));
 
 export function AccountProfile() {
   const t = useTranslations();
-  const { user, tenant, versions } = useAppContext();
+  const { user, tenant } = useAppContext();
   const { locale, switchLocale } = useLocaleSwitch();
 
   return (
@@ -60,14 +61,7 @@ export function AccountProfile() {
       </SettingsRow>
       <SettingsRow title={t("version")}>
         <p className="text-muted-foreground text-sm">
-          {t("version_frontend")} {versions.frontend}
-          {versions.frontendRevision ? (
-            <>
-              {" "}
-              (<code className="break-all">{versions.frontendRevision}</code>)
-            </>
-          ) : null}
-          {versions.backend ? ` · ${t("version_backend")} ${versions.backend}` : null}
+          <AccountVersions />
         </p>
       </SettingsRow>
     </SettingsGroup>
