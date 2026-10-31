@@ -34482,6 +34482,8 @@ export interface operations {
       query?: {
         start_date?: string | null;
         end_date?: string | null;
+        /** @description IANA time zone for hourly buckets; omitted uses the database session time zone. */
+        time_zone?: string | null;
       };
       header?: never;
       path?: never;
@@ -34496,6 +34498,15 @@ export interface operations {
         };
         content: {
           "application/json": components["schemas"]["MetadataStatisticsAggregated"];
+        };
+      };
+      /** @description Bad Request */
+      400: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
         };
       };
       /** @description Forbidden */

@@ -1,8 +1,12 @@
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
-from eneo.analysis.analysis_router import _normalize_datetime_range
+from eneo.analysis.analysis_router import (
+    _normalize_datetime_range,
+    get_metadata_aggregated,
+)
 from eneo.main.exceptions import BadRequestException
 
 
@@ -79,3 +83,11 @@ def test_both_dates_provided_passthrough():
 
     assert from_date == explicit_from
     assert to_date == explicit_to
+
+
+@pytest.mark.parametrize("time_zone", ["Not/AZone", "/UTC", ""])
+async def test_aggregated_metadata_rejects_invalid_zone_before_reading(time_zone):
+    container = MagicMock()
+    with pytest.raises(BadRequestException, match="Invalid IANA time zone"):
+        await get_metadata_aggregated(container=container, time_zone=time_zone)
+    container.analysis_service.assert_not_called()

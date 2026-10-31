@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, AsyncIterator, Optional, cast
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, Query
 
@@ -191,7 +192,7 @@ async def get_assistant_activity(
     "/metadata-statistics/aggregated/",
     response_model=MetadataStatisticsAggregated,
     description="Get aggregated analytics data in hourly buckets.",
-    responses=responses.get_responses([403]),
+    responses=responses.get_responses([400, 403]),
 )
 @endpoint_access(
     authentication=Authentication.USER,
@@ -202,15 +203,27 @@ async def get_metadata_aggregated(
     container: Annotated[Container, Depends(get_container(with_user=True))],
     start_date: datetime | None = None,
     end_date: datetime | None = None,
+    time_zone: Annotated[
+        str | None,
+        Query(
+            max_length=100,
+            description="IANA time zone for hourly buckets; omitted uses the database session time zone.",
+        ),
+    ] = None,
 ):
     """Aggregated data for analytics (hourly buckets)."""
+    if time_zone is not None:
+        try:
+            ZoneInfo(time_zone)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            raise BadRequestException("Invalid IANA time zone") from error
     start_date, end_date = _default_analytics_range(
         start_date=start_date, end_date=end_date
     )
 
     service = container.analysis_service()
     assistants, sessions, questions = await service.get_metadata_statistics_aggregated(
-        start_date, end_date
+        start_date, end_date, time_zone=time_zone
     )
 
     return analysis_protocol.to_metadata_aggregated(
