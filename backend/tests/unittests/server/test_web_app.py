@@ -1,4 +1,5 @@
 import re
+from http.cookies import SimpleCookie
 from pathlib import Path
 
 import pytest
@@ -33,6 +34,24 @@ SECURITY_HEADERS = {
     "x-dns-prefetch-control": "off",
     "permissions-policy": "camera=(), geolocation=(), microphone=(self)",
 }
+
+LEGACY_PAGES = (
+    ("/news", "/whats-new"),
+    ("/news/", "/whats-new"),
+    ("/admin/legacy/user-groups", "/admin/user-groups"),
+    ("/admin/personal-assistant/configuration", "/admin/personal-assistant"),
+    ("/admin/personal-assistant/prompts", "/admin/prompt-library"),
+    ("/admin/personal-assistant/prompts/new", "/admin/prompt-library"),
+    ("/admin/personal-assistant/prompts/version-1", "/admin/prompt-library"),
+    ("/admin/prompt-library/new", "/admin/prompt-library"),
+    ("/admin/prompt-library/version-1/", "/admin/prompt-library"),
+    ("/admin/prompt-library/version.json", "/admin/prompt-library"),
+    ("/admin/templates/edit/app/template-1", "/admin/templates"),
+    ("/admin/templates/edit/assistant/template-1", "/admin/templates"),
+    ("/admin/templates/new/app", "/admin/templates"),
+    ("/admin/templates/new/assistant", "/admin/templates"),
+    ("/assistants", "/"),
+)
 
 
 @endpoint_access(
@@ -102,6 +121,241 @@ def _nonce(csp: str) -> str:
     match = re.search(r"'nonce-([^']+)'", csp)
     assert match is not None
     return match.group(1)
+
+
+@pytest.mark.parametrize(("path", "target"), LEGACY_PAGES)
+def test_web_app_redirects_legacy_pages(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str, target: str
+):
+    response = _client(monkeypatch, dist).get(path, follow_redirects=False)
+
+    assert response.status_code == 308
+    assert response.headers["location"] == target
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+def test_web_app_redirect_preserves_query_encoding(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, method: str
+):
+    query = "?tab=x&tag=a%2Fb&tag=%23+%20&empty=&next=//example.com"
+    response = _client(monkeypatch, dist).request(
+        method, "/news" + query, follow_redirects=False
+    )
+
+    assert response.status_code == 308
+    assert response.headers["location"] == "/whats-new" + query
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/admin/personal-assistant",
+        "/admin/prompt-library",
+        "/news/archive",
+        "/admin/personal-assistant/prompts/id/extra",
+        "/admin/prompt-library/id/extra",
+        "/admin/templates/edit/app/id/extra",
+        "/admin/templates/new/app/id",
+        "/enterprise",
+    ],
+)
+def test_web_app_legacy_mapping_does_not_capture_other_pages(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str
+):
+    response = _client(monkeypatch, dist).get(path, follow_redirects=False)
+
+    assert response.status_code == 200
+    assert "location" not in response.headers
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["/admin/audit-logs/export", "/admin/audit-logs/export/123/download"],
+)
+def test_web_app_retired_audit_downloads_are_json_404(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str
+):
+    response = _client(monkeypatch, dist).get(path, follow_redirects=False)
+
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/json"
+    assert "location" not in response.headers
+
+
+@pytest.mark.parametrize(
+    ("path", "target"),
+    [
+        ("/en", "/"),
+        ("/en/", "/"),
+        ("/en/news", "/whats-new"),
+        ("/en/folder/file.v1", "/folder/file.v1"),
+    ],
+)
+def test_web_app_redirects_english_urls(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str, target: str
+):
+    client = _client(monkeypatch, dist)
+    client.cookies.set("NEXT_LOCALE", "sv")
+    response = client.get(path, follow_redirects=False)
+
+    assert response.status_code == 308
+    assert response.headers["location"] == target
+    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["set-cookie"].startswith("NEXT_LOCALE=en;")
+
+
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+def test_web_app_english_redirect_serializes_decoded_path_and_raw_query(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, method: str
+):
+    query = "?tag=a%2fb&tag=%23+%20&empty="
+    response = _client(monkeypatch, dist).request(
+        method, "/en/path%3Fquery%23entry" + query, follow_redirects=False
+    )
+
+    assert response.status_code == 308
+    assert response.headers["location"] == "/path%3Fquery%23entry" + query
+    assert response.headers["cache-control"] == "no-store"
+
+
+@pytest.mark.parametrize("environment", ["development", "production"])
+def test_web_app_english_redirect_cookie_attributes(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, environment: str
+):
+    response = _client(monkeypatch, dist, environment=environment).get(
+        "/en/spaces/list", follow_redirects=False
+    )
+    cookies = SimpleCookie()
+    cookies.load(response.headers["set-cookie"])
+    cookie = cookies["NEXT_LOCALE"]
+
+    assert response.status_code == 308
+    assert cookie.value == "en"
+    assert cookie["path"] == "/"
+    assert cookie["max-age"] == "31536000"
+    assert cookie["samesite"].lower() == "lax"
+    assert bool(cookie["secure"]) is (environment == "production")
+    assert not cookie["httponly"]
+    assert not cookie["domain"]
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/en//external.example/path",
+        "/en/%2fexternal.example/path",
+        "/en/%5cexternal.example",
+        "/en/path%0aheader",
+        "/en/path%00tail",
+        "/en/path%C2%85tail",
+        "/en/api/v1/things/",
+        "/en/scim/x",
+        "/en/internal-mcp/x",
+        "/en/docs/x",
+        "/en/redoc",
+        "/en/openapi.json",
+        "/en/version/x",
+        "/en/admin/audit-logs/export/123/download",
+    ],
+)
+def test_web_app_english_redirect_rejects_unsafe_or_reserved_targets(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str
+):
+    response = _client(monkeypatch, dist).get(path, follow_redirects=False)
+
+    assert response.status_code == 404
+    assert response.headers["content-type"] == "application/json"
+    assert "location" not in response.headers
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize("segment", ["%2e", "%2e%2e", "x/%2e%2e"])
+def test_web_app_english_redirect_rejects_decoded_dot_segments(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, segment: str
+):
+    response = _client(monkeypatch, dist).get(
+        f"/en/{segment}/api/v1/things/", follow_redirects=False
+    )
+
+    assert response.status_code == 404
+    assert "location" not in response.headers
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize("path", ["/news", "/en/news"])
+def test_web_app_legacy_urls_do_not_redirect_posts(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str
+):
+    response = _client(monkeypatch, dist).post(path, follow_redirects=False)
+
+    assert response.status_code == 404
+    assert "location" not in response.headers
+
+
+@pytest.mark.parametrize("path", ["/news", "/en/news"])
+def test_web_app_legacy_urls_never_redirect_on_content_origin(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str
+):
+    response = _client(monkeypatch, dist, mcp_app_content_base_url=CONTENT_BASE).get(
+        CONTENT_BASE + path, follow_redirects=False
+    )
+
+    assert response.status_code == 404
+    assert "location" not in response.headers
+    assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize("locale", ["sv", "en"])
+def test_web_app_index_migrates_legacy_cookie_once(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, locale: str
+):
+    client = TestClient(_app(monkeypatch, dist), base_url="https://app.example.com")
+    client.cookies.set("PARAGLIDE_LOCALE", locale)
+
+    first = client.get("/")
+    assert f'<html lang="{locale}">' in first.text
+    assert first.headers["set-cookie"].startswith(f"NEXT_LOCALE={locale};")
+    assert client.cookies.get("PARAGLIDE_LOCALE") == locale
+    second = client.get("/")
+    assert f'<html lang="{locale}">' in second.text
+    assert "set-cookie" not in second.headers
+
+
+@pytest.mark.parametrize("current", ["en", "sv", "de", ""])
+def test_web_app_current_cookie_blocks_legacy_migration(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, current: str
+):
+    client = _client(monkeypatch, dist)
+    client.cookies.set("NEXT_LOCALE", current)
+    client.cookies.set("PARAGLIDE_LOCALE", "sv" if current == "en" else "en")
+    response = client.get("/")
+
+    expected = "en" if current == "en" else "sv"
+    assert f'<html lang="{expected}">' in response.text
+    assert "set-cookie" not in response.headers
+
+
+def test_web_app_invalid_legacy_cookie_uses_default_without_migration(
+    monkeypatch: pytest.MonkeyPatch, dist: Path
+):
+    client = _client(monkeypatch, dist)
+    client.cookies.set("PARAGLIDE_LOCALE", "de")
+    response = client.get("/")
+
+    assert '<html lang="sv">' in response.text
+    assert "set-cookie" not in response.headers
+
+
+def test_web_app_english_module_handover_keeps_sensitive_page_headers(
+    monkeypatch: pytest.MonkeyPatch, dist: Path
+):
+    response = _client(monkeypatch, dist).get(
+        "/en/module-login?state=s&redirect_uri=x", follow_redirects=False
+    )
+
+    assert response.status_code == 308
+    assert response.headers["referrer-policy"] == "no-referrer"
+    assert response.headers["x-robots-tag"] == "noindex, nofollow, noarchive"
 
 
 def test_disabled_by_default_keeps_unknown_paths_json_404(

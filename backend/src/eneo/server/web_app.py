@@ -7,6 +7,7 @@ its 307 and 405 answers (``Mount("/")`` would take both over):
 - a reserved prefix, or the MCP content host, gets the API's JSON 404;
 - a path with a file extension is a build file: hashed ``/assets/`` are
   immutable, other files revalidate. ``index.html`` is never served raw;
+- legacy pages and English-prefixed URLs redirect to their canonical pages;
 - any other GET or HEAD gets ``index.html`` with a fresh nonce, its CSP and
   ``<html lang>``, never stored.
 
@@ -22,11 +23,12 @@ import re
 import secrets
 from collections.abc import Sequence
 from pathlib import Path, PurePath, PurePosixPath
+from urllib.parse import quote, quote_from_bytes
 
 from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
 from starlette.requests import Request
-from starlette.responses import HTMLResponse
+from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
 from starlette.types import Receive, Scope, Send
 
@@ -37,6 +39,7 @@ from eneo.authentication.endpoint_access import (
 )
 from eneo.main.config import get_settings, serialize_origin
 from eneo.mcp_apps.presentation.mcp_apps_router import on_content_origin
+from eneo.server.web_app_legacy import legacy_page_target
 
 # Where the backend image puts `vite build` output (P4-build-pipeline-1).
 WEB_APP_DIST = Path("/app/web-dist")
@@ -46,7 +49,7 @@ _NONCE = "__ENEO_CSP_NONCE__"
 _LANG = "__ENEO_HTML_LANG__"
 _PLACEHOLDER = re.compile(f"{_NONCE}|{_LANG}")
 
-# Never the web app: a miss under these is the API's JSON 404, never HTML.
+# Reserved and retired paths get JSON 404 on a miss, never app HTML.
 _RESERVED = (
     "/api",
     "/scim",
@@ -55,6 +58,7 @@ _RESERVED = (
     "/redoc",
     "/openapi.json",
     "/version",
+    "/admin/audit-logs/export",
 )
 
 # Module hand-off URLs carry state and redirect_uri: no Referer, no indexing.
@@ -98,6 +102,37 @@ def build_content_security_policy(nonce: str, frame_origins: Sequence[str]) -> s
 
 def _is_reserved(path: str) -> bool:
     return any(path == prefix or path.startswith(prefix + "/") for prefix in _RESERVED)
+
+
+def _redirect_location(path: str, query: bytes) -> str:
+    # The ASGI path is decoded; its ?/# are path data, not new delimiters.
+    location = quote(path, safe="/")
+    if query:
+        location += "?" + quote_from_bytes(query, safe="!$&'()*+,-./:;=?@_%~[]")
+    return location
+
+
+def _is_local_redirect_path(path: str) -> bool:
+    # Browser dot-segment normalization must not change a reserved-path decision.
+    return (
+        path.startswith("/")
+        and not path.startswith("//")
+        and not any(part in (".", "..") for part in path.split("/"))
+        and not any(
+            char == "\\" or ord(char) < 32 or 127 <= ord(char) <= 159 for char in path
+        )
+    )
+
+
+def _set_locale_cookie(response: Response, locale: str, *, secure: bool) -> None:
+    response.set_cookie(
+        "NEXT_LOCALE",
+        locale,
+        max_age=31536000,
+        path="/",
+        secure=secure,
+        samesite="lax",
+    )
 
 
 def _read_index(dist: Path) -> str:
@@ -165,6 +200,29 @@ def install_web_app(app: FastAPI) -> None:
         if _is_reserved(path) or on_content_origin(request):
             raise HTTPException(status_code=404)
 
+        if scope["method"] in ("GET", "HEAD"):
+            english = path == "/en" or path.startswith("/en/")
+            remainder = (path[3:] or "/") if english else path
+            if _is_reserved(remainder):
+                raise HTTPException(status_code=404)
+            target = legacy_page_target(remainder)
+            if english or target is not None:
+                if not _is_local_redirect_path(remainder):
+                    raise HTTPException(status_code=404)
+                target = target or remainder
+                response = RedirectResponse(
+                    _redirect_location(target, scope["query_string"]),
+                    status_code=308,
+                    headers=_PATH_HEADERS.get(target.rstrip("/"), {}),
+                )
+                if english:
+                    response.headers["Cache-Control"] = "no-store"
+                    _set_locale_cookie(
+                        response, "en", secure=not settings.is_development
+                    )
+                await response(scope, receive, send)
+                return
+
         suffix = PurePosixPath(path).suffix.lower()
         if suffix == ".html":
             # Raw index.html would carry no CSP and the literal placeholders.
@@ -182,9 +240,14 @@ def install_web_app(app: FastAPI) -> None:
             raise HTTPException(status_code=404)
 
         nonce = secrets.token_urlsafe(16)
+        current_locale = request.cookies.get("NEXT_LOCALE")
+        legacy_locale = (
+            request.cookies.get("PARAGLIDE_LOCALE") if current_locale is None else None
+        )
+        migrated_locale = legacy_locale if legacy_locale in ("sv", "en") else None
         values = {
             _NONCE: nonce,
-            _LANG: "en" if request.cookies.get("NEXT_LOCALE") == "en" else "sv",
+            _LANG: "en" if (migrated_locale or current_locale) == "en" else "sv",
         }
         # One pass: an inserted value is never scanned for placeholders.
         html = _PLACEHOLDER.sub(lambda match: values[match.group(0)], template)
@@ -198,6 +261,10 @@ def install_web_app(app: FastAPI) -> None:
                 **_PATH_HEADERS.get(path.rstrip("/"), {}),
             },
         )
+        if migrated_locale is not None:
+            _set_locale_cookie(
+                response, migrated_locale, secure=not settings.is_development
+            )
         await response(scope, receive, send)
 
     app.router.default = web_app_fallback
