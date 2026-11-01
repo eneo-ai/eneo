@@ -2,7 +2,7 @@
 
 import { Badge } from "@astryxdesign/core/Badge";
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
-import { Brain, ChevronDown, ChevronRight, Eye, Wrench } from "lucide-react";
+import { AudioLines, Brain, ChevronDown, ChevronRight, Eye, Wrench } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
@@ -32,6 +32,8 @@ export type SelectableModel = {
   vision?: boolean | null;
   reasoning?: boolean | null;
   supports_tool_calling?: boolean | null;
+  /** Transcription: served over the realtime API live transcription streams to. */
+  supports_realtime?: boolean | null;
   input_cost_per_token?: string | number | null;
   output_cost_per_token?: string | number | null;
   cost_per_minute?: string | number | null;
@@ -83,7 +85,8 @@ function CapabilityIcons({ model }: { model: SelectableModel }) {
   const items = [
     model.vision ? { Icon: Eye, text: t("model_label_vision") } : null,
     model.reasoning ? { Icon: Brain, text: t("model_label_reasoning") } : null,
-    model.supports_tool_calling ? { Icon: Wrench, text: t("model_label_tool_calling") } : null
+    model.supports_tool_calling ? { Icon: Wrench, text: t("model_label_tool_calling") } : null,
+    model.supports_realtime ? { Icon: AudioLines, text: t("live_transcription_support") } : null
   ].filter((item): item is { Icon: typeof Eye; text: string } => item !== null);
 
   if (items.length === 0) return null;
@@ -94,7 +97,7 @@ function CapabilityIcons({ model }: { model: SelectableModel }) {
         <Tooltip key={text}>
           <TooltipTrigger asChild>
             <span className="text-muted-foreground inline-flex">
-              <Icon className="size-4" aria-label={text} />
+              <Icon className="size-4" role="img" aria-label={text} />
             </span>
           </TooltipTrigger>
           <TooltipContent>{text}</TooltipContent>

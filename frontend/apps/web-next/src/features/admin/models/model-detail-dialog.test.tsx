@@ -54,6 +54,46 @@ const rerankModel = {
 } as AdminModel;
 
 describe("ModelDetailDialog", () => {
+  it.each([
+    [true, "Ja"],
+    [false, "Nej"]
+  ])("states live transcription %s in a transcription model's details", async (on, answer) => {
+    renderInApp(
+      <ModelDetailDialog
+        model={{ ...model, provider_type: "hosted_vllm", supports_realtime: on } as AdminModel}
+        kind="transcription"
+        open
+        onOpenChange={() => {}}
+      />
+    );
+    const term = await screen.findByText("Livetranskribering", { selector: "dt" });
+    expect(term.nextElementSibling?.textContent).toBe(answer);
+  });
+
+  it.each([
+    [true, null],
+    [false, "Deklarerad men utan verkan: verktygsstöd saknas."]
+  ])("lists a strict tool-schema declaration, with tool calling %s", async (tools, ineffective) => {
+    renderInApp(
+      <ModelDetailDialog
+        model={
+          {
+            ...model,
+            supports_tool_calling: tools,
+            supports_strict_tool_schema: true
+          } as AdminModel
+        }
+        kind="completion"
+        open
+        onOpenChange={() => {}}
+      />
+    );
+    const dialog = await screen.findByRole("dialog", { name: "GPT-5" });
+    expect(within(dialog).getByText("Strikta verktygsscheman")).toBeTruthy();
+    const note = within(dialog).queryByText("Deklarerad men utan verkan: verktygsstöd saknas.");
+    expect(note?.textContent ?? null).toBe(ineffective);
+  });
+
   it("formats the context window in the UI language", async () => {
     renderInApp(
       <ModelDetailDialog

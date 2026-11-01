@@ -11,6 +11,8 @@ import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog"
 import { inputFieldRules } from "@/features/files/upload-plan";
 import { saveBlob } from "@/features/files/signed-file-url";
 import { formatBytes, formatDateTime } from "@/lib/format";
+import { ScreenWakeLock } from "@/lib/audio/screen-wake-lock";
+import { withRecordedDuration } from "@/lib/audio/webm-duration";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { toast } from "@/lib/toast";
 import type { InputField } from "../apps";
@@ -63,9 +65,12 @@ type Capture = {
   cleanupListeners: () => void;
   stallTimer: ReturnType<typeof setInterval> | null;
   diagnostics: string[];
+  /** A phone whose screen locks can stop the capture: the screen stays on while recording. */
+  wakeLock: ScreenWakeLock;
 };
 
 function releaseCapture(capture: Capture) {
+  capture.wakeLock.release();
   capture.cleanupListeners();
   if (capture.stallTimer !== null) clearInterval(capture.stallTimer);
   if (capture.raf !== null) cancelAnimationFrame(capture.raf);
@@ -153,7 +158,8 @@ export function AudioRecorderInput({
       raf: null,
       stallTimer: null,
       diagnostics: [],
-      cleanupListeners: () => {}
+      cleanupListeners: () => {},
+      wakeLock: new ScreenWakeLock()
     };
     captureRef.current = capture;
     setPhase("acquiring");
@@ -206,6 +212,8 @@ export function AudioRecorderInput({
       const chunks: Blob[] = [];
       let totalBytes = 0;
       let lastChunkAt = Date.now();
+      /** Monotonic time the recorder started, for the duration written into the file. */
+      let recordingSince = 0;
       setBytes(0);
       const receiveData = (event: BlobEvent) => {
         if (captureRef.current !== capture || event.data.size === 0) return;
@@ -218,12 +226,27 @@ export function AudioRecorderInput({
           stopRecording();
         }
       };
-      const finalize = () => {
+      const finalize = async () => {
         if (captureRef.current !== capture) return;
-        captureRef.current = null;
+        // Measured at the stop, before the header is read.
+        const durationMs = Math.max(0, performance.now() - recordingSince);
         releaseCapture(capture);
         const mimeType = recorder.mimeType || pickMimeType();
-        const blob = new Blob(chunks, { type: mimeType });
+        // The first chunk holds a WebM header without a duration; written in, a
+        // player can tell the length and seek.
+        const [first, ...rest] = chunks;
+        let head = first;
+        if (first) {
+          try {
+            head = await withRecordedDuration(first, durationMs, mimeType);
+          } catch {
+            // The header stays as recorded: players then guess the length.
+          }
+        }
+        // Unmounted meanwhile: the capture was released and nothing is shown.
+        if (captureRef.current !== capture) return;
+        captureRef.current = null;
+        const blob = new Blob(head ? [head, ...rest] : [], { type: mimeType });
         if (blob.size > 0) {
           // File validation uses MIME essence; codecs describe the recording transport.
           const fileType = mimeType.split(";")[0]!.trim();
@@ -274,16 +297,19 @@ export function AudioRecorderInput({
       tracks.forEach((track) => track.addEventListener("ended", disconnected));
       recorder.addEventListener("error", failed);
       recorder.addEventListener("dataavailable", receiveData);
-      recorder.addEventListener("stop", finalize);
+      const stopped = () => void finalize();
+      recorder.addEventListener("stop", stopped);
       capture.cleanupListeners = () => {
         stream.removeEventListener("inactive", disconnected);
         tracks.forEach((track) => track.removeEventListener("ended", disconnected));
         recorder.removeEventListener("error", failed);
         recorder.removeEventListener("dataavailable", receiveData);
-        recorder.removeEventListener("stop", finalize);
+        recorder.removeEventListener("stop", stopped);
       };
       recorder.start(TIMESLICE_MS);
+      recordingSince = performance.now();
       capture.phase = "recording";
+      capture.wakeLock.hold();
       capture.stallTimer = setInterval(() => {
         if (captureRef.current !== capture || capture.phase !== "recording") return;
         if (Date.now() - lastChunkAt >= STALL_TIMEOUT_MS) {

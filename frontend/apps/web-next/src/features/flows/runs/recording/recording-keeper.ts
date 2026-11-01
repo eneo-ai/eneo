@@ -1,3 +1,4 @@
+import { withRecordedDuration } from "@/lib/audio/webm-duration";
 import type { RuntimeInput } from "../runs-api";
 import { partFileName } from "./recording-format";
 import {
@@ -17,7 +18,6 @@ import {
   type RecordingDatabase,
   type StoredPart
 } from "./recording-store";
-import { withRecordedDuration } from "./webm-duration";
 
 /**
  * Keeps the recordings of one run form on the device: each finished part as

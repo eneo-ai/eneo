@@ -47,6 +47,7 @@ import {
   isEmbeddingFamily,
   isHostingRegion
 } from "./model-metadata-options";
+import { speaksRealtimeDialect } from "./model-providers";
 import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
 import {
   isCandidateSetting,
@@ -182,8 +183,25 @@ function EditModelForm({
   const [tools, setTools] = useState(
     hasTools(model) ? (model.supports_tool_calling ?? false) : false
   );
+  // The strict tool-schema declaration belongs to the route (the identifier as
+  // submitted) it was made for: another identifier makes it ineffective until
+  // declared again, as the server withdraws it when a route moves. An update
+  // carries it only when changed here, so an untouched form cannot declare a
+  // route nobody assessed or resurrect what the server withdrew meanwhile.
+  const [strictRoute, setStrictRoute] = useState(
+    "supports_strict_tool_schema" in model && model.supports_strict_tool_schema ? model.name : null
+  );
+  const [strictTouched, setStrictTouched] = useState(false);
+  const strictDeclared = strictRoute !== null && strictRoute === litellmName.trim();
   const [classificationId, setClassificationId] = useState(
     model.security_classification?.id ?? "__none__"
+  );
+  // Live transcription streams over the realtime API, which only vLLM serves.
+  const [realtime, setRealtime] = useState(
+    "supports_realtime" in model ? (model.supports_realtime ?? false) : false
+  );
+  const realtimeAvailable = speaksRealtimeDialect(
+    "provider_type" in model ? model.provider_type : null
   );
 
   const save = useMutation({
@@ -242,6 +260,8 @@ function EditModelForm({
           open_source: openSource,
           stability: stability.trim() || null,
           cost_per_minute: numericOrNull(costPerMinute),
+          // Always stated, so turning it off reaches the server too.
+          supports_realtime: realtime,
           ...defaultPatch,
           security_classification
         });
@@ -260,6 +280,7 @@ function EditModelForm({
         vision,
         reasoning,
         supports_tool_calling: tools,
+        ...(strictTouched ? { supports_strict_tool_schema: strictDeclared } : {}),
         ...defaultPatch,
         security_classification
       });
@@ -480,6 +501,32 @@ function EditModelForm({
             </div>
           )}
 
+          {kind === "transcription" && (
+            <div className="flex flex-col gap-1.5">
+              <Label className="flex items-center justify-between gap-2 font-normal">
+                {t("live_transcription_support")}
+                <Switch
+                  checked={realtime}
+                  onCheckedChange={setRealtime}
+                  disabled={!realtimeAvailable}
+                  aria-describedby={
+                    realtimeAvailable
+                      ? "model-realtime-help"
+                      : "model-realtime-help model-realtime-unavailable"
+                  }
+                />
+              </Label>
+              <p id="model-realtime-help" className="text-muted-foreground text-xs">
+                {t("live_transcription_help")}
+              </p>
+              {!realtimeAvailable && (
+                <p id="model-realtime-unavailable" className="text-muted-foreground text-xs">
+                  {t("live_transcription_needs_vllm")}
+                </p>
+              )}
+            </div>
+          )}
+
           {kind === "image" && (
             <>
               <div className="flex flex-col gap-1.5">
@@ -673,6 +720,22 @@ function EditModelForm({
                 {t("model_label_tool_calling")}
                 <Switch checked={tools} onCheckedChange={setTools} />
               </Label>
+              <div className="flex flex-col gap-1.5">
+                <Label className="flex items-center justify-between gap-2 font-normal">
+                  {t("strict_tool_schema_support")}
+                  <Switch
+                    checked={strictDeclared}
+                    onCheckedChange={(declared) => {
+                      setStrictRoute(declared ? litellmName.trim() : null);
+                      setStrictTouched(true);
+                    }}
+                    aria-describedby="model-strict-tools-help"
+                  />
+                </Label>
+                <p id="model-strict-tools-help" className="text-muted-foreground text-xs">
+                  {t("strict_tool_schema_help")}
+                </p>
+              </div>
             </fieldset>
           )}
 

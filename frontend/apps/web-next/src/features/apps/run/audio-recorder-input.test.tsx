@@ -8,6 +8,13 @@ import { AudioRecorderInput } from "./audio-recorder-input";
 
 const saveBlob = vi.hoisted(() => vi.fn());
 vi.mock("@/features/files/signed-file-url", () => ({ saveBlob }));
+// The header repair itself is tested with real WebM bytes in src/lib/audio.
+const withRecordedDuration = vi.hoisted(() =>
+  vi.fn<(chunk: Blob, durationMs: number, mimeType?: string) => Promise<Blob>>(
+    async (chunk) => chunk
+  )
+);
+vi.mock("@/lib/audio/webm-duration", () => ({ withRecordedDuration }));
 
 const getUserMedia = vi.fn<() => Promise<MediaStream>>();
 const stopTrack = vi.fn();
@@ -80,6 +87,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  Reflect.deleteProperty(navigator, "wakeLock");
+  Reflect.deleteProperty(document, "visibilityState");
   vi.useRealTimers();
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -153,6 +162,91 @@ it("saves the captured audio with its dated filename, including while queued", a
   rerender(<AudioRecorderInput {...props} files={[]} />);
   fireEvent.click(screen.getByRole("button", { name: "Spara som fil" }));
   expect(saveBlob).toHaveBeenLastCalledWith(file, name);
+});
+
+it("keeps the screen on while recording, again after the page was hidden, until stop", async () => {
+  class Lock extends EventTarget {
+    release = vi.fn(async () => {
+      this.dispatchEvent(new Event("release"));
+    });
+  }
+  const locks: Lock[] = [];
+  const wakeLock = {
+    request: vi.fn(async () => {
+      const lock = new Lock();
+      locks.push(lock);
+      return lock;
+    })
+  };
+  Object.defineProperty(navigator, "wakeLock", { configurable: true, value: wakeLock });
+  let visibility: DocumentVisibilityState = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  const turn = (state: DocumentVisibilityState) => {
+    visibility = state;
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+
+  show();
+  expect(wakeLock.request).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Starta inspelning" }));
+  const stop = await screen.findByRole("button", { name: "Stoppa inspelning" });
+  await waitFor(() => expect(wakeLock.request).toHaveBeenCalledExactlyOnceWith("screen"));
+
+  // Hidden, the browser lets the lock go; visible again, a new one is taken.
+  await act(async () => {
+    turn("hidden");
+    locks[0]!.dispatchEvent(new Event("release"));
+  });
+  await act(async () => turn("visible"));
+  await waitFor(() => expect(wakeLock.request).toHaveBeenCalledTimes(2));
+
+  act(() => Recorder.instances[0]!.data());
+  fireEvent.click(stop);
+  await screen.findByRole("button", { name: "Använd denna inspelning" });
+  expect(locks[1]!.release).toHaveBeenCalledOnce();
+  await act(async () => turn("hidden"));
+  await act(async () => turn("visible"));
+  expect(wakeLock.request).toHaveBeenCalledTimes(2);
+});
+
+it("lets the screen lock again when the recorder is closed mid-recording", async () => {
+  const lock = Object.assign(new EventTarget(), { release: vi.fn(async () => undefined) });
+  const wakeLock = { request: vi.fn(async () => lock) };
+  Object.defineProperty(navigator, "wakeLock", { configurable: true, value: wakeLock });
+  const { unmount } = show();
+  fireEvent.click(screen.getByRole("button", { name: "Starta inspelning" }));
+  await screen.findByRole("button", { name: "Stoppa inspelning" });
+  await waitFor(() => expect(wakeLock.request).toHaveBeenCalledOnce());
+  unmount();
+  expect(lock.release).toHaveBeenCalledOnce();
+});
+
+async function recordAndSave(...chunks: string[]) {
+  show();
+  fireEvent.click(screen.getByRole("button", { name: "Starta inspelning" }));
+  const stop = await screen.findByRole("button", { name: "Stoppa inspelning" });
+  act(() => chunks.forEach((chunk) => Recorder.instances[0]!.data(chunk)));
+  fireEvent.click(stop);
+  fireEvent.click(await screen.findByRole("button", { name: "Spara som fil" }));
+  return saveBlob.mock.calls[0]![0] as File;
+}
+
+it("writes the recorded duration into the first chunk, which holds the WebM header", async () => {
+  withRecordedDuration.mockImplementationOnce(async () => new Blob(["timed"]));
+  const file = await recordAndSave("head", "rest");
+
+  const [chunk, durationMs, mimeType] = withRecordedDuration.mock.calls[0]!;
+  expect([chunk.size, mimeType]).toEqual([4, "audio/webm;codecs=opus"]);
+  expect(durationMs).toBeGreaterThanOrEqual(0);
+  // The repaired header, then the audio after it as recorded.
+  expect(file.size).toBe("timed".length + "rest".length);
+  expect(file.type).toBe("audio/webm");
+});
+
+it("keeps the recording as recorded when its header cannot be repaired", async () => {
+  withRecordedDuration.mockRejectedValueOnce(new Error("unreadable"));
+  const file = await recordAndSave("head", "rest");
+  expect(file.size).toBe(8);
 });
 
 it("retains the preview when discard is cancelled and releases it only after confirmation", async () => {

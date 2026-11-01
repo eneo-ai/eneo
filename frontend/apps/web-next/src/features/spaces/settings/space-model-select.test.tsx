@@ -183,6 +183,16 @@ describe("SpaceModelSelect", () => {
     expect(screen.queryByText("Inga modeller matchar sökningen.")).toBeNull();
   });
 
+  it.each([true, false])("marks a model that does live transcription: %s", async (on) => {
+    const { container } = renderModels([
+      { id: "live", name: "Pianissimo", org: "Nord AI", supports_realtime: on }
+    ]);
+    openCard();
+    const marker = screen.queryByRole("img", { name: "Livetranskribering" });
+    expect(Boolean(marker)).toBe(on);
+    await expectNoAxeViolations(container);
+  });
+
   it("explains an unavailable model in reading order and on its switch", async () => {
     const { container } = renderModels([
       {

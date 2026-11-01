@@ -138,8 +138,17 @@ function InfoTab({
     "reasoning" in model && model.reasoning ? t("capability_reasoning") : null,
     "supports_tool_calling" in model && model.supports_tool_calling
       ? t("model_label_tool_calling")
+      : null,
+    "supports_strict_tool_schema" in model && model.supports_strict_tool_schema
+      ? t("capability_strict_tools")
       : null
   ].filter((value): value is string => value !== null);
+  // Strict schemas apply only to tools that are sent, so without tool calling
+  // the declaration has no effect.
+  const strictIneffective =
+    "supports_strict_tool_schema" in model &&
+    model.supports_strict_tool_schema &&
+    !model.supports_tool_calling;
 
   return (
     <dl className="grid grid-cols-1 gap-x-6 gap-y-2 text-sm sm:grid-cols-2">
@@ -174,17 +183,30 @@ function InfoTab({
           label={t("capabilities")}
           value={
             capabilities.length ? (
-              <div className="flex flex-wrap gap-1 pt-0.5">
-                {capabilities.map((label) => (
-                  <Badge key={label} variant="outline">
-                    {label}
-                  </Badge>
-                ))}
-              </div>
+              <>
+                <div className="flex flex-wrap gap-1 pt-0.5">
+                  {capabilities.map((label) => (
+                    <Badge key={label} variant="outline">
+                      {label}
+                    </Badge>
+                  ))}
+                </div>
+                {strictIneffective && (
+                  <p className="text-muted-foreground pt-1 text-xs">
+                    {t("capability_strict_tools_needs_tools")}
+                  </p>
+                )}
+              </>
             ) : (
               t("none")
             )
           }
+        />
+      )}
+      {"supports_realtime" in model && (
+        <Field
+          label={t("live_transcription_support")}
+          value={t(model.supports_realtime ? "yes" : "no")}
         />
       )}
       {kind === "image" && (

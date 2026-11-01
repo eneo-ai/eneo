@@ -34,7 +34,7 @@ import {
   NO_SUGGESTIONS_PROVIDERS,
   staticCatalogModels
 } from "./model-catalog";
-import { providerCapabilitiesQueryOptions } from "./model-providers";
+import { providerCapabilitiesQueryOptions, speaksRealtimeDialect } from "./model-providers";
 import { useModelTypeLabel } from "./model-type-label";
 import {
   type AdminModel,
@@ -197,6 +197,9 @@ export function ModelCatalogStep({
   const [hosting, setHosting] = useState(() => defaultModelHosting(providerType));
   const [embeddingFamily, setEmbeddingFamily] = useState<EmbeddingFamily>("openai");
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
+  // Live transcription streams over the realtime API, which only vLLM serves.
+  const [realtime, setRealtime] = useState(false);
+  const realtimeAvailable = speaksRealtimeDialect(providerType);
   const [validating, setValidating] = useState(false);
   const [createAnyway, setCreateAnyway] = useState(false);
   const [submitted, setSubmitted] = useState(false);
@@ -362,6 +365,7 @@ export function ModelCatalogStep({
               family: providerType,
               hosting,
               cost_per_minute: model.cost_per_minute ?? null,
+              supports_realtime: realtime,
               security_classification: selectedClassification
             });
           }
@@ -516,6 +520,18 @@ export function ModelCatalogStep({
           ]}
           value={classificationId}
           onChange={setClassificationId}
+        />
+      )}
+
+      {mode === "transcription" && (
+        <CheckboxInput
+          label={t("live_transcription_support")}
+          description={
+            realtimeAvailable ? t("live_transcription_help") : t("live_transcription_needs_vllm")
+          }
+          value={realtime}
+          onChange={setRealtime}
+          isDisabled={!realtimeAvailable}
         />
       )}
 

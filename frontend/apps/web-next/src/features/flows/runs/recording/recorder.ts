@@ -1,3 +1,5 @@
+import { browserWakeLock, ScreenWakeLock, type WakeLockHost } from "@/lib/audio/screen-wake-lock";
+import { withRecordedDuration } from "@/lib/audio/webm-duration";
 import { partFileName, recordingTimeLeftMs, type RecordingOptions } from "./recording-format";
 import type { RecorderAudioGraph } from "./live-transcript";
 import type { JournalPart, RecorderJournal } from "./recording-keeper";
@@ -7,7 +9,6 @@ import {
   type MicrophoneSettings,
   type RecorderDiagnostics
 } from "./recorder-diagnostics";
-import { withRecordedDuration } from "./webm-duration";
 
 /**
  * One microphone recording in the run form, from the permission prompt to
@@ -126,7 +127,7 @@ type RecorderEnvironment = {
   MediaRecorder: typeof MediaRecorder | undefined;
   AudioContext: typeof AudioContext | undefined;
   isSecureContext: boolean;
-  wakeLock: { request(type: "screen"): Promise<{ release(): Promise<void> }> } | undefined;
+  wakeLock: WakeLockHost | undefined;
   /** A monotonic clock: a system clock set during a meeting must not change the recording. */
   now: () => number;
   wallNow: () => number;
@@ -141,8 +142,7 @@ export function browserEnvironment(): RecorderEnvironment {
     MediaRecorder: typeof MediaRecorder === "undefined" ? undefined : MediaRecorder,
     AudioContext: typeof AudioContext === "undefined" ? undefined : AudioContext,
     isSecureContext: typeof window === "undefined" ? true : window.isSecureContext,
-    wakeLock: (nav as (Navigator & { wakeLock?: RecorderEnvironment["wakeLock"] }) | undefined)
-      ?.wakeLock,
+    wakeLock: browserWakeLock(),
     now: () => performance.now(),
     wallNow: () => Date.now(),
     isHidden: () => typeof document !== "undefined" && document.visibilityState === "hidden"
@@ -267,7 +267,8 @@ export class AudioRecorder {
   #hiddenSince: number | null = null;
   #lastAudibleAt = 0;
   #muted = false;
-  #wakeLock: { release(): Promise<void> } | null = null;
+  /** Held while recording or paused, again after the page was hidden. */
+  #wakeLock: ScreenWakeLock;
   #part: Part | null = null;
   #handovers: Promise<void> = Promise.resolve();
   #pendingHandovers = 0;
@@ -304,6 +305,7 @@ export class AudioRecorder {
     this.#options = options;
     this.#callbacks = callbacks;
     this.#env = environment;
+    this.#wakeLock = new ScreenWakeLock(environment.wakeLock);
     this.#log = new RecorderEventLog(environment.now);
   }
 
@@ -387,7 +389,7 @@ export class AudioRecorder {
       this.#set({ ...IDLE, problem: "microphone_failed" });
       return;
     }
-    this.#holdWakeLock();
+    this.#wakeLock.hold();
     // The watch starts once the recorder runs: the permission prompt is not a stall.
     this.#lastChunkAt = this.#env.now();
     this.#lastAudibleAt = this.#lastChunkAt;
@@ -945,20 +947,6 @@ export class AudioRecorder {
     if (this.#snapshot.phase === "recording") this.#set({ ...this.#snapshot, micHint: null });
   };
 
-  #holdWakeLock() {
-    // A phone screen that locks can stop the page's capture.
-    void this.#env.wakeLock
-      ?.request("screen")
-      .then((lock) => {
-        if (this.#snapshot.phase === "recording" || this.#snapshot.phase === "paused") {
-          this.#wakeLock = lock;
-        } else {
-          void lock.release().catch(() => undefined);
-        }
-      })
-      .catch(() => undefined);
-  }
-
   #release() {
     clearInterval(this.#tick);
     const stream = this.#stream;
@@ -977,9 +965,7 @@ export class AudioRecorder {
     const context = this.#context;
     this.#context = null;
     void context?.close().catch(() => undefined);
-    const lock = this.#wakeLock;
-    this.#wakeLock = null;
-    void lock?.release().catch(() => undefined);
+    this.#wakeLock.release();
   }
 
   #set(next: RecorderSnapshot) {
