@@ -148,15 +148,26 @@ test(
       .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
       .toBe(true);
     await expect(page.locator("html")).toHaveClass(/dark/);
-    await page.getByRole("link", { name: runName, exact: true }).scrollIntoViewIfNeeded();
+    // A phone lists the runs instead of the table (runs-list.tsx): the run, how it went, and
+    // who started it and for how long. Usage is what only a wide screen has room for; the
+    // table row above checks it.
+    const historyItem = page
+      .getByRole("list", { name: "Körningar", exact: true })
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("link", { name: runName, exact: true }) });
+    await expect(historyItem.getByText("Klar", { exact: true })).toBeVisible();
+    await expect(historyItem.getByText(/^.+ · .+$/)).toBeVisible();
+    await expect(page.getByRole("columnheader", { name: "Användning", exact: true })).toHaveCount(
+      0
+    );
+    await expect(
+      historyItem.getByText("Ingen registrerad användning", { exact: true })
+    ).toHaveCount(0);
+    const historyLink = historyItem.getByRole("link", { name: runName, exact: true });
+    await historyLink.scrollIntoViewIfNeeded();
+    await expect(historyLink).toBeInViewport();
     await page.screenshot({
       path: test.info().outputPath("flow-run-history-mobile-dark.png"),
-      fullPage: true
-    });
-    await historyUsage.scrollIntoViewIfNeeded();
-    await expect(historyUsage).toBeInViewport();
-    await page.screenshot({
-      path: test.info().outputPath("flow-run-history-usage-mobile-dark.png"),
       fullPage: true
     });
     const historyAxe = await new AxeBuilder({
@@ -165,7 +176,7 @@ test(
       .withTags(WCAG_22_AA_TAGS)
       .analyze();
     expect(historyAxe.violations).toEqual([]);
-    await page.getByRole("link", { name: runName, exact: true }).click();
+    await historyLink.click();
     await expect(page).toHaveURL(runUrl);
     await page.getByRole("button", { name: "Försök", exact: true }).click();
     const attemptDetails = page.getByRole("button", { name: "Detaljer för försök 1", exact: true });
