@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDateTime } from "@/lib/format";
 import { PromptVersionDialog } from "@/features/prompts/prompt-version-dialog";
+import { promptDraftsMatch, type PromptDraft } from "@/features/prompts/prompt-draft";
 import type { App } from "../apps";
 import { useUpdateApp } from "./use-app";
 
@@ -19,15 +20,15 @@ export function InstructionsSection({ app }: { app: App }) {
 
   const savedText = app.prompt?.text ?? "";
   const savedDescription = app.prompt?.description ?? "";
-  const prompt = useAutosaveField<{ text: string; description?: string }>({
+  const prompt = useAutosaveField<PromptDraft>({
     key: "app-prompt",
-    value: { text: savedText, description: savedDescription },
-    equals: (a, b) => a.text === b.text && (a.description ?? "") === (b.description ?? ""),
+    value: { kind: "server", text: savedText, description: savedDescription },
+    equals: promptDraftsMatch,
     save: (value) =>
       update.mutateAsync({
         prompt: {
           text: value.text,
-          ...(value.description ? { description: value.description } : {})
+          ...(value.kind === "manual" ? {} : { description: value.description })
         }
       }),
     commitDebounceMs: 1500,
@@ -54,10 +55,7 @@ export function InstructionsSection({ app }: { app: App }) {
           rows={6}
           onChange={(event) => {
             const text = event.target.value;
-            prompt.setValue({
-              text,
-              description: text === savedText ? savedDescription : undefined
-            });
+            prompt.setValue({ kind: "manual", text });
           }}
           onBlur={() => prompt.commit()}
         />
@@ -67,7 +65,8 @@ export function InstructionsSection({ app }: { app: App }) {
         open={showHistory}
         onOpenChange={setShowHistory}
         onUseVersion={(version) => {
-          const value = {
+          const value: PromptDraft = {
+            kind: "annotated",
             text: version.text,
             description: t("prompt_restored_from_date", {
               date: version.created_at ? formatDateTime(version.created_at) : t("unknown")

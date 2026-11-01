@@ -195,3 +195,63 @@ test("explains model-specific settings and governed startup defaults", async ({ 
   await expect(page.getByRole("switch", { name: "Webbsökning" })).not.toBeChecked();
   await page.screenshot({ path: info.outputPath("phone-governance.png"), fullPage: true });
 });
+
+test("keeps manual provenance clear when returning during a pending save", async ({ page }) => {
+  const space = await createSpace(page, uniqueName("Pending prompt provenance"));
+  const assistant = await apiPostJson<Assistant>(page, `${space}/applications/assistants/`, {
+    name: uniqueName("Pending prompt")
+  });
+  const path = `/assistants/${assistant.id}/`;
+  await apiPost(page, path, {
+    prompt: { text: "Original A", description: "Previous restore provenance" }
+  });
+  await page.goto(`${space}/assistants/${assistant.id}/edit?section=instructions`);
+  const field = page.getByRole("textbox", { name: "Prompt", exact: true });
+  let release!: () => void;
+  let sawWrite!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const writing = new Promise<void>((resolve) => {
+    sawWrite = resolve;
+  });
+  const pattern = `**/api/v1${path}`;
+  await page.route(pattern, async (route) => {
+    if (
+      route.request().method() === "POST" &&
+      route.request().postDataJSON().prompt?.text === "Manual B"
+    ) {
+      sawWrite();
+      await held;
+    }
+    await route.continue();
+  });
+  try {
+    await field.fill("Manual B");
+    await field.blur();
+    await writing;
+    const returned = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/v1${path}`) &&
+        response.request().method() === "POST" &&
+        response.request().postDataJSON().prompt?.text === "Original A"
+    );
+    await field.fill("Original A");
+    await field.blur();
+    release();
+    const response = await returned;
+    expect(response.ok()).toBe(true);
+    expect(response.request().postDataJSON().prompt).toEqual({
+      text: "Original A",
+      description: ""
+    });
+    expect(((await response.json()) as Assistant).prompt?.description).toBe("");
+    await page.reload();
+    await expect(field).toHaveValue("Original A");
+    const persisted = (await (await page.request.get(`/api/v1${path}`)).json()) as Assistant;
+    expect(persisted.prompt?.description).toBe("");
+  } finally {
+    release();
+    await page.unroute(pattern);
+  }
+});

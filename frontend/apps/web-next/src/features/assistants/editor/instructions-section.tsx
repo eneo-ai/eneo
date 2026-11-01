@@ -27,6 +27,7 @@ import {
 } from "@/features/help-assistants/prompt-guide/helper-runs";
 import { PromptGuideDialog } from "@/features/help-assistants/prompt-guide/prompt-guide-dialog";
 import { PromptVersionDialog } from "@/features/prompts/prompt-version-dialog";
+import { promptDraftsMatch, type PromptDraft } from "@/features/prompts/prompt-draft";
 import { useSpace } from "@/features/spaces/use-space";
 import { isPromptLocked } from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
@@ -83,13 +84,15 @@ export function InstructionsSection({
 
   // Each save creates a new prompt version, so commit on blur, after a pause,
   // or on an explicit apply rather than on every keystroke.
-  const promptField = useAutosaveField<{ text: string; description?: string }>({
+  const promptField = useAutosaveField<PromptDraft>({
     key: "assistant-prompt",
-    value: { text: savedPrompt, description: savedDescription },
-    equals: (a, b) => a.text === b.text && (a.description ?? "") === (b.description ?? ""),
+    value: { kind: "server", text: savedPrompt, description: savedDescription },
+    equals: promptDraftsMatch,
     validate: () => !promptLocked,
     save: (value) =>
-      update.mutateAsync({ prompt: { text: value.text, description: value.description ?? "" } }),
+      update.mutateAsync({
+        prompt: { text: value.text, description: value.kind === "manual" ? "" : value.description }
+      }),
     commitDebounceMs: PROMPT_AUTOSAVE_DEBOUNCE_MS,
     commitOnVisibilityChange: true
   });
@@ -97,10 +100,7 @@ export function InstructionsSection({
   const dirty = promptField.dirty;
 
   function editPrompt(text: string) {
-    promptField.setValue({
-      text,
-      description: text === savedPrompt ? savedDescription : undefined
-    });
+    promptField.setValue({ kind: "manual", text });
   }
 
   const effectiveModelId = assistantToolModel(space.completion_models, assistant)?.id;
@@ -221,7 +221,7 @@ export function InstructionsSection({
           const description = t("prompt_guide_apply_description", {
             date: formatDateTime(new Date().toISOString())
           });
-          const value = { text, description };
+          const value: PromptDraft = { kind: "annotated", text, description };
           promptField.setValue(value);
           void promptField.commit(value);
         }}
@@ -232,7 +232,8 @@ export function InstructionsSection({
         onOpenChange={setShowHistory}
         onUseVersion={(version) => {
           if (promptLocked) return;
-          const value = {
+          const value: PromptDraft = {
+            kind: "annotated",
             text: version.text,
             description: t("prompt_restored_from_date", {
               date: version.created_at ? formatDateTime(version.created_at) : t("unknown")

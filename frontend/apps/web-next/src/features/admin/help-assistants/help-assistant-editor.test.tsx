@@ -213,3 +213,104 @@ it("does not restore old provenance when manual A returns while assistant save B
     release();
   }
 });
+
+it("keeps same-text assistant restore intent through a held manual save and external metadata", async () => {
+  const assistant = {
+    id: "helper",
+    name: "Helper",
+    completion_model: models[0],
+    completion_model_kwargs: {},
+    prompt: { text: "Original A", description: "Previous provenance" },
+    attachments: []
+  } as unknown as Assistant;
+  const old = {
+    id: "old",
+    text: "Manual B",
+    description: "Historical marker",
+    created_at: "2026-10-01T12:00:00Z",
+    is_selected: false,
+    user: { id: "user-1", email: "owner@example.se" }
+  };
+  api.GET.mockImplementation(async (path) => ({
+    data: path.includes("/prompts/{id}") ? old : { items: [old] },
+    response: new Response("{}")
+  }));
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  api.POST.mockImplementation(async (path, init) => {
+    if (path.endsWith("/preflight"))
+      return { data: { file_tokens: 0, prompt_tokens: 0 }, response: new Response("{}") };
+    if (!init.body.prompt.description) await held;
+    return { data: { ...assistant, prompt: init.body.prompt }, response: new Response("{}") };
+  });
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(["assistants", "helper"], assistant);
+  renderInApp(<HelpAssistantEditor assistantId="helper" helperKind="prompt_guide" />, {
+    queryClient
+  });
+  const field = screen.getByRole("textbox", { name: "Prompt" });
+  fireEvent.change(field, { target: { value: "Uncommitted edit" } });
+  fireEvent.change(field, { target: { value: "Original A" } });
+  await act(async () => {
+    fireEvent.blur(field);
+  });
+  expect(api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/")).toHaveLength(
+    0
+  );
+  fireEvent.change(field, { target: { value: "Manual B" } });
+  fireEvent.blur(field);
+  await waitFor(() =>
+    expect(api.POST).toHaveBeenCalledWith(
+      "/api/v1/assistants/{id}/",
+      expect.objectContaining({ body: { prompt: { text: "Manual B", description: "" } } })
+    )
+  );
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "Visa prompthistorik" }));
+    await screen.findByRole("button", { name: "Återställ denna version" });
+    fireEvent.click(screen.getByRole("button", { name: "Återställ denna version" }));
+    expect(
+      api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/")
+    ).toHaveLength(1);
+    await act(async () => {
+      release();
+    });
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith(
+        "/api/v1/assistants/{id}/",
+        expect.objectContaining({
+          body: {
+            prompt: {
+              text: "Manual B",
+              description: expect.stringMatching(/^Återställd prompt från /)
+            }
+          }
+        })
+      )
+    );
+    await waitFor(() =>
+      expect(
+        queryClient.getQueryData<Assistant>(["assistants", "helper"])?.prompt?.description
+      ).toMatch(/^Återställd prompt från /)
+    );
+    act(() =>
+      queryClient.setQueryData<Assistant>(["assistants", "helper"], (current) => ({
+        ...current!,
+        prompt: { ...current!.prompt!, description: "External metadata" }
+      }))
+    );
+    fireEvent.blur(field);
+    fireEvent.change(field, { target: { value: "Uncommitted edit" } });
+    fireEvent.change(field, { target: { value: "Manual B" } });
+    await act(async () => {
+      fireEvent.blur(field);
+    });
+    expect(
+      api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/")
+    ).toHaveLength(2);
+  } finally {
+    release();
+  }
+});
