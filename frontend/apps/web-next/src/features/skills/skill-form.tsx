@@ -246,7 +246,9 @@ export function SkillForm(props: Props) {
             />
           )}
         </div>
-        <div className="bg-background sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t py-3">
+        {/* Not sticky on a short window (a phone held sideways leaves about 300 px): the bar
+            would cover a field that has the focus (2.4.11), and a fifth of the screen is its own. */}
+        <div className="bg-background sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t py-3 [@media(height<31.25rem)]:static">
           <p className="text-muted-foreground text-sm" role="status">
             {dirty ? t("skills_form_unsaved_status") : saved ? t("skills_form_saved_status") : ""}
           </p>

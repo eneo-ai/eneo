@@ -102,7 +102,10 @@ test(
 
 const TOUCH_SIZES = [
   { name: "phone", width: 390, height: 844 },
-  { name: "ipad", width: 820, height: 1180 }
+  // A phone turned: the browser's own bars leave about 300 px, so a fixed bar covers most of it.
+  { name: "phone held sideways", width: 667, height: 300 },
+  { name: "ipad", width: 820, height: 1180 },
+  { name: "ipad held sideways", width: 1180, height: 820 }
 ] as const;
 
 for (const size of TOUCH_SIZES) {

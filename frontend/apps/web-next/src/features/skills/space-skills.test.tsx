@@ -213,6 +213,11 @@ describe("space Skills", () => {
     expect(
       screen.getByLabelText("skills_display_name_label").closest(".\\[\\&_\\*\\]\\:scroll-mb-20")
     ).toBeTruthy();
+    // And on a window too short for a bar that size (a phone held sideways) it is not sticky.
+    const footer = screen.getByRole("button", { name: "skills_create_action" }).parentElement!
+      .parentElement!;
+    expect(footer.className).toContain("sticky");
+    expect(footer.className).toContain("[@media(height<31.25rem)]:static");
     fireEvent.change(screen.getByLabelText("skills_display_name_label"), {
       target: { value: "Reports" }
     });
