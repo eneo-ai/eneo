@@ -6,6 +6,7 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { Building2, SquarePen, User } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
+import { CRUMB_TOUCH } from "@/components/composites/page-header";
 import { iconUrl } from "@/components/composites/icon-field";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { cn } from "@/lib/utils";
@@ -60,13 +61,17 @@ export function SpaceHeader({
   return (
     <header className={cn("border-ax-border flex flex-col gap-4 border-b px-6 pt-5", className)}>
       <Breadcrumbs variant="supporting">
-        <BreadcrumbItem href="/spaces/list" isCurrent={false}>
+        <BreadcrumbItem href="/spaces/list" isCurrent={false} className={CRUMB_TOUCH}>
           {t("spaces")}
         </BreadcrumbItem>
         {isOverview ? (
           <BreadcrumbItem isCurrent>{name}</BreadcrumbItem>
         ) : (
-          <BreadcrumbItem href={spaceLandingHref(sections, routeId)} isCurrent={false}>
+          <BreadcrumbItem
+            href={spaceLandingHref(sections, routeId)}
+            isCurrent={false}
+            className={CRUMB_TOUCH}
+          >
             {name}
           </BreadcrumbItem>
         )}

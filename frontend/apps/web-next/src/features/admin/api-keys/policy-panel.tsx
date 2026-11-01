@@ -54,7 +54,7 @@ export function ApiKeyPolicyDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
+      <DialogContent className="overflow-y-auto sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>{t("api_keys_admin_tenant_policy")}</DialogTitle>
           <DialogDescription>{t("api_keys_admin_policy_description")}</DialogDescription>

@@ -1,6 +1,7 @@
 "use client";
 
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
@@ -32,6 +33,7 @@ import { ClientTime } from "@/components/composites/client-time";
 import { ListError, LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { TableFrame } from "@/components/composites/table-frame";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { useSpace } from "@/features/spaces/use-space";
 import { PersonalChatSkillStatus } from "./personal-chat-skills";
 import { skillQueryKey } from "./skill-revisions";
@@ -67,6 +69,9 @@ export function SpaceSkillsPage() {
     retry: false
   });
   const items = flattenPages(skills.data?.pages);
+  // One create action at a time: an empty space's empty state carries its own.
+  const showCreate =
+    can("create", "skill") && (items.length > 0 || search !== "" || skills.isError);
 
   function submitSearch(event: SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -183,13 +188,15 @@ export function SpaceSkillsPage() {
         description={t("skills_library_intro")}
         tour="space-skills"
         actions={
-          can("create", "skill") ? (
-            <Button asChild>
-              <Link href={`${base}/new`}>
-                <Plus className="size-4" />
-                {t("skills_library_create")}
-              </Link>
-            </Button>
+          showCreate ? (
+            <DockedActions label={t("space_skills_actions")}>
+              <Button asChild>
+                <Link href={`${base}/new`}>
+                  <Plus className="size-4" />
+                  {t("skills_library_create")}
+                </Link>
+              </Button>
+            </DockedActions>
           ) : undefined
         }
       />
@@ -202,6 +209,7 @@ export function SpaceSkillsPage() {
             <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
             <Input
               type="search"
+              {...KEYBOARD.search}
               className="pl-9"
               value={searchInput}
               placeholder={t("skills_library_search_placeholder")}

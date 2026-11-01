@@ -7,10 +7,12 @@ import { useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { ResourceCollection } from "@/components/composites/resource-tile";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
+import { ServiceActionScope } from "./actions";
 import { CreateServiceButton } from "./create-service";
 import { spaceServices } from "./services";
 import { ServiceTile } from "./tile";
@@ -28,47 +30,55 @@ export function ServicesPage() {
 
   return (
     <RemovalFocusScope target={headingRef}>
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
-          headingLevel={2}
-          headingRef={headingRef}
-          title={t("services")}
-          actions={canCreate && services.length > 0 ? <CreateServiceButton /> : undefined}
-        />
-        {services.length === 0 ? (
-          <EmptyState
-            icon={<Wrench />}
-            title={t("space_services_empty_title")}
-            description={t("space_services_empty_description")}
-            headingLevel={3}
-            actions={canCreate ? <CreateServiceButton /> : undefined}
+      <ServiceActionScope focusTarget={headingRef}>
+        <div className="flex w-full flex-col gap-6">
+          <PageHeader
+            headingLevel={2}
+            headingRef={headingRef}
+            title={t("services")}
+            actions={
+              canCreate && services.length > 0 ? (
+                <DockedActions label={t("space_services_actions")}>
+                  <CreateServiceButton />
+                </DockedActions>
+              ) : undefined
+            }
           />
-        ) : (
-          <>
-            <ResourceFilterInput
-              value={filter}
-              onChange={setFilter}
-              label={t("space_filter_services_label")}
-              placeholder={t("ui_filter_items", { resourceName: t("resource_services") })}
-              resultCount={filteredServices.length}
+          {services.length === 0 ? (
+            <EmptyState
+              icon={<Wrench />}
+              title={t("space_services_empty_title")}
+              description={t("space_services_empty_description")}
+              headingLevel={3}
+              actions={canCreate ? <CreateServiceButton /> : undefined}
             />
-            {filteredServices.length === 0 ? (
-              <EmptyState
-                icon={<SearchX />}
-                title={t("no_results_found")}
-                headingLevel={3}
-                isCompact
+          ) : (
+            <>
+              <ResourceFilterInput
+                value={filter}
+                onChange={setFilter}
+                label={t("space_filter_services_label")}
+                placeholder={t("ui_filter_items", { resourceName: t("resource_services") })}
+                resultCount={filteredServices.length}
               />
-            ) : (
-              <ResourceCollection>
-                {filteredServices.map((service) => (
-                  <ServiceTile key={service.id} service={service} />
-                ))}
-              </ResourceCollection>
-            )}
-          </>
-        )}
-      </div>
+              {filteredServices.length === 0 ? (
+                <EmptyState
+                  icon={<SearchX />}
+                  title={t("no_results_found")}
+                  headingLevel={3}
+                  isCompact
+                />
+              ) : (
+                <ResourceCollection>
+                  {filteredServices.map((service) => (
+                    <ServiceTile key={service.id} service={service} />
+                  ))}
+                </ResourceCollection>
+              )}
+            </>
+          )}
+        </div>
+      </ServiceActionScope>
     </RemovalFocusScope>
   );
 }

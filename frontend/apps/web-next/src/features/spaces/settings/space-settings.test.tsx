@@ -5,6 +5,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
+import { setViewport } from "@/test/setup-dom";
 import type { Space } from "../space";
 import { makeSpace } from "../testing/space-fixture";
 
@@ -99,6 +100,15 @@ afterEach(() => {
   api.DELETE.mockReset();
 });
 
+/** The strip of section links (a phone's index is another navigation of the same name). */
+function sectionLinks() {
+  const strip = screen
+    .getAllByRole("navigation", { name: "Inställningar" })
+    .find((navigation) => navigation.querySelector("a[href^='#']"));
+  if (!strip) throw new Error("No strip of section links");
+  return strip;
+}
+
 /** The model switches sit behind each card's "choose" button. */
 async function openModels(kind: string) {
   fireEvent.click(await screen.findByRole("button", { name: `Välj ${kind}` }));
@@ -107,10 +117,10 @@ async function openModels(kind: string) {
 it("offers section links and keeps each model type separate from tools", () => {
   showSettings();
 
-  const navigation = screen.getByRole("navigation", { name: "Inställningar" });
+  const navigation = sectionLinks();
   for (const name of [
     "Allmänt",
-    "Säkerhet & Integritet",
+    "Säkerhet och integritet",
     "Modeller",
     "Verktyg och anslutningar",
     "Funktioner",
@@ -129,6 +139,58 @@ it("offers section links and keeps each model type separate from tools", () => {
   ).toBeGreaterThan(0);
 });
 
+it("opens on a phone with an index of the sections, as the assistant editor does", async () => {
+  setViewport("phone");
+  const { container } = showSettings();
+
+  const index = document.querySelector<HTMLElement>("[data-editor-index]")!;
+  expect(document.querySelector("[data-editor-view]")?.getAttribute("data-editor-view")).toBe(
+    "index"
+  );
+  const rows = within(index).getAllByRole("link");
+  expect(rows.map((row) => row.getAttribute("href"))).toEqual([
+    "/?section=general",
+    "/?section=security",
+    "/?section=models",
+    "/?section=tools",
+    "/?section=capabilities",
+    "/?section=api-keys",
+    "/?section=danger"
+  ]);
+  expect(
+    within(index)
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent)
+  ).toEqual(["Ytan", "Modell och funktioner", "Åtkomst"]);
+  // Deleting the space is not an access setting: it stands alone, last, under no heading.
+  const lists = index.querySelectorAll("ul");
+  expect(within(lists[lists.length - 1]!).getAllByRole("link")).toHaveLength(1);
+  expect(within(lists[lists.length - 1]!).getByRole("link", { name: /Farozon/ })).toBeTruthy();
+  expect(within(lists[lists.length - 2]!).queryByRole("link", { name: /Farozon/ })).toBeNull();
+  // The space's page bar is above it: the index has none of its own, a section has one back to it.
+  expect(container.querySelector("[data-phone-page-bar]")).toBeNull();
+  // What the space holds is said on the row, so the index tells before it is opened.
+  expect(rows[1]!.textContent).toMatch(/^Säkerhet och integritet, .*30/);
+  // The index names itself (the frame's bar shows its title only after a scroll), under the
+  // frame's h1, not beside it.
+  const names = [...container.querySelectorAll("h2.md\\:hidden")].map(
+    (heading) => heading.textContent
+  );
+  expect(names).toEqual(["Inställningar"]);
+  expect(container.querySelector("h1")).toBeNull();
+  await expectNoAxeViolations(container);
+});
+
+it("says nothing about a space's security while it keeps nothing back", () => {
+  setViewport("phone");
+  state.space = makeSpace({ overrides: { data_retention_days: null } });
+  showSettings(undefined, [], [], "space-1", state.space);
+  const rows = within(document.querySelector<HTMLElement>("[data-editor-index]")!).getAllByRole(
+    "link"
+  );
+  expect(rows[1]!.textContent).toBe("Säkerhet och integritet");
+});
+
 it("lists each model type in the models section once the models have loaded", async () => {
   showSettings(undefined, availableModels);
 
@@ -141,9 +203,9 @@ it("lists each model type in the models section once the models have loaded", as
 it("shows organization settings without personal space sections", () => {
   showSettings(undefined, [], [], "space-1", makeSpace({ overrides: { organization: true } }));
 
-  const navigation = screen.getByRole("navigation", { name: "Inställningar" });
+  const navigation = sectionLinks();
   expect(within(navigation).queryByRole("link", { name: "Allmänt" })).toBeNull();
-  expect(within(navigation).queryByRole("link", { name: "Säkerhet & Integritet" })).toBeNull();
+  expect(within(navigation).queryByRole("link", { name: "Säkerhet och integritet" })).toBeNull();
   expect(within(navigation).getByRole("link", { name: "Funktioner" })).toBeTruthy();
   const webSearch = within(document.getElementById("capabilities")!).getByRole("switch", {
     name: "Webbsökning"

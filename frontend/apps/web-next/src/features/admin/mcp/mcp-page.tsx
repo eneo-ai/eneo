@@ -239,6 +239,7 @@ function McpServerCard({
           asChild
           variant="ghost"
           size="icon"
+          className="max-sm:hidden"
           aria-label={t("mcp_manage_server", { name: server.name })}
         >
           <Link href={detailHref}>

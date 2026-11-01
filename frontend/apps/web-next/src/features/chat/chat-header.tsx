@@ -207,7 +207,7 @@ const SWITCHER_CLASS: Record<SwitcherVariant, string> = {
   header:
     "text-ax-text flex h-[42px] max-w-[min(22rem,40vw)] min-w-0 items-center justify-start rounded-ax-element ps-1.5 pe-2 text-start text-sm pointer-coarse:h-11",
   token:
-    "text-ax-text border-ax-border-control flex h-8 max-w-[16rem] min-w-0 items-center justify-start rounded-full border ps-1 pe-2 text-[13px] font-semibold pointer-coarse:h-11",
+    "text-ax-text border-ax-border-control flex h-8 max-w-[min(16rem,40vw)] min-w-0 items-center justify-start rounded-full border ps-1 pe-2 text-[13px] font-semibold pointer-coarse:h-11",
   // Start-aligned (one control before it, two after); on an iPad held
   // upright no wider than its lines need.
   mobile:

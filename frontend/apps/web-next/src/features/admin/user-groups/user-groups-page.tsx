@@ -24,6 +24,7 @@ import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { TableFrame } from "@/components/composites/table-frame";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -178,8 +179,9 @@ function UserGroupTable({
   ];
 
   return (
-    <div className="border-ax-border bg-ax-card rounded-ax-container [&_thead_tr]:bg-ax-sunken overflow-hidden border">
-      {/* Below its min width the table scrolls inside its own named region. */}
+    <TableFrame>
+      {/* Below its min width the table scrolls inside its own named region; the name stays
+          at the start and the row menu at the end, in view on a phone. */}
       <Table
         data={sortedData}
         columns={columns}
@@ -187,9 +189,11 @@ function UserGroupTable({
         hasHover
         aria-labelledby={labelledBy}
         plugins={{ sort: sortPlugin }}
+        pinnedColumn="name"
+        pinnedEndColumn="actions"
         className="min-w-120"
       />
-    </div>
+    </TableFrame>
   );
 }
 
@@ -261,7 +265,7 @@ export function AdminUserGroupsPage() {
           { label: t("admin_breadcrumb_root"), href: "/admin" },
           { label: t("admin_section_organisation") }
         ]}
-        actions={createButton}
+        actions={groups.data?.length ? createButton : undefined}
       />
       <QueryStateBoundary query={groups} rows={4}>
         {(items) =>

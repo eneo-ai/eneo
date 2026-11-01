@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderInApp, testQueryClient } from "@/test/render";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 
 const backend = vi.hoisted(() => ({
   runs: [] as AppRunSparse[],
@@ -57,6 +58,8 @@ describe("ResultsTable", () => {
 
     const table = await screen.findByRole("table", { name: "Resultat" });
     expect(within(table).getByText(/Sammanfatta protokollet/)).toBeTruthy();
+    // The column of row menus has a header a screen reader can say (not an empty cell).
+    expect(within(table).getAllByRole("columnheader").at(-1)?.textContent).toBe("Åtgärder");
   });
 
   it("names each run's menu by the time its row shows", async () => {
@@ -71,6 +74,22 @@ describe("ResultsTable", () => {
       expect(time).toMatch(/2026/);
       expect(within(row).getByRole("button", { name: `Fler åtgärder för ${time}` })).toBeTruthy();
     }
+  });
+
+  it("is a list of rows on a phone, one per run, each opening its result", async () => {
+    setViewport(PHONE_VIEWPORT);
+    renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/apps/app-1/results/${id}`} />);
+
+    const list = await screen.findByRole("list", { name: "Resultat" });
+    expect(screen.queryByRole("table")).toBeNull();
+    const links = within(list).getAllByRole("link");
+    expect(links.map((link) => link.getAttribute("href"))).toEqual([
+      "/apps/app-1/results/run-2",
+      "/apps/app-1/results/run-1"
+    ]);
+    expect(within(list).getByText(/Sammanfatta protokollet/)).toBeTruthy();
+    // Each row has its menu, named by the time the row shows.
+    expect(within(list).getAllByRole("button", { name: /^Fler åtgärder för / })).toHaveLength(2);
   });
 });
 

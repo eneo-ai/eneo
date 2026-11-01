@@ -285,10 +285,10 @@ describe("BlobTable", () => {
 
   it("explains an empty list, one level below the page's h1", () => {
     // Both pages render the table straight under their h1 (1.3.1 heading order).
-    renderInApp(<BlobTable blobs={[]} canEdit labelledBy="files" />);
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Du har inga filer uppladdade ännu" })
-    ).toBeTruthy();
+    const { container } = renderInApp(<BlobTable blobs={[]} canEdit labelledBy="files" />);
+    // Worded and tinted like the collections' own empty state ("Inga samlingar ännu").
+    expect(screen.getByRole("heading", { level: 2, name: "Inga filer ännu" })).toBeTruthy();
+    expect(container.querySelector(".bg-ax-blue-muted")).toBeTruthy();
   });
 });
 

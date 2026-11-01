@@ -24,6 +24,7 @@ import {
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { useOnline } from "@/lib/hooks/use-online";
 import { invalidateConversationLists } from "@/lib/api/conversations";
@@ -257,6 +258,17 @@ function ConversationView({
   // composer, put back if it fails before the answer starts.
   const pendingSendRef = useRef<{ text: string; attachments: Attachment[] } | null>(null);
   const [pendingQuestion, setPendingQuestion] = useState<PendingQuestionState | null>(null);
+  // A reload or a closed tab ends what is typed or attached and not yet sent: the
+  // draft survives a reload but not a closed tab, and files survive neither.
+  // A question taken out of the composer is still unsent while it waits for a model or
+  // reasoning switch to be saved (`queuedSend`) or for its uploads (`pendingQuestion`).
+  const [queuedSend, setQueuedSend] = useState(false);
+  useBeforeUnloadWarning(
+    input.trim() !== "" ||
+      attachments.attachments.length > 0 ||
+      queuedSend ||
+      pendingQuestion !== null
+  );
   // Ends the wait for the pending question's uploads (a stop while it waits).
   const pendingAbort = useRef<AbortController | null>(null);
   // The last question and its files, for "Försök igen" after an error.
@@ -760,11 +772,23 @@ function ConversationView({
     };
 
     timings.markSent();
-    const send = () => sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
+    const send = () => {
+      // The log is not live (aria-live off), so a screen reader hears nothing between
+      // pressing Send and the finished answer unless this says that one is coming.
+      // Said when the request goes, not while it still waits for a model save.
+      announce(t("chat_announce_generating"));
+      return sendMessage({ text, metadata: { files, createdAt: isoNow() } }, { body });
+    };
     // A model or reasoning switch made in the composer is saved on the
     // assistant; the backend answers with what is stored, so that save lands first.
-    if (hasPendingPartnerUpdates()) void awaitPartnerUpdates().then(send);
-    else void send();
+    if (hasPendingPartnerUpdates()) {
+      setQueuedSend(true);
+      void awaitPartnerUpdates().then(() => {
+        // Sent from here on: the request itself outlasts the answer, not the wait.
+        setQueuedSend(false);
+        void send();
+      });
+    } else void send();
   }
 
   /** Takes a waiting question back out of the conversation; nothing was sent. */
@@ -1028,11 +1052,6 @@ function ConversationView({
         <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-y-contain">
           <StartState
             partner={partner}
-            onPickStarter={(prompt) => {
-              // A starter never replaces what was already typed.
-              setInput((current) => (current.trim() ? current : prompt));
-              startTextarea()?.focus();
-            }}
             composer={
               phone !== true && (
                 // From 640px: centred under the greeting until the conversation starts.
@@ -1065,6 +1084,7 @@ function ConversationView({
               {errorNotice}
               <Composer
                 {...composerProps}
+                beforeAnswer
                 partnerToken={partnerToken}
                 textareaRef={startDockTextareaRef}
               />
@@ -1141,6 +1161,7 @@ function ConversationView({
         {({ sheetOver }) => (
           <ConversationLayout
             className="min-w-0 flex-1"
+            followKey={`${messages.filter((message) => message.role === "user").length}:${pendingQuestion ? "pending" : ""}`}
             sheetOver={sheetOver}
             sheetOpener={activityTrigger}
             composer={
@@ -1153,6 +1174,9 @@ function ConversationView({
               </div>
             }
           >
+            {/* The conversation is a section of the page under its h1: the headings in an answer start
+                at h3 (markdown-components.tsx), so this is the h2 between them (1.3.1, 2.4.6). */}
+            <h2 className="sr-only">{t("chat_conversation_label")}</h2>
             <ChatMessageList
               ref={quietLog}
               aria-label={t("chat_conversation_label")}

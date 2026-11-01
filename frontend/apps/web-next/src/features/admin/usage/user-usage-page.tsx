@@ -43,10 +43,10 @@ import {
 
 function Stat({ label, value, subvalue }: { label: string; value: string; subvalue?: string }) {
   return (
-    <Card className="flex flex-col gap-1 p-4">
+    <Card className="flex flex-row flex-wrap items-baseline justify-between gap-x-3 gap-y-1 p-4 sm:flex-col sm:items-start sm:justify-start">
       <span className="text-muted-foreground text-sm">{label}</span>
       <span className="text-2xl font-semibold tabular-nums">{value}</span>
-      {subvalue ? <span className="text-muted-foreground text-xs">{subvalue}</span> : null}
+      {subvalue ? <span className="text-muted-foreground w-full text-xs">{subvalue}</span> : null}
     </Card>
   );
 }
@@ -87,12 +87,6 @@ function UserSummary({
           </div>
         </div>
         <UsageBadge level={usageIntensity(user.total_tokens, range)} />
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-2 text-sm">
-          <dt className="text-muted-foreground">{t("username")}</dt>
-          <dd className="truncate">{user.username}</dd>
-          <dt className="text-muted-foreground">{t("email")}</dt>
-          <dd className="truncate">{user.email}</dd>
-        </dl>
       </Card>
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -243,10 +237,10 @@ function ModelBreakdownTable({
             <TableHead>{t("model")}</TableHead>
             <TableHead>{t("provider")}</TableHead>
             <TableHead className="text-right">{t("requests")}</TableHead>
-            <TableHead className="text-right">{t("input_tokens")}</TableHead>
-            <TableHead className="text-right">{t("output_tokens")}</TableHead>
-            <TableHead className="text-right">{t("total_tokens")}</TableHead>
-            <TableHead className="text-right">{t("estimated_cost")}</TableHead>
+            <TableHead className="text-right whitespace-normal">{t("input_tokens")}</TableHead>
+            <TableHead className="text-right whitespace-normal">{t("output_tokens")}</TableHead>
+            <TableHead className="text-right whitespace-normal">{t("total_tokens")}</TableHead>
+            <TableHead className="text-right whitespace-normal">{t("estimated_cost")}</TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

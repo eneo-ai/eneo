@@ -292,7 +292,7 @@ export function WebsiteDialog({
           onOpenChange(next);
         }}
       >
-        <DialogContent className="max-h-[85vh] overflow-y-auto">
+        <DialogContent className="overflow-y-auto">
           <DialogHeader>
             <DialogTitle>
               {website ? t("edit_website_integration") : t("create_website_integration")}

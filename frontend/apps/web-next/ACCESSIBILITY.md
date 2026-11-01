@@ -350,6 +350,31 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 - Ids are unique (`useId`), and `aria-*` references point at existing elements.
 - Don't add ARIA that native HTML already provides.
 
+## Phones and tablets (WCAG2Mobile)
+
+[Guidance on Applying WCAG 2.2 to Mobile Applications](https://www.w3.org/TR/wcag2mobile-22/)
+(WCAG2Mobile, a W3C draft note) is written for native apps. web-next is web
+content in a mobile browser, so WCAG 2.2 applies to it as it stands; the note
+is our list of what changes on a touch device. Where we stand on it:
+
+| Criterion                          | On a phone or tablet                                                   | Here                                                                                                                                   |
+| ---------------------------------- | ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| 1.3.4 Orientation                  | All four orientations work, none is locked                             | No lock in the manifest or code; a phone turned (667 × 300) is one of the contract's sizes                                             |
+| 1.4.4 Resize text, 1.4.10 Reflow   | Larger system text, 320 px wide                                        | `tests/responsive-text-size.spec.ts` (200% text), the contract at 320 px                                                               |
+| 1.4.12 Text spacing                | The reader's own line, letter, word and paragraph spacing              | `tests/responsive-text-size.spec.ts` applies the 1.4.12 values to every screen                                                         |
+| 2.4.11 Focus not obscured          | A bar fixed to the screen must not hide the focused control            | `DockedActions` publishes its height and the panel reserves it; toasts lift clear (rule 3)                                             |
+| 2.5.1, 2.5.7 Gestures and dragging | Every swipe, pinch or drag has a single tap alternative                | Rule 9; no multi-finger or path gesture exists                                                                                         |
+| 2.5.2 Pointer cancellation         | An action runs on release, so a finger can slide off                   | Native buttons and links; the few `pointerdown` listeners only track state (a drag handle starts a drag, with keys as the alternative) |
+| 2.5.3 Label in name                | Voice Control says what the control shows                              | Rule 8: the visible label is in the accessible name                                                                                    |
+| 2.5.4 Motion actuation             | Nothing runs on shake or tilt                                          | No device-motion API is used; one that is added needs a button and a way to turn it off                                                |
+| 2.5.8 Target size                  | 24 px is the AA floor                                                  | axe checks 24 px; we hold 44 px on a coarse pointer, measured by the contract                                                          |
+| 1.3.5, 3.3.7, 3.3.8 Forms          | Typing is costly: input purpose, autofill, paste and password managers | `autocomplete`, `inputMode` and `enterKeyHint` on the fields that take typed input (`KEYBOARD` presets); paste is not blocked (rule 8) |
+| 4.1.3 Status messages              | A screen reader hears results without focus moving                     | Rule 10                                                                                                                                |
+
+What stays with a person on a device: VoiceOver and TalkBack, Voice Control and
+Switch Control, the on-screen keyboard, and a real thumb (the manual protocol,
+below).
+
 ## How it is enforced
 
 Run from `frontend/apps/web-next`.
@@ -429,6 +454,13 @@ a screen. Every e2e spec imports `test`/`expect` from `tests/csp.ts`, so a CSP
 violation fails the run. Locally, run it against a dev server with a seeded
 backend (see `playwright.config.ts`); in CI it runs on the isolated e2e stack.
 
+`tests/a11y-routes.spec.ts` runs axe on every route of the responsive route
+list (phone and iPad, both colour modes), `tests/keyboard-focus.spec.ts` walks
+the first 30 Tab stops of each (the skip link first; every stop must look
+different focused than blurred, 2.4.7), and `tests/responsive-text-size.spec.ts`
+checks 200% text and the 1.4.12 text spacing. A screen added to
+`tests/responsive-routes.ts` is covered by all of them.
+
 ## Manual test protocol
 
 For every PR that changes UI, on the screens it touches, in light and dark
@@ -454,9 +486,42 @@ mode:
 6. **Forced colours.** Windows contrast themes, or Chrome DevTools → Rendering
    → "Emulate CSS forced-colors: active": focus, control borders, icons and
    selected states stay visible. A state shown only as a background tint needs
-   a `forced-colors:` fallback (border or outline).
+   a `forced-colors:` fallback (border or outline). `tests/forced-colors.spec.ts`
+   finds the mechanical case on every route: a control whose fill becomes the
+   page's colour and that has no border, and a legacy switch with no visible
+   state. Fix it once in `globals.css` section 10, not per page.
 
 Write what you checked in the PR's **Accessibility** section.
+
+### Real-device pass (about 30 minutes, before a release that changes touch layouts)
+
+The simulator and emulator cannot run VoiceOver or TalkBack, and a headless browser cannot
+show what a screen reader says. Use one iPhone (VoiceOver) and one Android phone (TalkBack),
+in Swedish, signed in to a test tenant with a space that has an assistant, an app, a
+knowledge collection and a flow.
+
+1. **Start.** Chat start screen: swipe right through everything. Order matches the picture,
+   every control says what it is ("Skicka, knapp"), the composer says it is a text field.
+2. **Navigate by headings** (VoiceOver rotor → Headings; TalkBack → Headings): a space, an
+   assistant editor and Settings each have one h1 and sensible h2s; no screen has two h1s.
+3. **A pushed screen.** Open an assistant editor from a list: the Back link reads "Tillbaka
+   till ...", focus lands on the new screen's heading, Back returns focus to the row.
+4. **A form dialog.** Create a space: the dialog is announced, focus is inside, swiping does
+   not reach the page behind, a required field says it is required, an error is read when
+   it appears (leave the name empty and submit), Cancel returns focus to the opener.
+5. **A bottom bar.** Anywhere with a docked action: it is reachable after the content, it is
+   not read twice, and the last row of the page is not hidden behind it.
+6. **A picker and a menu.** Open a model picker and a "More actions" menu: options are read
+   with their state ("vald"), Escape/Back closes them, focus returns.
+7. **Turn the phone** with a dialog open and something typed (sideways and back): the dialog
+   is still there, text and focus are kept, nothing is announced twice.
+8. **Text size.** Settings → Larger Text / Font size to the largest: the chat start, a
+   list, a settings index and a dialog still show every control; nothing is cut off.
+9. **Flows.** Start a run with the microphone: the permission prompt, "Spela in", pause and
+   resume are named, and the clock is not read every second. Review a run: Godkänn/Avvisa
+   are reachable at 320 px wide.
+10. **Write what you heard** in the PR's **Accessibility** section: device, OS version,
+    screen reader and anything that was announced wrongly, twice or not at all.
 
 ## Exceptions
 

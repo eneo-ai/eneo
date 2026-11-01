@@ -28,6 +28,7 @@ import {
   type GroupMember,
   type UserGroup
 } from "./user-groups";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /**
  * Adds users to the group: search by e-mail (sent once typing pauses), tick
@@ -118,6 +119,7 @@ function AddMembers({
         isLabelHidden
         placeholder={t("find_user")}
         startIcon={Search}
+        {...KEYBOARD.search}
         value={searchInput}
         onChange={setSearchInput}
         hasClear

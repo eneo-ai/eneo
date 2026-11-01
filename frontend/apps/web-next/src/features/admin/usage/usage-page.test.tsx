@@ -201,13 +201,25 @@ describe("UsagePage", () => {
     await expectNoAxeViolations(container);
   });
 
+  // Three cards inside the summary card took a phone's first screen for three numbers.
+  it("shows the summary's figures as rows of its card on a phone, cards from 640 px", async () => {
+    renderInApp(<UsagePage />, { route: "/admin/usage" });
+    const total = (await screen.findByText("Totalt antal tokens")).closest('[data-slot="card"]')!;
+    expect(total.className.split(" ")).toEqual(
+      expect.arrayContaining(["max-sm:border-x-0", "max-sm:shadow-none", "max-sm:px-0"])
+    );
+    const grid = total.parentElement!.className.split(" ");
+    expect(grid).toContain("sm:gap-4");
+    expect(grid).not.toContain("gap-4");
+  });
+
   it("refetches the model table for a new date range and keeps it for the users tab", async () => {
     renderInApp(<UsagePage />, { route: "/admin/usage" });
     await screen.findByRole("table", { name: "Användning per modell" });
     expect(apiState.calls.filter((call) => call.path === "/api/v1/token-usage/")).toHaveLength(1);
 
     fireEvent.change(screen.getByLabelText("Från"), { target: { value: "2026-09-01" } });
-    fireEvent.change(screen.getByLabelText("till"), { target: { value: "2026-09-16" } });
+    fireEvent.change(screen.getByLabelText("Till"), { target: { value: "2026-09-16" } });
     await waitFor(() =>
       expect(apiState.calls.at(-1)).toEqual({
         path: "/api/v1/token-usage/",
@@ -216,7 +228,7 @@ describe("UsagePage", () => {
     );
     expect(window.location.search).toBe("?from=2026-09-01&to=2026-09-16");
     // The overview stays on the last 30 days.
-    expect(screen.getByText(/Senaste 30 dagarna/)).toBeTruthy();
+    expect(screen.getByText(/senaste 30 dagarna/)).toBeTruthy();
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Användare" }));
     await screen.findByRole("table", { name: "Användning per användare" });

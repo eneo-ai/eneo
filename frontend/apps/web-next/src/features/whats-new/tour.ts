@@ -154,6 +154,9 @@ async function spotlight(
       nextBtnText: labels.next,
       prevBtnText: labels.previous,
       doneBtnText: isLast ? labels.done : labels.next,
+      // A tap beside the popover must not throw the tour away (a finger is not a mouse):
+      // the close button, Escape and the abort signal still end it.
+      overlayClickBehavior: "none",
       popoverClass: "eneo-spotlight",
       steps: [
         {
@@ -191,7 +194,7 @@ async function spotlight(
     signal.addEventListener("abort", abort, { once: true });
     window.addEventListener("keyup", navigate);
     try {
-      element.scrollIntoView({ block: "center", behavior: "smooth" });
+      element.scrollIntoView({ block: "center" });
       tour.drive();
     } catch (error) {
       reject(error);

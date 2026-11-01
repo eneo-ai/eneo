@@ -98,7 +98,7 @@ export function SpacePhoneHeader({
         />
       ) : null}
       {tabbed ? (
-        <div className="border-ax-border flex flex-col gap-3 border-b pt-4 md:hidden">
+        <div className="border-ax-border flex flex-col gap-3 border-b pt-4 md:hidden [main:has([data-editor-view=section])_&]:pb-3">
           <div className="flex flex-col items-start gap-2 px-4">
             <Heading
               level={1}
@@ -112,13 +112,17 @@ export function SpacePhoneHeader({
               <p className="text-ax-text-secondary text-sm text-pretty">{description}</p>
             ) : null}
           </div>
-          {/* px-1 and the tab's own inset start the first label on the 16 px line. */}
-          <SpaceTabs
-            sections={tabs}
-            activeSection={route.section}
-            showCounts={false}
-            className="-mb-px px-1"
-          />
+          {/* Gives way while a settings section is open (it has a bar back to its index); the
+              header then takes the strip's place with a bottom padding. px-1 and the tab's own
+              inset start the first label on the 16 px line. */}
+          <div data-space-tabs="">
+            <SpaceTabs
+              sections={tabs}
+              activeSection={route.section}
+              showCounts={false}
+              className="-mb-px px-1"
+            />
+          </div>
         </div>
       ) : route.isSectionRoot ? (
         // The screen's visible title is the page's own heading ("Medlemmar").

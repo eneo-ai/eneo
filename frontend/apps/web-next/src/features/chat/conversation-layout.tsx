@@ -34,6 +34,7 @@ export function ConversationLayout({
   composer,
   sheetOver = false,
   sheetOpener,
+  followKey,
   className
 }: {
   /** The message list. */
@@ -42,6 +43,12 @@ export function ConversationLayout({
   composer: ReactNode;
   sheetOver?: boolean;
   sheetOpener?: RefObject<HTMLElement | null>;
+  /**
+   * Changes when the reader sends a question (not when an answer grows): the
+   * list then jumps to the end, so the question and its answer are what is on
+   * screen even if the reader had scrolled up to an earlier answer.
+   */
+  followKey?: string;
   className?: string;
 }) {
   const t = useTranslator();
@@ -53,6 +60,13 @@ export function ConversationLayout({
     isLocked,
     onResize: scrollIfLocked
   });
+  const followed = useRef(followKey);
+  useLayoutEffect(() => {
+    if (followKey === followed.current) return;
+    followed.current = followKey;
+    dismiss();
+    scrollToBottom({ behavior: "instant" });
+  }, [followKey, dismiss, scrollToBottom]);
   // With the end padding in place, before paint.
   useLayoutEffect(() => {
     if (sheetOver) sheetOpener?.current?.scrollIntoView({ block: "nearest" });

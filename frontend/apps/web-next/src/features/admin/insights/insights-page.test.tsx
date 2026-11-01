@@ -124,4 +124,20 @@ describe("InsightsPage", () => {
     fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
     expect(await screen.findByText("chart")).toBeTruthy();
   });
+
+  it("insets the usage card like the totals above it on a phone", async () => {
+    state.aggregated = "ok";
+    renderInApp(<InsightsPage />);
+    const heading = await screen.findByRole("heading", { name: "Assistentanvändning" });
+    // jsdom applies no CSS: the inset is asserted as its classes. At p-6 the card's text
+    // sat 8 px further in than the totals' (p-4) above it.
+    const card = heading.closest(".astryx-card");
+    expect(card?.className.split(" ")).toContain("p-4");
+    expect(card?.className).toContain("sm:p-6");
+    // And the activity cards after it, so the three kinds of card share one inset.
+    for (const label of ["Aktiva assistenter", "Aktiva användare"]) {
+      const activity = (await screen.findByText(label)).closest(".astryx-card");
+      expect(activity?.className.split(" ")).toContain("p-4");
+    }
+  });
 });

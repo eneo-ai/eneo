@@ -267,7 +267,8 @@ export function PromptLibraryPage() {
         description={t("governance_prompts_intro")}
         headingId={headingId}
         headingRef={headingRef}
-        actions={createButton}
+        // The empty state carries its own; a failed or loading list still allows creating.
+        actions={list.data?.length === 0 ? undefined : createButton}
       />
       <QueryStateBoundary query={list} rows={4}>
         {(items) =>

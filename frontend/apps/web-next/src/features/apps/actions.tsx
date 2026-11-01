@@ -6,8 +6,9 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDownToLine, ArrowUpToLine, Pencil, Trash2 } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import type { ReactNode, RefObject } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { createResourceActions } from "@/components/composites/resource-action-scope";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
@@ -17,17 +18,27 @@ import { PublishDialog } from "@/features/assistants/publish-dialog";
 import type { AppSparse } from "./apps";
 import { invalidateExpiringApiKeys } from "@/features/api-keys/api-keys";
 
-/** Edit/publish/delete menu for an app, shown on its tile. */
-export function AppActions({ app }: { app: AppSparse }) {
+type AppAction = "publish" | "delete";
+
+const { ResourceActionScope, useOpenResourceAction } = createResourceActions<
+  AppSparse,
+  AppAction
+>();
+
+/** The publish and delete dialogs of an app's menu, held above the rows and cards that open them. */
+function AppActionDialog({
+  kind,
+  resource: app,
+  onClose
+}: {
+  kind: AppAction;
+  resource: AppSparse;
+  onClose: () => void;
+}) {
   const t = useTranslations();
-  const router = useRouter();
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
-  const [showPublish, setShowPublish] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
-
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
-  const permissions = app.permissions ?? [];
 
   const publish = useMutation({
     mutationFn: () =>
@@ -39,7 +50,7 @@ export function AppActions({ app }: { app: AppSparse }) {
     onSuccess: () => {
       void invalidate();
       void invalidateExpiringApiKeys(queryClient);
-      setShowPublish(false);
+      onClose();
     },
     onError: (error) => toastApiError(error, t)
   });
@@ -48,8 +59,64 @@ export function AppActions({ app }: { app: AppSparse }) {
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/apps/{id}/", { params: { path: { id: app.id } } })),
     refresh: invalidate,
-    onRemoved: () => setShowDelete(false)
+    onRemoved: onClose
   });
+
+  const onOpenChange = (open: boolean) => {
+    if (!open) onClose();
+  };
+
+  if (kind === "publish") {
+    return (
+      <PublishDialog
+        open
+        onOpenChange={onOpenChange}
+        name={app.name}
+        published={app.published}
+        pending={publish.isPending}
+        onConfirm={() => publish.mutate()}
+      />
+    );
+  }
+  return (
+    <ConfirmDialogControlled
+      open
+      onOpenChange={onOpenChange}
+      title={t("delete_app")}
+      description={t("confirm_delete_app")}
+      confirmLabel={deleteApp.isPending ? t("deleting") : t("delete")}
+      pending={deleteApp.isPending}
+      onConfirm={() => deleteApp.mutate()}
+    />
+  );
+}
+
+/**
+ * Above a collection of apps: what their menus open. A turn across 768 px
+ * replaces the rows with cards and the open dialog stays. `focusTarget` is
+ * where focus goes when the control that opened one is gone.
+ */
+export function AppActionScope({
+  focusTarget,
+  children
+}: {
+  focusTarget: RefObject<HTMLElement | null>;
+  children: ReactNode;
+}) {
+  return (
+    <ResourceActionScope Dialog={AppActionDialog} focusTarget={focusTarget}>
+      {children}
+    </ResourceActionScope>
+  );
+}
+
+/** Edit/publish/delete menu for an app, shown on its tile. */
+export function AppActions({ app }: { app: AppSparse }) {
+  const t = useTranslations();
+  const router = useRouter();
+  const { routeId } = useSpace();
+  const open = useOpenResourceAction();
+  const permissions = app.permissions ?? [];
 
   if (!permissions.some((permission) => ["edit", "publish", "delete"].includes(permission))) {
     return null;
@@ -74,7 +141,7 @@ export function AppActions({ app }: { app: AppSparse }) {
             ) : (
               <ArrowUpToLine aria-hidden="true" />
             ),
-            onClick: () => setShowPublish(true)
+            onClick: () => open("publish", app)
           }
         ]
       : []),
@@ -84,36 +151,17 @@ export function AppActions({ app }: { app: AppSparse }) {
             label: t("delete"),
             icon: <Trash2 aria-hidden="true" />,
             variant: "destructive" as const,
-            onClick: () => setShowDelete(true)
+            onClick: () => open("delete", app)
           }
         ]
       : [])
   ];
 
   return (
-    <>
-      <MoreMenu
-        label={t("space_more_actions_for", { name: app.name })}
-        alignment="end"
-        items={items}
-      />
-      <PublishDialog
-        open={showPublish}
-        onOpenChange={setShowPublish}
-        name={app.name}
-        published={app.published}
-        pending={publish.isPending}
-        onConfirm={() => publish.mutate()}
-      />
-      <ConfirmDialogControlled
-        open={showDelete}
-        onOpenChange={setShowDelete}
-        title={t("delete_app")}
-        description={t("confirm_delete_app")}
-        confirmLabel={deleteApp.isPending ? t("deleting") : t("delete")}
-        pending={deleteApp.isPending}
-        onConfirm={() => deleteApp.mutate()}
-      />
-    </>
+    <MoreMenu
+      label={t("space_more_actions_for", { name: app.name })}
+      alignment="end"
+      items={items}
+    />
   );
 }

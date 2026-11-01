@@ -211,7 +211,7 @@ export function ToolCallList({
   // span too): it has no min-width, so a long description would push the
   // chevron out of the row instead of truncating.
   const rows = (
-    <div className="px-1 [&_.astryx-collapsible-trigger]:min-h-9 [&_.astryx-collapsible-trigger>span:first-child]:min-w-0 [&_.astryx-collapsible-trigger>span:first-child]:flex-1 [&_.astryx-collapsible-trigger>span:first-child>*]:w-full">
+    <div className="px-1 [&_.astryx-collapsible-trigger]:min-h-9 pointer-coarse:[&_.astryx-collapsible-trigger]:min-h-11 [&_.astryx-collapsible-trigger>span:first-child]:min-w-0 [&_.astryx-collapsible-trigger>span:first-child]:flex-1 [&_.astryx-collapsible-trigger>span:first-child>*]:w-full">
       <CollapsibleGroup type="multiple" hasDividers density="compact">
         {presented.map(({ call, presentation, target }) => {
           const problem =

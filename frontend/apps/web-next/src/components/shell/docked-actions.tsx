@@ -10,8 +10,9 @@ import { useLayoutEffect, useRef, type ReactNode } from "react";
  * what was typed in it.
  *
  * On a phone it is fixed over the page's bottom edge and padded clear of the
- * home indicator. Its buttons share a row while their labels fit and wrap to
- * rows of their own at larger text, rather than cutting the labels short. It
+ * home indicator. Its buttons share a row (below 640 px) while their labels fit and
+ * wrap to rows of their own at larger text, rather than cutting the labels
+ * short; from 640 px each keeps its own width, at the end of the bar. It
  * publishes its height as `--docked-actions-height`: main#main-content
  * reserves that much (app-shell), so the last row scrolls clear of it and
  * focus stops above it (WCAG 2.4.11), and the toasts rest above it
@@ -46,7 +47,7 @@ export function DockedActions({ label, children }: { label: string; children: Re
       role="group"
       aria-label={label}
       data-docked-actions=""
-      className="max-md:border-ax-border max-md:bg-ax-surface flex flex-wrap justify-end gap-2 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-10 max-md:border-t max-md:px-4 max-md:pt-3 max-md:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] max-md:[&>*]:min-w-0 max-md:[&>*]:flex-[1_1_auto]"
+      className="max-md:border-ax-border max-md:bg-ax-surface flex flex-wrap justify-end gap-2 max-md:fixed max-md:inset-x-0 max-md:bottom-0 max-md:z-10 max-md:border-t max-md:px-4 max-md:pt-3 max-md:pb-[calc(0.75rem+env(safe-area-inset-bottom,0px))] max-md:[&>*]:min-w-0 max-sm:[&>*]:flex-[1_1_auto]"
     >
       {children}
     </div>

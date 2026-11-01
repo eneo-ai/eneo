@@ -178,7 +178,9 @@ describe("AdminOverviewPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Översikt" })).toBeTruthy();
 
     const users = region("Aktiva användare");
-    expect(await within(users).findByText("42")).toBeTruthy();
+    const figure = await within(users).findByText("42");
+    // Large and bold, but not a paragraph: axe takes a big bold <p> for a heading (p-as-heading).
+    expect(figure.tagName).not.toBe("P");
     expect(within(users).getByText("3 inaktiva konton")).toBeTruthy();
     expect(within(users).getByRole("link", { name: "Visa användare" }).getAttribute("href")).toBe(
       "/admin/users"
@@ -254,14 +256,13 @@ describe("AdminOverviewPage", () => {
     renderOverview();
 
     const audit = region("Senaste granskningshändelser");
+    expect(await within(audit).findByText("Visas efter en motiverad åtkomstsession")).toBeTruthy();
+    // One route to the access session: the card's own link.
     expect(
-      await within(audit).findByText(
-        "Granskningsloggarna visas först efter en motiverad åtkomstsession."
-      )
-    ).toBeTruthy();
-    expect(
-      within(audit).getByRole("link", { name: "Öppna granskningsloggarna" }).getAttribute("href")
-    ).toBe("/admin/audit-logs");
+      within(audit)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+    ).toEqual(["/admin/audit-logs"]);
     expect(within(audit).queryByRole("button", { name: "Försök igen" })).toBeNull();
     // Any other failure gets the generic error with retry.
     cleanup();
@@ -295,15 +296,15 @@ describe("AdminOverviewPage", () => {
 
     expect(
       await within(region("Tokenanvändning senaste 30 dagarna")).findByText(
-        "Ingen användning de senaste 30 dagarna."
+        "Ingen användning de senaste 30 dagarna"
       )
     ).toBeTruthy();
     const crawler = region("Crawler");
-    expect(await within(crawler).findByText("Inga indexeringar pågår eller väntar.")).toBeTruthy();
+    expect(await within(crawler).findByText("Inga indexeringar pågår eller väntar")).toBeTruthy();
     expect(within(crawler).getByText("Status okänd")).toBeTruthy();
     expect(
       await within(region("Senaste granskningshändelser")).findByText(
-        "Inga händelser har loggats ännu."
+        "Inga händelser har loggats ännu"
       )
     ).toBeTruthy();
     // The links to each page stay, so the admin can still get there.
@@ -483,7 +484,7 @@ describe("AdminOverviewPage on a phone (decision 30)", () => {
     answer({ ...HEALTHY, "/api/v1/audit/logs": failure(401) });
     renderOverview({ queryClient });
     const areas = await screen.findByRole("region", { name: "Läget just nu" });
-    const locked = "Granskningsloggarna visas först efter en motiverad åtkomstsession.";
+    const locked = "Visas efter en motiverad åtkomstsession";
     expect(await within(areas).findByText(locked)).toBeTruthy();
 
     // A refetch clears the query's error while it runs.

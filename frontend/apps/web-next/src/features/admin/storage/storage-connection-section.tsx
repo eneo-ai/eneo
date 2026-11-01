@@ -10,6 +10,7 @@ import {
   RefreshCw
 } from "lucide-react";
 import { useTranslations } from "use-intl";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useCallback, useEffect, useRef, useState, type SubmitEvent } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
 import {
@@ -768,6 +769,7 @@ export function StorageConnectionSection({
                     id="object-store-bucket"
                     {...fieldProblemProps("object-store-bucket", shownProblem("bucket"))}
                     autoComplete="off"
+                    {...KEYBOARD.identifier}
                     required
                     disabled={submitting}
                     placeholder={t("storage_connection_bucket_placeholder")}
@@ -792,6 +794,7 @@ export function StorageConnectionSection({
                       "object-store-region-help"
                     )}
                     autoComplete="off"
+                    {...KEYBOARD.identifier}
                     required
                     disabled={submitting}
                     placeholder={t("storage_connection_region_placeholder")}
@@ -819,6 +822,7 @@ export function StorageConnectionSection({
                     "object-store-access-key-help"
                   )}
                   autoComplete="off"
+                  {...KEYBOARD.identifier}
                   required
                   disabled={submitting}
                   value={input.access_key_id}
@@ -871,7 +875,7 @@ export function StorageConnectionSection({
                   >
                     <select
                       id="object-store-addressing"
-                      className="border-input bg-background h-9 w-full rounded-md border px-3 text-sm"
+                      className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                       disabled={submitting}
                       value={input.addressing_style}
                       onChange={(event) =>

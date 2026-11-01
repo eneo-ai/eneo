@@ -3,7 +3,6 @@
 import { modelEntries } from "../models/provider-sections";
 
 import { Badge } from "@astryxdesign/core/Badge";
-import { Button } from "@astryxdesign/core/Button";
 import { Card } from "@astryxdesign/core/Card";
 import { Heading } from "@astryxdesign/core/Heading";
 import { Link } from "@astryxdesign/core/Link";
@@ -103,7 +102,10 @@ function OverviewCard({
             </>
           )}
         </div>
-        <Link href={href} className="self-start text-sm">
+        <Link
+          href={href}
+          className="inline-flex min-h-6 items-center self-start text-sm pointer-coarse:min-h-11"
+        >
           {linkLabel}
         </Link>
       </Card>
@@ -111,8 +113,9 @@ function OverviewCard({
   );
 }
 
+/** A figure, not a paragraph: a large bold <p> reads as a fake heading to axe (p-as-heading). */
 function BigNumber({ value }: { value: string }) {
-  return <p className="text-3xl font-semibold tabular-nums">{value}</p>;
+  return <div className="text-3xl font-semibold tabular-nums">{value}</div>;
 }
 
 function UsersCard() {
@@ -256,21 +259,6 @@ function useAuditLocked(query: UseQueryResult<unknown, Error>): boolean {
   return now;
 }
 
-function AuditLocked() {
-  const t = useTranslations();
-  return (
-    <EmptyState
-      title={t("admin_overview_audit_locked")}
-      headingLevel={3}
-      isCompact
-      framed={false}
-      actions={
-        <Button href="/admin/audit-logs" label={t("admin_overview_audit_unlock")} size="sm" />
-      }
-    />
-  );
-}
-
 function AuditCard() {
   const t = useTranslations();
   const query = useQuery(latestAuditEventsQueryOptions(browserApi));
@@ -283,7 +271,10 @@ function AuditCard() {
       href="/admin/audit-logs"
       linkLabel={t("admin_overview_audit_link")}
       query={query}
-      renderError={() => (locked ? <AuditLocked /> : undefined)}
+      // Locked, the card's own link leads to the access session.
+      renderError={() =>
+        locked ? <CardEmpty title={t("admin_overview_audit_locked")} /> : undefined
+      }
     >
       {query.data && logs.length === 0 ? (
         <CardEmpty title={t("admin_overview_audit_empty")} />
@@ -292,7 +283,10 @@ function AuditCard() {
           {logs.map((log) => (
             <li key={log.id} className="flex min-w-0 items-start gap-3 py-2 text-sm">
               <Badge label={actionLabel(t, log.action)} />
-              <span className="min-w-0 flex-1 truncate" title={log.description}>
+              <span
+                className="min-w-0 flex-1 truncate pointer-coarse:break-words pointer-coarse:whitespace-normal"
+                title={log.description}
+              >
                 {log.description}
               </span>
               <span className="text-ax-text-secondary shrink-0 text-xs">

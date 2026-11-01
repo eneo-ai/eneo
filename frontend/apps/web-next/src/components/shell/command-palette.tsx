@@ -25,7 +25,6 @@ import {
 import { usePathname, useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useId, useLayoutEffect, useMemo, useRef } from "react";
-import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { ClientTime } from "@/components/composites/client-time";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
@@ -45,6 +44,7 @@ import {
   type PalettePermissions
 } from "./palette-items";
 import { spaceRouteIdFromPath } from "./routes";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type PaletteItem = SearchableItem<{ group: string; entry: PaletteEntry }>;
 
@@ -204,10 +204,10 @@ function CancelButton() {
   );
 }
 
-/** A key hint in the footer; touch screens have no keys to hint at. */
+/** A key hint in the footer; touch screens and phone-width windows have no use for it. */
 function Hint({ keys, keyName, label }: { keys: string[]; keyName: string; label: string }) {
   return (
-    <span className="flex items-center gap-1.5 pointer-coarse:hidden">
+    <span className="flex items-center gap-1.5 max-md:hidden pointer-coarse:hidden">
       <span aria-hidden="true" className="flex items-center gap-1">
         {keys.map((key) => (
           <Kbd key={key} keys={key} />
@@ -321,12 +321,12 @@ export default function ShellCommandPalette({
       // the software keyboard never covers the field and the field stays put
       // while the results change; on phones it may grow to the full height.
       maxHeight={phone ? PHONE_MAX_HEIGHT : "min(480px, calc(100dvh - 2rem))"}
-      className={DIALOG_TOP_ON_TOUCH}
       input={
         <CommandPaletteInput
           label={t("shell_palette_input_label")}
           placeholder={t("shell_palette_placeholder")}
           endContent={<CancelButton />}
+          {...KEYBOARD.search}
         />
       }
       renderItem={(item) =>

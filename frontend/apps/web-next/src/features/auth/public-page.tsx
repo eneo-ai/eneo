@@ -26,7 +26,7 @@ export function PublicPage({
 }) {
   const t = useTranslations();
   return (
-    <main className="bg-secondary flex min-h-svh flex-col items-center justify-center gap-6 p-4">
+    <main className="bg-secondary p-safe flex min-h-svh flex-col items-center justify-center gap-6">
       <EneoWordMark className="h-8 w-auto" />
       <Card
         padding={6}
@@ -43,7 +43,9 @@ export function PublicPage({
           {description ? <p className="text-ax-text-secondary text-sm">{description}</p> : null}
         </header>
         <div className="flex flex-col gap-4">{children}</div>
-        {footer ? <footer className="flex justify-end gap-2">{footer}</footer> : null}
+        {footer ? (
+          <footer className="flex flex-col gap-2 sm:flex-row sm:justify-end">{footer}</footer>
+        ) : null}
       </Card>
       {accessibilityStatementUrl ? (
         <a

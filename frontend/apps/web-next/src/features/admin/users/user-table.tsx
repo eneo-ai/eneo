@@ -161,6 +161,7 @@ export function UserTable({
       idKey="id"
       aria-label={label}
       pinnedColumn="name"
+      pinnedEndColumn="actions"
       hasHover
     />
   );

@@ -232,7 +232,7 @@ export function StorageContent({
               onChange={(event) => setMoveTarget(event.target.value as StorageKind)}
               disabled={pending !== null}
               aria-invalid={moveTarget === "object_store" && objectStoreUnavailable}
-              className="bg-background border-input h-9 w-full rounded-md border px-3 text-sm"
+              className="border-input h-9 w-full rounded-md border bg-transparent px-3 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
             >
               <option value="object_store">{targetLabel("object_store")}</option>
               <option value="postgres_inline">{targetLabel("postgres_inline")}</option>

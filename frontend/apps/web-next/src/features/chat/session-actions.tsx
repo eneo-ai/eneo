@@ -5,7 +5,6 @@ import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { revealProblems } from "@/components/composites/field-problem";
-import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { TextInput } from "@/components/astryx/text-input";
 import { useMutation, useQueryClient, type InfiniteData } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
@@ -140,7 +139,6 @@ export function RenameSessionDialog({
       onOpenChange={(open) => !open && close()}
       purpose="form"
       width={440}
-      className={DIALOG_TOP_ON_TOUCH}
     >
       <Layout
         header={

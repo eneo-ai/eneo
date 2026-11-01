@@ -5,6 +5,7 @@ import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -32,9 +33,9 @@ export function SpaceSkillNewPage() {
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
       <PageHeader title={t("skills_library_new_heading")} />
-      <Button asChild variant="link" className="w-fit px-0">
-        <Link href={base}>{t("skills")}</Link>
-      </Button>
+      <BackLink href={base} hideOnPhone>
+        {t("skills")}
+      </BackLink>
       <p className="text-muted-foreground max-w-2xl text-sm">{t("skills_library_new_intro")}</p>
       {createdHref ? (
         <Alert>

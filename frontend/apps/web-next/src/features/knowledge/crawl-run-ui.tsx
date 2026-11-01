@@ -42,10 +42,12 @@ export function CrawlRunStatusLabel({ run }: { run: CrawlRun }) {
  */
 export function CrawlFailureActions({
   run,
-  onSelect
+  onSelect,
+  className
 }: {
   run: CrawlRun;
   onSelect: (kind: CrawlFailureKind | null) => void;
+  className?: string;
 }) {
   const t = useTranslations();
   if (!hasCrawlIssues(run)) return null;
@@ -53,7 +55,7 @@ export function CrawlFailureActions({
   const filesFailed = run.files_failed ?? 0;
   const hasFailedItems = pagesFailed > 0 || filesFailed > 0;
   return (
-    <span className="flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs">
+    <span className={cn("flex flex-wrap items-center gap-x-1 gap-y-0.5 text-xs", className)}>
       {hasFailedItems ? (
         <span className="text-ax-text-secondary">{t("crawl_not_indexed")}</span>
       ) : null}
@@ -136,7 +138,11 @@ export function CrawlRunCounts({
         <tr>
           <td />
           {columns.map((column) => (
-            <th key={column.key} scope="col" className="ps-3 pb-1 text-end font-normal">
+            <th
+              key={column.key}
+              scope="col"
+              className="ps-3 pb-1 text-end font-normal whitespace-nowrap"
+            >
               {column.label}
             </th>
           ))}
@@ -145,7 +151,7 @@ export function CrawlRunCounts({
       <tbody>
         {rows.map((row) => (
           <tr key={row.kind}>
-            <th scope="row" className="py-0.5 text-start font-normal">
+            <th scope="row" className="py-0.5 text-start font-normal whitespace-nowrap">
               {row.label}
             </th>
             {columns.map((column) => {

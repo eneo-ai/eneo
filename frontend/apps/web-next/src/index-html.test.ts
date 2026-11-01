@@ -36,7 +36,9 @@ it("preserves the responsive document metadata and fixed server placeholders", (
     description: "Eneo",
     "apple-mobile-web-app-capable": "yes",
     "apple-mobile-web-app-title": "Eneo",
-    "mobile-web-app-capable": "yes"
+    "mobile-web-app-capable": "yes",
+    // iOS Safari would turn long digit runs (counts, ids) into tel: links.
+    "format-detection": "telephone=no"
   }))
     expect(template.querySelector(`meta[name="${name}"]`)?.getAttribute("content")).toBe(content);
   expect(template.querySelector('link[rel="icon"]')?.getAttribute("href")).toBe("/favicon.ico");

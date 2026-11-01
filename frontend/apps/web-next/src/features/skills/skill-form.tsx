@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "use-intl";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import type { ReferenceCatalog } from "@eneo/skill-instructions";
 import { SkillInstructionEditor } from "./skill-instruction-editor";
 import { useEffect, useId, useState, type SubmitEvent } from "react";
@@ -194,7 +195,7 @@ export function SkillForm(props: Props) {
                 id={`${id}-instructions`}
                 value={instructions}
                 rows={props.mode === "create" ? 8 : 12}
-                className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
+                className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-base pointer-fine:text-sm"
                 required
                 disabled={busy}
                 {...fieldProblemProps(`${id}-instructions`, instructionsProblem)}
@@ -220,6 +221,7 @@ export function SkillForm(props: Props) {
                   value={slug}
                   maxLength={64}
                   autoComplete="off"
+                  {...KEYBOARD.identifier}
                   required
                   disabled={busy}
                   {...fieldProblemProps(`${id}-slug`, slugProblem)}

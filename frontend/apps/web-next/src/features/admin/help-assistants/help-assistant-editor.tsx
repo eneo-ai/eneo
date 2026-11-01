@@ -1,9 +1,10 @@
 "use client";
 
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ChevronLeft, Info } from "lucide-react";
+import { Info } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import { Button } from "@/components/ui/button";
@@ -42,13 +43,7 @@ function HelpAssistantEditorContent({ assistantId, helperKind }: Props) {
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <Link
-          href="/admin/help-assistants"
-          className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-        >
-          <ChevronLeft className="size-4" />
-          {t("admin_help_assistants_nav_label")}
-        </Link>
+        <BackLink href="/admin/help-assistants">{t("admin_help_assistants_nav_label")}</BackLink>
         <PageHeader title={assistant.name}>
           <SaveStatusIndicator />
           <Button asChild variant="outline">

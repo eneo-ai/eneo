@@ -29,7 +29,7 @@ import { useSpace } from "@/features/spaces/use-space";
 
 /** The composer's compact (ghost) trigger look, shared by the model and reasoning pickers. */
 const COMPOSER_PICKER_CLASS =
-  "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11";
+  "text-ax-text-secondary hover:text-ax-text rounded-ax-element h-8 border-0 px-2 text-[13px] font-semibold pointer-coarse:h-11 pointer-coarse:min-w-11";
 
 /**
  * Default-assistant completion model switcher (personal chat only). Switching

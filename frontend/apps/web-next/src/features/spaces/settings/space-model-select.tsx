@@ -194,7 +194,8 @@ export function SpaceModelSelect({
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border-border rounded-lg border">
       <div className="flex flex-wrap items-start justify-between gap-3 p-4">
-        <div className="min-w-0 flex-1">
+        {/* A basis, not flex-1 (0): on a phone the actions wrap under the text instead of squeezing it to a word a line. */}
+        <div className="min-w-0 flex-[1_1_14rem]">
           <h3 className="text-base font-semibold">{title}</h3>
           <p className="text-muted-foreground mt-1 text-sm">{description}</p>
         </div>
@@ -377,7 +378,7 @@ export function SpaceModelSelect({
                           className="flex items-center gap-3 border-b px-3 py-2 last:border-b-0"
                         >
                           <div className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium">
+                            <span className="block text-sm font-medium break-words">
                               {label(model)}
                             </span>
                             {(reasonId || lifecycleId) && (

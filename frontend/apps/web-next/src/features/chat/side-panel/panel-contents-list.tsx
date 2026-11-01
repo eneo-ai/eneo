@@ -16,6 +16,7 @@ import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import type { PanelContents, PanelView } from "./panel-contents";
 import type { SidePanelStore } from "./side-panel-store";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /** The activity of an answer, as one more thing the panel can show. */
 export type ActivityEntry = {
@@ -48,7 +49,7 @@ export const FILTER_FROM = 8;
 const ALL_TYPES = "__all__";
 
 const ROW_CLASS =
-  "focus-visible:outline-ring hover:bg-ax-hover flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-ax-inner px-2 text-start focus-visible:outline-2 focus-visible:-outline-offset-2";
+  "focus-visible:outline-ring hover:bg-ax-hover flex h-9 min-w-0 flex-1 items-center gap-2.5 rounded-ax-inner px-2 pointer-coarse:h-11 text-start focus-visible:outline-2 focus-visible:-outline-offset-2";
 const CURRENT_CLASS = "bg-ax-accent-muted hover:bg-ax-accent-muted";
 
 function Row({
@@ -266,6 +267,7 @@ export function PanelContentsList({
                 size="sm"
                 hasClear
                 autoComplete="off"
+                {...KEYBOARD.search}
               />
               {/* One type at a time; the "all" pill stands for no type filter. */}
               <ToggleButtonGroup

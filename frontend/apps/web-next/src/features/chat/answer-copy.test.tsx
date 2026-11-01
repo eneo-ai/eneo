@@ -39,6 +39,12 @@ const answer: EneoUIMessage = {
   parts: [{ type: "text", text: 'Gränsen är **700 000 kr**<inref id="abcd1234"/>.', state: "done" }]
 };
 
+// Confirmed at the button and said aloud, not with a toast over the composer.
+async function expectCopied() {
+  await waitFor(() => expect(screen.getByText("Kopierad!")).toBeTruthy());
+  expect(toast.success).not.toHaveBeenCalled();
+}
+
 function renderAnswer(message = answer) {
   renderInApp(
     <ChatMessage message={message} assistant={{ id: "assistant-1", name: "Upphandling" }} />
@@ -78,7 +84,7 @@ describe("copying an answer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Kopiera svaret" }));
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
+    await expectCopied();
     expect(clipboard.writeText).toHaveBeenCalledWith("Gränsen är **700 000 kr**.");
   });
 
@@ -105,7 +111,7 @@ describe("copying an answer", () => {
 
     // Safari requires this call during the click, before the renderer import settles.
     expect(clipboard.write).toHaveBeenCalledOnce();
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
+    await expectCopied();
     const [item] = clipboard.write.mock.calls[0]![0] as TestClipboardItem[];
     expect(Object.keys(item!.items)).toEqual(["text/plain", "text/html"]);
     expect(await readBlob(await item!.items["text/html"]!)).toContain(
@@ -121,7 +127,7 @@ describe("copying an answer", () => {
 
     copyAsRichText();
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
+    await expectCopied();
     const [item] = clipboard.write.mock.calls[0]![0] as TestClipboardItem[];
     expect(await readBlob(await item!.items["text/html"]!)).toContain("<math");
     expect(await readBlob(await item!.items["text/plain"]!)).toBe("Arean är \\pi r^2.");
@@ -150,7 +156,7 @@ describe("copying an answer", () => {
 
     copyAsRichText();
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierad!"));
+    await expectCopied();
     expect(clipboard.writeText).toHaveBeenCalledWith("Gränsen är 700 000 kr.");
   });
 });

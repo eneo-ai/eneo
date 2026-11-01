@@ -186,7 +186,7 @@ function ActivityCards({ range, compare }: { range: InsightRange; compare: boole
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <Card className="flex flex-col gap-1 p-6">
+      <Card className="flex flex-col gap-1 p-4 sm:p-6">
         <span className="text-muted-foreground text-sm">{t("active_assistants")}</span>
         <span className="flex items-baseline gap-2">
           <span className="text-3xl font-semibold tabular-nums">
@@ -196,7 +196,7 @@ function ActivityCards({ range, compare }: { range: InsightRange; compare: boole
           <Delta current={data.active_assistant_count} prior={priorData?.active_assistant_count} />
         </span>
       </Card>
-      <Card className="flex flex-col gap-1 p-6">
+      <Card className="flex flex-col gap-1 p-4 sm:p-6">
         <span className="text-muted-foreground text-sm">{t("active_users")}</span>
         <span className="flex items-baseline gap-2">
           <span className="text-3xl font-semibold tabular-nums">

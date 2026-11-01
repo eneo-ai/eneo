@@ -10,6 +10,7 @@ import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
+import { iconUrl } from "@/components/composites/icon-field";
 import {
   RESOURCE_GRID_CLASS,
   ResourceCollection,
@@ -18,6 +19,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { type CatalogEntry, catalogGroups, filterCatalog } from "@/features/dashboard/catalog";
 import { dashboardQueryOptions } from "@/features/dashboard/queries";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: string }) {
   const t = useTranslations();
@@ -26,7 +28,13 @@ function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: strin
   const icon =
     entry.kind === "app" ? <AppWindow /> : entry.kind === "personal-assistant" ? <User /> : null;
   const avatar = (
-    <EntityAvatar id={entry.id} name={entry.name} icon={icon ?? undefined} size="lg" />
+    <EntityAvatar
+      id={entry.id}
+      name={entry.name}
+      src={iconUrl(entry.iconId)}
+      icon={icon ?? undefined}
+      size="lg"
+    />
   );
 
   // A phone (decision 9): a row; its link reads the name and where it lives.
@@ -102,6 +110,7 @@ export function DashboardList() {
           label={t("shell_catalog_search_label")}
           isLabelHidden
           startIcon={Search}
+          {...KEYBOARD.search}
           hasClear
           value={query}
           onChange={search}

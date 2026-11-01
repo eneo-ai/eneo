@@ -9,8 +9,9 @@ import { Label } from "./label";
 import { RadioGroup, RadioGroupItem } from "./radio-group";
 import { Select, SelectTrigger, SelectValue } from "./select";
 import { Switch } from "./switch";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./tabs";
+import { Tabs, TabsContent, TabsList, TabsTrigger, tabsListVariants } from "./tabs";
 import { Textarea } from "./textarea";
+import { AlertDescription } from "./alert";
 
 /*
  * The legacy shadcn controls meet WCAG 2.2 AA like the Astryx ones
@@ -222,8 +223,9 @@ describe("form controls", () => {
           : screen.getByRole("combobox", { name });
       expect(classesOf(control)).toContain("pointer-coarse:min-h-11");
     }
-    expect(classesOf(screen.getByRole("tab", { name: "Ett" }))).toContain(
-      "pointer-coarse:min-h-11"
+    // A short label (Kör, Run) leaves a tab under 44 px wide unless it has a floor.
+    expect(classesOf(screen.getByRole("tab", { name: "Ett" }))).toEqual(
+      expect.arrayContaining(["pointer-coarse:min-h-11", "pointer-coarse:min-w-11"])
     );
     for (const control of [
       screen.getByRole("checkbox", { name: "Påminn mig" }),
@@ -233,7 +235,66 @@ describe("form controls", () => {
       const classes = classesOf(control);
       expect(classes).toContain("relative");
       expect(classes).toContain("after:absolute");
-      expect(classes.some((name) => name.startsWith("pointer-coarse:after:-inset"))).toBe(true);
     }
+    // The 16 px checkbox and radio have a 1 px border, so a fixed -inset-3.5
+    // gave 14 + 28 = 42 px: the hit area is a 24 / 44 px box centred on them.
+    for (const control of [
+      screen.getByRole("checkbox", { name: "Påminn mig" }),
+      screen.getByRole("radio", { name: "Alla" })
+    ]) {
+      expect(classesOf(control)).toEqual(
+        expect.arrayContaining([
+          "after:inset-[calc(50%-12px)]",
+          "pointer-coarse:after:inset-[calc(50%-22px)]"
+        ])
+      );
+    }
+    expect(
+      classesOf(screen.getByRole("switch", { name: "Aktiv" })).some((name) =>
+        name.startsWith("pointer-coarse:after:-inset")
+      )
+    ).toBe(true);
+  });
+});
+
+describe("TabsList", () => {
+  // A centred list too narrow for its tabs overflows on both sides, and what
+  // lies before the scroll origin cannot be scrolled to (the first state tab on
+  // the admin API keys page at 320 px). jsdom has no layout: the class is the
+  // contract; tests/responsive-measure.spec.ts shows the overflow it causes.
+  it("starts its tabs, so an overflowing list scrolls to every one", () => {
+    expect(tabsListVariants().split(" ")).not.toContain("justify-center");
+  });
+
+  // flex-1 shared the list's width equally: on touch (min-w-11 replaces the
+  // automatic minimum) a long label spilled onto the tab beside it.
+  it("makes each tab at least as wide as its label", () => {
+    render(
+      <Tabs defaultValue="tokens">
+        <TabsList>
+          <TabsTrigger value="tokens">Tokens</TabsTrigger>
+          <TabsTrigger value="users">Användare</TabsTrigger>
+        </TabsList>
+      </Tabs>
+    );
+    const classes = classesOf(screen.getByRole("tab", { name: "Användare" }));
+    expect(classes).toContain("flex-[1_0_auto]");
+    expect(classes).not.toContain("flex-1");
+  });
+});
+
+describe("AlertDescription", () => {
+  // Its grid puts a link on a row of its own, so the link is no inline text link.
+  it("gives a link in it a 44 px row on a coarse pointer", () => {
+    render(
+      <AlertDescription>
+        Det finns inga nycklar. <a href="/admin/api-keys">Hantera API-nycklar</a>
+      </AlertDescription>
+    );
+    const classes = classesOf(
+      screen.getByRole("link", { name: "Hantera API-nycklar" }).parentElement!
+    );
+    expect(classes).toContain("pointer-coarse:[&>a]:min-h-11");
+    expect(classes).toContain("pointer-coarse:[&>a]:items-center");
   });
 });

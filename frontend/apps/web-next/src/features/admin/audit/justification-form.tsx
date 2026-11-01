@@ -80,7 +80,7 @@ export function JustificationForm() {
   const shown = (problem: string | null) => (submitted ? problem : null);
 
   return (
-    <div className="flex min-h-[50vh] items-center justify-center">
+    <div className="flex min-h-[50dvh] items-center justify-center">
       <div className="border-border bg-card w-full max-w-xl rounded-2xl border p-8 shadow-sm">
         <div className="mb-6 flex items-start gap-4">
           <span className="bg-muted flex size-11 items-center justify-center rounded-lg">

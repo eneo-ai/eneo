@@ -90,7 +90,10 @@ function SelectedRow({
             trigger={
               <span className="flex min-w-0 flex-1 items-center gap-2">
                 {icon}
-                <span className="min-w-0 flex-1 truncate text-sm" title={name}>
+                <span
+                  className="min-w-0 flex-1 truncate text-sm pointer-coarse:break-words pointer-coarse:whitespace-normal"
+                  title={name}
+                >
                   {name}
                   {!modelEnabled && (
                     <span className="text-destructive"> ({t("model_disabled")})</span>
@@ -110,12 +113,15 @@ function SelectedRow({
                   ) : (
                     <FileText className="size-4 shrink-0" aria-hidden="true" />
                   )}
-                  <span className="min-w-0 flex-1 truncate" title={item.name}>
+                  <span
+                    className="min-w-0 flex-1 truncate pointer-coarse:break-words pointer-coarse:whitespace-normal"
+                    title={item.name}
+                  >
                     {item.name}
                   </span>
                   {item.folder_path ? (
                     <span
-                      className="text-ax-text-secondary max-w-1/2 truncate text-xs"
+                      className="text-ax-text-secondary max-w-1/2 truncate text-xs pointer-coarse:break-words pointer-coarse:whitespace-normal"
                       title={item.folder_path}
                     >
                       {item.folder_path}
@@ -139,9 +145,12 @@ function SelectedRow({
     );
   }
   return (
-    <div className="flex h-12 w-full items-center gap-2 rounded-xl border px-3">
+    <div className="flex min-h-12 w-full items-center gap-2 rounded-xl border px-3">
       {icon}
-      <span className="min-w-0 flex-1 truncate text-sm" title={name}>
+      <span
+        className="min-w-0 flex-1 truncate text-sm pointer-coarse:break-words pointer-coarse:whitespace-normal"
+        title={name}
+      >
         {name}
         {!modelEnabled && <span className="text-destructive"> ({t("model_disabled")})</span>}
       </span>
@@ -364,7 +373,10 @@ function SelectedKnowledgeRow({
           disabled={!expandable}
           className="min-w-0 flex-1 rounded-md text-left text-sm font-medium hover:underline disabled:hover:no-underline"
         >
-          <span className="truncate" title={title}>
+          <span
+            className="truncate pointer-coarse:break-words pointer-coarse:whitespace-normal"
+            title={title}
+          >
             {title}
             {!modelEnabled ? (
               <span className="text-destructive"> ({t("model_disabled")})</span>

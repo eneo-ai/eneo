@@ -426,8 +426,8 @@ export function ModelRow({
             ) : null}
             {showKind ? <span>{typeLabel(kind)}</span> : null}
             <Price model={model} kind={kind} isEmptyHidden />
+            <Capabilities model={model} label={t("capabilities")} />
           </div>
-          <Capabilities model={model} label={t("capabilities")} />
         </div>
         {/* The track centred in its 44 px touch box, level with the menu. */}
         <div className="[&>*]:flex [&>*]:min-h-11 [&>*]:items-center">{enableSwitch}</div>
@@ -479,7 +479,7 @@ export function ModelRow({
         </TableCell>
       )}
 
-      <TableCell className="text-end">{menu}</TableCell>
+      <TableCell className="bg-ax-card sticky end-0 text-end">{menu}</TableCell>
     </TableRow>
   );
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -12,7 +13,7 @@ export function PasswordInput(props: Omit<TextInputProps, "type">) {
   const t = useTranslations();
   return (
     <div className="flex flex-col gap-1">
-      <TextInput {...props} type={visible ? "text" : "password"} />
+      <TextInput {...KEYBOARD.identifier} {...props} type={visible ? "text" : "password"} />
       <Button
         label={t(visible ? "hide_password" : "show_password")}
         icon={visible ? <EyeOff aria-hidden="true" /> : <Eye aria-hidden="true" />}
@@ -20,7 +21,6 @@ export function PasswordInput(props: Omit<TextInputProps, "type">) {
         variant="ghost"
         size="sm"
         isDisabled={props.isDisabled}
-        aria-pressed={visible}
         onClick={() => setVisible(!visible)}
         className="self-end"
       />

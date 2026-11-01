@@ -6,8 +6,9 @@ import { useQueryClient } from "@tanstack/react-query";
 import { FolderInput, Pencil, Trash2 } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import type { ReactNode, RefObject } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
+import { createResourceActions } from "@/components/composites/resource-action-scope";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { MoveResourceDialog } from "@/features/knowledge/move-dialog";
@@ -15,17 +16,27 @@ import { useRemovalMutation } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import type { ServiceSparse } from "./services";
 
-/** Edit/move/delete menu for a service. Services have no publish. */
-export function ServiceActions({ service }: { service: ServiceSparse }) {
+type ServiceAction = "move" | "delete";
+
+const { ResourceActionScope, useOpenResourceAction } = createResourceActions<
+  ServiceSparse,
+  ServiceAction
+>();
+
+/** The move and delete dialogs of a service's menu, held above the rows and cards that open them. */
+function ServiceActionDialog({
+  kind,
+  resource: service,
+  onClose
+}: {
+  kind: ServiceAction;
+  resource: ServiceSparse;
+  onClose: () => void;
+}) {
   const t = useTranslations();
-  const router = useRouter();
   const { routeId } = useSpace();
   const queryClient = useQueryClient();
-  const [showMove, setShowMove] = useState(false);
-  const [showDelete, setShowDelete] = useState(false);
-
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ["spaces", routeId] });
-  const permissions = service.permissions ?? [];
 
   const move = useRemovalMutation({
     mutationFn: (targetSpaceId: string) =>
@@ -36,15 +47,71 @@ export function ServiceActions({ service }: { service: ServiceSparse }) {
         })
       ),
     refresh: invalidate,
-    onRemoved: () => setShowMove(false)
+    onRemoved: onClose
   });
 
   const deleteService = useRemovalMutation({
     mutationFn: () =>
       unwrap(browserApi.DELETE("/api/v1/services/{id}/", { params: { path: { id: service.id } } })),
     refresh: invalidate,
-    onRemoved: () => setShowDelete(false)
+    onRemoved: onClose
   });
+
+  const onOpenChange = (open: boolean) => {
+    if (!open) onClose();
+  };
+
+  if (kind === "move") {
+    return (
+      <MoveResourceDialog
+        open
+        onOpenChange={onOpenChange}
+        title={t("move_service")}
+        confirmLabel={t("move_service")}
+        pending={move.isPending}
+        onMove={(targetSpaceId) => move.mutate(targetSpaceId)}
+      />
+    );
+  }
+  return (
+    <ConfirmDialogControlled
+      open
+      onOpenChange={onOpenChange}
+      title={t("delete_service")}
+      description={t("confirm_delete_service", { serviceName: service.name })}
+      confirmLabel={deleteService.isPending ? t("deleting") : t("delete")}
+      pending={deleteService.isPending}
+      onConfirm={() => deleteService.mutate()}
+    />
+  );
+}
+
+/**
+ * Above a collection of services: what their menus open. A turn across
+ * 768 px replaces the rows with cards and the open dialog stays.
+ * `focusTarget` is where focus goes when the control that opened one is gone.
+ */
+export function ServiceActionScope({
+  focusTarget,
+  children
+}: {
+  focusTarget: RefObject<HTMLElement | null>;
+  children: ReactNode;
+}) {
+  return (
+    <ResourceActionScope Dialog={ServiceActionDialog} focusTarget={focusTarget}>
+      {children}
+    </ResourceActionScope>
+  );
+}
+
+/** Edit/move/delete menu for a service. Services have no publish. */
+export function ServiceActions({ service }: { service: ServiceSparse }) {
+  const t = useTranslations();
+  const router = useRouter();
+  const { routeId } = useSpace();
+  const open = useOpenResourceAction();
+  const permissions = service.permissions ?? [];
 
   if (!permissions.some((permission) => ["edit", "delete"].includes(permission))) {
     return null;
@@ -65,42 +132,23 @@ export function ServiceActions({ service }: { service: ServiceSparse }) {
           {
             label: t("move"),
             icon: <FolderInput aria-hidden="true" />,
-            onClick: () => setShowMove(true)
+            onClick: () => open("move", service)
           },
           {
             label: t("delete"),
             icon: <Trash2 aria-hidden="true" />,
             variant: "destructive" as const,
-            onClick: () => setShowDelete(true)
+            onClick: () => open("delete", service)
           }
         ]
       : [])
   ];
 
   return (
-    <>
-      <MoreMenu
-        label={t("space_more_actions_for", { name: service.name })}
-        alignment="end"
-        items={items}
-      />
-      <MoveResourceDialog
-        open={showMove}
-        onOpenChange={setShowMove}
-        title={t("move_service")}
-        confirmLabel={t("move_service")}
-        pending={move.isPending}
-        onMove={(targetSpaceId) => move.mutate(targetSpaceId)}
-      />
-      <ConfirmDialogControlled
-        open={showDelete}
-        onOpenChange={setShowDelete}
-        title={t("delete_service")}
-        description={t("confirm_delete_service", { serviceName: service.name })}
-        confirmLabel={deleteService.isPending ? t("deleting") : t("delete")}
-        pending={deleteService.isPending}
-        onConfirm={() => deleteService.mutate()}
-      />
-    </>
+    <MoreMenu
+      label={t("space_more_actions_for", { name: service.name })}
+      alignment="end"
+      items={items}
+    />
   );
 }

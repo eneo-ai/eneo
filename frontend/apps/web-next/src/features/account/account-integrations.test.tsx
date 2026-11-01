@@ -47,7 +47,7 @@ it("keeps an API failure retryable before showing the empty list", async () => {
   expect(
     await screen.findByText("Din organisation har för närvarande inga integrationer aktiverade.")
   ).toBeTruthy();
-  expect(screen.queryByRole("link", { name: "administrationsmenyn för integrationer" })).toBeNull();
+  expect(screen.queryByRole("link", { name: "Aktivera integrationer" })).toBeNull();
 });
 
 it("shows only SharePoint with vendor icons and personal or organisation identity", async () => {
@@ -72,9 +72,8 @@ it("shows only SharePoint with vendor icons and personal or organisation identit
 it("points admins to provider settings when the available types are not ready", async () => {
   items = [integration({ integration_type: "confluence", name: "Confluence" })];
   renderInApp(<AccountIntegrations />, { appContext: testAppContext({ permissions: ["admin"] }) });
-  const link = await screen.findByRole("link", { name: "administrationsmenyn för integrationer" });
+  const link = await screen.findByRole("link", { name: "Aktivera integrationer" });
   expect(link.getAttribute("href")).toBe("/admin/integrations?tab=providers");
-  expect(screen.getByText("Du kan aktivera integrationer i")).toBeTruthy();
 });
 
 it("requires confirmation, allows cancellation and keeps a failed disconnect retryable", async () => {

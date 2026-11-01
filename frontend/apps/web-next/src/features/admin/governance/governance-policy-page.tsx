@@ -49,7 +49,7 @@ export function GovernancePolicyPage() {
 
   return (
     <>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 pb-32">
+      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6 [&_*]:scroll-mb-24">
         <PageHeader title={t("governance_title")} tour="admin-personal-assistant" />
         <ModelRestrictionSection draft={draft} />
         <ReasoningPolicySection draft={draft} />
@@ -67,16 +67,16 @@ export function GovernancePolicyPage() {
           onChange={draft.setSkillBindings}
           selectiveActivationEnabled={skillRuntimePolicy.selective_activation_enabled}
         />
+        <PolicySaveBar
+          dirty={draft.dirty}
+          saveError={draft.saveError}
+          canSave={draft.canSave}
+          saving={draft.saving}
+          onDiscard={draft.discard}
+          onSave={draft.save}
+        />
       </div>
 
-      <PolicySaveBar
-        dirty={draft.dirty}
-        saveError={draft.saveError}
-        canSave={draft.canSave}
-        saving={draft.saving}
-        onDiscard={draft.discard}
-        onSave={draft.save}
-      />
       <PolicyConfirmDialog
         pending={draft.pendingConfirm}
         saving={draft.saving}

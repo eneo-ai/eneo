@@ -75,8 +75,11 @@ export function AdminSkillsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <PageHeader title={t("admin_skills_title")} tour="admin-skills" />
-      <p className="text-muted-foreground max-w-3xl text-sm">{t("admin_skills_subtitle")}</p>
+      <PageHeader
+        title={t("admin_skills_title")}
+        description={t("admin_skills_subtitle")}
+        tour="admin-skills"
+      />
       {/* The model projection is optional: the editor says so when it is missing. */}
       <QueryStateBoundary query={policy} rows={4}>
         {(initialPolicy) =>
@@ -90,24 +93,31 @@ export function AdminSkillsPage() {
           )
         }
       </QueryStateBoundary>
-      <SettingsGroup
-        id="skill-catalogue"
-        title={t("admin_skills_catalogue_title")}
-        description={t("admin_skills_catalogue_description")}
-        headerEnd={<Badge variant="outline">{t("admin_skills_catalogue_summary")}</Badge>}
-      >
-        <p className="text-muted-foreground text-sm">{t("admin_skills_catalogue_bindings_note")}</p>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild>
-            <Link href="/spaces/organization/skills">{t("governance_manage_skills_action")}</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/admin/personal-assistant">
-              {t("admin_skills_open_personal_assistant")}
-            </Link>
-          </Button>
-        </div>
-      </SettingsGroup>
+      {/* With the editor, not before it: shown first, it sat in view and was pushed off the
+          screen when the editor (which waits for the policy and the model projections)
+          arrived above it (layout shift). A failed policy still leaves the catalogue. */}
+      {!policy.isPending && (policy.isError || !projections.isPending) && (
+        <SettingsGroup
+          id="skill-catalogue"
+          title={t("admin_skills_catalogue_title")}
+          description={t("admin_skills_catalogue_description")}
+          headerEnd={<Badge variant="outline">{t("admin_skills_catalogue_summary")}</Badge>}
+        >
+          <p className="text-muted-foreground text-sm">
+            {t("admin_skills_catalogue_bindings_note")}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link href="/spaces/organization/skills">{t("governance_manage_skills_action")}</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/admin/personal-assistant">
+                {t("admin_skills_open_personal_assistant")}
+              </Link>
+            </Button>
+          </div>
+        </SettingsGroup>
+      )}
     </div>
   );
 }
@@ -205,7 +215,7 @@ function PolicyEditor({
       title={t("skills_runtime_policy_title")}
       description={t("skills_runtime_policy_description")}
       headerEnd={
-        <Badge variant={policy.selective_activation_enabled ? "default" : "outline"}>
+        <Badge variant={policy.selective_activation_enabled ? "secondary" : "outline"}>
           {t(
             policy.selective_activation_enabled
               ? "admin_skills_runtime_summary_on"
@@ -307,9 +317,11 @@ function PolicyEditor({
                 className="w-full min-w-[44rem] text-sm"
                 aria-labelledby="skill-models-heading"
               >
-                <thead className="bg-background sticky top-0">
+                <thead className="bg-card sticky top-0">
                   <tr className="border-b text-left">
-                    <th className="p-3">{t("skills_runtime_models_model")}</th>
+                    <th className="bg-card sticky start-0 z-10 p-3">
+                      {t("skills_runtime_models_model")}
+                    </th>
                     <th className="p-3 text-right">{t("skills_runtime_models_input_window")}</th>
                     <th className="p-3 text-right">{t("skills_runtime_models_skill_budget")}</th>
                     <th className="p-3">{t("skills_runtime_models_tool_calling")}</th>
@@ -318,7 +330,7 @@ function PolicyEditor({
                 <tbody>
                   {modelProjections.models.map((model) => (
                     <tr key={model.completion_model_id} className="border-b last:border-0">
-                      <td className="p-3 font-medium">
+                      <td className="bg-card sticky start-0 p-3 font-medium">
                         {model.nickname ?? model.name}
                         {model.nickname && (
                           <span className="text-muted-foreground block text-xs">{model.name}</span>

@@ -7,6 +7,8 @@ export type CatalogEntry = {
   kind: "personal-assistant" | "assistant" | "app";
   name: string;
   href: string;
+  /** The uploaded icon, if the assistant or app has one. */
+  iconId?: string | null;
 };
 
 export type CatalogGroup = {
@@ -46,13 +48,15 @@ export function catalogGroups(
         id: assistant.id,
         kind: "assistant" as const,
         name: assistant.name,
-        href: `/dashboard/${assistant.id}?tab=chat`
+        href: `/dashboard/${assistant.id}?tab=chat`,
+        iconId: assistant.icon_id
       })),
       ...(space.applications?.apps.items ?? []).map((app) => ({
         id: app.id,
         kind: "app" as const,
         name: app.name,
-        href: `/dashboard/app/${app.id}`
+        href: `/dashboard/app/${app.id}`,
+        iconId: app.icon_id
       }))
     ]
   }));

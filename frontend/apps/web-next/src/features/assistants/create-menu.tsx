@@ -10,7 +10,6 @@ import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
-import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { revealProblems } from "@/components/composites/field-problem";
@@ -133,9 +132,9 @@ export function CreateChatAppMenu() {
 
   return (
     <>
-      <div className="flex">
+      <div className="flex max-w-full">
         <Button
-          className="rounded-r-none"
+          className="min-w-0 shrink grow rounded-r-none"
           aria-busy={createAssistant.isPending || undefined}
           onClick={createBlankAssistant}
         >
@@ -171,7 +170,6 @@ export function CreateChatAppMenu() {
         onOpenChange={closeGroupDialog}
         purpose="form"
         width={440}
-        className={DIALOG_TOP_ON_TOUCH}
       >
         <Layout
           height="auto"

@@ -526,7 +526,7 @@ export function SidePanel({
             {...separatorProps}
             aria-label={t("file_preview_resize_handle")}
             style={{ width: HANDLE_WIDTH }}
-            className="hover:bg-ax-border-strong focus-visible:outline-ring bg-ax-border shrink-0 cursor-col-resize touch-none focus-visible:outline-2"
+            className="hover:bg-ax-border-strong focus-visible:outline-ring bg-ax-border relative z-10 shrink-0 cursor-col-resize touch-none after:absolute after:-inset-x-2.5 after:inset-y-0 after:content-[''] focus-visible:outline-2 pointer-coarse:after:-inset-x-5"
           />
           <aside
             ref={aside}
@@ -551,7 +551,7 @@ export function SidePanel({
           id={panelId}
           aria-label={label}
           tabIndex={-1}
-          className="bg-ax-surface fixed inset-0 z-20 flex min-h-0 flex-col"
+          className="bg-ax-surface fixed inset-0 z-20 flex min-h-0 flex-col pt-[env(safe-area-inset-top,0px)] pr-[env(safe-area-inset-right,0px)] pb-[env(safe-area-inset-bottom,0px)] pl-[env(safe-area-inset-left,0px)]"
         >
           {body(true)}
         </aside>

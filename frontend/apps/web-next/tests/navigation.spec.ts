@@ -313,7 +313,10 @@ test.describe("unsaved edits on Vite", { tag: "@vite" }, () => {
     page
   }) => {
     await page.goto("/spaces/personal/skills");
-    await page.getByRole("link", { name: /^(Skapa skill|Create skill)$/i }).click();
+    // An empty space offers only its empty state's "Skapa din första skill".
+    await page
+      .getByRole("link", { name: /^(Skapa (din första )?skill|Create (the first )?skill)$/i })
+      .click();
     const name = page.getByRole("textbox", { name: /^(Namn|Name)$/ });
     await name.fill(uniqueName("Unsaved Skill"));
     const draft = await name.inputValue();

@@ -60,6 +60,26 @@ it("pins a column, with the columns before it, while the rest scrolls sideways",
   expect(sizeCell?.style.insetInlineStart).toBeFalsy();
 });
 
+it("pins the last column at the end, where a row's menu stays reachable", () => {
+  renderInApp(
+    <Table
+      data={[{ id: "1", name: "Upphandlingspolicy", size: "12 kB" }]}
+      columns={[
+        { key: "name", header: "Namn", width: proportional(1) },
+        { key: "size", header: "Storlek", width: pixel(96) }
+      ]}
+      idKey="id"
+      aria-label="Filer"
+      pinnedEndColumn="size"
+    />
+  );
+
+  const [name, size] = screen.getAllByRole("columnheader");
+  expect(size?.style.insetInlineEnd).toBe("0px");
+  expect(name?.style.insetInlineEnd).toBeFalsy();
+  expect(name?.style.insetInlineStart).toBeFalsy();
+});
+
 it("pins nothing unless asked", () => {
   renderInApp(<Table data={rows} columns={columns} idKey="id" aria-label="Samlingar" />);
   expect(screen.getByRole("columnheader").style.insetInlineStart).toBeFalsy();

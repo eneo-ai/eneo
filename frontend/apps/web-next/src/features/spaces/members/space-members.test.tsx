@@ -261,13 +261,21 @@ describe("members on a phone", () => {
     const { container } = renderInApp(<SpaceMembers />);
 
     expect(screen.queryByRole("combobox", { name: "Roll" })).toBeNull();
-    const editors = screen.getByRole("list", { name: /^Administratörer & Redigerare/ });
+    const editors = screen.getByRole("list", { name: /^Administratörer och redigerare/ });
     const self = within(editors)
       .getByText(/anna\.lind@example\.com \(du\)/)
       .closest("li")!;
     // Nobody changes their own role: no button, the role in words.
     expect(within(self).queryByRole("button")).toBeNull();
     expect(within(self).getByText("Administratör")).toBeTruthy();
+    // A supporting fact at the e-mail's size; under the name below 20rem of the
+    // rows (a 320 px phone), so the e-mail does not break mid-address.
+    expect(within(self).getByText("Administratör").className).toBe(
+      "hidden text-sm @min-[20rem]/rows:inline"
+    );
+    expect(within(self).getByText("Roll: Administratör").className).toBe(
+      "block @min-[20rem]/rows:sr-only"
+    );
     const erik = within(editors).getByRole("button", { name: /^erik\.johansson@example\.com/ });
     expect(erik.closest("li")!.textContent).toContain("Redigerare");
 
@@ -410,5 +418,42 @@ describe("members on a tablet", () => {
       .getAllByRole("combobox", { name: "Roll" })
       .map((select) => select.textContent);
     expect(roles).toEqual(["Redigerare", "Visare", "Visare"]);
+  });
+});
+
+describe("members across 768 px (a phone turned)", () => {
+  const title = () => screen.getByRole("heading", { name: "Medlemmar" });
+
+  it("moves focus from a member control that went with its layout to the title, both ways", async () => {
+    state.space = spaceWithMembers();
+    setViewport("phone");
+    renderInApp(<SpaceMembers />);
+
+    const row = screen.getByRole("button", { name: /^erik\.johansson@example\.com/ });
+    act(() => row.focus());
+    expect(document.activeElement).toBe(row);
+    act(() => setViewport("tablet-portrait"));
+    await waitFor(() => expect(document.activeElement).toBe(title()));
+    expect(screen.queryByRole("button", { name: /^erik\.johansson@example\.com/ })).toBeNull();
+
+    const role = screen.getAllByRole("combobox", { name: "Roll" })[0]!;
+    act(() => role.focus());
+    expect(document.activeElement).toBe(role);
+    act(() => setViewport("phone"));
+    await waitFor(() => expect(document.activeElement).toBe(title()));
+    expect(screen.queryByRole("combobox", { name: "Roll" })).toBeNull();
+  });
+
+  it("leaves focus alone when it was on a control that stays", async () => {
+    state.space = spaceWithMembers();
+    setViewport("phone");
+    renderInApp(<SpaceMembers />);
+
+    // The add buttons are one element in both layouts (DockedActions).
+    const add = screen.getAllByRole("button", { name: "Lägg till medlem" })[0]!;
+    act(() => add.focus());
+    act(() => setViewport("tablet-portrait"));
+    await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+    expect(document.activeElement).toBe(add);
   });
 });

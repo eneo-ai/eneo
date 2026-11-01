@@ -69,7 +69,11 @@ export function StorageAdminPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <PageHeader title={t("storage_settings_title")} tour="admin-storage" />
+      <PageHeader
+        title={t("storage_settings_title")}
+        description={t("storage_settings_description")}
+        tour="admin-storage"
+      />
       {policy.isPending ? (
         <LoadingState rows={2} label={t("storage_settings_loading")} />
       ) : policy.isError ? (
@@ -215,9 +219,16 @@ function StoragePolicyEditor({
       toast.success(t("storage_settings_save_success"));
     } catch (error) {
       if (error instanceof EneoApiError && error.status === 403) setAuthorityRevoked(true);
-      else if (error instanceof EneoApiError && error.code === 9046) setStale(true);
-      else if (error instanceof EneoApiError && error.code === 9047) setTargetUnavailable(true);
-      else setSaveOutcomeUnknown(true);
+      else if (error instanceof EneoApiError && error.code === 9046) {
+        setStale(true);
+        toast.error(t("storage_settings_stale_title"));
+      } else if (error instanceof EneoApiError && error.code === 9047) {
+        setTargetUnavailable(true);
+        toast.error(t("storage_settings_target_unavailable_title"));
+      } else {
+        setSaveOutcomeUnknown(true);
+        toast.error(t("storage_settings_save_outcome_unknown_title"));
+      }
     } finally {
       setSaving(false);
       setConfirmOpen(false);
@@ -235,10 +246,7 @@ function StoragePolicyEditor({
   return (
     <>
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="max-w-3xl space-y-1">
-          <p className="text-muted-foreground text-sm leading-6">
-            {t("storage_settings_description")}
-          </p>
+        <div className="max-w-3xl">
           <p className="text-muted-foreground text-xs">
             {t("storage_settings_last_changed", {
               date: new Intl.DateTimeFormat(locale, {

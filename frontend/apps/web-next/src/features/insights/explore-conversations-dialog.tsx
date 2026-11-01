@@ -20,6 +20,7 @@ import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "@/features/chat/chat-message";
 import { insightPartnerQuery, insightRangeParams, type InsightRange } from "./insights-range";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 const PAGE_SIZE = 50;
 
@@ -117,6 +118,7 @@ function SessionList({
         value={searchInput}
         onChange={setSearchInput}
         startIcon={Search}
+        {...KEYBOARD.search}
         hasClear
         size="sm"
         width="100%"

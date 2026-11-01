@@ -54,7 +54,7 @@ function ExpandableErrorRow({
       <button
         type="button"
         onClick={() => setExpanded((current) => !current)}
-        className="rounded-ax-inner focus-visible:outline-ring flex min-h-6 w-full items-center justify-between gap-x-3 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="rounded-ax-inner focus-visible:outline-ring flex min-h-6 w-full items-center justify-between gap-x-3 text-start focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
         aria-expanded={expanded}
         aria-controls={messageId}
       >

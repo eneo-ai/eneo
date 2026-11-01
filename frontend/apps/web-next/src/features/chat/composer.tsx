@@ -1,6 +1,7 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ChatComposer, ChatComposerDrawer, useChatComposerContext } from "@astryxdesign/core/Chat";
 import { useAnnounce, useMergedRefs } from "@astryxdesign/core/hooks";
 import { Kbd } from "@astryxdesign/core/Kbd";
@@ -166,7 +167,9 @@ function KnowledgePill({
               return (
                 <li key={origin.id} className="flex min-w-0 items-center gap-2 text-[13px]">
                   <Icon aria-hidden="true" className="text-ax-text-secondary size-3.5 shrink-0" />
-                  <span className="truncate">{origin.name}</span>
+                  <span className="truncate pointer-coarse:break-words pointer-coarse:whitespace-normal">
+                    {origin.name}
+                  </span>
                 </li>
               );
             })}
@@ -226,6 +229,13 @@ export type ComposerProps = {
   /** A passage quoted from a file or a view, sent as the opening lines of the question. */
   quote?: ComposerQuote | null;
   variant?: "docked" | "start";
+  /**
+   * No answer in the conversation yet: the advice to check an answer against its
+   * sources has nothing to apply to, so one line on where the data stays is enough
+   * (the centred start composer says it that way at every width, and a phone's
+   * docked one, which stays where it is, now does the same).
+   */
+  beforeAnswer?: boolean;
   textareaRef?: Ref<HTMLTextAreaElement>;
 };
 
@@ -305,9 +315,12 @@ export function Composer({
   contextBar,
   quote = null,
   variant = "docked",
+  beforeAnswer = false,
   textareaRef
 }: ComposerProps) {
   const t = useTranslations();
+  // A touch screen has no Shift, Ctrl or Enter key to point at.
+  const coarse = useMediaMatch("(pointer: coarse)");
   const announce = useAnnounce();
   const hintId = useId();
   const problemId = useId();
@@ -387,7 +400,9 @@ export function Composer({
           }
           footerActions={
             <div className="flex min-w-0 flex-wrap items-center gap-1">
-              {partnerToken}
+              {/* Not on a phone: its header already carries this switcher, and the pill only
+                  took footer width the other controls need. */}
+              {partnerToken && <span className="contents max-md:hidden">{partnerToken}</span>}
               {canAttach && (
                 <button
                   type="button"
@@ -411,9 +426,11 @@ export function Composer({
           sendActions={
             <>
               {modelSelector}
-              {/* The shortcut beside the button it stands for, where there is a
-                  keyboard to press it; the field's description says it in words. */}
-              <span aria-hidden="true" className="hidden pointer-fine:inline-flex">
+              {/* The shortcut beside the button it stands for, where there is a keyboard
+                  to press it and room for it: not on a touch screen, nor in a phone-width
+                  window, where it only crowds the send button. The field's description says
+                  it in words. */}
+              <span aria-hidden="true" className="hidden md:pointer-fine:inline-flex">
                 <Kbd keys="mod+enter" />
               </span>
             </>
@@ -451,12 +468,14 @@ export function Composer({
         </p>
       )}
       <span id={hintId} className="sr-only">
-        {t("chat_composer_hint")}
+        {t(coarse ? "chat_composer_hint_touch" : "chat_composer_hint")}
       </span>
       {contextBar}
       <p className="text-ax-text-secondary flex items-center justify-center gap-1.5 text-center text-xs">
         <ShieldCheck aria-hidden="true" className="size-3.5 shrink-0" />
-        {variant === "start" ? t("chat_sovereignty_hint") : t("chat_sovereignty_hint_full")}
+        {variant === "start" || beforeAnswer
+          ? t("chat_sovereignty_hint")
+          : t("chat_sovereignty_hint_full")}
       </p>
     </div>
   );

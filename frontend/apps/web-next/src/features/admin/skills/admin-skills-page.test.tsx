@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const get = vi.hoisted(() => vi.fn());
@@ -61,6 +61,45 @@ describe("admin skill runtime policy", () => {
     expect(
       await screen.findByRole("switch", { name: "skills_runtime_policy_selective_title" })
     ).toBeTruthy();
+  });
+
+  it("shows the catalogue with the editor, not before it", async () => {
+    // The editor waits for the policy and for the model projections; the catalogue card
+    // shown earlier sat in view and was pushed off the screen when the editor arrived above it.
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    get.mockImplementation((path: string) =>
+      path.endsWith("model-projections")
+        ? gate.then(() => ({
+            data: { context_share_percent: 20, models: [] },
+            response: new Response("{}", { status: 200 })
+          }))
+        : ok(policy)
+    );
+    show();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    expect(screen.queryByText("admin_skills_catalogue_title")).toBeNull();
+
+    await act(async () => release());
+    const editor = await screen.findByRole("switch", {
+      name: "skills_runtime_policy_selective_title"
+    });
+    const catalogue = screen.getByText("admin_skills_catalogue_title");
+    expect(
+      editor.compareDocumentPosition(catalogue) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+  });
+
+  it("keeps the catalogue when the policy cannot be loaded", async () => {
+    get.mockImplementation(() => Promise.reject(new Error("boom")));
+    show();
+
+    await screen.findByRole("alert");
+    expect(screen.getByText("admin_skills_catalogue_title")).toBeTruthy();
   });
 
   it("saves all four fields and refreshes the model projection", async () => {
@@ -213,5 +252,14 @@ describe("admin skill runtime policy", () => {
 
     const table = await screen.findByRole("table", { name: "skills_runtime_models_title" });
     expect(within(table).getByText("gpt-5")).toBeTruthy();
+  });
+
+  it("keeps Spara the screen's one primary button", async () => {
+    show();
+    // The catalogue link was filled blue too: two primaries on one screen.
+    const catalogue = await screen.findByRole("link", { name: "governance_manage_skills_action" });
+    expect(catalogue.className).not.toContain("bg-primary");
+    const save = screen.getByRole("button", { name: "skills_runtime_policy_save" });
+    expect(save.className).toContain("bg-primary");
   });
 });

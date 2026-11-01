@@ -39,6 +39,7 @@ import {
 import { formatBytes } from "@/lib/format";
 import type { Schema } from "@/lib/api/models";
 import { toast } from "@/lib/toast";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import {
   buildTemplateCreate,
@@ -173,6 +174,8 @@ function TemplateWizard({
   onRemoveAttachment: (key: string) => void;
 }) {
   const t = useTranslations();
+  // Dragging a file onto the page needs a mouse: a touch screen is told to choose files.
+  const coarse = useMediaMatch("(pointer: coarse)");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const { dragging, handlers } = useFileDrop(onAddFiles);
   const wizard = template.wizard;
@@ -240,7 +243,9 @@ function TemplateWizard({
                 }}
               />
               <TemplateAttachmentList attachments={attachments} onRemove={onRemoveAttachment} />
-              <p className="text-muted-foreground text-sm">{t("upload_dropzone_prompt")}</p>
+              <p className="text-muted-foreground text-sm">
+                {coarse ? t("upload_dropzone_prompt_touch") : t("upload_dropzone_prompt")}
+              </p>
               {/* Uploading, it stays enabled so it keeps focus (the busy spinner
                   replaces its icon); a press meanwhile is ignored. */}
               <Button
@@ -412,7 +417,7 @@ export function TemplateGalleryDialog({
         else onOpenChange(next);
       }}
     >
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{t("select_a_template")}</DialogTitle>
         </DialogHeader>

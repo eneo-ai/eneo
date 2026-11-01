@@ -275,23 +275,26 @@ export function RolesPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <PageHeader title={t("roles")} tour="admin-roles">
+      <PageHeader
+        title={t("roles")}
+        description={
+          <>
+            {t("roles_page_description")} {t("roles_template_note")}
+          </>
+        }
+        tour="admin-roles"
+      >
         <Button onClick={() => openEditor({ kind: "create" })} disabled={failed || loading}>
           <Plus className="size-4" />
           {t("create_role")}
         </Button>
       </PageHeader>
       <div className="flex flex-wrap items-end justify-between gap-4">
-        <div className="text-muted-foreground max-w-3xl space-y-1 text-sm">
-          <p>
-            {t("roles_page_description")} {t("roles_template_note")}
-          </p>
-          <p>
-            {defaultRole
-              ? t("roles_default_role_note", { name: defaultRole.name })
-              : t("roles_no_default_role_note")}
-          </p>
-        </div>
+        <p className="text-muted-foreground max-w-3xl text-sm">
+          {defaultRole
+            ? t("roles_default_role_note", { name: defaultRole.name })
+            : t("roles_no_default_role_note")}
+        </p>
         <div className="relative w-full sm:w-72">
           <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2" />
           <Input
@@ -527,7 +530,7 @@ function RoleRow({
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <h2 className="min-w-0 font-semibold [overflow-wrap:anywhere]">{role.name}</h2>
           {isDefault && (
-            <Badge title={t("roles_cannot_delete_default")}>
+            <Badge variant="secondary" title={t("roles_cannot_delete_default")}>
               <Star className="size-3" />
               {t("roles_default_badge")}
             </Badge>
@@ -542,7 +545,7 @@ function RoleRow({
             </Badge>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 sm:justify-self-end">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:shrink-0 sm:flex-nowrap sm:justify-self-end">
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Pencil className="size-4" />
             {t("edit")}
@@ -554,7 +557,10 @@ function RoleRow({
               title={t("roles_view_users")}
             >
               <Users className="size-4" />
-              <span className="hidden lg:inline">{t("roles_view_users")}</span>
+              {/* A phone has no tooltip for the icon: a short word beside it (the full text
+                  stays the name, which contains it). */}
+              <span className="md:hidden">{t("roles_view_users_short")}</span>
+              <span className="hidden md:inline">{t("roles_view_users")}</span>
             </Link>
           </Button>
           {/* Always there: the default role's menu shows why it cannot be deleted. */}

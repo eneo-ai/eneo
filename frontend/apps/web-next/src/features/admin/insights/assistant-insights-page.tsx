@@ -53,6 +53,7 @@ import { insightPeriod } from "./insights";
 import { insightRangeOfDays } from "@/features/insights/insights-range";
 import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type InsightsTab = AssistantInsightView["tab"];
 
@@ -392,6 +393,7 @@ function QuestionsTab({
             isLabelHidden
             placeholder={t("assistant_questions_search_placeholder")}
             startIcon={Search}
+            {...KEYBOARD.search}
             value={search}
             onChange={setSearch}
             hasClear

@@ -228,6 +228,11 @@ describe("CrawlerPage", () => {
       "7"
     );
 
+    // Label in name (2.5.3): what the button shows leads its accessible name, so a person
+    // who says what they see can press it.
+    const issues = screen.getByRole("button", { name: /^Fel och varningar · Senaste dygnet 4\./ });
+    expect(issues.textContent).toContain("Fel och varningar · Senaste dygnet 4");
+
     const table = screen.getByRole("table", { name: "Alla" });
     const row = within(table).getAllByRole("row")[1]!;
     expect(within(row).getByRole("button", { name: "Intranätet" })).toBeTruthy();
@@ -307,5 +312,27 @@ describe("CrawlerPage", () => {
     fireEvent.click(within(confirm).getByRole("button", { name: "Försök köra igen" }));
 
     await waitFor(() => expect(state.posted).toEqual(["/api/v1/admin/crawler/websites/{id}/run/"]));
+  });
+
+  it("leaves out the last run of a scheduler that never ran, and starts the issues link on the gutter", async () => {
+    state.overview = () => ({
+      ...overview(),
+      scheduler: {
+        status: "stale",
+        ran_at: null,
+        stale_after_minutes: 65,
+        due: null,
+        admitted: null,
+        failed: null
+      }
+    });
+    show();
+
+    const scheduler = await screen.findByRole("group", { name: "Schemaläggare" });
+    expect(within(scheduler).getByText("Har inte körts")).toBeTruthy();
+    expect(within(scheduler).queryByText(/Senaste körning/)).toBeNull();
+    // Wrapped under the counts on a phone, the ghost button's inset is pulled back to the gutter.
+    const issues = screen.getByRole("button", { name: /^Fel och varningar · Senaste dygnet/ });
+    expect(issues.closest('[class~="max-sm:-ms-3"]')).toBeTruthy();
   });
 });

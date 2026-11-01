@@ -101,9 +101,8 @@ export function WhatsNewPage({ title }: { title: string }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 p-4 sm:p-6">
-      <PageHeader title={title} />
-      <p className="text-muted-foreground">{t("whats_new_intro")}</p>
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:gap-8 sm:p-6">
+      <PageHeader title={title} description={t("whats_new_intro")} />
       {releases.length === 0 ? (
         <p className="text-muted-foreground flex items-center gap-2">
           <Sparkles className="size-4" />
@@ -126,13 +125,16 @@ export function WhatsNewPage({ title }: { title: string }) {
                   type="button"
                   aria-pressed={release.version === selectedVersion}
                   onClick={() => selectRelease(release)}
-                  className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors"
+                  className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors pointer-coarse:min-h-11"
                 >
                   {release.version}
                   {!release.date && <span className="text-xs">{t("whats_new_upcoming")}</span>}
                   {seenAtOpen !== null && !isReadRelease(release, seenAtOpen) && (
                     <>
-                      <span aria-hidden="true" className="bg-success size-2 rounded-full" />
+                      <span
+                        aria-hidden="true"
+                        className="bg-success size-2 rounded-full forced-colors:bg-[CanvasText]"
+                      />
                       <span className="sr-only">{t("whats_new_new_for_you")}</span>
                     </>
                   )}
@@ -151,7 +153,7 @@ export function WhatsNewPage({ title }: { title: string }) {
               </span>
               {seenAtOpen !== null &&
                 (isReadRelease(current, seenAtOpen) ? (
-                  <span className="text-muted-foreground text-xs">{t("whats_new_read")}</span>
+                  <span className="text-muted-foreground text-sm">{t("whats_new_read")}</span>
                 ) : (
                   <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
                     {t("whats_new_new_for_you")}
@@ -161,7 +163,8 @@ export function WhatsNewPage({ title }: { title: string }) {
                 <Button
                   size="sm"
                   variant={isReadRelease(current, seenAtOpen) ? "outline" : "default"}
-                  className="ml-auto"
+                  // On a phone it wraps under the heading and starts on the page's line.
+                  className="sm:ml-auto"
                   aria-busy={(running && tourFrom === "release") || undefined}
                   onClick={() =>
                     void startEntries("release", tourEntries(current, can), current.version)
@@ -240,7 +243,7 @@ export function WhatsNewPage({ title }: { title: string }) {
                     )}
                   </div>
                   <h3 className="font-medium">{entry.title[locale] ?? entry.title.en}</h3>
-                  <p className="text-muted-foreground text-sm leading-relaxed">
+                  <p className="text-muted-foreground max-w-prose text-sm leading-relaxed">
                     {entry.body[locale] ?? entry.body.en}
                   </p>
                   {entry.showMe && (
@@ -279,7 +282,7 @@ export function WhatsNewPage({ title }: { title: string }) {
         href="https://docs.eneo.ai/about/release-notes"
         target="_blank"
         rel="noreferrer"
-        className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-2"
+        className="text-muted-foreground hover:text-foreground inline-flex items-center self-start text-sm underline underline-offset-2 pointer-coarse:min-h-11"
       >
         {t("whats_new_docs_link")}
       </a>
@@ -301,7 +304,7 @@ function FilterButton({
       type="button"
       aria-pressed={selected}
       onClick={onClick}
-      className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+      className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-medium transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11"
     >
       {children}
     </button>

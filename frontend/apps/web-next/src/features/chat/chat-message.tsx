@@ -2,7 +2,7 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
-import { useClipboard } from "@astryxdesign/core/hooks";
+import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
@@ -10,9 +10,9 @@ import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
-import { Copy, ThumbsDown, ThumbsUp } from "lucide-react";
+import { Check, Copy, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useCallback, useMemo, useRef, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
   CitationSourcesProvider,
@@ -365,8 +365,17 @@ function AnswerActions({
   const moreRef = useRef<HTMLDivElement>(null);
   const { copy: copyText } = useClipboard();
 
-  // Confirmed with a toast (seen and announced) for both formats: a rich-text
-  // copy does not go through useClipboard, so it has no copied state to show.
+  // Confirmed at the button (a check and "Kopierad!" for two seconds, and said
+  // aloud), not with a toast: a toast rests over the docked composer on a
+  // phone. A rich-text copy does not go through useClipboard, so the state is
+  // kept here for both formats. A refusal is still a toast, to be read.
+  const announce = useAnnounce();
+  const [copiedNow, setCopiedNow] = useState(false);
+  useEffect(() => {
+    if (!copiedNow) return;
+    const id = setTimeout(() => setCopiedNow(false), 2000);
+    return () => clearTimeout(id);
+  }, [copiedNow]);
   const copy = useCallback(
     async (format: AssistantCopyFormat) => {
       let copied = false;
@@ -379,10 +388,12 @@ function AnswerActions({
       } catch {
         // A failed renderer import uses the same refusal feedback as a denied write.
       }
-      if (copied) toast.success(t("copied"));
-      else toast.error(t("copy_failed"));
+      if (copied) {
+        setCopiedNow(true);
+        announce(t("copied"));
+      } else toast.error(t("copy_failed"));
     },
-    [copyText, t, text]
+    [announce, copyText, t, text]
   );
 
   // Decision 7: on touch the actions say what they do ("Kopiera", "Bra
@@ -419,13 +430,13 @@ function AnswerActions({
           label={t("chat_copy_answer")}
           onClick={() => void copy(preferred)}
         >
-          {t("copy")}
+          {copiedNow ? t("copied") : t("copy")}
         </Button>
       ) : (
         <IconButton
           label={t("chat_copy_answer")}
           tooltip={preferred === "richtext" ? t("copy_as_richtext") : t("copy_as_markdown")}
-          icon={<Copy className="size-4" />}
+          icon={copiedNow ? <Check className="size-4" /> : <Copy className="size-4" />}
           variant="ghost"
           size="sm"
           className={iconClass}

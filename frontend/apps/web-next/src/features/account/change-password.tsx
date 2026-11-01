@@ -206,11 +206,12 @@ export function ChangePasswordCard() {
 
   return (
     <SettingsGroup title={t("change_password")} tour="account-password">
+      {/* No title of its own: the group's says the same. Nor, for Eneo's own form, a line
+          saying "change the password" again under it (and under the PageBar on a phone). */}
       <SettingsRow
-        title={t("change_password")}
         description={
           capability.source === "eneo"
-            ? t("password_settings_description")
+            ? undefined
             : capability.source === "external"
               ? t("password_managed_externally")
               : t("password_capability_unavailable")

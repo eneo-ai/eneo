@@ -404,7 +404,7 @@ export function CrawlerPage() {
     {
       key: "result",
       header: t("admin_crawler_result"),
-      width: pixel(260),
+      width: pixel(400),
       renderCell: (item) => <CrawlRunCounts run={item.run} />
     },
     {
@@ -472,11 +472,14 @@ export function CrawlerPage() {
               {t("admin_crawler_queued")}
               <strong className="ms-2 tabular-nums">{data.summary.queued}</strong>
             </p>
-            <div className="sm:ms-auto">
+            {/* Wrapped under the counts on a phone: the ghost button's own inset is
+                pulled back so its text starts on the gutter with the lines above. */}
+            <div className="max-sm:-ms-3 sm:ms-auto">
               <Button
                 variant="ghost"
                 size="sm"
-                label={t("admin_crawler_show_issues")}
+                // The name starts with what the button shows (2.5.3), then says what it does.
+                label={`${t("admin_crawler_issues")} · ${t("admin_crawler_last_day")} ${data.summary.issues}. ${t("admin_crawler_show_issues")}`}
                 endContent={<ArrowRight aria-hidden="true" />}
                 onClick={showIssues}
               >
@@ -553,7 +556,7 @@ export function CrawlerPage() {
               placeholder={t("admin_crawler_search_hint")}
               value={searchInput}
               onChange={setSearchInput}
-              width="18rem"
+              width="17rem"
             />
             {view !== "active" && !isSchedule ? (
               <Selector
@@ -651,7 +654,8 @@ export function CrawlerPage() {
                 columns={columns}
                 idKey="id"
                 aria-labelledby={tabId(view)}
-                className="min-w-[960px]"
+                pinnedColumn="website"
+                className="min-w-[960px] [--table-sticky-background:var(--color-ax-surface)]"
               />
             )
           ) : null}

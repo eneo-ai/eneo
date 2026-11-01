@@ -42,8 +42,8 @@ export function AccountAppearance() {
   }, [announce, pageLocale, t]);
 
   return (
-    // The width of a phone's, beside the SideNav too.
-    <div className="flex flex-col gap-8 lg:max-w-md">
+    // The width of a phone's on tablets and beside the SideNav too.
+    <div className="flex flex-col gap-8 md:max-w-md">
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
           <h2 id={themeId} className="text-[1.0625rem] font-semibold">

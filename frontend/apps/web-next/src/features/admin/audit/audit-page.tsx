@@ -4,7 +4,7 @@ import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { pushUrl, replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
@@ -13,6 +13,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
 import { useSearchDraft } from "@/lib/hooks/use-search-draft";
+import { showListTop } from "@/lib/show-list-top";
 import { cn } from "@/lib/utils";
 import { auditLogsQueryOptions, type AuditFilters } from "./audit";
 import { AuditConfig } from "./audit-config";
@@ -31,6 +32,7 @@ function LogsTab() {
   const search = useSearchDraft(filters.search);
   const [showExport, setShowExport] = useState(false);
   const [paging, setPaging] = useState<"previous" | "next" | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (search.settled !== filters.search) {
@@ -69,6 +71,7 @@ function LogsTab() {
   // focus (aria-busy), and presses are ignored.
   function turnPage(direction: "previous" | "next") {
     if (isPlaceholderData) return;
+    showListTop(listRef.current);
     setPaging(direction);
     patchFilters({ page: filters.page + (direction === "next" ? 1 : -1) });
   }
@@ -90,7 +93,7 @@ function LogsTab() {
         }}
       />
 
-      <div className={cn(isPlaceholderData && "opacity-60 transition-opacity")}>
+      <div ref={listRef} className={cn(isPlaceholderData && "opacity-60 transition-opacity")}>
         <QueryStateBoundary query={logsQuery} rows={5}>
           {(page) =>
             page.logs.length === 0 ? (

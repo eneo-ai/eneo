@@ -55,8 +55,10 @@ export function ProviderConnectionStatus({ provider }: { provider: ModelProvider
   const expiry = notices.expiryOf(provider);
   const expiryNotice = expiry ? notices.expiryNotice(expiry) : null;
 
+  // pe-4 like the model rows: the filled button ends on their line (the
+  // card header's pe-2.5 is for the ghost menu button at its end).
   return (
-    <div className="border-ax-border flex flex-wrap items-center gap-x-4 gap-y-2 border-b py-2 ps-4 pe-2.5">
+    <div className="border-ax-border flex flex-wrap items-center gap-x-4 gap-y-2 border-b py-2 ps-4 pe-4">
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
         <StatusLabel status={connection.tone} label={connection.label} />
         {checkedAt ? (

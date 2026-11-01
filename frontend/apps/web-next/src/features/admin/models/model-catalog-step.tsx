@@ -46,6 +46,7 @@ import {
   validateProviderModel
 } from "./models";
 import { useFieldFocus } from "./provider-form-fields";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 import {
   defaultModelHosting,
@@ -527,6 +528,7 @@ export function ModelCatalogStep({
                 isLabelHidden
                 placeholder={t("filter_catalog")}
                 startIcon={Search}
+                {...KEYBOARD.search}
                 value={search}
                 onChange={setSearch}
                 hasClear
