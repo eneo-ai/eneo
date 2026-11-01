@@ -150,7 +150,8 @@ export function readFirstAnswer<
   );
   const cache = queryClient.getQueryCache();
   const query = cache.find({ queryKey: options.queryKey, exact: true });
-  if (query === undefined || query.state.fetchFailureCount > 0) return read;
+  // A read that already failed is retrying in the background: that was its answer.
+  if (query === undefined || query.state.fetchFailureCount > 0) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {
       unsubscribe();

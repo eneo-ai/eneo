@@ -315,10 +315,12 @@ export function CrawlerPage() {
   const data = overview.data;
   // The tabs, filters and runs show with the first overview read, and stay: shown first,
   // they were pushed off the screen when the summary, the scheduler and the day cards (or
-  // the empty state) arrived above them (layout shift on a phone). A failed first read
-  // shows them with its error; a later view's read, even one without data, keeps them.
+  // the empty state) arrived above them (layout shift on a phone). A first read that failed,
+  // also while it is retried, shows them with its error; a later view's read, even one
+  // without data, keeps them.
   const [listReady, setListReady] = useState(false);
-  if (!listReady && (!overview.isPending || blockingError(overview))) setListReady(true);
+  if (!listReady && (!overview.isPending || overview.failureCount > 0 || blockingError(overview)))
+    setListReady(true);
   const fetchedAt = useClientTimeText(data?.as_of, "date_time");
   const rows = isSchedule ? schedule : overview;
   const nextCursor = isSchedule ? schedule.data?.next_cursor : data?.next_cursor;

@@ -273,6 +273,23 @@ describe("readFirstAnswer", () => {
     expect(backend.requests()).toBe(2);
   });
 
+  it("answers at once for a read that already failed and is retrying in the background", async () => {
+    const backend = resource(503, "loaded");
+    const client = makeQueryClient();
+    warmQuery(client, backend.options);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(backend.requests()).toBe(1);
+    let answered = false;
+
+    void readFirstAnswer(client, backend.options).then(() => (answered = true));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(answered).toBe(true);
+    expect(backend.requests()).toBe(1);
+    await retriesRun();
+    expect(client.getQueryData(["resource"])).toBe("loaded");
+  });
+
   it("does not fail on a refusal", async () => {
     const backend = resource(404);
 
