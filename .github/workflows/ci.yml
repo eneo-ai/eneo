@@ -564,7 +564,30 @@ jobs:
           E2E_BASE_URL: http://localhost:8124
           E2E_USER: e2e@example.com
           E2E_PASSWORD: E2ePassword123!
-        run: bun run test:e2e
+        run: bun run test:e2e --grep-invert '@upload-worker'
+
+      # Pending app-result assertions above require the queue to remain idle.
+      - name: Start and check the knowledge upload worker
+        run: |
+          docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml exec -T -d \
+            e2e-backend sh -c 'exec /app/.venv/bin/worker >/proc/1/fd/1 2>/proc/1/fd/2'
+          for _ in $(seq 1 15); do
+            if docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml exec -T \
+              e2e-backend /app/.venv/bin/worker --check; then
+              exit 0
+            fi
+            sleep 2
+          done
+          exit 1
+
+      - name: Run the native knowledge upload test
+        working-directory: frontend/apps/web-next
+        env:
+          E2E_BASE_URL: http://localhost:8124
+          E2E_USER: e2e@example.com
+          E2E_PASSWORD: E2ePassword123!
+          PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/upload-worker
+        run: bun run test:e2e --grep '@upload-worker' --output test-results/upload-worker
 
       - name: Capture E2E stack diagnostics
         if: ${{ failure() }}

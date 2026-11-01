@@ -149,14 +149,31 @@ FastAPI. Set `E2E_USER` and `E2E_PASSWORD` for the isolated stack's seeded user,
 then run from the repository root:
 
 ```bash
-docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml up -d --build --wait
-mkdir -p frontend/apps/web-next/node_modules/.cache
-docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml cp \
-  e2e-backend:/app/web-bundle-report.json frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
-cd frontend/apps/web-next
-E2E_BASE_URL=http://localhost:8124 bun run test:e2e
-cd ../../..
-docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml down -v
+(
+  set -e
+  trap 'docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml down -v' EXIT
+  docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml up -d --build --wait
+  mkdir -p frontend/apps/web-next/node_modules/.cache
+  docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml cp \
+    e2e-backend:/app/web-bundle-report.json frontend/apps/web-next/node_modules/.cache/vite-bundle-report.json
+  (cd frontend/apps/web-next && E2E_BASE_URL=http://localhost:8124 bun run test:e2e --grep-invert '@upload-worker')
+
+  docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml exec -T -d \
+    e2e-backend sh -c 'exec /app/.venv/bin/worker >/proc/1/fd/1 2>/proc/1/fd/2'
+  worker_ready=false
+  for _ in $(seq 1 15); do
+    if docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml exec -T \
+      e2e-backend /app/.venv/bin/worker --check; then
+      worker_ready=true
+      break
+    fi
+    sleep 2
+  done
+  [ "$worker_ready" = true ] || { echo "Upload worker did not become healthy" >&2; exit 1; }
+  (cd frontend/apps/web-next && E2E_BASE_URL=http://localhost:8124 \
+    PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report/upload-worker \
+    bun run test:e2e --grep '@upload-worker' --output test-results/upload-worker)
+)
 ```
 
 Copy the module report from the running image: fault-injection tests need the
@@ -165,12 +182,28 @@ FastAPI is running; it reads its HTML once at startup. Use `localhost`,
 since the stack's `127.0.0.1` address is the separate MCP content origin. To run
 selected cases, append their paths, for example `tests/csp.spec.ts`.
 
+Run the ordinary suite before starting the worker: app-result tests require
+pending jobs to stay queued. Only the native 25 MiB upload carries
+`@upload-worker`. Both phases use normal success gating and separate output
+and HTML report directories so the second run preserves the first run's results.
+The worker may drain earlier app jobs after their assertions have finished.
+
+The existing worker runs inside the backend container so knowledge ingestion
+shares its staged files and environment. Start it once per stack. Its output
+joins the container logs, and the cleanup trap stops it with the backend on
+success or failure. The web-app overlay sets a 32 MiB inline storage ceiling.
+The native upload test raises the knowledge policy through the admin API and
+restores it using the current revision; production defaults and seed policy
+are unchanged.
+
 CI enables both backend settings through `docker-compose.e2e.web-app.yml` and
 runs the full browser suite there, including CSP, boot failure and recovery,
 locale, cookie login and cross-origin rejection.
 
-Results go to `test-results-fastapi/`, with the CI HTML report in
-`playwright-report-fastapi/`. Both are ignored by Git. `E2E_BASE_URL` is required;
+The first phase writes `test-results-fastapi/` and the CI HTML report in
+`playwright-report-fastapi/`. The upload phase writes `test-results/upload-worker/`
+and `playwright-report/upload-worker/`. All four are ignored by Git and uploaded
+by CI. `E2E_BASE_URL` is required;
 Playwright starts no server. Use `bun run dev` for interactive development, not
 this suite: the development server has neither production CSP nor hashed chunks.
 
