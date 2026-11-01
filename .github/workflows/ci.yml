@@ -461,9 +461,12 @@ jobs:
         # Building the backend image and waiting for the stack's health checks
         # take ~2 min and need nothing from the frontend steps, so they overlap
         # with bun install and the web build. "Wait for the E2E stack" collects
-        # the exit status before the tests start.
+        # the exit status before the tests start. Only the backend and what it
+        # depends on (database, Redis, mock model, tool runtime): no Svelte spec
+        # uses the workers, the crawler or the realtime mock that the web-next
+        # Flows specs need, and their health checks only load the runner.
         run: |
-          nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
+          nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait e2e-backend; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
       - name: Set up frontend dependencies
