@@ -340,6 +340,18 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
     ...activeReviewQueryOptions(flowId, runId, signature ?? ""),
     enabled: awaitingReview
   });
+  // The run shows once its first reads are in, and stays shown: the status and graph, then the
+  // detail and steps they unlock (and an open review). Shown as each arrived, the header's status
+  // line and title and each section pushed what was already on the screen (layout shift 0.20 on a
+  // phone). A read that failed shows the page with its error. Only `isPending` is read: the update
+  // times `blockingError` reads would bring back one render per poll.
+  const [shown, setShown] = useState(false);
+  const firstReads = [
+    progress,
+    ...(signature !== null ? [detail, steps] : []),
+    ...(awaitingReview ? [review] : [])
+  ];
+  if (!shown && firstReads.every((query) => !query.isPending)) setShown(true);
 
   const summary: RunSummary | undefined = progress.data?.status;
   const status = summary?.status ?? null;
@@ -519,6 +531,16 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   const view = status ? runStatusView(status) : null;
   const duration = summary ? runDurationMs(summary) : null;
+
+  if (!shown) {
+    return (
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="flex w-full max-w-5xl flex-col py-4 md:px-6 md:py-5">
+          <LoadingState rows={4} label={t("flow_runs_run_loading")} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex min-w-0 flex-1 flex-col">

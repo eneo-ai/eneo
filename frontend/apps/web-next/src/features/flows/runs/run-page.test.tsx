@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { focusManager } from "@tanstack/react-query";
 import { Profiler, Suspense } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -88,6 +88,21 @@ function answerEvidence() {
 
 function calls(route: string) {
   return state.stub.calls.filter((call) => `${call.method} ${call.path}` === route);
+}
+
+/** Holds the answers to `route` (asked as usual) until the returned function is called. */
+function holdAnswers(route: string) {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const get = state.stub.client.GET;
+  const spy = vi.spyOn(state.stub.client, "GET").mockImplementation((path, init) => {
+    const answer = get(path, init);
+    return `GET ${path}` === route ? gate.then(() => answer) : answer;
+  });
+  onTestFinished(() => spy.mockRestore());
+  return release;
 }
 
 /** The person leaves the tab and comes back to it, after the app's 30 s. */
@@ -590,6 +605,57 @@ describe("FlowRunPage", () => {
     });
     await act(() => vi.advanceTimersByTimeAsync(2_100));
     expect(await screen.findByText(messages.flow_runs_run_failed_to_load)).toBeTruthy();
+  });
+
+  it("shows the run once its first reads are in, not piece by piece as they arrive", async () => {
+    answerRun(makeRunSummary());
+    const release = holdAnswers(DETAIL);
+    renderRun();
+    // The status, graph and steps have answered; the detail they unlocked has not.
+    await waitFor(() => expect(calls(DETAIL)).toHaveLength(1));
+    await act(async () => {});
+    expect(screen.getByText(messages.flow_runs_run_loading)).toBeTruthy();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+    expect(screen.queryByText("Startad av Anna Lind")).toBeNull();
+    expect(screen.queryByRole("heading", { name: messages.flow_runs_result_heading })).toBeNull();
+
+    await act(async () => release());
+    expect(await screen.findByText("Beslutet är fattat.")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
+    expect(screen.getByText("Startad av Anna Lind")).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_run_loading)).toBeNull();
+  });
+
+  it("shows the run with its error when the detail cannot be read", async () => {
+    answerRun(makeRunSummary());
+    state.routes[DETAIL] = () => ({ status: 500, body: { message: "Down", code: "internal" } });
+    renderRun();
+    expect(await screen.findByText(messages.flow_runs_detail_failed)).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
+    expect(screen.getByText("Startad av Anna Lind")).toBeTruthy();
+  });
+
+  it("stays on the run while the review it moved into loads", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    renderRun(["flows_view", "flows_manage"]);
+    await screen.findByText(messages.flow_runs_result_pending);
+    const heading = screen.getByRole("heading", { level: 1 });
+
+    const release = holdAnswers(REVIEW);
+    const waiting = makeRunSummary({ status: "awaiting_review", finished_at: null, revision: 3 });
+    answerRun(waiting, makeRunDetail({ ...waiting, result: null }));
+    state.routes[REVIEW] = () => ({ body: makeCheckpoint() });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    await waitFor(() => expect(calls(REVIEW)).toHaveLength(1));
+    expect(screen.getByRole("heading", { level: 1 })).toBe(heading);
+    expect(screen.getByText(messages.flow_runs_status_awaiting_review)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_run_loading)).toBeNull();
+
+    await act(async () => release());
+    expect(await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" })).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 1 })).toBe(heading);
   });
 
   describe("review", () => {
