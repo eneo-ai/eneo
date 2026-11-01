@@ -476,7 +476,8 @@ export function CrawlerPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                label={t("admin_crawler_show_issues")}
+                // The name starts with what the button shows (2.5.3), then says what it does.
+                label={`${t("admin_crawler_issues")} · ${t("admin_crawler_last_day")} ${data.summary.issues}. ${t("admin_crawler_show_issues")}`}
                 endContent={<ArrowRight aria-hidden="true" />}
                 onClick={showIssues}
               >

@@ -228,6 +228,11 @@ describe("CrawlerPage", () => {
       "7"
     );
 
+    // Label in name (2.5.3): what the button shows leads its accessible name, so a person
+    // who says what they see can press it.
+    const issues = screen.getByRole("button", { name: /^Fel och varningar · Senaste dygnet 4\./ });
+    expect(issues.textContent).toContain("Fel och varningar · Senaste dygnet 4");
+
     const table = screen.getByRole("table", { name: "Alla" });
     const row = within(table).getAllByRole("row")[1]!;
     expect(within(row).getByRole("button", { name: "Intranätet" })).toBeTruthy();
