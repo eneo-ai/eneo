@@ -301,8 +301,10 @@ export function TranscriptionServiceDialog({
                   onChange={setApiKey}
                   isRequired={saved === null || addressMoved}
                   isDisabled={submitting}
-                  // A service's key is not the administrator's own password.
-                  autoComplete="off"
+                  // A service's key is not the administrator's own password: "new-password"
+                  // keeps password managers from filling the sign-in password in, which
+                  // they do over "off" on a password field.
+                  autoComplete="new-password"
                   placeholder={
                     saved && !addressMoved
                       ? t("speaker_service_api_key_saved_placeholder")

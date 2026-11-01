@@ -87,6 +87,9 @@ it("connects a service with the entered settings, on by default, and stays open 
   // The key is saved and never shown again; the field now offers to replace it.
   expect(field(KEY).value).toBe("");
   expect(field(KEY).type).toBe("password");
+  // A password manager ignores "off" on a password field and could put the signed-in
+  // administrator's own password here, which the check would send to the service.
+  expect(field(KEY).getAttribute("autocomplete")).toBe("new-password");
   // Everything is saved, so the only way out is "Klar", and it has the focus.
   await waitFor(() => expect(document.activeElement).toBe(button("Klar")));
   expect(screen.queryByRole("button", { name: "Spara" })).toBeNull();
