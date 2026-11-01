@@ -56,7 +56,9 @@ it.each([403, 503, "network"])("keeps a failed logout visible (%s)", async (fail
   if (failure === "network") fetchMock.mockRejectedValue(new TypeError("Offline"));
   else fetchMock.mockResolvedValue(new Response(null, { status: Number(failure) }));
   renderInApp(<LogoutHandoff target="/login" />);
-  expect(await screen.findByText("Utloggningen misslyckades. Försök igen.")).toBeTruthy();
+  const failed = await screen.findByText("Utloggningen misslyckades. Försök igen.");
+  // Said when it happens: an Astryx 0.7.3 banner has no live region of its own.
+  expect(failed.closest('[role="alert"]')).not.toBeNull();
   expect(navigateTo).not.toHaveBeenCalled();
   expect(fetchMock).toHaveBeenCalledTimes(1);
   expect(screen.getByRole("link").getAttribute("href")).toBe("/logout");

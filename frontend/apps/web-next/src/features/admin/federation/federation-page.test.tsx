@@ -331,6 +331,8 @@ describe("saving", () => {
     );
 
     const banner = await screen.findByText("Någon annan har ändrat inställningarna");
+    // Said when it happens: an Astryx 0.7.3 banner has no live region of its own.
+    expect(banner.closest('[role="alert"]')).not.toBeNull();
     expect(clientId().value).toBe("mine");
     await expectNoAxeViolations(container);
     // A failed reload keeps the draft and the banner ...
