@@ -63,7 +63,7 @@ async function historyFlow(page: Page) {
           configuration: {
             input_source: "flow_input",
             input_type: "text",
-            output_mode: "compose_text",
+            output_mode: "pass_through",
             output_type: "text"
           }
         }
