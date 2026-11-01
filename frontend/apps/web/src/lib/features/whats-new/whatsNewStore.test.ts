@@ -262,8 +262,8 @@ describe("whatsNewStore", () => {
   });
 
   it("announces every RC and the final once, and keeps read progress independent", async () => {
-    let seen: Marker = "2.2.0";
-    let announced: Marker = "2.2.0";
+    let seen: Marker = "0.0.1";
+    let announced: Marker = "0.0.1";
     for (const installed of [`${version}-rc.0`, `${version}-rc.1`, `${version}-rc.10`, version]) {
       const { store, client } = makeStore(seen, announced, true, installed);
       expect(store.pendingAnnouncement()?.version).toBe(installed);
@@ -278,6 +278,34 @@ describe("whatsNewStore", () => {
       seen = get(store.seenVersion);
       expect(get(makeStore(seen, announced, true, installed).store.hasUnseen)).toBe(false);
     }
+  });
+
+  it("lists unreleased notes on development builds without announcing or recording them", async () => {
+    const upcoming: Release = { ...latest, version: news.UNRELEASED };
+    delete upcoming.date;
+    vi.spyOn(news, "releasesForVersion").mockReturnValue([upcoming, latest]);
+
+    const caughtUp = makeStore(version, version, true, "develop-0123456789ab");
+    expect(caughtUp.store.releases.map((release) => release.version)).toEqual([
+      news.UNRELEASED,
+      version
+    ]);
+    expect(caughtUp.store.pendingAnnouncement()).toBeNull();
+    expect(get(caughtUp.store.hasUnseen)).toBe(false);
+    await caughtUp.store.markLatestSeen();
+    expect(caughtUp.client.markSeen).not.toHaveBeenCalled();
+
+    const behind = makeStore(null, null, true, "develop-0123456789ab");
+    expect(behind.store.pendingAnnouncement()).toBe(latest);
+    await behind.store.markLatestAnnounced();
+    await behind.store.markLatestSeen();
+    expect(behind.client.markAnnounced).toHaveBeenCalledExactlyOnceWith(version);
+    expect(behind.client.markSeen).toHaveBeenCalledExactlyOnceWith(version);
+
+    vi.mocked(news.releasesForVersion).mockReturnValue([upcoming]);
+    const onlyUpcoming = makeStore(null, null, true, "develop-0123456789ab");
+    expect(onlyUpcoming.store.pendingAnnouncement()).toBeNull();
+    expect(get(onlyUpcoming.store.hasUnseen)).toBe(false);
   });
 
   it("does not announce an older RC or move markers backwards after rollback", async () => {

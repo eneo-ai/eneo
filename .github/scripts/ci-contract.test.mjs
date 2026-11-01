@@ -376,3 +376,9 @@ test("each candidate is classified by its own diff onto the preceding candidate,
     fs.rmSync(cwd, { recursive: true, force: true });
   }
 });
+
+test("tool-runtime document engine files run the backend suite", () => {
+  // Flow document tests render through the tool runtime's document engine.
+  const plan = planCi(["tool-runtime/src/tools/documents/control.ts"], "merge_group");
+  assert.equal(plan.backend, true);
+});
