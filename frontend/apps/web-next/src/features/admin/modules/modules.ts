@@ -5,18 +5,20 @@ import type { Schema } from "@/lib/api/models";
 export type ModuleInstallation = Schema<"ModuleInstallation">;
 export type ServiceKey = Schema<"ApiKeyV2">;
 
-/** Keep the backend as the authority for binding eligibility, across every page. */
+/**
+ * The keys a module may bind, across every page. The backend's module route
+ * decides eligibility (active, service-owned sk_ keys with write or admin) and
+ * pages at most 100 keys.
+ */
 export async function listCompatibleServiceKeys(): Promise<ServiceKey[]> {
   const keys: ServiceKey[] = [];
   const visited = new Set<string>();
   let cursor: string | null = null;
 
   do {
-    const page: Schema<"CursorPaginatedResponse_ApiKeyV2_"> = await unwrap(
-      browserApi.GET("/api/v1/admin/api-keys", {
-        params: {
-          query: { limit: 200, eligible_for_module_binding: true, ...(cursor && { cursor }) }
-        }
+    const page: Schema<"ApiKeyListResponse"> = await unwrap(
+      browserApi.GET("/api/v1/admin/modules/service-keys/", {
+        params: { query: { limit: 100, ...(cursor && { cursor }) } }
       })
     );
     for (const key of page.items) {

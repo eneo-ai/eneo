@@ -78,6 +78,12 @@ describe("FlowsPage", () => {
     expect(screen.queryByRole("button", { name: "Nytt flöde" })).toBeNull();
   });
 
+  it("offers creating and importing to a role with the old flows grant, which includes managing", () => {
+    renderPage([sparse({ id: "f1", name: "Medborgarbrev" })], ["flows"]);
+    expect(screen.getByRole("button", { name: "Nytt flöde" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Importera" })).toBeTruthy();
+  });
+
   it("creates a flow with a name and description and opens it", async () => {
     api.POST.mockResolvedValue({
       data: makeFlow({ id: "new-flow", name: "Bygglov", steps: [] }),
