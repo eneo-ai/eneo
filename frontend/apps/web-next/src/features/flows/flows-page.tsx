@@ -168,13 +168,14 @@ export function FlowsPage() {
     {
       key: "owner",
       header: t("flow_list_owner"),
-      width: pixel(140),
+      // Names wrap; with the name's 120 px the table fits an upright iPad (about 770 px).
+      width: pixel(120),
       renderCell: (flow) => <span className="break-words">{ownerLabel(flow)}</span>
     },
     {
       key: "updated",
       header: t("flows_updated"),
-      width: pixel(170),
+      width: pixel(160),
       // The date the list sorts by: a flow never changed since it was created shows when that was.
       renderCell: (flow) => {
         const changed = flow.updated_at ?? flow.created_at;
@@ -302,6 +303,7 @@ export function FlowsPage() {
                   idKey="id"
                   aria-label={t("flows")}
                   pinnedColumn="name"
+                  className="[--table-sticky-background:var(--color-ax-surface)]"
                 />
               )}
             </div>

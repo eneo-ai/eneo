@@ -134,6 +134,19 @@ describe("FlowsPage", () => {
     expect(bare.children).toHaveLength(1);
   });
 
+  it("fits an iPad held upright with every column, its name pinned on the page's colour", () => {
+    renderPage(dated());
+    const table = screen.getByRole("table", { name: "Flöden" });
+    // The delete column is there (every flow here can be deleted): the widest the table gets.
+    expect(within(table).getAllByRole("button", { name: /^Ta bort / })).toHaveLength(3);
+    // About 770 px of an upright 820 px iPad are left for the table (AGENTS.md, Tables).
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(770);
+    // A pinned column takes its container's colour; on the page that is the surface.
+    expect(
+      table.closest('[class*="[--table-sticky-background:var(--color-ax-surface)]"]')
+    ).not.toBeNull();
+  });
+
   it("says whose each flow is, by the names the space's members go by", async () => {
     const { container } = renderPage(dated());
     const table = screen.getByRole("table", { name: "Flöden" });
