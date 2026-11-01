@@ -165,6 +165,9 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     autoSaveId: CHAT_WIDTH_STORAGE_KEY
   });
   const [addAt, setAddAt] = useState<number | null>(null);
+  // Edits on screen that are not saved: the open step's, or the settings form
+  // while it is open (the two are never on screen together).
+  const [unsavedEdits, setUnsavedEdits] = useState(false);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
   const [exporting, setExporting] = useState(false);
   // The chat's composer while it is on screen (the chat panel reports it).
@@ -485,15 +488,22 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
     }
   }, [announce, flowId, queryClient, t]);
 
+  /** Publishes the saved draft; with no steps, or edits not yet saved, says what to do first. */
   function requestPublish() {
     if (publish.isPending) return;
-    if (steps.length === 0) {
+    const blocked =
+      steps.length === 0
+        ? t("flows_publish_needs_steps")
+        : unsavedEdits
+          ? t("flows_publish_unsaved")
+          : null;
+    if (blocked) {
       noticeKey.current += 1;
       setNotice({
         key: noticeKey.current,
         status: "error",
         title: t("flows_notice_not_published"),
-        description: t("flows_publish_needs_steps")
+        description: blocked
       });
       return;
     }
@@ -817,6 +827,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                       announce(t("flows_step_saved", { step: stepLabel(openedStep, t) }));
                     }}
                     onCancel={closeStep}
+                    onUnsavedChange={setUnsavedEdits}
                     navigation={{
                       position: openedIndex + 1,
                       count: steps.length,
@@ -893,6 +904,7 @@ function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => voi
                       services: space.transcription_services ?? []
                     }}
                     onSave={saveSettings}
+                    onEditingChange={setUnsavedEdits}
                   />
                 </>
               )}

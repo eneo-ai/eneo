@@ -7,6 +7,8 @@ import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { CircleAlert, CircleCheck, Download, RotateCw, X } from "lucide-react";
 import { Fragment } from "react";
 import { useLocale, useTranslations } from "use-intl";
+import { saveUrl, signedFileUrl, toastDownloadError } from "@/features/files/signed-file-url";
+import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
 import { HANDHELD_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { UploadRetryHint } from "./recording/upload-retry-hint";
@@ -56,16 +58,34 @@ export function saveFile(file: File) {
   setTimeout(() => URL.revokeObjectURL(url), 0);
 }
 
+/**
+ * Hands a file the form uploaded to the person, to check it: the core signs a
+ * short-lived link for the file's owner, used by a run or not.
+ */
+async function downloadUploaded(
+  fileId: string,
+  name: string,
+  t: ReturnType<typeof useTranslations>
+) {
+  try {
+    saveUrl(await signedFileUrl(browserApi, fileId, "attachment"), name);
+  } catch (error) {
+    toastDownloadError(error, t);
+  }
+}
+
 function UploadRow({
   entry,
   onRemove,
   onRetry,
-  onSave
+  onSave,
+  onDownload
 }: {
   entry: UploadEntry;
   onRemove: () => void;
   onRetry: (() => void) | null;
   onSave: (() => void) | null;
+  onDownload: (() => void) | null;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -121,6 +141,15 @@ function UploadRow({
           variant="ghost"
           size="sm"
           onClick={onSave}
+        />
+      ) : null}
+      {onDownload ? (
+        <IconButton
+          label={t("flow_runs_file_download", { name: entry.name })}
+          icon={<Download aria-hidden="true" />}
+          variant="ghost"
+          size="sm"
+          onClick={onDownload}
         />
       ) : null}
       <IconButton
@@ -238,6 +267,12 @@ export function RunFileInput({
                       const file = fileOf(entry.key);
                       if (file) saveFile(file);
                     }
+                  : null
+              }
+              onDownload={
+                // A recorded part is saved from the form's own copy (onSave).
+                entry.state === "done" && entry.fileId && !entry.recording
+                  ? () => void downloadUploaded(entry.fileId as string, entry.name, t)
                   : null
               }
             />

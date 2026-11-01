@@ -161,6 +161,27 @@ it.each(["Back", "Alla steg", "Nästa steg: Skriv svar"])(
   }
 );
 
+it("publishes only what is saved: unsaved step edits hold Publicera back and say why", async () => {
+  api.routes["POST /api/v1/flows/{id}/publish/"] = () => ({
+    body: { ...flow, published_version: 1 }
+  });
+  const publishes = () =>
+    api.stub.calls.filter((call) => call.path === "/api/v1/flows/{id}/publish/");
+  await renderPage();
+  await openFirst();
+  await changeName();
+  await click(messages.publish);
+  expect(await screen.findByText(messages.flows_publish_unsaved)).toBeTruthy();
+  expect(publishes()).toEqual([]);
+  // The draft stays as it was typed, with the editor open.
+  expect(((await nameField()) as HTMLInputElement).value).toBe("Eget utkast");
+  await click(messages.cancel);
+  await chooseLeave();
+  await screen.findByRole("button", { name: "Redigera Steg 1: Sammanfatta" });
+  await click(messages.publish);
+  await waitFor(() => expect(publishes()).toHaveLength(1));
+});
+
 it("releases a pending navigation after the current draft is saved", async () => {
   let saved!: () => void;
   const saving = new Promise<void>((resolve) => {

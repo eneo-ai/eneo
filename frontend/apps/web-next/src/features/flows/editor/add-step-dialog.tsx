@@ -27,6 +27,7 @@ import {
   kindOption,
   kindRefusalText,
   newStepUpdate,
+  starterInstructionKey,
   stepNameTaken,
   uniqueStepName,
   type DocumentFormat,
@@ -155,8 +156,9 @@ function AddStepForm({
     candidate.refusals[0] ? kindRefusalText(candidate.refusals[0], position, flow, t) : null;
 
   const add = useMutation({
-    mutationFn: (adding: StepKindOption) =>
-      updateFlowEditor(
+    mutationFn: (adding: StepKindOption) => {
+      const starter = starterInstructionKey(adding);
+      return updateFlowEditor(
         flow.id,
         newStepUpdate(flow, position, adding, {
           name,
@@ -164,9 +166,11 @@ function AddStepForm({
           url,
           tool: tool
             ? { mcp_server_id: tool.mcp_server_id, tool_id: tool.tool_id, arguments: {} }
-            : null
+            : null,
+          prompt: starter ? t(starter) : undefined
         })
-      ),
+      );
+    },
     onMutate: () => onPendingChange(true),
     onSettled: () => onPendingChange(false),
     onSuccess: (updated) => {

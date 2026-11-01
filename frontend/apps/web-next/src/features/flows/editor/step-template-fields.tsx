@@ -11,9 +11,11 @@ import { useState } from "react";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import { useAnnounce } from "@astryxdesign/core/hooks";
+import { DownloadButton } from "../runs/run-files";
 import {
   flowEditorKeys,
   inspectTemplate,
+  templateDownloadPath,
   templateFilesQueryOptions,
   templateInspectionQueryOptions,
   uploadTemplate
@@ -104,7 +106,7 @@ function bindingOptions(groups: VariableGroup[], t: ReturnType<typeof useTransla
 /**
  * The Word template a template step fills and what goes into each of its
  * fields. Uploading a template adds it to the flow at once; choosing it for
- * the step is part of the draft.
+ * the step is part of the draft. The chosen template can be downloaded.
  */
 export function TemplateFillFields({
   flowId,
@@ -197,6 +199,7 @@ export function TemplateFillFields({
   if (files.isError) return <ListError error={files.error} onRetry={() => void files.refetch()} />;
 
   const assets = files.data;
+  const chosen = assets.find((asset) => asset.id === config.templateAssetId);
   const placeholders =
     inspection.data?.placeholders ??
     config.placeholders.map((name) => ({
@@ -239,6 +242,16 @@ export function TemplateFillFields({
         status={problemStatus(problem)}
         width="100%"
       />
+      {chosen?.can_download ? (
+        <div>
+          <DownloadButton
+            label={t("flow_runs_file_download", { name: chosen.name })}
+            visible={t("flow_runs_file_download_short")}
+            getPath={() => templateDownloadPath(flowId, chosen)}
+            name={chosen.name}
+          />
+        </div>
+      ) : null}
       <FileInput
         label={t("flow_step_editor_template_upload")}
         description={t("flow_step_editor_template_upload_description")}

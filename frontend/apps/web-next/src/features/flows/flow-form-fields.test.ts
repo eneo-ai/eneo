@@ -11,6 +11,7 @@ import {
   roleFor,
   suggestedFieldName,
   withFieldChanged,
+  withFieldMoved,
   type FormFieldDraft
 } from "./flow-form-fields";
 
@@ -112,6 +113,31 @@ describe("field roles", () => {
       label: "Möte",
       role: "run_label"
     });
+  });
+});
+
+describe("withFieldMoved", () => {
+  const fields = [
+    draft({ key: "1", name: "a" }),
+    draft({ key: "2", name: "b" }),
+    draft({ key: "3", name: "c" })
+  ];
+
+  it("swaps the field with its neighbour, and the saved order follows", () => {
+    const down = withFieldMoved(fields, "1", 1);
+    expect(down?.map((field) => field.key)).toEqual(["2", "1", "3"]);
+    expect(persistedFormFields(down ?? []).map((field) => [field.name, field.order])).toEqual([
+      ["b", 1],
+      ["a", 2],
+      ["c", 3]
+    ]);
+    expect(withFieldMoved(fields, "3", -1)?.map((field) => field.key)).toEqual(["1", "3", "2"]);
+  });
+
+  it("moves nothing past either end, nor a field it does not have", () => {
+    expect(withFieldMoved(fields, "1", -1)).toBeNull();
+    expect(withFieldMoved(fields, "3", 1)).toBeNull();
+    expect(withFieldMoved(fields, "x", 1)).toBeNull();
   });
 });
 

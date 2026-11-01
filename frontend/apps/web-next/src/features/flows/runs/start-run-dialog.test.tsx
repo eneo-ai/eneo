@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
@@ -22,6 +22,23 @@ vi.mock("@/lib/api/browser", async () => {
   return { browserApi: api.stub.client };
 });
 
+// The core's upload timeout policy as it is; a test can say one of its timeouts ran out.
+const timeouts = vi.hoisted(() => ({
+  fire: null as null | ((event: { reason: string; timeoutMs: number }) => void)
+}));
+vi.mock("@eneo/eneo-js/flows/runtime-upload-policy", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@eneo/eneo-js/flows/runtime-upload-policy")>();
+  return {
+    ...actual,
+    createFlowRuntimeUploadTimeoutController: (
+      params: Parameters<typeof actual.createFlowRuntimeUploadTimeoutController>[0]
+    ) => {
+      timeouts.fire = params.onTimeout as typeof timeouts.fire;
+      return actual.createFlowRuntimeUploadTimeoutController(params);
+    }
+  };
+});
+
 import { StartRunDialog } from "./start-run-dialog";
 
 const CONTRACT = "GET /api/v1/flows/{id}/run-contract/";
@@ -32,6 +49,8 @@ const DETAIL = "GET /api/v1/flows/{id}/runs/{run_id}/";
 /** Answers runtime uploads as the core does, at once. */
 class FakeUpload {
   static sent: { url: string; body: FormData }[] = [];
+  /** Holds every upload unanswered, as a connection that has stopped. */
+  static hold = false;
   status = 0;
   responseText = "";
   upload = { onprogress: null as ((event: ProgressEvent) => void) | null };
@@ -49,6 +68,7 @@ class FakeUpload {
   abort() {}
   send(body: FormData) {
     FakeUpload.sent.push({ url: this.url, body });
+    if (FakeUpload.hold) return;
     queueMicrotask(() => {
       this.status = 201;
       const file = body.get("upload_file") as File;
@@ -130,6 +150,8 @@ beforeEach(async () => {
   await initializeBrowserSession();
   api.routes = {};
   FakeUpload.sent = [];
+  FakeUpload.hold = false;
+  timeouts.fire = null;
   vi.stubGlobal("XMLHttpRequest", FakeUpload);
 });
 
@@ -234,6 +256,54 @@ describe("StartRunDialog", () => {
       (call?.init as { params?: { header?: Record<string, string> } }).params?.header?.[
         "Idempotency-Key"
       ]
+    ).toBeTruthy();
+  });
+
+  it("downloads a file already uploaded to the form through a link signed for its owner", async () => {
+    api.routes["POST /api/v1/files/{id}/signed-url/"] = () => ({
+      body: { url: "http://backend:8000/api/v1/files/file-1/download/?token=signed", expires_at: 0 }
+    });
+    const saved: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+      this: HTMLAnchorElement
+    ) {
+      saved.push(`${this.getAttribute("href")} ${this.download}`);
+    });
+    const { dialog } = await openDialog();
+    pickFile(dialog, new File(["%PDF"], "brev.pdf", { type: "application/pdf" }));
+    expect(await within(dialog).findByText(/Uppladdad/)).toBeTruthy();
+
+    fireEvent.click(button(dialog, "Ladda ned brev.pdf"));
+    await waitFor(() =>
+      expect(saved).toEqual(["/api/v1/files/file-1/download/?token=signed brev.pdf"])
+    );
+    expect(
+      api.stub.calls.find((call) => call.path === "/api/v1/files/{id}/signed-url/")?.init
+    ).toMatchObject({
+      params: { path: { id: "file-1" } },
+      body: { content_disposition: "attachment" }
+    });
+    click.mockRestore();
+  });
+
+  it.each([
+    [
+      "not_started",
+      "Uppladdningen startade inte inom 30 s. Kontrollera anslutningen och försök igen."
+    ],
+    ["server_not_responding", "Filen skickades, men servern svarade inte inom 30 s. Försök igen."],
+    ["stalled", "Uppladdningen stod stilla i 30 s. Kontrollera anslutningen och försök igen."]
+  ])("says which upload timeout ran out: %s", async (reason, text) => {
+    FakeUpload.hold = true;
+    const { dialog } = await openDialog();
+    pickFile(dialog, new File(["%PDF"], "brev.pdf", { type: "application/pdf" }));
+    await waitFor(() => expect(timeouts.fire).not.toBeNull());
+    act(() => timeouts.fire?.({ reason, timeoutMs: 30_000 }));
+
+    expect(await within(dialog).findByText(text)).toBeTruthy();
+    // It may pass: the file can be sent again.
+    expect(
+      button(dialog, messages.flow_transcript_upload_retry.replace("{name}", "brev.pdf"))
     ).toBeTruthy();
   });
 

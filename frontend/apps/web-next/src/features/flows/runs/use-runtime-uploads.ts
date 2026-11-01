@@ -1,7 +1,10 @@
 "use client";
 
 import { useAnnounce } from "@astryxdesign/core/hooks";
-import { createFlowRuntimeUploadTimeoutController } from "@eneo/eneo-js/flows/runtime-upload-policy";
+import {
+  createFlowRuntimeUploadTimeoutController,
+  type FlowRuntimeUploadTimeoutEvent
+} from "@eneo/eneo-js/flows/runtime-upload-policy";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { API_BASE, onBrowserApiRequest, onRawRefusal } from "@/lib/api/base";
@@ -54,7 +57,7 @@ async function sendFile(
       fileSizeBytes: file.size,
       policy,
       abortController: abort,
-      onTimeout: () => reject(new UploadTimeoutError())
+      onTimeout: (event) => reject(new UploadTimeoutError(event))
     });
     const cancel = () => xhr.abort();
     const clear = () => {
@@ -121,12 +124,22 @@ function forgetRuntimeFile(flowId: string, fileId: string) {
   void deleteRuntimeFile(flowId, fileId).catch(() => {});
 }
 
+/** Which of the core's upload timeouts ran out (`event.reason`), and after how long. */
 class UploadTimeoutError extends Error {
-  constructor() {
-    super("The upload stopped making progress");
+  readonly event: FlowRuntimeUploadTimeoutEvent;
+  constructor(event: FlowRuntimeUploadTimeoutEvent) {
+    super(`The upload timed out (${event.reason})`);
     this.name = "UploadTimeoutError";
+    this.event = event;
   }
 }
+
+/** Svelte's three timeout messages: never started, stalled midway, sent but unanswered. */
+const TIMEOUT_KEYS: Record<FlowRuntimeUploadTimeoutEvent["reason"], string> = {
+  not_started: "flow_runs_upload_not_started",
+  stalled: "flow_runs_upload_stalled",
+  server_not_responding: "flow_runs_upload_server_not_responding"
+};
 
 class UploadNetworkError extends Error {
   constructor() {
@@ -145,7 +158,11 @@ function passes(error: unknown): boolean {
 }
 
 function uploadProblem(error: unknown, input: RuntimeInput, t: Translator, locale: string) {
-  if (error instanceof UploadTimeoutError) return t("flow_runs_upload_stalled");
+  if (error instanceof UploadTimeoutError) {
+    return t(TIMEOUT_KEYS[error.event.reason], {
+      seconds: Math.round(error.event.timeoutMs / 1000)
+    });
+  }
   if (error instanceof UploadNetworkError) return t("flow_runs_upload_network");
   if (error instanceof EneoApiError && error.status === 413 && input.max_file_size_bytes) {
     return t("flow_runs_upload_too_large", {

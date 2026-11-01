@@ -115,7 +115,7 @@ describe("AddStepDialog", () => {
     await expectNoAxeViolations(document.body);
   });
 
-  it("adds an AI step where it was asked for, with the configuration the core gives it", async () => {
+  it("adds an AI step where it was asked for, with the core's configuration and a starter instruction", async () => {
     const updated = makeFlow({ draft_revision: 5 });
     api.routes[EDITOR] = () => ({ body: updated });
     const { dialog, onSaved } = await openDialog(2);
@@ -134,7 +134,14 @@ describe("AddStepDialog", () => {
     expect(body).toEqual({
       expected_revision: 4,
       definition: {},
-      new_steps: [{ name: "Bedöm ärendet", configuration: ai.configuration, assistant: {} }],
+      new_steps: [
+        {
+          name: "Bedöm ärendet",
+          configuration: ai.configuration,
+          // It reads the JSON of the step before it: the Svelte "data into text" starter.
+          assistant: { prompt: { text: messages.flow_template_render_text_prompt } }
+        }
+      ],
       step_order: [{ step_id: "step-1" }, { new_step: 0 }, { step_id: "step-2" }]
     });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

@@ -23,6 +23,15 @@ vi.mock("@/lib/api/browser", async () => {
   return { browserApi: api.stub.client };
 });
 
+// The Prompt Guide's answers stream from the help assistant; the availability read is real.
+const guide = vi.hoisted(() => ({ start: vi.fn(), next: vi.fn() }));
+vi.mock("@/features/help-assistants/prompt-guide/helper-runs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/help-assistants/prompt-guide/helper-runs")>()),
+  startPromptGuideRun: guide.start,
+  continuePromptGuideRun: guide.next,
+  updateHelperRunStatus: vi.fn(async () => ({}))
+}));
+
 import { FlowStepEditor, type StepNavigation } from "./flow-step-editor";
 
 const EDITOR = "PATCH /api/v1/flows/{id}/editor/";
@@ -821,6 +830,118 @@ describe("FlowStepEditor", () => {
     expect(assistantReads.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("puts an earlier instruction from the step assistant's history in the draft, to save with the step", async () => {
+    const author = { id: "user-1", email: "anna.lind@example.se", username: "Anna Lind" };
+    const versions = [
+      {
+        id: "prompt-1",
+        text: "Sammanfatta ärendet.",
+        description: null,
+        is_selected: true,
+        created_at: "2026-10-20T09:00:00Z",
+        user: author
+      },
+      {
+        id: "prompt-0",
+        text: "Sammanfatta kort.",
+        description: "Första utkastet",
+        is_selected: false,
+        created_at: "2026-10-01T09:00:00Z",
+        user: author
+      }
+    ];
+    api.routes["GET /api/v1/assistants/{id}/prompts/"] = () => ({
+      body: { items: versions, count: versions.length }
+    });
+    api.routes["GET /api/v1/prompts/{id}/"] = (init: { params: { path: { id: string } } }) => ({
+      body: versions.find((version) => version.id === init.params.path.id)
+    });
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    const { onSaved } = renderEditor(makeFlow());
+    await nameField();
+
+    fireEvent.click(screen.getByRole("button", { name: messages.show_prompt_history }));
+    const dialog = await screen.findByRole("dialog", { name: messages.prompt_history });
+    fireEvent.click(await within(dialog).findByRole("button", { name: /Första utkastet/ }));
+    await within(dialog).findByText("Sammanfatta kort.");
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.restore_this_version }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect((screen.getByLabelText(/^Instruktion/) as HTMLTextAreaElement).value).toBe(
+      "Sammanfatta kort."
+    );
+    expect(
+      api.stub.calls.find((call) => call.path === "/api/v1/assistants/{id}/prompts/")?.init
+    ).toMatchObject({ params: { path: { id: "assistant-1" } } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(patchBodies()).toEqual([
+      expect.objectContaining({
+        assistants: [
+          expect.objectContaining({
+            changes: { prompt: { text: "Sammanfatta kort.", description: null } }
+          })
+        ]
+      })
+    ]);
+  });
+
+  it("rewrites the instruction with the Prompt Guide into the draft, and its answers save no step", async () => {
+    api.routes["GET /api/v1/help-assistants/availability"] = () => ({ body: { available: true } });
+    guide.start.mockResolvedValue({ run: { id: "run-1" }, answer: "Vad ska steget göra?" });
+    guide.next.mockResolvedValue({
+      run: { id: "run-1" },
+      answer: "```prompt\nSammanfatta i tre punkter.\n```"
+    });
+    renderEditor(makeFlow());
+    await nameField();
+    fireEvent.change(screen.getByLabelText(/^Instruktion/), { target: { value: "Mitt utkast." } });
+
+    fireEvent.click(await screen.findByRole("button", { name: messages.prompt_guide_button }));
+    const dialog = await screen.findByRole("dialog", { name: messages.prompt_guide_dialog_title });
+    // The guide starts from the draft's instruction, for the step's own assistant.
+    expect(guide.start.mock.calls[0]?.[0]).toMatchObject({ targetId: "assistant-1" });
+    expect(guide.start.mock.calls[0]?.[0].question).toContain("Mitt utkast.");
+    const answer = await within(dialog).findByRole("textbox", {
+      name: messages.prompt_guide_input_placeholder
+    });
+    fireEvent.change(answer, { target: { value: "Tre punkter." } });
+    fireEvent.click(
+      within(dialog).getByRole("button", { name: messages.prompt_guide_question_send })
+    );
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.prompt_guide_apply_button })
+    );
+    // The draft's own instruction is unsaved, so the guide asks before it replaces it.
+    const confirm = await screen.findByRole("alertdialog", {
+      name: messages.prompt_guide_apply_overwrite_title
+    });
+    fireEvent.click(
+      within(confirm).getByRole("button", { name: messages.prompt_guide_apply_button })
+    );
+
+    await waitFor(() =>
+      expect((screen.getByLabelText(/^Instruktion/) as HTMLTextAreaElement).value).toBe(
+        "Sammanfatta i tre punkter."
+      )
+    );
+    expect(patchBodies()).toEqual([]);
+  });
+
+  it("offers no Prompt Guide where the organisation has none for the caller", async () => {
+    api.routes["GET /api/v1/help-assistants/availability"] = () => ({
+      body: { available: false, disabled_reason: "no_assignment" }
+    });
+    renderEditor(makeFlow());
+    await nameField();
+    await waitFor(() =>
+      expect(
+        api.stub.calls.some((call) => call.path === "/api/v1/help-assistants/availability")
+      ).toBe(true)
+    );
+    expect(screen.queryByRole("button", { name: messages.prompt_guide_button })).toBeNull();
+  });
+
   it("keeps the edits when the draft moved on, and saves them on the reloaded revision", async () => {
     let attempts = 0;
     api.routes[EDITOR] = () =>
@@ -1025,6 +1146,81 @@ describe("FlowStepEditor", () => {
     expect(screen.getByText("0 av 1 fält är kopplade.")).toBeTruthy();
     await expectNoAxeViolations(container);
   }, 20_000);
+
+  it.each([
+    { can_download: true, offered: true },
+    { can_download: false, offered: false }
+  ])(
+    "downloads the chosen Word template through a link the core signs for it (may: $can_download)",
+    async ({ can_download, offered }) => {
+      api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({
+        body: [
+          {
+            id: "asset-1",
+            flow_id: "flow-1",
+            file_id: "file-1",
+            name: "Beslut.docx",
+            checksum: "abc",
+            status: "ready",
+            placeholders: [],
+            can_download
+          }
+        ]
+      });
+      api.routes["GET /api/v1/flows/{id}/template-inspect/"] = () => ({
+        body: { asset_id: "asset-1", file_id: "file-1", file_name: "Beslut.docx", placeholders: [] }
+      });
+      api.routes["POST /api/v1/flows/{id}/template-files/{file_id}/signed-url/"] = () => ({
+        body: {
+          url: "http://backend:8000/api/v1/files/file-1/download/?token=signed",
+          expires_at: 0
+        }
+      });
+      const saved: string[] = [];
+      const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+        this: HTMLAnchorElement
+      ) {
+        saved.push(`${this.getAttribute("href")} ${this.download}`);
+      });
+      renderEditor(
+        makeFlow({
+          steps: [
+            makeStep({
+              output_mode: "template_fill",
+              output_type: "docx",
+              output_config: {
+                template_asset_id: "asset-1",
+                template_name: "Beslut.docx",
+                placeholders: [],
+                bindings: {}
+              }
+            })
+          ]
+        })
+      );
+      // The template list has loaded and the chosen template shows.
+      await screen.findAllByText("Beslut.docx");
+      const download = () => screen.queryByRole("button", { name: "Ladda ned Beslut.docx" });
+      if (!offered) {
+        expect(download()).toBeNull();
+        click.mockRestore();
+        return;
+      }
+      fireEvent.click(await screen.findByRole("button", { name: "Ladda ned Beslut.docx" }));
+      await waitFor(() =>
+        expect(saved).toEqual(["/api/v1/files/file-1/download/?token=signed Beslut.docx"])
+      );
+      expect(
+        api.stub.calls.find(
+          (call) => call.path === "/api/v1/flows/{id}/template-files/{file_id}/signed-url/"
+        )?.init
+      ).toMatchObject({
+        params: { path: { id: "flow-1", file_id: "asset-1" } },
+        body: { content_disposition: "attachment" }
+      });
+      click.mockRestore();
+    }
+  );
 
   it("releases a Word template uploaded in an edit that is closed without saving", async () => {
     api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({ body: [] });

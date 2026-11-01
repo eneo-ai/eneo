@@ -7,7 +7,16 @@ import { makeFlow, makeStep } from "./flow-fixtures";
 import { FlowSettings } from "./flow-settings";
 import type { TranscriptionResources } from "./flow-transcription-settings";
 
-afterEach(cleanup);
+const announce = vi.hoisted(() => vi.fn());
+vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@astryxdesign/core/hooks")>()),
+  useAnnounce: () => announce
+}));
+
+afterEach(() => {
+  cleanup();
+  announce.mockClear();
+});
 
 const flow = makeFlow({
   metadata_json: {
@@ -155,6 +164,67 @@ describe("FlowSettings", () => {
           }
         })
       })
+    );
+  });
+
+  it("moves a run-form field with its buttons, keeps focus on it and says where it went", async () => {
+    const onSave = vi.fn(async () => true);
+    const twoFields = makeFlow({
+      metadata_json: {
+        form_schema: {
+          fields: [
+            { name: "diarienummer", label: "Diarienummer", type: "text", required: true, order: 1 },
+            { name: "datum", label: "Datum", type: "date", required: false, order: 2 }
+          ]
+        }
+      }
+    });
+    renderInApp(
+      <FlowSettings flow={twoFields} canEdit transcription={noTranscription} onSave={onSave} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    const order = () =>
+      screen
+        .getAllByRole("group", { name: /^(Diarienummer|Datum)$/ })
+        .map(
+          (group) =>
+            document.getElementById(group.getAttribute("aria-labelledby") ?? "")?.textContent
+        );
+    const button = (name: string) => screen.getByRole("button", { name }) as HTMLButtonElement;
+    expect(order()).toEqual(["Diarienummer", "Datum"]);
+    // The first field cannot go up, the last cannot go down.
+    expect(button("Flytta upp Diarienummer").disabled).toBe(true);
+    expect(button("Flytta ner Datum").disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "Flytta ner Diarienummer" }));
+    expect(order()).toEqual(["Datum", "Diarienummer"]);
+    expect(announce).toHaveBeenCalledWith("Diarienummer flyttades till plats 2");
+    // At the end its down button is off, so its up button keeps the focus.
+    await waitFor(() => expect(document.activeElement).toBe(button("Flytta upp Diarienummer")));
+
+    fireEvent.click(screen.getByRole("button", { name: "Spara inställningar" }));
+    await waitFor(() => expect(onSave).toHaveBeenCalledTimes(1));
+    expect(onSave).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata_json: {
+          form_schema: {
+            fields: [
+              { name: "datum", label: "Datum", type: "date", required: false, order: 1 },
+              {
+                name: "diarienummer",
+                label: "Diarienummer",
+                type: "text",
+                required: true,
+                order: 2
+              }
+            ]
+          }
+        }
+      })
+    );
+    // Reordering renames nothing.
+    expect(onSave).toHaveBeenCalledWith(
+      expect.not.objectContaining({ form_field_renames: expect.anything() })
     );
   });
 
