@@ -59,7 +59,9 @@ function CardEmpty({ title }: { title: string }) {
  * One landing card: a titled region with its page's link, that always ends
  * in content, an empty state or an error with retry (never a stuck skeleton).
  * `renderError` lets a card show a specific error (the audit card's locked
- * state) instead of the generic one.
+ * state) instead of the generic one. `blocked` shows it even while the card
+ * has data: a refusal that must take earlier content away (an access session
+ * that has expired), not a refresh that failed and leaves it.
  */
 function OverviewCard({
   title,
@@ -67,6 +69,7 @@ function OverviewCard({
   linkLabel,
   query,
   renderError,
+  blocked = false,
   children
 }: {
   title: string;
@@ -74,10 +77,11 @@ function OverviewCard({
   linkLabel: string;
   query: CardQuery;
   renderError?: (error: Error | null) => ReactNode;
+  blocked?: boolean;
   children: ReactNode;
 }) {
   const headingId = useId();
-  const failed = blockingError(query);
+  const failed = blocked || blockingError(query);
   return (
     <section aria-labelledby={headingId} className="flex min-w-0">
       <Card className="flex min-w-0 flex-1 flex-col gap-4">
@@ -271,7 +275,9 @@ function AuditCard() {
       href="/admin/audit-logs"
       linkLabel={t("admin_overview_audit_link")}
       query={query}
-      // Locked, the card's own link leads to the access session.
+      // Locked, the card's own link leads to the access session. Locked again after events were
+      // loaded (the justified session ran out), what was loaded is taken off the screen.
+      blocked={locked}
       renderError={() =>
         locked ? <CardEmpty title={t("admin_overview_audit_locked")} /> : undefined
       }

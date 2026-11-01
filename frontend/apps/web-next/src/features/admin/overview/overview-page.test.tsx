@@ -316,6 +316,44 @@ describe("AdminOverviewPage", () => {
     await waitFor(() => expect(document.querySelector('[aria-busy="true"]')).toBeNull());
     await expectNoAxeViolations(container);
   });
+
+  it("takes loaded audit events off the screen when the access session expires, and brings them back after an authorized refetch", async () => {
+    const queryClient = testQueryClient();
+    answer(ALL_OK);
+    renderOverview({ queryClient });
+    const events = region("Senaste granskningshändelser");
+    expect(await within(events).findByText("Anna Lind bytte lösenord")).toBeTruthy();
+
+    // The backend refuses the next read: the justified access session has ended.
+    answer({ ...ALL_OK, "/api/v1/audit/logs": failure(401) });
+    await act(async () => {
+      await queryClient.refetchQueries({ type: "active" });
+    });
+    await waitFor(() => expect(within(events).queryByText("Anna Lind bytte lösenord")).toBeNull());
+    expect(within(events).getByText("Visas efter en motiverad åtkomstsession")).toBeTruthy();
+
+    // A session opened again: the next read works and the events are back.
+    answer(ALL_OK);
+    await act(async () => {
+      await queryClient.refetchQueries({ type: "active" });
+    });
+    expect(await within(events).findByText("Anna Lind bytte lösenord")).toBeTruthy();
+    expect(within(events).queryByText("Visas efter en motiverad åtkomstsession")).toBeNull();
+  });
+
+  it("keeps loaded audit events when a refresh only fails", async () => {
+    const queryClient = testQueryClient();
+    answer(ALL_OK);
+    renderOverview({ queryClient });
+    const events = region("Senaste granskningshändelser");
+    expect(await within(events).findByText("Anna Lind bytte lösenord")).toBeTruthy();
+    answer({ ...ALL_OK, "/api/v1/audit/logs": failure(500) });
+    await act(async () => {
+      await queryClient.refetchQueries({ type: "active" });
+    });
+    expect(within(events).getByText("Anna Lind bytte lösenord")).toBeTruthy();
+    expect(within(events).queryByText("Visas efter en motiverad åtkomstsession")).toBeNull();
+  });
 });
 
 describe("Behöver åtgärd (decision 30)", () => {
