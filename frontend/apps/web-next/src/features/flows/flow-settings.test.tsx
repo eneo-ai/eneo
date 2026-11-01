@@ -228,6 +228,30 @@ describe("FlowSettings", () => {
     );
   });
 
+  it("says a field without a label by the number it has once moved, as its row now does", () => {
+    renderInApp(
+      <FlowSettings flow={makeFlow()} canEdit transcription={noTranscription} onSave={vi.fn()} />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Ändra inställningar" }));
+    // Two new fields, nothing typed yet: their titles are their places.
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fält" }));
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till fält" }));
+    const titles = () =>
+      screen
+        .getAllByRole("group", { name: /^Fält \d$/ })
+        .map((group) => group.getAttribute("aria-labelledby")!)
+        .map((id) => document.getElementById(id)?.textContent);
+    expect(titles()).toEqual(["Fält 1", "Fält 2"]);
+    const moving = screen.getByRole("button", { name: "Flytta upp Fält 2" });
+    const row = moving.closest<HTMLElement>('[role="group"]')!;
+    fireEvent.click(moving);
+    // Its row is the first now, so it is "Fält 1": the announcement says the same.
+    expect(announce).toHaveBeenCalledWith("Fält 1 flyttades till plats 1");
+    expect(document.getElementById(row.getAttribute("aria-labelledby")!)?.textContent).toBe(
+      "Fält 1"
+    );
+  });
+
   it("sends a renamed field's saved name, so the steps' reads follow it", async () => {
     const onSave = vi.fn(async () => true);
     renderInApp(

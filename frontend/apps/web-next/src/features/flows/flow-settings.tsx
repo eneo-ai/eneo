@@ -355,12 +355,20 @@ export function FlowSettings({
 
   const moveId = (key: string, direction: "up" | "down") => `${formId}-${key}-${direction}`;
 
-  /** Moves a field up or down the form; its button keeps focus, at an end its twin. */
-  function moveField(field: FormFieldDraft, title: string, position: number, delta: -1 | 1) {
+  /** A field's title: its label, or its place in the form while it has none. */
+  const fieldTitle = (field: FormFieldDraft, position: number) =>
+    field.label.trim() || t("flows_form_field_number", { number: position });
+
+  /**
+   * Moves a field up or down the form; its button keeps focus, at an end its twin. The
+   * announcement names it as its row does after the move (an unlabeled field's place changed).
+   */
+  function moveField(field: FormFieldDraft, position: number, delta: -1 | 1) {
     const next = withFieldMoved(fields, field.key, delta);
     if (!next) return;
     flushSync(() => setFields(next));
-    announce(t("flows_step_moved", { step: title, position: position + delta }));
+    const moved = position + delta;
+    announce(t("flows_step_moved", { step: fieldTitle(field, moved), position: moved }));
     const same = document.getElementById(moveId(field.key, delta < 0 ? "up" : "down"));
     const other = document.getElementById(moveId(field.key, delta < 0 ? "down" : "up"));
     (same instanceof HTMLButtonElement && !same.disabled ? same : other)?.focus();
@@ -442,8 +450,7 @@ export function FlowSettings({
               {t("flows_form_description")}
             </Text>
             {fields.map((field, index) => {
-              const title =
-                field.label.trim() || t("flows_form_field_number", { number: index + 1 });
+              const title = fieldTitle(field, index + 1);
               return (
                 <FormFieldRow
                   key={field.key}
@@ -452,7 +459,7 @@ export function FlowSettings({
                   isFirst={index === 0}
                   isLast={index === fields.length - 1}
                   moveId={(direction) => moveId(field.key, direction)}
-                  onMove={(delta) => moveField(field, title, index + 1, delta)}
+                  onMove={(delta) => moveField(field, index + 1, delta)}
                   problems={
                     showProblems ? problems.filter((problem) => problem.key === field.key) : []
                   }
