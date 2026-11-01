@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import type { Page } from "@playwright/test";
 import type { Schema } from "../src/lib/api/models";
 import { expect, test } from "./csp";
-import { apiPost, apiRequest, sessionResponseHeaders, uniqueName } from "./helpers";
+import { apiPost, apiRequest, MOCK_REPLY, sessionResponseHeaders, uniqueName } from "./helpers";
 
 test.skip(!process.env.E2E_BASE_URL, "Verifies Flows on FastAPI serving the Vite build.");
 
@@ -157,6 +157,40 @@ test(
     await expect(article).toContainText(
       `${count.format(older.step.num_tokens_input! + older.step.num_tokens_output!)} token (${count.format(older.step.num_tokens_input!)} in, ${count.format(older.step.num_tokens_output!)} ut)`
     );
+    await test.step("expands and copies the secondary step result without hiding the main result", async () => {
+      const output = older.step.output_payload_json?.text;
+      expect(output).toBe(MOCK_REPLY);
+      const results = page.getByText(MOCK_REPLY, { exact: true });
+      const secondary = article.getByText(MOCK_REPLY, { exact: true });
+      const disclosure = article.getByRole("button", { name: "Stegets resultat", exact: true });
+      const copy = article.getByRole("button", { name: "Kopiera resultatet", exact: true });
+      await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+      await expect(secondary).toHaveCount(0);
+      await expect(results).toHaveCount(1);
+      await expect(results).toBeVisible();
+      await expect(copy).toBeVisible();
+      await disclosure.focus();
+      await page.keyboard.press("Enter");
+      await expect(disclosure).toHaveAttribute("aria-expanded", "true");
+      await expect(disclosure).toBeFocused();
+      await expect(secondary).toBeVisible();
+      await expect(results).toHaveCount(2);
+      await expect(results.first()).toBeVisible();
+      await page.screenshot({
+        path: test.info().outputPath("flow-step-output-expanded.png"),
+        fullPage: true
+      });
+      await copy.click();
+      await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(output);
+      await disclosure.focus();
+      await page.keyboard.press("Enter");
+      await expect(disclosure).toHaveAttribute("aria-expanded", "false");
+      await expect(disclosure).toBeFocused();
+      await expect(secondary).toHaveCount(0);
+      await expect(results).toHaveCount(1);
+      await expect(results).toBeVisible();
+      await expect(copy).toBeVisible();
+    });
     await article
       .getByRole("button", { name: "Prompt och modellinställningar", exact: true })
       .click();
