@@ -83,7 +83,7 @@ test(
       await route.fulfill({ response });
     });
     await page.getByRole("button", { name: "Radera denna yta", exact: true }).click();
-    const dialog = page.getByRole("dialog", { name: "Radera yta", exact: true });
+    const dialog = page.getByRole("alertdialog", { name: "Radera yta", exact: true });
     await dialog
       .getByRole("textbox", { name: "Ange ytnamnet för att bekräfta", exact: true })
       .fill(renamed);
@@ -97,7 +97,7 @@ test(
       deliverDelete();
     }
     await expect(page).toHaveURL("/spaces/list");
-    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await expect(page.getByRole("alertdialog")).toHaveCount(0);
   }
 );
 
