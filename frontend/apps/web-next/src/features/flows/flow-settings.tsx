@@ -1,13 +1,14 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { Plus, Trash2 } from "lucide-react";
+import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -24,6 +25,7 @@ import {
   roleFor,
   suggestedFieldName,
   withFieldChanged,
+  withFieldMoved,
   type FormFieldDraft,
   type FormFieldProblem,
   type FormFieldType
@@ -126,16 +128,26 @@ function SettingsSummary({
 
 function FormFieldRow({
   field,
-  index,
+  title,
+  isFirst,
+  isLast,
+  moveId,
   problems,
   onChange,
+  onMove,
   onRemove,
   existingNames
 }: {
   field: FormFieldDraft;
-  index: number;
+  /** The field's label, or "Fält 2" until it has one. */
+  title: string;
+  isFirst: boolean;
+  isLast: boolean;
+  /** The id of the field's move button in that direction. */
+  moveId: (direction: "up" | "down") => string;
   problems: readonly FormFieldProblem[];
   onChange: (field: FormFieldDraft) => void;
+  onMove: (delta: -1 | 1) => void;
   onRemove: () => void;
   existingNames: readonly string[];
 }) {
@@ -143,7 +155,6 @@ function FormFieldRow({
   const legendId = useId();
   const nameProblem = problems.find((problem) => problem.part === "name");
   const optionsProblem = problems.find((problem) => problem.part === "options");
-  const title = field.label.trim() || t("flows_form_field_number", { number: index + 1 });
   const role = roleFor(field.type);
 
   return (
@@ -153,16 +164,36 @@ function FormFieldRow({
       className="border-ax-border rounded-ax-container flex flex-col gap-3 border p-3"
     >
       <div className="flex items-center justify-between gap-2">
-        <span id={legendId} className="text-ax-text text-sm font-semibold break-words">
+        <span id={legendId} className="text-ax-text min-w-0 text-sm font-semibold break-words">
           {title}
         </span>
-        <IconButton
-          label={t("flows_form_field_remove", { field: title })}
-          icon={<Trash2 aria-hidden="true" />}
-          variant="ghost"
-          size="sm"
-          onClick={onRemove}
-        />
+        <div className="flex shrink-0 items-center gap-1">
+          <IconButton
+            id={moveId("up")}
+            label={t("flows_step_move_up", { step: title })}
+            icon={<ArrowUp aria-hidden="true" />}
+            variant="ghost"
+            size="sm"
+            isDisabled={isFirst}
+            onClick={() => onMove(-1)}
+          />
+          <IconButton
+            id={moveId("down")}
+            label={t("flows_step_move_down", { step: title })}
+            icon={<ArrowDown aria-hidden="true" />}
+            variant="ghost"
+            size="sm"
+            isDisabled={isLast}
+            onClick={() => onMove(1)}
+          />
+          <IconButton
+            label={t("flows_form_field_remove", { field: title })}
+            icon={<Trash2 aria-hidden="true" />}
+            variant="ghost"
+            size="sm"
+            onClick={onRemove}
+          />
+        </div>
       </div>
       <TextInput
         label={t("flows_form_field_label")}
@@ -258,6 +289,7 @@ export function FlowSettings({
   onEditingChange?: (editing: boolean) => void;
 }) {
   const t = useTranslations();
+  const announce = useAnnounce();
   const headingId = useId();
   const formId = useId();
   const formRef = useRef<HTMLFormElement>(null);
@@ -319,6 +351,19 @@ export function FlowSettings({
         nameEdited: false
       }
     ]);
+  }
+
+  const moveId = (key: string, direction: "up" | "down") => `${formId}-${key}-${direction}`;
+
+  /** Moves a field up or down the form; its button keeps focus, at an end its twin. */
+  function moveField(field: FormFieldDraft, title: string, position: number, delta: -1 | 1) {
+    const next = withFieldMoved(fields, field.key, delta);
+    if (!next) return;
+    flushSync(() => setFields(next));
+    announce(t("flows_step_moved", { step: title, position: position + delta }));
+    const same = document.getElementById(moveId(field.key, delta < 0 ? "up" : "down"));
+    const other = document.getElementById(moveId(field.key, delta < 0 ? "down" : "up"));
+    (same instanceof HTMLButtonElement && !same.disabled ? same : other)?.focus();
   }
 
   async function submit(event: React.SubmitEvent<HTMLFormElement>) {
@@ -396,29 +441,39 @@ export function FlowSettings({
             <Text type="supporting" size="sm" as="p" display="block" className="m-0">
               {t("flows_form_description")}
             </Text>
-            {fields.map((field, index) => (
-              <FormFieldRow
-                key={field.key}
-                field={field}
-                index={index}
-                problems={
-                  showProblems ? problems.filter((problem) => problem.key === field.key) : []
-                }
-                existingNames={fields
-                  .filter((other) => other.key !== field.key)
-                  .map((other) => other.name)}
-                onChange={(next) => setFields((current) => withFieldChanged(current, next))}
-                onRemove={() => {
-                  setFields((current) =>
-                    current.filter((candidate) => candidate.key !== field.key)
-                  );
-                  // The row is gone; the add button keeps focus in the form.
-                  requestAnimationFrame(() =>
-                    formRef.current?.querySelector<HTMLElement>("[data-add-field] button")?.focus()
-                  );
-                }}
-              />
-            ))}
+            {fields.map((field, index) => {
+              const title =
+                field.label.trim() || t("flows_form_field_number", { number: index + 1 });
+              return (
+                <FormFieldRow
+                  key={field.key}
+                  field={field}
+                  title={title}
+                  isFirst={index === 0}
+                  isLast={index === fields.length - 1}
+                  moveId={(direction) => moveId(field.key, direction)}
+                  onMove={(delta) => moveField(field, title, index + 1, delta)}
+                  problems={
+                    showProblems ? problems.filter((problem) => problem.key === field.key) : []
+                  }
+                  existingNames={fields
+                    .filter((other) => other.key !== field.key)
+                    .map((other) => other.name)}
+                  onChange={(next) => setFields((current) => withFieldChanged(current, next))}
+                  onRemove={() => {
+                    setFields((current) =>
+                      current.filter((candidate) => candidate.key !== field.key)
+                    );
+                    // The row is gone; the add button keeps focus in the form.
+                    requestAnimationFrame(() =>
+                      formRef.current
+                        ?.querySelector<HTMLElement>("[data-add-field] button")
+                        ?.focus()
+                    );
+                  }}
+                />
+              );
+            })}
             <div data-add-field>
               <Button
                 label={t("flows_form_add_field")}

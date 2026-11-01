@@ -160,6 +160,22 @@ export function withFieldChanged(
   });
 }
 
+/** `fields` with the row `key` swapped with its neighbour (-1 above, 1 below); null at an end. */
+export function withFieldMoved(
+  fields: readonly FormFieldDraft[],
+  key: string,
+  delta: -1 | 1
+): FormFieldDraft[] | null {
+  const from = fields.findIndex((field) => field.key === key);
+  const moved = fields[from];
+  const neighbour = fields[from + delta];
+  if (!moved || !neighbour) return null;
+  const next = [...fields];
+  next[from] = neighbour;
+  next[from + delta] = moved;
+  return next;
+}
+
 /**
  * The saved fields the edit renames, from the saved name to the new one, for
  * `form_field_renames`: the core then moves the steps' reads of each field
