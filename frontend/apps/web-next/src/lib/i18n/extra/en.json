@@ -1853,7 +1853,7 @@
   "space_apps_actions": "Apps, actions",
   "chat_composer_hint_touch": "Return adds a line. Send with the Send button.",
   "app_run_start": "Run the app",
-  "no_mcp_servers_available": "No MCP servers yet",
+  "admin_mcp_servers_empty_title": "No MCP servers yet",
   "space_assistants_actions": "Assistants, actions",
   "chat_continue": "Continue",
   "admin_api_keys_actions": "API keys, actions",

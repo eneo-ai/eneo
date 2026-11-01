@@ -1853,7 +1853,7 @@
   "space_apps_actions": "Appar, åtgärder",
   "chat_composer_hint_touch": "Retur ger en ny rad. Skicka med Skicka-knappen.",
   "app_run_start": "Kör appen",
-  "no_mcp_servers_available": "Inga MCP-servrar ännu",
+  "admin_mcp_servers_empty_title": "Inga MCP-servrar ännu",
   "space_assistants_actions": "Assistenter, åtgärder",
   "chat_continue": "Fortsätt",
   "admin_api_keys_actions": "API-nycklar, åtgärder",
