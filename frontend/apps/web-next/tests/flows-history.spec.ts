@@ -12,7 +12,7 @@ const stepName = "Sammanfatta underlag";
 const count = new Intl.NumberFormat("sv");
 
 // Real persistence and execution, using the completion provider already seeded in E2E.
-async function historyFlow(page: Page) {
+async function historyFlow(page: Page, source?: { title: string; text: string }) {
   await page.goto("/spaces/list");
   const models = await apiRequest<Schema<"PaginatedResponse_CompletionModelPublic_">>(
     page,
@@ -43,6 +43,31 @@ async function historyFlow(page: Page) {
   const spaceId = await apiPost(page, "/spaces/", { name: uniqueName("E2E history") });
   const space = await apiRequest<Schema<"SpacePublic">>(page, `/spaces/${spaceId}/`);
   expect(space.completion_models.some((item) => item.id === model.id)).toBe(true);
+  let collectionId: string | undefined;
+  let sourceId: string | undefined;
+  if (source) {
+    const embeddings = await apiRequest<Schema<"PaginatedResponse_EmbeddingModelPublic_">>(
+      page,
+      "/embedding-models/"
+    );
+    const embedding = embeddings.items.find((item) => item.name === "e2e-mock-embedding");
+    if (!embedding) throw new Error("The E2E mock embedding model is missing");
+    collectionId = await apiPost(page, `/spaces/${spaceId}/knowledge/groups/`, {
+      name: uniqueName("Historikkällor"),
+      embedding_model: { id: embedding.id }
+    });
+    // Text insertion embeds and persists the source before returning.
+    const blobs = await apiRequest<Schema<"PaginatedResponse_InfoBlobPublic_">>(
+      page,
+      `/groups/${collectionId}/info-blobs/`,
+      {
+        method: "POST",
+        body: { info_blobs: [{ text: source.text, metadata: { title: source.title } }] }
+      }
+    );
+    expect(blobs.items).toHaveLength(1);
+    sourceId = blobs.items[0]!.id;
+  }
   const flow = await apiRequest<Schema<"FlowPublic">>(page, "/flows/", {
     method: "POST",
     body: { space_id: spaceId, name: uniqueName("Historikflöde") }
@@ -56,6 +81,7 @@ async function historyFlow(page: Page) {
         {
           name: stepName,
           assistant: {
+            groups: collectionId ? [{ id: collectionId }] : [],
             completion_model: { id: model.id },
             completion_model_kwargs: { temperature: 0.2 },
             prompt: { text: originalPrompt }
@@ -63,6 +89,9 @@ async function historyFlow(page: Page) {
           configuration: {
             input_source: "flow_input",
             input_type: "text",
+            input_config: {
+              runtime_input: { enabled: !!source, required: false, input_format: "document" }
+            },
             output_mode: "pass_through",
             output_type: "text"
           }
@@ -75,18 +104,47 @@ async function historyFlow(page: Page) {
     `/flows/${flow.id}/publish/?expected_revision=${saved.draft_revision}`,
     { method: "POST" }
   );
-  return { published, url: `/spaces/${spaceId}/flows/${flow.id}` };
+  return { published, url: `/spaces/${spaceId}/flows/${flow.id}`, sourceId };
 }
 
-async function completedRun(page: Page, flow: Schema<"FlowPublic">, label: string) {
-  const run = await apiRequest<Schema<"FlowRunPublic">>(page, `/flows/${flow.id}/runs/`, {
-    method: "POST",
-    body: {
-      expected_flow_version: flow.published_version,
-      run_label: label,
-      input_payload_json: { text: "Ett kort underlag för historikkontrollen." }
-    } satisfies Schema<"FlowRunCreateRequest">
-  });
+async function completedRun(
+  page: Page,
+  flow: Schema<"FlowPublic">,
+  label: string,
+  file?: { name: string; text: string }
+) {
+  let run: Schema<"FlowRunPublic">;
+  if (file) {
+    await page.goto(`/spaces/${flow.space_id}/flows/${flow.id}`);
+    await page.getByRole("button", { name: "Kör flödet", exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: `Kör ${flow.name}`, exact: true });
+    await dialog.locator('input[type="file"]').setInputFiles({
+      name: file.name,
+      mimeType: "text/plain",
+      buffer: Buffer.from(file.text)
+    });
+    await expect(dialog.getByText(/^Uppladdad, /)).toBeVisible();
+    await dialog.getByRole("textbox", { name: /^Namn på körningen/ }).fill(label);
+    await dialog.getByRole("button", { name: "Granska", exact: true }).click();
+    const created = page.waitForResponse(
+      (response) =>
+        response.url().endsWith(`/api/v1/flows/${flow.id}/runs/`) &&
+        response.request().method() === "POST"
+    );
+    await dialog.getByRole("button", { name: "Starta körningen", exact: true }).click();
+    const response = await created;
+    expect(response.ok()).toBe(true);
+    run = await response.json();
+  } else {
+    run = await apiRequest<Schema<"FlowRunPublic">>(page, `/flows/${flow.id}/runs/`, {
+      method: "POST",
+      body: {
+        expected_flow_version: flow.published_version,
+        run_label: label,
+        input_payload_json: { text: "Ett kort underlag för historikkontrollen." }
+      } satisfies Schema<"FlowRunCreateRequest">
+    });
+  }
   const path = `/flows/${flow.id}/runs/${run.id}`;
   await expect
     .poll(
@@ -109,9 +167,24 @@ test(
   async ({ page, context }) => {
     test.setTimeout(150_000);
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
-    const { published, url } = await historyFlow(page);
+    const source = {
+      title: uniqueName("Handbok för historikkontroll"),
+      text: "Historikkontrollen använder ett sparat beslutsunderlag. Beslutet ska innehålla datum och ansvarig handläggare."
+    };
+    const file = {
+      name: "historiskt-underlag.txt",
+      text: "Sammanfatta beslutsunderlaget i handboken."
+    };
+    const { published, url, sourceId } = await historyFlow(page, source);
     const olderLabel = uniqueName("Äldre körning");
-    const older = await completedRun(page, published, olderLabel);
+    const older = await completedRun(page, published, olderLabel, file);
+    expect(older.step.runtime_input_files).toEqual([expect.objectContaining({ name: file.name })]);
+    const reference = older.evidence.knowledge_traces?.[0]?.rag.references?.[0];
+    expect(reference?.id).toBe(sourceId);
+    expect(reference?.usage_state).toBe("inserted_into_prompt");
+    expect(reference?.passages).toHaveLength(1);
+    const passage = reference!.passages![0]!;
+    expect(passage.text).toBe(source.text);
     expect(older.detail.evidence_access.can_export_redacted).toBe(false);
     expect(older.detail.evidence_access.redacted_export_refusal_code).toBe(
       "flow_run_evidence_export_disabled"
@@ -138,6 +211,7 @@ test(
             assistant_id: step.assistant_id,
             step_id: step.id,
             changes: {
+              groups: [],
               prompt: { text: revisedPrompt },
               completion_model_kwargs: { temperature: 0.7 }
             }
@@ -158,6 +232,8 @@ test(
     expect(older.step.effective_prompt).not.toContain(revisedPrompt);
     expect(older.step.model_parameters_json).toMatchObject({ temperature: 0.2 });
     expect(newer.step.model_parameters_json).toMatchObject({ temperature: 0.7 });
+    expect(newer.step.runtime_input_file_ids ?? []).toHaveLength(0);
+    expect(newer.evidence.knowledge_traces?.[0]?.rag.references ?? []).toHaveLength(0);
 
     await page.goto(`${url}?tab=runs`);
     await expect(page.getByRole("link", { name: newerLabel, exact: true })).toBeVisible();
@@ -178,6 +254,46 @@ test(
     await expect(page.getByText(usageText, { exact: true })).toBeVisible();
 
     const article = page.getByRole("article", { name: `Steg 1: ${stepName}`, exact: true });
+    await test.step("opens the older run's file and recorded knowledge passage after republishing", async () => {
+      const inputs = article.getByRole("list", { name: "Filer som steget fick", exact: true });
+      await expect(inputs.getByText(file.name, { exact: true })).toBeVisible();
+      const downloaded = page.waitForEvent("download");
+      await inputs.getByRole("button", { name: `Ladda ned ${file.name}`, exact: true }).click();
+      const download = await downloaded;
+      expect(download.suggestedFilename()).toBe(file.name);
+      const path = await download.path();
+      expect(path).not.toBeNull();
+      expect(await readFile(path!, "utf8")).toBe(file.text);
+
+      const knowledge = page.getByRole("region", { name: "Kunskapsunderlag", exact: true });
+      await knowledge.getByRole("button", { name: "Visa kunskapsunderlag", exact: true }).click();
+      const openSource = knowledge.getByRole("button", {
+        name: `Visa källan ${source.title}`,
+        exact: true
+      });
+      await openSource.focus();
+      await page.keyboard.press("Enter");
+      const viewer = page.getByRole("dialog", { name: source.title, exact: true });
+      const document = viewer.getByRole("region", {
+        name: `Dokumentet ${source.title}`,
+        exact: true
+      });
+      await expect(document).toHaveText(source.text);
+      const highlight = document.locator("mark");
+      await expect(highlight).toHaveText(passage.text!);
+      const next = viewer.getByRole("button", { name: "Nästa träff", exact: true });
+      await next.focus();
+      await page.keyboard.press("Enter");
+      await expect(highlight).toBeFocused();
+      await expect(viewer.getByText("1 av 1", { exact: true })).toBeVisible();
+      await viewer.screenshot({
+        path: test.info().outputPath("flow-history-knowledge-passage.png")
+      });
+      await viewer.getByRole("button", { name: "Klar", exact: true }).click();
+      await expect(viewer).toBeHidden();
+      await expect(openSource).toBeFocused();
+      await expect(page).toHaveURL(`${new URL(url, page.url()).href}/runs/${older.detail.id}`);
+    });
     expect(older.step.num_tokens_input).toBeGreaterThan(0);
     expect(older.step.num_tokens_output).toBeGreaterThan(0);
     await expect(article).toContainText(
