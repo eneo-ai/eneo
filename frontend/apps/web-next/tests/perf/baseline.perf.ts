@@ -395,7 +395,7 @@ test("chat readiness waits for a visible, editable and focusable composer", asyn
   await page.route(`**${CHAT_ROUTE}`, (route) =>
     route.fulfill({
       contentType: "text/html",
-      body: `<main><textarea aria-label="Message to Eneo" hidden></textarea></main>`
+      body: `<main><textarea aria-label="Ask Eneo" hidden></textarea></main>`
     })
   );
   await page.goto(CHAT_ROUTE);
@@ -476,7 +476,7 @@ test("click-to-render timings are stamped in the page, not when the assertion pa
       contentType: "text/html",
       body: `<main>
         <nav aria-label="Main menu"><a href="/spaces/list">All spaces</a></nav>
-        <textarea aria-label="Message to Eneo"></textarea><button>Send message</button>
+        <textarea aria-label="Ask Eneo"></textarea><button>Send message</button>
       </main>
       <script>
         // window.app.reply comes from the test as data, rendered as text.
