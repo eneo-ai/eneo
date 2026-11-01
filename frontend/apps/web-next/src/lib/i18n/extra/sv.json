@@ -4249,5 +4249,7 @@
   "user_groups_description": "Grupper av användare som har åtkomst till denna yta. Alla medlemmar i en grupp ärver gruppens roll.",
   "conversation_retention_space_description": "Gäller för alla assistenter och appar i denna yta som inte har sin egen kvarhållningspolicy",
   "insights_assistant_row_counts": "{questions, plural, one {# fråga} other {# frågor}} · {sessions, plural, one {# session} other {# sessioner}}",
-  "enable_mcp_in_space_settings": "Aktivera MCP-servrar i space-inställningarna först."
+  "enable_mcp_in_space_settings": "Aktivera MCP-servrar i space-inställningarna först.",
+  "speaker_service_checked_at": "Testad <time></time>",
+  "speaker_service_check_announce": "Anslutningstest för {name}: {status}"
 }

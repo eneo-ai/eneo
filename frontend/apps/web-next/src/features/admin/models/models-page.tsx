@@ -15,16 +15,19 @@ import { MigrationHistoryPanel } from "./migration-history-panel";
 import { adminModelsQueryOptions } from "./models";
 import { PricingVisibilityToggle } from "./pricing-visibility-toggle";
 import { ProviderOverview } from "./provider-overview";
+import { TranscriptionServicesSection } from "./transcription-services-section";
 
-type ModelsTab = "models" | "history" | "settings";
-const TABS: ModelsTab[] = ["models", "history", "settings"];
+type ModelsTab = "models" | "speakers" | "history" | "settings";
+const TABS: ModelsTab[] = ["models", "speakers", "history", "settings"];
 
 /**
  * Admin model management. "Modeller" groups the models by provider (API-key
  * status, enable/disable, default, security classification, edit, migrate);
- * "Migreringshistorik" lists past migrations; "Inställningar" holds the
- * org-wide pricing visibility. "Lägg till leverantör" and each provider's
- * "Lägg till modell" open the same add-model wizard.
+ * "Ordtider och talaridentifiering" connects the services that time the words
+ * of a transcript and label its speakers; "Migreringshistorik" lists past
+ * migrations; "Inställningar" holds the org-wide pricing visibility. "Lägg
+ * till leverantör" and each provider's "Lägg till modell" open the same
+ * add-model wizard.
  */
 export function ModelsPage() {
   const t = useTranslations();
@@ -45,9 +48,11 @@ export function ModelsPage() {
   const tabLabel = (value: ModelsTab) =>
     value === "models"
       ? t("models")
-      : value === "history"
-        ? t("migration_history_title")
-        : t("settings");
+      : value === "speakers"
+        ? t("speaker_identification")
+        : value === "history"
+          ? t("migration_history_title")
+          : t("settings");
 
   function selectTab(next: ModelsTab) {
     setTab(next);
@@ -123,6 +128,13 @@ export function ModelsPage() {
                 onAddModel={openAddModel}
                 onAddProvider={openAddProvider}
               />
+            </RemovalFocusScope>
+          </div>
+        )}
+        {visited.has("speakers") && (
+          <div hidden={tab !== "speakers"}>
+            <RemovalFocusScope target={panelRef}>
+              <TranscriptionServicesSection classifications={security.security_classifications} />
             </RemovalFocusScope>
           </div>
         )}

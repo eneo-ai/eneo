@@ -23,7 +23,12 @@ import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { IconField } from "@/components/composites/icon-field";
 import { LoadingState } from "@/components/composites/loading-state";
-import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
+import {
+  blockingError,
+  ListError,
+  QueryStateBoundary,
+  RefreshError
+} from "@/components/composites/query-state";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import {
   SectionedSettings,
@@ -57,6 +62,10 @@ import {
 } from "@/features/capabilities/capabilities";
 import { mcpServersQueryOptions, mcpServerToolsQueryOptions } from "@/features/admin/mcp/mcp";
 import {
+  transcriptionServiceCatalogueQueryOptions,
+  type TranscriptionServiceSummary
+} from "@/features/admin/models/transcription-services";
+import {
   securityClassificationsQueryOptions,
   type SecurityClassification
 } from "@/features/admin/security-classifications/security-classifications";
@@ -81,6 +90,7 @@ import {
   securityImpactTotal
 } from "./security-impact";
 import { SpaceModelSelect, type ModelKind, type ModelSelectionChange } from "./space-model-select";
+import { SpaceSpeakerServices } from "./space-speaker-services";
 import { SpaceDeletionHint } from "@/features/spaces/list/delete-space-dialog";
 
 type SpaceUpdate = Schema<"PartialUpdateSpaceRequest">;
@@ -635,7 +645,72 @@ function ModelsSection() {
           )}
         </>
       ) : null}
+      <SpeakerServicesRow />
     </SettingsGroup>
+  );
+}
+
+/**
+ * The speaker identification services granted to the space, through the
+ * space's one save path: each switch sends the whole list, built from the
+ * space as the previous save left it, one change at a time. Flows in the
+ * space read the same grants from the space (`transcription_services`).
+ */
+function SpeakerServicesRow() {
+  const t = useTranslations();
+  const { space, can } = useSpace();
+  const update = useUpdateSpace();
+  const autosave = useAutosave("speaker-services");
+  const catalogue = useQuery(transcriptionServiceCatalogueQueryOptions(browserApi));
+  const security = useQuery(securityClassificationsQueryOptions(browserApi));
+  const [savingId, setSavingId] = useState<string | null>(null);
+  // Read by a second press before the first one's render.
+  const savingRef = useRef(false);
+
+  async function toggle(service: TranscriptionServiceSummary, grant: boolean) {
+    if (savingRef.current) return;
+    savingRef.current = true;
+    setSavingId(service.id);
+    await autosave(() =>
+      update.mutateAsync((latest) => {
+        const current = latest.transcription_services;
+        if (!current) throw new Error(t("speaker_service_space_load_failed"));
+        const ids = current.map((granted) => granted.id).filter((id) => id !== service.id);
+        return {
+          transcription_services: (grant ? [...ids, service.id] : ids).map((id) => ({ id }))
+        };
+      })
+    );
+    savingRef.current = false;
+    setSavingId(null);
+  }
+
+  return (
+    <SettingsRow
+      id="speaker-services"
+      title={t("speaker_identification")}
+      description={t("speaker_service_space_description")}
+    >
+      <QueryStateBoundary
+        query={catalogue}
+        rows={2}
+        errorTitle={t("speaker_service_space_load_failed")}
+      >
+        {(services) => (
+          <SpaceSpeakerServices
+            services={services}
+            links={space.transcription_services}
+            spaceClassification={space.security_classification}
+            // Until the setting is read (its own section reports a failure),
+            // a classified space offers only what meets its class.
+            securityEnabled={security.data?.security_enabled ?? true}
+            canEdit={can("edit", "space")}
+            savingId={savingId}
+            onToggle={(service, grant) => void toggle(service, grant)}
+          />
+        )}
+      </QueryStateBoundary>
+    </SettingsRow>
   );
 }
 
