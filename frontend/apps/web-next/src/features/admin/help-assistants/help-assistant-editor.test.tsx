@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, assert, expect, it, vi } from "vitest";
 import { renderInApp, testQueryClient } from "@/test/render";
 import type { Assistant } from "@/features/assistants/editor/use-assistant";
 import { HelpAssistantEditor } from "./help-assistant-editor";
@@ -208,6 +208,7 @@ it("does not restore old provenance when manual A returns while assistant save B
       ).toHaveLength(2)
     );
     const writes = api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/");
+    assert(writes[1]);
     expect(writes[1][1].body).toEqual({ prompt: { text: "Original A", description: "" } });
   } finally {
     release();
@@ -270,6 +271,11 @@ it("keeps same-text assistant restore intent through a held manual save and exte
   try {
     fireEvent.click(screen.getByRole("button", { name: "Visa prompthistorik" }));
     await screen.findByRole("button", { name: "Återställ denna version" });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Återställ denna version" }).getAttribute("aria-busy")
+      ).toBeNull()
+    );
     fireEvent.click(screen.getByRole("button", { name: "Återställ denna version" }));
     expect(
       api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/")
@@ -310,6 +316,24 @@ it("keeps same-text assistant restore intent through a held manual save and exte
     expect(
       api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/")
     ).toHaveLength(2);
+    fireEvent.click(screen.getByRole("button", { name: "Visa prompthistorik" }));
+    await screen.findByRole("button", { name: "Återställ denna version" });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Återställ denna version" }).getAttribute("aria-busy")
+      ).toBeNull()
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Återställ denna version" }));
+    await waitFor(() =>
+      expect(
+        api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/")
+      ).toHaveLength(3)
+    );
+    const writes = api.POST.mock.calls.filter(([path]) => path === "/api/v1/assistants/{id}/");
+    assert(writes[2]);
+    expect(writes[2][1].body).toEqual({
+      prompt: { text: "Manual B", description: expect.stringMatching(/^Återställd prompt från /) }
+    });
   } finally {
     release();
   }

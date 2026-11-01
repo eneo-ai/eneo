@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { useMutation } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, assert, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import type { App } from "../apps";
 import type { AppUpdate } from "./use-app";
@@ -158,6 +158,11 @@ it("keeps same-text restore intent through a held manual save and adopts server 
   try {
     fireEvent.click(screen.getByRole("button", { name: "Visa prompthistorik" }));
     await screen.findByRole("button", { name: "Återställ denna version" });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Återställ denna version" }).getAttribute("aria-busy")
+      ).toBeNull()
+    );
     fireEvent.click(screen.getByRole("button", { name: "Återställ denna version" }));
     expect(update).toHaveBeenCalledTimes(1);
     await act(async () => {
@@ -168,8 +173,10 @@ it("keeps same-text restore intent through a held manual save and adopts server 
         prompt: { text: "Manual B", description: expect.stringMatching(/^Återställd prompt från /) }
       })
     );
+    const restored = update.mock.results[1];
+    assert(restored?.type === "return");
     await act(async () => {
-      await update.mock.results[1].value;
+      await restored.value;
     });
     app = { ...app, prompt: { ...app.prompt!, description: "External metadata" } };
     view.rerender(<InstructionsSection app={app} />);
@@ -180,6 +187,19 @@ it("keeps same-text restore intent through a held manual save and adopts server 
       fireEvent.blur(field);
     });
     expect(update).toHaveBeenCalledTimes(2);
+    fireEvent.click(screen.getByRole("button", { name: "Visa prompthistorik" }));
+    await screen.findByRole("button", { name: "Återställ denna version" });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Återställ denna version" }).getAttribute("aria-busy")
+      ).toBeNull()
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Återställ denna version" }));
+    await waitFor(() =>
+      expect(update).toHaveBeenNthCalledWith(3, {
+        prompt: { text: "Manual B", description: expect.stringMatching(/^Återställd prompt från /) }
+      })
+    );
   } finally {
     release();
   }
