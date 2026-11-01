@@ -84,6 +84,8 @@ test.describe("an editor on a small phone", () => {
     test(`fits every section of ${kind} in 320 px, nothing scrolling sideways`, async ({
       page
     }) => {
+      // Every section of an editor in one test (15-22 s on CI): a budget for its work.
+      test.setTimeout(90_000);
       const { editor } = await assistantEditor(page, kind);
       await page.goto(editor);
       await expect(page.locator("[data-editor-row]").first()).toBeVisible();
