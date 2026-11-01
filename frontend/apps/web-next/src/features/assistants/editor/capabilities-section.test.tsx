@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Assistant } from "./use-assistant";
 
 const update = vi.hoisted(() => vi.fn().mockResolvedValue({}));
+const templates = vi.hoisted(() =>
+  vi.fn(async () => ({ data: { items: [] }, response: new Response() }))
+);
+vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: templates } }));
 // The section's own mutation, saving through `update`.
 vi.mock("./use-assistant", () => ({
   useUpdateAssistant: () => useMutation({ mutationFn: (body: unknown) => update(body) })
@@ -130,4 +134,18 @@ it("shows the governed chat default separately from policy availability", () => 
   expect(screen.getByRole("switch", { name: "image_generation" }).hasAttribute("disabled")).toBe(
     true
   );
+});
+
+it("shows the persisted template mode only while file creation is enabled", async () => {
+  const value = {
+    ...assistant([], true),
+    document_template: { mode: "builtin" as const, template_id: null }
+  };
+  show(value);
+  expect(screen.queryByText("document_template_status")).toBeNull();
+  expect(templates).not.toHaveBeenCalled();
+  cleanup();
+  show({ ...value, enabled_capabilities: ["file_creation"] });
+  expect(await screen.findByText("document_template_status")).toBeTruthy();
+  expect(update).not.toHaveBeenCalled();
 });

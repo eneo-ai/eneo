@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import type { paths } from "@/lib/api/schema";
 import {
   documentTemplatesQueryOptions,
+  availableDocumentTemplatesQueryOptions,
   uploadDocumentTemplate,
   replaceDocumentTemplate,
   updateDocumentTemplate,
@@ -135,4 +136,24 @@ it("sends actual multipart file bytes and metadata with the browser-owned bounda
   expect(await (body.get("file") as File).text()).toBe("word bytes");
   expect(body.get("name")).toBe("Report");
   expect(body.get("is_default")).toBe("false");
+});
+
+it("reads ordinary authenticated template choices separately from the admin library", async () => {
+  const result = { items: [{ id: "report", name: "Report", is_default: true }] };
+  const fetch = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify(result), {
+      status: 200,
+      headers: { "content-type": "application/json" }
+    })
+  );
+  const api = createClient<paths>({ baseUrl: "http://localhost", fetch });
+  const client = new QueryClient();
+  expect(await client.query(availableDocumentTemplatesQueryOptions(api))).toEqual(result);
+  const request = fetch.mock.calls[0]![0] as Request;
+  expect(new URL(request.url).pathname).toBe("/api/v1/document-templates/available/");
+  expect(client.getQueryData(documentTemplatesQueryOptions(api).queryKey)).toBeUndefined();
+  await client.invalidateQueries({ queryKey: documentTemplatesQueryOptions(api).queryKey });
+  expect(
+    client.getQueryState(availableDocumentTemplatesQueryOptions(api).queryKey)?.isInvalidated
+  ).toBe(true);
 });

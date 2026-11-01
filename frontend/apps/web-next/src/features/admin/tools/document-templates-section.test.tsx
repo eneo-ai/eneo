@@ -146,6 +146,12 @@ it("confirms the captured delete target, blocks duplicate presses and restores l
     return ok(undefined);
   });
   const client = show();
+  client.setQueryData(["assistants", "bound-assistant"], {
+    document_template: { mode: "selected", template_id: template.id }
+  });
+  client.setQueryData([...DOCUMENT_TEMPLATES_KEY, "available"], {
+    items: [{ id: template.id, name: template.name, is_default: true }]
+  });
   fireEvent.click(await screen.findByRole("button", { name: "actions: Municipal report" }));
   fireEvent.click(screen.getByRole("menuitem", { name: "document_template_delete" }));
   const dialog = screen.getByRole("alertdialog");
@@ -166,6 +172,8 @@ it("confirms the captured delete target, blocks duplicate presses and restores l
   expect(await within(dialog).findByText("Delete rejected")).toBeTruthy();
   fireEvent.click(confirm);
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  expect(client.getQueryState(["assistants", "bound-assistant"])?.isInvalidated).toBe(true);
+  expect(client.getQueryState([...DOCUMENT_TEMPLATES_KEY, "available"])?.isInvalidated).toBe(true);
   for (const call of remove.mock.calls)
     expect(call).toEqual([
       "/api/v1/document-templates/{id}/",

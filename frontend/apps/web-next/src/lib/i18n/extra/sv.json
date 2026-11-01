@@ -1840,5 +1840,8 @@
   "your_invite_link": "Din inbjudningslänk",
   "your_session_expired": "Din session har gått ut",
   "zoom_in": "Zooma in",
-  "zoom_out": "Zooma ut"
+  "zoom_out": "Zooma ut",
+  "document_template_change": "Ändra dokumentmall",
+  "document_template_choice_label": "Dokumentmall",
+  "document_template_choice_read_only": "Du behöver redigeringsbehörighet för att ändra dokumentmall."
 }

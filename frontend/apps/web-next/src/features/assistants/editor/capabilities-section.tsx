@@ -13,6 +13,7 @@ import {
   toggleCapability
 } from "@/features/capabilities/capabilities";
 import { useSpace } from "@/features/spaces/use-space";
+import { AssistantDocumentTemplateChoice } from "./document-template-choice";
 import { assistantToolModel } from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
@@ -74,53 +75,58 @@ export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
                 )
               : t(capability.assistantHint);
           return (
-            <div key={capability.purpose} className="flex items-center gap-3 rounded-lg border p-4">
-              <capability.icon
-                aria-hidden="true"
-                className="text-muted-foreground size-5 shrink-0"
-              />
-              <div className="min-w-0 flex-1">
-                <Label htmlFor={`assistant-${capability.purpose}`}>{t(capability.purpose)}</Label>
-                {governed && (
-                  <p className="text-muted-foreground text-sm">
-                    {t(
-                      assistant.effective_config?.default_disabled_capabilities?.includes(
-                        capability.purpose
-                      )
-                        ? "functions_default_off"
-                        : "functions_default_on"
-                    )}
-                  </p>
-                )}
-                <p className="text-muted-foreground text-sm">{hint}</p>
-              </div>
-              {/* Saving, it stays enabled so it keeps focus. A toggle meanwhile is
+            <div key={capability.purpose} className="rounded-lg border p-4">
+              <div className="flex items-center gap-3">
+                <capability.icon
+                  aria-hidden="true"
+                  className="text-muted-foreground size-5 shrink-0"
+                />
+                <div className="min-w-0 flex-1">
+                  <Label htmlFor={`assistant-${capability.purpose}`}>{t(capability.purpose)}</Label>
+                  {governed && (
+                    <p className="text-muted-foreground text-sm">
+                      {t(
+                        assistant.effective_config?.default_disabled_capabilities?.includes(
+                          capability.purpose
+                        )
+                          ? "functions_default_off"
+                          : "functions_default_on"
+                      )}
+                    </p>
+                  )}
+                  <p className="text-muted-foreground text-sm">{hint}</p>
+                </div>
+                {/* Saving, it stays enabled so it keeps focus. A toggle meanwhile is
                 ignored: each save sends the whole selection. */}
-              <Switch
-                id={`assistant-${capability.purpose}`}
-                checked={
-                  governed
-                    ? !assistant.effective_config?.default_disabled_capabilities?.includes(
-                        capability.purpose
-                      )
-                    : enabled
-                }
-                disabled={governed || !editable || blocked !== null}
-                aria-busy={
-                  (update.isPending &&
-                    update.variables?.enabled_capabilities?.includes(capability.purpose) !==
-                      enabled) ||
-                  undefined
-                }
-                onCheckedChange={() => {
-                  if (update.isPending) return;
-                  void autosave(() =>
-                    update.mutateAsync({
-                      enabled_capabilities: toggleCapability(selected, capability.purpose)
-                    })
-                  );
-                }}
-              />
+                <Switch
+                  id={`assistant-${capability.purpose}`}
+                  checked={
+                    governed
+                      ? !assistant.effective_config?.default_disabled_capabilities?.includes(
+                          capability.purpose
+                        )
+                      : enabled
+                  }
+                  disabled={governed || !editable || blocked !== null}
+                  aria-busy={
+                    (update.isPending &&
+                      update.variables?.enabled_capabilities?.includes(capability.purpose) !==
+                        enabled) ||
+                    undefined
+                  }
+                  onCheckedChange={() => {
+                    if (update.isPending) return;
+                    void autosave(() =>
+                      update.mutateAsync({
+                        enabled_capabilities: toggleCapability(selected, capability.purpose)
+                      })
+                    );
+                  }}
+                />
+              </div>
+              {capability.purpose === "file_creation" && enabled && (
+                <AssistantDocumentTemplateChoice assistant={assistant} />
+              )}
             </div>
           );
         }
