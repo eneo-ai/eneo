@@ -1,11 +1,66 @@
 // @vitest-environment jsdom
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
 import { readCspNonce, resolveLocale, showBootError } from "./boot";
 
 afterEach(() => {
+  vi.restoreAllMocks();
   document.documentElement.lang = "";
   document.cookie = "NEXT_LOCALE=; Max-Age=0; Path=/";
+  document.cookie = "PARAGLIDE_LOCALE=; Max-Age=0; Path=/";
+  window.localStorage.removeItem("language");
   document.head.querySelectorAll('meta[property="csp-nonce"]').forEach((meta) => meta.remove());
+});
+
+it.each(["sv", "de", ""])(
+  "never imports legacy preferences while current cookie %s is present",
+  (current) => {
+    document.documentElement.lang = "sv";
+    document.cookie = `NEXT_LOCALE=${current}; Path=/`;
+    document.cookie = "PARAGLIDE_LOCALE=en; Path=/";
+    window.localStorage.setItem("language", "en");
+    const readStorage = vi.spyOn(Storage.prototype, "getItem");
+
+    expect(resolveLocale(document)).toBe("sv");
+    expect(readStorage).not.toHaveBeenCalled();
+    expect(document.cookie).toContain(`NEXT_LOCALE=${current}`);
+  }
+);
+
+it("migrates a valid legacy cookie ahead of storage without modifying legacy choices", () => {
+  document.documentElement.lang = "sv";
+  document.cookie = "PARAGLIDE_LOCALE=en; Path=/";
+  window.localStorage.setItem("language", "sv");
+  const readStorage = vi.spyOn(Storage.prototype, "getItem");
+
+  expect(resolveLocale(document)).toBe("en");
+  expect(document.cookie).toContain("NEXT_LOCALE=en");
+  expect(document.cookie).toContain("PARAGLIDE_LOCALE=en");
+  expect(readStorage).not.toHaveBeenCalled();
+  expect(window.localStorage.getItem("language")).toBe("sv");
+});
+
+it("imports a valid stored language only without an eligible cookie", () => {
+  document.documentElement.lang = "sv";
+  document.cookie = "PARAGLIDE_LOCALE=de; Path=/";
+  window.localStorage.setItem("language", "en");
+
+  expect(resolveLocale(document)).toBe("en");
+  expect(document.cookie).toContain("NEXT_LOCALE=en");
+  expect(document.cookie).toContain("PARAGLIDE_LOCALE=de");
+  expect(window.localStorage.getItem("language")).toBe("en");
+});
+
+it("ignores invalid or denied legacy storage without setting a current cookie", () => {
+  document.documentElement.lang = "sv";
+  window.localStorage.setItem("language", "de");
+  expect(resolveLocale(document)).toBe("sv");
+  expect(document.cookie).not.toContain("NEXT_LOCALE=");
+
+  vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
+    throw new DOMException("Storage denied", "SecurityError");
+  });
+  expect(resolveLocale(document)).toBe("sv");
+  expect(document.cookie).not.toContain("NEXT_LOCALE=");
 });
 
 it.each([
