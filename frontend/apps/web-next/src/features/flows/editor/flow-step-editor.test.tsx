@@ -1082,6 +1082,81 @@ describe("FlowStepEditor", () => {
     await expectNoAxeViolations(container);
   }, 20_000);
 
+  it.each([
+    { can_download: true, offered: true },
+    { can_download: false, offered: false }
+  ])(
+    "downloads the chosen Word template through a link the core signs for it (may: $can_download)",
+    async ({ can_download, offered }) => {
+      api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({
+        body: [
+          {
+            id: "asset-1",
+            flow_id: "flow-1",
+            file_id: "file-1",
+            name: "Beslut.docx",
+            checksum: "abc",
+            status: "ready",
+            placeholders: [],
+            can_download
+          }
+        ]
+      });
+      api.routes["GET /api/v1/flows/{id}/template-inspect/"] = () => ({
+        body: { asset_id: "asset-1", file_id: "file-1", file_name: "Beslut.docx", placeholders: [] }
+      });
+      api.routes["POST /api/v1/flows/{id}/template-files/{file_id}/signed-url/"] = () => ({
+        body: {
+          url: "http://backend:8000/api/v1/files/file-1/download/?token=signed",
+          expires_at: 0
+        }
+      });
+      const saved: string[] = [];
+      const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+        this: HTMLAnchorElement
+      ) {
+        saved.push(`${this.getAttribute("href")} ${this.download}`);
+      });
+      renderEditor(
+        makeFlow({
+          steps: [
+            makeStep({
+              output_mode: "template_fill",
+              output_type: "docx",
+              output_config: {
+                template_asset_id: "asset-1",
+                template_name: "Beslut.docx",
+                placeholders: [],
+                bindings: {}
+              }
+            })
+          ]
+        })
+      );
+      // The template list has loaded and the chosen template shows.
+      await screen.findAllByText("Beslut.docx");
+      const download = () => screen.queryByRole("button", { name: "Ladda ned Beslut.docx" });
+      if (!offered) {
+        expect(download()).toBeNull();
+        click.mockRestore();
+        return;
+      }
+      fireEvent.click(await screen.findByRole("button", { name: "Ladda ned Beslut.docx" }));
+      await waitFor(() =>
+        expect(saved).toEqual(["/api/v1/files/file-1/download/?token=signed Beslut.docx"])
+      );
+      expect(
+        api.stub.calls.find(
+          (call) => call.path === "/api/v1/flows/{id}/template-files/{file_id}/signed-url/"
+        )?.init
+      ).toMatchObject({
+        params: { path: { id: "flow-1", file_id: "asset-1" } },
+        body: { content_disposition: "attachment" }
+      });
+      click.mockRestore();
+    }
+  );
+
   it("releases a Word template uploaded in an edit that is closed without saving", async () => {
     api.routes["GET /api/v1/flows/{id}/template-files/"] = () => ({ body: [] });
     api.routes["POST /api/v1/flows/{id}/template-files/"] = () => ({

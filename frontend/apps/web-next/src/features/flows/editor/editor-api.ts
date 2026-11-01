@@ -2,6 +2,7 @@ import { queryOptions, type QueryClient } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
 import { apiErrorFromResponse, EneoApiError, unwrap } from "@/lib/api/errors";
 import type { components } from "@/lib/api/schema";
+import { proxiedDownloadPath } from "@/features/files/signed-file-url";
 import {
   isJsonObject,
   type ClassificationPreview,
@@ -158,6 +159,24 @@ export function uploadTemplate(flowId: string, file: File): Promise<TemplateAsse
       bodySerializer: (formData: unknown) => formData as FormData
     })
   );
+}
+
+/**
+ * A short-lived download path (through the app's proxy) for one of the
+ * flow's stored templates, used by a run or not: the core signs it for the
+ * template's file and audits each one it mints.
+ */
+export async function templateDownloadPath(
+  flowId: string,
+  asset: Pick<TemplateAsset, "id" | "file_id">
+): Promise<string> {
+  const signed = await unwrap(
+    browserApi.POST("/api/v1/flows/{id}/template-files/{file_id}/signed-url/", {
+      params: { path: { id: flowId, file_id: asset.id } },
+      body: { content_disposition: "attachment", expires_in: 300 }
+    })
+  );
+  return proxiedDownloadPath(signed.url, asset.file_id);
 }
 
 /**

@@ -25,7 +25,7 @@ function downloadFailed(error: unknown, t: ReturnType<typeof useTranslations>) {
 }
 
 /** A download button that asks the core for a fresh signed link on each press. */
-function DownloadButton({
+export function DownloadButton({
   label,
   visible,
   getPath,
