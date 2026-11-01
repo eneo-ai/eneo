@@ -610,6 +610,17 @@ describe("FlowRunsList on a phone", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("says only who started a run with no time to report, not a bare dash after a dot", async () => {
+    setViewport("phone");
+    // Not running and never finished: there is no duration to give.
+    answerList([makeRunSummary({ id: "run-x", status: "failed", finished_at: null })]);
+    withRun();
+    const list = await screen.findByRole("list", { name: messages.flow_runs_heading });
+    const row = within(list).getByRole("listitem");
+    expect(within(row).getByText("Anna Lind")).toBeTruthy();
+    expect(row.textContent).not.toContain("–");
+  });
+
   it("leaves out the filters while there is nothing to filter, and keeps them for a search that finds nothing", async () => {
     setViewport("phone");
     answerList([]);

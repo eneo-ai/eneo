@@ -327,16 +327,18 @@ export function FlowRunsList({
       </span>
     );
   };
-  /** How long a run took, or took so far. */
-  const durationText = (run: Row) => {
+  /** How long a run took, or took so far; null when it has not started. */
+  const durationOrNull = (run: Row) => {
     const ms = runDurationMs(run);
     if (ms !== null) return formatSeconds(ms / 1000, t);
     // A run still going: how long so far, as of the list's last read.
     const elapsed = runElapsedMs(run, runs.dataUpdatedAt);
     return elapsed === null
-      ? "–"
+      ? null
       : t("flow_run_more_elapsed", { time: formatSeconds(elapsed / 1000, t) });
   };
+  /** The table cell: a dash under the "Tid" header says there is no time yet. */
+  const durationText = (run: Row) => durationOrNull(run) ?? "–";
 
   const columns: TableColumn<Row>[] = [
     {
@@ -476,7 +478,8 @@ export function FlowRunsList({
                   />
                   {statusCell(run)}
                   <span className="text-ax-text-secondary text-sm">
-                    {[starterName(run, t), durationText(run)].join(" · ")}
+                    {/* No header names the time here, so a missing one is left out, not a bare dash. */}
+                    {[starterName(run, t), durationOrNull(run)].filter(Boolean).join(" · ")}
                   </span>
                 </li>
               ))}

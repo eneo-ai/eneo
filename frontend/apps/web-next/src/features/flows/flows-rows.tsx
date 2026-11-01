@@ -27,6 +27,8 @@ export function flowKindLine(
  * A space's flows as rows on a phone, where the table's five columns do not
  * fit: the name, what it does, what it takes and gives, and (for those who
  * manage flows) whether it is published. A row opens the flow, where it is run.
+ * The name is a node, not a string, so a long one wraps instead of being cut
+ * to one line (Astryx truncates only a plain string label).
  */
 export function FlowRows({
   flows,
@@ -46,7 +48,7 @@ export function FlowRows({
           <ListItem
             key={flow.id}
             href={`${base}/${flow.id}`}
-            label={flow.name}
+            label={<span className="block break-words">{flow.name}</span>}
             className="min-h-16"
             description={
               <span className="flex flex-col gap-0.5">

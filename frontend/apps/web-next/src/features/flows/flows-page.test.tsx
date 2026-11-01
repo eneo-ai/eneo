@@ -248,6 +248,15 @@ describe("FlowsPage on a phone", () => {
     expect(screen.queryByRole("button", { name: "Nytt flöde" })).toBeNull();
   });
 
+  it("lets a long flow name wrap instead of cutting it to one line", () => {
+    setViewport("phone");
+    const name =
+      "Sammanfattning av nämndens långa protokoll med bilagor till samtliga förvaltningar";
+    renderPage([sparse({ id: "f9", name })]);
+    // Astryx truncates a plain string label to one line; a node label is ours to wrap.
+    expect(screen.getByText(name).className).toContain("break-words");
+  });
+
   it("stays rows, with nothing to create, when the phone is held sideways", () => {
     setViewport({ width: 844, height: 390, pointer: "coarse" });
     renderPage(flows());
