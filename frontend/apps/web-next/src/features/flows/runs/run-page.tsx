@@ -343,15 +343,18 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   // The run shows once its first reads are in, and stays shown: the status and graph, then the
   // detail and steps they unlock (and an open review). Shown as each arrived, the header's status
   // line and title and each section pushed what was already on the screen (layout shift 0.20 on a
-  // phone). A read that failed shows the page with its error. Only `isPending` is read: the update
-  // times `blockingError` reads would bring back one render per poll.
+  // phone). A read that failed shows the page with its error, also while it is retried. Only
+  // `isPending` and `failureCount` are read: the update times `blockingError` reads would bring
+  // back one render per poll.
   const [shown, setShown] = useState(false);
   const firstReads = [
     progress,
     ...(signature !== null ? [detail, steps] : []),
     ...(awaitingReview ? [review] : [])
   ];
-  if (!shown && firstReads.every((query) => !query.isPending)) setShown(true);
+  if (!shown && firstReads.every((query) => !query.isPending || query.failureCount > 0)) {
+    setShown(true);
+  }
 
   const summary: RunSummary | undefined = progress.data?.status;
   const status = summary?.status ?? null;

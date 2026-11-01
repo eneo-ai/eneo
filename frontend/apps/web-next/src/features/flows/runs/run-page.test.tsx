@@ -118,9 +118,15 @@ async function comeBack() {
 
 function renderRun(
   permissions: Permission[] = ["flows_view", "flows_run"],
-  onCommit: () => void = () => {}
+  onCommit: () => void = () => {},
+  retries?: { retry: number; retryDelay: number }
 ) {
   const queryClient = testQueryClient();
+  if (retries) {
+    // The app retries a failed read with a backoff; the test client fails at once by default.
+    const defaults = queryClient.getDefaultOptions();
+    queryClient.setDefaultOptions({ ...defaults, queries: { ...defaults.queries, ...retries } });
+  }
   const flow = makeFlow({ published_version: 3 });
   queryClient.setQueryData(flowKeys.flow(flow.id), flow);
   queryClient.setQueryData(["spaces", "space-1"], makeSpace({}));
@@ -633,6 +639,17 @@ describe("FlowRunPage", () => {
     expect(await screen.findByText(messages.flow_runs_detail_failed)).toBeTruthy();
     expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
     expect(screen.getByText("Startad av Anna Lind")).toBeTruthy();
+  });
+
+  it("shows the run while a detail that failed is retried, not after the backoff", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerRun(makeRunSummary());
+    state.routes[DETAIL] = () => ({ status: 503, body: { message: "Down", code: "unavailable" } });
+    renderRun(undefined, undefined, { retry: 3, retryDelay: 60_000 });
+
+    expect(await screen.findByRole("heading", { level: 1 })).toBeTruthy();
+    expect(screen.getByText("Startad av Anna Lind")).toBeTruthy();
+    expect(calls(DETAIL)).toHaveLength(1);
   });
 
   it("stays on the run while the review it moved into loads", async () => {
