@@ -7,6 +7,7 @@ import messages from "../src/lib/i18n/messages/sv.json";
 import { expect, test } from "./csp";
 import {
   apiPost,
+  apiPostJson,
   createSpace,
   E2E_CREDENTIALS,
   sessionResponseHeaders,
@@ -114,6 +115,10 @@ test(
   { tag: "@vite" },
   async ({ page }, testInfo) => {
     const space = await createSpace(page, uniqueName("Settings presentation"));
+    // The real PATCH requires this tenant setting, even when clearing null.
+    // The stored space remains unclassified; the GET projections below do
+    // not establish a previously stored classification or a real impact.
+    await apiPostJson(page, "/security-classifications/enable/", { enabled: true });
     const current: Schema<"SecurityClassificationPublic"> = {
       id: "class-current-fixture",
       name: "Intern",
