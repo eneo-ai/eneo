@@ -19,6 +19,7 @@ export type ChatFailure = {
    * already says everything there is to know.
    */
   details: string[];
+  context?: ContextErrorInfo;
 };
 
 /** Longer backend text is cut so a stack trace or HTML page never fills the chat. */
@@ -32,7 +33,7 @@ const DETAIL_MAX_LENGTH = 300;
  */
 function parseJsonMessage(
   text: string
-): { message?: string; code?: number; reason?: string } | null {
+): { message?: string; code?: number; reason?: string; details?: unknown } | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith("{")) return null;
   try {
@@ -52,10 +53,44 @@ function parseJsonMessage(
             : undefined;
     const code = typeof record.eneo_error_code === "number" ? record.eneo_error_code : undefined;
     const reason = typeof record.code === "string" ? record.code : undefined;
-    return { message, code, reason };
+    return { message, code, reason, details: record.details };
   } catch {
     return null;
   }
+}
+
+export type ContextErrorInfo = { used?: number; limit?: number };
+
+/** Facts from the rejection itself; token-usage events are not rejection counts. */
+export function getContextErrorInfo(
+  error: unknown,
+  streamError: EneoDataParts["error"] | null | undefined
+): ContextErrorInfo | null {
+  const raw = error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const parsed = parseJsonMessage(raw);
+  const code = streamError?.code ?? (error instanceof EneoApiError ? error.code : parsed?.code);
+  const message = parsed?.message ?? raw;
+  if (
+    code !== 9003 &&
+    !/context window|context length|maximum context|too many tokens|tokens used|too long/i.test(
+      message
+    )
+  )
+    return null;
+  const details = error instanceof EneoApiError ? error.details : parsed?.details;
+  const fields =
+    details && typeof details === "object" ? (details as Record<string, unknown>) : null;
+  const match = message.match(/(\d[\d,]*)\s*tokens?\s*used.*?limit\s*(?:is\s*)?(\d[\d,]*)/i);
+  const used = fields?.tokens_used ?? (match ? Number(match[1]!.replaceAll(",", "")) : undefined);
+  const limit = fields?.token_limit ?? (match ? Number(match[2]!.replaceAll(",", "")) : undefined);
+  return typeof used === "number" &&
+    typeof limit === "number" &&
+    Number.isSafeInteger(used) &&
+    Number.isSafeInteger(limit) &&
+    limit > 0 &&
+    used > limit
+    ? { used, limit }
+    : {};
 }
 
 function truncate(text: string): string {
@@ -99,7 +134,7 @@ function sentenceForStatus(status: number, t: Translate): string {
  * broken stream → "connection lost"; anything else → the generic sentence.
  * The technical facts go to `details`, for "Visa detaljer".
  */
-export function describeChatFailure(
+function describeGeneralFailure(
   error: unknown,
   streamError: EneoDataParts["error"] | null | undefined,
   t: Translate
@@ -141,4 +176,14 @@ export function describeChatFailure(
   if (mapped) return { message: mapped, details };
   if (isConnectionFailure(error)) return { message: t("chat_error_connection_lost"), details };
   return { message: t("request_failed"), details };
+}
+
+export function describeChatFailure(
+  error: unknown,
+  streamError: EneoDataParts["error"] | null | undefined,
+  t: Translate
+): ChatFailure {
+  const failure = describeGeneralFailure(error, streamError, t);
+  const context = getContextErrorInfo(error, streamError);
+  return context ? { ...failure, message: t("context_window_exceeded"), context } : failure;
 }

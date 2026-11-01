@@ -422,10 +422,15 @@ class ComposeTests(unittest.TestCase):
         config = json.loads(
             subprocess.check_output(
                 [
-                    "docker", "compose",
-                    "-f", str(ROOT / "docker-compose.e2e.ci.yml"),
-                    "-f", str(ROOT / "docker-compose.e2e.web-app.yml"),
-                    "config", "--format", "json",
+                    "docker",
+                    "compose",
+                    "-f",
+                    str(ROOT / "docker-compose.e2e.ci.yml"),
+                    "-f",
+                    str(ROOT / "docker-compose.e2e.web-app.yml"),
+                    "config",
+                    "--format",
+                    "json",
                 ],
                 env={**os.environ, "E2E_APP_CONTENT_ORIGIN": ""},
                 text=True,
@@ -441,105 +446,204 @@ class ComposeTests(unittest.TestCase):
             f"http://127.0.0.1:{port}",
         )
 
+    def deployment_config(self):
+        directory = self.enterContext(tempfile.TemporaryDirectory())
+        root = Path(directory)
+        for name in (
+            "docker-compose.yml",
+            "docker-compose.tool-runtime.yml",
+            "docker-compose.without-tools.yml",
+            "docker-compose.web-next.yml",
+        ):
+            shutil.copy(ROOT / "docs/deployment" / name, root / name)
+        for name in ("backend", "frontend", "db"):
+            (root / f"env_{name}.env").write_text("")
+        images = {
+            c: release.REGISTRY + c + "@sha256:" + "b" * 64 for c in release.COMPONENTS
+        }
+        env = {
+            "PATH": os.environ["PATH"],
+            "ENEO_VERSION": "2.3.0",
+            "TOOL_RUNTIME_TOKEN": "x" * 64,
+            **{
+                name: "c" * 64
+                for name in (
+                    "TRAEFIK_IMAGE_DIGEST",
+                    "PGVECTOR_IMAGE_DIGEST",
+                    "REDIS_IMAGE_DIGEST",
+                )
+            },
+            **{
+                "ENEO_" + c.upper().replace("-", "_") + "_IMAGE": ref
+                for c, ref in images.items()
+            },
+        }
+
+        def config(*overlays):
+            args = ["docker", "compose", "-f", str(root / "docker-compose.yml")]
+            for overlay in overlays:
+                args += ["-f", str(root / overlay)]
+            return json.loads(
+                subprocess.check_output(
+                    [*args, "config", "--format", "json"], env=env, text=True
+                )
+            )
+
+        return config, env, images
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI required")
+    def test_main_host_serves_react_and_preserves_svelte_rollback(self):
+        config, env, _ = self.deployment_config()
+        for priority in (None, "7"):
+            with self.subTest(priority=priority):
+                if priority is not None:
+                    env["FRONTEND_ROUTER_PRIORITY"] = priority
+                services = config()["services"]
+                backend = services["backend"]
+                for flag in ("WEB_APP_ENABLED", "BROWSER_SESSION_ENABLED"):
+                    self.assertEqual(backend["environment"].get(flag), "true")
+                labels = backend["labels"]
+                app = "traefik.http.routers.eneo-web-app-main-secure"
+                api = "traefik.http.routers.eneo-backend-secure"
+                self.assertEqual(
+                    labels[app + ".rule"],
+                    "Host(`your-domain.com`) && !(Path(`/internal-mcp`) || PathPrefix(`/internal-mcp/`))",
+                )
+                self.assertEqual(labels[app + ".entrypoints"], "websecure")
+                self.assertEqual(labels[app + ".tls"], "true")
+                self.assertEqual(labels[app + ".tls.certresolver"], "letsencrypt")
+                self.assertEqual(labels[app + ".service"], "eneo-backend-svc")
+                self.assertEqual(labels[app + ".priority"], "5")
+                self.assertEqual(labels[api + ".priority"], "10")
+                frontend = services["frontend"]["labels"]
+                self.assertEqual(
+                    frontend["traefik.http.routers.eneo-frontend-secure.priority"],
+                    priority or "1",
+                )
+                self.assertLess(int(priority or "1"), int(labels[api + ".priority"]))
+                if priority:
+                    self.assertGreater(int(priority), int(labels[app + ".priority"]))
+                else:
+                    self.assertLess(1, int(labels[app + ".priority"]))
+
+    @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI required")
+    def test_beta_overlay_preserves_main_host_rollback_and_api_priority(self):
+        config, env, _ = self.deployment_config()
+        for host in ("your-domain.com", "beta.example.com"):
+            for priority in ("1", "7"):
+                with self.subTest(host=host, priority=priority):
+                    env.update(WEB_NEXT_HOST=host, FRONTEND_ROUTER_PRIORITY=priority)
+                    normal = config()["services"]
+                    services = config("docker-compose.web-next.yml")["services"]
+                    self.assertEqual(services["frontend"], normal["frontend"])
+                    labels = services["backend"]["labels"]
+                    main = "traefik.http.routers.eneo-web-app-main-secure"
+                    api = "traefik.http.routers.eneo-backend-secure"
+                    for router in ("eneo-web-next", "eneo-web-next-secure"):
+                        prefix = f"traefik.http.routers.{router}"
+                        self.assertEqual(
+                            labels[prefix + ".rule"],
+                            f"Host(`{host}`) && !(Path(`/internal-mcp`) || PathPrefix(`/internal-mcp/`))",
+                        )
+                        self.assertEqual(
+                            labels[prefix + ".service"], "eneo-backend-svc"
+                        )
+                        self.assertEqual(labels[prefix + ".priority"], "5")
+                        self.assertLess(
+                            int(labels[prefix + ".priority"]),
+                            int(labels[api + ".priority"]),
+                        )
+                        if priority == "7":
+                            self.assertLess(
+                                int(labels[prefix + ".priority"]), int(priority)
+                            )
+                    self.assertEqual(
+                        labels[main + ".rule"],
+                        normal["backend"]["labels"][main + ".rule"],
+                    )
+                    self.assertEqual(
+                        labels[api + ".rule"],
+                        normal["backend"]["labels"][api + ".rule"],
+                    )
+                    self.assertEqual(labels[api + ".priority"], "10")
+                    for service in services.values():
+                        for label in service.get("labels", {}):
+                            self.assertNotIn("stsseconds", label.lower())
+                            self.assertNotIn("strict-transport-security", label.lower())
+
     @unittest.skipUnless(shutil.which("docker"), "Docker Compose CLI required")
     def test_bundle_pins_every_service_and_legacy_overlay_is_inert(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            for name in (
-                "docker-compose.yml",
-                "docker-compose.tool-runtime.yml",
-                "docker-compose.without-tools.yml",
-                "docker-compose.web-next.yml",
-            ):
-                shutil.copy(ROOT / "docs/deployment" / name, root / name)
-            for name in ("backend", "frontend", "db"):
-                (root / f"env_{name}.env").write_text("")
-            images = {
-                c: release.REGISTRY + c + "@sha256:" + "b" * 64
-                for c in release.COMPONENTS
-            }
-            # The operator's .env pins the third-party images by digest
-            # (docs/deployment/.env.template); the bundle's release.env pins Eneo's.
-            third_party = {
-                "traefik": ("TRAEFIK_IMAGE_DIGEST", "traefik"),
-                "db": ("PGVECTOR_IMAGE_DIGEST", "pgvector/pgvector"),
-                "redis": ("REDIS_IMAGE_DIGEST", "redis"),
-            }
-            env = {
-                "PATH": os.environ["PATH"],
-                "ENEO_VERSION": "2.3.0",
-                "TOOL_RUNTIME_TOKEN": "x" * 64,
-                **{variable: "c" * 64 for variable, _ in third_party.values()},
-                **{
-                    "ENEO_" + c.upper().replace("-", "_") + "_IMAGE": ref
-                    for c, ref in images.items()
-                },
-            }
-
-            def config(*overlays):
-                args = ["docker", "compose", "-f", str(root / "docker-compose.yml")]
-                for overlay in overlays:
-                    args += ["-f", str(root / overlay)]
-                return json.loads(
-                    subprocess.check_output(
-                        [*args, "config", "--format", "json"], env=env, text=True
-                    )
-                )
-
-            normal = config()
-            self.assertEqual(normal, config("docker-compose.tool-runtime.yml"))
-            services = normal["services"]
-            for name, (_, repository) in third_party.items():
-                self.assertEqual(
-                    services[name]["image"], repository + "@sha256:" + "c" * 64
-                )
-            for name in ("backend", "worker", "crawler-worker", "db-init"):
-                self.assertEqual(services[name]["image"], images["backend"])
-                self.assertNotIn("tool-runtime", services[name].get("depends_on", {}))
-            runtime = services["tool-runtime"]
-            self.assertEqual(runtime["image"], images["tool-runtime"])
-            self.assertTrue(runtime["read_only"])
-            self.assertNotIn("POSTGRES_PASSWORD", runtime["environment"])
-            self.assertTrue(normal["networks"]["tool_runtime_net"]["internal"])
-            omitted = config("docker-compose.without-tools.yml")
-            self.assertNotIn("tool-runtime", omitted["services"])
+        config, env, images = self.deployment_config()
+        normal = config()
+        self.assertEqual(normal, config("docker-compose.tool-runtime.yml"))
+        services = normal["services"]
+        for name, repository in (
+            ("traefik", "traefik"),
+            ("db", "pgvector/pgvector"),
+            ("redis", "redis"),
+        ):
             self.assertEqual(
-                omitted["services"]["backend"]["environment"]["TOOL_RUNTIME_URL"], ""
+                services[name]["image"], repository + "@sha256:" + "c" * 64
             )
-            # Only opting into the overlay enables the backend-served Vite host.
-            self.assertNotIn("WEB_APP_ENABLED", services["backend"]["environment"])
-            env["WEB_NEXT_HOST"] = "beta.example.com"
-            beta = config("docker-compose.web-next.yml")["services"]
-            self.assertNotIn("web-next", beta)
-            self.assertEqual(beta["frontend"], services["frontend"])
-            backend = beta["backend"]
-            self.assertEqual(backend["image"], images["backend"])
-            for flag in ("WEB_APP_ENABLED", "BROWSER_SESSION_ENABLED"):
-                self.assertEqual(backend["environment"][flag], "true")
-            labels = backend["labels"]
-            rule = "Host(`beta.example.com`) && !(Path(`/internal-mcp`) || PathPrefix(`/internal-mcp/`))"
-            for router in ("eneo-web-next", "eneo-web-next-secure"):
-                self.assertEqual(labels[f"traefik.http.routers.{router}.rule"], rule)
-                self.assertEqual(labels[f"traefik.http.routers.{router}.service"], "eneo-backend-svc")
-                self.assertEqual(labels[f"traefik.http.routers.{router}.priority"], "20")
-            self.assertEqual(labels["traefik.http.routers.eneo-web-next.entrypoints"], "web")
-            self.assertEqual(labels["traefik.http.routers.eneo-web-next.middlewares"], "redirect-to-https")
-            self.assertEqual(labels["traefik.http.routers.eneo-web-next-secure.entrypoints"], "websecure")
-            self.assertEqual(labels["traefik.http.routers.eneo-web-next-secure.tls"], "true")
-            self.assertEqual(labels["traefik.http.routers.eneo-web-next-secure.tls.certresolver"], "letsencrypt")
-            env["COMPOSE_PROFILES"] = "web-next"
-            self.assertEqual(config("docker-compose.web-next.yml")["services"], beta)
-            del env["COMPOSE_PROFILES"]
-            env["FILE_REFERENCE_BASE_URL"] = "http://custom-backend:8000"
-            custom = config()["services"]
+        for name in ("backend", "worker", "crawler-worker", "db-init"):
+            self.assertEqual(services[name]["image"], images["backend"])
+            self.assertNotIn("tool-runtime", services[name].get("depends_on", {}))
+        runtime = services["tool-runtime"]
+        self.assertEqual(runtime["image"], images["tool-runtime"])
+        self.assertTrue(runtime["read_only"])
+        self.assertNotIn("POSTGRES_PASSWORD", runtime["environment"])
+        self.assertTrue(normal["networks"]["tool_runtime_net"]["internal"])
+        omitted = config("docker-compose.without-tools.yml")
+        self.assertNotIn("tool-runtime", omitted["services"])
+        self.assertEqual(
+            omitted["services"]["backend"]["environment"]["TOOL_RUNTIME_URL"], ""
+        )
+        env["WEB_NEXT_HOST"] = "beta.example.com"
+        beta = config("docker-compose.web-next.yml")["services"]
+        self.assertNotIn("web-next", beta)
+        self.assertEqual(beta["frontend"], services["frontend"])
+        backend = beta["backend"]
+        self.assertEqual(backend["image"], images["backend"])
+        for flag in ("WEB_APP_ENABLED", "BROWSER_SESSION_ENABLED"):
+            self.assertEqual(backend["environment"][flag], "true")
+        labels = backend["labels"]
+        rule = "Host(`beta.example.com`) && !(Path(`/internal-mcp`) || PathPrefix(`/internal-mcp/`))"
+        for router in ("eneo-web-next", "eneo-web-next-secure"):
+            self.assertEqual(labels[f"traefik.http.routers.{router}.rule"], rule)
             self.assertEqual(
-                custom["tool-runtime"]["environment"]["TOOL_RUNTIME_FILE_ORIGINS"],
-                "http://custom-backend:8000",
+                labels[f"traefik.http.routers.{router}.service"], "eneo-backend-svc"
             )
-            self.assertEqual(
-                custom["worker"]["environment"]["FILE_REFERENCE_BASE_URL"],
-                "http://custom-backend:8000",
-            )
+            self.assertEqual(labels[f"traefik.http.routers.{router}.priority"], "5")
+        self.assertEqual(
+            labels["traefik.http.routers.eneo-web-next.entrypoints"], "web"
+        )
+        self.assertEqual(
+            labels["traefik.http.routers.eneo-web-next.middlewares"],
+            "redirect-to-https",
+        )
+        self.assertEqual(
+            labels["traefik.http.routers.eneo-web-next-secure.entrypoints"], "websecure"
+        )
+        self.assertEqual(
+            labels["traefik.http.routers.eneo-web-next-secure.tls"], "true"
+        )
+        self.assertEqual(
+            labels["traefik.http.routers.eneo-web-next-secure.tls.certresolver"],
+            "letsencrypt",
+        )
+        env["COMPOSE_PROFILES"] = "web-next"
+        self.assertEqual(config("docker-compose.web-next.yml")["services"], beta)
+        del env["COMPOSE_PROFILES"]
+        env["FILE_REFERENCE_BASE_URL"] = "http://custom-backend:8000"
+        custom = config()["services"]
+        self.assertEqual(
+            custom["tool-runtime"]["environment"]["TOOL_RUNTIME_FILE_ORIGINS"],
+            "http://custom-backend:8000",
+        )
+        self.assertEqual(
+            custom["worker"]["environment"]["FILE_REFERENCE_BASE_URL"],
+            "http://custom-backend:8000",
+        )
 
 
 if __name__ == "__main__":

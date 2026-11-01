@@ -1,5 +1,6 @@
 "use client";
 
+import { notFound } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
@@ -34,15 +35,19 @@ export function DashboardChat({
     );
   }
 
+  if (assistant.is_help_assistant) throw notFound();
+
   const partner: ChatPartner = {
     type: "assistant",
     id: assistant.id,
     name: assistant.name,
     allowedAttachments: assistant.allowed_attachments,
     insightEnabled: assistant.insight_enabled,
+    permissions: assistant.permissions,
     description: assistant.description ?? null,
     iconId: assistant.icon_id ?? null,
     knowledge: partnerKnowledge(assistant),
+    knowledgeMode: assistant.knowledge_mode,
     mcpServers: assistant.mcp_servers ?? [],
     enabledCapabilities: assistant.enabled_capabilities,
     availableCapabilities: assistant.available_capabilities,

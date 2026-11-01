@@ -66,7 +66,10 @@ function useUsageLabel() {
   };
 }
 
-function resultMessage(result: SkillRemovalResult, t: ReturnType<typeof useTranslations>): string {
+export function skillRemovalMessage(
+  result: SkillRemovalResult,
+  t: ReturnType<typeof useTranslations>
+): string {
   const count = String(result.removed_ids.length);
   const base =
     result.detached.assistant_count > 0 || result.detached.app_count > 0
@@ -138,7 +141,7 @@ export function OrganizationSkillsPage() {
   async function removedSkills(result: SkillRemovalResult) {
     setRemovalTargets([]);
     setSelectedIds([]);
-    setAnnouncement(resultMessage(result, t));
+    setAnnouncement(skillRemovalMessage(result, t));
     await queryClient.invalidateQueries({ queryKey: ORGANIZATION_SKILLS_KEY });
   }
 
@@ -330,6 +333,13 @@ export function OrganizationSkillsPage() {
                             {skill.display_name}
                           </Link>
                           <p className="text-muted-foreground text-xs break-all">{skill.slug}</p>
+                          {skill.removed_at && (
+                            <p className="text-muted-foreground mt-2 text-xs">
+                              {t("organization_skills_removed_at", {
+                                time: new Date(skill.removed_at).toLocaleString(locale)
+                              })}
+                            </p>
+                          )}
                           {!removed && (
                             <p className="text-muted-foreground mt-2 text-xs">
                               {usageLabel(skill.usage) ?? t("organization_skills_usage_none")}

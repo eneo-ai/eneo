@@ -6,6 +6,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import {
   keepPreviousData,
+  queryOptions,
   useInfiniteQuery,
   useMutation,
   useMutationState,
@@ -127,6 +128,33 @@ function applyChange(bindings: Binding[], change: PersonalSkillChange): Binding[
   ];
 }
 
+type ConfigurationOwner = { spaceId: string; assistantId: string | null; modelId: string | null };
+
+function readConfiguration(
+  owner: ConfigurationOwner,
+  signal?: AbortSignal
+): Promise<Configuration> {
+  return unwrap(
+    browserApi.GET("/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/", {
+      params: { path: { space_id: owner.spaceId, assistant_id: owner.assistantId! } },
+      signal
+    })
+  );
+}
+
+/** Shared with the personal chat's token preflight; mutations invalidate this same cache. */
+export function personalChatSkillsConfigurationQueryOptions(owner: ConfigurationOwner) {
+  return queryOptions({
+    queryKey: [
+      ...skillQueryKey({ type: "space", spaceId: owner.spaceId }),
+      { personalChat: owner.assistantId, model: owner.modelId }
+    ],
+    enabled: owner.assistantId !== null,
+    placeholderData: keepPreviousData,
+    queryFn: ({ signal }) => readConfiguration(owner, signal)
+  });
+}
+
 /**
  * The one owner of the personal chat's own Skills, for the composer control
  * and the personal space's Skills pages. The configuration query holds only
@@ -160,24 +188,14 @@ export function usePersonalChatSkills({
   // A model switch can pause or resume the layer, so the model is part of the
   // key; the scope (without it) covers the configuration under every model.
   const configurationScope = [...spaceSkillsKey, { personalChat: assistantId }];
-  const configurationKey = [
-    ...spaceSkillsKey,
-    { personalChat: assistantId, model: assistant?.completion_model?.id ?? null }
-  ];
+  const owner = {
+    spaceId: space.id,
+    assistantId,
+    modelId: assistant?.completion_model?.id ?? null
+  };
   const mutationKey = ["personal-chat-skills", assistantId];
-  const readSaved = (): Promise<Configuration> =>
-    unwrap(
-      browserApi.GET("/api/v1/spaces/{space_id}/assistants/{assistant_id}/skills/configuration/", {
-        params: { path: { space_id: space.id, assistant_id: assistantId! } }
-      })
-    );
-
-  const configuration = useQuery({
-    queryKey: configurationKey,
-    enabled: assistantId !== null,
-    placeholderData: keepPreviousData,
-    queryFn: readSaved
-  });
+  const readSaved = () => readConfiguration(owner);
+  const configuration = useQuery(personalChatSkillsConfigurationQueryOptions(owner));
 
   const library = useInfiniteQuery({
     queryKey: [...spaceSkillsKey, { personalChatLibrary: search }],

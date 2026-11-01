@@ -197,18 +197,6 @@ export function crawlFailuresQueryOptions(
   });
 }
 
-export function websiteBlobsQueryOptions(api: EneoClient, websiteId: string) {
-  return queryOptions({
-    queryKey: ["websites", websiteId, "info-blobs"],
-    queryFn: async (): Promise<InfoBlob[]> => {
-      const page = await unwrap(
-        api.GET("/api/v1/websites/{id}/info-blobs/", { params: { path: { id: websiteId } } })
-      );
-      return page.items;
-    }
-  });
-}
-
 /**
  * Embedding models referenced by a set of knowledge resources, deduplicated
  * and flagged with whether they are still enabled in the space. Used to group

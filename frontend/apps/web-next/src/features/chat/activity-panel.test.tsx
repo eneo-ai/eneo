@@ -6,6 +6,7 @@ import type { EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { observedElements, reportResize, setViewport } from "@/test/setup-dom";
+import { StepList } from "./activity-steps";
 import { deriveActivity } from "./activity";
 import { ActivityPanelBody, type ActivityTab } from "./activity-panel";
 import { ActivityPill } from "./activity-pill";
@@ -256,3 +257,35 @@ describe("ActivityPanel", () => {
     await expectNoAxeViolations(document.body);
   });
 });
+
+it.each([true, false])(
+  "labels an unresolved spreadsheet attempt without claiming completion (streaming: %s)",
+  (streaming) => {
+    const activity = deriveActivity(
+      {
+        id: "retrying",
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "query_table",
+            toolCallId: "failed-query",
+            state: "output-error",
+            errorText: "Invalid query",
+            input: { sql: "SELECT SUM(cost) FROM t" },
+            callProviderMetadata: {
+              eneo: { server_name: "Spreadsheet", is_bundled: true, purpose: "file_analysis" }
+            }
+          }
+        ]
+      },
+      { streaming }
+    );
+    renderInApp(<StepList activity={activity} durations={null} sessionId={null} />);
+    expect(
+      screen.getAllByText(streaming ? "Tidigare försök" : "Misslyckades").length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("Beräknade sammanställning")).toBeNull();
+    expect(screen.getAllByText("Beräknar sammanställning").length).toBeGreaterThan(0);
+  }
+);

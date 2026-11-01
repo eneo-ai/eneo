@@ -6,19 +6,24 @@ import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { List, ListItem } from "@astryxdesign/core/List";
-import { queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, Trash2, UserPlus, Users, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { DockedActions } from "@/components/shell/docked-actions";
+import { revealProblems } from "@/components/composites/field-problem";
+import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
+import { Token } from "@astryxdesign/core/Token";
+import { Selector } from "@astryxdesign/core/Selector";
+import { TextInput } from "@/components/astryx/text-input";
 import {
-  FieldProblem,
-  fieldProblemProps,
-  revealProblems
-} from "@/components/composites/field-problem";
-import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
-import { Typeahead } from "@/components/astryx/typeahead";
+  LoadMore,
+  QueryStateBoundary,
+  blockingError,
+  ListError,
+  RefreshError
+} from "@/components/composites/query-state";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
@@ -42,8 +47,12 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
-import { SEARCH_DEBOUNCE_MS } from "@/lib/hooks/use-debounced-value";
-import { userGroupsQueryOptions } from "@/features/admin/user-groups/user-groups";
+import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
+import { flattenPages } from "@/lib/api/pagination";
+import {
+  memberCandidatesQueryOptions,
+  userGroupsQueryOptions
+} from "@/features/admin/user-groups/user-groups";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
@@ -193,54 +202,32 @@ function MemberRow({ member }: { member: SpaceMember }) {
   );
 }
 
-/** Users to add as members: those whose email matches, or the first ones without a search. */
-function memberCandidatesQueryOptions(email: string | null) {
-  return queryOptions({
-    queryKey: ["users", "search", email],
-    queryFn: async () => {
-      const page = await unwrap(
-        browserApi.GET("/api/v1/users/", { params: { query: { email, limit: 10 } } })
-      );
-      return page.items;
-    }
-  });
-}
-
 /**
  * "Lägg till medlem": adds an existing user to the space. The members page
  * shows it as its primary action; `variant="header"` is the quieter button in
  * the space header on the other tabs (same name, same dialog).
  */
-/** Adds a member: a user picked from the search, and a role. A missing pick shows on add. */
 export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "header" }) {
   const t = useTranslations();
   const roleId = useId();
   const { space } = useSpace();
   const invalidate = useInvalidateSpace();
-  const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [selected, setSelected] = useState<SearchableItem | null>(null);
+  const [selected, setSelected] = useState<Schema<"UserSparse"> | null>(null);
   const [role, setRole] = useState<SpaceRoleValue>(space.available_roles[0]?.value ?? "editor");
   const [submitted, setSubmitted] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
+  const [searchInput, setSearchInput] = useState("");
   const userProblem = submitted && !selected ? t("form_problem_choose_user") : null;
 
-  // Users who are not members yet: the first ones on focus, then those matching
-  // the typed email once typing pauses (any length, as the Svelte app).
-  const members = space.members.items;
-  const candidates = useMemo<SearchSource<SearchableItem>>(() => {
-    const memberIds = new Set(members.map((member) => member.id));
-    const load = async (email: string | null) => {
-      const users = await queryClient.query(memberCandidatesQueryOptions(email));
-      return users
-        .filter((user) => !memberIds.has(user.id))
-        .map((user) => ({ id: user.id, label: user.email }));
-    };
-    return {
-      search: (query) => load(query.trim() || null),
-      bootstrap: () => load(null)
-    };
-  }, [members, queryClient]);
+  const email = useDebouncedValue(searchInput.trim());
+  const candidates = useInfiniteQuery({
+    ...memberCandidatesQueryOptions(browserApi, email),
+    enabled: open
+  });
+  const users = flattenPages(candidates.data?.pages);
+  const total = candidates.data?.pages.at(-1)?.total_count ?? users.length;
+  const memberIds = new Set(space.members.items.map((member) => member.id));
 
   const addMember = useMutation({
     mutationFn: (body: { id: string; role: SpaceRoleValue }) =>
@@ -254,13 +241,15 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
       invalidate();
       setOpen(false);
       setSelected(null);
+      setSearchInput("");
     },
     onError: (error) => toastApiError(error, t)
   });
 
   function add() {
     if (addMember.isPending) return;
-    if (!selected) {
+    if (!selected || memberIds.has(selected.id)) {
+      setSelected(null);
       revealProblems(() => setSubmitted(true), searchRef.current);
       return;
     }
@@ -291,19 +280,52 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
           <DialogTitle>{t("add_member")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
-          <Typeahead
+          <TextInput
             ref={searchRef}
             label={t("email")}
             placeholder={t("member_search_placeholder")}
-            searchSource={candidates}
-            value={selected}
-            onChange={setSelected}
-            hasEntriesOnFocus
-            debounceMs={SEARCH_DEBOUNCE_MS}
-            emptySearchText={t("no_results")}
+            value={searchInput}
+            onChange={setSearchInput}
+            autoComplete="off"
+            hasClear
             status={userProblem ? { type: "error", message: userProblem } : undefined}
             width="100%"
           />
+          {selected && <Token label={selected.email} onRemove={() => setSelected(null)} />}
+          <QueryStateBoundary query={candidates} rows={3}>
+            {() => (
+              <>
+                {users.length === 0 ? (
+                  <p className="text-ax-text-secondary text-sm">{t("no_users_found")}</p>
+                ) : (
+                  <div className="max-h-60 overflow-y-auto">
+                    <RadioList
+                      label={t("users")}
+                      value={selected?.id ?? ""}
+                      onChange={(id) => {
+                        const user = users.find((candidate) => candidate.id === id);
+                        if (user && !memberIds.has(user.id)) setSelected(user);
+                      }}
+                    >
+                      {users.map((user) => (
+                        <RadioListItem
+                          key={user.id}
+                          value={user.id}
+                          label={user.email}
+                          isDisabled={memberIds.has(user.id)}
+                          description={memberIds.has(user.id) ? t("already_added") : user.username}
+                        />
+                      ))}
+                    </RadioList>
+                  </div>
+                )}
+                <LoadMore
+                  query={candidates}
+                  label={t("load_more_users", { current: users.length, total })}
+                />
+              </>
+            )}
+          </QueryStateBoundary>
           <div className="flex flex-col gap-2">
             <Label htmlFor={roleId}>{t("role")}</Label>
             <Select value={role} onValueChange={(next) => setRole(next as SpaceRoleValue)}>
@@ -381,7 +403,6 @@ function GroupMemberRow({ group }: { group: GroupMember }) {
 /** Adds a user group with a role. A missing group shows on add. */
 function AddGroupMemberDialog() {
   const t = useTranslations();
-  const groupId = useId();
   const roleId = useId();
   const { space } = useSpace();
   const invalidate = useInvalidateSpace();
@@ -389,11 +410,12 @@ function AddGroupMemberDialog() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [role, setRole] = useState<SpaceRoleValue>(space.available_roles[0]?.value ?? "editor");
   const [submitted, setSubmitted] = useState(false);
-  const groupRef = useRef<HTMLButtonElement>(null);
+  const groupRef = useRef<HTMLDivElement>(null);
   const groupProblem = submitted && !selectedId ? t("form_problem_choose_user_group") : null;
 
   const groupMemberIds = new Set((space.group_members?.items ?? []).map((group) => group.id));
-  const { data: groups } = useQuery({ ...userGroupsQueryOptions(browserApi), enabled: open });
+  const groupsQuery = useQuery({ ...userGroupsQueryOptions(browserApi), enabled: open });
+  const groups = groupsQuery.data;
 
   const addGroup = useMutation({
     mutationFn: (body: { id: string; role: SpaceRoleValue }) =>
@@ -416,7 +438,7 @@ function AddGroupMemberDialog() {
   function add() {
     if (addGroup.isPending) return;
     if (!selectedId) {
-      revealProblems(() => setSubmitted(true), groupRef.current);
+      revealProblems(() => setSubmitted(true), groupRef.current?.querySelector("button"));
       return;
     }
     addGroup.mutate({ id: selectedId, role });
@@ -438,26 +460,43 @@ function AddGroupMemberDialog() {
           <DialogTitle>{t("add_group")}</DialogTitle>
         </DialogHeader>
         <div className="flex flex-col gap-4">
-          <div className="flex flex-col gap-2">
-            <Label htmlFor={groupId}>{t("user_groups")}</Label>
-            <Select value={selectedId ?? ""} onValueChange={setSelectedId}>
-              <SelectTrigger
-                ref={groupRef}
-                id={groupId}
-                className="w-full"
-                {...fieldProblemProps(groupId, groupProblem)}
-              >
-                <SelectValue placeholder={t("user_groups")} />
-              </SelectTrigger>
-              <SelectContent>
-                {selectable.map((group) => (
-                  <SelectItem key={group.id} value={group.id}>
-                    {group.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <FieldProblem id={groupId} problem={groupProblem} />
+          <RefreshError queries={[groupsQuery]} />
+          {blockingError(groupsQuery) && (
+            <ListError
+              error={groupsQuery.error}
+              isRetrying={groupsQuery.isFetching}
+              onRetry={() => void groupsQuery.refetch()}
+            />
+          )}
+          <div ref={groupRef}>
+            <Selector
+              label={t("user_groups")}
+              aria-label={
+                selectedId
+                  ? t("admin_user_groups_picker_trigger", {
+                      label: t("user_groups"),
+                      group: selectable.find((group) => group.id === selectedId)?.name ?? ""
+                    })
+                  : t("user_groups")
+              }
+              value={selectedId ?? undefined}
+              onChange={setSelectedId}
+              options={selectable.map((group) => ({ value: group.id, label: group.name }))}
+              hasSearch
+              placeholder={t("select_user_group")}
+              searchPlaceholder={t("select_user_group")}
+              emptyText={
+                groupsQuery.isError
+                  ? t("request_failed")
+                  : (groups?.length ?? 0) > 0
+                    ? t("admin_user_groups_all_assigned")
+                    : t("no_user_groups_configured")
+              }
+              emptySearchText={t("no_results_found")}
+              isLoading={groupsQuery.isPending}
+              status={groupProblem ? { type: "error", message: groupProblem } : undefined}
+              width="100%"
+            />
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor={roleId}>{t("role")}</Label>

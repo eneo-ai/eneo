@@ -97,3 +97,20 @@ export function getDeprecationStatus(
   if (!date) return { kind: "active", date: null };
   return date <= today ? { kind: "deprecated", date } : { kind: "retiring", date };
 }
+
+export type ModelLifecycle =
+  | { kind: "active" }
+  | { kind: "retiring"; date: string }
+  | { kind: "deprecated"; date: string | null };
+
+/** Deprecation from the recorded date, or the admin's manual deprecation flag. */
+export function modelLifecycle(
+  model: { deprecation_date?: string | null; is_deprecated?: boolean },
+  today?: string
+): ModelLifecycle {
+  const status = getDeprecationStatus(model, today);
+  if (status.kind === "deprecated") return { kind: "deprecated", date: status.date };
+  if (model.is_deprecated) return { kind: "deprecated", date: null };
+  if (status.kind === "retiring") return { kind: "retiring", date: status.date };
+  return { kind: "active" };
+}

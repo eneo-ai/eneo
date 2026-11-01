@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
 import { useAutosaveField } from "@/components/composites/use-autosave";
@@ -14,7 +14,9 @@ import { useUpdateApp } from "./use-app";
 /** Conversation retention; empty inherits the space policy. */
 export function SecuritySection({ app }: { app: App }) {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, can } = useSpace();
+  const canEditRetention = space.personal || can("edit", "space");
+  const readOnlyHintId = useId();
   const update = useUpdateApp(app.id);
   const [daysVisited, setDaysVisited] = useState(false);
 
@@ -23,7 +25,7 @@ export function SecuritySection({ app }: { app: App }) {
     value: app.data_retention_days?.toString() ?? "",
     save: (value) => update.mutateAsync({ data_retention_days: parseRetentionDays(value) }),
     // Empty inherits the space policy.
-    validate: (value) => parseRetentionDays(value) !== undefined
+    validate: (value) => canEditRetention && parseRetentionDays(value) !== undefined
   });
   const daysProblem =
     daysVisited && parseRetentionDays(days.value) === undefined
@@ -54,11 +56,21 @@ export function SecuritySection({ app }: { app: App }) {
               setDaysVisited(true);
               void days.commit();
             }}
-            {...fieldProblemProps("app-retention-days", daysProblem)}
+            disabled={!canEditRetention}
+            {...fieldProblemProps(
+              "app-retention-days",
+              daysProblem,
+              canEditRetention ? undefined : readOnlyHintId
+            )}
           />
           <span className="text-muted-foreground text-sm">{t("days")}</span>
         </div>
         <FieldProblem id="app-retention-days" problem={daysProblem} />
+        {!canEditRetention && (
+          <p id={readOnlyHintId} className="text-muted-foreground text-sm">
+            {t("conversation_retention_space_admin_only")}
+          </p>
+        )}
       </SettingsRow>
     </SettingsGroup>
   );

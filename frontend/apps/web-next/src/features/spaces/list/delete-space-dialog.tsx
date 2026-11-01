@@ -1,18 +1,34 @@
 "use client";
 
 import { Button } from "@astryxdesign/core/Button";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { revealProblems } from "@/components/composites/field-problem";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { invalidateSpaces, type SpaceSparse } from "@/features/spaces/space";
+
+/** Mounted only during deletion, so settlement and every retry reset the timer. */
+export function SpaceDeletionHint() {
+  const t = useTranslations();
+  const announce = useAnnounce();
+  const [slow, setSlow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setSlow(true);
+      announce(t("delete_space_hint"));
+    }, 5_000);
+    return () => clearTimeout(timer);
+  }, [announce, t]);
+  return slow ? <p className="text-ax-text-secondary text-sm">{t("delete_space_hint")}</p> : null;
+}
 
 /**
  * Confirms deleting a space by typing its name (irreversible, WCAG 3.3.4).
@@ -88,6 +104,7 @@ export function DeleteSpaceDialog({
                 <p className="text-ax-text-secondary text-sm">
                   {t("confirm_delete_space_message", { space: name })}
                 </p>
+                {deleteSpace.isPending && <SpaceDeletionHint />}
                 <TextInput
                   ref={inputRef}
                   label={t("enter_space_name_to_confirm")}

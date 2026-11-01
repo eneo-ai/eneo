@@ -14,6 +14,8 @@ from scripts.check_whats_new import _semver_key
 REPO_ROOT = Path(__file__).resolve().parents[2]
 CHECK = REPO_ROOT / "scripts" / "check_whats_new.py"
 SCHEMA = REPO_ROOT / "frontend" / "packages" / "whats-new" / "releases.schema.json"
+WEB_NEXT = Path("frontend/apps/web-next/src")
+LEGACY_PAGES = Path("backend/src/eneo/server/web_app_legacy.py")
 
 ENTRY = {
     "id": "self-service-password",
@@ -51,7 +53,31 @@ class _RepoCase(unittest.TestCase):
             "".join(f'<div data-tour="{a}"></div>\n' for a in anchors.split()),
             encoding="utf-8",
         )
+        web_next = root / WEB_NEXT
+        web_next.mkdir(parents=True)
+        self.write_route_tree(
+            root,
+            [
+                "/account",
+                "/spaces/$spaceId/knowledge/",
+                "/dashboard/$assistantId/{-$sessionId}",
+                "/$",
+            ],
+        )
+        (web_next / "account.tsx").write_text(
+            '<Page.Title tour="account-password" />', encoding="utf-8"
+        )
+        (root / LEGACY_PAGES).parent.mkdir(parents=True)
+        shutil.copy(REPO_ROOT / LEGACY_PAGES, root / LEGACY_PAGES)
         return root
+
+    def write_route_tree(self, root: Path, paths: list[str]) -> None:
+        (root / WEB_NEXT / "routeTree.gen.ts").write_text(
+            "export interface FileRoutesByFullPath {\n"
+            + "".join(f'  "{path}": typeof TestRoute\n' for path in paths)
+            + "}\n",
+            encoding="utf-8",
+        )
 
     def run_check(self, root: Path, *extra: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -67,8 +93,141 @@ class _RepoCase(unittest.TestCase):
         self.assertIn(fragment, result.stdout)
 
 
-
 class CheckWhatsNewTests(_RepoCase):
+    def test_rejects_missing_react_route_despite_svelte_page_and_catch_all(
+        self,
+    ) -> None:
+        root = self.make_repo(VALID)
+        self.write_route_tree(root, ["/other", "/$"])
+        result = self.run_check(root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("no page at /account", result.stdout)
+        self.assertIn(str(WEB_NEXT), result.stdout)
+
+    def test_svelte_routes_remain_required_while_source_exists(self) -> None:
+        root = self.make_repo(VALID)
+        shutil.rmtree(root / "frontend/apps/web/src/routes")
+        (root / "frontend/apps/web/src/anchor.svelte").write_text(
+            '<div data-tour="account-password" />', encoding="utf-8"
+        )
+        result = self.run_check(root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn("no page at /account under frontend/apps/web/src", result.stdout)
+
+    def test_rejects_missing_react_anchor_despite_svelte_anchor(self) -> None:
+        root = self.make_repo(VALID)
+        (root / WEB_NEXT / "account.tsx").unlink()
+        for relative in [
+            "account.test.tsx",
+            "account.spec.jsx",
+            "__tests__/account.tsx",
+        ]:
+            source = root / WEB_NEXT / relative
+            source.parent.mkdir(exist_ok=True)
+            source.write_text('<div data-tour="account-password" />', encoding="utf-8")
+        result = self.run_check(root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn('no element with data-tour="account-password"', result.stdout)
+        self.assertIn(str(WEB_NEXT), result.stdout)
+
+    def test_accepts_react_literal_anchor_forms(self) -> None:
+        for suffix, markup in [
+            ("tsx", '<Page.Title tour="account-password" />'),
+            ("jsx", "<div data-tour = {'account-password'} />"),
+        ]:
+            with self.subTest(markup=markup):
+                root = self.make_repo(VALID)
+                (root / WEB_NEXT / "account.tsx").unlink()
+                (root / WEB_NEXT / f"page.{suffix}").write_text(
+                    markup, encoding="utf-8"
+                )
+                result = self.run_check(root)
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_react_routes_validate_without_svelte(self) -> None:
+        for href in [
+            "/",
+            "/account/",
+            "/spaces/abc/knowledge?tab=files#details",
+            "/dashboard/assistant",
+            "/dashboard/assistant/session",
+        ]:
+            with self.subTest(href=href):
+                data = copy.deepcopy(VALID)
+                data["releases"][0]["entries"][0]["showMe"]["href"] = href
+                root = self.make_repo(data)
+                shutil.rmtree(root / "frontend/apps/web")
+                self.write_route_tree(
+                    root,
+                    [
+                        "/",
+                        "/account/",
+                        "/spaces/$spaceId/knowledge/",
+                        "/dashboard/$assistantId/{-$sessionId}",
+                    ],
+                )
+                result = self.run_check(root)
+                self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_react_dynamic_routes_reject_missing_and_extra_segments(self) -> None:
+        for href in ["/spaces/knowledge", "/dashboard", "/dashboard/a/b/c"]:
+            with self.subTest(href=href):
+                data = copy.deepcopy(VALID)
+                data["releases"][0]["entries"][0]["showMe"]["href"] = href
+                root = self.make_repo(data)
+                shutil.rmtree(root / "frontend/apps/web")
+                result = self.run_check(root)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn(f"no page at {href}", result.stdout)
+
+    def test_shared_legacy_target_must_resolve_to_a_react_route(self) -> None:
+        data = copy.deepcopy(VALID)
+        data["releases"][0]["entries"][0]["showMe"]["href"] = (
+            "/admin/personal-assistant/configuration?tab=chat#settings"
+        )
+        root = self.make_repo(
+            data, routes="admin/personal-assistant/configuration account"
+        )
+        self.write_route_tree(root, ["/admin/personal-assistant"])
+        result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.write_route_tree(root, ["/other"])
+        result = self.run_check(root)
+        self.assertEqual(result.returncode, 1, result.stdout)
+        self.assertIn(
+            "no page at /admin/personal-assistant/configuration", result.stdout
+        )
+
+    def test_requires_generated_react_routes(self) -> None:
+        root = self.make_repo(VALID)
+        tree = root / WEB_NEXT / "routeTree.gen.ts"
+        for content in [
+            None,
+            "export interface FileRoutesById { '/account': unknown }",
+        ]:
+            with self.subTest(content=content):
+                if content is None:
+                    tree.unlink()
+                else:
+                    tree.write_text(content, encoding="utf-8")
+                result = self.run_check(root)
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("routeTree.gen.ts", result.stdout)
+
+    def test_checker_needs_no_site_packages_or_backend_package_imports(self) -> None:
+        root = self.make_repo(VALID)
+        backend_package = root / "backend/src/eneo/__init__.py"
+        backend_package.write_text(
+            'raise RuntimeError("backend package imported")', encoding="utf-8"
+        )
+        result = subprocess.run(
+            ["python3", "-S", str(CHECK), "--repo-root", str(root)],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
     def test_permission_vocabulary_matches_backend_contract(self) -> None:
         source = REPO_ROOT / "backend/src/eneo/roles/permissions.py"
         permission_class = next(

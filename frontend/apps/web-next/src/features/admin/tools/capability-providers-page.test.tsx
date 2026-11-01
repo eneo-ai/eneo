@@ -1,13 +1,13 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpServer } from "../mcp/mcp";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
-vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key, useLocale: () => "en" }));
 vi.mock("@/lib/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
@@ -84,6 +84,41 @@ function show() {
 }
 
 describe("admin function sources", () => {
+  it.each([false, true])(
+    "shows the template library only inside a file-creation card with a provider (%s)",
+    async (hasProvider) => {
+      get.mockImplementation((path: string) => {
+        if (path === "/api/v1/mcp-servers/settings/")
+          return ok({
+            items: hasProvider
+              ? [
+                  {
+                    ...source,
+                    id: "file-creation",
+                    name: "Document source",
+                    purpose: "file_creation"
+                  }
+                ]
+              : []
+          });
+        if (path === "/api/v1/mcp-servers/bundled/") return ok(bundled);
+        if (path === "/api/v1/document-templates/")
+          return ok({ items: [], runtime_configured: false });
+        return ok({ items: [] });
+      });
+      show();
+      await screen.findByRole("heading", { name: "file_creation" });
+      if (hasProvider) {
+        const heading = await screen.findByRole("heading", { name: "document_templates" });
+        const card = screen.getByRole("heading", { name: "file_creation" }).closest("section")!;
+        expect(card.contains(heading)).toBe(true);
+        expect(within(card).getByRole("button", { name: "document_template_upload" })).toBeTruthy();
+      } else {
+        expect(screen.queryByRole("heading", { name: "document_templates" })).toBeNull();
+        expect(get.mock.calls.some(([path]) => path === "/api/v1/document-templates/")).toBe(false);
+      }
+    }
+  );
   it("shows both functions before either has a source and saves a search source inactive", async () => {
     show();
     expect(await screen.findByRole("heading", { name: "web_search" })).toBeTruthy();

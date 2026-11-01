@@ -8,9 +8,9 @@ import { ResourceCard, ResourceCollection } from "./resource-tile";
 
 afterEach(cleanup);
 
-function Collection() {
+function Collection({ desktopList }: { desktopList?: React.ReactNode } = {}) {
   return (
-    <ResourceCollection>
+    <ResourceCollection desktopList={desktopList}>
       <ResourceCard
         href="/spaces/s1/apps/a1"
         name="Protokollsammanfattning"
@@ -82,4 +82,26 @@ describe("ResourceCollection (decision 9)", () => {
     act(() => setViewport("tablet-portrait"));
     expect(document.activeElement?.getAttribute("href")).toBe("/spaces/s1/apps/a1");
   });
+});
+
+it("keeps focus on the same resource when a chosen desktop table replaces its card", () => {
+  const view = renderInApp(<Collection />);
+  act(() => screen.getByRole("button", { name: /^Fler åtgärder/ }).focus());
+  view.rerender(
+    <Collection
+      desktopList={
+        <table aria-label="Result">
+          <tbody>
+            <tr>
+              <td>
+                <a href="/spaces/s1/apps/a1">Protokollsammanfattning</a>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      }
+    />
+  );
+  expect(document.activeElement).toBe(within(screen.getByRole("table")).getByRole("link"));
+  expect(document.activeElement?.getAttribute("href")).toBe("/spaces/s1/apps/a1");
 });

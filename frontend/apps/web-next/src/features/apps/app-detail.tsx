@@ -13,6 +13,7 @@ import { useSpace } from "@/features/spaces/use-space";
 import { appQueryOptions, readAppTab } from "./apps";
 import { ResultsTable } from "./results/results-table";
 import { RunView } from "./run/run-view";
+import { AppSwitcher } from "./app-switcher";
 
 /** App run/results surface, with the active tab tracked in ?tab=. */
 export function AppDetail({ appId }: { appId: string }) {
@@ -44,13 +45,17 @@ export function AppDetail({ appId }: { appId: string }) {
           <ChevronLeft className="size-4" />
           {t("apps")}
         </Link>
-        <PageHeader title={app.name}>
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            <PageHeader title={app.name} className="min-w-0" />
+            <AppSwitcher key={app.id} appId={app.id} />
+          </div>
           {canEdit && (
             <Button asChild variant="outline">
               <Link href={`${base}/edit`}>{t("edit")}</Link>
             </Button>
           )}
-        </PageHeader>
+        </div>
       </div>
 
       <Tabs value={tab} onValueChange={selectTab}>

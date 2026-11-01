@@ -2,6 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API_BASE } from "@/lib/api/base";
+import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { IconField, iconUrl } from "./icon-field";
 
@@ -103,4 +104,33 @@ describe("IconField", () => {
       await expect(refused.json()).resolves.toMatchObject({ message: "Refused" });
     }
   );
+});
+
+it.each([
+  [new File(["x"], "invalid.txt", { type: "text/plain" }), /Endast PNG, JPEG och WebP/],
+  [new File([new Uint8Array(262145)], "large.png", { type: "image/png" }), /256/]
+])("rejects an invalid avatar before contacting the icon transport", async (file, message) => {
+  const fetchMock = vi.fn(async () => Response.json({ id: "unexpected" }));
+  vi.stubGlobal("fetch", fetchMock);
+  const save = vi.fn();
+  const { container } = renderInApp(<IconField iconId={null} onSave={save} />);
+  fireEvent.change(container.querySelector('input[type="file"]')!, { target: { files: [file] } });
+  expect(fetchMock).not.toHaveBeenCalled();
+  expect(save).not.toHaveBeenCalled();
+  expect(toastError).toHaveBeenCalledWith(expect.stringMatching(message));
+});
+it("offers an enlarged avatar preview and same-origin download", async () => {
+  renderInApp(<IconField iconId="existing" onSave={vi.fn()} />);
+  fireEvent.click(screen.getByRole("button", { name: /visa.*avatar/i }));
+  expect(await screen.findByRole("dialog")).toBeTruthy();
+  const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (
+    this: HTMLAnchorElement
+  ) {
+    expect(this.getAttribute("href")).toBe(iconUrl("existing"));
+    expect(this.download).toBe("icon");
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Ladda ner" }));
+  expect(click).toHaveBeenCalledOnce();
+  click.mockRestore();
+  await expectNoAxeViolations(document.body);
 });

@@ -10,8 +10,8 @@ a schema cannot express:
   * releases are ordered newest first with unique versions
   * entry ids and aliases are unique within a release
   * texts are user-facing: no PR/issue numbers, GitHub URLs, code-like tokens
-  * every showMe href resolves to a page under the web app's (app) routes
-  * every showMe anchor exists as data-tour="..." in the web app
+  * every showMe href resolves in web-next and, while present, the Svelte app
+  * every showMe anchor exists in each frontend's production source
 
 With --release-tag vX.Y.Z (the image build runs this on every tag) it also
 checks that the newest entry fits the release being built: it may not be
@@ -28,13 +28,19 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import runpy
 import sys
+from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 
 RELEASES_PATH = Path("frontend/packages/whats-new/releases.json")
 SCHEMA_PATH = Path("frontend/packages/whats-new/releases.schema.json")
 WEB_SRC = Path("frontend/apps/web/src")
 APP_ROUTES = WEB_SRC / "routes" / "(app)"
+WEB_NEXT_SRC = Path("frontend/apps/web-next/src")
+WEB_NEXT_ROUTES = WEB_NEXT_SRC / "routeTree.gen.ts"
+LEGACY_PAGES = Path("backend/src/eneo/server/web_app_legacy.py")
 
 TITLE_MAX = 60
 VERSION_RE_LOOSE = re.compile(r"^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$")
@@ -75,6 +81,13 @@ INTERNAL_TOKENS = [
 
 class Problem(Exception):
     pass
+
+
+@dataclass
+class Frontend:
+    source: Path
+    anchors: set[str]
+    route_exists: Callable[[str], bool]
 
 
 def _semver_key(version: str) -> tuple[int, int, int, int, tuple[tuple[int, object], ...]]:
@@ -197,8 +210,6 @@ def _route_exists(href: str, app_routes: Path) -> bool:
     [param] and [[optional]] segments and route groups in parentheses."""
     path = href.split("?", 1)[0].split("#", 1)[0].strip("/")
     wanted = [segment for segment in path.split("/") if segment]
-    if not app_routes.is_dir():
-        return True
     for page in app_routes.rglob("+page.svelte"):
         segments = [
             part
@@ -214,32 +225,76 @@ def _segments_match(pattern: list[str], wanted: list[str]) -> bool:
     if not pattern:
         return not wanted
     head, rest = pattern[0], pattern[1:]
-    if head.startswith("[[") and head.endswith("]]"):
+    if (head.startswith("[[") and head.endswith("]]")) or (
+        head.startswith("{-$") and head.endswith("}")
+    ):
         return _segments_match(rest, wanted) or (
             bool(wanted) and _segments_match(rest, wanted[1:])
         )
     if not wanted:
         return False
-    if head.startswith("[") and head.endswith("]"):
+    if (head.startswith("[") and head.endswith("]")) or head.startswith("$"):
         return _segments_match(rest, wanted[1:])
     return head == wanted[0] and _segments_match(rest, wanted[1:])
 
 
-def _collect_anchors(web_src: Path) -> set[str]:
+def _web_next_routes(route_tree: Path) -> list[list[str]]:
+    source = route_tree.read_text(encoding="utf-8")
+    interface = re.search(
+        r"export interface FileRoutesByFullPath\s*\{\s*\n(.*?)^\}",
+        source,
+        re.MULTILINE | re.DOTALL,
+    )
+    if interface is None:
+        raise Problem(f"{WEB_NEXT_ROUTES}: missing generated FileRoutesByFullPath")
+    paths = re.findall(r"""^\s*["'](/[^"']*)["']\s*:""", interface[1], re.MULTILINE)
+    if not paths:
+        raise Problem(f"{WEB_NEXT_ROUTES}: no generated full paths")
+    # Bare splats render not-found pages; they cannot prove a showMe destination.
+    return [
+        path.strip("/").split("/") if path.strip("/") else []
+        for path in paths
+        if "$" not in path.split("/")
+    ]
+
+
+def _web_next_route_exists(
+    href: str,
+    routes: list[list[str]],
+    legacy_page_target: Callable[[str], str | None],
+) -> bool:
+    path = href.split("?", 1)[0].split("#", 1)[0]
+    path = legacy_page_target(path) or path
+    wanted = [segment for segment in path.strip("/").split("/") if segment]
+    return any(_segments_match(route, wanted) for route in routes)
+
+
+def _collect_anchors(
+    web_src: Path, suffixes: tuple[str, ...] = (".svelte",)
+) -> set[str]:
     """Literal data-tour attributes plus the `tour` prop that Page.Title
     renders as one."""
     anchors: set[str] = set()
-    pattern = re.compile(r"""\b(?:data-tour|tour)=["']([a-z0-9-]+)["']""")
+    pattern = re.compile(
+        r"""\b(?:data-tour|tour)\s*=\s*(?:\{\s*)?["']([a-z0-9-]+)["']"""
+    )
     if not web_src.is_dir():
         return anchors
-    for path in web_src.rglob("*.svelte"):
+    for path in web_src.rglob("*"):
+        if (
+            path.suffix not in suffixes
+            or any(
+                part in {"__tests__", "tests", "__mocks__"}
+                for part in path.relative_to(web_src).parts
+            )
+            or re.search(r"\.(?:test|spec)\.[^.]+$", path.name)
+        ):
+            continue
         anchors.update(pattern.findall(path.read_text(encoding="utf-8")))
     return anchors
 
 
-def validate(
-    data: object, vocab: Vocabulary, anchors: set[str], app_routes: Path
-) -> list[str]:
+def validate(data: object, vocab: Vocabulary, frontends: list[Frontend]) -> list[str]:
     errors: list[str] = []
     if not isinstance(data, dict):
         return ["top level must be an object"]
@@ -307,18 +362,19 @@ def validate(
             show_me = entry.get("showMe") if isinstance(entry, dict) else None
             if isinstance(show_me, dict):
                 href = show_me.get("href")
-                if isinstance(href, str) and not _route_exists(href, app_routes):
-                    errors.append(
-                        f"{entry_where}.showMe.href: no page at {href} under "
-                        f"{APP_ROUTES}; remove showMe or point it at a page that exists"
-                    )
                 anchor = show_me.get("anchor")
-                if isinstance(anchor, str) and anchor not in anchors:
-                    errors.append(
-                        f"{entry_where}.showMe.anchor: no element with "
-                        f'data-tour="{anchor}" in {WEB_SRC}; remove showMe or '
-                        "restore the attribute"
-                    )
+                for frontend in frontends:
+                    if isinstance(href, str) and not frontend.route_exists(href):
+                        errors.append(
+                            f"{entry_where}.showMe.href: no page at {href} under "
+                            f"{frontend.source}; remove showMe or point it at a page that exists"
+                        )
+                    if isinstance(anchor, str) and anchor not in frontend.anchors:
+                        errors.append(
+                            f"{entry_where}.showMe.anchor: no element with "
+                            f'data-tour="{anchor}" in {frontend.source}; remove showMe or '
+                            "restore the attribute"
+                        )
     return errors
 
 
@@ -389,7 +445,32 @@ def main() -> int:
         return 1
     data = loaded[RELEASES_PATH]
 
-    errors = validate(data, vocab, _collect_anchors(root / WEB_SRC), root / APP_ROUTES)
+    try:
+        routes = _web_next_routes(root / WEB_NEXT_ROUTES)
+        # Load only the stdlib-only URL rules, without importing the backend app.
+        legacy_page_target = runpy.run_path(str(root / LEGACY_PAGES))[
+            "legacy_page_target"
+        ]
+        frontends = [
+            Frontend(
+                WEB_NEXT_SRC,
+                _collect_anchors(root / WEB_NEXT_SRC, (".tsx", ".jsx")),
+                lambda href: _web_next_route_exists(href, routes, legacy_page_target),
+            )
+        ]
+        if (root / WEB_SRC).is_dir():
+            frontends.append(
+                Frontend(
+                    WEB_SRC,
+                    _collect_anchors(root / WEB_SRC),
+                    lambda href: _route_exists(href, root / APP_ROUTES),
+                )
+            )
+    except (OSError, Problem) as error:
+        print(error)
+        return 1
+
+    errors = validate(data, vocab, frontends)
     if not errors and args.release_tag and isinstance(data, dict):
         errors = check_release_tag(data, args.release_tag)
     if errors:

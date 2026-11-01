@@ -2,8 +2,9 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
+import { router } from "@/test/navigation";
+import messages from "@/lib/i18n/messages/sv.json";
 import type { Space } from "../space";
 import { makeSpace } from "../testing/space-fixture";
 
@@ -95,6 +96,7 @@ afterEach(() => {
   cleanup();
   api.GET.mockReset();
   api.PATCH.mockReset();
+  api.DELETE.mockReset();
 });
 
 /** The model switches sit behind each card's "choose" button. */
@@ -142,10 +144,39 @@ it("shows organization settings without personal space sections", () => {
   const navigation = screen.getByRole("navigation", { name: "Inställningar" });
   expect(within(navigation).queryByRole("link", { name: "Allmänt" })).toBeNull();
   expect(within(navigation).queryByRole("link", { name: "Säkerhet & Integritet" })).toBeNull();
-  expect(within(navigation).queryByRole("link", { name: "Funktioner" })).toBeNull();
+  expect(within(navigation).getByRole("link", { name: "Funktioner" })).toBeTruthy();
+  const webSearch = within(document.getElementById("capabilities")!).getByRole("switch", {
+    name: "Webbsökning"
+  });
+  expect(webSearch.hasAttribute("disabled")).toBe(true);
   expect(within(navigation).queryByRole("link", { name: "Farozon" })).toBeNull();
   expect(within(navigation).getByRole("link", { name: "Modeller" })).toBeTruthy();
   expect(within(navigation).getByRole("link", { name: "Verktyg och anslutningar" })).toBeTruthy();
+});
+
+it("saves an available organization capability through the existing space update", async () => {
+  showSettings(
+    undefined,
+    [],
+    [],
+    "organization",
+    makeSpace({
+      overrides: {
+        organization: true,
+        enabled_capabilities: [],
+        available_capabilities: [{ purpose: "web_search", available: true, reason: null }]
+      }
+    })
+  );
+  fireEvent.click(
+    within(document.getElementById("capabilities")!).getByRole("switch", { name: "Webbsökning" })
+  );
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledWith("/api/v1/spaces/{id}/", {
+      params: { path: { id: "space-1" } },
+      body: { enabled_capabilities: ["web_search"] }
+    })
+  );
 });
 
 it("keeps an empty space name and explains the error at the field until corrected", async () => {
@@ -393,6 +424,63 @@ it("rolls back only unsaved model selections and explains a failed save", async 
   expect(aurora.getAttribute("data-state")).toBe("checked");
   expect(borealis.getAttribute("data-state")).toBe("unchecked");
   expect(api.PATCH).toHaveBeenCalledTimes(2);
+});
+
+it("keeps a saved deprecated model visible in the space model selector", async () => {
+  const deprecated = {
+    ...availableModels[0]!,
+    is_deprecated: true,
+    deprecation_date: "2020-01-01"
+  };
+  showSettings(
+    undefined,
+    [deprecated],
+    [],
+    "space-1",
+    makeSpace({ overrides: { completion_models: [{ id: "north-1", name: "Aurora" }] } })
+  );
+  await openModels("Chattmodeller");
+  const selected = await screen.findByRole("switch", { name: "Aurora" });
+  expect(selected.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(selected);
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledWith("/api/v1/spaces/{id}/", {
+      params: { path: { id: "space-1" } },
+      body: { completion_models: [] }
+    })
+  );
+});
+
+it("shows and clears the same delayed deletion hint from space settings", async () => {
+  let finish!: (value: unknown) => void;
+  api.DELETE.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  showSettings();
+  fireEvent.click(screen.getByRole("button", { name: messages.delete_this_space }));
+  const dialog = await screen.findByRole("alertdialog", { name: messages.delete_space });
+  fireEvent.change(
+    within(dialog).getByRole("textbox", { name: messages.enter_space_name_to_confirm }),
+    { target: { value: state.space.name } }
+  );
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.confirm_deletion }));
+    await act(async () => vi.advanceTimersByTimeAsync(4999));
+    expect(within(dialog).queryByText(messages.delete_space_hint)).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(within(dialog).getByText(messages.delete_space_hint)).toBeTruthy();
+    await act(async () => {
+      finish({ data: null, response: new Response(null, { status: 204 }) });
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.queryByText(messages.delete_space_hint)).toBeNull();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith("/spaces/list");
+  } finally {
+    vi.useRealTimers();
+  }
 });
 
 it("deletes the space once its name is confirmed: the list refreshes, the deleted space is not read again", async () => {

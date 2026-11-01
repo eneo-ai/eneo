@@ -35,6 +35,7 @@ const STATUS_KEY = {
   waiting: "chat_step_status_waiting",
   error: "chat_step_status_error",
   denied: "chat_step_status_denied",
+  "previous-attempt": "chat_tool_status_previous_attempt",
   stopped: "chat_step_status_stopped"
 } as const satisfies Record<StepStatus, string>;
 
@@ -44,6 +45,7 @@ const CALL_ICON: Record<StepStatus, { icon: LucideIcon; className: string; spin?
   waiting: { icon: Clock, className: "text-ax-text-secondary" },
   error: { icon: CircleX, className: "text-ax-error" },
   denied: { icon: Ban, className: "text-ax-warning" },
+  "previous-attempt": { icon: Clock, className: "text-ax-text-secondary" },
   stopped: { icon: Square, className: "text-ax-text-secondary" }
 };
 
@@ -218,7 +220,10 @@ export function ToolCallList({
               : call.status === "denied" || call.status === "stopped"
                 ? t(STATUS_KEY[call.status])
                 : null;
-          const description = [sharedServer ? null : presentation.server, problem ?? target]
+          const description = [
+            sharedServer ? null : presentation.server,
+            call.status === "previous-attempt" ? t(STATUS_KEY[call.status]) : (problem ?? target)
+          ]
             .filter(Boolean)
             .join(" · ");
           const duration = durations?.stepMs[callTimingKey(call.part.toolCallId)];

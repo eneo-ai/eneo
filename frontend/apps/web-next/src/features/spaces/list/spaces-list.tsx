@@ -4,9 +4,20 @@ import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { LayoutGrid, SearchX, Trash2 } from "lucide-react";
+import { LayoutGrid, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
+import { Table } from "@/components/astryx/table";
+import {
+  pixel,
+  proportional,
+  useTableSortable,
+  useTableSortableState,
+  type TableColumn
+} from "@astryxdesign/core/Table";
+import Link from "@/lib/link";
+import { useRouter } from "@/lib/navigation";
+import { ResourceViewControls, useResourceView } from "@/features/spaces/resource-view";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
@@ -33,6 +44,48 @@ function spaceMeta(space: SpaceSparse, t: ReturnType<typeof useTranslations>): s
   ];
 }
 
+/** The same permission-gated menu in cards, phone rows and the desktop table. */
+function SpaceActions({
+  space,
+  onDelete
+}: {
+  space: SpaceSparse;
+  onDelete: (space: SpaceSparse) => void;
+}) {
+  const t = useTranslations();
+  const router = useRouter();
+  const canEdit = space.permissions?.includes("edit");
+  const canDelete = space.permissions?.includes("delete");
+  if (!canEdit && !canDelete) return null;
+  return (
+    <MoreMenu
+      label={t("space_more_actions_for", { name: space.name })}
+      alignment="end"
+      items={[
+        ...(canEdit
+          ? [
+              {
+                label: t("edit"),
+                icon: <Pencil aria-hidden="true" />,
+                onClick: () => router.push(`/spaces/${spaceRouteId(space)}/settings`)
+              }
+            ]
+          : []),
+        ...(canDelete
+          ? [
+              {
+                label: t("delete_space"),
+                icon: <Trash2 aria-hidden="true" />,
+                variant: "destructive" as const,
+                onClick: () => onDelete(space)
+              }
+            ]
+          : [])
+      ]}
+    />
+  );
+}
+
 function SpaceCard({
   space,
   onDelete
@@ -41,7 +94,6 @@ function SpaceCard({
   onDelete: (space: SpaceSparse) => void;
 }) {
   const t = useTranslations();
-  const canDelete = space.permissions?.includes("delete") ?? false;
   const description = space.description?.trim();
 
   return (
@@ -61,22 +113,7 @@ function SpaceCard({
         description || <span className="text-ax-text-tertiary">{t("space_no_description")}</span>
       }
       meta={spaceMeta(space, t)}
-      actions={
-        canDelete ? (
-          <MoreMenu
-            label={t("space_more_actions_for", { name: space.name })}
-            alignment="end"
-            items={[
-              {
-                label: t("delete_space"),
-                icon: <Trash2 aria-hidden="true" />,
-                variant: "destructive",
-                onClick: () => onDelete(space)
-              }
-            ]}
-          />
-        ) : null
-      }
+      actions={<SpaceActions space={space} onDelete={onDelete} />}
     />
   );
 }
@@ -100,7 +137,41 @@ export function SpacesList({ title }: { title: string }) {
   const sharedSpaces = spaces
     .filter((space) => !space.personal && !space.organization)
     .sort((a, b) => collator.compare(a.name, b.name));
-  const visibleSpaces = filterSpaceResources(sharedSpaces, filter);
+  const matchedSpaces = filterSpaceResources(sharedSpaces, filter);
+  const { view, chooseView } = useResourceView("spaces", "list");
+  const comparators = useMemo(
+    () => ({ name: (a: SpaceSparse, b: SpaceSparse) => collator.compare(a.name, b.name) }),
+    [collator]
+  );
+  const { sortedData: visibleSpaces, sortConfig } = useTableSortableState<SpaceSparse, "name">({
+    data: matchedSpaces,
+    comparators,
+    defaultSort: [{ sortKey: "name", direction: "ascending" }],
+    allowUnsortedState: false
+  });
+  const sort = useTableSortable<SpaceSparse, "name">(sortConfig);
+  const columns: TableColumn<SpaceSparse>[] = [
+    {
+      key: "name",
+      header: t("name"),
+      width: proportional(1),
+      sortable: true,
+      renderCell: (space) => (
+        <Link
+          href={`/spaces/${spaceRouteId(space)}/overview`}
+          className="font-medium hover:underline"
+        >
+          {space.name}
+        </Link>
+      )
+    },
+    {
+      key: "actions",
+      header: t("actions"),
+      width: pixel(64),
+      renderCell: (space) => <SpaceActions space={space} onDelete={setDeleteTarget} />
+    }
+  ];
   const canCreate = can("shared_spaces");
   const createButton = (
     <AstryxButton label={t("create_space")} variant="primary" onClick={openCreateSpace} />
@@ -126,17 +197,37 @@ export function SpacesList({ title }: { title: string }) {
         />
       ) : (
         <>
-          <ResourceFilterInput
-            value={filter}
-            onChange={setFilter}
-            label={t("space_list_filter_label")}
-            placeholder={t("space_list_filter_placeholder")}
-            resultCount={visibleSpaces.length}
-          />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <ResourceFilterInput
+              value={filter}
+              onChange={setFilter}
+              label={t("space_list_filter_label")}
+              placeholder={t("space_list_filter_placeholder")}
+              resultCount={visibleSpaces.length}
+            />
+            <ResourceViewControls
+              view={view}
+              onViewChange={chooseView}
+              sortConfig={sortConfig}
+              options={[{ key: "name", label: t("name") }]}
+            />
+          </div>
           {visibleSpaces.length === 0 ? (
             <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
           ) : (
-            <ResourceCollection>
+            <ResourceCollection
+              desktopList={
+                view === "list" ? (
+                  <Table
+                    data={visibleSpaces}
+                    columns={columns}
+                    idKey="id"
+                    aria-label={title}
+                    plugins={{ sort }}
+                  />
+                ) : undefined
+              }
+            >
               {visibleSpaces.map((space) => (
                 <SpaceCard key={space.id} space={space} onDelete={setDeleteTarget} />
               ))}

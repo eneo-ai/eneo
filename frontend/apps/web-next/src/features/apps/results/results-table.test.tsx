@@ -1,33 +1,55 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderInApp } from "@/test/render";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderInApp, testQueryClient } from "@/test/render";
 
-const run = (id: string, text: string | null, created_at: string) => ({
+const backend = vi.hoisted(() => ({
+  runs: [] as AppRunSparse[],
+  deleted: [] as string[],
+  refuseDelete: false
+}));
+const toast = vi.hoisted(() => ({ error: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ toast }));
+const run = (id: string, text: string | null, created_at: string): AppRunSparse => ({
   id,
   status: "complete",
   input: { text, files: [] },
-  created_at
+  created_at,
+  finished_at: null,
+  user: { id: "user", email: "test@example.org" },
+  skill_provenance: []
 });
-
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: () =>
-      Promise.resolve({
-        data: {
-          items: [
-            run("run-1", "Sammanfatta protokollet", "2026-09-20T08:00:00Z"),
-            run("run-2", null, "2026-09-21T09:30:00Z")
-          ]
-        },
-        response: new Response("{}")
-      })
+    GET: () => Promise.resolve({ data: { items: backend.runs }, response: new Response("{}") }),
+    DELETE: (path: string, { params }: { params: { path: { id: string } } }) => {
+      if (backend.refuseDelete)
+        return Promise.resolve({
+          error: { message: "Unavailable" },
+          response: new Response("{}", { status: 503, headers: { "x-trace-id": "result-trace" } })
+        });
+      backend.deleted.push(`${path} ${params.path.id}`);
+      backend.runs = backend.runs.filter((run) => run.id !== params.path.id);
+      return Promise.resolve({ data: null, response: new Response(null, { status: 204 }) });
+    }
   }
 }));
 
+import type { AppRunSparse } from "../apps";
 import { ResultsTable } from "./results-table";
 
-afterEach(cleanup);
+beforeEach(() => {
+  backend.runs = [
+    run("run-1", "Sammanfatta protokollet", "2026-09-20T08:00:00Z"),
+    run("run-2", null, "2026-09-21T09:30:00Z")
+  ];
+  backend.deleted = [];
+  backend.refuseDelete = false;
+});
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
 
 describe("ResultsTable", () => {
   it("takes its name from the app page's Resultat tab", async () => {
@@ -50,4 +72,125 @@ describe("ResultsTable", () => {
       expect(within(row).getByRole("button", { name: `Fler åtgärder för ${time}` })).toBeTruthy();
     }
   });
+});
+
+it("filters result titles and sorts name, status and created without mutating cached runs", async () => {
+  const item = (
+    id: string,
+    text: string | null,
+    status: AppRunSparse["status"],
+    created_at: string
+  ): AppRunSparse => ({
+    id,
+    input: { text, files: [] },
+    status,
+    created_at,
+    finished_at: null,
+    user: { id: "user", email: "test@example.org" },
+    skill_provenance: []
+  });
+  const runs = [
+    item("z", "Zeta", "queued", "2026-01-01T00:00:00Z"),
+    item("a", "Alfa", "failed", "2026-01-03T00:00:00Z"),
+    item("b", null, "complete", "2026-01-02T00:00:00Z")
+  ];
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(["apps", "app-1", "runs"], runs);
+  renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/results/${id}`} />, {
+    queryClient
+  });
+  const table = await screen.findByRole("table", { name: "Resultat" });
+  const order = () =>
+    within(table)
+      .getAllByRole("row")
+      .slice(1)
+      .map((row) => within(row).getByRole("link").getAttribute("href"));
+  expect(order()).toEqual(["/results/a", "/results/b", "/results/z"]);
+  const column = (name: string) =>
+    within(table).getByRole("columnheader", { name: new RegExp(name) });
+  fireEvent.click(within(column("Namn")).getByRole("button"));
+  expect(order()).toEqual(["/results/b", "/results/a", "/results/z"]);
+  expect(column("Namn").getAttribute("aria-sort")).toBe("ascending");
+  fireEvent.click(within(column("Namn")).getByRole("button"));
+  expect(order()).toEqual(["/results/z", "/results/a", "/results/b"]);
+  fireEvent.click(within(column("Status")).getByRole("button"));
+  // The Swedish visible statuses sort I kö, Misslyckades, Slutförd.
+  expect(order()).toEqual(["/results/z", "/results/a", "/results/b"]);
+  fireEvent.click(within(column("Skapad")).getByRole("button"));
+  expect(order()).toEqual(["/results/z", "/results/b", "/results/a"]);
+  const filter = screen.getByRole("textbox", { name: "Filtrera resultat" });
+  fireEvent.change(filter, { target: { value: "alfa" } });
+  expect(order()).toEqual(["/results/a"]);
+  fireEvent.change(filter, { target: { value: "saknas" } });
+  expect(screen.getByRole("heading", { name: "Inga resultat hittades" })).toBeTruthy();
+  expect(screen.getByRole("textbox", { name: "Filtrera resultat" })).toBe(filter);
+  expect(runs.map((run) => run.id)).toEqual(["z", "a", "b"]);
+});
+
+it("filters by the visible empty-input title and uses it in the deletion confirmation", async () => {
+  const emptyTitle = "Den här körningen tog inte emot några indata.";
+  renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/results/${id}`} />);
+  await screen.findByRole("table", { name: "Resultat" });
+  expect(screen.getByRole("link", { name: emptyTitle })).toBeTruthy();
+
+  fireEvent.change(screen.getByRole("textbox", { name: "Filtrera resultat" }), {
+    target: { value: emptyTitle }
+  });
+  expect(screen.getAllByRole("link").map((link) => link.getAttribute("href"))).toEqual([
+    "/results/run-2"
+  ]);
+  const row = screen.getByRole("link", { name: emptyTitle }).closest("tr")!;
+  fireEvent.keyDown(within(row).getByRole("button"), { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+  const dialog = await screen.findByRole("alertdialog");
+  expect(
+    within(dialog).getByText(`Vill du verkligen ta bort resultatet ${emptyTitle}?`)
+  ).toBeTruthy();
+});
+
+async function requestDelete(id: string) {
+  const table = await screen.findByRole("table", { name: "Resultat" });
+  const row = within(table)
+    .getAllByRole("row")
+    .find((row) => row.querySelector(`a[href='/results/${id}']`))!;
+  const menu = within(row).getByRole("button");
+  menu.focus();
+  fireEvent.keyDown(menu, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+  const dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+  return dialog;
+}
+
+it.each([false, true])(
+  "restores removal focus to a neighboring run or the stable empty list (last: %s)",
+  async (last) => {
+    if (last) backend.runs = [backend.runs[0]!];
+    renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/results/${id}`} />);
+    await requestDelete("run-1");
+    await waitFor(() => expect(backend.deleted).toEqual(["/api/v1/app-runs/{id}/ run-1"]));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        last ? screen.getByRole("group", { name: "Resultat" }) : screen.getByRole("link")
+      )
+    );
+  }
+);
+
+it("keeps a refused deletion open with its result and trace id, then permits retry", async () => {
+  backend.refuseDelete = true;
+  renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/results/${id}`} />);
+  const dialog = await requestDelete("run-1");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith(
+      "Unavailable",
+      expect.objectContaining({ description: expect.stringContaining("result-trace") })
+    )
+  );
+  expect(screen.getByRole("alertdialog")).toBe(dialog);
+  expect(backend.runs).toHaveLength(2);
+  backend.refuseDelete = false;
+  fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
 });

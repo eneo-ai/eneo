@@ -1151,6 +1151,29 @@ it("lets an administrator load the organization space", async () => {
   ).toHaveLength(1);
 });
 
+it.each(["organization", "org-space"])(
+  "rejects organization assistants using the loaded space (%s)",
+  async (routeId) => {
+    replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+    const path =
+      routeId === "organization"
+        ? "/api/v1/spaces/type/organization/"
+        : `/api/v1/spaces/${routeId}/`;
+    replies.set(path, makeSpace({ overrides: { id: "org-space", organization: true } }));
+    const { router } = await renderRoute(`/spaces/${routeId}/assistants`);
+    await screen.findByRole("heading", { name: messages.page_not_found });
+    expect(router.state.matches.some((match) => match.status === "notFound")).toBe(true);
+    expect(requestedPaths().filter((requested) => requested === path)).toHaveLength(1);
+  }
+);
+
+it("opens shared assistants when the loaded space is not an organization", async () => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  const { router } = await renderRoute("/spaces/space-1/assistants");
+  await screen.findByRole("heading", { name: messages.assistants, level: 2 });
+  expect(router.state.matches.some((match) => match.status === "notFound")).toBe(false);
+});
+
 it("uses the stored collapsed preference on the first shell commit", async () => {
   document.cookie = "eneo_sidenav_collapsed=1; Path=/";
   const commits: string[] = [];
@@ -1865,4 +1888,28 @@ it("preloads federation with GET requests without waiting for its optional data"
   for (const [input, init] of fetcher.mock.calls) {
     expect(input instanceof Request ? input.method : (init?.method ?? "GET")).toBe("GET");
   }
+});
+
+it.each([
+  "/dashboard/helper-1/private-session",
+  "/spaces/space-1/chat?type=assistant&id=helper-1&session_id=private-session"
+])("rejects a help assistant before mounting chat: %s", async (path) => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set("/api/v1/assistants/helper-1/", {
+    id: "helper-1",
+    name: "Prompt guide",
+    is_help_assistant: true,
+    groups: [],
+    websites: [],
+    integration_knowledge_list: []
+  });
+  await renderRoute(path);
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(screen.queryByRole("textbox", { name: "Draft" })).toBeNull();
+  expect(
+    requestedPaths().filter(
+      (request) =>
+        request === "/api/v1/conversations/" || request.includes("/conversations/private-session/")
+    )
+  ).toEqual([]);
 });

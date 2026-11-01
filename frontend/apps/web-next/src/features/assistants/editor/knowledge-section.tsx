@@ -8,6 +8,9 @@ import { KnowledgePicker } from "@/features/knowledge/select/knowledge-picker";
 import type { KnowledgeSelections } from "@/features/knowledge/select/logic";
 import { RerankerRow } from "./reranker-row";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
+import { MaterialHandling } from "./material-handling";
+import { useSpace } from "@/features/spaces/use-space";
+import { assistantToolModel } from "./effective-config";
 
 function toIds(selections: KnowledgeSelections): string {
   return JSON.stringify([
@@ -23,10 +26,17 @@ function toIds(selections: KnowledgeSelections): string {
  * pickers are disabled (legacy data with both stays editable so the user can
  * resolve the conflict). The MCP picker is `McpSection` (mcp-section.tsx).
  */
-export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
+export function KnowledgeSection({
+  assistant,
+  modelSupportsTools
+}: {
+  assistant: Assistant;
+  modelSupportsTools?: boolean;
+}) {
   const t = useTranslations();
   const update = useUpdateAssistant(assistant.id);
   const autosave = useAutosave("knowledge");
+  const { space } = useSpace();
 
   const saved: KnowledgeSelections = useMemo(
     () => ({
@@ -81,6 +91,13 @@ export function KnowledgeSection({ assistant }: { assistant: Assistant }) {
 
   return (
     <SettingsGroup title={t("knowledge")}>
+      <MaterialHandling
+        assistant={assistant}
+        modelSupportsTools={
+          modelSupportsTools ??
+          assistantToolModel(space.completion_models, assistant)?.supports_tool_calling === true
+        }
+      />
       <SettingsRow title={t("knowledge")} description={t("select_additional_knowledge")}>
         <div className="flex flex-col gap-2">
           {warning}

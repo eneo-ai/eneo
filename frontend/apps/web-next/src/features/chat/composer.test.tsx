@@ -23,7 +23,8 @@ function Harness({
   onStop = vi.fn(),
   initial = "",
   sendBlocked = null,
-  inputRef
+  inputRef,
+  knowledgeMode
 }: {
   busy?: boolean;
   onSubmit?: () => void;
@@ -31,6 +32,7 @@ function Harness({
   initial?: string;
   sendBlocked?: string | null;
   inputRef?: Ref<ComposerHandle>;
+  knowledgeMode?: "tool" | "inject";
 }) {
   const [value, setValue] = useState(initial);
   const attachments = useAttachments(partner);
@@ -49,6 +51,7 @@ function Harness({
       knowledge={partner.knowledge}
       inputRef={inputRef}
       triggers={inputRef ? [] : undefined}
+      knowledgeMode={knowledgeMode}
     />
   );
 }
@@ -202,4 +205,13 @@ describe("Composer", () => {
     const { container } = renderComposer({ initial: "Hej" });
     await expectNoAxeViolations(container);
   });
+});
+
+it.each([
+  ["inject", "Innehåll från dessa källor infogas i varje meddelande."],
+  ["tool", "Assistenten söker i dessa källor när frågan kräver det."]
+] as const)("explains the configured knowledge mode: %s", async (mode, hint) => {
+  renderInApp(<Harness knowledgeMode={mode} />);
+  fireEvent.click(screen.getByRole("button", { name: /Kunskap: Upphandling/ }));
+  expect(await screen.findByText(hint)).toBeTruthy();
 });

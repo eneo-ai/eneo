@@ -5,6 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Assistant } from "./use-assistant";
 
 const update = vi.hoisted(() => vi.fn().mockResolvedValue({}));
+const templates = vi.hoisted(() =>
+  vi.fn(async () => ({ data: { items: [] }, response: new Response() }))
+);
+vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: templates } }));
 // The section's own mutation, saving through `update`.
 vi.mock("./use-assistant", () => ({
   useUpdateAssistant: () => useMutation({ mutationFn: (body: unknown) => update(body) })
@@ -101,4 +105,47 @@ describe("assistant capabilities", () => {
     fireEvent.click(screen.getByRole("switch", { name: "image_generation" }));
     expect(update).toHaveBeenCalledTimes(1);
   });
+});
+
+it("shows the governed chat default separately from policy availability", () => {
+  show({
+    ...assistant(["web_search", "image_generation"], true),
+    effective_config: {
+      models_enforced: false,
+      available_models: [],
+      locked_model: null,
+      default_model: null,
+      prompt_locked: false,
+      default_reasoning_effort: null,
+      reasoning_effort_user_configurable: false,
+      available_mcp_servers: [],
+      default_disabled_mcp_server_ids: [],
+      mcp_enforced: true,
+      enabled_capabilities: ["web_search", "image_generation"],
+      default_disabled_capabilities: ["image_generation"],
+      available_capabilities: [
+        { purpose: "web_search", available: true },
+        { purpose: "image_generation", available: true }
+      ]
+    }
+  } as Assistant);
+  expect(screen.getByText("functions_default_on")).toBeTruthy();
+  expect(screen.getByText("functions_default_off")).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "image_generation" }).hasAttribute("disabled")).toBe(
+    true
+  );
+});
+
+it("shows the persisted template mode only while file creation is enabled", async () => {
+  const value = {
+    ...assistant([], true),
+    document_template: { mode: "builtin" as const, template_id: null }
+  };
+  show(value);
+  expect(screen.queryByText("document_template_status")).toBeNull();
+  expect(templates).not.toHaveBeenCalled();
+  cleanup();
+  show({ ...value, enabled_capabilities: ["file_creation"] });
+  expect(await screen.findByText("document_template_status")).toBeTruthy();
+  expect(update).not.toHaveBeenCalled();
 });

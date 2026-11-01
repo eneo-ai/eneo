@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
-import { renderInApp, testAppContext } from "@/test/render";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
 const route = vi.hoisted(() => ({
@@ -16,12 +16,8 @@ const route = vi.hoisted(() => ({
   }
 }));
 const api = vi.hoisted(() => ({
-  GET: vi.fn(async () => ({
-    data: undefined,
-    error: { message: "Forbidden" },
-    response: new Response(null, { status: 403 })
-  })),
-  POST: vi.fn(async (_path: string, init?: { body?: unknown }) => ({
+  GET: vi.fn(),
+  POST: vi.fn(async (_path: string, init?: { body?: unknown; signal?: AbortSignal }) => ({
     data: init?.body,
     response: new Response()
   }))
@@ -59,6 +55,7 @@ const personalSpace = {
       reasoning_effort_user_configurable: true
     },
     allowed_attachments: null,
+    permissions: ["read"],
     mcp_servers: [],
     enabled_capabilities: [],
     available_capabilities: []
@@ -71,10 +68,22 @@ vi.mock("@/features/spaces/use-space", () => ({
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
+beforeEach(() => {
+  api.GET.mockImplementation(async () => ({
+    data: undefined,
+    error: { message: "Forbidden" },
+    response: new Response(null, { status: 403 })
+  }));
+});
+
 afterEach(() => {
   cleanup();
   api.GET.mockClear();
-  api.POST.mockClear();
+  api.POST.mockReset();
+  api.POST.mockImplementation(async (_path, init) => ({
+    data: init?.body,
+    response: new Response()
+  }));
   route.space.personal = false;
   route.space.completion_models = [];
   route.space.default_assistant = null;
@@ -99,6 +108,127 @@ describe("SpaceChat", () => {
     expect(screen.getByText("Det gick inte att öppna chatten")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Försök igen" })).toBeNull();
     expect(api.GET).not.toHaveBeenCalled();
+  });
+
+  it.each(["assistant", "group-chat"])("projects insight_view from the loaded %s", async (type) => {
+    const queryClient = testQueryClient();
+    queryClient.setQueryData([type === "assistant" ? "assistants" : "group-chats", "partner-9"], {
+      ...personalSpace.default_assistant,
+      id: "partner-9",
+      name: "Avtalsgranskning",
+      insight_enabled: true,
+      permissions: ["read", "insight_view"],
+      groups: [],
+      websites: [],
+      integration_knowledge_list: []
+    });
+    renderInApp(<SpaceChat />, {
+      route: `/spaces/space-1/chat?type=${type}&id=partner-9`,
+      queryClient
+    });
+    expect(await screen.findByRole("radio", { name: "Insikter" })).toBeTruthy();
+  });
+
+  it("refreshes the empty-draft baseline after a saved Skill change and a model switch", async () => {
+    const assistant = { ...personalSpace.default_assistant };
+    Object.assign(route.space, personalSpace, { default_assistant: assistant });
+    const summary = {
+      skill_id: "answers",
+      skill_revision_id: "r1",
+      attachable_revision_id: "r1",
+      slug: "answers",
+      display_name: "Mina svarspreferenser",
+      description: "",
+      content_digest: "digest",
+      revision_number: 1,
+      attachable_revision_number: 1,
+      position: 0,
+      is_active: true,
+      source: "space",
+      execution_blocked: false,
+      activation_mode: "always"
+    };
+    let bindings = [summary];
+    let configurationReads = 0;
+    const requests: { signal: AbortSignal; resolve: (data: unknown) => void }[] = [];
+    api.GET.mockImplementation(async (path: string) => {
+      if (path === "/api/v1/dashboard/")
+        return { data: { spaces: { items: [] } }, response: new Response() };
+      if (path.endsWith("/skills/configuration/")) {
+        configurationReads++;
+        return {
+          data: {
+            bindings,
+            organisation_bindings: [],
+            personal_layer: { status: "applied", reason: null, detail: null },
+            runtime: null
+          },
+          response: new Response()
+        };
+      }
+      return { data: { items: [], total_count: 0, next_cursor: null }, response: new Response() };
+    });
+    api.POST.mockImplementation(async (path, init) => {
+      if (path === "/api/v1/conversations/preflight")
+        return new Promise((resolve) => {
+          requests.push({
+            signal: init!.signal!,
+            resolve: (data) => resolve({ data, response: new Response() })
+          });
+        });
+      bindings = [];
+      return { data: init?.body, response: new Response() };
+    });
+    const view = renderInApp(<SpaceChat />, {
+      route: "/spaces/personal/chat",
+      appContext: testAppContext({ permissions: ["personal_chat", "personal_skills"] })
+    });
+    await waitFor(() => expect(requests).toHaveLength(1));
+    expect(configurationReads).toBe(1);
+    fireEvent.click(screen.getByRole("button", { name: /^Skills/ }));
+    const mode = await screen.findByRole("radiogroup", { name: "Läge för Mina svarspreferenser" });
+    fireEvent.click(within(mode).getByRole("radio", { name: "Av" }));
+    await waitFor(() => expect(configurationReads).toBe(3));
+    await waitFor(() => expect(requests).toHaveLength(2));
+    expect(requests[0]!.signal.aborted).toBe(true);
+    await act(async () =>
+      requests[0]!.resolve({
+        input_tokens: 0,
+        file_tokens: 0,
+        prompt_tokens: 9999,
+        max_input_tokens: 10000
+      })
+    );
+    expect(screen.queryByRole("button", { name: /^Kontextanvändning:/ })).toBeNull();
+    assistant.completion_model = { ...assistant.completion_model, id: "model-2" };
+    view.rerender(<SpaceChat />);
+    await waitFor(() => expect(requests).toHaveLength(3));
+    expect(requests[1]!.signal.aborted).toBe(true);
+    await act(async () =>
+      requests[2]!.resolve({
+        input_tokens: 0,
+        file_tokens: 0,
+        prompt_tokens: 500,
+        skill_context_tokens: 200,
+        assistant_attachment_tokens: 300,
+        max_input_tokens: 10000
+      })
+    );
+    expect(
+      (await screen.findByRole("button", { name: /^Kontextanvändning:/ })).textContent
+    ).toMatch(/800 \/ 10.000/);
+  });
+
+  it("denies a loaded personal assistant without read access before private queries mount", () => {
+    Object.assign(route.space, personalSpace, {
+      default_assistant: { ...personalSpace.default_assistant, permissions: [] }
+    });
+    renderRoute("/spaces/personal/chat?session_id=private-session");
+    expect(
+      screen.getByRole("heading", { name: "Du har inte åtkomst till den personliga chatten" })
+    ).toBeTruthy();
+    expect(api.GET).not.toHaveBeenCalled();
+    expect(screen.queryByRole("textbox")).toBeNull();
   });
 
   it("lets the personal assistant's reasoning effort be picked beside the model and saves it on the assistant", async () => {

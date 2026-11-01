@@ -141,7 +141,8 @@ export function selectedIntegrationDisplay(
     const first = selectedItems[0];
     if (!first) continue;
     const allItems = allWrappers.get(wrapperId) ?? [];
-    const fullySelected = allItems.length > 0 && selectedItems.length >= allItems.length;
+    const selectedIds = new Set(selectedItems.map((item) => item.id));
+    const fullySelected = allItems.length > 0 && allItems.every((item) => selectedIds.has(item.id));
     if (!fullySelected) {
       for (const item of selectedItems) {
         display.push({ type: "single", key: `integration:${item.id}`, knowledge: item });
@@ -154,7 +155,7 @@ export function selectedIntegrationDisplay(
       wrapper: {
         id: wrapperId,
         name: wrapperName(first),
-        items: allItems,
+        items: selectedItems,
         integration_type: first.integration_type
       }
     });

@@ -3,10 +3,23 @@
 import { useCollator } from "@astryxdesign/core/i18n";
 import { AppWindow, SearchX } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { PageHeader } from "@/components/composites/page-header";
+import { Table } from "@/components/astryx/table";
+import {
+  pixel,
+  proportional,
+  useTableSortable,
+  useTableSortableState,
+  type TableColumn,
+  type TableSortComparator
+} from "@astryxdesign/core/Table";
+import { ResourceGroup } from "@/components/composites/resource-group";
+import { StatusLabel } from "@/components/composites/status-label";
+import Link from "@/lib/link";
+import { ResourceViewControls, useResourceView } from "@/features/spaces/resource-view";
 import { ResourceCollection } from "@/components/composites/resource-tile";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
@@ -14,45 +27,108 @@ import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
 import { spaceApps, type AppSparse } from "./apps";
 import { CreateAppButton } from "./create-app";
+import { AppActions } from "./actions";
 import { AppTile } from "./tile";
 
-function TileGrid({ items, showStatus }: { items: AppSparse[]; showStatus: boolean }) {
-  return (
-    <ResourceCollection>
-      {items.map((app) => (
-        <AppTile key={app.id} app={app} showStatus={showStatus} />
-      ))}
-    </ResourceCollection>
-  );
-}
-
-/** A titled group of cards (Publicerad / Utkast). */
-function TileGroup({ title, items }: { title: string; items: AppSparse[] }) {
-  const headingId = useId();
-  if (items.length === 0) return null;
-  return (
-    <section aria-labelledby={headingId} className="flex flex-col gap-3">
-      <h3 id={headingId} className="text-ax-text-secondary text-sm font-semibold">
-        {title}
-      </h3>
-      <TileGrid items={items} showStatus={false} />
-    </section>
-  );
-}
-
-/** Apps in one grid, grouped into published/drafts for users who can publish. */
 export function AppsPage() {
   const t = useTranslations();
-  const { space, can } = useSpace();
+  const { space, routeId, can } = useSpace();
   const collator = useCollator();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const [filter, setFilter] = useState("");
 
-  const items = spaceApps(space, collator.compare);
-  const filteredItems = filterSpaceResources(items, filter);
+  const items = useMemo(() => spaceApps(space, collator.compare), [space, collator]);
+  const matchedItems = useMemo(() => filterSpaceResources(items, filter), [items, filter]);
+  const { view, chooseView } = useResourceView("apps", "cards");
+  const comparePublished = useCallback(
+    (a: boolean, b: boolean) =>
+      collator.compare(t(a ? "published" : "draft"), t(b ? "published" : "draft")),
+    [collator, t]
+  );
+  const comparators = useMemo<Record<"name" | "published", TableSortComparator<AppSparse>>>(
+    () => ({
+      name: (a, b) => collator.compare(a.name, b.name),
+      published: (a, b) => comparePublished(a.published, b.published)
+    }),
+    [collator, comparePublished]
+  );
+  const { sortedData: filteredItems, sortConfig } = useTableSortableState<
+    AppSparse,
+    "name" | "published"
+  >({
+    data: matchedItems,
+    comparators,
+    defaultSort: [{ sortKey: "name", direction: "ascending" }],
+    allowUnsortedState: false
+  });
+  const sortPlugin = useTableSortable<AppSparse, "name" | "published">(sortConfig);
   const showStatus = !space.personal;
   const groupByStatus = can("publish", "app");
   const canCreate = can("create", "app");
+
+  const columns: TableColumn<AppSparse>[] = [
+    {
+      key: "name",
+      header: t("name"),
+      width: proportional(2),
+      sortable: true,
+      renderCell: (item) => (
+        <Link href={`/spaces/${routeId}/apps/${item.id}`} className="font-medium hover:underline">
+          {item.name}
+        </Link>
+      )
+    },
+    ...(showStatus
+      ? [
+          {
+            key: "published",
+            header: t("status"),
+            width: proportional(1),
+            sortable: true,
+            renderCell: (item: AppSparse) => (
+              <StatusLabel
+                status={item.published ? "success" : "neutral"}
+                label={t(item.published ? "published" : "draft")}
+              />
+            )
+          }
+        ]
+      : []),
+    {
+      key: "actions",
+      header: t("actions"),
+      width: pixel(64),
+      renderCell: (item) => <AppActions app={item} />
+    }
+  ];
+  const collection = (members: AppSparse[], status: boolean, title: string) => (
+    <ResourceCollection
+      desktopList={
+        view === "list" ? (
+          <Table
+            data={members}
+            columns={columns}
+            idKey="id"
+            aria-label={title}
+            plugins={{ sort: sortPlugin }}
+          />
+        ) : undefined
+      }
+    >
+      {members.map((item) => (
+        <AppTile key={item.id} app={item} showStatus={status} />
+      ))}
+    </ResourceCollection>
+  );
+  const groups = [true, false].map((published) => ({
+    published,
+    title: t(published ? "published" : "drafts"),
+    members: filteredItems.filter((item) => item.published === published)
+  }));
+  if (sortConfig.sort[0]?.sortKey === "published") {
+    const direction = sortConfig.sort[0].direction === "ascending" ? 1 : -1;
+    groups.sort((a, b) => comparePublished(a.published, b.published) * direction);
+  }
 
   return (
     <RemovalFocusScope target={headingRef}>
@@ -74,13 +150,24 @@ export function AppsPage() {
           />
         ) : (
           <>
-            <ResourceFilterInput
-              value={filter}
-              onChange={setFilter}
-              label={t("space_filter_apps_label")}
-              placeholder={t("filter_apps_placeholder")}
-              resultCount={filteredItems.length}
-            />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <ResourceFilterInput
+                value={filter}
+                onChange={setFilter}
+                label={t("space_filter_apps_label")}
+                placeholder={t("filter_apps_placeholder")}
+                resultCount={filteredItems.length}
+              />
+              <ResourceViewControls
+                view={view}
+                onViewChange={chooseView}
+                sortConfig={sortConfig}
+                options={[
+                  { key: "name", label: t("name") },
+                  ...(showStatus ? [{ key: "published" as const, label: t("status") }] : [])
+                ]}
+              />
+            </div>
             {filteredItems.length === 0 ? (
               <EmptyState
                 icon={<SearchX />}
@@ -90,17 +177,18 @@ export function AppsPage() {
               />
             ) : groupByStatus ? (
               <div className="flex flex-col gap-6">
-                <TileGroup
-                  title={t("published")}
-                  items={filteredItems.filter((app) => app.published)}
-                />
-                <TileGroup
-                  title={t("drafts")}
-                  items={filteredItems.filter((app) => !app.published)}
-                />
+                {groups.map((group) => (
+                  <ResourceGroup
+                    key={String(group.published)}
+                    title={group.title}
+                    hidden={group.members.length === 0}
+                  >
+                    {collection(group.members, false, `${t("apps")} · ${group.title}`)}
+                  </ResourceGroup>
+                ))}
               </div>
             ) : (
-              <TileGrid items={filteredItems} showStatus={showStatus} />
+              collection(filteredItems, showStatus, t("apps"))
             )}
           </>
         )}

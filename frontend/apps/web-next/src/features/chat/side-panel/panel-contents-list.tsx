@@ -201,6 +201,8 @@ export function PanelContentsList({
       )
     : contents.uploads;
 
+  const shownUploadIds = new Set(shownUploads.map((file) => file.id));
+
   return (
     <div className="flex flex-col p-1">
       {contents.views.length > 0 && (
@@ -289,7 +291,27 @@ export function PanelContentsList({
             </div>
           )}
           {shownUploads.length > 0 ? (
-            <ul className="flex flex-col">{shownUploads.map((file) => entry(file, [file]))}</ul>
+            contents.uploadGroups ? (
+              contents.uploadGroups.map((group) => {
+                const files = group.files.filter((file) => shownUploadIds.has(file.id));
+                if (files.length === 0) return null;
+                const rows = (
+                  <ul className="flex flex-col">{files.map((file) => entry(file, [file]))}</ul>
+                );
+                if (group.ordinal === null) return <div key={group.key}>{rows}</div>;
+                const title = t("conversation_uploads_group", { ordinal: group.ordinal });
+                return (
+                  <section key={group.key} aria-label={title}>
+                    <h4 className="text-ax-text-secondary px-2 pt-2 pb-1 text-xs font-medium">
+                      {title}
+                    </h4>
+                    {rows}
+                  </section>
+                );
+              })
+            ) : (
+              <ul className="flex flex-col">{shownUploads.map((file) => entry(file, [file]))}</ul>
+            )
           ) : (
             <p className="text-ax-text-secondary px-2 py-1.5 text-xs">
               {t("conversation_uploads_filter_empty")}

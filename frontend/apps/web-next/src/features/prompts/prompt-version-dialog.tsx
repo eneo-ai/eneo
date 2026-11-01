@@ -1,140 +1,379 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { Button } from "@astryxdesign/core/Button";
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { TextArea } from "@astryxdesign/core/TextArea";
+import { Tooltip } from "@astryxdesign/core/Tooltip";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
-import { LoadingState } from "@/components/composites/loading-state";
+import { useEffect, useImperativeHandle, useRef, useState } from "react";
+import { useAppContext } from "@/components/providers/app-context";
 import { ClientTime } from "@/components/composites/client-time";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
+import {
+  LeaveConfirmation,
+  type LeaveConfirmationHandle
+} from "@/components/composites/leave-confirmation";
 import { browserApi } from "@/lib/api/browser";
+import { cn } from "@/lib/utils";
 import { unwrap } from "@/lib/api/errors";
+import { toastApiError } from "@/lib/api/toast";
+import type { Schema } from "@/lib/api/models";
 
-type PromptResource = {
-  type: "assistant" | "app";
-  id: string;
-};
-
-async function fetchPromptVersions(resource: PromptResource) {
-  if (resource.type === "assistant") {
-    return (
-      await unwrap(
-        browserApi.GET("/api/v1/assistants/{id}/prompts/", {
-          params: { path: { id: resource.id } }
-        })
-      )
-    ).items;
-  }
-
-  return (
-    await unwrap(
-      browserApi.GET("/api/v1/apps/{id}/prompts/", {
-        params: { path: { id: resource.id } }
-      })
-    )
-  ).items;
-}
-
-/** Browse a resource's prompt history and load a past version for review. */
-export function PromptVersionDialog({
-  resource,
-  open,
-  onOpenChange,
-  onUseVersion
-}: {
+type PromptResource = { type: "assistant" | "app"; id: string };
+type Props = {
   resource: PromptResource;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onUseVersion: (text: string) => void;
-}) {
+  onUseVersion: (prompt: Schema<"PromptPublic">) => void;
+};
+type Action =
+  { kind: "description"; id: string; description: string } | { kind: "delete"; id: string };
+
+async function fetchPromptVersions(resource: PromptResource, signal: AbortSignal) {
+  return resource.type === "assistant"
+    ? (
+        await unwrap(
+          browserApi.GET("/api/v1/assistants/{id}/prompts/", {
+            params: { path: { id: resource.id } },
+            signal
+          })
+        )
+      ).items
+    : (
+        await unwrap(
+          browserApi.GET("/api/v1/apps/{id}/prompts/", {
+            params: { path: { id: resource.id } },
+            signal
+          })
+        )
+      ).items;
+}
+
+/** The dialog persists; its resource-scoped history/draft is discarded when it closes. */
+export function PromptVersionDialog(props: Props) {
   const t = useTranslations();
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-
-  const list = useQuery({
-    queryKey: [resource.type, resource.id, "prompts"],
-    enabled: open,
-    queryFn: () => fetchPromptVersions(resource)
-  });
-
-  const preview = useQuery({
-    queryKey: ["prompt", selectedId],
-    enabled: open && Boolean(selectedId),
-    queryFn: () =>
-      unwrap(
-        browserApi.GET("/api/v1/prompts/{id}/", {
-          params: { path: { id: selectedId as string } }
-        })
-      )
-  });
-
+  const leave = useRef<LeaveConfirmationHandle>(null);
+  function changeOpen(next: boolean) {
+    if (next) props.onOpenChange(true);
+    else if (leave.current) leave.current.confirm(() => props.onOpenChange(false));
+    else props.onOpenChange(false);
+  }
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-hidden sm:max-w-3xl">
-        <DialogHeader>
-          <DialogTitle>{t("prompt_history")}</DialogTitle>
-        </DialogHeader>
-        <div className="grid max-h-[60vh] grid-cols-1 gap-4 sm:grid-cols-[18rem_1fr]">
-          <div className="overflow-y-auto rounded-md border">
-            {list.isPending ? (
-              <LoadingState rows={1} height={160} />
-            ) : (
-              <ul className="divide-border divide-y">
-                {(list.data ?? []).map((version) => (
-                  <li key={version.id}>
-                    <button
-                      type="button"
-                      className={`hover:bg-muted/50 flex w-full flex-col items-start gap-0.5 px-3 py-2 text-left ${
-                        selectedId === version.id ? "bg-accent" : ""
-                      }`}
-                      onClick={() => setSelectedId(version.id)}
-                    >
-                      <span className="flex items-center gap-2 text-sm">
-                        {version.created_at ? (
-                          <ClientTime value={version.created_at} format="date_time" />
-                        ) : (
-                          version.id.slice(0, 8)
-                        )}
-                        {version.is_selected && (
-                          <Badge variant="secondary">{t("current_version")}</Badge>
-                        )}
-                      </span>
-                      {version.description && (
-                        <span className="text-muted-foreground truncate text-xs">
-                          {version.description}
-                        </span>
-                      )}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </div>
-          <div className="flex min-h-0 flex-col gap-2">
-            <div className="bg-muted/30 flex-1 overflow-y-auto rounded-md border p-3">
-              {!selectedId ? (
-                <p className="text-muted-foreground text-sm">{t("preview")}</p>
-              ) : preview.isPending ? (
-                <LoadingState rows={1} height={160} />
-              ) : (
-                <pre className="text-sm whitespace-pre-wrap">{preview.data?.text}</pre>
-              )}
-            </div>
-            <Button
-              className="w-fit self-end"
-              disabled={!preview.data?.text}
-              onClick={() => {
-                if (preview.data?.text) {
-                  onUseVersion(preview.data.text);
-                  onOpenChange(false);
-                }
-              }}
-            >
-              {t("use_this_version")}
-            </Button>
-          </div>
-        </div>
-      </DialogContent>
+    <Dialog
+      isOpen={props.open}
+      aria-label={t("prompt_history")}
+      onOpenChange={changeOpen}
+      purpose="form"
+      width={840}
+      maxHeight="85dvh"
+    >
+      {props.open && (
+        <History
+          key={`${props.resource.type}:${props.resource.id}`}
+          {...props}
+          requestClose={() => changeOpen(false)}
+          leave={leave}
+        />
+      )}
     </Dialog>
+  );
+}
+
+function History({
+  resource,
+  onOpenChange,
+  onUseVersion,
+  requestClose,
+  leave
+}: Props & { requestClose: () => void; leave: React.Ref<LeaveConfirmationHandle> }) {
+  const t = useTranslations();
+  const { user } = useAppContext();
+  const client = useQueryClient();
+  const discard = useRef<LeaveConfirmationHandle>(null);
+  // Mutation observers render asynchronously; submitted work owns close immediately.
+  const saving = useRef(false);
+  const listKey = [resource.type, resource.id, "prompts"];
+  const [selection, setSelection] = useState<string | null>(null);
+  const [step, setStep] = useState<
+    | { kind: "preview" }
+    | {
+        kind: "description" | "delete";
+        target: Schema<"PromptSparse">;
+        originalDescription: string;
+      }
+  >({ kind: "preview" });
+  const [description, setDescription] = useState("");
+  const body = useRef<HTMLDivElement>(null);
+  const actionHeading = useRef<HTMLHeadingElement>(null);
+  const editButton = useRef<HTMLButtonElement>(null);
+  const previousStep = useRef(step.kind);
+  useEffect(() => {
+    if (previousStep.current !== step.kind) {
+      if (step.kind === "preview") (editButton.current ?? body.current)?.focus();
+      else actionHeading.current?.focus();
+      previousStep.current = step.kind;
+    }
+  }, [step]);
+  const list = useQuery({
+    queryKey: listKey,
+    queryFn: ({ signal }) => fetchPromptVersions(resource, signal),
+    staleTime: 0
+  });
+  const selected =
+    list.data?.find((v) => v.id === selection) ??
+    list.data?.find((v) => v.is_selected) ??
+    list.data?.[0];
+  const preview = useQuery({
+    queryKey: ["prompt", selected?.id],
+    enabled: !!selected,
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/prompts/{id}/", { params: { path: { id: selected!.id } }, signal })
+      ),
+    staleTime: 0
+  });
+  const author = selected?.user.id === user.id;
+  const mutation = useMutation({
+    mutationFn: async (action: Action) => {
+      if (action.kind === "delete") {
+        await unwrap(
+          browserApi.DELETE("/api/v1/prompts/{id}/", { params: { path: { id: action.id } } })
+        );
+        return null;
+      }
+      return unwrap(
+        browserApi.PATCH("/api/v1/prompts/{id}/", {
+          params: { path: { id: action.id } },
+          body: { description: action.description }
+        })
+      );
+    },
+    onMutate: async (action) => {
+      await Promise.all([
+        client.cancelQueries({ queryKey: listKey }),
+        client.cancelQueries({ queryKey: ["prompt", action.id] })
+      ]);
+    },
+    onSuccess: (saved, action) => {
+      if (saved) {
+        client.setQueryData(["prompt", action.id], saved);
+        client.setQueryData<Schema<"PromptSparse">[]>(listKey, (current) =>
+          current?.map((v) => (v.id === action.id ? { ...v, description: saved.description } : v))
+        );
+      } else {
+        client.removeQueries({ queryKey: ["prompt", action.id], exact: true });
+        client.setQueryData<Schema<"PromptSparse">[]>(listKey, (current) =>
+          current?.filter((v) => v.id !== action.id)
+        );
+        setSelection(null);
+      }
+      if (saved && list.data?.find((version) => version.id === action.id)?.is_selected)
+        void client.invalidateQueries({
+          queryKey: [resource.type === "assistant" ? "assistants" : "apps", resource.id]
+        });
+      setStep({ kind: "preview" });
+      void client.invalidateQueries({ queryKey: listKey });
+    },
+    onError: (error) => toastApiError(error, t),
+    onSettled: () => {
+      saving.current = false;
+    }
+  });
+  useImperativeHandle(
+    leave,
+    () => ({
+      confirm(action) {
+        if (!saving.current) discard.current?.confirm(action);
+      }
+    }),
+    []
+  );
+  const dirty = step.kind === "description" && description !== step.originalDescription;
+  const actionTitle = step.kind === "delete" ? t("delete_prompt") : t("edit_prompt_description");
+  function submit() {
+    if (saving.current || step.kind === "preview" || step.target.user.id !== user.id) return;
+    if (
+      step.kind === "delete" &&
+      (list.data?.find((version) => version.id === step.target.id)?.is_selected ??
+        step.target.is_selected)
+    )
+      return;
+    saving.current = true;
+    mutation.mutate(
+      step.kind === "delete"
+        ? { kind: "delete", id: step.target.id }
+        : { kind: "description", id: step.target.id, description }
+    );
+  }
+  return (
+    <>
+      <DialogHeader
+        title={t("prompt_history")}
+        onOpenChange={(next) => {
+          if (!next) requestClose();
+        }}
+      />
+      <div
+        ref={body}
+        tabIndex={-1}
+        className="focus-visible:outline-ring flex min-h-0 flex-col gap-4 overflow-y-auto py-4 focus-visible:outline-2"
+      >
+        {step.kind !== "preview" ? (
+          <>
+            <h3
+              ref={actionHeading}
+              tabIndex={-1}
+              className="focus-visible:outline-ring rounded-ax-inner text-lg font-medium focus-visible:outline-2"
+            >
+              {actionTitle}
+            </h3>
+            {step.kind === "delete" ? (
+              <p>{t("do_you_really_want_to_delete_this_version")}</p>
+            ) : (
+              <TextArea
+                label={t("description")}
+                value={description}
+                onChange={setDescription}
+                isReadOnly={mutation.isPending}
+              />
+            )}
+            {mutation.isError && <ListError error={mutation.error} title={t("request_failed")} />}
+            <div className="flex flex-wrap justify-end gap-2">
+              <Button
+                label={t("cancel")}
+                isDisabled={mutation.isPending}
+                onClick={() => {
+                  if (saving.current) return;
+                  mutation.reset();
+                  setStep({ kind: "preview" });
+                }}
+              />
+              <Button
+                label={t(step.kind === "delete" ? "delete" : "save_changes")}
+                variant={step.kind === "delete" ? "destructive" : "primary"}
+                isLoading={mutation.isPending}
+                isInterruptible
+                onClick={submit}
+              />
+            </div>
+          </>
+        ) : (
+          <QueryStateBoundary query={list} rows={2}>
+            {(versions) =>
+              versions.length === 0 ? (
+                <p>{t("prompt_library_versions_empty")}</p>
+              ) : (
+                <div className="grid min-h-0 grid-cols-1 gap-4 sm:grid-cols-[16rem_1fr]">
+                  <ul className="border-ax-border rounded-ax-container flex max-h-48 flex-col gap-1 overflow-y-auto border p-2 sm:max-h-[55dvh]">
+                    {versions.map((version) => (
+                      <li key={version.id}>
+                        <button
+                          type="button"
+                          aria-current={version.id === selected?.id ? "true" : undefined}
+                          className={cn(
+                            "focus-visible:outline-ring hover:bg-ax-hover rounded-ax-inner flex min-h-11 w-full flex-col gap-1 px-3 py-2 text-start text-sm focus-visible:outline-2",
+                            version.id === selected?.id && "bg-ax-accent-muted"
+                          )}
+                          onClick={() => setSelection(version.id)}
+                        >
+                          <span>
+                            {version.created_at ? (
+                              <ClientTime value={version.created_at} format="date_time" />
+                            ) : (
+                              version.id.slice(0, 8)
+                            )}{" "}
+                            {version.is_selected && <strong>{t("current_version")}</strong>}
+                          </span>
+                          <span className="text-ax-text-secondary break-words">
+                            {t("author")}: {version.user.username || version.user.email}
+                          </span>
+                          {version.description && (
+                            <span className="text-ax-text-secondary line-clamp-2">
+                              {version.description}
+                            </span>
+                          )}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                  <QueryStateBoundary query={preview} rows={2}>
+                    {(prompt) => (
+                      <div className="flex min-w-0 flex-col gap-4">
+                        <pre className="bg-ax-sunken rounded-ax-inner max-h-[35dvh] overflow-y-auto p-3 text-sm break-words whitespace-pre-wrap">
+                          {prompt.text}
+                        </pre>
+                        {prompt.description && (
+                          <p className="bg-ax-accent-muted rounded-ax-inner p-3 text-sm break-words whitespace-pre-wrap">
+                            {prompt.description}
+                          </p>
+                        )}
+                        <div className="flex flex-wrap gap-2">
+                          <Tooltip
+                            content={author ? undefined : t("only_author_can_change_description")}
+                          >
+                            <span tabIndex={author ? undefined : 0}>
+                              <Button
+                                ref={editButton}
+                                label={t(
+                                  prompt.description ? "edit_description" : "add_description"
+                                )}
+                                isDisabled={!author}
+                                onClick={() => {
+                                  if (!author || !selected) return;
+                                  mutation.reset();
+                                  setDescription(prompt.description ?? "");
+                                  setStep({
+                                    kind: "description",
+                                    target: selected,
+                                    originalDescription: prompt.description ?? ""
+                                  });
+                                }}
+                              />
+                            </span>
+                          </Tooltip>
+                          <Tooltip
+                            content={author ? undefined : t("prompt_only_author_can_delete")}
+                          >
+                            <span tabIndex={author ? undefined : 0}>
+                              <Button
+                                label={t("delete_prompt")}
+                                isDisabled={!author || selected?.is_selected}
+                                onClick={() => {
+                                  if (!author || !selected || selected.is_selected) return;
+                                  mutation.reset();
+                                  setStep({
+                                    kind: "delete",
+                                    target: selected,
+                                    originalDescription: prompt.description ?? ""
+                                  });
+                                }}
+                              />
+                            </span>
+                          </Tooltip>
+                          <Button
+                            label={t("restore_this_version")}
+                            variant="primary"
+                            isDisabled={selected?.is_selected}
+                            isLoading={preview.isFetching}
+                            isInterruptible
+                            onClick={() => {
+                              if (selected?.is_selected || preview.isFetching) return;
+                              onUseVersion(prompt);
+                              onOpenChange(false);
+                            }}
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </QueryStateBoundary>
+                </div>
+              )
+            }
+          </QueryStateBoundary>
+        )}
+      </div>
+      <LeaveConfirmation ref={discard} active={dirty && !mutation.isPending} />
+    </>
   );
 }
