@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
+import messages from "@/lib/i18n/messages/sv.json";
 
 const api = vi.hoisted(() => ({ GET: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
@@ -154,12 +155,16 @@ const HEALTHY: Responses = {
   "/api/v1/admin/crawler/": ok({ ...CRAWLER, summary: { ongoing: 1, queued: 2, issues: 0 } })
 };
 
-function renderOverview({ auditLogging = true, queryClient = testQueryClient() } = {}) {
+function renderOverview({
+  auditLogging = true,
+  flows = false,
+  queryClient = testQueryClient()
+} = {}) {
   return renderInApp(<AdminOverviewPage />, {
     queryClient,
     appContext: testAppContext({
       permissions: ["admin"],
-      settings: { audit_logging_enabled: auditLogging }
+      settings: { audit_logging_enabled: auditLogging, flows_enabled: flows }
     })
   });
 }
@@ -219,6 +224,22 @@ describe("AdminOverviewPage", () => {
     // Nothing is left loading.
     expect(document.querySelector('[aria-busy="true"]')).toBeNull();
     await expectNoAxeViolations(container);
+  });
+
+  it("opens Flow settings from a card of their own while the tenant has flows", async () => {
+    answer(ALL_OK);
+    const { container } = renderOverview({ flows: true });
+    const flows = region("Flöden");
+    expect(within(flows).getByText(messages.flow_admin_description)).toBeTruthy();
+    expect(
+      within(flows).getByRole("link", { name: "Öppna flödesinställningar" }).getAttribute("href")
+    ).toBe("/admin/flow-settings");
+    expect(await within(region("Aktiva användare")).findByText("42")).toBeTruthy();
+    await expectNoAxeViolations(container);
+    cleanup();
+
+    renderOverview();
+    expect(screen.queryByRole("region", { name: "Flöden" })).toBeNull();
   });
 
   it("leaves the audit card out while audit logging is off", async () => {
@@ -537,6 +558,23 @@ describe("AdminOverviewPage on a phone (decision 30)", () => {
     await waitFor(() => expect(queryClient.isFetching()).toBeGreaterThan(0));
     expect(within(areas).getByText(locked)).toBeTruthy();
     expect(within(areas).queryByText("Innehållet kunde inte hämtas")).toBeNull();
+  });
+
+  it("ends with a Flöden row to Flow settings while the tenant has flows", async () => {
+    setViewport("phone");
+    answer(HEALTHY);
+    const { container } = renderOverview({ flows: true });
+    const areas = await screen.findByRole("region", { name: "Läget just nu" });
+    await within(areas).findByText("42 aktiva · 3 inaktiva konton");
+    const links = within(areas).getAllByRole("link");
+    expect(links.at(-1)?.getAttribute("href")).toBe("/admin/flow-settings");
+    expect(links.at(-1)?.textContent).toContain(messages.flow_admin_description);
+    await expectNoAxeViolations(container);
+    cleanup();
+
+    renderOverview();
+    const without = await screen.findByRole("region", { name: "Läget just nu" });
+    expect(within(without).queryByRole("link", { name: /^Flöden/ })).toBeNull();
   });
 
   it("leaves Granskningsloggar out while audit logging is off", async () => {

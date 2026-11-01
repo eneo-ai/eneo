@@ -2399,6 +2399,7 @@
   "flow_admin_nav_label": "Flows",
   "flow_admin_title": "Flows",
   "flow_admin_description": "Limits and rules for every flow in the organisation.",
+  "flow_settings_open": "Open flow settings",
   "flow_admin_audit_link": "Changes are recorded in the audit log",
   "flow_admin_deployment_default": "Deployment default",
   "flow_admin_empty_restores_default": "Leave empty for the default.",
