@@ -255,6 +255,8 @@ describe("globals.css", () => {
       'main:has([data-editor-view="section"]) [data-phone-page-bar]:not([data-editor-view] *)'
     );
     expect(selector).toContain("+ [data-connection-banner]");
+    // The tab strip of a space from the menu, which has no page bar to give way.
+    expect(selector).toContain('main:has([data-editor-view="section"]) [data-space-tabs]');
     expect(declarations).toEqual({ display: "none" });
   });
 

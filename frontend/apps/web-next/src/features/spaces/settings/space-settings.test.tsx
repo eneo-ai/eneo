@@ -159,6 +159,11 @@ it("opens on a phone with an index of the sections, as the assistant editor does
       .getAllByRole("heading", { level: 2 })
       .map((heading) => heading.textContent)
   ).toEqual(["Ytan", "Modell och funktioner", "Åtkomst"]);
+  // Deleting the space is not an access setting: it stands alone, last, under no heading.
+  const lists = index.querySelectorAll("ul");
+  expect(within(lists[lists.length - 1]!).getAllByRole("link")).toHaveLength(1);
+  expect(within(lists[lists.length - 1]!).getByRole("link", { name: /Farozon/ })).toBeTruthy();
+  expect(within(lists[lists.length - 2]!).queryByRole("link", { name: /Farozon/ })).toBeNull();
   // The space's page bar is above it: the index has none of its own, a section has one back to it.
   expect(container.querySelector("[data-phone-page-bar]")).toBeNull();
   // What the space holds is said on the row, so the index tells before it is opened.

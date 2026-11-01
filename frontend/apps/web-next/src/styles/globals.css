@@ -1197,8 +1197,10 @@
     }
   }
   /* A phone's space settings open a section as a screen of its own, with a page bar back to
-     the index: the space's bar above gives way, so two bars do not stack. */
+     the index: the space's bar above gives way, so two bars do not stack. A space from the menu
+     (the organisation's) has no such bar, only its tab strip, which gives way the same. */
   @media (width < 48rem) {
+    main:has([data-editor-view="section"]) [data-space-tabs],
     main:has([data-editor-view="section"]) [data-phone-page-bar]:not([data-editor-view] *),
     main:has([data-editor-view="section"])
       [data-phone-page-bar]:not([data-editor-view] *)

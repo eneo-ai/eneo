@@ -880,7 +880,7 @@ export function SpaceSettings() {
             id: "danger",
             label: t("danger_zone"),
             icon: TriangleAlert,
-            group: access,
+            // No group: deleting the space is not an access setting, and it stands apart.
             node: <DangerSection />
           }
         ]
