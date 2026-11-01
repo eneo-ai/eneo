@@ -200,8 +200,8 @@ test(
       expect(projection).toMatchObject({
         effective_bytes: 32 * MIB,
         operator_ceiling_bytes: 32 * MIB,
-        storage_target: "inline"
-      });
+        storage_target: "postgres_inline"
+      } satisfies Partial<Schema<"UploadLimitProjection">>);
       const space = await createSpace(page, uniqueName("E2E Native original"));
       await page.goto(`${space}/knowledge`);
       const create = await openCreateCollectionDialog(page);
@@ -237,7 +237,7 @@ test(
       await page.getByRole("button", { name: filename, exact: true }).click({ timeout: 60_000 });
       const ingestMs = performance.now() - uploadStarted;
       const preview = page.getByRole("dialog", { name: filename });
-      await expect(preview.getByText("Native knowledge upload", { exact: true })).toBeVisible();
+      await expect(preview).toContainText("Native knowledge upload");
       const original = preview.getByRole("button", {
         name: /ladda ner original|download original/i
       });
@@ -267,6 +267,18 @@ test(
       expect(policyDraft(restored)).toEqual({
         ...originalPolicy,
         expected_revision: restored.policy.revision
+      });
+      await testInfo.attach("restored-knowledge-policy.json", {
+        body: JSON.stringify(
+          {
+            restore_expected_revision: current.policy.revision,
+            restored_revision: restored.policy.revision,
+            knowledge_file_limit_bytes: restored.policy.knowledge_file_limit_bytes
+          },
+          null,
+          2
+        ),
+        contentType: "application/json"
       });
     }
   }
