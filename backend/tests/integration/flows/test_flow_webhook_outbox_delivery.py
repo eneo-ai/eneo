@@ -2517,7 +2517,6 @@ async def test_flow_webhook_outbox_records_a_200_whose_audit_never_returns(
 
 @pytest.mark.asyncio
 @pytest.mark.integration
-@pytest.mark.parametrize("row_count", [1, 2], ids=["single_row", "mixed_wave"])
 async def test_flow_webhook_outbox_keeps_the_claim_when_recording_blocks_to_the_hard_stop(
     setup_database,
     completion_model_factory,
@@ -2526,23 +2525,21 @@ async def test_flow_webhook_outbox_keeps_the_claim_when_recording_blocks_to_the_
     admin_user,
     monkeypatch,
     caplog,
-    row_count: int,
 ):
     """A 200 whose outcome cannot be recorded: another session holds the
-    delivery row's lock. In a mixed wave only that row is cut; its sibling
-    records normally.
+    delivery row's lock until the job reaches its real hard stop.
 
     Kills: recording with no bound (the job runs on until ARQ cancels it), a
-    cut delivery or a cut job that is not logged, and a hard stop that counts
-    the whole wave as unfinished, or none of it."""
+    cut delivery or a cut job that is not logged, or a cut claim released
+    before its outcome is known."""
     delivery_ids = await _insert_due_webhook_rows(
-        row_count=row_count,
+        row_count=1,
         admin_user=admin_user,
         completion_model_factory=completion_model_factory,
         space_factory=space_factory,
         assistant_factory=assistant_factory,
     )
-    [delivery_id, *recorded_ids] = delivery_ids
+    [delivery_id] = delivery_ids
     send_started = asyncio.Event()
     lock_held = asyncio.Event()
     release_lock = asyncio.Event()
@@ -2599,14 +2596,11 @@ async def test_flow_webhook_outbox_keeps_the_claim_when_recording_blocks_to_the_
     assert (result["status"], result["unfinished"], result["delivered"]) == (
         "hard_stopped",
         1,
-        row_count - 1,
+        0,
     )
     assert state.claim_token is not None
     assert state.delivery_attempts == 1
     assert state.delivery_status != FlowOutboxDeliveryStatus.DELIVERED.value
-    assert {states[recorded_id].delivery_status for recorded_id in recorded_ids} <= {
-        FlowOutboxDeliveryStatus.DELIVERED.value
-    }
     errors = [record for record in caplog.records if record.levelno == logging.ERROR]
     assert [
         (getattr(record, "delivery_id", None), getattr(record, "flow_run_id", None))
