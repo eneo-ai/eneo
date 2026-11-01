@@ -332,7 +332,7 @@
   "add_to_group": "Lägg till i grupp",
   "adding": "Lägger till...",
   "admin": "Administratör",
-  "admins_editors": "Administratörer & Redigerare",
+  "admins_editors": "Administratörer och redigerare",
   "admins_editors_description": "Administratörer har full kontroll och kan hantera medlemmar. Redigerare kan skapa, redigera och publicera assistenter, appar och kunskapskällor.",
   "advanced_settings": "Avancerade inställningar",
   "ai_settings": "AI-inställningar",
@@ -7047,5 +7047,7 @@
   "skills_reference_placeholder_touch": "Beskriv hur Skillen ska hjälpa till.",
   "skills_reference_hint_touch": "Tryck på Infoga referens för att lägga till en Skill, funktion eller MCP.",
   "roles_view_users_short": "Användare",
-  "account_api_keys_actions": "Mina API-nycklar, åtgärder"
+  "account_api_keys_actions": "Mina API-nycklar, åtgärder",
+  "admin_users_tab_active": "Aktiva",
+  "admin_users_tab_inactive": "Inaktiva"
 }

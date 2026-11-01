@@ -14,7 +14,7 @@ test.describe("members on a phone", () => {
     await page.goto(`${space}/members`);
 
     const admins = page.getByRole("list", {
-      name: /^(administratörer & redigerare|admins & editors)/i
+      name: /^(administratörer och redigerare|admins and editors)/i
     });
     const self = admins.getByRole("listitem").filter({ hasText: /\((du|you)\)/ });
     await expect(self).toBeVisible();

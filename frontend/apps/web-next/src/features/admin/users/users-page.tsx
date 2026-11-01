@@ -87,6 +87,10 @@ export function AdminUsersPage() {
   const tabId = (value: StateFilter) => `${baseId}-tab-${value}`;
   const tabLabel = (value: StateFilter) =>
     value === "active" ? t("active_users") : t("inactive_users");
+  // Under the "Användare" heading a tab says only which ones (both fit a 320
+  // px phone); the table keeps the full name.
+  const tabName = (value: StateFilter) =>
+    value === "active" ? t("admin_users_tab_active") : t("admin_users_tab_inactive");
   const panelRef = useRef<HTMLDivElement>(null);
   const rescue = useFocusRescue();
   const announce = useAnnounce();
@@ -165,10 +169,14 @@ export function AdminUsersPage() {
     changeFilters({ roleId: next === ALL_ROLES ? null : next, page: 1 });
   }
 
+  const filtered = Boolean(emailBox.draft || nameBox.draft || search || searchName || roleId);
+
   function clearFilters() {
     emailBox.setDraft("");
     nameBox.setDraft("");
     changeFilters({ search: "", searchName: "", roleId: null, page: 1 });
+    // The pressed button leaves with the filters: focus goes to the list.
+    rescue(panelRef.current);
   }
 
   function changePage(next: number) {
@@ -230,7 +238,7 @@ export function AdminUsersPage() {
               key={value}
               id={tabId(value)}
               value={value}
-              label={tabLabel(value)}
+              label={tabName(value)}
               panelId={panelId}
               endContent={
                 count != null ? (
@@ -290,7 +298,10 @@ export function AdminUsersPage() {
             <p id={hintId} className="text-ax-text-secondary max-w-xl text-sm">
               {t("admin_users_search_hint")}
             </p>
-            <Button label={t("admin_users_clear_filters")} size="sm" onClick={clearFilters} />
+            {/* Only while there is something to clear, as the crawler's filters. */}
+            {filtered ? (
+              <Button label={t("admin_users_clear_filters")} size="sm" onClick={clearFilters} />
+            ) : null}
             <p className="text-ax-text-secondary ms-auto text-sm">
               {total != null ? t("admin_users_count", { count: total }) : ""}
             </p>

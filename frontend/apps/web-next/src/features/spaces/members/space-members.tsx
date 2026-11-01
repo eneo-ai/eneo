@@ -519,8 +519,9 @@ function useMembershipLabels(membership: Membership) {
  * A member or group as a phone row (decision 25): avatar, name, the e-mail or
  * user count, and the role in words at the end. Tapping it opens the role
  * sheet; your own row, or one you may not change, only reads. Where the rows
- * are narrow for their text (larger text sizes, 18rem of the rows'
- * container), the role moves under the name instead, so the name keeps room.
+ * are narrow for their text (a 320 px phone, larger text sizes: under 20rem
+ * of the rows' container), the role moves under the name instead, so the
+ * e-mail keeps the width and does not break mid-address.
  */
 function PhoneMembershipRow({
   membership,
@@ -547,7 +548,7 @@ function PhoneMembershipRow({
         <>
           {detail ? <span className="block [overflow-wrap:anywhere]">{detail}</span> : null}
           {/* Under the name where the rows are narrow; for screen readers always. */}
-          <span className="block @min-[18rem]/rows:sr-only">{`${t("role")}: ${roleLabel}`}</span>
+          <span className="block @min-[20rem]/rows:sr-only">{`${t("role")}: ${roleLabel}`}</span>
         </>
       }
       startContent={
@@ -570,7 +571,7 @@ function PhoneMembershipRow({
       }
       endContent={
         <span aria-hidden="true" className="text-ax-text-secondary flex items-center gap-1">
-          <span className="hidden @min-[18rem]/rows:inline">{roleLabel}</span>
+          <span className="hidden text-sm @min-[20rem]/rows:inline">{roleLabel}</span>
           {/* The chevron's place stays, so roles line up with rows that have one. */}
           {onOpen ? <ChevronRight className="size-4" /> : <span className="size-4" />}
         </span>

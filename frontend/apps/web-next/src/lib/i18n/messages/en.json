@@ -332,7 +332,7 @@
   "add_to_group": "Add to group",
   "adding": "Adding...",
   "admin": "Admin",
-  "admins_editors": "Admins & Editors",
+  "admins_editors": "Admins and editors",
   "admins_editors_description": "Admins have full control and can manage members. Editors can create, edit and publish assistants, apps and knowledge sources.",
   "advanced_settings": "Advanced Settings",
   "ai_settings": "AI Settings",
@@ -7047,5 +7047,7 @@
   "skills_reference_placeholder_touch": "Describe how this Skill should help.",
   "skills_reference_hint_touch": "Tap Insert reference to add a Skill, function or MCP.",
   "roles_view_users_short": "Users",
-  "account_api_keys_actions": "My API Keys, actions"
+  "account_api_keys_actions": "My API Keys, actions",
+  "admin_users_tab_active": "Active",
+  "admin_users_tab_inactive": "Inactive"
 }

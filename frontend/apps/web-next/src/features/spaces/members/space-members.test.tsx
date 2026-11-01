@@ -134,13 +134,21 @@ describe("members on a phone", () => {
     const { container } = renderInApp(<SpaceMembers />);
 
     expect(screen.queryByRole("combobox", { name: "Roll" })).toBeNull();
-    const editors = screen.getByRole("list", { name: /^Administratörer & Redigerare/ });
+    const editors = screen.getByRole("list", { name: /^Administratörer och redigerare/ });
     const self = within(editors)
       .getByText(/anna\.lind@example\.com \(du\)/)
       .closest("li")!;
     // Nobody changes their own role: no button, the role in words.
     expect(within(self).queryByRole("button")).toBeNull();
     expect(within(self).getByText("Administratör")).toBeTruthy();
+    // A supporting fact at the e-mail's size; under the name below 20rem of the
+    // rows (a 320 px phone), so the e-mail does not break mid-address.
+    expect(within(self).getByText("Administratör").className).toBe(
+      "hidden text-sm @min-[20rem]/rows:inline"
+    );
+    expect(within(self).getByText("Roll: Administratör").className).toBe(
+      "block @min-[20rem]/rows:sr-only"
+    );
     const erik = within(editors).getByRole("button", { name: /^erik\.johansson@example\.com/ });
     expect(erik.closest("li")!.textContent).toContain("Redigerare");
 

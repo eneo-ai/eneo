@@ -1812,5 +1812,8 @@
   "security_and_privacy": "Säkerhet och integritet",
   "all_changes_saved": "Alla ändringar sparade",
   "token_summary": "Token-sammanfattning (senaste 30 dagarna)",
-  "account_api_keys_actions": "Mina API-nycklar, åtgärder"
+  "account_api_keys_actions": "Mina API-nycklar, åtgärder",
+  "admins_editors": "Administratörer och redigerare",
+  "admin_users_tab_active": "Aktiva",
+  "admin_users_tab_inactive": "Inaktiva"
 }

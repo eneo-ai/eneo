@@ -1812,5 +1812,8 @@
   "security_and_privacy": "Security and privacy",
   "all_changes_saved": "All changes saved",
   "token_summary": "Token summary (last 30 days)",
-  "account_api_keys_actions": "My API Keys, actions"
+  "account_api_keys_actions": "My API Keys, actions",
+  "admins_editors": "Admins and editors",
+  "admin_users_tab_active": "Active",
+  "admin_users_tab_inactive": "Inactive"
 }
