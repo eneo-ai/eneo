@@ -23,6 +23,9 @@ function usage(usedTokens: number, overrides: Partial<ContextUsage> = {}): Conte
     lockedOutputTokens: 0,
     pendingTextTokens: Math.min(200, usedTokens),
     pendingFileTokens: 0,
+    assistantPromptTokens: 0,
+    assistantAttachmentTokens: 0,
+    skillContextTokens: 0,
     usedTokens,
     willExceedContext: false,
     ...overrides
@@ -44,6 +47,32 @@ const meter = () => screen.queryByRole("button", { name: /^Kontextanvändning:/ 
 const rendered = () => screen.queryByText(/Kontextanvändning/) !== null;
 
 describe("ContextUsageBar", () => {
+  it("shows the first question's baseline and the included Skill subset below the usual threshold", async () => {
+    renderInApp(
+      <ContextUsageBar
+        usage={usage(800, {
+          lockedInputTokens: 0,
+          pendingTextTokens: 0,
+          assistantPromptTokens: 500,
+          assistantAttachmentTokens: 300,
+          skillContextTokens: 200
+        })}
+        cumulativeTokens={0}
+        turnCount={0}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /^Kontextanvändning:/ }));
+    const details = await screen.findByRole("dialog", { name: "Beräknad kontextanvändning" });
+    expect(within(details).getByText("Assistentens fasta kontext")).toBeTruthy();
+    expect(within(details).getByText("Assistentinstruktioner")).toBeTruthy();
+    expect(within(details).getByText("Fasta bilagor")).toBeTruthy();
+    expect(within(details).getByText("Varav skillkontext")).toBeTruthy();
+    expect(within(details).getByText("200")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^Kontextanvändning:/ }).textContent).toMatch(
+      /800 \/ 10.000/
+    );
+  });
+
   it("renders nothing while the window has room", () => {
     renderMeter(usage(5_900));
     expect(SHOW_FROM_PERCENT).toBe(60);

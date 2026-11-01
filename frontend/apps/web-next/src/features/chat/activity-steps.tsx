@@ -40,6 +40,7 @@ const STATUS_STYLE: Record<StepStatus, { icon: LucideIcon; className: string; sp
   waiting: { icon: Clock, className: "bg-ax-muted text-ax-text-secondary" },
   error: { icon: X, className: "bg-ax-error-muted text-ax-error" },
   denied: { icon: Ban, className: "bg-ax-warning-muted text-ax-warning" },
+  "previous-attempt": { icon: Clock, className: "bg-ax-muted text-ax-text-secondary" },
   stopped: { icon: Square, className: "bg-ax-muted text-ax-text-secondary" }
 };
 
@@ -49,12 +50,14 @@ const STATUS_KEY = {
   waiting: "chat_step_status_waiting",
   error: "chat_step_status_error",
   denied: "chat_step_status_denied",
+  "previous-attempt": "chat_tool_status_previous_attempt",
   stopped: "chat_step_status_stopped"
 } as const satisfies Record<StepStatus, string>;
 
 const STATUS_TEXT_CLASS: Partial<Record<StepStatus, string>> = {
   error: "text-ax-error",
   denied: "text-ax-warning",
+  "previous-attempt": "text-ax-text-secondary",
   stopped: "text-ax-text-secondary",
   waiting: "text-ax-text-secondary"
 };
@@ -102,7 +105,9 @@ export function stepTitle(step: ActivityStep, t: Translate): string {
  * same tool, else just the count.
  */
 function toolStepTitle(calls: ToolCall[], done: boolean, t: Translate): string {
-  const labels = calls.map((call) => toolPresentation(call.part, t, done).label);
+  const labels = calls.map(
+    (call) => toolPresentation(call.part, t, done && call.status !== "previous-attempt").label
+  );
   const first = labels[0] ?? "";
   if (calls.length === 1) return first;
   return labels.every((label) => label === first)

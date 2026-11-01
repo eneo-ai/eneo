@@ -57,6 +57,50 @@ describe("chat tool presentation", () => {
     });
   });
 
+  it.each([
+    ["inspect_table", {}, "tool_inspect_structure"],
+    ["assert_table", {}, "tool_check_data"],
+    [
+      "query_table",
+      { sql: "SELECT SUM(cost) FROM t GROUP BY department" },
+      "tool_aggregate_groups"
+    ],
+    ["query_table", { sql: "SELECT COUNT(*) FROM t" }, "tool_count_rows"],
+    ["query_table", { sql: "SELECT * FROM t WHERE cost > 0" }, "tool_query_rows"],
+    ["query_table", { sql: "SELECT * FROM (SELECT SUM(cost) FROM t) nested" }, "tool_query_rows"],
+    ["query_table", { sql: "SELECT '--SUM(cost)' FROM t /* COUNT(*) */" }, "tool_query_rows"]
+  ])("names bundled spreadsheet operation %s (%j)", (toolName, input, label) => {
+    const call = {
+      toolName,
+      input,
+      providerMetadata: {
+        eneo: {
+          server_name: "Spreadsheet",
+          purpose: "file_analysis",
+          is_bundled: true
+        }
+      }
+    };
+    expect(toolPresentation(call, t, false).label).toBe(label);
+    expect(toolPresentation(call, t, true).label).toBe(`${label}_done`);
+    expect(
+      toolPresentation(
+        {
+          ...call,
+          providerMetadata: {
+            eneo: {
+              server_name: "External",
+              purpose: "file_analysis",
+              is_bundled: false
+            }
+          }
+        },
+        t,
+        false
+      ).label
+    ).toBe("tool_file_analysis");
+  });
+
   it("distinguishes image edits from new image generation", () => {
     const call = {
       toolName: "draw",

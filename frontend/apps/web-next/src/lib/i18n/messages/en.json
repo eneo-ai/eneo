@@ -7062,5 +7062,7 @@
   "resource_sort": "Sort",
   "resource_sort_ascending": "Ascending",
   "resource_sort_descending": "Descending",
-  "resource_filter_results": "Filter results"
+  "resource_filter_results": "Filter results",
+  "chat_context_draft_preserved": "Your draft has been preserved. You can edit it or start a new conversation.",
+  "chat_context_rejection_counts": "{used} / {limit} tokens ({excess} over the limit)."
 }

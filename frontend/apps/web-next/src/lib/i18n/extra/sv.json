@@ -1820,5 +1820,7 @@
   "resource_sort": "Sortera",
   "resource_sort_ascending": "Stigande",
   "resource_sort_descending": "Fallande",
-  "resource_filter_results": "Filtrera resultat"
+  "resource_filter_results": "Filtrera resultat",
+  "chat_context_draft_preserved": "Ditt utkast har bevarats. Du kan ändra det eller börja en ny konversation.",
+  "chat_context_rejection_counts": "{used} / {limit} tokens ({excess} över gränsen)."
 }

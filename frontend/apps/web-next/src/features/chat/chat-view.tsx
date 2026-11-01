@@ -8,7 +8,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Selector } from "@astryxdesign/core/Selector";
 import { useQueryClient } from "@tanstack/react-query";
 import { CircleAlert } from "lucide-react";
-import { useTranslations } from "use-intl";
+import { useLocale, useTranslations } from "use-intl";
 import {
   useCallback,
   useEffect,
@@ -49,7 +49,11 @@ import {
   messageGeneratedFiles,
   messageToolCalls
 } from "./side-panel/message-tool-calls";
-import { conversationUploads, type PanelContents } from "./side-panel/panel-contents";
+import {
+  conversationUploadGroups,
+  conversationUploads,
+  type PanelContents
+} from "./side-panel/panel-contents";
 import type { PreviewQuote } from "./side-panel/side-panel-store";
 import { composeQuotedQuestion } from "./side-panel/question-quote";
 import { SidePanel, type SidePanelLayout } from "./side-panel/side-panel";
@@ -214,6 +218,7 @@ function ConversationView({
   layout
 }: ChatViewProps) {
   const t = useTranslations();
+  const locale = useLocale();
   const { can, user, tenant } = useAppContext();
   const queryClient = useQueryClient();
   // A file sent earlier in this conversation is attached again as it is,
@@ -376,8 +381,15 @@ function ConversationView({
           if (pending) releasePreviews(pending.attachments);
           return;
         }
-        announce(describeChatFailure(failure, streamErrorRef.current, t).message);
-        if (!pending || streamStartedRef.current) return;
+        const described = describeChatFailure(failure, streamErrorRef.current, t);
+        announce(described.message);
+        if (!pending) return;
+        if (streamStartedRef.current) {
+          // The accepted turn keeps its server-owned files and history. Only
+          // the rejected question text returns, without replacing a newer draft.
+          if (described.context) setInput((current) => (current.trim() ? current : pending.text));
+          return;
+        }
         // Failed before the answer started: the question goes back to the
         // composer, attachments included. A first question takes the view back
         // to the start state; keep focus in the composer across that swap.
@@ -465,7 +477,8 @@ function ConversationView({
         open: () => panel.openView(call.toolCallId)
       })),
     documents: documents.documents,
-    uploads
+    uploads,
+    uploadGroups: conversationUploadGroups(messages, uploads)
   };
   const versionsOf = (file: PreviewFile) => documents.versionsOf(file.id);
   // A Markdown document the assistant made here can be handed over as Word or
@@ -564,6 +577,7 @@ function ConversationView({
 
   const preflight = usePreflight({
     question: input,
+    revision: partner.preflightRevision ?? partner.completionModel?.id,
     fileIds: attachments.fileIds,
     sessionId,
     assistantId: sessionId || partner.type === "group-chat" ? null : partner.id,
@@ -942,6 +956,14 @@ function ConversationView({
       <span className="flex flex-col items-center gap-2">
         <span className="flex flex-wrap items-center justify-center gap-2">
           <span className="text-ax-error">{failure.message}</span>
+          {failure.context && onNewConversation && !sending && (
+            <Button
+              label={t("new_conversation")}
+              size="sm"
+              variant="secondary"
+              onClick={onNewConversation}
+            />
+          )}
           {lastQuestion && !sending && (
             <Button
               label={t("chat_retry")}
@@ -951,6 +973,22 @@ function ConversationView({
             />
           )}
         </span>
+        {failure.context && (
+          <span className="text-ax-text-secondary text-sm">
+            {failure.context.used !== undefined && failure.context.limit !== undefined && (
+              <>
+                {t("chat_context_rejection_counts", {
+                  used: new Intl.NumberFormat(locale).format(failure.context.used),
+                  limit: new Intl.NumberFormat(locale).format(failure.context.limit),
+                  excess: new Intl.NumberFormat(locale).format(
+                    failure.context.used - failure.context.limit
+                  )
+                })}{" "}
+              </>
+            )}
+            {t("chat_context_draft_preserved")}
+          </span>
+        )}
         {failure.details.length > 0 && (
           <Collapsible
             trigger={t("chat_error_show_details")}

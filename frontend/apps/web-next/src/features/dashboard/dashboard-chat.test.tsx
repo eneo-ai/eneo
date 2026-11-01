@@ -11,6 +11,8 @@ const api = vi.hoisted(() => ({
   assistantCalls: 0,
   /** Whether the assistant request fails (the assistant is gone). */
   missing: true,
+  permissions: [] as string[],
+  insights: false,
   GET: vi.fn(async (path: string) => {
     if (path === "/api/v1/assistants/{id}/") {
       api.assistantCalls += 1;
@@ -26,7 +28,8 @@ const api = vi.hoisted(() => ({
           id: "assistant-1",
           name: "Upphandlingsassistenten",
           allowed_attachments: null,
-          insight_enabled: false,
+          insight_enabled: api.insights,
+          permissions: api.permissions,
           description: null,
           icon_id: null,
           mcp_servers: [],
@@ -52,6 +55,8 @@ afterEach(() => {
   cleanup();
   api.assistantCalls = 0;
   api.missing = true;
+  api.permissions = [];
+  api.insights = false;
 });
 
 function renderRoute() {
@@ -59,6 +64,18 @@ function renderRoute() {
 }
 
 describe("DashboardChat", () => {
+  it.each([false, true])(
+    "projects the loaded assistant's insight permission (%s)",
+    async (allowed) => {
+      api.missing = false;
+      api.insights = true;
+      api.permissions = allowed ? ["read", "insight_view"] : ["read"];
+      renderRoute();
+      await screen.findByRole("heading", { name: "Upphandlingsassistenten", level: 1 });
+      expect(Boolean(screen.queryByRole("radio", { name: "Insikter" }))).toBe(allowed);
+    }
+  );
+
   it("says the chat could not be opened instead of loading forever, and retries", async () => {
     const { container } = renderRoute();
     expect(screen.getByRole("heading", { level: 1, name: "Laddar assistenten…" })).toBeTruthy();

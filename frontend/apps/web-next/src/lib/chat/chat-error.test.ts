@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { EneoApiError } from "@/lib/api/errors";
-import { describeChatFailure } from "./chat-error";
+import { describeChatFailure, getContextErrorInfo } from "./chat-error";
 import { StreamContractError } from "./transport";
 
 const t = (key: string, values?: Record<string, string | number>) =>
@@ -130,5 +130,41 @@ describe("describeChatFailure", () => {
     expect(detail!.length).toBeLessThanOrEqual(301);
     expect(detail).not.toContain("\n");
     expect(detail!.endsWith("…")).toBe(true);
+  });
+});
+
+describe("context rejection facts", () => {
+  it("reads real HTTP9003 details and the SDK JSON error body", () => {
+    const details = { tokens_used: 12000, token_limit: 10000 };
+    expect(
+      getContextErrorInfo(new EneoApiError("Too large", { status: 400, code: 9003, details }), null)
+    ).toEqual({ used: 12000, limit: 10000 });
+    expect(
+      getContextErrorInfo(
+        new Error(JSON.stringify({ eneo_error_code: 9003, message: "Too large", details })),
+        null
+      )
+    ).toEqual({ used: 12000, limit: 10000 });
+  });
+  it("recognizes the real SSE shape and keeps absent or invalid counts absent", () => {
+    expect(getContextErrorInfo(new Error("Context window exceeded"), { code: 9003 })).toEqual({});
+    expect(
+      getContextErrorInfo(new Error("12,000 tokens used, limit is 10,000 tokens"), null)
+    ).toEqual({ used: 12000, limit: 10000 });
+    for (const details of [
+      { tokens_used: -1, token_limit: 100 },
+      { tokens_used: 120, token_limit: 0 },
+      { tokens_used: "120", token_limit: 100 },
+      { tokens_used: 80, token_limit: 100 }
+    ]) {
+      expect(
+        getContextErrorInfo(
+          new EneoApiError("Too large", { status: 400, code: 9003, details }),
+          null
+        )
+      ).toEqual({});
+    }
+    expect(getContextErrorInfo(new Error("Provider unavailable"), { code: 9003 })).toEqual({});
+    expect(getContextErrorInfo(new Error("Provider unavailable"), { code: 9008 })).toBeNull();
   });
 });
