@@ -659,6 +659,8 @@ describe("ModelsPage on a phone (decision 31)", () => {
     setViewport("tablet-portrait");
     renderPage();
     const menu = openRowMenu("Claude Opus 4.7");
+    // The menu moves focus into itself on the next frame; let it, as a user would.
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Redigera" }));
     const dialog = await screen.findByRole("dialog");
     const description = within(dialog).getByLabelText("Beskrivning");

@@ -61,7 +61,7 @@ export function pollWhile<TData>(
 }
 
 /*
- * How a route loader or guard reads data: three operations, never a bare
+ * How a route loader or guard reads data: four operations, never a bare
  * `queryClient.query` (whose meaning depends on the options' staleTime).
  * A failed background refetch marks a query invalidated (query-core 5.104),
  * so `isInvalidated` must never decide whether a read blocks. None of them
@@ -126,4 +126,41 @@ export function warmQuery<
   TQueryKey extends QueryKey = QueryKey
 >(queryClient: QueryClient, options: ReadOptions<TQueryFnData, TError, TData, TQueryKey>): void {
   queryClient.query(options).catch(() => {});
+}
+
+/**
+ * Display data the page is laid out around but can show without: waits for
+ * its first answer, the data or one failed request, and never rejects. What
+ * is cached answers at once, as with `readCached`. The query's own retries go
+ * on for the component that shows it (as with `warmQuery`), so a failing read
+ * holds the page for one request, not for the retry backoff.
+ */
+export function readFirstAnswer<
+  TQueryFnData,
+  TError = DefaultError,
+  TData = TQueryFnData,
+  TQueryKey extends QueryKey = QueryKey
+>(
+  queryClient: QueryClient,
+  options: ReadOptions<TQueryFnData, TError, TData, TQueryKey>
+): Promise<void> {
+  const read = readCached(queryClient, options).then(
+    () => {},
+    () => {}
+  );
+  const cache = queryClient.getQueryCache();
+  const query = cache.find({ queryKey: options.queryKey, exact: true });
+  // A read that already failed is retrying in the background: that was its answer.
+  if (query === undefined || query.state.fetchFailureCount > 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => {
+      unsubscribe();
+      resolve();
+    };
+    // A failed attempt that will be retried is counted before its backoff starts.
+    const unsubscribe = cache.subscribe((event) => {
+      if (event.query === query && query.state.fetchFailureCount > 0) done();
+    });
+    void read.then(done);
+  });
 }

@@ -11,16 +11,21 @@ import {
 } from "@/features/admin/models/model-providers";
 import { adminModelsQueryOptions } from "@/features/admin/models/models";
 import { browserApi } from "@/lib/api/browser";
-import { warmQuery } from "@/lib/api/query";
+import { readFirstAnswer, warmQuery } from "@/lib/api/query";
 
 export const Route = createFileRoute("/_app/admin/")({
-  loader: ({ context: { queryClient } }) => {
+  loader: async ({ context: { queryClient } }) => {
     warmQuery(queryClient, overviewUsersQueryOptions(browserApi));
     warmQuery(queryClient, overviewUsageQueryOptions(browserApi));
-    warmQuery(queryClient, overviewCrawlerQueryOptions(browserApi));
-    warmQuery(queryClient, adminModelsQueryOptions(browserApi));
-    warmQuery(queryClient, modelProvidersQueryOptions(browserApi));
-    warmQuery(queryClient, providerCapabilitiesQueryOptions(browserApi));
+    // "Behöver åtgärd" leads the page and is built from these: shown before
+    // they answered, it arrived above the areas and pushed them down (layout
+    // shift on a phone). A failed read adds nothing; the area's own row says why.
+    await Promise.all([
+      readFirstAnswer(queryClient, overviewCrawlerQueryOptions(browserApi)),
+      readFirstAnswer(queryClient, adminModelsQueryOptions(browserApi)),
+      readFirstAnswer(queryClient, modelProvidersQueryOptions(browserApi)),
+      readFirstAnswer(queryClient, providerCapabilitiesQueryOptions(browserApi))
+    ]);
   },
   component: AdminOverviewPage
 });

@@ -2,7 +2,14 @@
 import { QueryClient, QueryObserver } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EneoApiError } from "./errors";
-import { makeQueryClient, pollWhile, readCached, readFresh, warmQuery } from "./query";
+import {
+  makeQueryClient,
+  pollWhile,
+  readCached,
+  readFirstAnswer,
+  readFresh,
+  warmQuery
+} from "./query";
 
 type Job = { status: "running" | "done" };
 
@@ -238,5 +245,56 @@ describe("warmQuery", () => {
     expect(observer.getCurrentResult().error).toMatchObject({ status: 503 });
     expect(backend.requests()).toBe(1);
     unsubscribe();
+  });
+});
+
+describe("readFirstAnswer", () => {
+  it("waits for the data", async () => {
+    const backend = resource("loaded");
+    const client = makeQueryClient();
+
+    await readFirstAnswer(client, backend.options);
+
+    expect(client.getQueryData(["resource"])).toBe("loaded");
+  });
+
+  it("waits for one failed request, not for its retries, which go on for the component", async () => {
+    const backend = resource(503, "loaded");
+    const client = makeQueryClient();
+    let answered = false;
+
+    void readFirstAnswer(client, backend.options).then(() => (answered = true));
+    await vi.advanceTimersByTimeAsync(10);
+
+    expect(answered).toBe(true);
+    expect(backend.requests()).toBe(1);
+    await retriesRun();
+    expect(client.getQueryData(["resource"])).toBe("loaded");
+    expect(backend.requests()).toBe(2);
+  });
+
+  it("answers at once for a read that already failed and is retrying in the background", async () => {
+    const backend = resource(503, "loaded");
+    const client = makeQueryClient();
+    warmQuery(client, backend.options);
+    await vi.advanceTimersByTimeAsync(10);
+    expect(backend.requests()).toBe(1);
+    let answered = false;
+
+    void readFirstAnswer(client, backend.options).then(() => (answered = true));
+    await vi.advanceTimersByTimeAsync(0);
+
+    expect(answered).toBe(true);
+    expect(backend.requests()).toBe(1);
+    await retriesRun();
+    expect(client.getQueryData(["resource"])).toBe("loaded");
+  });
+
+  it("does not fail on a refusal", async () => {
+    const backend = resource(404);
+
+    const result = await settle(readFirstAnswer(makeQueryClient(), backend.options));
+
+    expect(result).toMatchObject({ status: "fulfilled" });
   });
 });
