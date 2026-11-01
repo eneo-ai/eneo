@@ -5942,6 +5942,7 @@
   "shell_catalog_card_label": "{name}, {space}",
   "shell_catalog_app_in_space": "App in {space}",
   "space_sections_label": "Space sections",
+  "space_breadcrumbs_label": "Space breadcrumb",
   "space_section_with_count": "{label} ({count})",
   "security_classification_prefix": "Security class:",
   "space_members_count": "{count, plural, one {# member} other {# members}}",

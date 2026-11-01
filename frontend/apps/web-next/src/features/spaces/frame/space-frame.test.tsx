@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
+import { PageHeader } from "@/components/composites/page-header";
 import {
   spaceHasPermission,
   type ResourcePermission,
@@ -170,6 +171,26 @@ describe("SpaceFrame", () => {
     ).toBe("true");
 
     await expectNoAxeViolations(container);
+  });
+
+  it("names its trail apart from the trail a page below a tab brings (a flow run's)", () => {
+    state.space = sharedSpace();
+    state.segments = ["flows", "f1", "runs", "r1"];
+    renderInApp(
+      <SpaceFrame>
+        <PageHeader
+          title="Körning 3"
+          breadcrumbs={[
+            { label: "Upphandling", href: "/spaces/space-1/overview" },
+            { label: "Flöden", href: "/spaces/space-1/flows" },
+            { label: "Körning 3", current: true }
+          ]}
+        />
+      </SpaceFrame>
+    );
+
+    const names = screen.getAllByRole("navigation").map((nav) => nav.getAttribute("aria-label"));
+    expect(names).toEqual(["Ytans sökväg", "Ytans innehåll", "Sökväg"]);
   });
 
   it("shows the personal space without members or invites", () => {

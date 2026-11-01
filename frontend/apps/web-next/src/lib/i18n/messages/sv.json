@@ -5942,6 +5942,7 @@
   "shell_catalog_card_label": "{name}, {space}",
   "shell_catalog_app_in_space": "App i {space}",
   "space_sections_label": "Ytans innehåll",
+  "space_breadcrumbs_label": "Ytans sökväg",
   "space_section_with_count": "{label} ({count})",
   "security_classification_prefix": "Säkerhetsklass:",
   "space_members_count": "{count, plural, one {# medlem} other {# medlemmar}}",

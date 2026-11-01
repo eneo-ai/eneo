@@ -88,7 +88,9 @@ export function SpaceHeader({
 
   return (
     <header className={cn("border-ax-border flex flex-col gap-4 border-b px-6 pt-5", className)}>
-      <Breadcrumbs variant="supporting">
+      {/* A page below a tab may bring a trail of its own (a flow run's): the two landmarks
+          need names of their own. */}
+      <Breadcrumbs variant="supporting" label={t("space_breadcrumbs_label")}>
         <BreadcrumbItem href="/spaces/list" isCurrent={false} className={CRUMB_TOUCH}>
           {t("spaces")}
         </BreadcrumbItem>
