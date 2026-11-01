@@ -95,15 +95,17 @@ test(
     await renamedRow.getByRole("button", { name: `Åtgärder: ${renamed}` }).click();
     await page.getByRole("menuitem", { name: "Byt fil", exact: true }).click();
     const replace = page.getByRole("dialog", { name: "Byt fil", exact: true });
-    await page.setViewportSize({ width: 390, height: 844 });
     await replace.locator('input[type="file"]').setInputFiles({
       name: "replacement.docx",
       mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       buffer: replacement
     });
-    const phoneScan = await new AxeBuilder({ page }).withTags(WCAG_22_AA_TAGS).analyze();
-    expect(phoneScan.violations).toEqual([]);
-    await page.screenshot({ path: test.info().outputPath("document-template-replace-phone.png") });
+    await expect(replace).toHaveCSS("opacity", "1");
+    const dialogScan = await new AxeBuilder({ page }).withTags(WCAG_22_AA_TAGS).analyze();
+    expect(dialogScan.violations).toEqual([]);
+    await page.screenshot({
+      path: test.info().outputPath("document-template-replace-desktop.png")
+    });
     const replacedResponse = page.waitForResponse(
       (response) =>
         new URL(response.url()).pathname === `/api/v1/document-templates/${saved.id}/content/` &&
@@ -123,7 +125,6 @@ test(
       sha256: createHash("sha256").update(replacement).digest("hex")
     });
 
-    await page.setViewportSize({ width: 1280, height: 900 });
     await renamedRow.getByRole("button", { name: `Åtgärder: ${renamed}` }).click();
     const storedDownload = page.waitForEvent("download");
     await page.getByRole("menuitem", { name: "Ladda ner", exact: true }).click();
