@@ -183,6 +183,16 @@ function EditModelForm({
   const [tools, setTools] = useState(
     hasTools(model) ? (model.supports_tool_calling ?? false) : false
   );
+  // The strict tool-schema declaration belongs to the route (the identifier as
+  // submitted) it was made for: another identifier makes it ineffective until
+  // declared again, as the server withdraws it when a route moves. An update
+  // carries it only when changed here, so an untouched form cannot declare a
+  // route nobody assessed or resurrect what the server withdrew meanwhile.
+  const [strictRoute, setStrictRoute] = useState(
+    "supports_strict_tool_schema" in model && model.supports_strict_tool_schema ? model.name : null
+  );
+  const [strictTouched, setStrictTouched] = useState(false);
+  const strictDeclared = strictRoute !== null && strictRoute === litellmName.trim();
   const [classificationId, setClassificationId] = useState(
     model.security_classification?.id ?? "__none__"
   );
@@ -270,6 +280,7 @@ function EditModelForm({
         vision,
         reasoning,
         supports_tool_calling: tools,
+        ...(strictTouched ? { supports_strict_tool_schema: strictDeclared } : {}),
         ...defaultPatch,
         security_classification
       });
@@ -709,6 +720,22 @@ function EditModelForm({
                 {t("model_label_tool_calling")}
                 <Switch checked={tools} onCheckedChange={setTools} />
               </Label>
+              <div className="flex flex-col gap-1.5">
+                <Label className="flex items-center justify-between gap-2 font-normal">
+                  {t("strict_tool_schema_support")}
+                  <Switch
+                    checked={strictDeclared}
+                    onCheckedChange={(declared) => {
+                      setStrictRoute(declared ? litellmName.trim() : null);
+                      setStrictTouched(true);
+                    }}
+                    aria-describedby="model-strict-tools-help"
+                  />
+                </Label>
+                <p id="model-strict-tools-help" className="text-muted-foreground text-xs">
+                  {t("strict_tool_schema_help")}
+                </p>
+              </div>
             </fieldset>
           )}
 

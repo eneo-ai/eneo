@@ -269,6 +269,81 @@ it("requires positive whole completion token budgets and can clear the tenant de
   );
 });
 
+describe("the strict tool-schema declaration belongs to one route", () => {
+  function editStrict(declared = true) {
+    api.PUT.mockImplementation(() => ok({}));
+    renderInApp(
+      <EditModelDialog
+        model={
+          {
+            ...completionModel,
+            supports_tool_calling: true,
+            supports_strict_tool_schema: declared
+          } as AdminModel
+        }
+        kind="completion"
+        classifications={[]}
+        securityEnabled={false}
+        open
+        onOpenChange={vi.fn()}
+      />
+    );
+    return {
+      toggle: () => screen.getByRole("switch", { name: "Strikta verktygsscheman" }),
+      identifier: screen.getByLabelText("Modellidentifierare"),
+      save: async () => {
+        fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+        await waitFor(() => expect(api.PUT).toHaveBeenCalled());
+        return api.PUT.mock.calls[0]?.[1]?.body as Record<string, unknown>;
+      }
+    };
+  }
+
+  it("is shown for a saved model while its identifier stays, and not sent unless touched", async () => {
+    const { toggle, save } = editStrict();
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    await expectNoAxeViolations(screen.getByRole("dialog"));
+    // Saving an unrelated field must not re-assert a declaration the server
+    // may have withdrawn since the form was opened.
+    expect(await save()).not.toHaveProperty("supports_strict_tool_schema");
+  });
+
+  it("becomes ineffective when the identifier is edited, and returns with it", async () => {
+    const { toggle, identifier, save } = editStrict();
+    fireEvent.change(identifier, { target: { value: "gpt-6" } });
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+    fireEvent.change(identifier, { target: { value: "gpt-5" } });
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    // Untouched either way: the update leaves the flag to the server.
+    expect(await save()).not.toHaveProperty("supports_strict_tool_schema");
+  });
+
+  it("compares the identifier as a request submits it, so surrounding whitespace is no move", async () => {
+    const { toggle, identifier, save } = editStrict();
+    fireEvent.change(identifier, { target: { value: " gpt-5 " } });
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    fireEvent.change(identifier, { target: { value: " gpt-6 " } });
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-checked")).toBe("true");
+    expect(await save()).toMatchObject({ name: "gpt-6", supports_strict_tool_schema: true });
+  });
+
+  it("is withdrawn for the new route only by an explicit choice", async () => {
+    const { toggle, identifier, save } = editStrict();
+    fireEvent.change(identifier, { target: { value: "gpt-6" } });
+    fireEvent.click(toggle());
+    fireEvent.click(toggle());
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+    expect(await save()).toMatchObject({ name: "gpt-6", supports_strict_tool_schema: false });
+  });
+
+  it("starts undeclared for a saved model without the flag", async () => {
+    const { toggle, save } = editStrict(false);
+    expect(toggle().getAttribute("aria-checked")).toBe("false");
+    expect(await save()).not.toHaveProperty("supports_strict_tool_schema");
+  });
+});
+
 const transcriptionModel = (providerType: string | null, supportsRealtime = false) =>
   ({
     id: "t1",

@@ -70,6 +70,30 @@ describe("ModelDetailDialog", () => {
     expect(term.nextElementSibling?.textContent).toBe(answer);
   });
 
+  it.each([
+    [true, null],
+    [false, "Deklarerad men utan verkan: verktygsstöd saknas."]
+  ])("lists a strict tool-schema declaration, with tool calling %s", async (tools, ineffective) => {
+    renderInApp(
+      <ModelDetailDialog
+        model={
+          {
+            ...model,
+            supports_tool_calling: tools,
+            supports_strict_tool_schema: true
+          } as AdminModel
+        }
+        kind="completion"
+        open
+        onOpenChange={() => {}}
+      />
+    );
+    const dialog = await screen.findByRole("dialog", { name: "GPT-5" });
+    expect(within(dialog).getByText("Strikta verktygsscheman")).toBeTruthy();
+    const note = within(dialog).queryByText("Deklarerad men utan verkan: verktygsstöd saknas.");
+    expect(note?.textContent ?? null).toBe(ineffective);
+  });
+
   it("formats the context window in the UI language", async () => {
     renderInApp(
       <ModelDetailDialog
