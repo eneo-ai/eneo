@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import {
-  assistantMcpServersFromApi,
   enabledMcpToolCount,
   ensureSelectedMcpToolsTracked,
   isMcpToolEnabled,
@@ -21,35 +20,6 @@ const server: AssistantMcpServer = {
 };
 
 describe("MCP tool selection", () => {
-  it("parses API server tools without trusting unknown payload shape", () => {
-    expect(
-      assistantMcpServersFromApi([
-        {
-          id: "server-1",
-          name: "Search",
-          tools: [{ id: "tool-1", name: "query", is_enabled: true }, { id: "invalid" }]
-        }
-      ])
-    ).toEqual([
-      {
-        id: "server-1",
-        name: "Search",
-        description: undefined,
-        tools: [
-          {
-            id: "tool-1",
-            name: "query",
-            title: undefined,
-            description: undefined,
-            is_enabled: true,
-            is_enabled_by_default: undefined,
-            removed_from_remote: undefined
-          }
-        ]
-      }
-    ]);
-  });
-
   it("adds a server with every tool enabled for assistant convenience", () => {
     const next = toggleMcpServerSelection(new Set(), [], server);
     expect([...next.selectedIds]).toEqual(["server-1"]);

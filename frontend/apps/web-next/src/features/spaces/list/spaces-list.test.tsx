@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { Suspense, useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { ShellContext } from "@/components/shell/shell-context";
@@ -7,18 +7,17 @@ import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { expectNoAxeViolations } from "@/test/axe";
 import { noopShell, renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
+import { router } from "@/test/navigation";
+import messages from "@/lib/i18n/messages/sv.json";
 
 const api = vi.hoisted(() => ({
   spaces: [] as unknown[],
   deleted: [] as string[],
-  created: [] as unknown[]
+  created: [] as unknown[],
+  deleteResult: null as Promise<unknown> | null
 }));
 
-// Preserve the seam exports; this list only needs a navigation action.
-vi.mock("@/lib/navigation", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@/lib/navigation")>()),
-  useRouter: () => ({ push: () => {}, prefetch: () => {} })
-}));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: () =>
@@ -35,7 +34,10 @@ vi.mock("@/lib/api/browser", () => ({
     },
     DELETE: (_path: string, { params }: { params: { path: { id: string } } }) => {
       api.deleted.push(params.path.id);
-      return Promise.resolve({ data: null, response: new Response(null, { status: 204 }) });
+      return (
+        api.deleteResult ??
+        Promise.resolve({ data: null, response: new Response(null, { status: 204 }) })
+      );
     }
   }
 }));
@@ -47,6 +49,7 @@ afterEach(() => {
   window.localStorage.clear();
   api.deleted.length = 0;
   api.created.length = 0;
+  api.deleteResult = null;
 });
 
 const count = (value: number) => ({ items: [], count: value, permissions: ["read"] });
@@ -92,6 +95,65 @@ async function show() {
 }
 
 describe("SpacesList", () => {
+  it("shows the five-second deletion hint and resets it after failure and retry settlement", async () => {
+    let finish!: (value: unknown) => void;
+    api.deleteResult = new Promise((resolve) => {
+      finish = resolve;
+    });
+    api.spaces = [space({})];
+    await show();
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Upphandling" }));
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Radera yta" }));
+    const dialog = await screen.findByRole("dialog", { name: "Radera yta" });
+    fireEvent.change(
+      within(dialog).getByRole("textbox", { name: "Ange ytnamnet för att bekräfta" }),
+      { target: { value: "Upphandling" } }
+    );
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+      await act(async () => vi.advanceTimersByTimeAsync(4999));
+      expect(within(dialog).queryByText(messages.delete_space_hint)).toBeNull();
+      await act(async () => vi.advanceTimersByTimeAsync(1));
+      expect(within(dialog).getByText(messages.delete_space_hint)).toBeTruthy();
+      await act(async () => {
+        finish({
+          error: { message: "Fixture deletion refused" },
+          response: new Response("{}", { status: 400 })
+        });
+        await vi.advanceTimersByTimeAsync(1);
+      });
+      expect(within(dialog).queryByText(messages.delete_space_hint)).toBeNull();
+      api.deleteResult = new Promise((resolve) => {
+        finish = resolve;
+      });
+      fireEvent.click(within(dialog).getByRole("button", { name: "Bekräfta borttagning" }));
+      await act(async () => vi.advanceTimersByTimeAsync(4999));
+      expect(within(dialog).queryByText(messages.delete_space_hint)).toBeNull();
+      api.spaces = [];
+      await act(async () => {
+        finish({ data: null, response: new Response(null, { status: 204 }) });
+        await vi.advanceTimersByTimeAsync(5001);
+      });
+      expect(screen.queryByText(messages.delete_space_hint)).toBeNull();
+      expect(api.deleted).toEqual(["s1", "s1"]);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["list", "cards"])("offers Edit without delete permission in %s view", async (view) => {
+    api.spaces = [space({ permissions: ["read", "edit"] })];
+    await show();
+    if (view === "cards") fireEvent.click(screen.getByRole("button", { name: "Kort" }));
+    fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Upphandling" }));
+    const edit = await screen.findByRole("menuitem", { name: "Redigera" });
+    expect(screen.queryByRole("menuitem", { name: "Radera yta" })).toBeNull();
+    fireEvent.click(edit);
+    expect(router.push).toHaveBeenCalledExactlyOnceWith("/spaces/s1/settings");
+    expect(api.deleted).toEqual([]);
+  });
+
   it("lists shared spaces as cards with counts, a filter and one create button", async () => {
     api.spaces = [
       space({}),
@@ -149,6 +211,7 @@ describe("SpacesList", () => {
     await show();
 
     fireEvent.click(screen.getByRole("button", { name: "Fler åtgärder för Upphandling" }));
+    expect(screen.queryByRole("menuitem", { name: "Redigera" })).toBeNull();
     fireEvent.click(await screen.findByRole("menuitem", { name: "Radera yta" }));
 
     const dialog = await screen.findByRole("dialog", { name: "Radera yta" });
