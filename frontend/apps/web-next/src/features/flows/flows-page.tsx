@@ -28,7 +28,12 @@ import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
 import { deleteFlow, flowKeys, flowsListQueryOptions, type FlowSparse } from "./flows-api";
 import { evidenceExportAllowed } from "./flow-form-fields";
-import { FLOW_LIST_STATUSES, visibleFlows, type FlowListStatus } from "./flow-list-filter";
+import {
+  FLOW_LIST_STATUSES,
+  flowOwner,
+  visibleFlows,
+  type FlowListStatus
+} from "./flow-list-filter";
 import { FlowPackageImportDialog } from "./flow-package-import-dialog";
 import { flowRefusalMessage } from "./flow-refusals";
 import { flowListHref, parseFlowListSearch } from "./flow-search";
@@ -48,7 +53,7 @@ import { NewFlowDialog } from "./new-flow-dialog";
 export function FlowsPage() {
   const t = useTranslations();
   const { space, routeId } = useSpace();
-  const { can } = useAppContext();
+  const { can, user } = useAppContext();
   const queryClient = useQueryClient();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -87,6 +92,13 @@ export function FlowsPage() {
 
   function showState(next: FlowListStatus) {
     replaceUrl(flowListHref(pathname, searchParams, { status: next }));
+  }
+
+  function ownerLabel(flow: FlowSparse): string {
+    const owner = flowOwner(flow, user.id, space.members.items);
+    if (!owner) return "—";
+    if (owner.kind === "member") return owner.name;
+    return owner.kind === "you" ? t("flow_list_owner_you") : t("flow_list_owner_unknown");
   }
 
   const remove = useRemovalMutation({
@@ -148,6 +160,12 @@ export function FlowsPage() {
       header: t("flows_steps_heading"),
       width: pixel(110),
       renderCell: (flow) => t("flows_step_count", { count: flow.step_count })
+    },
+    {
+      key: "owner",
+      header: t("flow_list_owner"),
+      width: pixel(140),
+      renderCell: (flow) => <span className="break-words">{ownerLabel(flow)}</span>
     },
     {
       key: "updated",

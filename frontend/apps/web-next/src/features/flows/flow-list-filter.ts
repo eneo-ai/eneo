@@ -1,4 +1,5 @@
 import { matchesSearch } from "@/lib/search";
+import type { SpaceMember } from "@/features/spaces/space";
 import type { FlowSparse } from "./flows-api";
 
 /** The states a space's flow list filters by: "Alla", "Publicerade", "Utkast". */
@@ -34,4 +35,23 @@ export function visibleFlows<T extends ListedFlow>(
     )
     .filter((flow) => matchesSearch([flow.name, subtitle(flow), flow.description], query))
     .sort((a, b) => flowChangedAt(b) - flowChangedAt(a));
+}
+
+export type FlowOwner = { kind: "you" } | { kind: "member"; name: string } | { kind: "unknown" };
+
+/**
+ * Who a flow belongs to (its owner, else whoever created it): the viewer, a
+ * space member by user name or e-mail, someone the space's members do not
+ * include, or nobody (null).
+ */
+export function flowOwner(
+  flow: Pick<FlowSparse, "owner_user_id" | "created_by_user_id">,
+  viewerId: string,
+  members: readonly Pick<SpaceMember, "id" | "username" | "email">[]
+): FlowOwner | null {
+  const ownerId = flow.owner_user_id ?? flow.created_by_user_id;
+  if (!ownerId) return null;
+  if (ownerId === viewerId) return { kind: "you" };
+  const member = members.find((candidate) => candidate.id === ownerId);
+  return member ? { kind: "member", name: member.username || member.email } : { kind: "unknown" };
 }

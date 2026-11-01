@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FlowSparse } from "./flows-api";
-import { flowChangedAt, visibleFlows } from "./flow-list-filter";
+import { flowChangedAt, flowOwner, visibleFlows } from "./flow-list-filter";
 
 function flow(overrides: Partial<FlowSparse>): FlowSparse {
   return {
@@ -74,5 +74,30 @@ describe("visibleFlows", () => {
       "draft"
     ]);
     expect(visibleFlows(flows, { query: "remiss", status: "published" }, noSubtitle)).toEqual([]);
+  });
+});
+
+describe("flowOwner", () => {
+  const members = [
+    { id: "user-2", username: "anna.lind", email: "anna.lind@kommun.se" },
+    { id: "user-3", username: null, email: "per@kommun.se" }
+  ];
+
+  it("says the viewer, a member by name or e-mail, someone outside the space, or nobody", () => {
+    expect(flowOwner(flow({ owner_user_id: "user-1" }), "user-1", members)).toEqual({
+      kind: "you"
+    });
+    // A flow nobody took over belongs to the one who created it.
+    expect(flowOwner(flow({ created_by_user_id: "user-2" }), "user-1", members)).toEqual({
+      kind: "member",
+      name: "anna.lind"
+    });
+    expect(
+      flowOwner(flow({ owner_user_id: "user-3", created_by_user_id: "user-1" }), "user-1", members)
+    ).toEqual({ kind: "member", name: "per@kommun.se" });
+    expect(flowOwner(flow({ owner_user_id: "user-9" }), "user-1", members)).toEqual({
+      kind: "unknown"
+    });
+    expect(flowOwner(flow({}), "user-1", members)).toBeNull();
   });
 });

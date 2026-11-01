@@ -123,6 +123,18 @@ describe("FlowsPage", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("says whose each flow is, by the names the space's members go by", async () => {
+    const { container } = renderPage(dated());
+    const table = screen.getByRole("table", { name: "Flöden" });
+    expect(within(table).getByRole("columnheader", { name: "Ägare" })).toBeTruthy();
+    const row = (name: string) => within(table).getByRole("link", { name }).closest("tr")!;
+    // Nobody took it over: it is its creator's.
+    expect(within(row("Mötesprotokoll")).getByText("anna.lind")).toBeTruthy();
+    expect(within(row("Medborgarbrev")).getByText("Du")).toBeTruthy();
+    expect(within(row("Remissvar")).getByText("Okänd")).toBeTruthy();
+    await expectNoAxeViolations(container);
+  });
+
   it("finds a flow by its name, description or what it takes in, and keeps the search in the address", async () => {
     renderPage(dated());
     fireEvent.change(search(), { target: { value: "LJUD" } });
