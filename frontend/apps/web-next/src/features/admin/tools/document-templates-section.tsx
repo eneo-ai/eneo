@@ -161,7 +161,12 @@ export function DocumentTemplatesSection() {
   const refresh = () => queryClient.invalidateQueries({ queryKey: DOCUMENT_TEMPLATES_KEY });
   const remove = useRemovalMutation({
     mutationFn: (template: DocumentTemplate) => deleteDocumentTemplate(browserApi, template.id),
-    refresh,
+    refresh: () =>
+      Promise.all([
+        refresh(),
+        // Deletion also removes assistant bindings; their next read must see default mode.
+        queryClient.invalidateQueries({ queryKey: ["assistants"] })
+      ]),
     onRemoved: () => {
       setDeleting(null);
       announce(t("document_template_removed"));

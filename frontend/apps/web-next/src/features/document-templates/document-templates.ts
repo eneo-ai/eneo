@@ -6,6 +6,16 @@ import type { Schema } from "@/lib/api/models";
 export type DocumentTemplate = Schema<"DocumentTemplatePublic">;
 export const DOCUMENT_TEMPLATES_KEY = ["document-templates"] as const;
 
+/** Authenticated assistant choices; the admin library retains its own permission boundary. */
+export function availableDocumentTemplatesQueryOptions(api: EneoClient) {
+  return queryOptions({
+    queryKey: [...DOCUMENT_TEMPLATES_KEY, "available"],
+    queryFn: ({ signal }): Promise<Schema<"DocumentTemplateOptions">> =>
+      unwrap(api.GET("/api/v1/document-templates/available/", { signal })),
+    retry: false
+  });
+}
+
 export function documentTemplatesQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: DOCUMENT_TEMPLATES_KEY,
