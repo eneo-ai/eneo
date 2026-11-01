@@ -442,6 +442,8 @@ describe("ChatView conversation", () => {
     renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
     const log = screen.getByRole("log", { name: "Konversation" });
     expect(log.getAttribute("aria-live")).toBe("off");
+    // The h2 an answer's own headings (h3 and below) nest under, below the page's h1.
+    expect(screen.getByRole("heading", { level: 2, name: "Konversation" })).toBeTruthy();
     expect(within(log).getByRole("article", { name: "Ditt meddelande" })).toBeTruthy();
     expect(
       within(log).getByRole("article", { name: /svar från upphandlingsassistenten/i })

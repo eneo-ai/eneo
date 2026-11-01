@@ -148,6 +148,37 @@ export async function addActivityToAnswers(page: Page) {
   });
 }
 
+/**
+ * The e2e stack's mock model answers "pong". This replaces that text, in the page's next
+ * answers, with `text` (Markdown): the stream's metadata and the saved conversation are the
+ * real ones, only the model's text-delta is swapped.
+ */
+export async function answerWithText(page: Page, text: string) {
+  await page.route(isChatStream, async (route) => {
+    const response = await fetchChatStream(route);
+    let inserted = false;
+    const events = (await response.text()).split(/\r?\n\r?\n/).filter(Boolean);
+    const body = events.flatMap((event) => {
+      if (!event.startsWith("data: ") || event === "data: [DONE]") return [event];
+      const chunk: { type: string; delta?: string } = JSON.parse(event.slice(6));
+      if (chunk.type !== "text-delta") return [event];
+      if (inserted) return [];
+      inserted = true;
+      return [`data: ${JSON.stringify({ ...chunk, delta: text })}`];
+    });
+    expect(inserted).toBe(true);
+    await route.fulfill({
+      status: response.status(),
+      headers: {
+        ...sessionResponseHeaders(route),
+        "content-type": "text/event-stream",
+        "x-vercel-ai-ui-message-stream": "v1"
+      },
+      body: body.map((event) => `${event}\n\n`).join("")
+    });
+  });
+}
+
 /** Creates a shared space through the UI and returns its base path (`/spaces/<id>`). */
 export async function createSpace(page: Page, name: string): Promise<string> {
   await page.goto("/spaces/list");

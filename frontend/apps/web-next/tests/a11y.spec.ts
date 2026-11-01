@@ -8,6 +8,7 @@ import { expect, test } from "./csp";
 import {
   activityPill,
   addActivityToAnswers,
+  answerWithText,
   apiPost,
   askChatQuestion,
   auditLogs,
@@ -259,6 +260,60 @@ async function answeredQuestion(page: Page) {
 
 const ACTIVITY_PANEL = /^(Aktivitet för svaret|Activity for the answer)$/;
 
+// What a model's answer can hold that the mock model's "pong" never does: a table, code, a link,
+// a long address, an image with and without a text alternative, a list and a quote. The answer is
+// the product's main content and is scanned as the user would see it.
+const PIXEL =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+const RICH_ANSWER = [
+  "## Svar med innehåll",
+  "",
+  "| Fält | Värde |",
+  "| --- | --- |",
+  "| Namn | Anna Lind |",
+  "| Roll | Redigerare |",
+  "",
+  "Ett stycke med en [länk till Eneo](https://example.org/eneo) och en lång adress: https://example.org/en/mycket/lang/adress/som/inte/far/gora/sidan/bredare/an/skarmen?x=1234567890.",
+  "",
+  `![Diagram över flödet](${PIXEL}) ![](${PIXEL})`,
+  "",
+  "- Första punkten",
+  "- Andra punkten",
+  "",
+  "> Ett citat som en modell kan lämna.",
+  "",
+  "```ts",
+  "const svar = { ok: true };",
+  "```"
+].join("\n");
+
+/** A rich answer on screen: the table and the link are drawn before the page is scanned. */
+async function richAnswer(page: Page) {
+  await answerWithText(page, RICH_ANSWER);
+  await page.goto("/spaces/personal/chat");
+  await chatStartReady(page);
+  await askChatQuestion(page, uniqueName("E2E a11y rikt svar"));
+  const log = conversationLog(page);
+  await expect(log.getByRole("table")).toBeVisible({ timeout: 20_000 });
+  await expect(log.getByRole("link", { name: /länk till eneo/i })).toBeVisible();
+  await expect(page).toHaveURL(/session_id=/);
+}
+
+/** Skapa yta submitted empty: the error is at the field, which has the focus. */
+async function emptyCreateSpace(page: Page) {
+  await spacesList(page);
+  await page
+    .getByRole("main")
+    .getByRole("button", { name: /skapa yta|create space/i })
+    .click();
+  const dialog = page.getByRole("dialog", { name: /skapa en ny yta|create a new space/i });
+  await dialog.getByRole("button", { name: /skapa yta|create space/i }).click();
+  const name = dialog.getByLabel(/namn|name/i);
+  await expect(name).toBeFocused();
+  await expect(name).toHaveAttribute("aria-invalid", "true");
+  await expect(name).toHaveAccessibleDescription(/\S/);
+}
+
 /** The Spaces list with its h1 shown: a page that has the whole shell. */
 async function spacesList(page: Page) {
   await page.goto("/spaces/list");
@@ -386,6 +441,16 @@ for (const colorScheme of ["light", "dark"] as const) {
       await scan(page, "/spaces/list", async () => {
         await expect(page.getByRole("heading", { level: 1 })).toBeVisible();
       });
+    });
+
+    test("chat: a rich answer with a table, code, a link and images", async ({ page }) => {
+      await richAnswer(page);
+      await expectNoAxeViolations(page);
+    });
+
+    test("an error state: Skapa yta submitted empty", async ({ page }) => {
+      await emptyCreateSpace(page);
+      await expectNoAxeViolations(page);
     });
 
     test("a dialog open: Skapa yta", async ({ page }) => {

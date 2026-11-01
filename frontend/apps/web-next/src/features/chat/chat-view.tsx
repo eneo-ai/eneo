@@ -1117,6 +1117,9 @@ function ConversationView({
               </div>
             }
           >
+            {/* The conversation is a section of the page under its h1: the headings in an answer start
+                at h3 (markdown-components.tsx), so this is the h2 between them (1.3.1, 2.4.6). */}
+            <h2 className="sr-only">{t("chat_conversation_label")}</h2>
             <ChatMessageList
               ref={quietLog}
               aria-label={t("chat_conversation_label")}
