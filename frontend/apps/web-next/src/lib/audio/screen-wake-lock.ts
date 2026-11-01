@@ -30,10 +30,11 @@ export class ScreenWakeLock {
   // the lock (battery saver) is not asked without end.
   #requestsWhileVisible = 0;
 
-  constructor(
-    host: WakeLockHost | undefined = browserWakeLock(),
-    page: PageLike | undefined = globalThis.document
-  ) {
+  /**
+   * `host` is required: `undefined` means "no wake lock" (a test, a browser
+   * without the API), never the browser's own, so callers pass browserWakeLock().
+   */
+  constructor(host: WakeLockHost | undefined, page: PageLike | undefined = globalThis.document) {
     this.#host = host;
     this.#page = page;
   }

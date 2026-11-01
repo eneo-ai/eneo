@@ -11,7 +11,7 @@ import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog"
 import { inputFieldRules } from "@/features/files/upload-plan";
 import { saveBlob } from "@/features/files/signed-file-url";
 import { formatBytes, formatDateTime } from "@/lib/format";
-import { ScreenWakeLock } from "@/lib/audio/screen-wake-lock";
+import { browserWakeLock, ScreenWakeLock } from "@/lib/audio/screen-wake-lock";
 import { withRecordedDuration } from "@/lib/audio/webm-duration";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { toast } from "@/lib/toast";
@@ -159,7 +159,7 @@ export function AudioRecorderInput({
       stallTimer: null,
       diagnostics: [],
       cleanupListeners: () => {},
-      wakeLock: new ScreenWakeLock()
+      wakeLock: new ScreenWakeLock(browserWakeLock())
     };
     captureRef.current = capture;
     setPhase("acquiring");

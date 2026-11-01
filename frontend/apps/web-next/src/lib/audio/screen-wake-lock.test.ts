@@ -187,4 +187,18 @@ describe("ScreenWakeLock", () => {
       lock.release();
     }).not.toThrow();
   });
+
+  it('takes "no wake lock" as it is given, even where the browser has one', async () => {
+    const { host } = fakes();
+    vi.stubGlobal("navigator", { wakeLock: host });
+    try {
+      const lock = new ScreenWakeLock(undefined, undefined);
+      lock.hold();
+      await settle();
+      expect(host.request).not.toHaveBeenCalled();
+      lock.release();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
 });
