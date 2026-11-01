@@ -1297,6 +1297,8 @@ describe("Kunskap on a phone", () => {
       setViewport("tablet-portrait");
       show(makeSpace(data), tab);
       fireEvent.click(screen.getByRole("button", { name: `Fler åtgärder för ${resourceName}` }));
+      // The menu moves focus into itself on the next frame; let it, as a user would.
+      await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
       fireEvent.click(await screen.findByRole("menuitem", { name: action }));
       const dialog = await screen.findByRole("dialog");
       const name = within(dialog).getByLabelText(field);
