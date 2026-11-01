@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
-import type { Release } from "@eneo/whats-new";
-import { fireEvent, screen } from "@testing-library/react";
+import { UNRELEASED, type Release } from "@eneo/whats-new";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { AppContextProvider } from "@/components/providers/app-context";
-import type { Permission } from "@/lib/auth/permissions";
 import { sessionKeys } from "@/lib/api/session";
+import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 
@@ -13,12 +13,18 @@ vi.mock("./tour", () => ({ runTour: vi.fn(() => Promise.resolve("unavailable")) 
 const catalog = vi.hoisted(() => ({ releases: [] as Release[] }));
 vi.mock("@eneo/whats-new", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@eneo/whats-new")>();
-  return { ...actual, releases: catalog.releases, latestRelease: () => catalog.releases[0] };
+  return {
+    ...actual,
+    releases: catalog.releases,
+    // As the real one, over the test's catalog: the unreleased block is never the latest.
+    latestRelease: (list = catalog.releases) => actual.latestRelease(list)
+  };
 });
 vi.mock("@/lib/api/browser", () => ({
   browserApi: { PUT: vi.fn(), DELETE: vi.fn() }
 }));
 
+import { runTour } from "./tour";
 import { TourProvider } from "./tour-provider";
 import { WhatsNewPage } from "./whats-new-page";
 import { WhatsNewProvider } from "./whats-new-provider";
@@ -50,6 +56,19 @@ const general: Release = {
     }
   ]
 };
+const upcoming: Release = {
+  version: UNRELEASED,
+  entries: [
+    {
+      id: "planned",
+      type: "new",
+      area: "spaces",
+      title: { en: "Planned news", sv: "Planerade nyheter" },
+      body: { en: "Planned changes.", sv: "Planerade ändringar." },
+      showMe: { href: "/spaces", anchor: "spaces" }
+    }
+  ]
+};
 
 function newsPage(permissions: Permission[] = []) {
   return (
@@ -63,14 +82,14 @@ function newsPage(permissions: Permission[] = []) {
   );
 }
 
-/** The session's What's new markers: everything in the catalog already seen and announced. */
-function seenEverything() {
+/** The news page over markers past every release: all seen and announced. */
+function renderNewsPage(permissions?: Permission[]) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(sessionKeys.whatsNew, {
     seen_version: "9.0.0",
     announced_version: "9.0.0"
   });
-  return { queryClient };
+  return renderInApp(newsPage(permissions), { queryClient });
 }
 
 beforeEach(() => {
@@ -79,7 +98,7 @@ beforeEach(() => {
 
 describe("What's new visible releases", () => {
   it("selects the first visible release and omits empty versions from the picker", async () => {
-    const { container } = renderInApp(newsPage(), seenEverything());
+    const { container } = renderNewsPage();
 
     expect(screen.queryByRole("button", { name: /^2\.3\.0/ })).toBeNull();
     expect(screen.getByRole("button", { name: /^2\.2\.0/ }).getAttribute("aria-pressed")).toBe(
@@ -93,7 +112,7 @@ describe("What's new visible releases", () => {
 
   it("shows the empty state when none of the releases has visible news", async () => {
     catalog.releases.splice(1);
-    const { container } = renderInApp(newsPage(), seenEverything());
+    const { container } = renderNewsPage();
 
     expect(screen.getByText("Inga nyheter ännu.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^2\./ })).toBeNull();
@@ -106,7 +125,7 @@ describe("What's new visible releases", () => {
       ...restricted,
       version: "2.1.1"
     });
-    renderInApp(newsPage(), seenEverything());
+    renderNewsPage();
 
     expect(screen.queryByRole("button", { name: /^2\.1\.1/ })).toBeNull();
     expect(screen.getByRole("button", { name: /^2\.2\.0/ }).getAttribute("aria-pressed")).toBe(
@@ -115,7 +134,7 @@ describe("What's new visible releases", () => {
   });
 
   it("keeps permitted versions selectable", () => {
-    renderInApp(newsPage(["websites"]), seenEverything());
+    renderNewsPage(["websites"]);
 
     expect(screen.getByRole("button", { name: /^2\.3\.0/ }).getAttribute("aria-pressed")).toBe(
       "true"
@@ -127,7 +146,7 @@ describe("What's new visible releases", () => {
   });
 
   it("falls back to visible history if the selected version becomes inaccessible", () => {
-    const { rerender } = renderInApp(newsPage(["websites"]), seenEverything());
+    const { rerender } = renderNewsPage(["websites"]);
     expect(screen.getByRole("heading", { name: "Version 2.3.0" })).toBeTruthy();
 
     rerender(newsPage());
@@ -136,6 +155,32 @@ describe("What's new visible releases", () => {
     expect(screen.getByRole("heading", { name: "Version 2.2.0" })).toBeTruthy();
     expect(screen.getByRole("button", { name: /^2\.2\.0/ }).getAttribute("aria-pressed")).toBe(
       "true"
+    );
+  });
+
+  it("opens on the unreleased block as the upcoming release, never read or new", async () => {
+    catalog.releases.splice(0, catalog.releases.length, upcoming, general);
+    const { container } = renderNewsPage();
+
+    expect(screen.getByRole("button", { name: "Kommande" }).getAttribute("aria-pressed")).toBe(
+      "true"
+    );
+    expect(screen.getByRole("heading", { name: "Kommande version" })).toBeTruthy();
+    expect(screen.getByText("Klara ändringar som ännu inte ingår i någon version.")).toBeTruthy();
+    expect(screen.queryByText("Läst")).toBeNull();
+    expect(screen.queryByText("Nytt för dig")).toBeNull();
+    expect(screen.queryByText(UNRELEASED)).toBeNull();
+    await expectNoAxeViolations(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "Visa mig de nya funktionerna" }));
+    await waitFor(() =>
+      expect(runTour).toHaveBeenCalledWith(
+        upcoming.entries,
+        "sv",
+        expect.objectContaining({ version: "Kommande" }),
+        expect.any(Function),
+        expect.any(AbortSignal)
+      )
     );
   });
 });

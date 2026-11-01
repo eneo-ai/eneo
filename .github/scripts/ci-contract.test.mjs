@@ -103,16 +103,53 @@ test("web-next runs all browser cases on FastAPI and has no Next runtime job", (
   const worker = step("Start and check the knowledge upload worker");
   // Complementary selections cover every case without starting the worker before queued-result tests.
   assert.deepEqual([...job.matchAll(/^        run: (bun run test:e2e.*)$/gm)].map((match) => match[1]), [
-    "bun run test:e2e --grep-invert '@upload-worker'",
+    'bun run test:e2e --grep "$E2E_GREP" --grep-invert "$E2E_GREP_INVERT"',
     "bun run test:e2e --grep '@upload-worker' --output test-results/upload-worker",
   ]);
+  assert.ok(native?.includes("E2E_GREP: ${{ matrix.grep }}\n"));
+  assert.ok(native.includes("E2E_GREP_INVERT: ${{ matrix.grep_invert }}\n"));
   for (const body of [native, upload]) {
     assert.match(body ?? "", /E2E_BASE_URL: http:\/\/localhost:8124/);
     assert.match(body, /working-directory: frontend\/apps\/web-next/);
   }
   for (const body of [native, worker, upload]) {
     assert.equal(typeof body, "string");
-    assert.doesNotMatch(body, /^        (if|continue-on-error):/m, "test phases require preceding success");
+    assert.doesNotMatch(body, /^        continue-on-error:/m, "test phases require preceding success");
+  }
+  assert.doesNotMatch(native, /^        if:/m, "test phases require preceding success");
+  // A condition without a status function implies success(), so the worker phases still require it.
+  for (const body of [worker, upload]) {
+    assert.deepEqual(body.match(/^        if: .*$/gm), ["        if: matrix.upload_worker"]);
+  }
+  // Each leg has its own stack and report. The walk legs exclude the upload case; the rest
+  // leg excludes it and both walk selections, so the legs run every other case exactly once.
+  assert.match(job, /^    strategy:\n      fail-fast: false\n      matrix:\n        include:\n/m);
+  const include = job.split("        include:\n")[1].split("\n    steps:")[0].split("\n");
+  const legs = include.map((line) => line.match(
+    /^          - \{ leg: ([a-z0-9-]+), grep: "([^"]+)", grep_invert: "([^"]+)"(, upload_worker: true)? \}$/,
+  )).map((match) => match && { leg: match[1], grep: match[2], invert: match[3], worker: Boolean(match[4]) });
+  assert.ok(legs.length >= 2 && legs.every(Boolean), include.join("\n"));
+  assert.equal(new Set(legs.map(({ leg }) => leg)).size, legs.length, "artifact names are unique");
+  assert.equal(legs.filter(({ worker }) => worker).length, 1, "the upload case runs once");
+  const walks = legs.filter(({ grep }) => grep !== ".");
+  const rest = legs.filter(({ grep }) => grep === ".");
+  assert.equal(rest.length, 1);
+  for (const { invert } of walks) assert.equal(invert, "@upload-worker");
+  assert.equal(rest[0].invert, ["@upload-worker", ...walks.map(({ grep }) => grep)].join("|"));
+  const tags = walks.flatMap(({ grep }) => grep.split("|"));
+  assert.equal(new Set(tags).size, tags.length);
+  // A tag that no test carries would quietly move its walk into the rest leg.
+  const testsDir = path.join(root, "frontend/apps/web-next/tests");
+  const specs = fs.readdirSync(testsDir).filter((file) => file.endsWith(".spec.ts"))
+    .map((file) => [file, fs.readFileSync(path.join(testsDir, file), "utf8")]);
+  for (const tag of tags) assert.ok(specs.some(([, source]) => source.includes(`"${tag}"`)), tag);
+  // A whole-route walk (a test limit of ten minutes or more) must not land in the rest leg.
+  for (const [file, source] of specs) {
+    const limits = [...source.matchAll(/test\.setTimeout\(([\d_]+)( \* 60_000)?\)/g)]
+      .map(([, value, minutes]) => Number(value.replaceAll("_", "")) * (minutes ? 60_000 : 1));
+    if (limits.some((ms) => ms >= 10 * 60_000)) {
+      assert.ok(tags.some((tag) => source.includes(`"${tag}"`)), `${file}: a route walk without a walk leg's tag`);
+    }
   }
   const workerIndex = job.indexOf("- name: Start and check the knowledge upload worker");
   assert.ok(workerIndex > job.indexOf("- name: Run E2E and accessibility tests"));
@@ -122,6 +159,7 @@ test("web-next runs all browser cases on FastAPI and has no Next runtime job", (
   assert.match(worker, /done\n\s+exit 1/);
   assert.match(upload, /PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report\/upload-worker/);
   const report = step("Upload Playwright report") ?? "";
+  assert.ok(report.includes("name: playwright-report-web-next-${{ matrix.leg }}\n"));
   for (const directory of ["playwright-report", "test-results", "playwright-report-fastapi", "test-results-fastapi"]) {
     assert.ok(report.includes(`frontend/apps/web-next/${directory}\n`), directory);
   }

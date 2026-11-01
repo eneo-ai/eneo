@@ -451,7 +451,7 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
       />
       {servers.length === 0 ? (
         <EmptyState
-          title={t("no_mcp_servers_available")}
+          title={t("admin_mcp_servers_empty_title")}
           description={t("add_mcp_server_to_get_started")}
         />
       ) : (
