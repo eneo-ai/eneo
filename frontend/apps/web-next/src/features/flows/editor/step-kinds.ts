@@ -27,7 +27,26 @@ export type NewStepOptions = {
   format?: DocumentFormat;
   url?: string;
   tool?: { mcp_server_id: string; tool_id: string; arguments: Record<string, unknown> } | null;
+  /** The instruction the step's AI starts with (`starterInstructionKey`). */
+  prompt?: string;
 };
+
+/**
+ * The catalog key of the instruction a new step of this kind starts with, the
+ * starters of the Svelte step picker (`flowStepTemplates.ts`): an AI step
+ * summarizes text and writes text from the JSON of the step before it, a step
+ * that answers in a fixed format extracts the details. Kinds without AI, and
+ * the speaker and outbound HTTP kinds, which had no starter, get none.
+ */
+export function starterInstructionKey(
+  option: Pick<StepKindOption, "kind" | "configuration">
+): string | null {
+  if (option.kind === "structured") return "flow_template_extract_prompt";
+  if (option.kind !== "ai") return null;
+  return option.configuration.input_type === "json"
+    ? "flow_template_render_text_prompt"
+    : "flow_template_summarize_prompt";
+}
 
 /** The option of `kind` at `place`, or null when the place does not offer it. */
 export function kindOption(
@@ -68,7 +87,8 @@ function enteredConfiguration(option: StepKindOption, entered: NewStepOptions): 
 /**
  * The editor update that adds a step of `option`'s kind at `position`
  * (1-based), fenced on the draft's revision: the new step with the core's
- * configuration and an empty assistant, every saved step in order with the
+ * configuration and an assistant with only its starter instruction, if any,
+ * every saved step in order with the
  * new one at `position`, the saved steps the core edits too (a step added
  * first takes the run's input over) and transcription turned on when the core
  * says the step needs it.
@@ -93,7 +113,7 @@ export function newStepUpdate(
       {
         name: entered.name.trim(),
         configuration: enteredConfiguration(option, entered),
-        assistant: {}
+        assistant: entered.prompt ? { prompt: { text: entered.prompt } } : {}
       }
     ],
     step_order: slots

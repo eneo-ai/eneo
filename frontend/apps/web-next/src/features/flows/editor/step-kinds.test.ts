@@ -2,7 +2,13 @@ import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import type { Translator } from "./field-problems";
-import { kindRefusalText, newStepUpdate, uniqueStepName } from "./step-kinds";
+import {
+  kindRefusalText,
+  newStepUpdate,
+  starterInstructionKey,
+  uniqueStepName,
+  type StepKind
+} from "./step-kinds";
 import { makeFlow, makeKindOption, makeKindRefusal, makeStep } from "./testing/fixtures";
 
 const t = createTranslator({ locale: "sv", messages }) as unknown as Translator;
@@ -82,6 +88,51 @@ describe("newStepUpdate", () => {
     expect(configurationOf(fetch)?.input_config).toEqual({ ...http, url: OPTIONS.url });
     expect(configurationOf(send)?.output_config).toEqual({ ...http, url: OPTIONS.url });
     expect(configurationOf(tool)?.input_config).toEqual({ tool: OPTIONS.tool });
+  });
+});
+
+describe("starter instructions", () => {
+  it("starts an AI step from the Svelte catalog's instruction for what it reads", () => {
+    const keys = [
+      makeKindOption("ai"),
+      makeKindOption("ai", { configuration: { input_type: "json" } }),
+      makeKindOption("structured", { configuration: { output_type: "json" } })
+    ].map(starterInstructionKey);
+    expect(keys).toEqual([
+      "flow_template_summarize_prompt",
+      "flow_template_render_text_prompt",
+      "flow_template_extract_prompt"
+    ]);
+    expect(keys.map((key) => key && t(key))).toEqual([
+      "Sammanfatta texten kort och tydligt. Lyft fram de viktigaste punkterna.",
+      "Skriv en tydlig text på naturligt språk utifrån den strukturerade datan från föregående steg.",
+      "Plocka ut de relevanta uppgifterna och returnera dem som strukturerad JSON."
+    ]);
+  });
+
+  it.each<StepKind>([
+    "compose",
+    "document",
+    "template",
+    "transcribe",
+    "speakers",
+    "review",
+    "fetch_http",
+    "tool",
+    "send_http"
+  ])("gives a %s step no starter instruction", (kind) => {
+    expect(starterInstructionKey(makeKindOption(kind))).toBeNull();
+  });
+
+  it("seeds the new step's assistant with the instruction, and leaves it empty without one", () => {
+    const option = makeKindOption("ai");
+    const prompt = "Sammanfatta texten kort och tydligt.";
+    expect(
+      newStepUpdate(twoSteps, 3, option, { ...OPTIONS, prompt }).new_steps?.[0]?.assistant
+    ).toEqual({
+      prompt: { text: prompt }
+    });
+    expect(newStepUpdate(twoSteps, 3, option, OPTIONS).new_steps?.[0]?.assistant).toEqual({});
   });
 });
 
