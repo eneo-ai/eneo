@@ -1,4 +1,4 @@
-# Optional Vite UI on the existing backend. Svelte keeps its service and host.
+# Optional additional Vite hostname on the existing backend.
 # Set WEB_NEXT_HOST in .env and configure runtime/federation in env_backend.env.
 # docker compose --env-file .env --env-file release.env \
 #   -f docker-compose.yml -f docker-compose.web-next.yml up -d
@@ -12,10 +12,12 @@ services:
       - traefik.http.routers.eneo-web-next.entrypoints=web
       - traefik.http.routers.eneo-web-next.middlewares=redirect-to-https
       - traefik.http.routers.eneo-web-next.service=eneo-backend-svc
-      - traefik.http.routers.eneo-web-next.priority=20
+      - traefik.http.routers.eneo-web-next.priority=5
       - traefik.http.routers.eneo-web-next-secure.rule=Host(`${WEB_NEXT_HOST:?Set the Vite hostname}`) && !(Path(`/internal-mcp`) || PathPrefix(`/internal-mcp/`))
       - traefik.http.routers.eneo-web-next-secure.entrypoints=websecure
       - traefik.http.routers.eneo-web-next-secure.tls=true
       - traefik.http.routers.eneo-web-next-secure.tls.certresolver=letsencrypt
       - traefik.http.routers.eneo-web-next-secure.service=eneo-backend-svc
-      - traefik.http.routers.eneo-web-next-secure.priority=20
+      # Stay below Svelte rollback (7) and the main host's API router (10),
+      # including when WEB_NEXT_HOST is configured as the main hostname.
+      - traefik.http.routers.eneo-web-next-secure.priority=5
