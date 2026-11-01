@@ -62,8 +62,10 @@ function SettingRow({
   );
   return (
     <div className="flex min-w-0 items-start gap-3">
+      {/* Decorative. On a phone its 52 px go to the label and description, which beside the
+          switch otherwise wrap to four lines at 320 px. */}
       <span
-        className={`rounded-ax-element flex size-10 shrink-0 items-center justify-center ${tone}`}
+        className={`rounded-ax-element flex size-10 shrink-0 items-center justify-center max-md:hidden ${tone}`}
         aria-hidden="true"
       >
         <Icon className="size-5" />

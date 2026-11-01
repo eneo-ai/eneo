@@ -102,8 +102,7 @@ export function WhatsNewPage({ title }: { title: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:gap-8 sm:p-6">
-      <PageHeader title={title} />
-      <p className="text-muted-foreground">{t("whats_new_intro")}</p>
+      <PageHeader title={title} description={t("whats_new_intro")} />
       {releases.length === 0 ? (
         <p className="text-muted-foreground flex items-center gap-2">
           <Sparkles className="size-4" />
@@ -154,7 +153,7 @@ export function WhatsNewPage({ title }: { title: string }) {
               </span>
               {seenAtOpen !== null &&
                 (isReadRelease(current, seenAtOpen) ? (
-                  <span className="text-muted-foreground text-xs">{t("whats_new_read")}</span>
+                  <span className="text-muted-foreground text-sm">{t("whats_new_read")}</span>
                 ) : (
                   <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
                     {t("whats_new_new_for_you")}
@@ -164,7 +163,8 @@ export function WhatsNewPage({ title }: { title: string }) {
                 <Button
                   size="sm"
                   variant={isReadRelease(current, seenAtOpen) ? "outline" : "default"}
-                  className="ml-auto"
+                  // On a phone it wraps under the heading and starts on the page's line.
+                  className="sm:ml-auto"
                   aria-busy={(running && tourFrom === "release") || undefined}
                   onClick={() =>
                     void startEntries("release", tourEntries(current, can), current.version)

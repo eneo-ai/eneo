@@ -106,7 +106,7 @@ function ActivityCards({ range, compare }: { range: InsightsRange; compare: bool
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <Card className="flex flex-col gap-1 p-6">
+      <Card className="flex flex-col gap-1 p-4 sm:p-6">
         <span className="text-muted-foreground text-sm">{t("active_assistants")}</span>
         <span className="flex items-baseline gap-2">
           <span className="text-3xl font-semibold tabular-nums">
@@ -116,7 +116,7 @@ function ActivityCards({ range, compare }: { range: InsightsRange; compare: bool
           <Delta current={data.active_assistant_count} prior={priorData?.active_assistant_count} />
         </span>
       </Card>
-      <Card className="flex flex-col gap-1 p-6">
+      <Card className="flex flex-col gap-1 p-4 sm:p-6">
         <span className="text-muted-foreground text-sm">{t("active_users")}</span>
         <span className="flex items-baseline gap-2">
           <span className="text-3xl font-semibold tabular-nums">
@@ -218,7 +218,7 @@ export function InsightsPage() {
         <Stat label={t("questions")} value={format.number(counts.questions)} />
       </div>
 
-      <Card className="flex flex-col gap-4 p-6">
+      <Card className="flex flex-col gap-4 p-4 sm:p-6">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div className="flex flex-col gap-0.5">
             <h2 className="font-semibold">{t("assistant_usage")}</h2>

@@ -253,4 +253,13 @@ describe("admin skill runtime policy", () => {
     const table = await screen.findByRole("table", { name: "skills_runtime_models_title" });
     expect(within(table).getByText("gpt-5")).toBeTruthy();
   });
+
+  it("keeps Spara the screen's one primary button", async () => {
+    show();
+    // The catalogue link was filled blue too: two primaries on one screen.
+    const catalogue = await screen.findByRole("link", { name: "governance_manage_skills_action" });
+    expect(catalogue.className).not.toContain("bg-primary");
+    const save = screen.getByRole("button", { name: "skills_runtime_policy_save" });
+    expect(save.className).toContain("bg-primary");
+  });
 });

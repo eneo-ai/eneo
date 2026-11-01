@@ -154,14 +154,11 @@ export function ModulesPage({ title }: { title: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-      <PageHeader title={title} tour="admin-modules" />
+      <PageHeader title={title} description={t("module_admin_description")} tour="admin-modules" />
       <section className="space-y-4" aria-labelledby="installed-modules-title">
-        <div>
-          <h2 id="installed-modules-title" className="text-lg font-semibold">
-            {t("module_admin_installed_title")}
-          </h2>
-          <p className="text-muted-foreground mt-1 text-sm">{t("module_admin_description")}</p>
-        </div>
+        <h2 id="installed-modules-title" className="text-lg font-semibold">
+          {t("module_admin_installed_title")}
+        </h2>
         <QueryStateBoundary queries={[installations, serviceKeys]} rows={2} height={48}>
           {() =>
             (installations.data ?? []).length === 0 ? (

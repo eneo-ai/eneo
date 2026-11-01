@@ -74,12 +74,48 @@ describe("CrawlRunsTable", () => {
       "listitem"
     );
     expect(rows).toHaveLength(3);
+    // Three runs need no filter on a phone (useFilterShown).
+    expect(screen.queryByRole("textbox", { name: "Filtrera indexeringar" })).toBeNull();
     // The newest first, as the table's default order.
     expect(within(rows[0]!).getByRole("button", { name: /5 mars 2024|2024-03-05/ })).toBeTruthy();
+    // The date starts on the row's 16 px line: the ghost button's padding is pulled back.
+    expect(
+      within(rows[0]!).getByRole("button", { name: /5 mars 2024|2024-03-05/ }).className
+    ).toContain("-ms-3");
+    // No "—" line: a run without a result says nothing about it.
+    expect(rows.map((row) => row.textContent?.includes("—"))).toEqual([false, false, false]);
     // A finished run says how long it took; the unfinished one says when it started.
     expect(rows[0]!.textContent).toMatch(/Varaktighet: \d/);
     expect(rows[1]!.textContent).not.toMatch(/Varaktighet/);
     expect(rows[1]!.textContent).toMatch(/Startad/);
+  });
+
+  it("starts a failed run's lone Visa detaljer on the same line as its date", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderInApp(<CrawlRunsTable runs={RUNS} />);
+    const rows = within(screen.getByRole("list", { name: "Indexeringar" })).getAllByRole(
+      "listitem"
+    );
+    // The middle row is the failed run: no counts, so the button is the line's first thing.
+    const errors = within(rows[1]!).getByRole("button", { name: "Visa detaljer" });
+    expect(errors.parentElement!.className).toContain("-ms-3");
+    // A run whose line starts with a label ("Ej indexerade") is not pulled back.
+    expect(
+      within(rows[0]!).getByRole("button", { name: /Visa sidor som inte kunde indexeras/ })
+        .parentElement!.className
+    ).not.toContain("-ms-3");
+  });
+
+  it("leaves a queued run's empty result line out on a phone", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderInApp(
+      <CrawlRunsTable
+        runs={[run({ id: "q", phase: "queued", finished_at: null, pages_crawled: 0 })]}
+      />
+    );
+    const row = within(screen.getByRole("list", { name: "Indexeringar" })).getByRole("listitem");
+    // The date and state, then when it started: no line for a result it does not have yet.
+    expect(row.children).toHaveLength(2);
   });
 
   it("lists runs newest first with their state as a status dot and text", async () => {

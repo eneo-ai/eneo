@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -248,16 +249,20 @@ export function OrgApiKeysPage() {
         <Button variant="outline" onClick={() => setShowPolicy(true)}>
           <Settings className="size-4" /> {t("notification_policy")}
         </Button>
-        <CreateApiKeyDialog
-          idPrefix="org"
-          defaultOwnership="service"
-          trigger={
-            <Button>
-              <Plus className="size-4" /> {t("api_keys_create_short")}
-            </Button>
-          }
-          onCreated={secrets.reveal(t("api_keys_created_title"))}
-        />
+        {/* The page's one primary action: docked at the bottom on a phone, as on Konto >
+            API-nycklar, and named the same; in the header from 768 px. */}
+        <DockedActions label={t("admin_api_keys_actions")}>
+          <CreateApiKeyDialog
+            idPrefix="org"
+            defaultOwnership="service"
+            trigger={
+              <Button>
+                <Plus className="size-4" /> {t("api_keys_create")}
+              </Button>
+            }
+            onCreated={secrets.reveal(t("api_keys_created_title"))}
+          />
+        </DockedActions>
       </PageHeader>
       <NotificationPolicyDialog open={showPolicy} onOpenChange={setShowPolicy} />
       <ApiKeyPolicyDialog open={showConstraintPolicy} onOpenChange={setShowConstraintPolicy} />

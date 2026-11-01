@@ -472,7 +472,9 @@ export function CrawlerPage() {
               {t("admin_crawler_queued")}
               <strong className="ms-2 tabular-nums">{data.summary.queued}</strong>
             </p>
-            <div className="sm:ms-auto">
+            {/* Wrapped under the counts on a phone: the ghost button's own inset is
+                pulled back so its text starts on the gutter with the lines above. */}
+            <div className="max-sm:-ms-3 sm:ms-auto">
               <Button
                 variant="ghost"
                 size="sm"

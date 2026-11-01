@@ -89,7 +89,11 @@ describe("role administration", () => {
   it("shows the default role and searches the permissions granted by a role", async () => {
     show();
     expect(await screen.findByText("Everyone")).toBeTruthy();
-    expect(screen.getByText("roles_default_badge")).toBeTruthy();
+    // A status, not a second primary: never the accent fill of "Skapa roll".
+    expect(screen.getByText("roles_default_badge").getAttribute("data-variant")).toBe("secondary");
+    // The actions wrap on a phone instead of running out of the card (320 px).
+    const actions = screen.getAllByRole("button", { name: /^edit$|Redigera/ })[0]!.parentElement!;
+    expect(actions.className).toContain("flex-wrap");
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "permission_admin" } });
     expect(screen.getByText("Manager")).toBeTruthy();
     expect(screen.queryByText("Everyone")).toBeNull();

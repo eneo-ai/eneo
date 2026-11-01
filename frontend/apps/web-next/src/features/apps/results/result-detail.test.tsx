@@ -143,6 +143,9 @@ describe("ResultDetail", () => {
     const panel = screen.getByRole("tabpanel", { name: "Resultat" });
     expect(within(panel).queryByRole("button", { name: "Kopiera" })).toBeNull();
     expect(screen.getByText("Slutförd")).toBeTruthy();
+    // The summary's labels read like "Indata", without a colon of their own.
+    expect(screen.getByText("Startad")).toBeTruthy();
+    expect(screen.getByText("Avslutad")).toBeTruthy();
   });
 
   it.each([

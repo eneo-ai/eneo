@@ -121,3 +121,9 @@ describe("storage move commands", () => {
     expect(post).not.toHaveBeenCalled();
   });
 });
+
+it("heads the overview without an intro that repeats the page description", async () => {
+  renderContent();
+  expect(await screen.findByRole("heading", { name: "storage_overview_title" })).toBeTruthy();
+  expect(screen.queryByText("storage_overview_description")).toBeNull();
+});

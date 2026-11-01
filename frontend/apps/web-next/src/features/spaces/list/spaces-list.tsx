@@ -57,9 +57,7 @@ function SpaceCard({
           className="size-9"
         />
       }
-      description={
-        description || <span className="text-ax-text-tertiary">{t("space_no_description")}</span>
-      }
+      description={description}
       meta={spaceMeta(space, t)}
       actions={
         canDelete ? (

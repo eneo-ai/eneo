@@ -88,6 +88,10 @@ describe("admin function sources", () => {
     show();
     expect(await screen.findByRole("heading", { name: "web_search" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "image_generation" })).toBeTruthy();
+    // A card holding only its header draws no second line on its bottom edge.
+    expect(
+      screen.getByRole("heading", { name: "web_search" }).closest("header")?.className
+    ).toContain("last:border-b-0");
     fireEvent.click(screen.getAllByRole("button", { name: "capability_configure" })[0]!);
     fireEvent.change(screen.getByLabelText("name"), { target: { value: "Search source" } });
     fireEvent.change(screen.getByLabelText("url"), {

@@ -21,6 +21,17 @@ import { ModulesPage } from "./modules-page";
 
 afterEach(() => vi.clearAllMocks());
 
+it("introduces the page under its title, not under the installed modules", () => {
+  renderInApp(<ModulesPage title="Moduler" />);
+  const intro = screen.getByText(
+    "Installera och konfigurera moduler för den här Eneo-installationen. Organisationsisoleringen hanteras automatiskt."
+  );
+  expect(intro.closest("section")).toBeNull();
+  expect(
+    screen.getByRole("heading", { level: 1, name: "Moduler" }).parentElement?.contains(intro)
+  ).toBe(true);
+});
+
 const problemOf = (control: HTMLElement) =>
   document.getElementById(control.getAttribute("aria-describedby")!.split(" ")[0]!)?.textContent;
 
@@ -31,13 +42,13 @@ it("shows each problem at its field on install, and moves focus to the first", a
   expect((install as HTMLButtonElement).disabled).toBe(false);
   // Loaded: the service keys to pick from.
   await waitFor(() =>
-    expect((screen.getByLabelText("Service key") as HTMLSelectElement).disabled).toBe(false)
+    expect((screen.getByLabelText("Tjänstenyckel") as HTMLSelectElement).disabled).toBe(false)
   );
 
   fireEvent.click(install);
   const key = screen.getByLabelText("Modulnyckel");
   const urls = screen.getByLabelText("Callback-URL:er");
-  const serviceKey = screen.getByLabelText("Service key");
+  const serviceKey = screen.getByLabelText("Tjänstenyckel");
   expect(problemOf(key)).toBe("Detta fält är obligatoriskt");
   expect(problemOf(urls)).toBe("Detta fält är obligatoriskt");
   expect(problemOf(serviceKey)).toBe("Detta fält är obligatoriskt");

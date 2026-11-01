@@ -25,6 +25,7 @@ import { Streamdown } from "streamdown";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { SourceMetadataList, type SourceMetadataEntry } from "./source-metadata";
 import { EmptyState } from "@/components/composites/empty-state";
+import { AREA_HUES } from "@/components/composites/icon-tile";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import {
   FieldProblem,
@@ -303,7 +304,13 @@ export function BlobTable({
   });
 
   if (blobs.length === 0) {
-    return <EmptyState icon={<FileText />} title={t("no_files_uploaded_yet")} />;
+    return (
+      <EmptyState
+        icon={<FileText />}
+        hue={AREA_HUES.knowledge}
+        title={t("knowledge_files_empty_title")}
+      />
+    );
   }
 
   const columns: TableColumn<InfoBlob>[] = [

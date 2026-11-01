@@ -80,6 +80,13 @@ function show() {
 }
 
 describe("OrgApiKeysPage", () => {
+  it("docks Skapa API-nyckel, the page's one primary action, on a phone", async () => {
+    show();
+    const create = screen.getByRole("button", { name: "Skapa API-nyckel" });
+    expect(create.closest("[data-docked-actions]")).not.toBeNull();
+    await screen.findByRole("table", { name: "API-nycklar" });
+  });
+
   it("lists keys with their owner, scope, rate limit and last use", async () => {
     const { container } = show();
     const table = await screen.findByRole("table", { name: "API-nycklar" });

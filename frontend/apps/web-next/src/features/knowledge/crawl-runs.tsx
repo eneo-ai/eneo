@@ -16,9 +16,10 @@ import { ClientTime, useClientTimeText } from "@/components/composites/client-ti
 import { EmptyState } from "@/components/composites/empty-state";
 import { formatDuration } from "@/lib/format";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useFilterShown } from "@/features/spaces/resource-filter-input";
 import { TableFrame } from "@/components/composites/table-frame";
 import { CrawlRunDetailsDialog } from "./crawl-run-details";
-import { crawlRunState, type CrawlFailureKind } from "./crawl-run-state";
+import { crawlRunState, hasCrawlIssues, type CrawlFailureKind } from "./crawl-run-state";
 import { CrawlFailureActions, CrawlRunStatusLabel } from "./crawl-run-ui";
 import type { CrawlRun } from "./knowledge";
 import {
@@ -33,7 +34,15 @@ import { KnowledgeLabel, KnowledgeTableControls } from "./table-controls-ui";
 export type RunSelection = { run: CrawlRun; kind: CrawlFailureKind | null };
 
 /** When the run started, as a button that opens its details. */
-function CrawlStartedCell({ run, onSelect }: { run: CrawlRun; onSelect: () => void }) {
+function CrawlStartedCell({
+  run,
+  onSelect,
+  className
+}: {
+  run: CrawlRun;
+  onSelect: () => void;
+  className?: string;
+}) {
   const t = useTranslations();
   const date = useClientTimeText(run.created_at, "date_time");
   if (!run.created_at) return "—";
@@ -43,6 +52,7 @@ function CrawlStartedCell({ run, onSelect }: { run: CrawlRun; onSelect: () => vo
       size="sm"
       label={t("crawl_details_title", { date: date ?? "" })}
       onClick={onSelect}
+      className={className}
     >
       <ClientTime value={run.created_at} format="date_time" />
     </Button>
@@ -55,10 +65,13 @@ function CrawlStartedCell({ run, onSelect }: { run: CrawlRun; onSelect: () => vo
  */
 function CrawlResultCell({
   run,
-  onShowFailures
+  onShowFailures,
+  inRow = false
 }: {
   run: CrawlRun;
   onShowFailures: (kind: CrawlFailureKind | null) => void;
+  /** A phone row leaves the line out while the run has no result; a table cell says "—". */
+  inRow?: boolean;
 }) {
   const t = useTranslations();
   const state = crawlRunState(run);
@@ -77,19 +90,29 @@ function CrawlResultCell({
       : pages > 0
         ? t("pages_succeeded", { count: pages })
         : t("files_succeeded", { count: files });
+  const succeeded = showsCounts && (pages > 0 || files > 0);
+  const unchangedShown = (showsCounts || state === "unchanged") && unchanged > 0;
+  if (inRow && !succeeded && !unchangedShown && !hasCrawlIssues(run)) return null;
 
   return (
     <div className="flex flex-wrap items-start gap-x-3 gap-y-1">
-      {showsCounts && (pages > 0 || files > 0) ? (
-        <KnowledgeLabel tone="success" label={successLabel} />
-      ) : null}
-      {(showsCounts || state === "unchanged") && unchanged > 0 ? (
+      {succeeded ? <KnowledgeLabel tone="success" label={successLabel} /> : null}
+      {unchangedShown ? (
         <KnowledgeLabel tone="neutral" label={t("pages_unchanged_count", { count: unchanged })} />
       ) : null}
-      {!(showsCounts && (pages > 0 || files > 0)) && !(state === "unchanged" && unchanged > 0) ? (
+      {!inRow && !succeeded && !(state === "unchanged" && unchanged > 0) ? (
         <span className="text-ax-text-secondary">—</span>
       ) : null}
-      <CrawlFailureActions run={run} onSelect={onShowFailures} />
+      <CrawlFailureActions
+        run={run}
+        onSelect={onShowFailures}
+        // A ghost button alone on the line starts on the row's 16 px line, as the date above it.
+        className={
+          inRow && !succeeded && !unchangedShown && !(run.pages_failed || run.files_failed)
+            ? "-ms-3"
+            : undefined
+        }
+      />
     </div>
   );
 }
@@ -119,8 +142,10 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
   const [selection, setSelection] = useState<RunSelection | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   const phone = useMediaMatch(PHONE_QUERY);
+  // A phone shows the filter only for a long history; a hidden filter no longer applies.
+  const filterShown = useFilterShown(runs.length);
   const { sortedData, sortConfig } = useTableSortableState<CrawlRun, CrawlRunSortKey>({
-    data: filterCrawlRuns(runs, filter),
+    data: filterCrawlRuns(runs, filterShown ? filter : ""),
     defaultSort: CRAWL_RUN_DEFAULT_SORT,
     comparators: CRAWL_RUN_COMPARATORS
   });
@@ -170,13 +195,15 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
 
   return (
     <div className="flex flex-col gap-4">
-      <KnowledgeTableControls
-        filterValue={filter}
-        onFilterChange={setFilter}
-        filterLabel={t("fix_crawls_filter_label")}
-        filterPlaceholder={t("space_filter_crawls_placeholder")}
-        resultCount={sortedData.length}
-      />
+      {filterShown ? (
+        <KnowledgeTableControls
+          filterValue={filter}
+          onFilterChange={setFilter}
+          filterLabel={t("fix_crawls_filter_label")}
+          filterPlaceholder={t("space_filter_crawls_placeholder")}
+          resultCount={sortedData.length}
+        />
+      ) : null}
       {sortedData.length === 0 ? (
         <EmptyState
           icon={<SearchX />}
@@ -196,10 +223,16 @@ export function CrawlRunsTable({ runs, onRerun }: { runs: CrawlRun[]; onRerun?: 
               {sortedData.map((run) => (
                 <li key={run.id} className="flex flex-col gap-1.5 px-4 py-3">
                   <div className="flex items-center justify-between gap-3">
-                    <CrawlStartedCell run={run} onSelect={() => select(run, null)} />
+                    {/* The ghost button's padding pulled back: the date starts on the
+                        row's 16 px line, with the lines under it. */}
+                    <CrawlStartedCell
+                      run={run}
+                      onSelect={() => select(run, null)}
+                      className="-ms-3"
+                    />
                     <CrawlRunStatusLabel run={run} />
                   </div>
-                  <CrawlResultCell run={run} onShowFailures={(kind) => select(run, kind)} />
+                  <CrawlResultCell run={run} onShowFailures={(kind) => select(run, kind)} inRow />
                   <span className="text-ax-text-secondary text-xs">
                     {/* A running one says when it started, which needs no label. */}
                     {run.finished_at ? `${t("duration")}: ` : null}

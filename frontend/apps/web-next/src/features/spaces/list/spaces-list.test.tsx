@@ -106,7 +106,8 @@ describe("SpacesList", () => {
     expect(
       cards.map((card) => within(card).getAllByRole("link")[0]!.getAttribute("aria-label"))
     ).toEqual(["HR", "Upphandling"]);
-    expect(within(cards[0]!).getByText("Ingen beskrivning")).toBeTruthy();
+    // No description, no placeholder line (as assistants and apps).
+    expect(within(cards[0]!).queryByText("Ingen beskrivning")).toBeNull();
     expect(within(cards[0]!).queryByRole("button")).toBeNull();
     expect(within(cards[1]!).getByText("3 assistenter")).toBeTruthy();
     expect(within(cards[1]!).getByText("1 app")).toBeTruthy();
@@ -222,7 +223,7 @@ describe("SpacesList on a phone (decision 9)", () => {
     const upphandling = within(rows[1]!).getByRole("link", { name: /^Upphandling/ });
     expect(upphandling.getAttribute("href")).toBe("/spaces/s1/overview");
     expect(upphandling.textContent).toContain("3 assistenter · 1 app");
-    expect(within(rows[0]!).getByRole("link", { name: /^HR/ }).textContent).toContain(
+    expect(within(rows[0]!).getByRole("link", { name: /^HR/ }).textContent).not.toContain(
       "Ingen beskrivning"
     );
     expect(

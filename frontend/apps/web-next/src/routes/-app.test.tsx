@@ -861,6 +861,26 @@ it("gives what's new filter chips and the docs link 44 px touch targets", async 
   expect(docs.className).toContain("pointer-coarse:min-h-11");
 });
 
+it("puts what's new intro in its header and the tour button on the start line", async () => {
+  // An admin sees the release's tour (its one Visa mig entry is for admins); all is read.
+  replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
+  replies.set("/api/v1/settings/", { ...context.settings, whats_new_enabled: true });
+  replies.set("/api/v1/whats-new/state/", {
+    seen_version: "999.0.0",
+    announced_version: "999.0.0"
+  });
+  await renderRoute("/whats-new");
+  const heading = await screen.findByRole("heading", { name: messages.whats_new, level: 1 });
+  // The header's description, as on every other page (it was a paragraph 20 px below).
+  expect(heading.parentElement?.textContent).toContain(messages.whats_new_intro);
+  // jsdom applies no CSS: a wrapped button pushed to the row's end sat alone at the right.
+  const tour = screen.getByRole("button", { name: messages.whats_new_tour_start });
+  expect(tour.className.split(" ")).not.toContain("ml-auto");
+  expect(tour.className).toContain("sm:ml-auto");
+  // "Läst" has the size of "Kommande" (the date) beside it.
+  expect(screen.getByText(messages.whats_new_read).className).toContain("text-sm");
+});
+
 afterEach(() => {
   cleanup();
   vi.unstubAllGlobals();

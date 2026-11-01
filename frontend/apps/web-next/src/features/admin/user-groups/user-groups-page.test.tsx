@@ -125,7 +125,7 @@ describe("AdminUserGroupsPage", () => {
 
   it("offers to create the first group when there is none, with one button, not two", async () => {
     await renderPage([]);
-    expect(await screen.findByText(/inga användargrupper konfigurerade/)).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Inga användargrupper ännu" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa användargrupp" })).toHaveLength(1);
   });
 

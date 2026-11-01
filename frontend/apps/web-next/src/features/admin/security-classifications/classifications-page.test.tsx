@@ -38,6 +38,13 @@ describe("SecurityClassificationsPage", () => {
     expect(screen.getByRole("button", { name: "Fler åtgärder för Klass 1 · Öppen" })).toBeTruthy();
   });
 
+  it("names the create button short enough to stay one line on a 320 px phone", async () => {
+    // "Skapa en ny säkerhetsklassificering" wrapped to two lines and filled the card at
+    // 320 px while it sat at the end at 390; the short name fits both, like "Ny prompt".
+    renderInApp(<SecurityClassificationsPage />);
+    expect(await screen.findByRole("button", { name: "Ny säkerhetsklassificering" })).toBeTruthy();
+  });
+
   it("keeps focus on a busy Inaktivera and switches off once", async () => {
     post.mockReturnValue(new Promise(() => {}));
     renderInApp(<SecurityClassificationsPage />);

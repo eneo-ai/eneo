@@ -107,7 +107,7 @@ export function AdminSkillsPage() {
             {t("admin_skills_catalogue_bindings_note")}
           </p>
           <div className="flex flex-wrap gap-2">
-            <Button asChild>
+            <Button asChild variant="outline">
               <Link href="/spaces/organization/skills">{t("governance_manage_skills_action")}</Link>
             </Button>
             <Button asChild variant="outline">

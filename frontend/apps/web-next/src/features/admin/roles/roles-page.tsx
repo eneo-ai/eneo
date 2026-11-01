@@ -530,7 +530,7 @@ function RoleRow({
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <h2 className="min-w-0 font-semibold [overflow-wrap:anywhere]">{role.name}</h2>
           {isDefault && (
-            <Badge title={t("roles_cannot_delete_default")}>
+            <Badge variant="secondary" title={t("roles_cannot_delete_default")}>
               <Star className="size-3" />
               {t("roles_default_badge")}
             </Badge>
@@ -545,7 +545,7 @@ function RoleRow({
             </Badge>
           )}
         </div>
-        <div className="flex shrink-0 items-center gap-1.5 sm:justify-self-end">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 sm:shrink-0 sm:flex-nowrap sm:justify-self-end">
           <Button variant="outline" size="sm" onClick={onEdit}>
             <Pencil className="size-4" />
             {t("edit")}
