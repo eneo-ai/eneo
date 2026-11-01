@@ -70,23 +70,27 @@ test(
     await page.reload();
     await expect(nameInput).toHaveValue(renamed);
     await scan(page);
-    // The DELETE is real. Only delivery of its successful response is delayed.
+    // Hold the browser request for the slow-operation presentation, then let
+    // it continue with its original session cookie and fetch metadata.
     let deliverDelete!: () => void;
     const delivery = new Promise<void>((resolve) => {
       deliverDelete = resolve;
     });
     await page.route(`**/api/v1${space}/`, async (route) => {
       if (route.request().method() !== "DELETE") return route.continue();
-      const response = await route.fetch();
-      expect(response.status()).toBe(204);
       await delivery;
-      await route.fulfill({ response });
+      await route.continue();
     });
     await page.getByRole("button", { name: "Radera denna yta", exact: true }).click();
     const dialog = page.getByRole("alertdialog", { name: "Radera yta", exact: true });
     await dialog
       .getByRole("textbox", { name: "Ange ytnamnet för att bekräfta", exact: true })
       .fill(renamed);
+    const deletion = page.waitForResponse(
+      (response) =>
+        response.request().method() === "DELETE" &&
+        new URL(response.url()).pathname === `/api/v1${space}/`
+    );
     await dialog.getByRole("button", { name: "Bekräfta borttagning", exact: true }).click();
     try {
       await expect(dialog.getByText(messages.delete_space_hint, { exact: true })).toBeVisible({
@@ -96,6 +100,7 @@ test(
     } finally {
       deliverDelete();
     }
+    expect((await deletion).status()).toBe(204);
     await expect(page).toHaveURL("/spaces/list");
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
   }
@@ -186,6 +191,7 @@ test(
               id: "blocked-fixture",
               mcp_server_id: "blocked-fixture",
               name: "Oklassad källa",
+              tags: null,
               security_classification: null,
               tools: [],
               tools_count: 0
