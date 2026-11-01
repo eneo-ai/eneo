@@ -251,8 +251,10 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
           : t("flow_admin_no_changes");
 
   return (
-    // Focused fields stay clear of the sticky save bar (WCAG 2.4.11).
-    <div className="flex flex-col gap-6 [&_input]:scroll-mb-32">
+    // Whatever takes focus, a link or a section's button as much as a field, stops
+    // clear of the sticky save bar (WCAG 2.4.11): the bar and its bottom-4 take
+    // 127 px on a phone, 94 px from 768 px.
+    <div className="flex flex-col gap-6 [&_*]:scroll-mb-36">
       <Text type="supporting" size="sm" as="p" display="block" className="m-0">
         <Link href={AUDIT_HREF} hasUnderline className="pointer-coarse:min-h-11">
           {t("flow_admin_audit_link")}
