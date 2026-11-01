@@ -106,7 +106,7 @@ export function stepTitle(step: ActivityStep, t: Translate): string {
  */
 function toolStepTitle(calls: ToolCall[], done: boolean, t: Translate): string {
   const labels = calls.map(
-    (call) => toolPresentation(call.part, t, done && call.status !== "previous-attempt").label
+    (call) => toolPresentation(call.part, t, done && call.status === "done").label
   );
   const first = labels[0] ?? "";
   if (calls.length === 1) return first;

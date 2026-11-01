@@ -258,29 +258,34 @@ describe("ActivityPanel", () => {
   });
 });
 
-it("labels an unresolved spreadsheet attempt without claiming the operation completed", () => {
-  const activity = deriveActivity(
-    {
-      id: "retrying",
-      role: "assistant",
-      parts: [
-        {
-          type: "dynamic-tool",
-          toolName: "query_table",
-          toolCallId: "failed-query",
-          state: "output-error",
-          errorText: "Invalid query",
-          input: { sql: "SELECT SUM(cost) FROM t" },
-          providerMetadata: {
-            eneo: { server_name: "Spreadsheet", is_bundled: true, purpose: "file_analysis" }
+it.each([true, false])(
+  "labels an unresolved spreadsheet attempt without claiming completion (streaming: %s)",
+  (streaming) => {
+    const activity = deriveActivity(
+      {
+        id: "retrying",
+        role: "assistant",
+        parts: [
+          {
+            type: "dynamic-tool",
+            toolName: "query_table",
+            toolCallId: "failed-query",
+            state: "output-error",
+            errorText: "Invalid query",
+            input: { sql: "SELECT SUM(cost) FROM t" },
+            callProviderMetadata: {
+              eneo: { server_name: "Spreadsheet", is_bundled: true, purpose: "file_analysis" }
+            }
           }
-        }
-      ]
-    },
-    { streaming: true }
-  );
-  renderInApp(<StepList activity={activity} durations={null} sessionId={null} />);
-  expect(screen.getAllByText("Tidigare försök").length).toBeGreaterThan(0);
-  expect(screen.queryByText("Beräknade sammanställning")).toBeNull();
-  expect(screen.getAllByText("Beräknar sammanställning").length).toBeGreaterThan(0);
-});
+        ]
+      },
+      { streaming }
+    );
+    renderInApp(<StepList activity={activity} durations={null} sessionId={null} />);
+    expect(
+      screen.getAllByText(streaming ? "Tidigare försök" : "Misslyckades").length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByText("Beräknade sammanställning")).toBeNull();
+    expect(screen.getAllByText("Beräknar sammanställning").length).toBeGreaterThan(0);
+  }
+);
