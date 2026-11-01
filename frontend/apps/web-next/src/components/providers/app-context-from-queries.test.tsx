@@ -172,6 +172,14 @@ it("updates Flows availability when settings or permissions change, keeping the 
   expect(screen.getByRole("button", { name: "Klick 1" })).toBeTruthy();
 });
 
+it("shows Flows to a role granted only flows_manage, as the backend lets it see them", async () => {
+  // /users/me answers with the role's own grants; the backend expands them when it checks.
+  backend.set(ME, ok(testAppContext({ permissions: ["flows_manage"] }).user));
+  backend.set(SETTINGS, ok({ ...signedIn.settings, flows_enabled: true }));
+  await renderApp();
+  expect(screen.getByTestId("flows").textContent).toBe("true");
+});
+
 it("keeps known What's new markers when a refresh could not read them", async () => {
   const { queryClient, refresh } = await renderApp();
   backend.set(WHATS_NEW, failure);

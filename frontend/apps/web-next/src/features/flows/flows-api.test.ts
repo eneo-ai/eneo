@@ -21,6 +21,15 @@ describe("flowsAvailable", () => {
   });
 
   it("hides flows from a user without the permission to see them", () => {
-    expect(flowsAvailable({ flows_enabled: true }, userWith(["flows_run"]))).toBe(false);
+    // Tracing alone does not include seeing flows (the backend's aliases).
+    expect(flowsAvailable({ flows_enabled: true }, userWith(["flows_trace"]))).toBe(false);
+    expect(flowsAvailable({ flows_enabled: true }, userWith(["apps"]))).toBe(false);
   });
+
+  it.each<Permission>(["flows_run", "flows_manage", "flows"])(
+    "shows flows to a role holding only %s, which includes seeing them",
+    (permission) => {
+      expect(flowsAvailable({ flows_enabled: true }, userWith([permission]))).toBe(true);
+    }
+  );
 });
