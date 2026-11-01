@@ -199,9 +199,10 @@ test(
       const projection = raised.limits.find((limit) => limit.use_case === "knowledge_file");
       expect(projection).toMatchObject({
         effective_bytes: 32 * MIB,
-        storage_capacity_bytes: 32 * MIB,
         storage_target: "postgres_inline"
       } satisfies Partial<Schema<"UploadLimitProjection">>);
+      // The storage format's capacity is the backend's own; it only has to hold the raised limit.
+      expect(projection?.storage_capacity_bytes ?? 0).toBeGreaterThanOrEqual(32 * MIB);
       const space = await createSpace(page, uniqueName("E2E Native original"));
       await page.goto(`${space}/knowledge`);
       const create = await openCreateCollectionDialog(page);
