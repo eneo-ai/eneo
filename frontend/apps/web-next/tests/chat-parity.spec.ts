@@ -1,7 +1,7 @@
 import type { Page, Route } from "@playwright/test";
 import type { Schema } from "../src/lib/api/models";
 import { expect, test } from "./csp";
-import { apiPath, isChatStream, sessionResponseHeaders } from "./helpers";
+import { apiPath, conversationLog, isChatStream, sessionResponseHeaders } from "./helpers";
 
 // Real cookie authentication and FastAPI/CSP; the response fixtures below isolate
 // route guards, token rejection and saved-message presentation from providers.
@@ -161,14 +161,17 @@ test(
     const composer = page.getByRole("textbox", { name: /^Fråga / });
     await composer.fill("Behåll min fråga");
     await composer.press("Control+Enter");
-    const error = page.getByText(
+    const error = conversationLog(page).getByText(
       "Din input är för stor för denna modell. Prova ett kortare meddelande, färre bilagor, eller en modell med större kontextfönster.",
       { exact: true }
     );
     await expect(error).toBeVisible();
     await expect(composer).toHaveValue("Behåll min fråga");
     await expect(page.getByText(/12.000 \/ 10.000 tokens \(2.000 över gränsen\)/)).toBeVisible();
-    await error.locator("..").getByRole("button", { name: "Ny konversation", exact: true }).click();
+    await page
+      .getByRole("log", { name: "Konversation", exact: true })
+      .getByRole("button", { name: "Ny konversation", exact: true })
+      .click();
     const confirmation = page.getByRole("alertdialog", { name: "Lämna chatten?", exact: true });
     await expect(confirmation).toBeVisible();
     await confirmation.getByRole("button", { name: "Lämna chatten", exact: true }).click();
