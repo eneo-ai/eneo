@@ -207,10 +207,27 @@ describe("globals.css", () => {
       "padding-bottom": "env(safe-area-inset-bottom, 0px)",
       "padding-inline-start": "env(safe-area-inset-left, 0px)"
     });
-    // A PageBar's title is hidden until the page scrolls it in.
-    expect(components.get(".page-bar-title")).toMatchObject({
-      opacity: "0",
+    // A PageBar's title is hidden until the scroll flips the bar's flag, and then fades in
+    // time: tied to the scroll position it would rest half faded (WCAG 1.4.3).
+    expect(components.get(":is([data-page-bar], [data-phone-page-bar])")).toMatchObject({
+      animation: "page-bar-scrolled steps(1, end) both",
       "animation-timeline": "scroll(nearest block)"
+    });
+    const title: Record<string, Record<string, string>> = {};
+    postcss.parse(css).walkRules(".page-bar-title", (rule: Rule) => {
+      const parent = rule.parent as AtRule;
+      const declarations: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      title[`${parent.name} ${parent.params}`] = declarations;
+    });
+    expect(title).toEqual({
+      "layer components": {
+        opacity: "0",
+        transition: "opacity var(--duration-fast) var(--ease-standard)"
+      },
+      "container style(--page-bar-scrolled: 1)": { opacity: "1" }
     });
   });
 

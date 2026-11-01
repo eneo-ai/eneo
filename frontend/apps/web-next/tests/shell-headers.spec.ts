@@ -238,6 +238,28 @@ test("focus moving up a pushed screen stops below its PageBar", async ({ page })
   }
 });
 
+test("a pushed screen's PageBar title is hidden or whole wherever the scroll stops", async ({
+  page
+}) => {
+  // Half faded, its text would be below its contrast (WCAG 1.4.3): the scroll only
+  // decides whether it shows, and the fade between runs in time (globals.css).
+  await page.setViewportSize({ width: 390, height: 480 });
+  await page.goto("/admin/users");
+  const main = page.locator("#main-content");
+  const title = page.locator("[data-page-bar] .page-bar-title");
+  await expect(title).toHaveText(/\S/);
+  for (const top of [0, 24, 32, 36, 42, 48, 56, 96, 42, 0]) {
+    await main.evaluate((element, to) => (element.scrollTop = to), top);
+    await expect
+      .poll(() => title.evaluate((element) => getComputedStyle(element).opacity), {
+        message: `scrolled ${top} px`
+      })
+      .toMatch(/^[01]$/);
+  }
+  await main.evaluate((element) => (element.scrollTop = 96));
+  await expect(title).toHaveCSS("opacity", "1");
+});
+
 test("going from a root screen to a pushed one shows one header throughout", async ({ page }) => {
   await recordHeaders(page);
   await page.goto("/admin");

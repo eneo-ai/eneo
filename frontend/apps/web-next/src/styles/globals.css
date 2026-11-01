@@ -1290,24 +1290,41 @@
     }
   }
   /* A pushed screen's PageBar (components/shell/page-bar.tsx) fades its
-     title in as the page's own h1 scrolls under the bar; the scroller is
-     main#main-content. Without scroll timelines the title stays hidden: the
-     back link is what the bar is for. */
+     title in once the page's own h1 has scrolled under the bar; the scroller
+     is main#main-content. The scroll only flips the bar's
+     --page-bar-scrolled, at 2.5rem, and the title fades on that in time: a
+     fade tied to the scroll position itself rests half done wherever the
+     scroll stops inside it, text below its contrast (WCAG 1.4.3). Without
+     scroll timelines the title stays hidden: the back link is what the bar
+     is for. */
   .page-bar-title {
     opacity: 0;
+    transition: opacity var(--duration-fast) var(--ease-standard);
   }
   @supports (animation-timeline: scroll()) {
-    .page-bar-title {
-      animation: page-bar-title linear both;
+    :is([data-page-bar], [data-phone-page-bar]) {
+      animation: page-bar-scrolled steps(1, end) both;
       animation-timeline: scroll(nearest block);
-      animation-range: 1.5rem 3.5rem;
+      animation-range: 0 2.5rem;
+    }
+    @container style(--page-bar-scrolled: 1) {
+      .page-bar-title {
+        opacity: 1;
+      }
     }
   }
-  @keyframes page-bar-title {
+  @keyframes page-bar-scrolled {
     to {
-      opacity: 1;
+      --page-bar-scrolled: 1;
     }
   }
+}
+
+/* Registered, so the style query above compares a number. */
+@property --page-bar-scrolled {
+  syntax: "<integer>";
+  inherits: false;
+  initial-value: 0;
 }
 
 /*
