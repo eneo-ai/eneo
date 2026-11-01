@@ -27,8 +27,9 @@ import {
 } from "@astryxdesign/core/Table";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
-import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
+import { useRemovalMutation } from "@/features/spaces/removal";
 import { matchesSearch } from "@/lib/search";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { pollWhile } from "@/lib/api/query";
@@ -44,53 +45,37 @@ function resultTitleLabels(t: (key: string) => string) {
   return { inputPrefix: t("input"), empty: t("this_run_did_not_receive_any_inputs") };
 }
 
-function ResultActions({ appId, run }: { appId: string; run: AppRunSparse }) {
+function ResultActions({
+  run,
+  onDelete
+}: {
+  run: AppRunSparse;
+  onDelete: (run: AppRunSparse, anchor: HTMLButtonElement | null) => void;
+}) {
   const t = useTranslations();
-  const queryClient = useQueryClient();
-  const [showDelete, setShowDelete] = useState(false);
   const menuRef = useRef<HTMLButtonElement>(null);
-  const titleLabels = resultTitleLabels(t);
   // A run has no name of its own; its row shows when it was made, so the
   // menu is named by that time in the viewer's time zone.
   const time = useClientTimeText(run.created_at, "date_time");
 
-  const deleteRun = useRemovalMutation({
-    anchor: menuRef,
-    mutationFn: () =>
-      unwrap(browserApi.DELETE("/api/v1/app-runs/{id}/", { params: { path: { id: run.id } } })),
-    refresh: () => queryClient.invalidateQueries({ queryKey: ["apps", appId, "runs"] }),
-    onRemoved: () => setShowDelete(false)
-  });
-
   return (
-    <>
-      <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <Button
-            ref={menuRef}
-            variant="ghost"
-            size="icon"
-            aria-label={time ? t("ui_more_actions_for", { name: time }) : t("actions")}
-          >
-            <MoreHorizontal className="size-4" />
-          </Button>
-        </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-            <Trash2 className="size-4" /> {t("delete")}
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
-      <ConfirmDialogControlled
-        open={showDelete}
-        onOpenChange={setShowDelete}
-        title={t("delete_result")}
-        description={t("confirm_delete_result", { resultTitle: getResultTitle(run, titleLabels) })}
-        confirmLabel={deleteRun.isPending ? t("deleting") : t("delete")}
-        pending={deleteRun.isPending}
-        onConfirm={() => deleteRun.mutate()}
-      />
-    </>
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          ref={menuRef}
+          variant="ghost"
+          size="icon"
+          aria-label={time ? t("ui_more_actions_for", { name: time }) : t("actions")}
+        >
+          <MoreHorizontal className="size-4" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem variant="destructive" onSelect={() => onDelete(run, menuRef.current)}>
+          <Trash2 className="size-4" /> {t("delete")}
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -151,6 +136,23 @@ export function ResultsTable({
   const collator = useCollator();
   const [filter, setFilter] = useState("");
   const listRef = useRef<HTMLDivElement>(null);
+  const menuAnchor = useRef<HTMLButtonElement | null>(null);
+  const [runToDelete, setRunToDelete] = useState<AppRunSparse | null>(null);
+  const queryClient = useQueryClient();
+  const rescueFocus = useFocusRescue();
+  // The list owns deletion so replacing rows with a table cannot close its dialog or reset a request.
+  const deleteRun = useRemovalMutation({
+    anchor: menuAnchor,
+    focusTarget: listRef,
+    mutationFn: (run: AppRunSparse) =>
+      unwrap(browserApi.DELETE("/api/v1/app-runs/{id}/", { params: { path: { id: run.id } } })),
+    refresh: () => queryClient.invalidateQueries({ queryKey: ["apps", appId, "runs"] }),
+    onRemoved: () => setRunToDelete(null)
+  });
+  function requestDelete(run: AppRunSparse, anchor: HTMLButtonElement | null) {
+    menuAnchor.current = anchor;
+    setRunToDelete(run);
+  }
   useFocusAcrossLayouts(listRef, phone);
   const labels = useMemo(() => resultTitleLabels(t), [t]);
   const matched = useMemo(
@@ -210,11 +212,11 @@ export function ResultsTable({
       key: "actions",
       header: t("actions"),
       width: pixel(64),
-      renderCell: (run) => <ResultActions appId={appId} run={run} />
+      renderCell: (run) => <ResultActions run={run} onDelete={requestDelete} />
     }
   ];
   return (
-    <RemovalFocusScope target={listRef}>
+    <>
       <div
         ref={listRef}
         tabIndex={-1}
@@ -254,7 +256,7 @@ export function ResultsTable({
                         </span>
                       </span>
                     }
-                    endContent={<ResultActions appId={appId} run={run} />}
+                    endContent={<ResultActions run={run} onDelete={requestDelete} />}
                   />
                 ))}
               </List>
@@ -270,6 +272,25 @@ export function ResultsTable({
           </>
         )}
       </div>
-    </RemovalFocusScope>
+      {runToDelete ? (
+        <ConfirmDialogControlled
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              const opener = menuAnchor.current;
+              setRunToDelete(null);
+              rescueFocus(() => (opener?.isConnected ? opener : listRef.current));
+            }
+          }}
+          title={t("delete_result")}
+          description={t("confirm_delete_result", {
+            resultTitle: getResultTitle(runToDelete, labels)
+          })}
+          confirmLabel={deleteRun.isPending ? t("deleting") : t("delete")}
+          pending={deleteRun.isPending}
+          onConfirm={() => deleteRun.mutate(runToDelete)}
+        />
+      ) : null}
+    </>
   );
 }

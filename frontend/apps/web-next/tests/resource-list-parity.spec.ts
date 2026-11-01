@@ -196,6 +196,66 @@ test(
 );
 
 test(
+  "result deletion stays pending across phone and tablet layouts until the real request succeeds",
+  { tag: "@vite" },
+  async ({ page }) => {
+    const space = await createSpace(page, uniqueName("Result deletion"));
+    const appId = await apiPost(page, `${space}/applications/apps/`, { name: "Resize result" });
+    const runId = await apiPost(page, `/apps/${appId}/runs/`, {
+      text: "Retained deletion",
+      files: []
+    });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(`**/api/v1/app-runs/${runId}/`, async (route) => {
+      if (route.request().method() === "DELETE") await gate;
+      await route.continue();
+    });
+    try {
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.goto(`${space}/apps/${appId}?tab=results`);
+      await page
+        .getByRole("list", { name: "Resultat", exact: true })
+        .getByRole("button", { name: /^Fler åtgärder/ })
+        .click();
+      await page.getByRole("menuitem", { name: "Ta bort", exact: true }).click();
+      const dialog = page.getByRole("alertdialog", { name: "Ta bort resultat" });
+      await expect(dialog).toBeVisible();
+      await dialog.evaluate((element) => element.setAttribute("data-resize-check", "retained"));
+      await page.setViewportSize({ width: 820, height: 1180 });
+      await expect(dialog).toHaveAttribute("data-resize-check", "retained");
+      await dialog.getByRole("button", { name: "Ta bort", exact: true }).click();
+      for (const width of [390, 820, 390]) {
+        await page.setViewportSize({ width, height: 844 });
+        await expect(dialog).toBeVisible();
+        await expect(dialog).toHaveAttribute("data-resize-check", "retained");
+        await expect(
+          dialog.getByRole("button", { name: "Tar bort...", exact: true })
+        ).toHaveAttribute("aria-busy", "true");
+      }
+      const deleted = page.waitForResponse(
+        (response) =>
+          response.url().endsWith(`/app-runs/${runId}/`) && response.request().method() === "DELETE"
+      );
+      release();
+      expect((await deleted).status()).toBe(204);
+      await expect(dialog).toBeHidden();
+      await expect(
+        page.getByRole("heading", { name: "Inga tidigare resultat hittades", exact: true })
+      ).toBeVisible();
+      await page.reload();
+      await expect(
+        page.getByRole("heading", { name: "Inga tidigare resultat hittades", exact: true })
+      ).toBeVisible();
+    } finally {
+      release();
+    }
+  }
+);
+
+test(
   "results filter and sort the returned collection and keep real result navigation",
   { tag: "@vite" },
   async ({ page }, testInfo) => {

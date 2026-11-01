@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
@@ -7,7 +7,8 @@ import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 const backend = vi.hoisted(() => ({
   runs: [] as AppRunSparse[],
   deleted: [] as string[],
-  refuseDelete: false
+  refuseDelete: false,
+  deleteGate: null as Promise<void> | null
 }));
 const toast = vi.hoisted(() => ({ error: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ toast }));
@@ -23,7 +24,8 @@ const run = (id: string, text: string | null, created_at: string): AppRunSparse 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: () => Promise.resolve({ data: { items: backend.runs }, response: new Response("{}") }),
-    DELETE: (path: string, { params }: { params: { path: { id: string } } }) => {
+    DELETE: async (path: string, { params }: { params: { path: { id: string } } }) => {
+      if (backend.deleteGate) await backend.deleteGate;
       if (backend.refuseDelete)
         return Promise.resolve({
           error: { message: "Unavailable" },
@@ -46,6 +48,7 @@ beforeEach(() => {
   ];
   backend.deleted = [];
   backend.refuseDelete = false;
+  backend.deleteGate = null;
 });
 afterEach(() => {
   cleanup();
@@ -212,4 +215,78 @@ it("keeps a refused deletion open with its result and trace id, then permits ret
   backend.refuseDelete = false;
   fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
   await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+});
+
+it.each([false, true])(
+  "keeps result deletion open across phone/tablet changes, including a pending request (refused: %s)",
+  async (refused) => {
+    setViewport(PHONE_VIEWPORT);
+    backend.refuseDelete = refused;
+    let finish!: () => void;
+    backend.deleteGate = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/results/${id}`} />);
+    const list = await screen.findByRole("list", { name: "Resultat" });
+    const menu = within(list)
+      .getAllByRole("button", { name: /^Fler åtgärder för / })
+      .at(-1)!;
+    fireEvent.keyDown(menu, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText(/Sammanfatta protokollet/)).toBeTruthy();
+
+    for (const viewport of ["tablet-portrait", "phone"] as const) {
+      act(() => setViewport(viewport));
+      expect(screen.getByRole("alertdialog")).toBe(dialog);
+    }
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+    await waitFor(() =>
+      expect(
+        within(dialog).getByRole("button", { name: "Tar bort..." }).getAttribute("aria-busy")
+      ).toBe("true")
+    );
+    for (const viewport of ["tablet-portrait", "phone"] as const) {
+      act(() => setViewport(viewport));
+      expect(screen.getByRole("alertdialog")).toBe(dialog);
+      expect(
+        within(dialog).getByRole("button", { name: "Tar bort..." }).getAttribute("aria-busy")
+      ).toBe("true");
+    }
+
+    await act(async () => finish());
+    if (refused) {
+      await waitFor(() =>
+        expect(toast.error).toHaveBeenCalledWith(
+          "Unavailable",
+          expect.objectContaining({ description: expect.stringContaining("result-trace") })
+        )
+      );
+      expect(screen.getByRole("alertdialog")).toBe(dialog);
+      expect(backend.runs).toHaveLength(2);
+      backend.refuseDelete = false;
+      fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
+    }
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(backend.deleted).toEqual(["/api/v1/app-runs/{id}/ run-1"]);
+  }
+);
+
+it("returns focus to the result list when cancellation follows a layout change", async () => {
+  setViewport(PHONE_VIEWPORT);
+  renderInApp(<ResultsTable appId="app-1" resultHref={(id) => `/results/${id}`} />);
+  const list = await screen.findByRole("list", { name: "Resultat" });
+  const focusTarget = screen.getByRole("group", { name: "Resultat" });
+  const menu = within(list)
+    .getAllByRole("button", { name: /^Fler åtgärder för / })
+    .at(-1)!;
+  menu.focus();
+  fireEvent.keyDown(menu, { key: "Enter" });
+  fireEvent.click(await screen.findByRole("menuitem", { name: "Ta bort" }));
+  const dialog = await screen.findByRole("alertdialog");
+  act(() => setViewport("tablet-portrait"));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }));
+  await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+  await waitFor(() => expect(document.activeElement).toBe(focusTarget));
+  expect(backend.deleted).toEqual([]);
 });
