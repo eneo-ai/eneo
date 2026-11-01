@@ -81,7 +81,7 @@ export function TemplateEditorDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent className="overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>{editing ? t("edit_template") : t("new_template")}</DialogTitle>
           <DialogDescription>

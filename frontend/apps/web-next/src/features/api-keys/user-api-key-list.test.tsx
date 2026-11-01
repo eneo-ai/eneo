@@ -112,6 +112,13 @@ describe("UserApiKeyList", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("gives the column of row menus a header a screen reader can say", async () => {
+    state.items = [key("1")];
+    renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
+    const table = await screen.findByRole("table");
+    expect(within(table).getAllByRole("columnheader").at(-1)?.textContent).toBe("Åtgärder");
+  });
+
   it("requests application names when refreshed keys need them, with a distinct spaces response", async () => {
     state.items = [key("1", { scope_type: "space", scope_id: "space-1" })];
     const { queryClient } = renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
@@ -129,7 +136,9 @@ describe("UserApiKeyList", () => {
     state.items[0] = key("1", { description: "Target system" });
     state.next = [key("5", { name: "Target archive" })];
     renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
-    const search = await screen.findByRole("textbox", { name: "Sök API-nycklar" });
+    // The field is there from the start (disabled while loading): wait for the keys.
+    await screen.findByText("Integration 1");
+    const search = screen.getByRole("textbox", { name: "Sök API-nycklar" });
     fireEvent.change(search, { target: { value: "target" } });
     expect(screen.getByText("Integration 1")).toBeTruthy();
     expect(screen.queryByText("Integration 2")).toBeNull();
@@ -148,11 +157,25 @@ describe("UserApiKeyList", () => {
     expect(state.requests.at(-1)?.state).toBeNull();
   });
 
+  it("keeps the search field in place while the keys load, disabled, so the table does not move", async () => {
+    renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
+    const search = screen.getByRole("textbox", { name: "Sök API-nycklar" });
+    expect((search as HTMLInputElement).disabled).toBe(true);
+    // The label and its description say what is searched; a placeholder only repeated them.
+    expect(search.getAttribute("placeholder") ?? "").toBe("");
+
+    await screen.findByText("Integration 1");
+    expect(
+      (screen.getByRole("textbox", { name: "Sök API-nycklar" }) as HTMLInputElement).disabled
+    ).toBe(false);
+  });
+
   it("retains loaded keys and a nonmatching search when a later page fails, then retries", async () => {
     state.next = [key("5", { name: "Target archive" })];
     state.failNext = true;
     renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
-    const search = await screen.findByRole("textbox", { name: "Sök API-nycklar" });
+    await screen.findByText("Integration 1");
+    const search = screen.getByRole("textbox", { name: "Sök API-nycklar" });
     fireEvent.change(search, { target: { value: "target" } });
     expect(screen.getByText("Inga matchande API-nycklar")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Ladda mer" }));

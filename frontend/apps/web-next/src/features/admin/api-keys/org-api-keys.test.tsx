@@ -80,6 +80,17 @@ function show() {
 }
 
 describe("OrgApiKeysPage", () => {
+  it("docks Skapa API-nyckel, the page's one primary action, on a phone", async () => {
+    show();
+    const create = screen.getByRole("button", { name: "Skapa API-nyckel" });
+    expect(create.closest("[data-docked-actions]")).not.toBeNull();
+    // The filter form's submit is not a second primary.
+    expect(
+      screen.getByRole("button", { name: "Tillämpa filter" }).getAttribute("data-variant")
+    ).toBe("outline");
+    await screen.findByRole("table", { name: "API-nycklar" });
+  });
+
   it("lists keys with their owner, scope, rate limit and last use", async () => {
     const { container } = show();
     const table = await screen.findByRole("table", { name: "API-nycklar" });
@@ -106,6 +117,36 @@ describe("OrgApiKeysPage", () => {
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Alla statusar" }));
     await waitFor(() => expect(listQueries().at(-1)?.state).toBeUndefined());
+  });
+
+  it("folds the filters after the search below 768 px, and keeps them in the form", async () => {
+    show();
+    await screen.findByText("Ärendesystemet");
+    const toggle = screen.getByRole("button", { name: "Fler filter" });
+    const more = document.getElementById(toggle.getAttribute("aria-controls") ?? "");
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(more?.className).toContain("max-md:hidden");
+    // Folded, not removed: the fields stay in the form and apply with it.
+    expect(more?.contains(screen.getByLabelText("Utgår inom (dagar)"))).toBe(true);
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(more?.className).not.toContain("max-md:hidden");
+  });
+
+  it("opens the folded filters when one of them is invalid, instead of refusing the form silently", async () => {
+    show();
+    await screen.findByText("Ärendesystemet");
+    const toggle = screen.getByRole("button", { name: "Fler filter" });
+    fireEvent.click(toggle);
+    fireEvent.change(screen.getByLabelText("Utgår inom (dagar)"), { target: { value: "0" } });
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
+
+    await waitFor(() => expect(toggle.getAttribute("aria-expanded")).toBe("true"));
+    expect(listQueries().every((query) => query.expires_within_days === undefined)).toBe(true);
   });
 
   it("applies the filters together: search, expiry window and page size", async () => {
@@ -145,6 +186,40 @@ describe("OrgApiKeysPage", () => {
       body: { secret }
     });
     expect(JSON.stringify(api.GET.mock.calls)).not.toContain(secret);
+  });
+
+  it("keeps the settings below the keys when the list failed and a lookup took its place", async () => {
+    serve();
+    api.GET.mockImplementation((path: string) =>
+      path === "/api/v1/admin/api-keys"
+        ? Promise.resolve({
+            error: { message: "Down" },
+            response: new Response("{}", { status: 503 })
+          })
+        : path === "/api/v1/admin/api-keys/{id}"
+          ? ok({ ...apiKey, name: "Hittad nyckel" })
+          : path === "/api/v1/audit/config/actions"
+            ? ok({ actions: [] })
+            : ok({ items: [] })
+    );
+    renderInApp(<OrgApiKeysPage />, {
+      appContext: testAppContext({
+        permissions: ["admin"],
+        settings: { api_key_expiry_notifications: true }
+      })
+    });
+    await screen.findByRole("button", { name: /Försök igen/ });
+    // The settings do not depend on the keys, and show once the keys have settled.
+    expect(await screen.findByText("API-nyckel runtime-inställningar")).toBeTruthy();
+
+    api.POST.mockReturnValue(ok({ api_key: { id: "key-9" }, match_reason: "exact_secret" }));
+    fireEvent.change(screen.getByLabelText("Sök"), { target: { value: secret } });
+    fireEvent.click(screen.getByRole("button", { name: "Tillämpa filter" }));
+    expect(await screen.findByText("Hittad nyckel")).toBeTruthy();
+    fireEvent.mouseDown(screen.getByRole("tab", { name: "Alla statusar" }));
+
+    // The list query is disabled in a lookup and never loaded: it must not take them away.
+    expect(screen.getByText("API-nyckel runtime-inställningar")).toBeTruthy();
   });
 
   it("searches a whole key that matched nothing by its suffix", async () => {

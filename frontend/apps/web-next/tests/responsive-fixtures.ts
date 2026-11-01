@@ -1,0 +1,154 @@
+import type { Browser, Page } from "@playwright/test";
+import { STORAGE_STATE } from "../playwright.config";
+import type { Schema } from "../src/lib/api/models";
+import { apiPost, apiRequest, spaceWithWork, uniqueName } from "./helpers";
+import type { Fixtures } from "./responsive-routes";
+
+/**
+ * What the screens that need a record are opened with: a shared space with an
+ * assistant, an app and a run, plus a group chat, a service, a website, a
+ * collection and a published flow with a finished run. Created once per run;
+ * ROUTES (tests/responsive-routes.ts) points at them.
+ */
+export async function createFixtures(
+  browser: Browser,
+  baseURL: string | undefined,
+  prefix: string
+): Promise<Fixtures> {
+  const context = await browser.newContext({ storageState: STORAGE_STATE, baseURL });
+  const page = await context.newPage();
+  const work = await spaceWithWork(page, uniqueName(prefix));
+  const spaceId = work.space.split("/").pop()!;
+  const groupChat = await apiPost(page, `${work.space}/applications/group-chats/`, {
+    name: uniqueName("Grupp")
+  });
+  const service = await apiPost(page, `${work.space}/applications/services/`, {
+    name: uniqueName("Tjänst")
+  });
+  const website = await apiPost(page, `/spaces/${spaceId}/knowledge/websites/`, {
+    url: "https://example.org/contract",
+    name: "Kontraktsida",
+    crawl_type: "crawl",
+    update_interval: "never",
+    download_files: false
+  });
+  const detail = await page.evaluate(
+    async (id) => (await fetch(`/api/v1/spaces/${id}/`)).json(),
+    spaceId
+  );
+  const embedding = detail.embedding_models?.[0]?.id as string | undefined;
+  const collection = await apiPost(page, `/spaces/${spaceId}/knowledge/groups/`, {
+    name: uniqueName("Samling"),
+    embedding_model: embedding ? { id: embedding } : undefined
+  });
+  const flow = await finishedFlowRun(
+    page,
+    spaceId,
+    (detail.completion_models as { id: string; name: string }[]).find(
+      (model) => model.name === "e2e-mock"
+    )?.id ?? detail.completion_models[0].id
+  );
+  // A key, so the tables of /admin/api-keys and /account/api-keys have a row to measure.
+  await apiPost(page, "/api-keys", {
+    name: uniqueName("Kontrollnyckel"),
+    key_type: "sk_",
+    permission: "read",
+    scope_type: "tenant"
+  });
+  // The release notice above the chat's lists shows once (the release is then
+  // announced) and is gone from the next visit on: on a fresh database it would be in the
+  // first run's measurements and not in the second's. Seen and announced here, it never shows.
+  await page.goto("/whats-new");
+  await page.waitForSelector("main#main-content", { state: "visible", timeout: 15_000 });
+  await page.waitForTimeout(1_000);
+  await page.goto("/spaces/personal/chat");
+  await page.waitForSelector("main#main-content", { state: "visible", timeout: 15_000 });
+  await page.waitForTimeout(1_500);
+  const userId = await page.evaluate(
+    async () => (await (await fetch("/api/v1/users/me/")).json()).id
+  );
+  await context.close();
+  return {
+    space: work.space,
+    assistant: work.editor.split("/assistants/")[1]!.split("/")[0]!,
+    app: work.app.split("/apps/")[1]!,
+    run: work.result.split("/results/")[1]!,
+    groupChat,
+    service,
+    website,
+    collection,
+    flow: flow.flowId,
+    flowRun: flow.runId,
+    userId
+  };
+}
+
+/**
+ * A published one-step flow and a run of it that has finished, so its pages show their
+ * settled layout (a run still working would change under the measurement).
+ */
+async function finishedFlowRun(page: Page, spaceId: string, completionModel: string) {
+  const created = await apiRequest<Schema<"FlowPublic">>(page, "/flows/", {
+    method: "POST",
+    body: { space_id: spaceId, name: uniqueName("Flöde") } satisfies Schema<"FlowCreateRequest">
+  });
+  const saved = await apiRequest<Schema<"FlowPublic">>(page, `/flows/${created.id}/editor/`, {
+    method: "PATCH",
+    body: {
+      expected_revision: created.draft_revision,
+      definition: {},
+      new_steps: [
+        {
+          name: "Sammanfatta underlag",
+          assistant: {
+            completion_model: { id: completionModel },
+            prompt: { text: "Sammanfatta underlaget." }
+          },
+          configuration: {
+            input_source: "flow_input",
+            input_type: "text",
+            output_mode: "pass_through",
+            output_type: "text"
+          }
+        }
+      ]
+    } satisfies Schema<"FlowEditorUpdateRequest">
+  });
+  const flow = await apiRequest<Schema<"FlowPublic">>(
+    page,
+    `/flows/${created.id}/publish/?expected_revision=${saved.draft_revision}`,
+    { method: "POST" }
+  );
+  const run = await apiRequest<Schema<"FlowRunPublic">>(page, `/flows/${flow.id}/runs/`, {
+    method: "POST",
+    body: {
+      expected_flow_version: flow.published_version,
+      run_label: uniqueName("Körning"),
+      input_payload_json: { text: "Ett kort underlag för kontraktet." }
+    } satisfies Schema<"FlowRunCreateRequest">
+  });
+  const status = `/flows/${flow.id}/runs/${run.id}/status/`;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const summary = await apiRequest<Schema<"FlowRunSummaryPublic">>(page, status);
+    if (summary.status === "completed") return { flowId: flow.id, runId: run.id };
+    if (summary.status === "failed" || summary.status === "cancelled")
+      throw new Error(`The contract's flow run ended ${summary.status}`);
+    await page.waitForTimeout(1_000);
+  }
+  throw new Error("The contract's flow run did not finish within 60 s");
+}
+
+/** Opens a route and waits until it shows its content and has stopped loading. */
+export async function openRoute(page: Page, url: string, signedIn: boolean) {
+  await page.goto(url);
+  await page.waitForSelector(signedIn ? "main#main-content" : "main, h1", {
+    state: "visible",
+    timeout: 15_000
+  });
+  await page
+    .waitForFunction(() => !document.querySelector('main [aria-busy="true"]'), undefined, {
+      timeout: 8_000
+    })
+    .catch(() => {});
+  await page.waitForTimeout(400);
+}

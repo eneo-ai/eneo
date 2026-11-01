@@ -4,10 +4,9 @@ import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Text } from "@astryxdesign/core/Text";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
 import { revealProblems } from "@/components/composites/field-problem";
-import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
@@ -29,6 +28,7 @@ import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
 import { UserGroupField } from "./user-group-field";
 import type { AdminUser } from "./users";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /**
  * The roles as checkbox rows in named groups (Standardroller, Anpassade
@@ -245,10 +245,7 @@ function UserEditorForm({
   return (
     // No close button while saving (Escape waits too, in the dialog): the
     // password the save sets must reach its one-time view.
-    <DialogContent
-      className={`max-h-[85vh] overflow-y-auto ${DIALOG_TOP_ON_TOUCH}`}
-      showCloseButton={!pending}
-    >
+    <DialogContent showCloseButton={!pending}>
       <DialogHeader>
         <DialogTitle>{mode === "create" ? t("create_a_new_user") : t("edit_user")}</DialogTitle>
         <DialogDescription>
@@ -261,6 +258,7 @@ function UserEditorForm({
           <TextInput
             ref={usernameRef}
             label={t("username")}
+            {...KEYBOARD.identifier}
             description={
               mode === "update"
                 ? t("username_change_logout_hint")

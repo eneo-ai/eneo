@@ -202,7 +202,9 @@ so a draft and its pending save outlive a trip to the index or a turn to the
 tablet layout; never render a section only in one view. A section's
 `SettingsGroup` drops its card frame and repeated title there by itself. A
 resource just created opens on General, so its name field is in view. Space
-settings uses the layout without `phone` and keeps one page on every width.
+settings uses it too, but with only a `title`: the space's own page bar sits above
+the index (a globals.css rule hides it, and its connection banner, while a section is
+open), so the index has no bar of its own and names itself with a heading.
 
 ## How it is wired
 
@@ -293,7 +295,12 @@ settings uses the layout without `phone` and keeps one page on every width.
   catalog) render through `ResourceCollection` (`resource-tile.tsx`): list
   rows on a phone (`PHONE_QUERY`), cards from 768 px in a grid that fits as
   many columns as the page has room for. A list row with a link is one
-  target (globals.css 12b); put controls in its end slot.
+  target (globals.css 12b); put controls in its end slot. A turn across
+  768 px remounts every item, so the dialogs of an item's menu (move, publish,
+  delete) are not in the item: `createResourceActions`
+  (`resource-action-scope.tsx`) puts them in one scope above the collection,
+  the menus only ask to open one, and an open dialog survives the turn. Follow
+  `services/actions.tsx` for a new resource.
 - **Navigation and links**: app code imports `@/lib/navigation` and
   `@/lib/link`, which own the TanStack adapters. Next imports are lint errors.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
@@ -565,6 +572,90 @@ build served by FastAPI. Never loosen the policy.
   ones web-next still uses to `extra/` before you run it.
 - Astryx's own strings (aria labels, pagination, …) come from its Swedish
   catalog through the provider; don't translate them yourself.
+
+## Phones and tablets (the responsive contract)
+
+Every screen works from a 320 px phone to a 1366 px iPad held sideways, with a
+finger and with a mouse, and a test keeps it that way. Build a new screen from
+what is here before writing layout of your own.
+
+**Tiers.** Phone below `md` (768 px), tablet from `md`, side navigation from
+`lg` (1024 px); `short:` is a viewport under 30rem tall (a phone turned
+sideways: a browser's own bars leave about 280 px, a keyboard leaves 50 to
+150). A touch pointer (`pointer-coarse:`) gets 44 px targets; a mouse does not.
+
+**Use these, do not rebuild them.**
+
+| Need                                           | Use                                                                                                                                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A pushed screen's header and back link         | `PageBar` (below `lg`); its parent label names where it returns                                                                                   |
+| The one primary action of a screen             | `DockedActions` (docked below `md`, in the header from `md`)                                                                                      |
+| A list of resources                            | `ResourceCollection` / `ResourceCard` (rows on a phone, cards from `md`)                                                                          |
+| Settings                                       | `SettingsGroup` / `SettingsRow`, `PageHeader`                                                                                                     |
+| A page outside the shell (sign-in, a callback) | `p-safe` (clears the notch and the home indicator)                                                                                                |
+| A search, e-mail or user-name field            | `{...KEYBOARD.search}` / `.email` / `.identifier` from `@/components/astryx/keyboard-hints`                                                       |
+| A dialog                                       | `Dialog` from `@/components/ui/dialog`: it is capped at `100dvh - 2rem`, and one with a text field hangs from the top on touch. No `max-h-[90vh]` |
+| Typed-name confirmation                        | `ConfirmDialog` / `confirmationMatches`                                                                                                           |
+| A wide table                                   | `ScrollableArea` with a name, or rows on a phone; never a bare `overflow-x-auto`                                                                  |
+
+**Do not.**
+
+- Use `vh`, `h-screen`, a `min-h-[3xx px]` or reveal anything only on hover
+  (lint rejects them). `hover:` already shows while a finger is down.
+- Dim text with `opacity-*` or build a colour pair of your own: use the
+  tokens (the contrast test cannot see alpha).
+- Add `env(safe-area-inset-*)` inside a page. The shell frame, `DockedActions`,
+  the side panel, the toaster and the space members sheet own it.
+- Let Return send: Return adds a line, Ctrl or Cmd+Enter sends (the chat's
+  rule, `prompt-guide` too). The search key closes the keyboard.
+- Confirm a copy with a toast over a docked composer: confirm at the button.
+- Make a visible target smaller than 44 px on touch, or two targets overlap.
+
+**The checks, so nobody walks screens by hand.** Every one is generated from
+the route list `tests/responsive-routes.ts`; a route missing from it fails a
+unit test (`src/test/responsive-routes.test.ts`), so a new screen cannot ship
+unchecked: add its route, with a way to open it.
+
+The contract counts a control as outside the screen only when no sideways scroller
+(a tab strip, a wide table) can bring it into view; `tests/responsive-measure.spec.ts`
+holds that rule on small hand-made pages.
+
+`tests/turn-and-resize.spec.ts` opens the form dialogs that each screen's create buttons
+open, on a phone, types into one and crosses 768 px and back (a phone turned, an iPad
+split): the same field must be there, with its text and its focus, and the dialog open.
+A component that swaps at a breakpoint rebuilds what is open and fails it.
+
+`tests/tooltips.spec.ts` holds a tooltip to WCAG 1.4.13 with a mouse and the keyboard: the pointer can
+move onto it, it stays, and Escape closes it. `src/test/a11y-source-guards.test.ts` guards what one line of
+source could break (no orientation lock, no autoplay, no password paste block).
+
+| What it finds                                                                                                                                                                           | Run                                                                                              |
+| --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Sideways scroll, a target under 44 px, one outside the screen, two on top of each other, text cut off, a text field under 16 px on a phone (iPhone Safari zooms into it), at five sizes | `tests/responsive-contract.spec.ts` (`CONTRACT_VIEWPORTS`, `CONTRACT_ROUTES`)                    |
+| WCAG 2.2 A/AA by axe (contrast, names, target size, structure) on every route, phone and iPad, light and dark                                                                           | `tests/a11y-routes.spec.ts` (`A11Y_ROUTES`, `A11Y_VARIANTS`, `A11Y_SHOTS=<dir>` saves a picture) |
+| The same with a dialog, menu or panel open, and what axe cannot see (collapsed table columns, reflow at 320)                                                                            | `tests/a11y.spec.ts`                                                                             |
+| A filled control with no boundary, or a legacy switch with no visible state, in Windows high contrast (forced colours), on every route                                                  | `tests/forced-colors.spec.ts` (`FORCED_ROUTES`)                                                  |
+| A screen that shifts by more than 0.1 while it loads on a slow phone (CPU x4, Fast 4G, cold cache): a card shown before the editor that pushes it, a spinner that widens a button       | `tests/layout-shift.spec.ts` (`LAYOUT_ROUTES`)                                                   |
+| A whole screen scrolling sideways with the text at 200% (a bar whose rem-sized controls no longer fit in a row)                                                                         | `tests/responsive-text-size.spec.ts`                                                             |
+| Menus open in 165 ms and leave in 125, drawers, sheets and dialogs open in 225, and nothing runs with reduced motion (2.3.3)                                                            | `tests/motion.spec.ts` (measured with `document.getAnimations()`)                                |
+| The skip link first, and a visible focus on each of the first 30 Tab stops, on every route (2.4.1, 2.4.7)                                                                               | `tests/keyboard-focus.spec.ts`                                                                   |
+| Keyboard, safe areas, short screens, header and focus across a breakpoint                                                                                                               | `tests/touch-platform.spec.ts`, `tests/header-continuity.spec.ts`                                |
+| A raw `<select>` without 16 px text and a 44 px touch height, in the dialogs the contract never opens                                                                                   | `src/test/raw-select.test.ts`                                                                    |
+| Patterns in the source: `vh`, a fixed bar without safe area, missing labels, label association                                                                                          | `eslint` (the `no-restricted-syntax` selectors and `jsx-a11y`)                                   |
+
+`tests/responsive-contract.baseline.json` is where a known violation would be
+listed. It is empty and `BASELINE_BUDGET` in `src/test/responsive-baseline.test.ts`
+is 0: a violation fails the run, so fix the screen. Example of a narrow run:
+`CONTRACT_VIEWPORTS=390x844 CONTRACT_ROUTES='^/spaces' bun run test:e2e tests/responsive-contract.spec.ts`.
+
+Automation finds the mechanical faults; it does not feel a tap, hear a screen
+reader or judge whether a flow makes sense. Those stay with a person on a
+device, once per feature (below).
+
+**By hand, once a feature is done.** Open it on a phone (a real one, or the
+iOS Simulator over https: Safari does not load a plain `http://localhost` app
+under the production CSP) with the keyboard open, turned sideways, offline,
+and with the text size at 130 %.
 
 ## Verify
 

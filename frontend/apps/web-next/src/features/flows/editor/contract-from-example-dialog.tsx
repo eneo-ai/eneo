@@ -126,7 +126,7 @@ export function ContractFromExampleDialog({
                       <Text type="label" as="h3" display="block" className="m-0">
                         {t("flow_editor_tools_contract_example_preview")}
                       </Text>
-                      <ul className="border-ax-border rounded-ax-container m-0 flex max-h-[30vh] list-none flex-col overflow-y-auto border p-0">
+                      <ul className="border-ax-border rounded-ax-container m-0 flex max-h-[30dvh] list-none flex-col overflow-y-auto border p-0">
                         {reading.fields.map((field) => (
                           <li
                             key={field.name}

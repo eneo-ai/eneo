@@ -254,7 +254,9 @@ export function PendingMessageFiles({ uploads }: { uploads: readonly PendingUplo
         <li key={upload.key} className="max-w-full">
           <span className={FILE_CHIP_CLASS} title={upload.name}>
             <FileTypeTile mimetype={upload.mimetype} size="sm" uploading={upload.uploading} />
-            <span className="min-w-0 truncate font-semibold">{upload.name}</span>
+            <span className="min-w-0 truncate font-semibold pointer-coarse:break-words pointer-coarse:whitespace-normal">
+              {upload.name}
+            </span>
             <span className="text-ax-text-secondary shrink-0">
               {upload.uploading
                 ? t("chat_attachment_uploading")

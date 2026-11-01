@@ -9,7 +9,7 @@ import { Search, X } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { conversationContext } from "@/components/shell/conversation-context";
 import { conversationHref } from "@/components/shell/routes";
@@ -34,6 +34,7 @@ import {
   useSessionMutations
 } from "./session-actions";
 import { useNow } from "./use-now";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 const PAGE_SIZE = 50;
 
@@ -257,6 +258,7 @@ function HistoryPanel({
             value={query}
             onChange={setQuery}
             startIcon={Search}
+            {...KEYBOARD.search}
             hasClear
             size="sm"
             width="100%"

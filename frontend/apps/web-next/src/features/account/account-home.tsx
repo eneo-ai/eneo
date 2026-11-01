@@ -3,7 +3,19 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { StatusDot } from "@astryxdesign/core/StatusDot";
-import { Building2, LogOut } from "lucide-react";
+import {
+  Accessibility,
+  ArrowLeft,
+  Building2,
+  Copy,
+  KeyRound,
+  LockKeyhole,
+  LogOut,
+  Plug,
+  Shield,
+  Sparkles,
+  SunMoon
+} from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useTheme } from "next-themes";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
@@ -90,6 +102,7 @@ function Konto() {
         <IndexGroup title={t("settings")}>
           <IndexRow
             href="/account/appearance"
+            icon={SunMoon}
             label={t("account_appearance_language")}
             summary={
               themeKey
@@ -99,6 +112,7 @@ function Konto() {
           />
           <IndexRow
             href="/account/copy-format"
+            icon={Copy}
             // What's new's "Visa mig" points here below 1024 px (packages/whats-new).
             data-tour="account-copy-format"
             label={t("account_copy_format")}
@@ -108,16 +122,18 @@ function Konto() {
         <IndexGroup title={t("account_security_group")}>
           <IndexRow
             href="/account/password"
+            icon={LockKeyhole}
             data-tour="account-password"
             label={t("change_password")}
           />
-          <IndexRow href="/account/api-keys" label={t("my_api_keys")} />
-          <IndexRow href="/account/integrations" label={t("integrations")} />
+          <IndexRow href="/account/api-keys" icon={KeyRound} label={t("my_api_keys")} />
+          <IndexRow href="/account/integrations" icon={Plug} label={t("integrations")} />
         </IndexGroup>
         <IndexGroup title={t("eneo")}>
           {whatsNewEnabled ? (
             <IndexRow
               href="/whats-new"
+              icon={Sparkles}
               label={t("whats_new")}
               summary={
                 hasUnseen ? (
@@ -136,16 +152,19 @@ function Konto() {
               }
             />
           ) : null}
-          {can("admin") ? <IndexRow href="/admin" label={t("shell_administration")} /> : null}
+          {can("admin") ? (
+            <IndexRow href="/admin" icon={Shield} label={t("shell_administration")} />
+          ) : null}
           {links.accessibilityStatement ? (
             <IndexRow
               href={links.accessibilityStatement}
+              icon={Accessibility}
               label={t("a11y_statement_link")}
               isExternal
             />
           ) : null}
           {links.legacyApp ? (
-            <IndexRow href={links.legacyApp} label={t("beta_return_to_legacy")} />
+            <IndexRow href={links.legacyApp} icon={ArrowLeft} label={t("beta_return_to_legacy")} />
           ) : null}
         </IndexGroup>
       </div>

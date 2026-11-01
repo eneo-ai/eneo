@@ -15,9 +15,10 @@ test(
     await page.goto("/admin/tools?tab=functions");
     const fileCreation = page.getByRole("region", { name: "Skapa fil", exact: true });
     const turnOn = fileCreation.getByRole("button", { name: "Slå på", exact: true });
-    await expect(fileCreation).toBeVisible();
-    if (await turnOn.count()) await turnOn.click();
     const library = fileCreation.getByRole("region", { name: "Dokumentmallar", exact: true });
+    await expect(fileCreation).toBeVisible();
+    await expect(turnOn.or(library)).toBeVisible();
+    if (await turnOn.isVisible()) await turnOn.click();
     await expect(library).toBeVisible();
     const builtin = await page.request.get("/api/v1/document-templates/builtin/?language=sv");
     expect(builtin.status()).toBe(200);

@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { expectNoAxeViolations } from "@/test/axe";
+import messages from "@/lib/i18n/messages/sv.json";
 import type { Schema } from "@/lib/api/models";
 import type { McpServer, McpServerTool } from "@/features/admin/mcp/mcp";
 import type { Space } from "../space";
@@ -193,7 +194,9 @@ it.each(["saved", "failed"])(
       finish({ data: { items: added.tools ?? [] }, response: new Response("{}") })
     );
     await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
-    await screen.findByText("Alla ändringar sparade!", { selector: "span" });
+    await within(screen.getByRole("banner")).findByText(messages.all_changes_saved, {
+      selector: "span"
+    });
     expect.soft(api.PATCH.mock.calls[1]?.[1].body).toEqual({
       mcp_servers: [{ id: "saved" }, { id: "added" }],
       mcp_tools: [
@@ -234,7 +237,9 @@ it.each(["failed", "saved"])(
       else removal.reject(new Error("Server removal refused"));
     });
     await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
-    await screen.findByText("Alla ändringar sparade!", { selector: "span" });
+    await within(screen.getByRole("banner")).findByText(messages.all_changes_saved, {
+      selector: "span"
+    });
     const retained =
       outcome === "failed"
         ? [

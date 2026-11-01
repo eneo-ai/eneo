@@ -47,9 +47,12 @@ export function SchedulerHealth({ scheduler }: { scheduler: CrawlerSchedulerHeal
         <StatusLabel status={status.tone} label={t(status.labelKey)} />
         {scheduler.status !== "unknown" ? (
           <>
-            <span className="text-ax-text-secondary">
-              {t("admin_crawler_scheduler_last_run", { time: lastRun ?? "—" })}
-            </span>
+            {/* A scheduler that never ran has no last run; its status already says so. */}
+            {lastRun ? (
+              <span className="text-ax-text-secondary">
+                {t("admin_crawler_scheduler_last_run", { time: lastRun })}
+              </span>
+            ) : null}
             {hasCounts ? (
               <span className="text-ax-text-secondary tabular-nums">
                 {t("admin_crawler_scheduler_counts", {

@@ -9,7 +9,7 @@ import { List, ListItem } from "@astryxdesign/core/List";
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronRight, Trash2, UserPlus, Users, X } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { revealProblems } from "@/components/composites/field-problem";
@@ -53,6 +53,7 @@ import {
   memberCandidatesQueryOptions,
   userGroupsQueryOptions
 } from "@/features/admin/user-groups/user-groups";
+import { useFocusRescue } from "@/lib/focus-rescue";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
 import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
@@ -65,6 +66,7 @@ import {
   SPACE_ROLE_LABEL_KEYS,
   sortMembersByRole
 } from "./member-avatar";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 function useInvalidateSpace() {
   const { routeId } = useSpace();
@@ -283,6 +285,7 @@ export function AddMemberDialog({ variant = "page" }: { variant?: "page" | "head
           <TextInput
             ref={searchRef}
             label={t("email")}
+            {...KEYBOARD.email}
             placeholder={t("member_search_placeholder")}
             value={searchInput}
             onChange={setSearchInput}
@@ -555,8 +558,9 @@ function useMembershipLabels(membership: Membership) {
  * A member or group as a phone row (decision 25): avatar, name, the e-mail or
  * user count, and the role in words at the end. Tapping it opens the role
  * sheet; your own row, or one you may not change, only reads. Where the rows
- * are narrow for their text (larger text sizes, 18rem of the rows'
- * container), the role moves under the name instead, so the name keeps room.
+ * are narrow for their text (a 320 px phone, larger text sizes: under 20rem
+ * of the rows' container), the role moves under the name instead, so the
+ * e-mail keeps the width and does not break mid-address.
  */
 function PhoneMembershipRow({
   membership,
@@ -583,7 +587,7 @@ function PhoneMembershipRow({
         <>
           {detail ? <span className="block [overflow-wrap:anywhere]">{detail}</span> : null}
           {/* Under the name where the rows are narrow; for screen readers always. */}
-          <span className="block @min-[18rem]/rows:sr-only">{`${t("role")}: ${roleLabel}`}</span>
+          <span className="block @min-[20rem]/rows:sr-only">{`${t("role")}: ${roleLabel}`}</span>
         </>
       }
       startContent={
@@ -606,7 +610,7 @@ function PhoneMembershipRow({
       }
       endContent={
         <span aria-hidden="true" className="text-ax-text-secondary flex items-center gap-1">
-          <span className="hidden @min-[18rem]/rows:inline">{roleLabel}</span>
+          <span className="hidden text-sm @min-[20rem]/rows:inline">{roleLabel}</span>
           {/* The chevron's place stays, so roles line up with rows that have one. */}
           {onOpen ? <ChevronRight className="size-4" /> : <span className="size-4" />}
         </span>
@@ -860,6 +864,24 @@ export function SpaceMembers() {
   const phone = useMediaMatch(PHONE_QUERY);
   const headingRef = useRef<HTMLHeadingElement>(null);
 
+  // Crossing 768 px (a phone turned) replaces the member controls with the
+  // other layout's. A control that had the focus goes with them, and focus
+  // goes to the title (WCAG 2.4.3). The rescue moves focus only if it was
+  // lost, so a button elsewhere keeps it.
+  const controls = useRef<HTMLDivElement>(null);
+  const focusWasInControls = useRef(false);
+  const rescue = useFocusRescue();
+  useEffect(() => {
+    const onFocusIn = (event: FocusEvent) => {
+      focusWasInControls.current = !!controls.current?.contains(event.target as Node);
+    };
+    document.addEventListener("focusin", onFocusIn);
+    return () => document.removeEventListener("focusin", onFocusIn);
+  }, []);
+  useEffect(() => {
+    if (focusWasInControls.current) rescue(() => headingRef.current);
+  }, [phone, rescue]);
+
   const editors = space.members.items.filter(
     (member) => member.role === "admin" || member.role === "editor"
   );
@@ -887,54 +909,56 @@ export function SpaceMembers() {
           }
         />
 
-        {phone !== false ? (
-          <div className="md:hidden">
-            <PhoneMembers />
-          </div>
-        ) : null}
-        {phone !== true ? (
-          <div className="flex flex-col gap-8 max-md:hidden">
-            <SettingsGroup title={t("current_members")}>
-              <SettingsRow
-                title={t("admins_editors")}
-                description={t("admins_editors_description")}
-              >
-                <div className="flex flex-col">
-                  {editors.map((member) => (
-                    <MemberRow key={member.id} member={member} />
-                  ))}
-                </div>
-              </SettingsRow>
-              {viewerRoleAvailable && (
-                <SettingsRow title={t("viewers")} description={t("viewers_description")}>
+        <div ref={controls} className="contents">
+          {phone !== false ? (
+            <div className="md:hidden">
+              <PhoneMembers />
+            </div>
+          ) : null}
+          {phone !== true ? (
+            <div className="flex flex-col gap-8 max-md:hidden">
+              <SettingsGroup title={t("current_members")}>
+                <SettingsRow
+                  title={t("admins_editors")}
+                  description={t("admins_editors_description")}
+                >
                   <div className="flex flex-col">
-                    {viewers.length === 0 ? (
+                    {editors.map((member) => (
+                      <MemberRow key={member.id} member={member} />
+                    ))}
+                  </div>
+                </SettingsRow>
+                {viewerRoleAvailable && (
+                  <SettingsRow title={t("viewers")} description={t("viewers_description")}>
+                    <div className="flex flex-col">
+                      {viewers.length === 0 ? (
+                        <p className="text-muted-foreground py-3 text-sm">
+                          {t("no_viewers_in_space")}
+                        </p>
+                      ) : (
+                        viewers.map((member) => <MemberRow key={member.id} member={member} />)
+                      )}
+                    </div>
+                  </SettingsRow>
+                )}
+              </SettingsGroup>
+
+              <SettingsGroup title={t("group_members")}>
+                <SettingsRow title={t("user_groups")} description={t("user_groups_description")}>
+                  <div className="flex flex-col">
+                    {groupMembers.length === 0 ? (
                       <p className="text-muted-foreground py-3 text-sm">
-                        {t("no_viewers_in_space")}
+                        {t("no_group_members_in_space")}
                       </p>
                     ) : (
-                      viewers.map((member) => <MemberRow key={member.id} member={member} />)
+                      groupMembers.map((group) => <GroupMemberRow key={group.id} group={group} />)
                     )}
                   </div>
                 </SettingsRow>
-              )}
-            </SettingsGroup>
-
-            <SettingsGroup title={t("group_members")}>
-              <SettingsRow title={t("user_groups")} description={t("user_groups_description")}>
-                <div className="flex flex-col">
-                  {groupMembers.length === 0 ? (
-                    <p className="text-muted-foreground py-3 text-sm">
-                      {t("no_group_members_in_space")}
-                    </p>
-                  ) : (
-                    groupMembers.map((group) => <GroupMemberRow key={group.id} group={group} />)
-                  )}
-                </div>
-              </SettingsRow>
-            </SettingsGroup>
-          </div>
-        ) : null}
+              </SettingsGroup>
+            </div>
+          ) : null}
+        </div>
       </div>
     </RemovalFocusScope>
   );

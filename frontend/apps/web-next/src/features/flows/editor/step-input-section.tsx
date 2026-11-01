@@ -11,7 +11,7 @@ import { useState } from "react";
 import { Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { Switch } from "@astryxdesign/core/Switch";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { Anchor, EditorSection, FieldMessage, problemStatus } from "./editor-fields";
 import { TemplateTextArea } from "./reference-text-area";
 import type { FieldProblems } from "./field-problems";

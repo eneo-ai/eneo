@@ -384,7 +384,7 @@ export function SourcesList({
         }}
       />
       {rows.length > 1 || filterUsed ? (
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+        <div className="flex flex-col gap-3 lg:flex-row lg:flex-wrap lg:items-end lg:justify-between">
           <SegmentedControl
             label={t("integration_filter_label")}
             value={filter}

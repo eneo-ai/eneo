@@ -62,7 +62,7 @@ export function RotateApiKeyDialog({
   const t = useTranslations();
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("api_keys_rotate_confirm_title")}</DialogTitle>
           <DialogDescription>{t("api_keys_rotate_confirm_description")}</DialogDescription>
@@ -216,7 +216,7 @@ export function ExtendExpirationDialog(props: KeyDialogProps) {
   const t = useTranslations();
   return (
     <Dialog open={props.open} onOpenChange={props.onOpenChange}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-lg">
+      <DialogContent className="overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{t("api_keys_extend_dialog_title")}</DialogTitle>
           <DialogDescription>{t("api_keys_extend_dialog_description")}</DialogDescription>

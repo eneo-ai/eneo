@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Building2, SquarePen, User } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { ClassificationToken } from "@/components/composites/classification-token";
+import { CRUMB_TOUCH } from "@/components/composites/page-header";
 import { iconUrl } from "@/components/composites/icon-field";
 import { useAppContext } from "@/components/providers/app-context";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
@@ -88,13 +89,17 @@ export function SpaceHeader({
   return (
     <header className={cn("border-ax-border flex flex-col gap-4 border-b px-6 pt-5", className)}>
       <Breadcrumbs variant="supporting">
-        <BreadcrumbItem href="/spaces/list" isCurrent={false}>
+        <BreadcrumbItem href="/spaces/list" isCurrent={false} className={CRUMB_TOUCH}>
           {t("spaces")}
         </BreadcrumbItem>
         {isOverview ? (
           <BreadcrumbItem isCurrent>{name}</BreadcrumbItem>
         ) : (
-          <BreadcrumbItem href={spaceLandingHref(sections, routeId)} isCurrent={false}>
+          <BreadcrumbItem
+            href={spaceLandingHref(sections, routeId)}
+            isCurrent={false}
+            className={CRUMB_TOUCH}
+          >
             {name}
           </BreadcrumbItem>
         )}
@@ -116,7 +121,13 @@ export function SpaceHeader({
             size={isHeading ? "xl" : "md"}
             className={isHeading ? "size-12 text-lg [&_svg]:size-6" : undefined}
           />
-          <div className={cn("flex min-w-0 flex-1 flex-col gap-1", !isHeading && "self-center")}>
+          <div
+            className={cn(
+              "flex min-w-0 flex-1 flex-col gap-1",
+              // No description under the name: it centres on the tile, as the actions do.
+              (!isHeading || !description) && "self-center"
+            )}
+          >
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
               {isHeading ? (
                 <Heading

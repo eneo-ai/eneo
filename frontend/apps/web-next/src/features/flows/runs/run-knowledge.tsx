@@ -9,7 +9,7 @@ import { Search } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";

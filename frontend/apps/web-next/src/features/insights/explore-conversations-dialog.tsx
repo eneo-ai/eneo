@@ -6,7 +6,7 @@ import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { Search } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
@@ -20,6 +20,7 @@ import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";
 import { cn } from "@/lib/utils";
 import { ChatMessage } from "@/features/chat/chat-message";
 import { insightPartnerQuery, insightRangeParams, type InsightRange } from "./insights-range";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 const PAGE_SIZE = 50;
 
@@ -117,6 +118,7 @@ function SessionList({
         value={searchInput}
         onChange={setSearchInput}
         startIcon={Search}
+        {...KEYBOARD.search}
         hasClear
         size="sm"
         width="100%"

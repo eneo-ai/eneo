@@ -22,6 +22,12 @@ export type TableProps<T extends Record<string, unknown>> = AstryxTableProps<T> 
      * (decision 9).
      */
     pinnedColumn?: string;
+    /**
+     * Key of the last column, kept in view at the end while the rest scrolls:
+     * a row's menu, the only way to act on it, which a phone's table scrolls
+     * out of reach.
+     */
+    pinnedEndColumn?: string;
   };
 
 /**
@@ -31,19 +37,22 @@ export type TableProps<T extends Record<string, unknown>> = AstryxTableProps<T> 
  * now takes the table's own name through Astryx's plugin API. Lint sends
  * every Table import here.
  *
- * `pinnedColumn` holds a column in view (Astryx's sticky columns). It covers
+ * `pinnedColumn` and `pinnedEndColumn` hold a column in view at either end
+ * (Astryx's sticky columns). They cover
  * what scrolls under it, so a control there that takes focus is moved out
  * from under it (WCAG 2.4.11): see `keepFocusClear`.
  */
 export function Table<T extends Record<string, unknown>>({
   pinnedColumn,
+  pinnedEndColumn,
   ...props
 }: TableProps<T>) {
   const label = props["aria-label"];
   const labelledBy = props["aria-labelledby"];
   const userPlugins = props.plugins;
   const sticky = useTableStickyColumns<T>({
-    startKeys: pinnedColumn ? [pinnedColumn] : undefined
+    startKeys: pinnedColumn ? [pinnedColumn] : undefined,
+    endKeys: pinnedEndColumn ? [pinnedEndColumn] : undefined
   });
   const plugins = useMemo(() => {
     const scrollRegionName: TablePlugin<T> = {
@@ -55,7 +64,7 @@ export function Table<T extends Record<string, unknown>>({
         }
       })
     };
-    if (!pinnedColumn) return { ...userPlugins, scrollRegionName };
+    if (!pinnedColumn && !pinnedEndColumn) return { ...userPlugins, scrollRegionName };
     // After the sticky plugin, whose ref on the region this one wraps. The
     // attribute is for globals.css section 9.
     const pinnedRegion: TablePlugin<T> = {
@@ -65,7 +74,7 @@ export function Table<T extends Record<string, unknown>>({
       })
     };
     return { ...userPlugins, sticky, pinnedRegion, scrollRegionName };
-  }, [label, labelledBy, pinnedColumn, sticky, userPlugins]);
+  }, [label, labelledBy, pinnedColumn, pinnedEndColumn, sticky, userPlugins]);
 
   return <AstryxTable<T> {...props} plugins={plugins} />;
 }
@@ -92,15 +101,24 @@ function keepFocusClear(inner: Ref<HTMLDivElement> | undefined): RefCallback<HTM
     if (!region) return;
     const onFocusIn = (event: FocusEvent) => {
       const cell = (event.target as Element).closest<HTMLElement>("td, th");
-      if (!cell || cell.style.insetInlineStart) return;
+      if (!cell || cell.style.insetInlineStart || cell.style.insetInlineEnd) return;
+      const box = (event.target as Element).getBoundingClientRect();
       let pinnedEnd = region.getBoundingClientRect().left;
+      let pinnedStart = Infinity;
       for (const header of region.querySelectorAll<HTMLElement>("thead th")) {
         if (header.style.insetInlineStart) {
           pinnedEnd = Math.max(pinnedEnd, header.getBoundingClientRect().right);
         }
+        if (header.style.insetInlineEnd) {
+          pinnedStart = Math.min(pinnedStart, header.getBoundingClientRect().left);
+        }
       }
-      const covered = pinnedEnd - (event.target as Element).getBoundingClientRect().left;
+      const covered = pinnedEnd - box.left;
       if (covered > 0) region.scrollLeft -= covered;
+      // The same from the other side: what scrolled under the end column.
+      if (pinnedStart !== Infinity && box.right > pinnedStart) {
+        region.scrollLeft += box.right - pinnedStart;
+      }
     };
     region.addEventListener("focusin", onFocusIn);
     return () => {

@@ -34,6 +34,25 @@ beforeAll(async () => {
 }, 30_000);
 
 describe("globals.css", () => {
+  // selector → declarations of every rule in a layer, optionally only those under one @media.
+  const declarationsOf = (layerName: string, inMedia?: string) => {
+    const found = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkAtRules("layer", (layer: AtRule) => {
+      if (layer.params !== layerName) return;
+      layer.walkRules((rule: Rule) => {
+        const media = rule.parent?.type === "atrule" ? (rule.parent as AtRule) : undefined;
+        if ((media?.name === "media" ? media.params : undefined) !== inMedia) return;
+        const selector = rule.selector.replace(/\s+/g, " ");
+        const declarations = found.get(selector) ?? {};
+        rule.walkDecls((decl) => {
+          declarations[decl.prop] = decl.value;
+        });
+        found.set(selector, declarations);
+      });
+    });
+    return found;
+  };
+
   it("scans Streamdown's build so its markdown classes are emitted", async () => {
     // Only the @source lines, with automatic detection off: app code cannot
     // mask a broken path. Without them numbered lists in chat answers render
@@ -193,6 +212,105 @@ describe("globals.css", () => {
     });
   });
 
+  it("keeps text fields at 16 px on touch (no iOS zoom on focus) and controls from double-tap zoom", () => {
+    // Text fields, not checkboxes, radios or buttons; select and textarea too.
+    const fields = [...declarationsOf("components", "(pointer: coarse)").entries()].filter(
+      ([, declarations]) => declarations["font-size"] === "max(1rem, 16px)"
+    );
+    expect(fields).toHaveLength(1);
+    const selector = fields[0]![0];
+    expect(selector).toMatch(/^input:not\(/);
+    for (const kind of ["checkbox", "radio", "range", "file", "hidden", "button", "submit"]) {
+      expect(selector).toContain(`[type="${kind}"]`);
+    }
+    expect(selector).toMatch(/, select, textarea$/);
+
+    // Below Astryx (astryx-base), so a control with its own touch-action keeps it.
+    const defaults = [...declarationsOf("base").entries()].filter(
+      ([, declarations]) => declarations["touch-action"] === "manipulation"
+    );
+    expect(defaults).toHaveLength(1);
+    for (const control of ["a", "button", "input", "textarea", '[role="tab"]']) {
+      expect(defaults[0]![0].split(", ")).toContain(control);
+    }
+  });
+
+  it("shows a tap like a hover, and gives a short viewport its own variant and bar rule", () => {
+    // Tailwind's hover: is gated to hover-capable pointers; on touch it is :active.
+    const media = (query: string) => {
+      const found: string[] = [];
+      postcss.parse(css).walkAtRules("media", (rule: AtRule) => {
+        if (rule.params !== query) return;
+        rule.walkRules((r: Rule) => void found.push(r.selector));
+      });
+      return found;
+    };
+    expect(media("(hover: hover)")).toContain(".hover\\:bg-ax-hover-overlay:hover");
+    expect(media("(hover: none)")).toContain(".hover\\:bg-ax-hover-overlay:active");
+
+    // `short:` is a viewport under 30rem tall.
+    expect(css).toMatch(/@media \(height < 30rem\)/);
+    // With a field focused on a viewport under 18.75rem, the page's bars give way.
+    const bars = [...declarationsOf("components", "(height < 18.75rem)").entries()];
+    expect(bars).toHaveLength(1);
+    expect(bars[0]![0]).toContain("textarea:focus");
+    for (const bar of ["[data-page-bar]", "[data-phone-page-bar]", "[data-own-mobile-header]"]) {
+      expect(bars[0]![0]).toContain(bar);
+    }
+    expect(bars[0]![1]).toEqual({ display: "none" });
+  });
+
+  it("hides the space's page bar on a phone while a settings section has its own", () => {
+    const rules = [...declarationsOf("components", "(width < 48rem)").entries()].filter(
+      ([selector]) => selector.includes('[data-editor-view="section"]')
+    );
+    expect(rules).toHaveLength(1);
+    const [selector, declarations] = rules[0]!;
+    // Only the bar outside the settings view (a section's own bar is inside it), and the
+    // connection banner right under it: two offline banners do not stack either.
+    expect(selector).toContain(
+      'main:has([data-editor-view="section"]) [data-phone-page-bar]:not([data-editor-view] *)'
+    );
+    expect(selector).toContain("+ [data-connection-banner]");
+    // The tab strip of a space from the menu, which has no page bar to give way.
+    expect(selector).toContain('main:has([data-editor-view="section"]) [data-space-tabs]');
+    expect(declarations).toEqual({ display: "none" });
+  });
+
+  it("hangs a dialog with a text field from the top on touch, under a dvh cap", () => {
+    const rules = [...declarationsOf("components", "(pointer: coarse)").entries()].filter(
+      ([selector]) => selector.startsWith(".astryx-dialog:has(")
+    );
+    expect(rules).toHaveLength(1);
+    const [selector, declarations] = rules[0]!;
+    for (const field of [
+      "input:not(",
+      "textarea",
+      '[contenteditable="true"]',
+      '[role="combobox"]'
+    ]) {
+      expect(selector).toContain(field);
+    }
+    // Not for a checkbox, radio, file or range input, which open no keyboard.
+    for (const kind of ["checkbox", "radio", "file", "range", "button"]) {
+      expect(selector).toContain(`[type="${kind}"]`);
+    }
+    expect(declarations).toMatchObject({
+      "margin-block": "max(1rem, env(safe-area-inset-top, 0px)) auto",
+      "max-height": "calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - 1rem)"
+    });
+  });
+
+  it("pads a page outside the shell by 1rem (or --page-pad) and the hardware's insets, whichever is larger", () => {
+    const padSafe = declarationsOf("utilities").get(".p-safe");
+    expect(padSafe).toEqual({
+      "padding-top": "max(var(--page-pad, 1rem), env(safe-area-inset-top, 0px))",
+      "padding-right": "max(var(--page-pad, 1rem), env(safe-area-inset-right, 0px))",
+      "padding-bottom": "max(var(--page-pad, 1rem), env(safe-area-inset-bottom, 0px))",
+      "padding-left": "max(var(--page-pad, 1rem), env(safe-area-inset-left, 0px))"
+    });
+  });
+
   it("marks what is selected, current or highlighted with Highlight in forced colours", () => {
     // selector → declarations of every rule under an unlayered
     // @media (forced-colors: active): a layered rule would lose to Tailwind.
@@ -272,6 +390,25 @@ describe("globals.css", () => {
     });
     expect(rules.get("(pointer: coarse)")).toMatchObject({ position: "relative" });
     expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-10px" });
+  });
+
+  it("makes the DateRangeInput's period button as tall as its 44 px frame on touch", () => {
+    const period =
+      ".astryx-date-range-input > button:not(:has(> .astryx-date-range-input-toggle-icon))";
+    const rules = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.startsWith(period)) return;
+      const parent = rule.parent as AtRule | undefined;
+      const media = parent?.type === "atrule" && parent.name === "media" ? parent.params : "";
+      const declarations: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      rules.set(`${media} ${rule.selector.slice(period.length)}`.trim(), declarations);
+    });
+    expect(rules.get("(pointer: coarse)")).toMatchObject({ position: "relative" });
+    // 21 px of text plus 12 px above and below: a 45 px target across the button's width.
+    expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-12px 0" });
   });
 
   it("self-hosts every required font subset as a Vite asset", () => {

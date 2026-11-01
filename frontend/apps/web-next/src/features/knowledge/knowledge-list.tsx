@@ -38,9 +38,10 @@ function RowTile({ row }: { row: KnowledgeRow }) {
   return (
     <span
       aria-hidden="true"
-      className="bg-ax-muted text-ax-text-secondary rounded-ax-element flex size-10 shrink-0 items-center justify-center"
+      // 36 px, as the assistants', apps' and members' rows: names start on one line across tabs.
+      className="bg-ax-muted text-ax-text-secondary rounded-ax-element flex size-9 shrink-0 items-center justify-center"
     >
-      {vendor ? <VendorIcon type={vendor} size={20} /> : <Icon className="size-5" />}
+      {vendor ? <VendorIcon type={vendor} size={18} /> : <Icon className="size-4.5" />}
     </span>
   );
 }

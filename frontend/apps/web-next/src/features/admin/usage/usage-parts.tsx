@@ -76,7 +76,7 @@ export function DateRangeBar({
 }) {
   const t = useTranslations();
   return (
-    <Card className="flex flex-wrap items-end gap-3 p-4">
+    <Card className="flex flex-row flex-wrap items-end gap-3 p-4">
       <label className="flex flex-col gap-1 text-xs">
         {t("from")}
         <Input

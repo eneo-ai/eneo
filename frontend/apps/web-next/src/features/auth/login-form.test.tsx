@@ -44,3 +44,21 @@ it("reveals a password without submitting the form", async () => {
   expect(field.getAttribute("type")).toBe("password");
   expect(submitPasswordLogin).not.toHaveBeenCalled();
 });
+
+// WCAG 3.3.8 and 1.3.5: a password manager must be able to fill the form, and nothing
+// may stop a pasted value (no paste blocking, no memory test, no transcribing a code).
+it("names the fields for a password manager and does not block pasting", () => {
+  renderInApp(<LoginForm />);
+  const email = screen.getByLabelText(/^E-post/) as HTMLInputElement;
+  const password = screen.getByLabelText(/^Lösenord/) as HTMLInputElement;
+  expect(email.getAttribute("autocomplete")).toBe("username");
+  expect(password.getAttribute("autocomplete")).toBe("current-password");
+
+  const paste = (field: HTMLElement) => {
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    field.dispatchEvent(event);
+    return event.defaultPrevented;
+  };
+  expect(paste(email)).toBe(false);
+  expect(paste(password)).toBe(false);
+});

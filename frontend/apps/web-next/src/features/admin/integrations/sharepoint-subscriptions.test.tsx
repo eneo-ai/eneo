@@ -56,6 +56,8 @@ describe("SharePointSubscriptions", () => {
 
     const table = await screen.findByRole("table", { name: "SharePoint Webhook-prenumerationer" });
     expect(within(table).getByText("anna.lind@example.se")).toBeTruthy();
+    // The column of row actions has a header a screen reader can say (not an empty cell).
+    expect(within(table).getAllByRole("columnheader").at(-1)?.textContent).toBe("Åtgärder");
     await expectNoAxeViolations(container);
   });
 

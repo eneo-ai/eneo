@@ -244,6 +244,24 @@ describe("AdminUsersPage", () => {
     expect(api.GET).not.toHaveBeenCalledWith("/api/v1/admin/users/", expect.anything());
   });
 
+  it("offers to clear the filters only while one is set, and keeps focus on the list", async () => {
+    searchParams.value = "";
+    renderPage(users);
+    await screen.findByText("anna.lind@kommun.se");
+    // Nothing to clear on an unfiltered list.
+    expect(screen.queryByRole("button", { name: "Rensa filter" })).toBeNull();
+
+    fireEvent.change(screen.getByRole("textbox", { name: "E-post" }), {
+      target: { value: "an" }
+    });
+    const clear = screen.getByRole("button", { name: "Rensa filter" });
+    act(() => clear.focus());
+    fireEvent.click(clear);
+
+    expect(screen.queryByRole("button", { name: "Rensa filter" })).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("tabpanel")));
+  });
+
   it("shows each user's groups", async () => {
     searchParams.value = "";
     renderPage([
@@ -314,10 +332,10 @@ describe("AdminUsersPage", () => {
   it("switches between active and inactive users with the tabs", async () => {
     searchParams.value = "";
     renderPage(users);
-    const inactive = await screen.findByRole("tab", { name: "Inaktiva användare 3" });
-    expect(
-      screen.getByRole("tab", { name: "Aktiva användare 1" }).getAttribute("aria-selected")
-    ).toBe("true");
+    const inactive = await screen.findByRole("tab", { name: "Inaktiva 3" });
+    expect(screen.getByRole("tab", { name: "Aktiva 1" }).getAttribute("aria-selected")).toBe(
+      "true"
+    );
 
     fireEvent.click(inactive);
 

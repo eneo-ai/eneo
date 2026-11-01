@@ -3,6 +3,7 @@
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Spinner } from "@astryxdesign/core/Spinner";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Cloud, Globe, Search } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
@@ -426,6 +427,7 @@ function SharePointImportForm({
           <div className="relative">
             <Input
               id="sharepoint-site-search"
+              {...KEYBOARD.search}
               value={search}
               placeholder={t("find_sharepoint_site")}
               onChange={(event) => setSearch(event.target.value)}

@@ -11,7 +11,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime } from "@/components/composites/client-time";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { EneoApiError } from "@/lib/api/errors";

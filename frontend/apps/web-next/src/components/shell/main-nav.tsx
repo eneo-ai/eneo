@@ -1,6 +1,7 @@
 "use client";
 
 import { AppShellMobileContext, useAppShellMobile } from "@astryxdesign/core/AppShell";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { Button } from "@astryxdesign/core/Button";
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
@@ -77,7 +78,8 @@ export function MainTopContent() {
           onClick={() => openPalette()}
           aria-keyshortcuts="Meta+K Control+K"
           endContent={
-            <span aria-hidden="true" className="flex">
+            // The drawer (below lg) is the phone's menu: no key hints there, nor on touch.
+            <span aria-hidden="true" className="flex max-lg:hidden pointer-coarse:hidden">
               <Kbd keys="mod+k" />
             </span>
           }
@@ -223,12 +225,16 @@ function RecentConversationItem({
   const t = useTranslations();
   const linkRef = useRef<HTMLElement>(null);
   const context = conversationContext(conversation, t);
+  // A touch screen has no tooltip: the context joins the title, so two chats with the
+  // same title can be told apart in the phone's menu.
+  const coarse = useMediaMatch("(pointer: coarse)");
+  const title = conversation.name.trim() || t("shell_untitled_conversation");
 
   return (
     <>
       <SideNavItem
         ref={linkRef}
-        label={conversation.name.trim() || t("shell_untitled_conversation")}
+        label={coarse && context ? `${title} · ${context}` : title}
         href={conversationHref(conversation)}
         isSelected={isSelected}
       />

@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "use-intl";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";
@@ -393,7 +394,8 @@ export function ServiceEditor({ service }: { service: Service }) {
               id="service-json-schema"
               value={output.value.schema}
               rows={12}
-              className="font-mono text-sm"
+              {...KEYBOARD.identifier}
+              className="font-mono text-base pointer-fine:text-sm"
               aria-invalid={schemaProblem ? true : undefined}
               onChange={(event) => {
                 const schema = event.target.value;

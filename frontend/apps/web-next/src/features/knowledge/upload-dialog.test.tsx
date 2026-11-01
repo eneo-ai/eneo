@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { sessionKeys } from "@/lib/api/session";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import { UploadBlobsDialog } from "./upload-dialog";
 
 const api = vi.hoisted(() => ({ GET: vi.fn() }));
@@ -208,4 +209,21 @@ it("asks before replacing files the collection already has, then queues them and
 
   expect(queueUploads).toHaveBeenCalledWith("collection-1", [protocol]);
   expect(onOpenChange).toHaveBeenCalledWith(false);
+});
+
+it("tells a touch screen to choose files, not to drag and drop them", () => {
+  setViewport(PHONE_VIEWPORT);
+  api.GET.mockResolvedValue({ data: { items: [] }, response: new Response("{}") });
+  renderInApp(
+    <UploadBlobsDialog
+      collectionId="collection-1"
+      collectionName="Protokoll"
+      open
+      onOpenChange={() => {}}
+    />,
+    { appContext }
+  );
+
+  expect(screen.getByLabelText("Välj filer att ladda upp")).toBeTruthy();
+  expect(screen.queryByLabelText("Dra och släpp filer eller mappar här")).toBeNull();
 });

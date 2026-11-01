@@ -53,7 +53,8 @@ const PAGE_MARKERS: Record<string, (page: Page) => Locator> = {
   [CHAT_ROUTE]: (page) => chatComposer(page),
   [SPACES_LIST]: (page) => page.getByRole("heading", { level: 1, name: SPACES_LIST_HEADING }),
   "/admin/users": (page) => page.getByRole("heading", { level: 1, name: /^(användare|users)$/i }),
-  "/admin/insights": (page) => page.getByRole("button", { name: /^(jämför|compare)$/i })
+  // The comparison is a switch (tests/smoke.spec.ts finds it the same way), not a button.
+  "/admin/insights": (page) => page.getByRole("switch", { name: /^(jämför|compare)$/i })
 };
 const ROUTES = Object.keys(PAGE_MARKERS);
 const ERROR_SCREEN = /^(något gick fel|something went wrong)$/i;

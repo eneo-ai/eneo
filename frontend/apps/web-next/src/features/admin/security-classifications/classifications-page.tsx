@@ -217,9 +217,11 @@ export function SecurityClassificationsPage() {
             </Button>
           </div>
           <div className="relative flex flex-col gap-2">
-            <div className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
-              <Lock className="size-4" /> {t("highest_security")}
-            </div>
+            {ordered.length > 0 && (
+              <div className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
+                <Lock className="size-4" /> {t("highest_security")}
+              </div>
+            )}
             {ordered.length === 0 ? (
               <p className="text-muted-foreground py-6 text-center text-sm">
                 {t("no_security_classifications")}
@@ -247,9 +249,11 @@ export function SecurityClassificationsPage() {
                 </div>
               ))
             )}
-            <div className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
-              <LockOpen className="size-4" /> {t("lowest_security")}
-            </div>
+            {ordered.length > 0 && (
+              <div className="text-muted-foreground flex items-center gap-2 text-sm font-medium">
+                <LockOpen className="size-4" /> {t("lowest_security")}
+              </div>
+            )}
           </div>
         </SettingsRow>
       </SettingsGroup>

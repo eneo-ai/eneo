@@ -140,7 +140,9 @@ export function InstructionsSection({
             </label>
             <p className="text-muted-foreground text-sm">{t("describe_assistant_behavior")}</p>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
+          {/* Wrapped under the label on a phone: the ghost buttons' own inset is pulled
+              back so their icons start on the gutter with the label. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-1 max-md:-ms-2.5">
             {promptGuide && availability && !promptLocked && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -244,7 +246,7 @@ export function InstructionsSection({
         }}
       />
       <Dialog open={expanded} onOpenChange={setExpanded}>
-        <DialogContent className="flex h-[82vh] max-h-[760px] max-w-[calc(100%-2rem)] flex-col gap-5 p-5 sm:min-h-[560px] sm:max-w-5xl sm:p-6">
+        <DialogContent className="flex h-[min(760px,calc(100dvh-2rem))] max-w-[calc(100%-2rem)] flex-col gap-5 p-5 sm:max-w-5xl sm:p-6">
           <DialogHeader>
             <DialogTitle>{t("prompt")}</DialogTitle>
             <DialogDescription>{t("describe_assistant_behavior")}</DialogDescription>

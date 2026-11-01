@@ -1,6 +1,7 @@
 "use client";
 
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useTranslations } from "use-intl";
 import { useMemo, useRef } from "react";
 import {
@@ -161,6 +162,7 @@ export function ProviderField({
       onChange={onValueChange}
       isRequired={field.required}
       autoComplete="off"
+      {...KEYBOARD.identifier}
       placeholder={providerFieldPlaceholder(t, field.name, providerType) || undefined}
       status={
         invalid ? { type: "error", message: requiredMessage(t, field, providerType) } : undefined

@@ -7,6 +7,7 @@ import { browserApi } from "@/lib/api/browser";
 import { SaveStatusProvider, SaveStatusIndicator } from "@/components/composites/save-status";
 import { useAutosave } from "@/components/composites/use-autosave";
 import { expectNoAxeViolations } from "@/test/axe";
+import messages from "@/lib/i18n/messages/sv.json";
 import { renderInApp, testQueryClient } from "@/test/render";
 import { CapabilitiesSection } from "./capabilities-section";
 import { AssistantDocumentTemplateChoice } from "./document-template-choice";
@@ -374,7 +375,7 @@ it("keeps serial field saves pending and their failures separate in the actual p
   } finally {
     await act(async () => finishTemplate?.());
   }
-  await status.findByText("Alla ändringar sparade!");
+  await status.findByText(messages.all_changes_saved);
   api.POST.mockResolvedValueOnce({
     data: undefined,
     error: { message: "Template save failed" },
@@ -457,7 +458,7 @@ it("does not queue a template write behind disabling file creation or strand pag
     expect(screen.queryByRole("button", { name: "Ändra dokumentmall" })).toBeNull()
   );
   await waitFor(() =>
-    expect(within(screen.getByRole("banner")).getByText("Alla ändringar sparade!")).toBeTruthy()
+    expect(within(screen.getByRole("banner")).getByText(messages.all_changes_saved)).toBeTruthy()
   );
   expect(api.POST).toHaveBeenCalledTimes(1);
   const beforeUnload = new Event("beforeunload", { cancelable: true });
@@ -505,7 +506,7 @@ it("blocks named choices and a failed-choice retry while the actual capability s
     await act(async () => finish());
   }
   await waitFor(() =>
-    expect(within(screen.getByRole("banner")).getByText("Alla ändringar sparade!")).toBeTruthy()
+    expect(within(screen.getByRole("banner")).getByText(messages.all_changes_saved)).toBeTruthy()
   );
   expect(api.POST).toHaveBeenCalledTimes(2);
 });

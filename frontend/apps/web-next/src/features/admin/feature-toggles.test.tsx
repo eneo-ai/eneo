@@ -39,7 +39,11 @@ const saved = () => Promise.resolve({ data: { enabled: true }, response: new Res
 it("renders labelled, described switches in a titled card", async () => {
   renderToggles();
   expect(screen.getByRole("region", { name: "Funktioner" })).toBeTruthy();
-  const templates = screen.getByRole("switch", { name: "Aktivera mallar" });
+  const templates = screen.getByRole("switch", { name: "Mallar" });
+  // The icon tile is the row's first part, hidden on a phone.
+  expect(templates.closest("li")?.firstElementChild?.firstElementChild?.className).toContain(
+    "max-md:hidden"
+  );
   expect((templates as HTMLInputElement).checked).toBe(true);
   expect(templates.getAttribute("aria-describedby")).toBeTruthy();
   const described = document.getElementById(templates.getAttribute("aria-describedby")!);
@@ -86,7 +90,7 @@ it("refreshes both provisioning resources without refetching unrelated session d
 it("saves a toggle and refreshes the shared settings", async () => {
   api.PATCH.mockResolvedValue({ data: { enabled: true }, response: new Response("{}") });
   const invalidate = renderToggles();
-  const audit = screen.getByRole("switch", { name: "Aktivera granskningsloggning" });
+  const audit = screen.getByRole("switch", { name: "Granskningsloggning" });
 
   fireEvent.click(audit);
 
@@ -120,7 +124,7 @@ it("saves a press made during a save once that save is done", async () => {
   const saves: Array<() => void> = [];
   api.PATCH.mockImplementation(() => new Promise((resolve) => saves.push(() => resolve(saved()))));
   const invalidate = renderToggles();
-  const audit = screen.getByRole("switch", { name: "Aktivera granskningsloggning" });
+  const audit = screen.getByRole("switch", { name: "Granskningsloggning" });
 
   fireEvent.click(audit);
   await waitFor(() => expect((audit as HTMLInputElement).checked).toBe(true));

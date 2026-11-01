@@ -11,7 +11,7 @@ import { TextArea } from "@astryxdesign/core/TextArea";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { toast } from "@/lib/toast";
 import { saveBlob } from "@/features/files/signed-file-url";
 import type { FlowPublic } from "./flows-api";

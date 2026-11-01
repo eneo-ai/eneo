@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useId, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";

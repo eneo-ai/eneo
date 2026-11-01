@@ -5,12 +5,12 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Button } from "@astryxdesign/core/Button";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
-import { Check, ChevronLeft, Copy, Download, Printer } from "lucide-react";
-import Link from "@/lib/link";
+import { Check, Copy, Download, Printer } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState, type RefObject } from "react";
 import { Streamdown } from "streamdown";
 import { LoadingState } from "@/components/composites/loading-state";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { DockedActions } from "@/components/shell/docked-actions";
 import { browserApi } from "@/lib/api/browser";
@@ -306,11 +306,14 @@ function ResultTabs({
 export function ResultDetail({
   runId,
   backHref,
+  hideBackOnPhone = false,
   editHref,
   newRunHref
 }: {
   runId: string;
   backHref: string;
+  /** Only below a space tab, whose page bar has the back link under 768 px. */
+  hideBackOnPhone?: boolean;
   editHref?: string;
   newRunHref: string;
 }) {
@@ -333,13 +336,9 @@ export function ResultDetail({
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
       <div className="flex flex-col gap-1">
-        <Link
-          href={backHref}
-          className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-        >
-          <ChevronLeft className="size-4" />
+        <BackLink href={backHref} hideOnPhone={hideBackOnPhone}>
           {t("back")}
-        </Link>
+        </BackLink>
         <PageHeader
           title={title}
           actions={
@@ -363,7 +362,7 @@ export function ResultDetail({
       {/* The summary comes first, so a phone shows the status above the
           result; from 1024 px it is the column on the right. */}
       <div className="flex flex-col gap-8 lg:flex-row-reverse lg:items-start">
-        <aside className="flex w-full flex-col gap-3 lg:sticky lg:top-6 lg:w-64">
+        <aside className="flex w-full flex-col gap-3 md:max-w-sm lg:sticky lg:top-6 lg:w-64">
           <div className="flex">
             <AppRunStatusToken status={run.status} />
           </div>

@@ -20,7 +20,7 @@ it("focuses the empty name field with its problem when an empty form is submitte
     atFocus.problem = document.getElementById(problemId)?.textContent ?? null;
   });
 
-  fireEvent.click(screen.getByRole("button", { name: "Skapa Skill" }));
+  fireEvent.click(screen.getByRole("button", { name: "Skapa skill" }));
 
   expect(document.activeElement).toBe(name);
   expect(atFocus.invalid).toBe("true");

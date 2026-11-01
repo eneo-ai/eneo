@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import { Composer, type ComposerHandle } from "./composer";
 import { useAttachments } from "./use-attachments";
 
@@ -24,7 +25,8 @@ function Harness({
   initial = "",
   sendBlocked = null,
   inputRef,
-  knowledgeMode
+  knowledgeMode,
+  beforeAnswer = false
 }: {
   busy?: boolean;
   onSubmit?: () => void;
@@ -33,6 +35,7 @@ function Harness({
   sendBlocked?: string | null;
   inputRef?: Ref<ComposerHandle>;
   knowledgeMode?: "tool" | "inject";
+  beforeAnswer?: boolean;
 }) {
   const [value, setValue] = useState(initial);
   const attachments = useAttachments(partner);
@@ -52,6 +55,7 @@ function Harness({
       inputRef={inputRef}
       triggers={inputRef ? [] : undefined}
       knowledgeMode={knowledgeMode}
+      beforeAnswer={beforeAnswer}
     />
   );
 }
@@ -77,6 +81,35 @@ describe("Composer", () => {
     expect(descriptionOf(textarea)).toBe(
       "Retur ger en ny rad. Skicka med Skicka-knappen, Kommando+Retur eller Ctrl+Retur."
     );
+  });
+
+  it("does not point a touch screen at keys it does not have in the field's description", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderComposer();
+    const textarea = screen.getByRole("textbox", { name: "Fråga Upphandlingsassistenten" });
+    expect(descriptionOf(textarea)).toBe("Retur ger en ny rad. Skicka med Skicka-knappen.");
+  });
+
+  it("leaves the assistant switcher pill out below 768 px, where the header has it", () => {
+    renderInApp(
+      <Composer
+        value=""
+        onChange={vi.fn()}
+        onSubmit={vi.fn()}
+        sendBlocked={null}
+        busy={false}
+        onStop={vi.fn()}
+        label="Fråga"
+        placeholder="Fråga"
+        attachments={{ attachments: [] } as unknown as ReturnType<typeof useAttachments>}
+        onOpenFileDialog={vi.fn()}
+        knowledge={[]}
+        partnerToken={<button type="button">Byt assistent</button>}
+      />
+    );
+    expect(
+      screen.getByRole("button", { name: "Byt assistent" }).parentElement?.className
+    ).toContain("max-md:hidden");
   });
 
   it("adds a line on Return and sends on ⌘ or Ctrl+Return and with Send (decision 3)", () => {
@@ -199,6 +232,12 @@ describe("Composer", () => {
     expect(screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")).toBe(
       false
     );
+  });
+
+  it("says only where the data stays before the first answer, and adds the advice to check it after", () => {
+    renderComposer({ beforeAnswer: true });
+    expect(screen.getByText("Data behandlas inom er infrastruktur")).toBeTruthy();
+    expect(screen.queryByText(/Kontrollera viktiga uppgifter/)).toBeNull();
   });
 
   it("has no axe violations", async () => {

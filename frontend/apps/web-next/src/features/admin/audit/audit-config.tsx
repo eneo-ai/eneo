@@ -7,7 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronRight } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { Switch } from "@/components/ui/switch";

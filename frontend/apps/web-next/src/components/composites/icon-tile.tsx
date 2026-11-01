@@ -25,7 +25,7 @@ const SIZE_CLASSES = {
 
 /**
  * One hue per area, so an area looks the same wherever it is empty or
- * introduced: the chat's start page uses the same tiles for its starters.
+ * introduced.
  */
 export const AREA_HUES = {
   assistants: "purple",
@@ -44,8 +44,8 @@ export type IconTileProps = {
 };
 
 /**
- * A coloured, rounded tile around an icon: the start page's starter cards,
- * empty states and feature cards share it. Decorative (`aria-hidden`): put the
+ * A coloured, rounded tile around an icon: empty states and feature cards
+ * share it. Decorative (`aria-hidden`): put the
  * meaning in the text next to it.
  */
 export function IconTile({ icon, hue = "neutral", size = "md", className }: IconTileProps) {

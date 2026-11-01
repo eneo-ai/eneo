@@ -2,18 +2,22 @@
 
 import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery } from "@tanstack/react-query";
-import { FileText, ListChecks, PenLine, type LucideIcon } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
 import { useId, type ReactNode } from "react";
+import { ClientTime } from "@/components/composites/client-time";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";
 import { useAppContext } from "@/components/providers/app-context";
+import { conversationContext } from "@/components/shell/conversation-context";
+import { conversationHref } from "@/components/shell/routes";
 import { chatPartnerHref } from "@/features/assistants/assistants";
 import { spaceRouteId } from "@/features/spaces/space";
 import { spaceDisplayName } from "@/features/spaces/space-name";
 import { WhatsNewBanner } from "@/features/whats-new/release-banner";
 import { browserApi } from "@/lib/api/browser";
+import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/api/conversations";
 import { unwrap } from "@/lib/api/errors";
 import { displayPartnerName } from "@/lib/chat/partner-name";
 import type { ChatPartner } from "@/lib/chat/types";
@@ -37,37 +41,13 @@ export function BrandMark({ className }: { className?: string }) {
   );
 }
 
-type Starter = {
-  key: "summarize" | "draft" | "plan";
-  icon: LucideIcon;
-};
-
-const STARTERS: Starter[] = [
-  { key: "summarize", icon: FileText },
-  { key: "draft", icon: PenLine },
-  { key: "plan", icon: ListChecks }
-];
-
 /** Section headings of the start state: 18 px, in a 44 px row so "Visa alla" beside one is a full target. */
 const SECTION_HEADING = "text-lg leading-tight font-semibold text-balance";
 
-const STARTER_TEXT = {
-  summarize: {
-    label: "personal_assistant_suggestion_summarize",
-    description: "chat_starter_summarize_description",
-    prompt: "personal_assistant_prompt_summarize"
-  },
-  draft: {
-    label: "personal_assistant_suggestion_draft",
-    description: "chat_starter_draft_description",
-    prompt: "personal_assistant_prompt_draft"
-  },
-  plan: {
-    label: "personal_assistant_suggestion_plan",
-    description: "chat_starter_plan_description",
-    prompt: "personal_assistant_prompt_plan"
-  }
-} as const;
+/** The conversations "Fortsätt" offers: two, so "Dina assistenter" stays in view on a 320 px phone. */
+const CONTINUE_COUNT = 2;
+/** The assistants "Dina assistenter" offers: enough to pick from, the catalog is one tap away. */
+const ASSISTANTS_SHOWN = 3;
 
 type QuickAssistant = {
   id: string;
@@ -77,60 +57,69 @@ type QuickAssistant = {
   href: string;
 };
 
-/** Up to four assistants from the user's shared spaces (the dashboard query, shared cache). */
-function useQuickAssistants(enabled: boolean): QuickAssistant[] {
+/** Up to three assistants from the user's shared spaces (the dashboard query, shared cache). */
+function useQuickAssistants(): { items: QuickAssistant[]; isPending: boolean } {
   const t = useTranslations();
-  const { data } = useQuery({
+  const { data, isPending } = useQuery({
     queryKey: ["dashboard"],
-    enabled,
     queryFn: () => unwrap(browserApi.GET("/api/v1/dashboard/"))
   });
-  if (!data) return [];
-  const result: QuickAssistant[] = [];
-  for (const space of data.spaces.items) {
+  const items: QuickAssistant[] = [];
+  for (const space of data?.spaces.items ?? []) {
     if (space.personal) continue;
     for (const assistant of space.applications?.assistants.items ?? []) {
-      result.push({
+      items.push({
         id: assistant.id,
         name: assistant.name,
         iconId: assistant.icon_id ?? null,
         spaceName: spaceDisplayName(space, t),
         href: chatPartnerHref(spaceRouteId(space), { type: "assistant", id: assistant.id })
       });
-      if (result.length === 4) return result;
+      if (items.length === ASSISTANTS_SHOWN) return { items, isPending };
     }
   }
-  return result;
+  return { items, isPending };
+}
+
+const firstFew = (conversations: RecentConversation[]) => conversations.slice(0, CONTINUE_COUNT);
+
+/** The latest conversations: the list the navigation's "Senaste" and the ⌘K palette share (one cache entry). */
+function useContinueConversations() {
+  return useQuery({ ...recentConversationsQueryOptions(browserApi), select: firstFew });
 }
 
 /**
- * "Prova att fråga": the three starters as rows (decision 8). Tapping one
- * fills the composer with its prompt; the icon takes the same 36 px slot as
- * an assistant's tile, so both lists start their text on one line.
+ * "Fortsätt": the latest conversations as rows, each saying when it was last
+ * used and, unless it is the personal chat, whom it is with. A row opens the
+ * conversation where it lives.
  */
-function Starters({ onPick }: { onPick: (prompt: string) => void }) {
+function Continue({ conversations }: { conversations: RecentConversation[] }) {
   const t = useTranslations();
   const headingId = useId();
   return (
     <section aria-labelledby={headingId} className="flex w-full flex-col">
       <div className="flex min-h-11 items-center">
         <h2 id={headingId} className={SECTION_HEADING}>
-          {t("chat_try_asking")}
+          {t("chat_continue")}
         </h2>
       </div>
       <List hasDividers edge="outset">
-        {STARTERS.map((starter) => {
-          const text = STARTER_TEXT[starter.key];
-          const Icon = starter.icon;
+        {conversations.map((conversation) => {
+          const context = conversationContext(conversation, t);
           return (
             <ListItem
-              key={starter.key}
-              label={t(text.label)}
-              description={t(text.description)}
-              onClick={() => onPick(t(text.prompt))}
+              key={conversation.id}
+              href={conversationHref(conversation)}
+              label={conversation.name.trim() || t("shell_untitled_conversation")}
+              description={
+                <>
+                  <ClientTime value={conversation.last_activity_at} format="auto" />
+                  {context ? ` · ${context}` : null}
+                </>
+              }
               startContent={
                 <span className="flex size-9 shrink-0 items-center justify-center">
-                  <Icon aria-hidden="true" className="text-ax-text-secondary size-5" />
+                  <MessageSquare aria-hidden="true" className="text-ax-text-secondary size-5" />
                 </span>
               }
             />
@@ -142,15 +131,13 @@ function Starters({ onPick }: { onPick: (prompt: string) => void }) {
 }
 
 /**
- * "Dina assistenter": up to four of the user's assistants with their space,
+ * "Dina assistenter": up to three of the user's assistants with their space,
  * and "Visa alla" to the catalog. A row opens a chat, so no chevron (as in
  * the catalog and the switcher).
  */
-function QuickAssistants() {
+function QuickAssistants({ assistants }: { assistants: QuickAssistant[] }) {
   const t = useTranslations();
   const headingId = useId();
-  const assistants = useQuickAssistants(true);
-  if (assistants.length === 0) return null;
   return (
     <section aria-labelledby={headingId} className="flex w-full flex-col">
       <div className="flex min-h-11 items-center justify-between gap-2">
@@ -188,11 +175,47 @@ function QuickAssistants() {
 }
 
 /**
- * The empty conversation: a greeting (personal assistant) or the partner's
- * name and description; the composer, centred under it from 640px (on phones
- * the view docks it at the bottom, where it stays: decision 5); and for the
- * personal assistant "Prova att fråga" and "Dina assistenter" (decision 8),
- * side by side where the column is wide enough.
+ * What the personal chat offers under its greeting: "Fortsätt" and "Dina
+ * assistenter", or, for someone with no conversations yet, one quiet line on
+ * how to begin. Shown once both lists have arrived: one that came later above
+ * the other would push it down.
+ */
+function PersonalLists() {
+  const t = useTranslations();
+  const recent = useContinueConversations();
+  const assistants = useQuickAssistants();
+  if (recent.isPending || assistants.isPending) return null;
+  const conversations = recent.data ?? [];
+  const noHistory = recent.isSuccess && conversations.length === 0;
+  const hasLists = conversations.length > 0 || assistants.items.length > 0;
+  if (!noHistory && !hasLists) return null;
+  return (
+    <div className="flex w-full flex-col gap-6">
+      {noHistory && (
+        <p className="text-ax-text-secondary max-w-xl text-sm sm:self-center sm:text-center">
+          {t("chat_start_guidance")}
+        </p>
+      )}
+      {hasLists && (
+        // Side by side where the column has room for both (not the window: a
+        // side panel narrows it); a lone section takes the width.
+        <div className="grid w-full grid-cols-1 gap-x-6 gap-y-6 @2xl:grid-cols-2 @2xl:[&>:only-child]:col-span-2">
+          {conversations.length > 0 && <Continue conversations={conversations} />}
+          {assistants.items.length > 0 && <QuickAssistants assistants={assistants.items} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * The empty conversation: a greeting (a space's own assistant, or the personal
+ * chat) or the partner's name and description; the composer, centred under it
+ * from 640px (on phones the view docks it at the bottom, where it stays:
+ * decision 5); and in the personal chat "Fortsätt" and "Dina assistenter".
+ * A space's own assistant leaves other assistants to its header's switcher,
+ * which lists the space's own: a shortcut to assistants of other spaces does
+ * not belong inside one.
  */
 export type StartHeadingLevel = 1 | 2 | 3;
 
@@ -201,13 +224,11 @@ const START_HEADINGS = { 1: "h1", 2: "h2", 3: "h3" } as const;
 export function StartState({
   partner,
   composer,
-  onPickStarter,
   headingLevel = 1
 }: {
   partner: ChatPartner;
   /** The centred composer; absent on phones, where the view docks it. */
   composer?: ReactNode;
-  onPickStarter: (prompt: string) => void;
   /** 1 on a chat page; lower inside a page that has its own h1. */
   headingLevel?: StartHeadingLevel;
 }) {
@@ -226,10 +247,10 @@ export function StartState({
     // The personal start leads with its greeting on a phone, start-aligned
     // above its lists; another assistant's has only its introduction, centred
     // at every width.
-    <div className="flex w-full flex-1 flex-col items-center px-4 pt-6 pb-4 sm:py-10">
+    <div className="short:py-3 flex w-full flex-1 flex-col items-center px-4 pt-6 pb-4 sm:py-10">
       <div
         className={cn(
-          "@container flex w-full max-w-[720px] flex-col gap-7 sm:gap-8",
+          "short:gap-4 @container flex w-full max-w-[720px] flex-col gap-7 sm:gap-8",
           personal ? "sm:my-auto sm:items-center" : "my-auto items-center"
         )}
       >
@@ -241,7 +262,7 @@ export function StartState({
         >
           {personal ? (
             // The mark only where there is room; on a phone the greeting leads.
-            <BrandMark className="size-[38px] max-sm:hidden" />
+            <BrandMark className="short:hidden size-[38px] max-sm:hidden" />
           ) : (
             <EntityAvatar
               id={partner.id}
@@ -270,14 +291,7 @@ export function StartState({
         {personal && <WhatsNewBanner />}
         {composer}
 
-        {personal && (
-          // Side by side where the column has room for both (not the window: a
-          // side panel narrows it); a lone section (no assistants yet) takes the width.
-          <div className="grid w-full grid-cols-1 gap-x-6 gap-y-6 @2xl:grid-cols-2 @2xl:[&>:only-child]:col-span-2">
-            <Starters onPick={onPickStarter} />
-            <QuickAssistants />
-          </div>
-        )}
+        {partner.personalSpace && <PersonalLists />}
       </div>
     </div>
   );

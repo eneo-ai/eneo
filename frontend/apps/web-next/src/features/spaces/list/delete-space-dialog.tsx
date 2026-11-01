@@ -4,12 +4,13 @@ import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
-import { DIALOG_TOP_ON_TOUCH } from "@/components/astryx/dialog-placement";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { revealProblems } from "@/components/composites/field-problem";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import { confirmationMatches } from "@/components/composites/confirmation-match";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { useRemovalMutation } from "@/features/spaces/removal";
@@ -69,18 +70,12 @@ export function DeleteSpaceDialog({
   }
 
   const name = space?.name ?? "";
-  const matches = space !== null && typed === name;
+  const matches = space !== null && confirmationMatches(typed, name);
   const problem =
     submitted && !matches ? t("form_problem_confirm_mismatch", { value: name }) : null;
 
   return (
-    <Dialog
-      isOpen={space !== null}
-      onOpenChange={onOpenChange}
-      purpose="form"
-      width={460}
-      className={DIALOG_TOP_ON_TOUCH}
-    >
+    <Dialog isOpen={space !== null} onOpenChange={onOpenChange} purpose="form" width={460}>
       <Layout
         height="auto"
         header={<DialogHeader title={t("delete_space")} onOpenChange={onOpenChange} />}
@@ -112,6 +107,7 @@ export function DeleteSpaceDialog({
                   value={typed}
                   onChange={setTyped}
                   autoComplete="off"
+                  {...KEYBOARD.identifier}
                   status={problem ? { type: "error", message: problem } : undefined}
                 />
               </form>

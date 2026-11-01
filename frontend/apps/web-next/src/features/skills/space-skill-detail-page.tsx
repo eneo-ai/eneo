@@ -1,13 +1,12 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
+import { BackLink } from "@/components/composites/back-link";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
@@ -82,9 +81,9 @@ export function SpaceSkillDetailPage({ skillId }: { skillId: string }) {
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-7 pb-16">
       <PageHeader title={value.display_name} headingRef={headingRef} />
       <RefreshError queries={[skill]} />
-      <Button asChild variant="link" className="w-fit px-0">
-        <Link href={base}>{t("skills")}</Link>
-      </Button>
+      <BackLink href={base} hideOnPhone>
+        {t("skills")}
+      </BackLink>
       {space.personal && <PersonalChatVersionNotice skillId={skillId} rescueTarget={headingRef} />}
       <section className="grid gap-7 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <div className="space-y-5">

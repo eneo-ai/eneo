@@ -10,7 +10,16 @@ import { AppActions } from "./actions";
 import type { AppSparse } from "./apps";
 
 /** Card for an app; the card opens the app's run page. */
-export function AppTile({ app, showStatus }: { app: AppSparse; showStatus: boolean }) {
+export function AppTile({
+  app,
+  showStatus,
+  showActions = true
+}: {
+  app: AppSparse;
+  showStatus: boolean;
+  /** The overview shows cards without the actions menu. */
+  showActions?: boolean;
+}) {
   const t = useTranslations();
   const { routeId } = useSpace();
 
@@ -37,7 +46,7 @@ export function AppTile({ app, showStatus }: { app: AppSparse; showStatus: boole
         ) : null
       }
       description={app.description}
-      actions={<AppActions app={app} />}
+      actions={showActions ? <AppActions app={app} /> : null}
     />
   );
 }

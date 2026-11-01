@@ -1,3 +1,4 @@
+import type { AppSparse } from "@/features/apps/apps";
 import type { ChatAppItem } from "@/features/assistants/assistants";
 import {
   groupIntegrationSources,
@@ -26,6 +27,13 @@ export function recentChatItems(space: Space, compare: Compare): ChatAppItem[] {
     ...(space.applications?.assistants.items ?? []),
     ...(space.applications?.group_chats.items ?? [])
   ].sort((a, b) => time(b.updated_at) - time(a.updated_at) || compare(a.name, b.name));
+}
+
+/** The space's apps, most recently changed first. */
+export function recentApps(space: Space, compare: Compare): AppSparse[] {
+  return [...(space.applications?.apps.items ?? [])].sort(
+    (a, b) => time(b.updated_at) - time(a.updated_at) || compare(a.name, b.name)
+  );
 }
 
 /**

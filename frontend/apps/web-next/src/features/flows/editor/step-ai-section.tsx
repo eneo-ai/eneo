@@ -216,7 +216,10 @@ function Attachments({
               className="border-ax-border rounded-ax-element flex min-w-0 items-center gap-2 border px-3 py-1"
             >
               <Paperclip className="text-ax-text-secondary size-4 shrink-0" aria-hidden="true" />
-              <span className="min-w-0 flex-1 truncate text-sm" title={file.name}>
+              <span
+                className="min-w-0 flex-1 truncate text-sm pointer-coarse:break-words pointer-coarse:whitespace-normal"
+                title={file.name}
+              >
                 {file.name}
               </span>
               <Text type="supporting" size="xsm">

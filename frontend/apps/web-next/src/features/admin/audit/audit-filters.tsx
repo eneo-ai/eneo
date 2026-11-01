@@ -16,7 +16,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ListFilter, User, X } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useMemo, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { Typeahead } from "@/components/astryx/typeahead";
 import { browserApi } from "@/lib/api/browser";
 import { MEDIA } from "@/lib/breakpoints";

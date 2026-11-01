@@ -11,6 +11,7 @@ import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { ChatView, type ActivityState } from "./chat-view";
 import type { ToolCallRecord } from "./side-panel/message-tool-calls";
+import { queuePartnerUpdate } from "./partner-updates";
 
 const spies = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -254,6 +255,41 @@ function ask(question: string) {
 }
 
 describe("ChatView streaming an answer", () => {
+  it("says that an answer is coming when the request goes, not while it waits for a model save", async () => {
+    spies.mode = "answer";
+    let release!: () => void;
+    const save = queuePartnerUpdate(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        })
+    );
+    try {
+      renderInApp(<Harness />);
+      ask("Vilken gräns gäller?");
+
+      // Waiting behind the save: nothing has been sent, so nothing is announced.
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      });
+      expect(spies.sent).toHaveLength(0);
+      expect(spies.announce).not.toHaveBeenCalledWith("Assistenten skriver ett svar");
+
+      await act(async () => {
+        release();
+        await save;
+      });
+      await waitFor(() => expect(spies.sent).toHaveLength(1));
+      expect(
+        spies.announce.mock.calls.filter(([text]) => text === "Assistenten skriver ett svar")
+      ).toHaveLength(1);
+    } finally {
+      // The save queue is module state: never leave it waiting for the next test.
+      release();
+      await save;
+    }
+  });
+
   it("renders the answer, announces it once, reports the session and asks for a title", async () => {
     spies.mode = "answer";
     const onSessionCreated = vi.fn();
@@ -265,12 +301,20 @@ describe("ChatView streaming an answer", () => {
     expect(await within(log).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
     expect(within(log).getByText("Claude Haiku 4.5")).toBeTruthy();
     await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret är klart"));
-    expect(spies.announce).toHaveBeenCalledTimes(1);
+    // That an answer is coming when the question goes, and once when it is done.
+    expect(spies.announce.mock.calls.map(([text]) => text)).toEqual([
+      "Assistenten skriver ett svar",
+      "Svaret är klart"
+    ]);
     expect(onSessionCreated).toHaveBeenCalledWith("session-1");
     await waitFor(() => expect(onTitle).toHaveBeenCalledWith("Gräns för direktupphandling"));
     expect(spies.titled).toEqual(["session-1"]);
     // A new assistant-first send sends the assistant id, not a session.
     expect(spies.sent[0]?.body).toMatchObject({ assistant_id: "assistant-1", session_id: null });
+    // Sent and answered: nothing unsent is left for a reload to end.
+    const unload = new Event("beforeunload", { cancelable: true });
+    window.dispatchEvent(unload);
+    expect(unload.defaultPrevented).toBe(false);
   });
 
   it("tells the page about each tool call that finished and about the finished answer", async () => {

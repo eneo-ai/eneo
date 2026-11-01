@@ -3,6 +3,8 @@ services:
     environment:
       BROWSER_SESSION_ENABLED: "true"
       WEB_APP_ENABLED: "true"
+      # Native upload tests temporarily raise the revisioned knowledge policy.
+      OBJECT_CONTENT_INLINE_MAXIMUM_BYTES: "33554432"
       # Tool frames allow the actual Vite host, not the Svelte E2E port.
       PUBLIC_ORIGIN: http://localhost:8124
       # 127.0.0.1:8124 remains the separate MCP content origin.

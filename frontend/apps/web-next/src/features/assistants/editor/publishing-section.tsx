@@ -80,11 +80,16 @@ export function PublishingSection({ assistant }: { assistant: Assistant }) {
   return (
     <SettingsGroup title={t("publishing")}>
       {canPublish && <PublishStatusRow assistant={assistant} />}
-      <SettingsRow title={t("insights")} description={t("insights_description")}>
-        <Label
-          className="flex items-center justify-between gap-2 py-1 font-normal"
-          title={canToggleInsights ? undefined : t("only_space_admins_toggle")}
-        >
+      <SettingsRow
+        title={t("insights")}
+        description={
+          // Why the switch is off is written out: a title attribute is not shown on touch.
+          canToggleInsights
+            ? t("insights_description")
+            : `${t("insights_description")} ${t("only_space_admins_toggle")}`
+        }
+      >
+        <Label className="flex items-center justify-between gap-2 py-1 font-normal">
           {t("enable_insights")}
           {/* Saving, it stays enabled so it keeps focus; a toggle meanwhile is ignored. */}
           <Switch

@@ -11,7 +11,7 @@ import { useTranslations } from "use-intl";
 import { Plus, Trash2 } from "lucide-react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Switch } from "@astryxdesign/core/Switch";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { LoadingState } from "@/components/composites/loading-state";
 import type { useFieldFocus } from "./provider-form-fields";

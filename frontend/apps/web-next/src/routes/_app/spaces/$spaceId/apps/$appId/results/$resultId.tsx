@@ -39,6 +39,7 @@ function AppResultPage() {
     <ResultDetail
       runId={resultId}
       backHref={base}
+      hideBackOnPhone
       editHref={canEdit ? `${base}/edit` : undefined}
       newRunHref={base}
     />

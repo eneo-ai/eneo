@@ -237,3 +237,19 @@ test("going from a root screen to a pushed one shows one header throughout", asy
     expect(frame.top !== frame.own, `one header at ${frame.at} ms`).toBe(true);
   }
 });
+
+test("the organisation space's tab strip gives way while a settings section is open", async ({
+  page
+}) => {
+  const tabs = page.getByRole("navigation", { name: /^(Ytans innehåll|Space content)$/ });
+  await page.goto("/spaces/organization/settings");
+  await expect(page.locator('[data-editor-view="index"]')).toBeVisible({ timeout: 15_000 });
+  await expect(tabs).toBeVisible();
+
+  await page.goto("/spaces/organization/settings?section=models");
+  await expect(page.locator('[data-editor-view="section"]')).toBeVisible({ timeout: 15_000 });
+  // Computed, not the selector text: the rule must really win over the strip's own display.
+  await expect(tabs).toBeHidden();
+  // The page keeps its heading for a screen reader.
+  await expect(page.getByRole("heading", { level: 1 })).toHaveCount(1);
+});

@@ -11,7 +11,7 @@ import { Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import type { FlowDefinitionUpdate, FlowPublic } from "./flows-api";
 import {
   evidenceExportAllowed,

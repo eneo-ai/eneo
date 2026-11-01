@@ -17,7 +17,7 @@ import { ExternalLink, Search } from "lucide-react";
 import Link from "@/lib/link";
 import { useFormatter, useLocale, useTranslations } from "use-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { Table } from "@/components/astryx/table";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { PageHeader } from "@/components/composites/page-header";
@@ -66,6 +66,7 @@ import {
   type UsageSegment,
   useCostRates
 } from "@/features/admin/usage/usage-parts";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /** Rows the model and space tables show until "show all" (apps/web's page size). */
 const SHORT_LIST = 10;
@@ -81,9 +82,10 @@ function useCompact() {
   return (value: number) => format.number(value, { notation: "compact", maximumFractionDigits: 1 });
 }
 
+/** A figure of the token summary: a card from 640 px, a divided row of the summary card below. */
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <Card className="flex flex-col gap-1 p-4">
+    <Card className="flex flex-row flex-wrap items-baseline justify-between gap-x-3 gap-y-1 p-4 max-sm:rounded-none max-sm:border-x-0 max-sm:border-t-0 max-sm:bg-transparent max-sm:px-0 max-sm:py-3 max-sm:shadow-none max-sm:last:border-b-0 sm:flex-col sm:items-start sm:justify-start">
       <span className="text-muted-foreground text-sm">{label}</span>
       <span className="text-2xl font-semibold tabular-nums">{value}</span>
     </Card>
@@ -149,7 +151,7 @@ function TokenOverview({ data }: { data: TokenUsage }) {
   return (
     <Card className="flex flex-col gap-4 p-4">
       <SectionHeading title={t("token_summary")} description={t("token_summary_description")} />
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 sm:gap-4">
         <Stat label={t("usage_total_tokens")} value={format.number(data.total_token_usage)} />
         <Stat label={t("input")} value={format.number(data.total_input_token_usage)} />
         <Stat label={t("output")} value={format.number(data.total_output_token_usage)} />
@@ -226,7 +228,8 @@ function ModelTable({
     },
     {
       key: "input",
-      header: t("input_tokens"),
+      // The summary's words (Indata, Utdata), not a second name for the same number.
+      header: t("input"),
       width: proportional(1),
       align: "end",
       sortable: true,
@@ -234,7 +237,7 @@ function ModelTable({
     },
     {
       key: "output",
-      header: t("output_tokens"),
+      header: t("output"),
       width: proportional(1),
       align: "end",
       sortable: true,
@@ -421,7 +424,9 @@ function UserTable({
             </Link>
           </Button>
           {user.email !== user.username ? (
-            <span className="text-ax-text-secondary max-w-full truncate text-xs">{user.email}</span>
+            <span className="text-ax-text-secondary max-w-full truncate text-xs pointer-coarse:break-words pointer-coarse:whitespace-normal">
+              {user.email}
+            </span>
           ) : null}
         </span>
       )
@@ -434,7 +439,7 @@ function UserTable({
     },
     {
       key: "input_tokens",
-      header: t("input_tokens"),
+      header: t("input"),
       width: proportional(1),
       align: "end",
       sortable: true,
@@ -442,7 +447,7 @@ function UserTable({
     },
     {
       key: "output_tokens",
-      header: t("output_tokens"),
+      header: t("output"),
       width: proportional(1),
       align: "end",
       sortable: true,
@@ -564,6 +569,7 @@ function UsersTab({ view, onChange }: { view: UsageView; onChange: ChangeView })
               isLabelHidden
               placeholder={t("usage_user_search")}
               startIcon={Search}
+              {...KEYBOARD.search}
               value={draft}
               onChange={setDraft}
               autoComplete="off"
@@ -647,7 +653,9 @@ function SpaceTable({ spaces, labelledBy }: { spaces: SpaceRow[]; labelledBy: st
       renderCell: (space) => (
         <span className="flex min-w-0 items-center gap-2">
           <EntityAvatar name={space.name} id={space.id} size="sm" />
-          <span className="truncate font-medium">{space.name}</span>
+          <span className="truncate font-medium pointer-coarse:break-words pointer-coarse:whitespace-normal">
+            {space.name}
+          </span>
         </span>
       )
     },

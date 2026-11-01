@@ -4,7 +4,7 @@ import { Selector } from "@astryxdesign/core/Selector";
 import { ListFilter, X } from "lucide-react";
 import { useState } from "react";
 import { useTranslations } from "use-intl";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import type { Schema } from "@/lib/api/models";
 import { matchesSearch } from "@/lib/search";
 

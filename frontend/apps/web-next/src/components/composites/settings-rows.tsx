@@ -45,7 +45,14 @@ export function SettingsGroup({
       className={cn("bg-card scroll-mt-32 rounded-xl border", IN_PHONE_SECTION.card)}
     >
       <div className={cn("border-b px-5 py-4", IN_PHONE_SECTION.header)}>
-        <div className="flex flex-wrap items-start justify-between gap-3">
+        {/* A lone title sits on its action's centre line (a 44 px touch button would leave
+            it 10 px high); beside a title and a description the action stays at the top. */}
+        <div
+          className={cn(
+            "flex flex-wrap justify-between gap-3",
+            description ? "items-start" : "items-center"
+          )}
+        >
           <div className="min-w-0">
             <h2 className={cn("text-base font-semibold", IN_PHONE_SECTION.title)}>{title}</h2>
             {description ? (
@@ -53,7 +60,7 @@ export function SettingsGroup({
             ) : null}
           </div>
           {headerEnd ? (
-            <div data-settings-group-end="" className="flex shrink-0 flex-wrap gap-1.5">
+            <div data-settings-group-end="" className="flex max-w-full shrink-0 flex-wrap gap-1.5">
               {headerEnd}
             </div>
           ) : null}

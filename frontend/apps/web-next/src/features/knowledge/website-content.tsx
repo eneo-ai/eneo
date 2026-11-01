@@ -3,7 +3,7 @@ import { useInfiniteQuery } from "@tanstack/react-query";
 import { Search, SearchX } from "lucide-react";
 import { useEffect } from "react";
 import { useTranslations } from "use-intl";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";

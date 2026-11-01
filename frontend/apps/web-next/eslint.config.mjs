@@ -39,6 +39,11 @@ const astryxWrappedImports = [
     importNames: ["Tokenizer"],
     message:
       'Use `Tokenizer` from "@/components/astryx/tokenizer": Astryx does not set aria-invalid on an error status.'
+  },
+  {
+    name: "@astryxdesign/core/TextInput",
+    message:
+      'Use `TextInput` from "@/components/astryx/text-input": a phone\'s search key also puts its keyboard away.'
   }
 ];
 
@@ -86,6 +91,33 @@ const eslintConfig = defineConfig([
           selector:
             "CallExpression[callee.object.property.name='history'][callee.property.name='replaceState'][arguments.0.raw='null']",
           message: "Use replaceUrl from @/lib/navigation: the router owns silent URL updates."
+        },
+        {
+          // vh is the tallest the viewport gets (Safari's toolbar included), and a
+          // utility beats the dialog's own dvh cap, so a footer falls under it.
+          selector:
+            "Literal[value=/(^|[\\s:])(max-|min-)?h-\\[[0-9.]+vh\\]/], TemplateElement[value.raw=/(^|[\\s:])(max-|min-)?h-\\[[0-9.]+vh\\]/]",
+          message: "Use dvh (h-[60dvh]): vh ignores Safari's toolbar."
+        },
+        {
+          // 100vh: the tallest the viewport gets, toolbar and keyboard not counted.
+          selector:
+            "Literal[value=/(^|[\\s:])(min-|max-)?h-screen($|[\\s])/], TemplateElement[value.raw=/(^|[\\s:])(min-|max-)?h-screen($|[\\s])/]",
+          message: "Use h-dvh (an app frame) or min-h-svh (a page): h-screen is 100vh."
+        },
+        {
+          // A phone turned sideways has 280 to 300 px: a 3xx px floor cannot be met.
+          selector:
+            "Literal[value=/(^|[\\s:])min-h-\\[[3-9][0-9]{2}px\\]/], TemplateElement[value.raw=/(^|[\\s:])min-h-\\[[3-9][0-9]{2}px\\]/]",
+          message:
+            "A min-height of 300 px or more cannot hold on a phone turned sideways (280 to 300 px): use a clamp or key it on min-height: 40rem."
+        },
+        {
+          // Hidden until hovered: a finger has no hover (motion-touch: nothing behind hover).
+          selector:
+            'Literal[value=/(opacity-0|invisible)[^"]*(group-)?hover:(opacity-100|visible)/], TemplateElement[value.raw=/(opacity-0|invisible)[^"]*(group-)?hover:(opacity-100|visible)/]',
+          message:
+            "Do not reveal anything on hover only: touch has no hover. Show it, or put it in a menu."
         }
       ]
     }

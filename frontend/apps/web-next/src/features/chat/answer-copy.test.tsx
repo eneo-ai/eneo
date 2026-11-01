@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { katexStore } from "@/components/ai-elements/math";
 import { renderInApp } from "@/test/render";
+import messages from "@/lib/i18n/messages/sv.json";
 import { ChatMessage } from "./chat-message";
 
 const toast = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn() }));
@@ -38,6 +39,12 @@ const answer: EneoUIMessage = {
   role: "assistant",
   parts: [{ type: "text", text: 'Gränsen är **700 000 kr**<inref id="abcd1234"/>.', state: "done" }]
 };
+
+// Confirmed at the button and said aloud, not with a toast over the composer.
+async function expectCopied() {
+  await waitFor(() => expect(screen.getByText(messages.copied)).toBeTruthy());
+  expect(toast.success).not.toHaveBeenCalled();
+}
 
 function renderAnswer(message = answer) {
   renderInApp(
@@ -78,7 +85,7 @@ describe("copying an answer", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Kopiera svaret" }));
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierat"));
+    await expectCopied();
     expect(clipboard.writeText).toHaveBeenCalledWith("Gränsen är **700 000 kr**.");
   });
 
@@ -105,7 +112,7 @@ describe("copying an answer", () => {
 
     // Safari requires this call during the click, before the renderer import settles.
     expect(clipboard.write).toHaveBeenCalledOnce();
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierat"));
+    await expectCopied();
     const [item] = clipboard.write.mock.calls[0]![0] as TestClipboardItem[];
     expect(Object.keys(item!.items)).toEqual(["text/plain", "text/html"]);
     expect(await readBlob(await item!.items["text/html"]!)).toContain(
@@ -121,7 +128,7 @@ describe("copying an answer", () => {
 
     copyAsRichText();
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierat"));
+    await expectCopied();
     const [item] = clipboard.write.mock.calls[0]![0] as TestClipboardItem[];
     expect(await readBlob(await item!.items["text/html"]!)).toContain("<math");
     expect(await readBlob(await item!.items["text/plain"]!)).toBe("Arean är \\pi r^2.");
@@ -150,7 +157,7 @@ describe("copying an answer", () => {
 
     copyAsRichText();
 
-    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Kopierat"));
+    await expectCopied();
     expect(clipboard.writeText).toHaveBeenCalledWith("Gränsen är 700 000 kr.");
   });
 });

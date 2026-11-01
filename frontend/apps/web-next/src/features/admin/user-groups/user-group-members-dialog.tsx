@@ -12,7 +12,7 @@ import { useInfiniteQuery, useMutation, useQueryClient } from "@tanstack/react-q
 import { Search, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { revealProblems } from "@/components/composites/field-problem";
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
@@ -28,6 +28,7 @@ import {
   type GroupMember,
   type UserGroup
 } from "./user-groups";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /**
  * Adds users to the group: search by e-mail (sent once typing pauses), tick
@@ -118,6 +119,7 @@ function AddMembers({
         isLabelHidden
         placeholder={t("find_user")}
         startIcon={Search}
+        {...KEYBOARD.search}
         value={searchInput}
         onChange={setSearchInput}
         hasClear

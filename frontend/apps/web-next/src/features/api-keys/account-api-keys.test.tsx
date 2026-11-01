@@ -34,13 +34,20 @@ const state = vi.hoisted(() => ({
   },
   failRead: false,
   failSave: false,
+  failKeys: false,
+  keysGate: null as Promise<void> | null,
   saveGate: null as Promise<void> | null,
   writes: [] as object[]
 }));
 
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
-    GET: (path: string) => {
+    GET: async (path: string) => {
+      if (path === "/api/v1/api-keys") {
+        if (state.keysGate) await state.keysGate;
+        if (state.failKeys)
+          return { error: { message: "Down" }, response: new Response("{}", { status: 503 }) };
+      }
       if (path === "/api/v1/api-keys/notification-preferences" && state.failRead)
         return Promise.reject(new Error("Temporarily unavailable"));
       const data =
@@ -82,6 +89,8 @@ beforeEach(() => {
   state.policy.enabled = true;
   state.failRead = false;
   state.failSave = false;
+  state.failKeys = false;
+  state.keysGate = null;
   state.saveGate = null;
   state.writes = [];
 });
@@ -92,6 +101,41 @@ describe("ApiKeys (account)", () => {
 
     const table = await screen.findByRole("table", { name: "API-nycklar" });
     expect(await within(table).findByText("Min integration")).toBeTruthy();
+  });
+
+  it("docks Skapa API-nyckel, the page's one primary action, on a phone", async () => {
+    renderInApp(<ApiKeys />, { appContext: testAppContext({ permissions: ["api_keys"] }) });
+
+    const create = screen.getByRole("button", { name: "Skapa API-nyckel" });
+    expect(create.closest("[data-docked-actions]")).not.toBeNull();
+    await screen.findByRole("table", { name: "API-nycklar" });
+  });
+
+  it("shows the reminder settings after the keys, and only once they have loaded", async () => {
+    let release!: () => void;
+    state.keysGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    renderInApp(<ApiKeys />, { appContext: testAppContext({ permissions: ["api_keys"] }) });
+    // The preferences answer at once; the keys wait. Earlier or above, the panel moved the
+    // list or was pushed off the screen by it (layout shift).
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 60));
+    });
+    expect(screen.queryByRole("textbox", { name: "Påminnelsedagar" })).toBeNull();
+
+    await act(async () => release());
+    const days = await screen.findByRole("textbox", { name: "Påminnelsedagar" });
+    const table = screen.getByRole("table", { name: "API-nycklar" });
+    expect(table.compareDocumentPosition(days) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it("shows the reminder settings when the keys cannot be loaded", async () => {
+    state.failKeys = true;
+    renderInApp(<ApiKeys />, { appContext: testAppContext({ permissions: ["api_keys"] }) });
+
+    await screen.findByRole("button", { name: /Försök igen/ });
+    expect(await screen.findByRole("textbox", { name: "Påminnelsedagar" })).toBeTruthy();
   });
 
   it("shows the keys in the panel of the selected state tab", async () => {

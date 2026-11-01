@@ -12,7 +12,7 @@ import { useMutation } from "@tanstack/react-query";
 import { CircleAlert, CircleCheck, KeyRound, Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { isJsonObject } from "./step-types";
 import { testHttp, type HttpTestResponse } from "./editor-api";
 import { FieldMessage, problemStatus, VariablePicker } from "./editor-fields";

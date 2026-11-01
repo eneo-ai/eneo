@@ -1,13 +1,6 @@
-import sv from "../src/lib/i18n/messages/sv.json";
 import { expect, test } from "./csp";
-import {
-  askChatQuestion,
-  conversationLog,
-  fetchChatStream,
-  isChatStream,
-  sessionResponseHeaders,
-  uniqueName
-} from "./helpers";
+import sv from "../src/lib/i18n/messages/sv.json";
+import { answerWithText, askChatQuestion, conversationLog, uniqueName } from "./helpers";
 
 const ANSWER =
   String.raw`## Formler och diagram
@@ -27,31 +20,7 @@ test(
   async ({ page, context }) => {
     await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await page.addInitScript(() => localStorage.setItem("theme", "light"));
-    // Keep the real authenticated request and stream metadata. Replace only the
-    // model's plain-text answer, as the activity tests enrich the same stream.
-    await page.route(isChatStream, async (route) => {
-      const response = await fetchChatStream(route);
-      let inserted = false;
-      const events = (await response.text()).split(/\r?\n\r?\n/).filter(Boolean);
-      const body = events.flatMap((event) => {
-        if (!event.startsWith("data: ") || event === "data: [DONE]") return [event];
-        const chunk: { type: string; delta?: string } = JSON.parse(event.slice(6));
-        if (chunk.type !== "text-delta") return [event];
-        if (inserted) return [];
-        inserted = true;
-        return [`data: ${JSON.stringify({ ...chunk, delta: ANSWER })}`];
-      });
-      expect(inserted).toBe(true);
-      await route.fulfill({
-        status: response.status(),
-        headers: {
-          ...sessionResponseHeaders(route),
-          "content-type": "text/event-stream",
-          "x-vercel-ai-ui-message-stream": "v1"
-        },
-        body: body.map((event) => `${event}\n\n`).join("")
-      });
-    });
+    await answerWithText(page, ANSWER);
     await page.goto("/spaces/personal/chat");
     await askChatQuestion(page, uniqueName("Visa formler och diagram"));
     const log = conversationLog(page);

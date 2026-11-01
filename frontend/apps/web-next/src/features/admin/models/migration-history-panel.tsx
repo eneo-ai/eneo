@@ -11,7 +11,7 @@ import {
   TableRow
 } from "@astryxdesign/core/Table";
 import { Table } from "@/components/astryx/table";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { Token } from "@astryxdesign/core/Token";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Search } from "lucide-react";
@@ -29,6 +29,7 @@ import {
   migrationHistoryQueryOptions,
   migrationWarningLabel
 } from "./models";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type TypeFilter = "all" | "completion" | "transcription";
 type StatusFilter = "all" | "completed" | "failed" | "in_progress";
@@ -128,6 +129,7 @@ export function MigrationHistoryPanel() {
                     isLabelHidden
                     placeholder={t("search")}
                     startIcon={Search}
+                    {...KEYBOARD.search}
                     value={search}
                     onChange={(value) => {
                       setSearch(value);

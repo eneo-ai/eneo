@@ -21,7 +21,9 @@ import {
   type RefObject
 } from "react";
 import { createPortal } from "react-dom";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+import { confirmationMatches } from "./confirmation-match";
 // Not shadcn: the focus return every Astryx Dialog in the app shares (menu
 // openers, Safari's unfocused clicks, an opener that is gone).
 import { useReturnFocus } from "@/components/ui/dialog-focus";
@@ -289,7 +291,7 @@ export function ConfirmDialog({
   const [submitted, setSubmitted] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const busy = pending || running;
-  const blocked = confirmValue !== undefined && typed !== confirmValue;
+  const blocked = confirmValue !== undefined && !confirmationMatches(typed, confirmValue);
   const problem =
     submitted && blocked ? t("form_problem_confirm_mismatch", { value: confirmValue }) : null;
 
@@ -349,6 +351,7 @@ export function ConfirmDialog({
             value={typed}
             placeholder={confirmValue}
             autoComplete="off"
+            {...KEYBOARD.identifier}
             onChange={setTyped}
             status={problem ? { type: "error", message: problem } : undefined}
           />

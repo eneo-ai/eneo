@@ -178,7 +178,9 @@ describe("AdminOverviewPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Översikt" })).toBeTruthy();
 
     const users = region("Aktiva användare");
-    expect(await within(users).findByText("42")).toBeTruthy();
+    const figure = await within(users).findByText("42");
+    // Large and bold, but not a paragraph: axe takes a big bold <p> for a heading (p-as-heading).
+    expect(figure.tagName).not.toBe("P");
     expect(within(users).getByText("3 inaktiva konton")).toBeTruthy();
     expect(within(users).getByRole("link", { name: "Visa användare" }).getAttribute("href")).toBe(
       "/admin/users"
@@ -196,6 +198,10 @@ describe("AdminOverviewPage", () => {
     expect(within(crawler).getByText("Pågående").nextElementSibling?.textContent).toBe("1");
     expect(within(crawler).getByText("Fel och varningar").nextElementSibling?.textContent).toBe(
       "4"
+    );
+    // A label that wraps in its narrow column keeps the three numbers on one line.
+    expect(within(crawler).getByText("Fel och varningar").parentElement?.className).toContain(
+      "justify-between"
     );
     expect(within(crawler).getByText("Fungerar")).toBeTruthy();
     expect(within(crawler).getByRole("link", { name: "Visa crawler" }).getAttribute("href")).toBe(
@@ -254,14 +260,13 @@ describe("AdminOverviewPage", () => {
     renderOverview();
 
     const audit = region("Senaste granskningshändelser");
+    expect(await within(audit).findByText("Visas efter en motiverad åtkomstsession")).toBeTruthy();
+    // One route to the access session: the card's own link.
     expect(
-      await within(audit).findByText(
-        "Granskningsloggarna visas först efter en motiverad åtkomstsession."
-      )
-    ).toBeTruthy();
-    expect(
-      within(audit).getByRole("link", { name: "Öppna granskningsloggarna" }).getAttribute("href")
-    ).toBe("/admin/audit-logs");
+      within(audit)
+        .getAllByRole("link")
+        .map((link) => link.getAttribute("href"))
+    ).toEqual(["/admin/audit-logs"]);
     expect(within(audit).queryByRole("button", { name: "Försök igen" })).toBeNull();
     // Any other failure gets the generic error with retry.
     cleanup();
@@ -295,21 +300,59 @@ describe("AdminOverviewPage", () => {
 
     expect(
       await within(region("Tokenanvändning senaste 30 dagarna")).findByText(
-        "Ingen användning de senaste 30 dagarna."
+        "Ingen användning de senaste 30 dagarna"
       )
     ).toBeTruthy();
     const crawler = region("Crawler");
-    expect(await within(crawler).findByText("Inga indexeringar pågår eller väntar.")).toBeTruthy();
+    expect(await within(crawler).findByText("Inga indexeringar pågår eller väntar")).toBeTruthy();
     expect(within(crawler).getByText("Status okänd")).toBeTruthy();
     expect(
       await within(region("Senaste granskningshändelser")).findByText(
-        "Inga händelser har loggats ännu."
+        "Inga händelser har loggats ännu"
       )
     ).toBeTruthy();
     // The links to each page stay, so the admin can still get there.
     expect(screen.getAllByRole("link")).toHaveLength(4);
     await waitFor(() => expect(document.querySelector('[aria-busy="true"]')).toBeNull());
     await expectNoAxeViolations(container);
+  });
+
+  it("takes loaded audit events off the screen when the access session expires, and brings them back after an authorized refetch", async () => {
+    const queryClient = testQueryClient();
+    answer(ALL_OK);
+    renderOverview({ queryClient });
+    const events = region("Senaste granskningshändelser");
+    expect(await within(events).findByText("Anna Lind bytte lösenord")).toBeTruthy();
+
+    // The backend refuses the next read: the justified access session has ended.
+    answer({ ...ALL_OK, "/api/v1/audit/logs": failure(401) });
+    await act(async () => {
+      await queryClient.refetchQueries({ type: "active" });
+    });
+    await waitFor(() => expect(within(events).queryByText("Anna Lind bytte lösenord")).toBeNull());
+    expect(within(events).getByText("Visas efter en motiverad åtkomstsession")).toBeTruthy();
+
+    // A session opened again: the next read works and the events are back.
+    answer(ALL_OK);
+    await act(async () => {
+      await queryClient.refetchQueries({ type: "active" });
+    });
+    expect(await within(events).findByText("Anna Lind bytte lösenord")).toBeTruthy();
+    expect(within(events).queryByText("Visas efter en motiverad åtkomstsession")).toBeNull();
+  });
+
+  it("keeps loaded audit events when a refresh only fails", async () => {
+    const queryClient = testQueryClient();
+    answer(ALL_OK);
+    renderOverview({ queryClient });
+    const events = region("Senaste granskningshändelser");
+    expect(await within(events).findByText("Anna Lind bytte lösenord")).toBeTruthy();
+    answer({ ...ALL_OK, "/api/v1/audit/logs": failure(500) });
+    await act(async () => {
+      await queryClient.refetchQueries({ type: "active" });
+    });
+    expect(within(events).getByText("Anna Lind bytte lösenord")).toBeTruthy();
+    expect(within(events).queryByText("Visas efter en motiverad åtkomstsession")).toBeNull();
   });
 });
 
@@ -483,7 +526,7 @@ describe("AdminOverviewPage on a phone (decision 30)", () => {
     answer({ ...HEALTHY, "/api/v1/audit/logs": failure(401) });
     renderOverview({ queryClient });
     const areas = await screen.findByRole("region", { name: "Läget just nu" });
-    const locked = "Granskningsloggarna visas först efter en motiverad åtkomstsession.";
+    const locked = "Visas efter en motiverad åtkomstsession";
     expect(await within(areas).findByText(locked)).toBeTruthy();
 
     // A refetch clears the query's error while it runs.

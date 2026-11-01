@@ -1,7 +1,6 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
-import { ExternalLink } from "lucide-react";
 import Link from "@/lib/link";
 import { useFormatter, useTranslations } from "use-intl";
 import { lazy, Suspense, useMemo, useState } from "react";
@@ -129,7 +128,7 @@ function TokensCard({ range }: { range: InsightRange }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-semibold">{t("tokens")}</h2>
         <Link
-          className="text-ax-text-accent underline underline-offset-4"
+          className="text-ax-text-accent inline-flex min-h-6 items-center underline underline-offset-4 pointer-coarse:min-h-11"
           href={`/admin/usage?tab=tokens&from=${range.start}&to=${range.end}`}
         >
           {t("insights_token_usage_link")}
@@ -186,7 +185,7 @@ function ActivityCards({ range, compare }: { range: InsightRange; compare: boole
 
   return (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-      <Card className="flex flex-col gap-1 p-6">
+      <Card className="flex flex-col gap-1 p-4 sm:p-6">
         <span className="text-muted-foreground text-sm">{t("active_assistants")}</span>
         <span className="flex items-baseline gap-2">
           <span className="text-3xl font-semibold tabular-nums">
@@ -196,7 +195,7 @@ function ActivityCards({ range, compare }: { range: InsightRange; compare: boole
           <Delta current={data.active_assistant_count} prior={priorData?.active_assistant_count} />
         </span>
       </Card>
-      <Card className="flex flex-col gap-1 p-6">
+      <Card className="flex flex-col gap-1 p-4 sm:p-6">
         <span className="text-muted-foreground text-sm">{t("active_users")}</span>
         <span className="flex items-baseline gap-2">
           <span className="text-3xl font-semibold tabular-nums">
@@ -244,7 +243,6 @@ function AssistantActivityRows({
   assistantNames: Map<string, string>;
 }) {
   const t = useTranslations();
-  const format = useFormatter();
   return (
     <Card className="overflow-hidden p-0">
       <div className="divide-y">
@@ -258,8 +256,10 @@ function AssistantActivityRows({
                 {assistantNames.get(row.assistantId) ?? row.assistantId}
               </p>
               <p className="text-muted-foreground text-sm">
-                {format.number(row.questions)} {t("questions")} · {format.number(row.sessions)}{" "}
-                {t("sessions")}
+                {t("insights_assistant_row_counts", {
+                  questions: row.questions,
+                  sessions: row.sessions
+                })}
               </p>
             </div>
             <Button
@@ -267,7 +267,6 @@ function AssistantActivityRows({
               size="sm"
               href={`/admin/insights/assistant/${row.assistantId}`}
               label={t("details")}
-              icon={<ExternalLink className="size-4" aria-hidden="true" />}
             />
           </div>
         ))}

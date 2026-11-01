@@ -123,6 +123,10 @@ describe("admin function sources", () => {
     show();
     expect(await screen.findByRole("heading", { name: "web_search" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "image_generation" })).toBeTruthy();
+    // A card holding only its header draws no second line on its bottom edge.
+    expect(
+      screen.getByRole("heading", { name: "web_search" }).closest("header")?.className
+    ).toContain("last:border-b-0");
     fireEvent.click(screen.getAllByRole("button", { name: "capability_configure" })[0]!);
     fireEvent.change(screen.getByLabelText("name"), { target: { value: "Search source" } });
     fireEvent.change(screen.getByLabelText("url"), {
@@ -198,6 +202,16 @@ describe("admin function sources", () => {
       })
     );
     expect(await screen.findByText("tools_builtin_turned_on")).toBeTruthy();
+  });
+
+  it("gives the external server's button a 44 px row on a touch screen", async () => {
+    show();
+    const connect = await screen.findAllByRole("button", { name: "tools_connect_external" });
+    expect(connect.length).toBeGreaterThan(0);
+    for (const button of connect) {
+      expect(button.className.split(/\s+/)).toContain("pointer-coarse:min-h-11");
+      expect(button.parentElement!.className.split(/\s+/)).toContain("items-center");
+    }
   });
 
   it("names a bundled source after its function and keeps it out of the edit form", async () => {

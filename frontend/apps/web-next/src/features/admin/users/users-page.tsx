@@ -5,7 +5,7 @@ import { useAnnounce, useMediaQuery } from "@astryxdesign/core/hooks";
 import { Pagination } from "@astryxdesign/core/Pagination";
 import { Selector, type SelectorOptionType } from "@astryxdesign/core/Selector";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { UserPlus } from "lucide-react";
 import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
@@ -31,6 +31,7 @@ import {
   type StateFilter,
   type UsersFilters
 } from "./users";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 const STATE_TABS: StateFilter[] = ["active", "inactive"];
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
@@ -86,6 +87,10 @@ export function AdminUsersPage() {
   const tabId = (value: StateFilter) => `${baseId}-tab-${value}`;
   const tabLabel = (value: StateFilter) =>
     value === "active" ? t("active_users") : t("inactive_users");
+  // Under the "Användare" heading a tab says only which ones (both fit a 320
+  // px phone); the table keeps the full name.
+  const tabName = (value: StateFilter) =>
+    value === "active" ? t("admin_users_tab_active") : t("admin_users_tab_inactive");
   const panelRef = useRef<HTMLDivElement>(null);
   const rescue = useFocusRescue();
   const announce = useAnnounce();
@@ -164,10 +169,14 @@ export function AdminUsersPage() {
     changeFilters({ roleId: next === ALL_ROLES ? null : next, page: 1 });
   }
 
+  const filtered = Boolean(emailBox.draft || nameBox.draft || search || searchName || roleId);
+
   function clearFilters() {
     emailBox.setDraft("");
     nameBox.setDraft("");
     changeFilters({ search: "", searchName: "", roleId: null, page: 1 });
+    // The pressed button leaves with the filters: focus goes to the list.
+    rescue(panelRef.current);
   }
 
   function changePage(next: number) {
@@ -229,7 +238,7 @@ export function AdminUsersPage() {
               key={value}
               id={tabId(value)}
               value={value}
-              label={tabLabel(value)}
+              label={tabName(value)}
               panelId={panelId}
               endContent={
                 count != null ? (
@@ -255,9 +264,10 @@ export function AdminUsersPage() {
       >
         {/* The filters search the whole list (the backend filters), not the page. */}
         <div role="search" aria-label={t("users")} className="flex flex-col gap-3">
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3">
             <TextInput
               label={t("email")}
+              {...KEYBOARD.email}
               value={emailBox.draft}
               onChange={emailBox.setDraft}
               hasClear
@@ -267,6 +277,7 @@ export function AdminUsersPage() {
             />
             <TextInput
               label={t("username")}
+              {...KEYBOARD.identifier}
               value={nameBox.draft}
               onChange={nameBox.setDraft}
               hasClear
@@ -287,7 +298,10 @@ export function AdminUsersPage() {
             <p id={hintId} className="text-ax-text-secondary max-w-xl text-sm">
               {t("admin_users_search_hint")}
             </p>
-            <Button label={t("admin_users_clear_filters")} size="sm" onClick={clearFilters} />
+            {/* Only while there is something to clear, as the crawler's filters. */}
+            {filtered ? (
+              <Button label={t("admin_users_clear_filters")} size="sm" onClick={clearFilters} />
+            ) : null}
             <p className="text-ax-text-secondary ms-auto text-sm">
               {total != null ? t("admin_users_count", { count: total }) : ""}
             </p>

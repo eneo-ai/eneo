@@ -9,7 +9,7 @@ import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { getErrorMessage } from "@/lib/api/errors";
 import { useSpace } from "@/features/spaces/use-space";
 import { createFlow, refusalCode, storeFlow } from "./flows-api";

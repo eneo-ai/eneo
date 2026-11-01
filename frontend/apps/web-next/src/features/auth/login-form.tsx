@@ -1,9 +1,10 @@
 import { Button } from "@astryxdesign/core/Button";
+import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { useActionState, useEffect, useId, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { Banner } from "@astryxdesign/core/Banner";
 import { PasswordInput } from "@/components/astryx/password-input";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { submitPasswordLogin, type LoginFormState } from "./password-login";
 
 const ERROR_KEYS: Record<NonNullable<LoginFormState["error"]>, string> = {
@@ -59,27 +60,30 @@ export function LoginForm({ next }: { next?: string }) {
           />
         </div>
       ) : null}
-      <TextInput
-        label={t("email")}
-        htmlName="email"
-        type="email"
-        autoComplete="username"
-        value={email}
-        onChange={setEmail}
-        isRequired
-        aria-invalid={rejected || undefined}
-        aria-describedby={rejected ? errorId : undefined}
-      />
-      <PasswordInput
-        label={t("password")}
-        htmlName="password"
-        autoComplete="current-password"
-        value={password}
-        onChange={setPassword}
-        isRequired
-        aria-invalid={rejected || undefined}
-        aria-describedby={rejected ? errorId : undefined}
-      />
+      {/* Both fields are required, the default and unmarked (decision 40). */}
+      <FormLayout defaultOptionality="required" className="gap-4">
+        <TextInput
+          label={t("email")}
+          htmlName="email"
+          type="email"
+          autoComplete="username"
+          value={email}
+          onChange={setEmail}
+          isRequired
+          aria-invalid={rejected || undefined}
+          aria-describedby={rejected ? errorId : undefined}
+        />
+        <PasswordInput
+          label={t("password")}
+          htmlName="password"
+          autoComplete="current-password"
+          value={password}
+          onChange={setPassword}
+          isRequired
+          aria-invalid={rejected || undefined}
+          aria-describedby={rejected ? errorId : undefined}
+        />
+      </FormLayout>
       <Button
         type="submit"
         variant="primary"

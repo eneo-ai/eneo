@@ -54,12 +54,18 @@ function makeRun(overrides: Partial<AppRun> = {}): AppRun {
   };
 }
 
-function renderResult(run: AppRun) {
+function renderResult(run: AppRun, hideBackOnPhone?: boolean) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(["app-runs", run.id], run);
-  return renderInApp(<ResultDetail runId={run.id} backHref="/apps" newRunHref="/apps/new" />, {
-    queryClient
-  });
+  return renderInApp(
+    <ResultDetail
+      runId={run.id}
+      backHref="/apps"
+      hideBackOnPhone={hideBackOnPhone}
+      newRunHref="/apps/new"
+    />,
+    { queryClient }
+  );
 }
 
 /** The docked bar's controls, in the order they sit. */
@@ -115,6 +121,17 @@ describe("ResultDetail", () => {
     expect(document.activeElement).toBe(results);
   });
 
+  it("keeps its back link on a phone unless the space's page bar has one", () => {
+    renderResult(makeRun());
+    const back = screen.getByRole("link", { name: "Tillbaka" });
+    expect(back.getAttribute("href")).toBe("/apps");
+    expect(back.className).not.toContain("max-md:hidden");
+    cleanup();
+
+    renderResult(makeRun(), true);
+    expect(screen.getByRole("link", { name: "Tillbaka" }).className).toContain("max-md:hidden");
+  });
+
   it("shows the output without tabs when nothing was transcribed", () => {
     renderResult(makeRun({ input: { text: "Vad säger avtalet?", files: [] } } as Partial<AppRun>));
 
@@ -139,6 +156,9 @@ describe("ResultDetail", () => {
     const panel = screen.getByRole("tabpanel", { name: "Resultat" });
     expect(within(panel).queryByRole("button", { name: "Kopiera" })).toBeNull();
     expect(screen.getByText("Slutförd")).toBeTruthy();
+    // The summary's labels read like "Indata", without a colon of their own.
+    expect(screen.getByText("Startad")).toBeTruthy();
+    expect(screen.getByText("Avslutad")).toBeTruthy();
   });
 
   it("prints only the rendered output and removes the temporary document when print returns", () => {

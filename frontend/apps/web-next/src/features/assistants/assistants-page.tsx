@@ -21,11 +21,14 @@ import { StatusLabel } from "@/components/composites/status-label";
 import Link from "@/lib/link";
 import { ResourceViewControls, useResourceView } from "@/features/spaces/resource-view";
 import { ResourceCollection } from "@/components/composites/resource-tile";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
-import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
+import { ResourceFilterInput, useFilterShown } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
 import { chatPartnerHref, spaceChatItems, type ChatAppItem } from "./assistants";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { ChatAppActionScope } from "./actions";
 import { CreateChatAppMenu } from "./create-menu";
 import { ChatAppActions } from "./actions";
 import { ChatAppTile } from "./tile";
@@ -35,10 +38,19 @@ export function AssistantsPage() {
   const { space, routeId, can } = useSpace();
   const collator = useCollator();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // On a phone the title is for screen readers only (the space's active tab names the page), so
+  // focus that a removal or an action needs to put somewhere goes to the visible page instead.
+  const phone = useMediaMatch(PHONE_QUERY);
+  const focusTarget = phone ? panelRef : headingRef;
   const [filter, setFilter] = useState("");
 
   const items = useMemo(() => spaceChatItems(space, collator.compare), [space, collator]);
-  const matchedItems = useMemo(() => filterSpaceResources(items, filter), [items, filter]);
+  const filterShown = useFilterShown(items.length);
+  const matchedItems = useMemo(
+    () => filterSpaceResources(items, filterShown ? filter : ""),
+    [items, filter, filterShown]
+  );
   const { view, chooseView } = useResourceView("assistants", "cards");
   const comparePublished = useCallback(
     (a: boolean, b: boolean) =>
@@ -131,68 +143,83 @@ export function AssistantsPage() {
   }
 
   return (
-    <RemovalFocusScope target={headingRef}>
-      <div className="flex w-full flex-col gap-6">
-        <PageHeader
-          headingLevel={2}
-          headingRef={headingRef}
-          title={t("assistants")}
-          actions={canCreate && items.length > 0 ? <CreateChatAppMenu /> : undefined}
-        />
-        {items.length === 0 ? (
-          <EmptyState
-            icon={<Bot />}
-            hue={AREA_HUES.assistants}
-            title={t("space_assistants_empty_title")}
-            description={t("space_assistants_empty_description")}
-            headingLevel={3}
-            actions={canCreate ? <CreateChatAppMenu /> : undefined}
+    <RemovalFocusScope target={focusTarget}>
+      <ChatAppActionScope focusTarget={focusTarget}>
+        <div
+          ref={panelRef}
+          tabIndex={-1}
+          className="focus-visible:outline-ring rounded-ax-element flex w-full flex-col gap-6 focus-visible:outline-2 focus-visible:outline-offset-4"
+        >
+          <PageHeader
+            headingLevel={2}
+            headingRef={headingRef}
+            title={t("assistants")}
+            isTitleHiddenOnPhone
+            actions={
+              canCreate && items.length > 0 ? (
+                <DockedActions label={t("space_assistants_actions")}>
+                  <CreateChatAppMenu />
+                </DockedActions>
+              ) : undefined
+            }
           />
-        ) : (
-          <>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <ResourceFilterInput
-                value={filter}
-                onChange={setFilter}
-                label={t("space_filter_assistants_label")}
-                placeholder={t("filter_assistants_placeholder")}
-                resultCount={filteredItems.length}
-              />
-              <ResourceViewControls
-                view={view}
-                onViewChange={chooseView}
-                sortConfig={sortConfig}
-                options={[
-                  { key: "name", label: t("name") },
-                  ...(showStatus ? [{ key: "published" as const, label: t("status") }] : [])
-                ]}
-              />
-            </div>
-            {filteredItems.length === 0 ? (
-              <EmptyState
-                icon={<SearchX />}
-                title={t("no_results_found")}
-                headingLevel={3}
-                isCompact
-              />
-            ) : groupByStatus ? (
-              <div className="flex flex-col gap-6">
-                {groups.map((group) => (
-                  <ResourceGroup
-                    key={String(group.published)}
-                    title={group.title}
-                    hidden={group.members.length === 0}
-                  >
-                    {collection(group.members, false, `${t("assistants")} · ${group.title}`)}
-                  </ResourceGroup>
-                ))}
+          {items.length === 0 ? (
+            <EmptyState
+              icon={<Bot />}
+              hue={AREA_HUES.assistants}
+              title={t("space_assistants_empty_title")}
+              description={t("space_assistants_empty_description")}
+              headingLevel={3}
+              actions={canCreate ? <CreateChatAppMenu /> : undefined}
+            />
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                {filterShown ? (
+                  <ResourceFilterInput
+                    value={filter}
+                    onChange={setFilter}
+                    label={t("space_filter_assistants_label")}
+                    placeholder={t("filter_assistants_placeholder")}
+                    resultCount={filteredItems.length}
+                  />
+                ) : null}
+                <ResourceViewControls
+                  view={view}
+                  onViewChange={chooseView}
+                  sortConfig={sortConfig}
+                  options={[
+                    { key: "name", label: t("name") },
+                    ...(showStatus ? [{ key: "published" as const, label: t("status") }] : [])
+                  ]}
+                />
               </div>
-            ) : (
-              collection(filteredItems, showStatus, t("assistants"))
-            )}
-          </>
-        )}
-      </div>
+              {filteredItems.length === 0 ? (
+                <EmptyState
+                  icon={<SearchX />}
+                  title={t("no_results_found")}
+                  headingLevel={3}
+                  isCompact
+                />
+              ) : groupByStatus ? (
+                <div className="flex flex-col gap-6">
+                  {groups.map((group) => (
+                    <ResourceGroup
+                      key={String(group.published)}
+                      title={group.title}
+                      hidden={group.members.length === 0}
+                    >
+                      {collection(group.members, false, `${t("assistants")} · ${group.title}`)}
+                    </ResourceGroup>
+                  ))}
+                </div>
+              ) : (
+                collection(filteredItems, showStatus, t("assistants"))
+              )}
+            </>
+          )}
+        </div>
+      </ChatAppActionScope>
     </RemovalFocusScope>
   );
 }

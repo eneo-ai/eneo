@@ -6,6 +6,7 @@ import { setRoute } from "@/test/navigation";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import type { Space } from "@/features/spaces/space";
 import { expectNoAxeViolations } from "@/test/axe";
+import { setViewport } from "@/test/setup-dom";
 import { AppDetail } from "./app-detail";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -32,14 +33,37 @@ it("follows external same-route tab changes and falls back for an unknown tab", 
     queryClient,
     route: "/spaces/space-1/apps/app-1"
   });
-  expect(screen.getByRole("tabpanel").textContent).toBe("Körvy");
+  // The run panel stays mounted behind Resultat, so name the one that is shown.
+  const shown = () => {
+    const [panel, ...more] = screen
+      .getAllByRole("tabpanel")
+      .filter((candidate) => candidate.getAttribute("data-state") === "active");
+    expect(more).toEqual([]);
+    return panel!;
+  };
+  expect(shown().textContent).toBe("Körvy");
   expect(screen.queryByRole("link", { name: "Redigera" })).toBeNull();
   setRoute("/spaces/space-1/apps/app-1?tab=results");
   rerender(<AppDetail appId="app-1" />);
-  expect(screen.getByRole("tabpanel").textContent).toBe("Resultatvy");
+  expect(shown().textContent).toBe("Resultatvy");
   setRoute("/spaces/space-1/apps/app-1?tab=unknown");
   rerender(<AppDetail appId="app-1" />);
-  expect(screen.getByRole("tabpanel").textContent).toBe("Körvy");
+  expect(shown().textContent).toBe("Körvy");
+});
+
+it("offers Redigera as a pencil beside the name on a phone, and as a button elsewhere", () => {
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(["apps", "app-1"], { name: "Protokoll", permissions: ["edit"] });
+  setViewport("phone");
+  renderInApp(<AppDetail appId="app-1" />, { queryClient, route: "/spaces/space-1/apps/app-1" });
+  const edit = screen.getByRole("link", { name: "Redigera" });
+  expect(edit.getAttribute("href")).toBe("/spaces/space-1/apps/app-1/edit");
+  expect(edit.textContent?.trim()).toBe("");
+  cleanup();
+
+  setViewport("tablet-portrait");
+  renderInApp(<AppDetail appId="app-1" />, { queryClient, route: "/spaces/space-1/apps/app-1" });
+  expect(screen.getByRole("link", { name: "Redigera" }).textContent).toContain("Redigera");
 });
 
 it.each([false, true])(

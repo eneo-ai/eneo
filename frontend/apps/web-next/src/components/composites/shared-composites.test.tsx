@@ -33,6 +33,10 @@ describe("PageHeader", () => {
     expect(within(trail).getByRole("link", { name: "Ytor" }).getAttribute("href")).toBe("/spaces");
     expect(within(trail).getByText("Min yta").closest("[aria-current='page']")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Lägg till" })).toBeTruthy();
+    // jsdom applies no CSS: the actions stand on the title's line, not centred on the paragraph.
+    const row = screen.getByRole("button", { name: "Lägg till" }).closest(".justify-between");
+    expect(row?.className.split(" ")).toContain("items-start");
+    expect(row?.className.split(" ")).not.toContain("items-center");
   });
 
   it("keeps a section label without a link out of aria-current", () => {
@@ -64,6 +68,24 @@ describe("PageHeader", () => {
     expect(screen.getByRole("table", { name: "Promptbibliotek" })).toBeTruthy();
   });
 
+  it("keeps the title for screen readers only on a phone, its actions in view", () => {
+    render(
+      <PageHeader
+        title="Appar"
+        description="Alla appar i ytan"
+        headingLevel={2}
+        isTitleHiddenOnPhone
+        actions={<button type="button">Skapa app</button>}
+      />
+    );
+    const title = screen.getByRole("heading", { level: 2, name: "Appar" });
+    const hidden = title.closest(".max-md\\:sr-only");
+    expect(hidden).toBeTruthy();
+    expect(screen.getByText("Alla appar i ytan").closest(".max-md\\:sr-only")).toBe(hidden);
+    const create = screen.getByRole("button", { name: "Skapa app" });
+    expect(create.closest(".max-md\\:sr-only")).toBeNull();
+  });
+
   it("keeps the legacy children actions slot", () => {
     render(
       <PageHeader title="Appar">
@@ -71,6 +93,9 @@ describe("PageHeader", () => {
       </PageHeader>
     );
     expect(screen.getByRole("button", { name: "Skapa" })).toBeTruthy();
+    // A title alone is centred on its actions' line.
+    const row = screen.getByRole("button", { name: "Skapa" }).closest(".justify-between");
+    expect(row?.className.split(" ")).toContain("items-center");
     expect(screen.queryByRole("navigation")).toBeNull();
   });
 });

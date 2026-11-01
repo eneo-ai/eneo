@@ -17,7 +17,7 @@ import {
   type RefObject
 } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import {
@@ -33,6 +33,7 @@ import { SkillDependencies } from "@/features/skills/skill-dependencies";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import { COMPOSER_PILL_CLASS, COMPOSER_PILL_COUNT_CLASS } from "./mcp-controls";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type PersonalChatSkills = ReturnType<typeof usePersonalChatSkills>;
 /** The library search: as typed, and the query the rows follow after a pause. */
@@ -216,6 +217,7 @@ function OwnSkills({
             value={search.value}
             onChange={search.onChange}
             startIcon={Search}
+            {...KEYBOARD.search}
             hasClear
             size="sm"
             width="100%"

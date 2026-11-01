@@ -7,7 +7,7 @@ import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/Segme
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { Banner } from "@astryxdesign/core/Banner";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
@@ -39,6 +39,7 @@ import {
   modelsAttention,
   UNCLASSIFIED
 } from "./provider-sections";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /**
  * One banner for everything the data says needs an admin: active providers
@@ -275,6 +276,7 @@ export function ProviderOverview({
             isLabelHidden
             placeholder={t("search_models_and_providers")}
             startIcon={Search}
+            {...KEYBOARD.search}
             value={search}
             onChange={(value) => {
               setSearch(value);

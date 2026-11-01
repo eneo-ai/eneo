@@ -32,7 +32,7 @@ it("shows missing input at the inputs on submit, and moves focus to the first", 
   api.POST.mockResolvedValue({ data: { id: "run-1" }, response: new Response("{}") });
   renderInApp(<RunView app={app([{ type: "text-field" }])} resultHref={(id) => `/runs/${id}`} />);
 
-  const submit = screen.getByRole("button", { name: "Skicka" });
+  const submit = screen.getByRole("button", { name: "Kör appen" });
   expect(submit.hasAttribute("disabled")).toBe(false);
   fireEvent.click(submit);
 
@@ -59,7 +59,7 @@ it("shows missing input at the inputs on submit, and moves focus to the first", 
 it("moves focus to an upload input's file picker when it is the first input", () => {
   renderInApp(<RunView app={app([{ type: "text-upload" }])} resultHref={(id) => `/runs/${id}`} />);
 
-  fireEvent.click(screen.getByRole("button", { name: "Skicka" }));
+  fireEvent.click(screen.getByRole("button", { name: "Kör appen" }));
 
   const group = screen.getByRole("group", { name: "Indata" });
   expect(document.activeElement?.tagName).toBe("BUTTON");
@@ -88,7 +88,7 @@ it("asks to wait while a file uploads, and keeps focus on a busy submit", async 
   });
   await screen.findByText("protokoll.pdf");
 
-  const submit = screen.getByRole("button", { name: "Skicka" });
+  const submit = screen.getByRole("button", { name: "Kör appen" });
   submit.focus();
   fireEvent.click(submit);
   const notice = await screen.findByText("Vänta tills filerna har laddats upp.");
@@ -99,7 +99,7 @@ it("asks to wait while a file uploads, and keeps focus on a busy submit", async 
   uploaded({ data: { id: "file-1" }, response: new Response("{}") });
   await waitFor(() => expect(notice.textContent).toBe(""));
   fireEvent.click(submit);
-  const busy = await screen.findByRole("button", { name: "Skickar..." });
+  const busy = await screen.findByRole("button", { name: "Startar…" });
   expect(busy).toBe(submit);
   expect(busy.getAttribute("aria-busy")).toBe("true");
   expect(document.activeElement).toBe(busy);
@@ -109,13 +109,16 @@ it("asks to wait while a file uploads, and keeps focus on a busy submit", async 
 });
 
 const drag = (files: File[] = []) => ({ dataTransfer: { types: ["Files"], files, items: [] } });
+// Any element inside the page-drop area takes the events (they bubble to its handlers); the card
+// has no heading of its own, the page's h1 names the app.
+const dropArea = () => screen.getByRole("group", { name: "Åtgärder för appen" });
 
 it("shows a named page overlay outside the picker and uploads once when dropped over the picker", async () => {
   api.POST.mockResolvedValue({ data: { id: "file-1" }, response: new Response("{}") });
   const { container } = renderInApp(
     <RunView app={app([{ type: "text-upload" }])} resultHref={(id) => `/runs/${id}`} />
   );
-  const title = screen.getByRole("heading", { name: "Sammanfattaren" });
+  const title = dropArea();
   fireEvent.dragEnter(title, drag());
   expect(
     within(container).getByText("Släpp filer här för att ladda upp dem till Sammanfattaren")
@@ -145,7 +148,7 @@ it("uses the first upload field's rules for a page drop", async () => {
     { mimetype: "image/png", extensions: ["png"], size_limit: 1000 }
   ];
   renderInApp(<RunView app={configured} resultHref={(id) => `/runs/${id}`} />);
-  const title = screen.getByRole("heading", { name: "Sammanfattaren" });
+  const title = dropArea();
   fireEvent.drop(title, drag([new File(["%PDF"], "first.pdf", { type: "application/pdf" })]));
   await screen.findAllByText("first.pdf");
   await act(async () =>
@@ -159,7 +162,7 @@ it.each(["text-field", "audio-recorder"] as const)("does not enable page drop fo
   const { container } = renderInApp(
     <RunView app={app([{ type }])} resultHref={(id) => `/runs/${id}`} />
   );
-  const title = screen.getByRole("heading", { name: "Sammanfattaren" });
+  const title = dropArea();
   fireEvent.dragEnter(title, drag());
   fireEvent.drop(title, drag([new File(["%PDF"], "ignored.pdf", { type: "application/pdf" })]));
   expect(
@@ -174,8 +177,20 @@ it("does not enable page drop without a completion model", () => {
   const { container } = renderInApp(
     <RunView app={configured} resultHref={(id) => `/runs/${id}`} />
   );
-  fireEvent.dragEnter(screen.getByRole("heading", { name: "Sammanfattaren" }), drag());
+  fireEvent.dragEnter(container.firstElementChild!, drag());
   expect(
     within(container).queryByText("Släpp filer här för att ladda upp dem till Sammanfattaren")
   ).toBeNull();
+});
+
+it("does not repeat the app's name: the page's own heading names it", () => {
+  renderInApp(<RunView app={app([{ type: "text-field" }])} resultHref={(id) => `/runs/${id}`} />);
+  expect(screen.queryByText("Sammanfattaren")).toBeNull();
+  expect(screen.queryByRole("heading")).toBeNull();
+});
+
+it("keeps the run button in the group a phone docks under the thumb", () => {
+  renderInApp(<RunView app={app([{ type: "text-field" }])} resultHref={(id) => `/runs/${id}`} />);
+  const docked = screen.getByRole("group", { name: "Åtgärder för appen" });
+  expect(within(docked).getByRole("button", { name: "Kör appen" })).toBeTruthy();
 });

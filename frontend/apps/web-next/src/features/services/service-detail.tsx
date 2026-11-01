@@ -1,10 +1,9 @@
 "use client";
 
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { ChevronLeft } from "lucide-react";
-import Link from "@/lib/link";
 import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
+import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -35,13 +34,9 @@ export function ServiceDetail({ serviceId }: { serviceId: string }) {
     <SaveStatusProvider>
       <div className="flex w-full flex-col gap-6">
         <div className="flex flex-col gap-1">
-          <Link
-            href={`/spaces/${routeId}/services`}
-            className="text-muted-foreground hover:text-foreground flex w-fit items-center gap-1 text-sm"
-          >
-            <ChevronLeft className="size-4" />
+          <BackLink href={`/spaces/${routeId}/services`} hideOnPhone>
             {t("services")}
-          </Link>
+          </BackLink>
           <PageHeader title={service.name}>
             {canEdit && tab === "settings" ? <SaveStatusIndicator /> : null}
           </PageHeader>

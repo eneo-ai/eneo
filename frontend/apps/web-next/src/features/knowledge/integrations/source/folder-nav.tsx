@@ -15,7 +15,7 @@ import {
 import Link from "@/lib/link";
 import { useFormatter, useTranslations } from "use-intl";
 import { useId, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { cn } from "@/lib/utils";
 import type { IntegrationKnowledge } from "../../knowledge";
 import {
@@ -26,6 +26,7 @@ import {
 import { itemState, sourceStateStatus, type ItemState, type QueuedIds } from "../sources";
 import type { ProgressById } from "../sync-progress";
 import type { InPlaceLink } from "@/components/composites/in-place-link";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /** Below this many folders the whole tree fits and a filter only adds noise. */
 const FILTER_FROM = 8;
@@ -118,6 +119,7 @@ export function FolderNav({
             value={query}
             onChange={setQuery}
             startIcon={Search}
+            {...KEYBOARD.search}
             hasClear
             size="sm"
             width="100%"

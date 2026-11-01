@@ -397,6 +397,10 @@ describe("ModelsPage", () => {
     renderPage();
     const toggle = screen.getByRole("switch", { name: "Aktivera Multilingual E5 Large" });
     expect((toggle as HTMLInputElement).checked).toBe(false);
+    // In the table too, the track is centred in its 44 px touch box, level with the row.
+    expect(toggle.closest("td")?.firstElementChild?.className).toContain(
+      "pointer-coarse:[&>*]:min-h-11"
+    );
 
     fireEvent.click(toggle);
 
@@ -676,6 +680,10 @@ describe("ModelsPage on a phone (decision 31)", () => {
     // Its technical id, price and capabilities, as the table has them.
     expect(within(opus!).getByText("claude-opus-4-7")).toBeTruthy();
     expect(within(opus!).getByRole("list", { name: "Funktioner" })).toBeTruthy();
+    // On the meta line with the hosting, not on a line of their own.
+    expect(within(opus!).getByRole("list", { name: "Funktioner" }).parentElement).toBe(
+      within(opus!).getByText("Sverige").closest(".text-ax-text-secondary")
+    );
     await expectNoAxeViolations(document.body);
   });
 

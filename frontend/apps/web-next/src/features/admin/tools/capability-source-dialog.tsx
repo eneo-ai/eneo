@@ -221,7 +221,7 @@ export function CapabilitySourceDialog({
                 <Label htmlFor="source-type">{t("mcp_source_label")}</Label>
                 <select
                   id="source-type"
-                  className="border-input bg-background h-9 w-full rounded-md border px-2"
+                  className="border-input h-9 w-full rounded-md border bg-transparent px-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                   value={draft.source}
                   disabled={server?.is_enabled}
                   onChange={(event) =>
@@ -238,7 +238,7 @@ export function CapabilitySourceDialog({
                 <Label htmlFor="source-model">{t("tools_source_model")}</Label>
                 <select
                   id="source-model"
-                  className="border-input bg-background h-9 w-full rounded-md border px-2"
+                  className="border-input h-9 w-full rounded-md border bg-transparent px-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                   value={draft.imageModelId}
                   onChange={(event) => set("imageModelId", event.target.value)}
                   {...fieldProblemProps("source-model", problemAt("imageModel"))}
@@ -316,7 +316,7 @@ export function CapabilitySourceDialog({
                   <Label htmlFor="source-auth">{t("mcp_authentication")}</Label>
                   <select
                     id="source-auth"
-                    className="border-input bg-background h-9 w-full rounded-md border px-2"
+                    className="border-input h-9 w-full rounded-md border bg-transparent px-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                     value={draft.auth}
                     onChange={(event) =>
                       set(
@@ -378,7 +378,7 @@ export function CapabilitySourceDialog({
                     <Label htmlFor="source-classification">{t("security_classification")}</Label>
                     <select
                       id="source-classification"
-                      className="border-input bg-background h-9 w-full rounded-md border px-2"
+                      className="border-input h-9 w-full rounded-md border bg-transparent px-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                       value={draft.classificationId}
                       onChange={(event) => set("classificationId", event.target.value)}
                     >
@@ -429,7 +429,7 @@ export function CapabilitySourceDialog({
               <Label htmlFor="source-audience">{t("mcp_audience_label")}</Label>
               <select
                 id="source-audience"
-                className="border-input bg-background h-9 w-full rounded-md border px-2"
+                className="border-input h-9 w-full rounded-md border bg-transparent px-2 text-base pointer-coarse:min-h-11 md:pointer-fine:text-sm"
                 value={draft.audience}
                 onChange={(event) =>
                   set("audience", event.target.value === "groups" ? "groups" : "everyone")

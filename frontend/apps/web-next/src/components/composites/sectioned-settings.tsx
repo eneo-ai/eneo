@@ -38,8 +38,11 @@ export type SettingsSection = {
 
 /** What a phone's settings index needs (decision 21): its page bar. */
 export type SettingsPhoneIndex = {
-  /** The list the resource sits in: where the index's back link goes. */
-  parent: { label: string; href: string };
+  /**
+   * The list the resource sits in: where the index's back link goes. Without it the index has no
+   * page bar of its own, for a page whose frame already supplies one (a space's settings).
+   */
+  parent?: { label: string; href: string };
   /** The resource's name: the bar's title, and the page's h1 on a phone. */
   title: string;
   /** The index bar's actions ("Testa"). */
@@ -55,7 +58,7 @@ type SectionedSettingsProps = {
   /**
    * Below 768 px, open on an index of the sections, each a view of its own
    * with a page bar back to the index (decision 21). Without it a phone shows
-   * the tablet's page, as space settings does.
+   * the tablet's page.
    */
   phone?: SettingsPhoneIndex;
 };
@@ -347,7 +350,7 @@ function SettingsLayout({
                 </span>
               }
             />
-          ) : (
+          ) : views.phone.parent ? (
             <PageBar
               until="md"
               parent={views.phone.parent}
@@ -358,11 +361,19 @@ function SettingsLayout({
                 views.phone.actions ? <span className="pe-2.5">{views.phone.actions}</span> : null
               }
             />
-          )}
+          ) : null}
           {/* The header is the tablet's. A phone shows the name in the bar,
               the h1 for assistive technology, and the save state: here on
               the index, in the bar on a section, where it stays in view. */}
-          <h1 className="sr-only md:hidden">{views.phone.title}</h1>
+          {views.phone.parent ? (
+            <h1 className="sr-only md:hidden">{views.phone.title}</h1>
+          ) : shown ? null : (
+            // The page's frame has the h1 (the space) and a bar whose title shows only once
+            // the page has scrolled: the index names itself.
+            <h2 className="text-ax-text m-0 px-4 pt-4 text-2xl leading-tight font-semibold md:hidden">
+              {views.phone.title}
+            </h2>
+          )}
           <div
             data-editor-strip
             className={cn("flex min-h-11 items-center px-4 pt-2 md:hidden", shown && "hidden")}

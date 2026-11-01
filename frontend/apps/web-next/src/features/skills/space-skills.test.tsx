@@ -119,6 +119,22 @@ describe("space Skills", () => {
     );
   });
 
+  it("offers one create action: docked with a list, only the empty state's without", async () => {
+    show(<SpaceSkillsPage />);
+    await screen.findByText("Reports");
+    expect(
+      within(screen.getByRole("group", { name: "space_skills_actions" })).getByRole("link", {
+        name: "skills_library_create"
+      })
+    ).toBeTruthy();
+    cleanup();
+
+    get.mockImplementation(() => ok({ items: [], next_cursor: null }));
+    show(<SpaceSkillsPage />);
+    await screen.findByRole("link", { name: "skills_library_create_first" });
+    expect(screen.queryByRole("link", { name: "skills_library_create" })).toBeNull();
+  });
+
   it("moves focus to the heading when the deleted skill's row goes away", async () => {
     remove.mockImplementation(() => {
       get.mockImplementation(() => ok({ items: [], next_cursor: null }));
@@ -197,6 +213,11 @@ describe("space Skills", () => {
     expect(
       screen.getByLabelText("skills_display_name_label").closest(".\\[\\&_\\*\\]\\:scroll-mb-20")
     ).toBeTruthy();
+    // And on a window too short for a bar that size (a phone held sideways) it is not sticky.
+    const footer = screen.getByRole("button", { name: "skills_create_action" }).parentElement!
+      .parentElement!;
+    expect(footer.className).toContain("sticky");
+    expect(footer.className).toContain("[@media(height<31.25rem)]:static");
     fireEvent.change(screen.getByLabelText("skills_display_name_label"), {
       target: { value: "Reports" }
     });

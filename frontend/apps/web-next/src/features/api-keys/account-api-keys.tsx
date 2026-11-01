@@ -3,11 +3,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@astryxdesign/core/Button";
 import { Bell } from "lucide-react";
-import { useId, useState } from "react";
+import { useCallback, useId, useState } from "react";
 import { useTranslations } from "use-intl";
 import { Switch } from "@astryxdesign/core/Switch";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { QueryStateBoundary } from "@/components/composites/query-state";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { useAutosaveField } from "@/components/composites/use-autosave";
 import { useAppContext } from "@/components/providers/app-context";
 import { settingSwitchScope, useSettingSwitch } from "@/features/admin/use-setting-switch";
@@ -187,7 +188,7 @@ function NotificationPreferences({
                       key={day}
                       label={t("api_keys_notifications_add_day", { days: day })}
                       size="sm"
-                      variant="ghost"
+                      variant="secondary"
                       isDisabled={!parsedDays}
                       isLoading={updateDays.isPending}
                       isInterruptible
@@ -249,25 +250,35 @@ export function ApiKeys() {
   const t = useTranslations();
   const { can } = useAppContext();
   const secrets = useSecretReveal();
+  const [keysLoaded, setKeysLoaded] = useState(false);
+  const onKeysLoaded = useCallback(() => setKeysLoaded(true), []);
 
   return (
     <div data-tour="account-api-keys" className="flex flex-col gap-4">
-      <NotificationPreferencesPanel />
       <UserApiKeyList
         limit={25}
+        onLoaded={onKeysLoaded}
         onRotated={secrets.reveal(t("api_keys_rotated_title"))}
         toolbar={
           can("api_keys") ? (
-            <CreateApiKeyDialog
-              idPrefix="account"
-              trigger={<Button label={t("api_keys_create_short")} />}
-              onCreated={secrets.reveal(t("api_keys_created_title"))}
-            />
+            // The page's one primary action: docked at the bottom on a phone, beside Uppdatera
+            // from 768 px.
+            <DockedActions label={t("account_api_keys_actions")}>
+              <CreateApiKeyDialog
+                idPrefix="account"
+                trigger={<Button variant="primary" label={t("api_keys_create")} />}
+                onCreated={secrets.reveal(t("api_keys_created_title"))}
+              />
+            </DockedActions>
           ) : (
             <p className="text-muted-foreground text-sm">{t("api_keys_no_create_permission")}</p>
           )
         }
       />
+      {/* Below the keys, and once they are there: above, it pushed the list down by its
+          whole height when it loaded; below but earlier, the rows pushed it off the
+          screen (layout shift both ways). */}
+      {keysLoaded && <NotificationPreferencesPanel />}
       {secrets.dialog}
     </div>
   );

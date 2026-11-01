@@ -1,7 +1,7 @@
 "use client";
 
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";
 import { Token } from "@astryxdesign/core/Token";
 import { Search, Server, Star } from "lucide-react";
@@ -10,6 +10,7 @@ import { useMemo, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { matchesSearch } from "@/lib/search";
 import type { ProviderOption } from "./model-providers";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type CapabilityFilter = "all" | "embedding" | "transcription" | "image" | "rerank";
 
@@ -138,6 +139,7 @@ export function ProviderPicker({
         isLabelHidden
         placeholder={t("search_providers")}
         startIcon={Search}
+        {...KEYBOARD.search}
         value={search}
         onChange={setSearch}
         hasClear

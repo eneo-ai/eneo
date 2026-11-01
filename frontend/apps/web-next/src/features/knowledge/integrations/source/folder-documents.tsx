@@ -18,7 +18,7 @@ import Link from "@/lib/link";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -46,6 +46,7 @@ import type { ProgressById } from "../sync-progress";
 import { VENDOR } from "../vendor";
 import type { InPlaceLink } from "@/components/composites/in-place-link";
 import { LiveSyncFeed } from "./live-sync-feed";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 /** Below Tailwind's `sm`, page numbers at 44 px touch sizes overflow a phone. */
 const NARROW_QUERY = `not all and ${MEDIA.sm}`;
@@ -340,7 +341,10 @@ export function FolderDocuments({
       width: proportional(1, { minWidth: 96 }),
       sortable: true,
       renderCell: (row) => (
-        <span className="text-ax-text-secondary block truncate" title={row.relative_path}>
+        <span
+          className="text-ax-text-secondary block truncate pointer-coarse:break-words pointer-coarse:whitespace-normal"
+          title={row.relative_path}
+        >
           {row.relative_path}
         </span>
       )
@@ -446,6 +450,7 @@ export function FolderDocuments({
               value={searchInput}
               onChange={setSearchInput}
               startIcon={Search}
+              {...KEYBOARD.search}
               hasClear
               width="100%"
             />

@@ -6,7 +6,7 @@ import { useFormatter, useTranslations } from "use-intl";
 import { useId } from "react";
 import { flushSync } from "react-dom";
 import { Banner } from "@astryxdesign/core/Banner";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import type { FederationView } from "./federation";
 
 /**

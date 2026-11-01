@@ -12,7 +12,7 @@ import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight } from "lucide-
 import { useTranslations } from "use-intl";
 import { Suspense, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";

@@ -9,7 +9,7 @@ import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslations } from "use-intl";
 import { Banner } from "@astryxdesign/core/Banner";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { useDebouncedValue } from "@/lib/hooks/use-debounced-value";

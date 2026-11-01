@@ -16,7 +16,6 @@ import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { useFocusRescue } from "@/lib/focus-rescue";
-import Link from "@/lib/link";
 import { useIntegrationAuth } from "@/features/integrations/use-integration-auth";
 import { VendorIcon } from "@/features/knowledge/integrations/vendor";
 
@@ -121,16 +120,14 @@ export function AccountIntegrations() {
         {(items) =>
           items.length === 0 ? (
             <EmptyState
-              title={t("integrations")}
+              title={t("no_integrations_available")}
               description={t("no_integrations_enabled")}
               actions={
                 can("admin") ? (
-                  <p>
-                    {t("enable_integrations_admin")}{" "}
-                    <Link href="/admin/integrations?tab=providers" className="underline">
-                      {t("integrations_admin_menu")}
-                    </Link>
-                  </p>
+                  <Button
+                    href="/admin/integrations?tab=providers"
+                    label={t("account_integrations_enable_in_admin")}
+                  />
                 ) : undefined
               }
             />

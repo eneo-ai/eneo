@@ -96,10 +96,39 @@ test("the Svelte build is checked against a memory budget below its heap limit",
 test("web-next runs all browser cases on FastAPI and has no Next runtime job", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
   const job = workflow.split("\n  frontend-web-next-e2e:\n")[1].split("\n  schema-drift:\n")[0];
-  assert.doesNotMatch(job, /next start|next-web-next|SESSION_SECRET|--grep|\.next\/cache/);
-  const native = job.split("- name: Run E2E and accessibility tests\n")[1]?.split(/\n      - name: /)[0];
-  assert.match(native ?? "", /E2E_BASE_URL: http:\/\/localhost:8124/);
-  assert.match(native ?? "", /^        run: bun run test:e2e$/m);
+  const step = (name) => job.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
+  assert.doesNotMatch(job, /next start|next-web-next|SESSION_SECRET|\.next\/cache/);
+  const native = step("Run E2E and accessibility tests");
+  const upload = step("Run the native knowledge upload test");
+  const worker = step("Start and check the knowledge upload worker");
+  // Complementary selections cover every case without starting the worker before queued-result tests.
+  assert.deepEqual([...job.matchAll(/^        run: (bun run test:e2e.*)$/gm)].map((match) => match[1]), [
+    "bun run test:e2e --grep-invert '@upload-worker'",
+    "bun run test:e2e --grep '@upload-worker' --output test-results/upload-worker",
+  ]);
+  for (const body of [native, upload]) {
+    assert.match(body ?? "", /E2E_BASE_URL: http:\/\/localhost:8124/);
+    assert.match(body, /working-directory: frontend\/apps\/web-next/);
+  }
+  for (const body of [native, worker, upload]) {
+    assert.equal(typeof body, "string");
+    assert.doesNotMatch(body, /^        (if|continue-on-error):/m, "test phases require preceding success");
+  }
+  const workerIndex = job.indexOf("- name: Start and check the knowledge upload worker");
+  assert.ok(workerIndex > job.indexOf("- name: Run E2E and accessibility tests"));
+  assert.ok(workerIndex < job.indexOf("- name: Run the native knowledge upload test"));
+  assert.match(worker, /e2e-backend sh -c 'exec \/app\/\.venv\/bin\/worker/);
+  assert.match(worker, /e2e-backend \/app\/\.venv\/bin\/worker --check; then\n\s+exit 0/);
+  assert.match(worker, /done\n\s+exit 1/);
+  assert.match(upload, /PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report\/upload-worker/);
+  const report = step("Upload Playwright report") ?? "";
+  for (const directory of ["playwright-report", "test-results", "playwright-report-fastapi", "test-results-fastapi"]) {
+    assert.ok(report.includes(`frontend/apps/web-next/${directory}\n`), directory);
+  }
+  assert.ok(report.includes("if: ${{ !cancelled() }}"));
+  const stop = step("Stop E2E stack") ?? "";
+  assert.ok(stop.includes("if: ${{ always() }}"));
+  assert.match(stop, /docker compose .* down -v/);
   const assets = job.indexOf("- name: Copy browser asset map from the running backend");
   assert.ok(assets > job.indexOf("- name: Wait for the E2E stack"));
   assert.ok(assets < job.indexOf("- name: Run E2E and accessibility tests"));

@@ -1,6 +1,7 @@
 "use client";
 
 import { Banner } from "@astryxdesign/core/Banner";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
 import { useAnnounce } from "@astryxdesign/core/hooks";
@@ -11,7 +12,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState, type SubmitEvent } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
 import { revealProblems } from "@/components/composites/field-problem";
@@ -313,6 +314,7 @@ function FederationForm({
             value={draft.provider}
             onChange={(provider) => edit("provider", { provider })}
             autoComplete="off"
+            {...KEYBOARD.identifier}
             isRequired
             status={status("provider")}
           />
@@ -322,6 +324,7 @@ function FederationForm({
             value={draft.clientId}
             onChange={(clientId) => edit("client_id", { clientId })}
             autoComplete="off"
+            {...KEYBOARD.identifier}
             isRequired
             status={status("client_id")}
           />
@@ -341,6 +344,7 @@ function FederationForm({
             onChange={(domains) => edit("allowed_domains", { domains })}
             rows={4}
             hasSpellCheck={false}
+            {...KEYBOARD.identifier}
             status={status("allowed_domains")}
           />
           {saveError != null ? <SaveError error={saveError} /> : null}

@@ -9,9 +9,12 @@ import { cn } from "@/lib/utils";
 /**
  * The 16 px box takes pointer input on a larger, invisible area: 24 px (WCAG
  * 2.5.8) and 44 px on a coarse pointer (ACCESSIBILITY.md → Target size).
- * Also used by RadioGroupItem.
+ * Also used by RadioGroupItem. The ::after is inset from the padding box,
+ * which the 1 px border makes 14 px, so a fixed inset fell 2 px short (42 px);
+ * centring a box of the target size does not depend on the border.
  */
-export const TOGGLE_HIT_AREA = "after:absolute after:-inset-1 pointer-coarse:after:-inset-3.5";
+export const TOGGLE_HIT_AREA =
+  "after:absolute after:inset-[calc(50%-12px)] pointer-coarse:after:inset-[calc(50%-22px)]";
 
 function Checkbox({
   className,

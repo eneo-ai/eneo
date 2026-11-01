@@ -6,7 +6,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { History } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import type { Schema } from "@/lib/api/models";
 import { toast } from "@/lib/toast";

@@ -267,6 +267,24 @@
 }
 
 @custom-variant dark (&:is(.dark *));
+/* `hover:` shows on a pointer that hovers and, on touch (which has no hover),
+   while the finger is down: Tailwind's own gates it to hover-capable pointers,
+   so a tap on a legacy button or a row showed nothing at all. */
+@custom-variant hover {
+  @media (hover: hover) {
+    &:hover {
+      @slot;
+    }
+  }
+  @media (hover: none) {
+    &:active {
+      @slot;
+    }
+  }
+}
+/* A short viewport: a phone turned sideways (a browser's own bars leave about
+   280 px) or its keyboard open. */
+@custom-variant short (@media (height < 30rem));
 
 /*
  * 3. Tailwind theme. `inline` makes every utility reference the token itself,
@@ -559,18 +577,19 @@
   }
 }
 
-/* Radix keeps closing content mounted until its exit keyframe ends. */
+/* Radix keeps closing content mounted until its exit keyframe ends. One
+   reversible motion (an accordion): the same duration and curve both ways. */
 @layer components {
   .space-model-collapse {
     overflow: hidden;
   }
 
   .space-model-collapse[data-state="open"] {
-    animation: space-model-open var(--duration-fast-max) var(--ease-standard);
+    animation: space-model-open var(--duration-medium-min) cubic-bezier(0.22, 1, 0.36, 1);
   }
 
   .space-model-collapse[data-state="closed"] {
-    animation: space-model-close var(--duration-fast-min) var(--ease-standard);
+    animation: space-model-close var(--duration-medium-min) cubic-bezier(0.22, 1, 0.36, 1);
   }
 }
 
@@ -598,7 +617,8 @@
   border: 1px solid var(--border);
   border-radius: var(--radius-container);
   box-shadow: var(--shadow-high);
-  max-width: 22rem;
+  /* Never wider than a 320 px screen leaves room for. */
+  max-width: min(22rem, calc(100vw - 2rem));
   padding: 1rem;
 }
 .driver-popover.eneo-spotlight .eneo-spotlight-version {
@@ -632,6 +652,39 @@
 .driver-popover.eneo-spotlight .driver-popover-footer button:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
+}
+/* driver.js draws the close x in #d2d2d2 (1.5:1 on this popover) and its
+   footer buttons 12 px and about 22 px high: the muted text colour (4.5:1), and a
+   target a thumb can hit. */
+.driver-popover.eneo-spotlight .driver-popover-close-btn {
+  color: var(--muted-foreground);
+}
+.driver-popover.eneo-spotlight .driver-popover-close-btn:hover,
+.driver-popover.eneo-spotlight .driver-popover-close-btn:focus-visible {
+  color: var(--foreground);
+}
+.driver-popover.eneo-spotlight .driver-popover-footer button {
+  font-size: 0.875rem;
+  line-height: 1.4;
+  padding: 0.25rem 0.75rem;
+}
+@media (pointer: coarse) {
+  .driver-popover.eneo-spotlight .driver-popover-footer button {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 0 1rem;
+    font-size: 0.9375rem;
+  }
+  .driver-popover.eneo-spotlight .driver-popover-navigation-btns {
+    gap: 0.5rem;
+  }
+  .driver-popover.eneo-spotlight .driver-popover-close-btn {
+    width: 44px;
+    height: 44px;
+  }
+  .driver-popover.eneo-spotlight .driver-popover-title {
+    padding-inline-end: 2.75rem;
+  }
 }
 
 /*
@@ -754,6 +807,48 @@
     background-color: Highlight;
     color: HighlightText;
   }
+
+  /* A filled button is drawn as a fill alone; the fill becomes Canvas, the page's
+     own colour, and a primary action reads as plain text. Give it the border a
+     native button has. Both libraries' buttons carry data-variant and data-size
+     (a legacy one used as a trigger loses its data-slot to Radix's Slot). Ghost
+     buttons are text, outline ones have a border already. */
+  :is(button, a)[data-variant][data-size]:not([data-variant="ghost"], [data-variant="link"]) {
+    border: 1px solid ButtonText;
+  }
+
+  /* A pressed toggle (a filter chip, a period preset) shows it as a fill: in
+     Highlight, the label in HighlightText, whatever its children colour. */
+  button[aria-pressed="true"] {
+    forced-color-adjust: none;
+    background-color: Highlight;
+    color: HighlightText;
+  }
+  button[aria-pressed="true"] * {
+    color: inherit;
+  }
+
+  /* The legacy switch is a coloured track with a coloured thumb: both Canvas, it
+     shows no state. An outline in the text colour, a Highlight track when on, and
+     a thumb that is the text colour off and HighlightText on. */
+  [data-slot="switch"] {
+    border-color: CanvasText;
+  }
+  [data-slot="switch"][data-state="checked"] {
+    background-color: Highlight;
+    border-color: Highlight;
+  }
+  [data-slot="switch-thumb"] {
+    background-color: CanvasText;
+  }
+  [data-slot="switch"][data-state="checked"] > [data-slot="switch-thumb"] {
+    background-color: HighlightText;
+  }
+
+  /* A filled badge keeps its shape with the text colour's border. */
+  [data-slot="badge"]:not([data-variant="outline"]) {
+    border-color: CanvasText;
+  }
 }
 
 /*
@@ -794,6 +889,16 @@
       content: "";
       position: absolute;
       inset: -10px;
+    }
+    /* The period itself is a button of its own, a line tall inside the 44 px frame: its hit
+       area grows to the frame's height (the insights page shows it on the screen). */
+    .astryx-date-range-input > button:not(:has(> .astryx-date-range-input-toggle-icon)) {
+      position: relative;
+    }
+    .astryx-date-range-input > button:not(:has(> .astryx-date-range-input-toggle-icon))::after {
+      content: "";
+      position: absolute;
+      inset: -12px 0;
     }
   }
 }
@@ -1091,7 +1196,74 @@
   .astryx-dialog::backdrop {
     backdrop-filter: none;
   }
+  /* While a text field has the focus on a viewport this short (a phone turned
+     sideways with its keyboard up leaves 50 to 150 px), the page's bars would
+     take all of it: the shell's top bar, a pushed screen's PageBar and the
+     chat's header give way until the field loses the focus. */
+  @media (height < 18.75rem) {
+    .group\/shell:has(
+        input:focus:not(
+            [type="checkbox"],
+            [type="radio"],
+            [type="file"],
+            [type="range"],
+            [type="button"],
+            [type="submit"]
+          ),
+        textarea:focus,
+        [contenteditable="true"]:focus
+      )
+      :is(header:not(main *), [data-page-bar], [data-phone-page-bar], [data-own-mobile-header]) {
+      /* !important: these bars set display through utilities (flex, grid), a later layer. */
+      display: none !important;
+    }
+  }
+  /* A phone's space settings open a section as a screen of its own, with a page bar back to
+     the index: the space's bar above gives way, so two bars do not stack. A space from the menu
+     (the organisation's) has no such bar, only its tab strip, which gives way the same. */
+  @media (width < 48rem) {
+    main:has([data-editor-view="section"]) [data-space-tabs],
+    main:has([data-editor-view="section"]) [data-phone-page-bar]:not([data-editor-view] *),
+    main:has([data-editor-view="section"])
+      [data-phone-page-bar]:not([data-editor-view] *)
+      + [data-connection-banner] {
+      /* !important: the bar sets display through a utility (grid), a later layer. */
+      display: none !important;
+    }
+  }
+  /* A dialog with a text field hangs from the top on a touch screen instead of
+     centring: the software keyboard rises over the lower half, and a centred
+     dialog's field, and the buttons under it, end up behind it. The margin
+     clears the notch; the cap keeps its footer inside the visible height. */
+  @media (pointer: coarse) {
+    .astryx-dialog:has(
+      input:not(
+        [type="checkbox"],
+        [type="radio"],
+        [type="file"],
+        [type="range"],
+        [type="button"],
+        [type="submit"],
+        [type="hidden"],
+        [type="color"]
+      ),
+      textarea,
+      [contenteditable="true"],
+      [role="combobox"]
+    ) {
+      margin-block: max(1rem, env(safe-area-inset-top, 0px)) auto;
+      max-height: calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - 1rem);
+    }
+  }
   .astryx-mobile-nav {
+    --duration-medium: var(--duration-medium-min);
+  }
+  /* What opens takes the drawer's 225 ms. Astryx's Dialog opens in 400 ms (and closes at once) and its
+     BottomSheet takes 300 ms each way; a sheet is the <dialog> that holds .astryx-bottom-sheet. */
+  .astryx-dialog {
+    --duration-medium-max: var(--duration-medium-min);
+  }
+  dialog:has(.astryx-bottom-sheet) {
     --duration-medium: var(--duration-medium-min);
   }
   .astryx-mobile-nav > div:first-child {
@@ -1143,6 +1315,78 @@
       --mobile-offset-bottom: calc(
         var(--docked-actions-height, calc(4.5rem + env(safe-area-inset-bottom, 0px))) + 8px
       ) !important;
+    }
+  }
+}
+
+/*
+ * 14c. Touch defaults for the controls of a page.
+ *    - A text field under 16 px makes iOS Safari zoom into it on focus and
+ *      stay zoomed, with the layout cropped. The touch type scale (section
+ *      14, 15 px) is below that, so on a coarse pointer a field keeps 16 px
+ *      (more with a larger root size) whatever it is given. Checkboxes, radios
+ *      and buttons are not text fields and keep theirs.
+ *    - touch-action: manipulation: a quick second tap on a control (a
+ *      stepper, the like on an answer) is two taps, not a double-tap zoom.
+ *      It sits in `base`, below Astryx, so a control that sets its own
+ *      touch-action (a slider thumb, a drag handle) keeps it.
+ *    - A disclosure's <summary> is 44 px tall on a coarse pointer.
+ */
+@layer base {
+  a,
+  button,
+  summary,
+  label,
+  input,
+  select,
+  textarea,
+  [role="button"],
+  [role="tab"],
+  [role="menuitem"],
+  [role="option"] {
+    touch-action: manipulation;
+  }
+  /* A disclosure's summary is its whole target: a line of text is 20 px. */
+  @media (pointer: coarse) {
+    summary {
+      min-block-size: 44px;
+      align-content: center;
+    }
+  }
+}
+
+/*
+ *    - A page outside the shell (sign-in, an integration's callback, a 404
+ *      without the menu) is padded by `p-safe`: --page-pad (1rem unless the
+ *      page sets it) at least, and the hardware's insets where those are
+ *      larger, so a standalone app (the manifest) keeps the heading clear of
+ *      the Dynamic Island and the home indicator when the page outgrows the
+ *      screen. Inside the shell its frame pads (components/shell/app-shell.tsx).
+ */
+@utility p-safe {
+  padding-top: max(var(--page-pad, 1rem), env(safe-area-inset-top, 0px));
+  padding-right: max(var(--page-pad, 1rem), env(safe-area-inset-right, 0px));
+  padding-bottom: max(var(--page-pad, 1rem), env(safe-area-inset-bottom, 0px));
+  padding-left: max(var(--page-pad, 1rem), env(safe-area-inset-left, 0px));
+}
+
+@layer components {
+  @media (pointer: coarse) {
+    input:not(
+      [type="checkbox"],
+      [type="radio"],
+      [type="range"],
+      [type="file"],
+      [type="color"],
+      [type="hidden"],
+      [type="image"],
+      [type="button"],
+      [type="submit"],
+      [type="reset"]
+    ),
+    select,
+    textarea {
+      font-size: max(1rem, 16px);
     }
   }
 }

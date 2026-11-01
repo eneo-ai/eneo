@@ -23,7 +23,7 @@ import { useRouter } from "@/lib/navigation";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";

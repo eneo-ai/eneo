@@ -2,7 +2,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { useMutation } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { renameMcpTool, type McpServerTool } from "../mcp";

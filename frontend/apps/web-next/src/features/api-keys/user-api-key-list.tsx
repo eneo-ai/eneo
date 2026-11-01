@@ -1,12 +1,13 @@
 "use client";
 
 import { useNow, useTranslations } from "use-intl";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { Button } from "@astryxdesign/core/Button";
 import { useInfiniteQuery } from "@tanstack/react-query";
-import { useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
-import { TextInput } from "@astryxdesign/core/TextInput";
+import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
@@ -130,7 +131,7 @@ function KeyRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="max-w-56 wrap-anywhere whitespace-normal">
+      <TableCell className="max-w-56 wrap-break-word whitespace-normal">
         <div className="flex flex-col items-start gap-1">
           <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
             {t(`api_keys_status_${apiKey.state}`)}
@@ -149,7 +150,7 @@ function KeyRow({
           )}
         </div>
       </TableCell>
-      <TableCell className="max-w-48 wrap-anywhere whitespace-normal">
+      <TableCell className="max-w-48 wrap-break-word whitespace-normal">
         {t(`api_keys_scope_${apiKey.scope_type}`)}
         {apiKey.scope_id && (
           <span className="text-ax-text-secondary block text-xs">
@@ -199,7 +200,8 @@ function KeyRow({
       <TableCell>
         {apiKey.created_at ? <ClientTime value={apiKey.created_at} format="date" /> : "—"}
       </TableCell>
-      <TableCell className="text-end">
+      {/* Pinned: the menu is the only way to act on a key, and on a phone the wide table scrolls. */}
+      <TableCell className="bg-ax-surface sticky end-0 text-end">
         <ApiKeyActions apiKey={apiKey} mode="user" scopeName={scopeName} onRotated={onRotated} />
       </TableCell>
     </TableRow>
@@ -215,13 +217,16 @@ export function UserApiKeyList({
   scope,
   limit,
   toolbar,
-  onRotated
+  onRotated,
+  onLoaded
 }: {
   scope?: { type: ResourceScopeType; id: string; name: string };
   limit: number;
   /** Beside the state tabs (the account page's Create). */
   toolbar?: ReactNode;
   onRotated: (secret: string) => void;
+  /** Called once the first page has arrived, or failed: what waits for it may show. */
+  onLoaded?: () => void;
 }) {
   const t = useTranslations();
   const [stateFilter, setStateFilter] = useState<ApiKeyStateFilter>("active");
@@ -250,6 +255,9 @@ export function UserApiKeyList({
         })
       )
   });
+  useEffect(() => {
+    if (!keys.isPending) onLoaded?.();
+  }, [keys.isPending, onLoaded]);
   const loadedKeys = flattenPages(keys.data?.pages);
   const searchTerm = search.trim().toLocaleLowerCase();
   const visibleKeys = loadedKeys.filter((key) =>
@@ -289,7 +297,8 @@ export function UserApiKeyList({
           <Button
             label={t("api_keys_refresh")}
             variant="secondary"
-            isLoading={keys.isFetching}
+            // Not for the first load: the spinner would widen the button (layout shift).
+            isLoading={keys.isRefetching}
             isInterruptible
             onClick={() => {
               if (!keys.isFetching) void keys.refetch();
@@ -299,16 +308,17 @@ export function UserApiKeyList({
         </div>
       </div>
 
-      {(loadedKeys.length > 3 || search !== "") && (
-        <TextInput
-          label={t("api_keys_search_label")}
-          value={search}
-          onChange={setSearch}
-          placeholder={t("api_keys_search_placeholder")}
-          description={t("api_keys_search_loaded_hint")}
-          width="100%"
-        />
-      )}
+      {/* Always there, disabled while the keys load: shown only for a longer list, it
+          pushed the table down by its height when the keys arrived (layout shift). */}
+      <TextInput
+        label={t("api_keys_search_label")}
+        value={search}
+        onChange={setSearch}
+        isDisabled={keys.isPending}
+        description={t("api_keys_search_loaded_hint")}
+        width="100%"
+        {...KEYBOARD.search}
+      />
 
       {/* The keys in the selected state: the state tabs' panel. */}
       <div
@@ -341,17 +351,20 @@ export function UserApiKeyList({
                   {visibleKeys.length === 0 ? (
                     <EmptyState title={t("api_keys_no_search_matches")} />
                   ) : (
-                    <Table aria-label={t("api_keys")} className="min-w-[52rem]">
+                    <Table aria-label={t("api_keys")} className="min-w-[44rem]">
                       <TableHeader>
                         <TableRow>
-                          <TableHead>{t("name")}</TableHead>
+                          {/* A phone scrolls this table sideways: the name must not be crushed to a few letters. */}
+                          <TableHead className="min-w-40 md:min-w-0">{t("name")}</TableHead>
                           <TableHead>{t("status")}</TableHead>
                           <TableHead>{t("api_keys_scope")}</TableHead>
                           <TableHead>{t("api_keys_permission_level")}</TableHead>
                           <TableHead>{t("api_keys_last_used")}</TableHead>
                           <TableHead>{t("api_keys_expires")}</TableHead>
                           <TableHead>{t("api_keys_created")}</TableHead>
-                          <TableHead className="w-14 min-w-14" />
+                          <TableHead className="bg-ax-surface sticky end-0 w-14 min-w-14">
+                            <span className="sr-only">{t("actions")}</span>
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>

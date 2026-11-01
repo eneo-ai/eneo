@@ -3,6 +3,28 @@ import { expect, test } from "./csp";
 test.describe("the admin users table on a phone (decision 9)", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
+  test("leaves enough room to read a role between fixed columns at 320 px", async ({ page }) => {
+    await page.setViewportSize({ width: 320, height: 568 });
+    await page.goto("/admin/users");
+    const table = page.getByRole("table", { name: "Aktiva användare" });
+    const role = table.locator("tbody tr").first().getByRole("cell").nth(1).locator("li").first();
+    await expect(role).toBeVisible();
+    const widths = await role.evaluate((element) => {
+      const region = element.closest(".astryx-table-scroll-wrapper")!;
+      const headers = [...region.querySelectorAll<HTMLElement>("thead th")];
+      const pinned = headers.filter(
+        (header) => header.style.insetInlineStart || header.style.insetInlineEnd
+      );
+      return {
+        role: element.getBoundingClientRect().width,
+        readable:
+          region.getBoundingClientRect().width -
+          pinned.reduce((sum, header) => sum + header.getBoundingClientRect().width, 0)
+      };
+    });
+    expect(widths.readable, JSON.stringify(widths)).toBeGreaterThanOrEqual(widths.role);
+  });
+
   test("keeps every column, scrolls in its own region with the name in view", async ({ page }) => {
     await page.goto("/admin/users");
     const table = page.getByRole("table", { name: "Aktiva användare" });

@@ -60,7 +60,7 @@ function RiskChip({ tool }: { tool: McpServerTool }) {
             "gap-1 font-normal",
             risk === "write"
               ? "border-warning/30 bg-warning/15 text-warning"
-              : "border-success/30 bg-success/15 text-success"
+              : "border-success/30 bg-ax-success-muted text-ax-success"
           )}
         >
           {risk === "write" ? (
@@ -197,7 +197,7 @@ function PendingToolRow({
                 {t("mcp_change_changed")}
               </Badge>
             ) : (
-              <Badge className="border-success/30 bg-success/15 text-success gap-1 font-normal">
+              <Badge className="border-success/30 bg-ax-success-muted text-ax-success gap-1 font-normal">
                 {t("mcp_change_new")}
               </Badge>
             )}
@@ -427,6 +427,9 @@ export function ToolsTab({
             </ul>
           ) : (
             <>
+              <p className="text-ax-text-secondary text-xs pointer-fine:hidden">
+                {t("mcp_risk_heuristic_hint")}
+              </p>
               {pending.length > 0 && (
                 <Card className="border-warning/30 gap-3 p-4">
                   <div className="flex items-center justify-between gap-2">

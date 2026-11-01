@@ -2,7 +2,7 @@
 
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";
+import { ChevronDown, Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { Switch } from "@astryxdesign/core/Switch";
@@ -14,6 +14,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { useAppContext } from "@/components/providers/app-context";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -47,6 +48,7 @@ import { ApiKeyActions } from "@/features/api-keys/api-key-actions";
 import { userLabel } from "@/features/api-keys/api-key-details";
 import { CreateApiKeyDialog } from "@/features/api-keys/api-key-form";
 import { useSecretReveal } from "@/features/api-keys/user-api-key-list";
+import { showListTop } from "@/lib/show-list-top";
 import {
   ADMIN_API_KEYS_KEY,
   API_KEY_STATE_BADGE_VARIANT,
@@ -143,6 +145,14 @@ export function OrgApiKeysPage() {
         })
       )
   });
+  // The settings below the keys show once the keys, or the lookup that replaced them, have
+  // settled, and stay: tied to the list alone they never came back when a lookup disabled it.
+  const keysSettled =
+    lookup === null
+      ? !list.isPending
+      : lookup.status !== "pending" && (foundId === null || !found.isPending);
+  const [settingsReady, setSettingsReady] = useState(false);
+  if (keysSettled && !settingsReady) setSettingsReady(true);
 
   /**
    * Applies the filters; a whole key is looked up first. A retry keeps the
@@ -224,8 +234,10 @@ export function OrgApiKeysPage() {
       <PageHeader title={t("api_keys")} headingId={headingId}>
         <Button
           variant="ghost"
+          // Not while the page first loads: the spinner would widen this button and move
+          // the others (layout shift); a refresh asked for, or a lookup, shows it.
           aria-busy={
-            list.isFetching || found.isFetching || lookup?.status === "pending" || undefined
+            list.isRefetching || found.isRefetching || lookup?.status === "pending" || undefined
           }
           onClick={refresh}
         >
@@ -237,16 +249,20 @@ export function OrgApiKeysPage() {
         <Button variant="outline" onClick={() => setShowPolicy(true)}>
           <Settings className="size-4" /> {t("notification_policy")}
         </Button>
-        <CreateApiKeyDialog
-          idPrefix="org"
-          defaultOwnership="service"
-          trigger={
-            <Button>
-              <Plus className="size-4" /> {t("api_keys_create_short")}
-            </Button>
-          }
-          onCreated={secrets.reveal(t("api_keys_created_title"))}
-        />
+        {/* The page's one primary action: docked at the bottom on a phone, as on Konto >
+            API-nycklar, and named the same; in the header from 768 px. */}
+        <DockedActions label={t("admin_api_keys_actions")}>
+          <CreateApiKeyDialog
+            idPrefix="org"
+            defaultOwnership="service"
+            trigger={
+              <Button>
+                <Plus className="size-4" /> {t("api_keys_create")}
+              </Button>
+            }
+            onCreated={secrets.reveal(t("api_keys_created_title"))}
+          />
+        </DockedActions>
       </PageHeader>
       <NotificationPolicyDialog open={showPolicy} onOpenChange={setShowPolicy} />
       <ApiKeyPolicyDialog open={showConstraintPolicy} onOpenChange={setShowConstraintPolicy} />
@@ -310,22 +326,39 @@ export function OrgApiKeysPage() {
             variant="outline"
             size="sm"
             disabled={!list.hasPreviousPage}
-            onClick={list.previousPage}
+            onClick={() => {
+              list.previousPage();
+              showListTop(panelRef.current);
+            }}
           >
             {t("previous")}
           </Button>
-          <Button variant="outline" size="sm" disabled={!list.hasNextPage} onClick={list.nextPage}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!list.hasNextPage}
+            onClick={() => {
+              list.nextPage();
+              showListTop(panelRef.current);
+            }}
+          >
             {t("next")}
           </Button>
         </div>
       )}
 
-      <SettingsGroup title={t("api_keys_admin_runtime_settings_title")}>
-        <ExpiryNotificationsSwitch />
-      </SettingsGroup>
-      <SettingsGroup title={t("api_keys_admin_tracking_title")}>
-        <KeyTrackingSwitches />
-      </SettingsGroup>
+      {/* After the list: shown while it loads, they sat in view and were pushed
+          off the screen when the rows arrived (layout shift). */}
+      {settingsReady && (
+        <>
+          <SettingsGroup title={t("api_keys_admin_runtime_settings_title")}>
+            <ExpiryNotificationsSwitch />
+          </SettingsGroup>
+          <SettingsGroup title={t("api_keys_admin_tracking_title")}>
+            <KeyTrackingSwitches />
+          </SettingsGroup>
+        </>
+      )}
 
       {secrets.dialog}
     </div>
@@ -355,6 +388,9 @@ function KeyFilterForm({
   const [filters, setFilters] = useState(initial);
   // A space, assistant or app the admin is not a member of is given by id.
   const [manualScopeId, setManualScopeId] = useState("");
+  // Below 768 px the filters after the search start folded, so the keys are not
+  // a screen away; from 768 px they are always shown.
+  const [moreOpen, setMoreOpen] = useState(false);
   const update = (patch: Partial<AdminKeyFilters>) =>
     setFilters((current) => ({ ...current, ...patch }));
   const queryClient = useQueryClient();
@@ -383,6 +419,14 @@ function KeyFilterForm({
     <form
       aria-labelledby={`${id}-title`}
       className="flex flex-col gap-4 rounded-xl border p-4"
+      // A field folded away cannot take focus, so the browser would refuse the
+      // submit without a word: open the section and show the problem where it is.
+      onInvalidCapture={(event) => {
+        if (moreOpen) return;
+        const field = event.target as HTMLInputElement;
+        setMoreOpen(true);
+        requestAnimationFrame(() => field.reportValidity());
+      }}
       onSubmit={(event) => {
         event.preventDefault();
         if (!pending) onApply({ ...filters, scopeId: manualScopeId.trim() || filters.scopeId });
@@ -415,7 +459,21 @@ function KeyFilterForm({
           onChange={(event) => update({ search: event.target.value })}
         />
       </div>
-      <div className="grid gap-4 md:grid-cols-2">
+      <Button
+        type="button"
+        variant="outline"
+        className="justify-between md:hidden"
+        aria-expanded={moreOpen}
+        aria-controls={`${id}-more`}
+        onClick={() => setMoreOpen((open) => !open)}
+      >
+        {t("api_keys_admin_more_filters")}
+        <ChevronDown className={moreOpen ? "size-4 rotate-180" : "size-4"} aria-hidden="true" />
+      </Button>
+      <div
+        id={`${id}-more`}
+        className={`grid gap-4 md:grid-cols-2 ${moreOpen ? "" : "max-md:hidden"}`}
+      >
         <Typeahead
           label={t("user")}
           description={t("audit_user_search_hint", { count: MIN_SEARCH_LENGTH })}
@@ -551,8 +609,9 @@ function KeyFilterForm({
         <Button type="button" variant="ghost" onClick={onClear}>
           {t("api_keys_admin_clear_all")}
         </Button>
-        {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-        <Button type="submit" aria-busy={pending || undefined}>
+        {/* Secondary: Skapa API-nyckel is the page's one primary action. Never disabled:
+            busy, it keeps focus and a second press is ignored. */}
+        <Button type="submit" variant="outline" aria-busy={pending || undefined}>
           {t("api_keys_admin_apply_filters")}
         </Button>
       </div>
@@ -593,7 +652,6 @@ function KeyTable({
           <TableHead>{t("api_keys_admin_rate_limit")}</TableHead>
           <TableHead>{t("api_keys_last_used")}</TableHead>
           <TableHead>{t("api_keys_expires")}</TableHead>
-          <TableHead className="w-14 min-w-14" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -601,21 +659,34 @@ function KeyTable({
           const scopeName = apiKey.scope_id ? scopeNames.get(apiKey.scope_id) : undefined;
           return (
             <TableRow key={apiKey.id}>
+              {/* The menu sits beside the name, which starts the row, so it is in view
+                  wherever the wide table is scrolled: a pinned end column would cover
+                  the owner links on a phone. */}
               <TableCell>
-                <div className="flex flex-col gap-1">
-                  <span className="font-medium">{apiKey.name}</span>
-                  <code className="text-muted-foreground font-mono text-xs">
-                    {apiKey.key_prefix}…{apiKey.key_suffix}
-                  </code>
-                  {apiKey.search_match_reasons?.length ? (
-                    <span className="flex flex-wrap gap-1">
-                      {apiKey.search_match_reasons.map((reason) => (
-                        <Badge key={reason} variant="outline">
-                          {t(MATCH_REASON_LABEL[reason] ?? "api_keys_admin_match_reason_text")}
-                        </Badge>
-                      ))}
-                    </span>
-                  ) : null}
+                <div className="flex items-start justify-between gap-2">
+                  <div className="flex max-w-48 min-w-0 flex-col gap-1 wrap-break-word whitespace-normal xl:max-w-80">
+                    <span className="font-medium">{apiKey.name}</span>
+                    <code className="text-muted-foreground font-mono text-xs">
+                      {apiKey.key_prefix}…{apiKey.key_suffix}
+                    </code>
+                    {apiKey.search_match_reasons?.length ? (
+                      <span className="flex flex-wrap gap-1">
+                        {apiKey.search_match_reasons.map((reason) => (
+                          <Badge key={reason} variant="outline">
+                            {t(MATCH_REASON_LABEL[reason] ?? "api_keys_admin_match_reason_text")}
+                          </Badge>
+                        ))}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="shrink-0">
+                    <ApiKeyActions
+                      apiKey={apiKey}
+                      mode="admin"
+                      scopeName={scopeName}
+                      onRotated={onRotated}
+                    />
+                  </div>
                 </div>
               </TableCell>
               <TableCell className="text-sm">
@@ -623,7 +694,7 @@ function KeyTable({
                   apiKey.owner_user?.email ? (
                     <Link
                       href={`/admin/users?search=${encodeURIComponent(apiKey.owner_user.email)}`}
-                      className="underline"
+                      className="inline-flex min-h-6 items-center underline pointer-coarse:min-h-11"
                     >
                       {userLabel(apiKey.owner_user, apiKey.owner_user_id)}
                     </Link>
@@ -658,14 +729,6 @@ function KeyTable({
               </TableCell>
               <TableCell className="text-muted-foreground text-sm">
                 {apiKey.expires_at ? formatApiKeyDate(apiKey.expires_at) : t("api_keys_never")}
-              </TableCell>
-              <TableCell className="text-end">
-                <ApiKeyActions
-                  apiKey={apiKey}
-                  mode="admin"
-                  scopeName={scopeName}
-                  onRotated={onRotated}
-                />
               </TableCell>
             </TableRow>
           );

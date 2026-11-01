@@ -1,6 +1,7 @@
 "use client";
 
 import { useTranslations } from "use-intl";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import type { ReferenceCatalog } from "@eneo/skill-instructions";
 import { SkillInstructionEditor } from "./skill-instruction-editor";
 import { useEffect, useId, useState, type SubmitEvent } from "react";
@@ -194,7 +195,7 @@ export function SkillForm(props: Props) {
                 id={`${id}-instructions`}
                 value={instructions}
                 rows={props.mode === "create" ? 8 : 12}
-                className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-sm"
+                className="max-h-[50dvh] min-h-48 overflow-y-auto font-mono text-base pointer-fine:text-sm"
                 required
                 disabled={busy}
                 {...fieldProblemProps(`${id}-instructions`, instructionsProblem)}
@@ -220,6 +221,7 @@ export function SkillForm(props: Props) {
                   value={slug}
                   maxLength={64}
                   autoComplete="off"
+                  {...KEYBOARD.identifier}
                   required
                   disabled={busy}
                   {...fieldProblemProps(`${id}-slug`, slugProblem)}
@@ -244,7 +246,9 @@ export function SkillForm(props: Props) {
             />
           )}
         </div>
-        <div className="bg-background sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t py-3">
+        {/* Not sticky on a short window (a phone held sideways leaves about 300 px): the bar
+            would cover a field that has the focus (2.4.11), and a fifth of the screen is its own. */}
+        <div className="bg-background sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t py-3 [@media(height<31.25rem)]:static">
           <p className="text-muted-foreground text-sm" role="status">
             {dirty ? t("skills_form_unsaved_status") : saved ? t("skills_form_saved_status") : ""}
           </p>

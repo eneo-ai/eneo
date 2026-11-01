@@ -12,6 +12,7 @@ import {
   revealProblems
 } from "@/components/composites/field-problem";
 import { iconUrl } from "@/components/composites/icon-field";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { Button } from "@/components/ui/button";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -97,7 +98,10 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
   }
 
   return (
-    <div className="flex w-full flex-1 flex-col items-center justify-center p-4" {...handlers}>
+    <div
+      className="flex w-full flex-1 flex-col items-center justify-center p-4 max-md:p-0"
+      {...handlers}
+    >
       {dragging && (
         <div className="bg-ax-surface border-ax-accent pointer-events-none fixed inset-0 z-50 flex flex-col items-center justify-center gap-4 border-2 p-6 text-center">
           <Upload className="text-ax-text-secondary size-10" />
@@ -106,16 +110,18 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
           </p>
         </div>
       )}
-      <div className="border-border bg-card flex w-full max-w-[64ch] flex-col gap-4 rounded-xl border p-4 shadow-lg">
-        <div className="flex flex-col items-center gap-3 pt-2">
-          <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-2xl">
+      <div className="border-border bg-card flex w-full max-w-[64ch] flex-col gap-4 rounded-xl border p-4 shadow-lg max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:p-0 max-md:shadow-none">
+        <div className="flex flex-col items-center gap-3 pt-2 max-md:pt-0">
+          {/* The page's own heading names the app at every width (both pages that show this
+              have it as their h1), so the card does not repeat it; on a phone the icon gives
+              the field its width back too. */}
+          <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-2xl max-md:hidden">
             {icon ? (
               <img src={icon} alt="" className="size-full object-cover" />
             ) : (
               <AppWindow className="size-8" />
             )}
           </span>
-          <h2 className="text-center text-2xl font-extrabold">{app.name}</h2>
           {app.description && (
             <p className="text-muted-foreground max-w-[50ch] text-center text-sm">
               {app.description}
@@ -129,23 +135,26 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
               id="app-run-inputs"
               role="group"
               aria-label={t("input")}
-              className="bg-muted/40 flex min-h-[12rem] w-full flex-col items-center justify-center gap-4 rounded-lg border p-6"
+              className="bg-muted/40 flex min-h-[12rem] w-full flex-col items-center justify-center gap-4 rounded-lg border p-6 max-md:min-h-0 max-md:border-0 max-md:bg-transparent max-md:p-0"
               {...fieldProblemProps("app-run-inputs", inputProblem)}
             >
               <AppInputs app={app} inputs={inputs} />
             </div>
             <FieldProblem id="app-run-inputs" problem={inputProblem} />
             <div>
-              {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-              <Button
-                size="lg"
-                className="w-full"
-                aria-busy={run.isPending || undefined}
-                onClick={submit}
-              >
-                <Play className="size-4" />
-                {run.isPending ? t("submitting") : t("submit")}
-              </Button>
+              {/* Never disabled: busy, it keeps focus and a second press is ignored. On a
+                  phone it is docked at the bottom, under the thumb. */}
+              <DockedActions label={t("app_run_actions")}>
+                <Button
+                  size="lg"
+                  className="w-full"
+                  aria-busy={run.isPending || undefined}
+                  onClick={submit}
+                >
+                  <Play className="size-4" />
+                  {run.isPending ? t("app_run_starting") : t("app_run_start")}
+                </Button>
+              </DockedActions>
               {/* Always rendered, so the notice is announced when it appears. */}
               <p role="status" className="text-muted-foreground mt-2 text-sm empty:mt-0">
                 {waitNoticed && inputs.uploading ? t("form_wait_for_uploads") : ""}
@@ -153,7 +162,7 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
             </div>
           </>
         ) : (
-          <div className="bg-muted/40 flex min-h-[12rem] w-full items-center justify-center rounded-lg border p-6 opacity-60">
+          <div className="bg-muted/40 flex min-h-[12rem] w-full items-center justify-center rounded-lg border p-6">
             <p className="text-muted-foreground max-w-[50ch] text-center text-sm">
               {t("no_completion_model_description")}
             </p>

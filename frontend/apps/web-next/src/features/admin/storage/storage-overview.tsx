@@ -1,6 +1,6 @@
 "use client";
 
-import { CircleAlert, Database, ExternalLink, HardDrive, Info } from "lucide-react";
+import { ChevronDown, CircleAlert, Database, ExternalLink, HardDrive, Info } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -101,12 +101,11 @@ export function StorageOverview({
 
   return (
     <section aria-labelledby="storage-overview-title" className="space-y-4">
-      <div>
-        <h2 id="storage-overview-title" className="text-lg font-semibold">
-          {t("storage_overview_title")}
-        </h2>
-        <p className="text-muted-foreground mt-1 text-sm">{t("storage_overview_description")}</p>
-      </div>
+      {/* No intro: the page's description already says where files go, and each card names
+          its own fact. */}
+      <h2 id="storage-overview-title" className="text-lg font-semibold">
+        {t("storage_overview_title")}
+      </h2>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardHeader className="flex items-center justify-between">
@@ -249,6 +248,10 @@ export function StorageOverview({
             aria-controls="storage-inventory-details"
             onClick={() => setDetailsOpen((open) => !open)}
           >
+            <ChevronDown
+              className={detailsOpen ? "size-4 rotate-180" : "size-4"}
+              aria-hidden="true"
+            />
             {detailsOpen ? t("storage_inventory_hide_details") : t("storage_inventory_caption")}
           </Button>
           {detailsOpen && (
