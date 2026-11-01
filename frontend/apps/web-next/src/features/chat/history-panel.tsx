@@ -346,6 +346,14 @@ function HistoryPanel({
             )
           }
         </QueryStateBoundary>
+        {!all && pages && (
+          <p className="text-ax-text-secondary px-2 py-2 text-xs">
+            {t("loaded_conversations_count", {
+              loaded: sessions.length,
+              total: pages.at(-1)!.total_count
+            })}
+          </p>
+        )}
         {!all && <LoadMore query={history} label={t("chat_history_load_more")} onLoad={loadMore} />}
       </div>
 

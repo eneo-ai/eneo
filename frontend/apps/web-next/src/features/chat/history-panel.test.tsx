@@ -156,14 +156,17 @@ describe("HistoryAside", () => {
     renderHistory();
     await screen.findByRole("button", { name: "Protokoll KS" });
 
+    expect(screen.getByText("Laddade 2/5 konversationer")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Visa fler konversationer" }));
     const added = await screen.findByRole("button", { name: "Budget 2027" });
+    expect(screen.getByText("Laddade 4/5 konversationer")).toBeTruthy();
     await waitFor(() => expect(document.activeElement).toBe(added));
     // The earlier conversations stay: the list grows instead of paging.
     expect(screen.getByRole("button", { name: "Upphandlingsanalys" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "Visa fler konversationer" }));
     const last = await screen.findByRole("button", { name: "Delegationsordning" });
+    expect(screen.getByText("Laddade 5/5 konversationer")).toBeTruthy();
     // No more pages: the button is gone, focus is on what it loaded.
     await waitFor(() => expect(document.activeElement).toBe(last));
     expect(screen.queryByRole("button", { name: "Visa fler konversationer" })).toBeNull();
