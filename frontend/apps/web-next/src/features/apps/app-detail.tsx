@@ -3,37 +3,23 @@
 import { Button } from "@astryxdesign/core/Button";
 import { Pencil } from "lucide-react";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { useSpace } from "@/features/spaces/use-space";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
-import { appQueryOptions, readAppTab } from "./apps";
-import { ResultsTable } from "./results/results-table";
-import { RunView } from "./run/run-view";
+import { AppRunTabs } from "./app-run-tabs";
+import { appQueryOptions } from "./apps";
 
 /** App run/results surface, with the active tab tracked in ?tab=. */
 export function AppDetail({ appId }: { appId: string }) {
   const t = useTranslations();
   const { routeId } = useSpace();
   const phone = useMediaMatch(PHONE_QUERY);
-  const searchParams = useSearchParams();
   const { data: app } = useSuspenseQuery(appQueryOptions(browserApi, appId));
 
   const base = `/spaces/${routeId}/apps/${appId}`;
-  const resultHref = (runId: string) => `${base}/results/${runId}`;
-
-  const tab = readAppTab(searchParams);
-
-  function selectTab(next: string) {
-    const url = new URL(window.location.href);
-    url.searchParams.set("tab", next);
-    replaceUrl(url);
-  }
-
   const canEdit = (app.permissions ?? []).includes("edit");
 
   return (
@@ -60,19 +46,7 @@ export function AppDetail({ appId }: { appId: string }) {
         />
       </div>
 
-      <Tabs value={tab} onValueChange={selectTab}>
-        <TabsList>
-          <TabsTrigger value="run">{t("run")}</TabsTrigger>
-          <TabsTrigger value="results">{t("results")}</TabsTrigger>
-        </TabsList>
-        {/* Kept mounted: a peek at Resultat must not throw away the typed text and delete the uploaded files. */}
-        <TabsContent value="run" forceMount className="pt-4 data-[state=inactive]:hidden">
-          <RunView app={app} resultHref={resultHref} />
-        </TabsContent>
-        <TabsContent value="results" className="pt-4">
-          <ResultsTable appId={appId} resultHref={resultHref} />
-        </TabsContent>
-      </Tabs>
+      <AppRunTabs app={app} base={base} />
     </div>
   );
 }
