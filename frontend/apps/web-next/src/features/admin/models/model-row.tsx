@@ -84,7 +84,7 @@ function hasDefault(model: AdminModel): model is AdminModel & { is_org_default?:
   return "is_org_default" in model;
 }
 
-/** Vision / reasoning / tools as small tokens; "–" where the type has none. */
+/** Vision / reasoning / tools / live transcription as small tokens; "–" where the type has none. */
 /** In a list row (`label`), named and left out when there are none. */
 function Capabilities({ model, label }: { model: AdminModel; label?: string }) {
   const t = useTranslations();
@@ -93,7 +93,8 @@ function Capabilities({ model, label }: { model: AdminModel; label?: string }) {
     "reasoning" in model && model.reasoning ? t("model_label_reasoning") : null,
     "supports_tool_calling" in model && model.supports_tool_calling
       ? t("model_label_tool_calling")
-      : null
+      : null,
+    "supports_realtime" in model && model.supports_realtime ? t("live_transcription_support") : null
   ].filter((label): label is string => label !== null);
 
   if (labels.length === 0) {

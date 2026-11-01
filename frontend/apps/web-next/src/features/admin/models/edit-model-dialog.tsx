@@ -47,6 +47,7 @@ import {
   isEmbeddingFamily,
   isHostingRegion
 } from "./model-metadata-options";
+import { speaksRealtimeDialect } from "./model-providers";
 import { type AdminModel, MODELS_KEY, type ModelKind, updateTenantModel } from "./models";
 import {
   isCandidateSetting,
@@ -185,6 +186,13 @@ function EditModelForm({
   const [classificationId, setClassificationId] = useState(
     model.security_classification?.id ?? "__none__"
   );
+  // Live transcription streams over the realtime API, which only vLLM serves.
+  const [realtime, setRealtime] = useState(
+    "supports_realtime" in model ? (model.supports_realtime ?? false) : false
+  );
+  const realtimeAvailable = speaksRealtimeDialect(
+    "provider_type" in model ? model.provider_type : null
+  );
 
   const save = useMutation({
     mutationFn: () => {
@@ -242,6 +250,8 @@ function EditModelForm({
           open_source: openSource,
           stability: stability.trim() || null,
           cost_per_minute: numericOrNull(costPerMinute),
+          // Always stated, so turning it off reaches the server too.
+          supports_realtime: realtime,
           ...defaultPatch,
           security_classification
         });
@@ -477,6 +487,32 @@ function EditModelForm({
                 value={costPerMinute}
                 onChange={(event) => setCostPerMinute(event.target.value)}
               />
+            </div>
+          )}
+
+          {kind === "transcription" && (
+            <div className="flex flex-col gap-1.5">
+              <Label className="flex items-center justify-between gap-2 font-normal">
+                {t("live_transcription_support")}
+                <Switch
+                  checked={realtime}
+                  onCheckedChange={setRealtime}
+                  disabled={!realtimeAvailable}
+                  aria-describedby={
+                    realtimeAvailable
+                      ? "model-realtime-help"
+                      : "model-realtime-help model-realtime-unavailable"
+                  }
+                />
+              </Label>
+              <p id="model-realtime-help" className="text-muted-foreground text-xs">
+                {t("live_transcription_help")}
+              </p>
+              {!realtimeAvailable && (
+                <p id="model-realtime-unavailable" className="text-muted-foreground text-xs">
+                  {t("live_transcription_needs_vllm")}
+                </p>
+              )}
             </div>
           )}
 

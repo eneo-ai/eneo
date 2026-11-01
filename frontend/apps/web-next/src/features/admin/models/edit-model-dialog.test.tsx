@@ -269,6 +269,86 @@ it("requires positive whole completion token budgets and can clear the tenant de
   );
 });
 
+const transcriptionModel = (providerType: string | null, supportsRealtime = false) =>
+  ({
+    id: "t1",
+    name: "pianissimo-sv",
+    nickname: "Pianissimo",
+    description: null,
+    hosting: "swe",
+    stability: "stable",
+    open_source: false,
+    cost_per_minute: null,
+    provider_id: "p1",
+    provider_type: providerType,
+    supports_realtime: supportsRealtime,
+    security_classification: null
+  }) as unknown as AdminModel;
+
+function editLiveTranscription(model: AdminModel) {
+  api.PUT.mockImplementation(() => ok({}));
+  renderInApp(
+    <EditModelDialog
+      model={model}
+      kind="transcription"
+      classifications={[]}
+      securityEnabled={false}
+      open
+      onOpenChange={vi.fn()}
+    />
+  );
+  return screen.getByRole("switch", { name: "Livetranskribering" });
+}
+
+/** The texts a control's aria-describedby points at. */
+const descriptions = (element: HTMLElement) =>
+  (element.getAttribute("aria-describedby") ?? "")
+    .split(" ")
+    .map((id) => document.getElementById(id)?.textContent);
+
+describe("live transcription on a transcription model", () => {
+  // "vllm" is the backend's alias for hosted_vllm, and a provider created
+  // through the API keeps the type it was given.
+  it.each(["hosted_vllm", "vllm"])("turns it on for a %s provider", async (providerType) => {
+    const toggle = editLiveTranscription(transcriptionModel(providerType));
+    expect((toggle as HTMLButtonElement).disabled).toBe(false);
+    expect(screen.queryByText("Kräver en leverantör av typen vLLM.")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(api.PUT).toHaveBeenCalledWith(
+        "/api/v1/admin/tenant-models/transcription/{model_id}/",
+        {
+          params: { path: { model_id: "t1" } },
+          body: expect.objectContaining({ supports_realtime: true })
+        }
+      )
+    );
+  });
+
+  it.each(["openai", null])("says why it is unavailable for provider type %s", (providerType) => {
+    const toggle = editLiveTranscription(transcriptionModel(providerType));
+    expect((toggle as HTMLButtonElement).disabled).toBe(true);
+    expect(descriptions(toggle)).toContain("Kräver en leverantör av typen vLLM.");
+  });
+
+  it("states the flag on every save, so turning it off reaches the server", async () => {
+    const toggle = editLiveTranscription(transcriptionModel("hosted_vllm", true));
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    await expectNoAxeViolations(screen.getByRole("dialog"));
+
+    fireEvent.click(toggle);
+    fireEvent.click(screen.getByRole("button", { name: "Spara" }));
+
+    await waitFor(() =>
+      expect(api.PUT.mock.calls[0]?.[1]?.body).toMatchObject({ supports_realtime: false })
+    );
+  });
+});
+
 it("offers validated hosting and E5 choices while preserving other embedding metadata", async () => {
   api.PUT.mockImplementation(() => ok({}));
   renderInApp(

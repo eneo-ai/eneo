@@ -8,6 +8,21 @@ import { ModelRow } from "./model-row";
 const api = vi.hoisted(() => ({ POST: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
+it.each([true, false])("marks live transcription among the capabilities: %s", (on) => {
+  renderInApp(
+    <ModelRow
+      model={{ id: "t1", name: "pianissimo-sv", supports_realtime: on } as AdminModel}
+      kind="transcription"
+      layout="list"
+      classifications={[]}
+      securityEnabled={false}
+      onAction={vi.fn()}
+    />
+  );
+  const capabilities = screen.queryByRole("list", { name: "Funktioner" });
+  expect(capabilities?.textContent ?? "").toBe(on ? "Livetranskribering" : "");
+});
+
 it("locks a historical migrated model even when rendered directly", () => {
   const model = {
     id: "old",

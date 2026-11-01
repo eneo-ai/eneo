@@ -54,6 +54,22 @@ const rerankModel = {
 } as AdminModel;
 
 describe("ModelDetailDialog", () => {
+  it.each([
+    [true, "Ja"],
+    [false, "Nej"]
+  ])("states live transcription %s in a transcription model's details", async (on, answer) => {
+    renderInApp(
+      <ModelDetailDialog
+        model={{ ...model, provider_type: "hosted_vllm", supports_realtime: on } as AdminModel}
+        kind="transcription"
+        open
+        onOpenChange={() => {}}
+      />
+    );
+    const term = await screen.findByText("Livetranskribering", { selector: "dt" });
+    expect(term.nextElementSibling?.textContent).toBe(answer);
+  });
+
   it("formats the context window in the UI language", async () => {
     renderInApp(
       <ModelDetailDialog

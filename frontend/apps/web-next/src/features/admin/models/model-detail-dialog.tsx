@@ -187,6 +187,12 @@ function InfoTab({
           }
         />
       )}
+      {"supports_realtime" in model && (
+        <Field
+          label={t("live_transcription_support")}
+          value={t(model.supports_realtime ? "yes" : "no")}
+        />
+      )}
       {kind === "image" && (
         <>
           <Field

@@ -143,6 +143,16 @@ export function providerFields(caps: ProviderCapabilities, type: string): Provid
   return caps.providers[canonical]?.fields ?? caps.default_fields ?? [];
 }
 
+/**
+ * Whether a provider serves the realtime API live transcription streams to.
+ * Only vLLM does (any alias or casing), as `speaks_realtime_dialect` decides
+ * in backend/src/eneo/transcription_models/domain/realtime.py.
+ */
+export function speaksRealtimeDialect(type: string | null | undefined): boolean {
+  const lower = type?.toLowerCase();
+  return lower != null && (PROVIDER_TYPE_ALIASES[lower] ?? lower) === "hosted_vllm";
+}
+
 /** Whether the backend requires an API key for this provider type. */
 export function isApiKeyRequired(caps: ProviderCapabilities, type: string): boolean {
   return providerFields(caps, type).some((field) => field.name === "api_key" && field.required);

@@ -92,6 +92,9 @@ const liveImageModels = [
 /** The provider's rerank models, served when the list is asked for that mode. */
 const liveRerankModels = [{ name: "Qwen/Qwen3-Reranker-4B", mode: "rerank" }];
 
+/** The provider's transcription models, served when the list is asked for that mode. */
+const liveTranscriptionModels = [{ name: "pianissimo-sv", mode: "transcription" }];
+
 function renderWizard({
   initialProviderId,
   models = [],
@@ -122,6 +125,7 @@ function renderWizard({
         const mode = options?.params?.query?.mode;
         if (mode === "image") return ok(imageModels);
         if (mode === "rerank") return ok(liveRerankModels);
+        if (mode === "transcription") return ok(liveTranscriptionModels);
         if (mode === "embedding")
           return ok([
             { name: "multilingual-e5-large", mode: "embedding", output_vector_size: 1024 }
@@ -817,6 +821,51 @@ describe("the add-model wizard's catalog", () => {
       }
     });
     expect(toast.success).toHaveBeenCalledWith("1 modell tillagd");
+  });
+
+  function renderTranscriptionStep(providerType: string) {
+    return renderWizard({
+      initialProviderId: "p-vllm",
+      fixedKind: "transcription",
+      providerList: [{ ...existing, provider_type: providerType }],
+      caps: {
+        ...capabilities,
+        providers: {
+          [providerType]: { ...capabilities.providers.openai, modes: ["transcription"] }
+        }
+      }
+    });
+  }
+
+  it("creates a transcription model with live transcription on a vLLM provider", async () => {
+    const { dialog, onOpenChange } = renderTranscriptionStep("hosted_vllm");
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    const live = within(dialog).getByRole("checkbox", { name: /^Livetranskribering/ });
+    expect((live as HTMLInputElement).checked).toBe(false);
+    fireEvent.click(live);
+    await expectNoAxeViolations(dialog);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "pianissimo-sv", supports_realtime: true })
+    });
+  });
+
+  it("says why live transcription is unavailable and creates the model without it", async () => {
+    const { dialog, onOpenChange } = renderTranscriptionStep("openai");
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /pianissimo-sv/ }));
+    const live = within(dialog).getByRole("checkbox", { name: /^Livetranskribering/ });
+    // Astryx keeps a disabled checkbox focusable; a press changes nothing.
+    expect(live.getAttribute("aria-disabled")).toBe("true");
+    expect(within(dialog).getByText("Kräver en leverantör av typen vLLM.")).toBeTruthy();
+    fireEvent.click(live);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/transcription/", {
+      body: expect.objectContaining({ name: "pianissimo-sv", supports_realtime: false })
+    });
   });
 
   it("keeps the picks when the list is filtered", async () => {
