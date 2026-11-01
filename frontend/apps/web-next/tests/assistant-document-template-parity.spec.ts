@@ -148,6 +148,46 @@ test(
     await expect(
       picker.getByText("Dokumentmall: Eneos inbyggda mall", { exact: true })
     ).toBeVisible();
+    // The read failure is injected; keyboard recovery continues to the actual endpoint.
+    let failedOptions = false;
+    let releaseOptions!: () => void;
+    const heldOptions = new Promise<void>((resolve) => {
+      releaseOptions = resolve;
+    });
+    await page.route("**/api/v1/document-templates/available/", async (route) => {
+      if (!failedOptions) {
+        failedOptions = true;
+        await route.fulfill({
+          status: 503,
+          contentType: "application/json",
+          body: JSON.stringify({ message: "Template options unavailable" })
+        });
+      } else {
+        await heldOptions;
+        await route.continue();
+      }
+    });
+    let unexpectedWrites = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === path && request.method() === "POST")
+        unexpectedWrites += 1;
+    });
+    await page.reload();
+    const readRetry = picker.getByRole("button", { name: "Försök igen", exact: true });
+    await expect(readRetry).toBeVisible();
+    await readRetry.focus();
+    await page.keyboard.press("Enter");
+    try {
+      await expect(readRetry).toHaveAttribute("aria-busy", "true");
+      await expect(readRetry).toBeFocused();
+    } finally {
+      releaseOptions();
+    }
+    await expect(readRetry).toBeHidden();
+    await expect(
+      picker.getByText("Dokumentmall: Eneos inbyggda mall", { exact: true })
+    ).toBeFocused();
+    expect(unexpectedWrites).toBe(0);
     expect(requests.length).toBeGreaterThan(0);
     expect(new Set(requests)).toEqual(new Set(["/api/v1/document-templates/available/"]));
     expect(pageErrors).toEqual([]);

@@ -125,7 +125,10 @@ export function CapabilitiesSection({ assistant }: { assistant: Assistant }) {
                 />
               </div>
               {capability.purpose === "file_creation" && enabled && (
-                <AssistantDocumentTemplateChoice assistant={assistant} />
+                <AssistantDocumentTemplateChoice
+                  assistant={assistant}
+                  isDisabled={update.isPending}
+                />
               )}
             </div>
           );

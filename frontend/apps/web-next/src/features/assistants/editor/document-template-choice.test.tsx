@@ -8,6 +8,7 @@ import { SaveStatusProvider, SaveStatusIndicator } from "@/components/composites
 import { useAutosave } from "@/components/composites/use-autosave";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testQueryClient } from "@/test/render";
+import { CapabilitiesSection } from "./capabilities-section";
 import { AssistantDocumentTemplateChoice } from "./document-template-choice";
 import {
   assistantQueryOptions,
@@ -18,7 +19,12 @@ import {
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
-vi.mock("@/features/spaces/use-space", () => ({ useSpace: () => ({ routeId: "space-1" }) }));
+vi.mock("@/features/spaces/use-space", () => ({
+  useSpace: () => ({
+    routeId: "space-1",
+    space: { enabled_capabilities: ["file_creation"], completion_models: [] }
+  })
+}));
 
 const initial: Assistant = {
   id: "assistant-1",
@@ -64,9 +70,21 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
-function Harness({ id = "assistant-1" }: { id?: string }) {
+function Harness({
+  id = "assistant-1",
+  capabilities = false
+}: {
+  id?: string;
+  capabilities?: boolean;
+}) {
   const { data } = useQuery(assistantQueryOptions(browserApi, id));
-  return data ? <AssistantDocumentTemplateChoice key={id} assistant={data} /> : null;
+  return data ? (
+    capabilities ? (
+      <CapabilitiesSection key={id} assistant={data} />
+    ) : (
+      <AssistantDocumentTemplateChoice key={id} assistant={data} />
+    )
+  ) : null;
 }
 function show(value = saved) {
   const queryClient = testQueryClient();
@@ -111,23 +129,32 @@ it("saves explicit default, selected and built-in choices through the assistant 
   ]);
 });
 
-it("preserves a saved selection on an options failure and retries that read without writing", async () => {
-  saved.document_template = { mode: "selected", template_id: "report" };
-  api.GET.mockResolvedValueOnce({
-    data: undefined,
-    error: { message: "Options unavailable" },
-    response: new Response(null, { status: 503 })
-  });
-  show();
-  fireEvent.click(await screen.findByRole("button", { name: "Försök igen" }));
-  expect(await screen.findByText("Dokumentmall: Rapport")).toBeTruthy();
-  expect(saved.document_template).toEqual({ mode: "selected", template_id: "report" });
-  expect(api.POST).not.toHaveBeenCalled();
-  expect(api.GET.mock.calls.map((call) => call[0])).toEqual([
-    "/api/v1/document-templates/available/",
-    "/api/v1/document-templates/available/"
-  ]);
-});
+it.each([true, false])(
+  "preserves a saved selection and returns read-retry focus with editable=%s",
+  async (editable) => {
+    saved.permissions = editable ? ["read", "edit"] : ["read"];
+    saved.document_template = { mode: "selected", template_id: "report" };
+    api.GET.mockResolvedValueOnce({
+      data: undefined,
+      error: { message: "Options unavailable" },
+      response: new Response(null, { status: 503 })
+    });
+    show();
+    const retry = await screen.findByRole("button", { name: "Försök igen" });
+    retry.focus();
+    fireEvent.click(retry);
+    expect(await screen.findByText("Dokumentmall: Rapport")).toBeTruthy();
+    await waitFor(() =>
+      expect(document.activeElement).toBe(screen.getByText("Dokumentmall: Rapport"))
+    );
+    expect(saved.document_template).toEqual({ mode: "selected", template_id: "report" });
+    expect(api.POST).not.toHaveBeenCalled();
+    expect(api.GET.mock.calls.map((call) => call[0])).toEqual([
+      "/api/v1/document-templates/available/",
+      "/api/v1/document-templates/available/"
+    ]);
+  }
+);
 
 it("keeps a failed choice available for retry while the saved assistant stays unchanged", async () => {
   api.POST.mockResolvedValueOnce({
@@ -363,4 +390,122 @@ it("keeps serial field saves pending and their failures separate in the actual p
     ).toBe("#assistant-document-template")
   );
   expect(document.getElementById("assistant-document-template")).not.toBeNull();
+});
+
+it("restores readonly focus after retrying a failed refresh without losing cached template names", async () => {
+  saved.permissions = ["read"];
+  saved.document_template = { mode: "selected", template_id: "report" };
+  const { queryClient } = show();
+  await screen.findByText("Dokumentmall: Rapport");
+  api.GET.mockResolvedValueOnce({
+    data: undefined,
+    error: { message: "Refresh unavailable" },
+    response: new Response(null, { status: 503 })
+  });
+  await act(async () => {
+    await queryClient.invalidateQueries({ queryKey: ["document-templates"] });
+  });
+  const retry = await screen.findByRole("button", { name: /Försök igen:/ });
+  expect(screen.getByText("Dokumentmall: Rapport")).toBeTruthy();
+  retry.focus();
+  fireEvent.click(retry);
+  await waitFor(() => expect(screen.queryByRole("button", { name: /Försök igen:/ })).toBeNull());
+  await waitFor(() =>
+    expect(document.activeElement).toBe(screen.getByText("Dokumentmall: Rapport"))
+  );
+  expect(api.POST).not.toHaveBeenCalled();
+});
+
+function showCapabilities() {
+  const queryClient = testQueryClient();
+  queryClient.setQueryData(assistantQueryOptions(browserApi, saved.id).queryKey, saved);
+  return renderInApp(
+    <SaveStatusProvider>
+      <header>
+        <SaveStatusIndicator />
+      </header>
+      <Harness capabilities />
+    </SaveStatusProvider>,
+    { queryClient }
+  );
+}
+
+it("does not queue a template write behind disabling file creation or strand page status", async () => {
+  let finish!: () => void;
+  api.POST.mockImplementationOnce(
+    () =>
+      new Promise<ReturnType<typeof ok>>((resolve) => {
+        finish = () => {
+          saved = { ...saved, enabled_capabilities: [] };
+          resolve(ok(saved));
+        };
+      })
+  );
+  api.POST.mockResolvedValueOnce({
+    data: undefined,
+    error: { message: "Queued template failure" },
+    response: new Response(null, { status: 503 })
+  });
+  showCapabilities();
+  fireEvent.click(screen.getByRole("button", { name: "Ändra dokumentmall" }));
+  await screen.findByText("Kommunens mall");
+  fireEvent.click(screen.getByRole("switch", { name: "Skapa fil" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+  fireEvent.click(screen.getByRole("radio", { name: /Organisationens standard/ }));
+  await act(async () => finish());
+  await waitFor(() =>
+    expect(screen.queryByRole("button", { name: "Ändra dokumentmall" })).toBeNull()
+  );
+  await waitFor(() =>
+    expect(within(screen.getByRole("banner")).getByText("Alla ändringar sparade!")).toBeTruthy()
+  );
+  expect(api.POST).toHaveBeenCalledTimes(1);
+  const beforeUnload = new Event("beforeunload", { cancelable: true });
+  window.dispatchEvent(beforeUnload);
+  expect(beforeUnload.defaultPrevented).toBe(false);
+  expect(document.getElementById("assistant-document-template")).toBeNull();
+});
+
+it("blocks named choices and a failed-choice retry while the actual capability section saves", async () => {
+  api.POST.mockResolvedValueOnce({
+    data: undefined,
+    error: { message: "Cannot save template" },
+    response: new Response(null, { status: 503 })
+  });
+  let finish!: () => void;
+  api.POST.mockImplementationOnce(
+    () =>
+      new Promise<ReturnType<typeof ok>>((resolve) => {
+        finish = () => {
+          saved = { ...saved, enabled_capabilities: [] };
+          resolve(ok(saved));
+        };
+      })
+  );
+  showCapabilities();
+  fireEvent.click(screen.getByRole("button", { name: "Ändra dokumentmall" }));
+  await screen.findByText("Kommunens mall");
+  fireEvent.click(screen.getByRole("radio", { name: "En annan mall" }));
+  const retry = await screen.findByRole("button", {
+    name: "Försök igen: Kunde inte spara ändringarna"
+  });
+  fireEvent.click(screen.getByRole("switch", { name: "Skapa fil" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+  try {
+    expect(
+      screen.getByRole("radio", { name: "Eneos inbyggda mall" }).getAttribute("aria-disabled")
+    ).toBe("true");
+    expect(
+      screen.getByRole("combobox", { name: "En annan mall" }).getAttribute("aria-disabled")
+    ).toBe("true");
+    expect(retry.getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(retry);
+    fireEvent.click(screen.getByRole("radio", { name: "Eneos inbyggda mall" }));
+  } finally {
+    await act(async () => finish());
+  }
+  await waitFor(() =>
+    expect(within(screen.getByRole("banner")).getByText("Alla ändringar sparade!")).toBeTruthy()
+  );
+  expect(api.POST).toHaveBeenCalledTimes(2);
 });

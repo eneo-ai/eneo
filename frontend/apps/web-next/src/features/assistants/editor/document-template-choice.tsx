@@ -18,9 +18,16 @@ import { useUpdateAssistant, type Assistant } from "./use-assistant";
 type Choice = Schema<"DocumentTemplateChoicePublic">;
 
 /** The template followed by this assistant's Word and PDF output. */
-export function AssistantDocumentTemplateChoice({ assistant }: { assistant: Assistant }) {
+export function AssistantDocumentTemplateChoice({
+  assistant,
+  isDisabled = false
+}: {
+  assistant: Assistant;
+  isDisabled?: boolean;
+}) {
   const t = useTranslations();
   const container = useRef<HTMLDivElement>(null);
+  const statusTarget = useRef<HTMLParagraphElement>(null);
   const rescue = useFocusRescue();
   // Keep a failed save's retry control mounted while the next attempt runs.
   const [saveError, setSaveError] = useState<unknown>(null);
@@ -28,6 +35,7 @@ export function AssistantDocumentTemplateChoice({ assistant }: { assistant: Assi
   const update = useUpdateAssistant(assistant.id);
   const autosave = useAutosave("assistant-document-template");
   const editable = assistant.permissions?.includes("edit") ?? false;
+  const busy = isDisabled || update.isPending;
   const attemptedChoice = update.variables?.document_template;
   const choice =
     editable && (update.isPending || update.isError)
@@ -51,8 +59,13 @@ export function AssistantDocumentTemplateChoice({ assistant }: { assistant: Assi
                   : "document_template_choice_default"
               )
             });
+  async function retryTemplates() {
+    const result = await templates.refetch();
+    if (!result.isError) rescue(statusTarget.current);
+    return result;
+  }
   function save(value: Choice) {
-    if (!editable || update.isPending) return;
+    if (!editable || busy) return;
     void autosave(async () => {
       try {
         await update.mutateAsync({ document_template: value });
@@ -77,25 +90,27 @@ export function AssistantDocumentTemplateChoice({ assistant }: { assistant: Assi
       id="assistant-document-template"
       ref={container}
       className="ms-8 mt-2"
-      aria-busy={update.isPending || undefined}
+      aria-busy={busy || undefined}
     >
-      <p className="text-ax-text-secondary text-sm">{status}</p>
+      <p ref={statusTarget} tabIndex={-1} className="text-ax-text-secondary text-sm">
+        {status}
+      </p>
       {blockingError(templates) ? (
         <ListError
           error={templates.error}
           isRetrying={templates.isFetching}
-          onRetry={() => void templates.refetch()}
+          onRetry={() => void retryTemplates()}
         />
       ) : templates.isPending ? (
         <LoadingState variant="text" rows={1} />
       ) : (
-        <RefreshError queries={[templates]} />
+        <RefreshError queries={[{ ...templates, refetch: retryTemplates }]} />
       )}
       {saveError != null && (
         <ListError
           error={saveError}
           title={t("save_failed")}
-          isRetrying={update.isPending}
+          isRetrying={busy}
           onRetry={editable && attemptedChoice ? () => save(attemptedChoice) : undefined}
         />
       )}
@@ -106,7 +121,7 @@ export function AssistantDocumentTemplateChoice({ assistant }: { assistant: Assi
               label={t("document_template_choice_label")}
               value={choice?.mode ?? "default"}
               onChange={setMode}
-              isDisabled={update.isPending}
+              isDisabled={busy}
               disabledMessage={t("saving")}
               size="sm"
             >
@@ -128,7 +143,7 @@ export function AssistantDocumentTemplateChoice({ assistant }: { assistant: Assi
                 value={choice.template_id ?? ""}
                 options={options.map((template) => ({ value: template.id, label: template.name }))}
                 onChange={(template_id) => save({ mode: "selected", template_id })}
-                isDisabled={update.isPending}
+                isDisabled={busy}
                 disabledMessage={t("saving")}
                 size="sm"
                 width="100%"
