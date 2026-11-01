@@ -232,6 +232,8 @@ it("retries a failed stored download with its reviewed identity and filename aft
   });
   const client = show();
   fireEvent.click(await screen.findByRole("button", { name: "actions: Municipal report" }));
+  // The menu moves focus into itself on the next frame; let it, as a user would.
+  await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
   fireEvent.click(screen.getByRole("menuitem", { name: "document_template_download" }));
   expect(await screen.findByText("Download offline")).toBeTruthy();
   act(() =>
