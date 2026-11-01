@@ -1,6 +1,8 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { createSpace, productionAsset, uniqueName } from "./helpers";
+import { apiRequest, createSpace, productionAsset, uniqueName } from "./helpers";
+import type { Schema } from "../src/lib/api/models";
+import { hasPermission } from "../src/lib/auth/permissions";
 import sv from "../src/lib/i18n/messages/sv.json";
 
 // Below 1024 px a page's own header replaces the shell's top bar. These
@@ -82,14 +84,32 @@ test("a shared space is pushed on a phone; the personal and organisation spaces 
   await expect(back).toBeVisible();
   await expect(page.locator(TOP_BAR)).toBeHidden();
   await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
-  await expect(tabs.getByRole("link")).toHaveCount(4);
+  // A phone's tabs are the space's content (space-sections.ts): Översikt, Assistenter, Appar and
+  // Kunskap, and Flöden beside Appar where the tenant has flows for this user (flowsAvailable).
+  const settings = await apiRequest<Schema<"SettingsPublic">>(page, "/settings/");
+  const me = await apiRequest<Parameters<typeof hasPermission>[0]>(page, "/users/me/");
+  const flows = settings.flows_enabled === true && hasPermission(me)("flows_view");
+  await expect(tabs.getByRole("link")).toHaveCount(flows ? 5 : 4);
+  for (const tab of ["Översikt", "Assistenter", "Appar", "Kunskap"]) {
+    await expect(tabs.getByRole("link", { name: tab, exact: true })).toHaveCount(1);
+  }
+  await expect(tabs.getByRole("link", { name: "Flöden", exact: true })).toHaveCount(flows ? 1 : 0);
   const strip = await tabs.evaluate((nav) => {
     const scroller = [...nav.querySelectorAll<HTMLElement>("*")].find(
       (element) => getComputedStyle(element).overflowX === "auto"
     );
     return scroller ? scroller.scrollWidth - scroller.clientWidth : 0;
   });
-  expect(strip).toBeLessThanOrEqual(1);
+  if (flows) {
+    // The four fit without their counts; a fifth may not (space-tabs.tsx): then the strip
+    // scrolls on its own with edge fades, the page never sideways, the current tab in view.
+    await expect
+      .poll(() => page.evaluate(() => document.documentElement.scrollWidth <= innerWidth))
+      .toBe(true);
+    await expect(tabs.getByRole("link", { name: "Översikt", exact: true })).toBeInViewport({
+      ratio: 1
+    });
+  } else expect(strip).toBeLessThanOrEqual(1);
   const manage = page.getByRole("region", { name: /^(Hantera ytan|Manage space)$/ });
   // The whole row is the link (globals.css 12b): its icon, outside the label, opens it.
   const row = manage.locator(".astryx-item").filter({ hasText: /^(Medlemmar|Members)/ });
