@@ -624,6 +624,10 @@ open, on a phone, types into one and crosses 768 px and back (a phone turned, an
 split): the same field must be there, with its text and its focus, and the dialog open.
 A component that swaps at a breakpoint rebuilds what is open and fails it.
 
+`tests/tooltips.spec.ts` holds a tooltip to WCAG 1.4.13 with a mouse and the keyboard: the pointer can
+move onto it, it stays, and Escape closes it. `src/test/a11y-source-guards.test.ts` guards what one line of
+source could break (no orientation lock, no autoplay, no password paste block).
+
 | What it finds                                                                                                                                                                           | Run                                                                                              |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | Sideways scroll, a target under 44 px, one outside the screen, two on top of each other, text cut off, a text field under 16 px on a phone (iPhone Safari zooms into it), at five sizes | `tests/responsive-contract.spec.ts` (`CONTRACT_VIEWPORTS`, `CONTRACT_ROUTES`)                    |
