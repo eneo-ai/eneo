@@ -102,3 +102,32 @@ describe("assistant capabilities", () => {
     expect(update).toHaveBeenCalledTimes(1);
   });
 });
+
+it("shows the governed chat default separately from policy availability", () => {
+  show({
+    ...assistant(["web_search", "image_generation"], true),
+    effective_config: {
+      models_enforced: false,
+      available_models: [],
+      locked_model: null,
+      default_model: null,
+      prompt_locked: false,
+      default_reasoning_effort: null,
+      reasoning_effort_user_configurable: false,
+      available_mcp_servers: [],
+      default_disabled_mcp_server_ids: [],
+      mcp_enforced: true,
+      enabled_capabilities: ["web_search", "image_generation"],
+      default_disabled_capabilities: ["image_generation"],
+      available_capabilities: [
+        { purpose: "web_search", available: true },
+        { purpose: "image_generation", available: true }
+      ]
+    }
+  } as Assistant);
+  expect(screen.getByText("functions_default_on")).toBeTruthy();
+  expect(screen.getByText("functions_default_off")).toBeTruthy();
+  expect(screen.getByRole("switch", { name: "image_generation" }).hasAttribute("disabled")).toBe(
+    true
+  );
+});

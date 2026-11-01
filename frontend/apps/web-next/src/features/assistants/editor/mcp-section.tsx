@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { modelSupportsToolCalling, readinessKey } from "@/features/capabilities/capabilities";
+import Link from "@/lib/link";
+import { getCapability } from "@/features/capabilities/capabilities";
 import { useSpace } from "@/features/spaces/use-space";
 import { assistantToolModel, isMcpEnforced, policyMcpServers } from "./effective-config";
 import {
@@ -37,7 +39,7 @@ const sortedToolKey = (settings: AssistantMcpToolSetting[]) =>
  */
 export function McpSection({ assistant }: { assistant: Assistant }) {
   const t = useTranslations();
-  const { space } = useSpace();
+  const { space, routeId, can } = useSpace();
   const update = useUpdateAssistant(assistant.id);
   const autosave = useAutosave("mcp");
 
@@ -80,8 +82,6 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
       assistant.integration_knowledge_list.length >
     0;
   const disabledByKnowledge = hasKnowledge && selected.size === 0;
-
-  if (!mcpEnforced && available.length === 0) return null;
 
   function persist(
     nextSelected: Set<string>,
@@ -134,7 +134,7 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
               {t("model_does_not_support_tools")}
             </p>
           )}
-          {disabledByKnowledge && (
+          {available.length > 0 && disabledByKnowledge && (
             <p className="border-warning/30 bg-warning/10 text-warning rounded-md border px-3 py-2 text-sm">
               <span className="font-semibold">{t("warning")}:</span>{" "}
               {t("mcp_disabled_when_knowledge_active")}
@@ -146,8 +146,12 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
                 <div className="divide-border divide-y rounded-lg border">
                   {policyServers.map((server) => (
                     <div key={server.id} className="flex flex-col gap-0.5 px-3 py-2">
-                      <p className="text-sm font-medium">{server.name}</p>
-                      {server.description && (
+                      <p className="text-sm font-medium">
+                        {getCapability(server.purpose)
+                          ? t(getCapability(server.purpose)!.purpose)
+                          : server.name}
+                      </p>
+                      {!getCapability(server.purpose) && server.description && (
                         <p className="text-muted-foreground line-clamp-1 text-xs">
                           {server.description}
                         </p>
@@ -164,6 +168,18 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
                 {t("governance_assistant_mcp_provided_by_policy")}
               </p>
             </>
+          ) : available.length === 0 ? (
+            <div className="flex flex-col gap-2">
+              <p className="text-muted-foreground text-sm">{t("no_mcp_servers_available")}</p>
+              {can("edit", "space") && (
+                <Link
+                  href={`/spaces/${routeId}/settings?section=tools`}
+                  className="text-primary focus-visible:outline-ring inline-flex min-h-11 items-center underline focus-visible:outline-2"
+                >
+                  {t("enable_mcp_in_space_settings")}
+                </Link>
+              )}
+            </div>
           ) : (
             <fieldset
               className="flex flex-col gap-2"

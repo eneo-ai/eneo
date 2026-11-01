@@ -1,5 +1,8 @@
 "use client";
 
+import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
+import { Button as ActionButton } from "@astryxdesign/core/Button";
+import { saveUrl } from "@/features/files/signed-file-url";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { ImagePlus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -22,7 +25,36 @@ async function uploadIcon(file: File): Promise<{ id: string }> {
 
 /** Icon uploads are served under the API base, which authenticates the request. */
 export function iconUrl(iconId: string | null | undefined): string | null {
-  return iconId ? `${API_BASE}/api/v1/icons/${iconId}/` : null;
+  return iconId ? `${API_BASE}/api/v1/icons/${encodeURIComponent(iconId)}/` : null;
+}
+
+const MAX_ICON_BYTES = 256 * 1024;
+const ICON_TYPES = ["image/png", "image/jpeg", "image/webp"];
+
+function IconPreview({ url }: { url: string }) {
+  const t = useTranslations();
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="focus-visible:outline-ring size-full focus-visible:outline-2 focus-visible:-outline-offset-2"
+        aria-label={t("upload_view_avatar")}
+        onClick={() => setOpen(true)}
+      >
+        <img src={url} alt="" className="size-full object-cover" />
+      </button>
+      <Dialog isOpen={open} onOpenChange={setOpen} width={560}>
+        <DialogHeader title={t("upload_avatar_alt")} onOpenChange={setOpen} />
+        <img
+          src={url}
+          alt={t("upload_avatar_preview_alt")}
+          className="rounded-ax-inner mx-auto my-4 h-64 max-h-[60dvh] w-full object-contain"
+        />
+        <ActionButton label={t("download")} onClick={() => saveUrl(url, "icon")} />
+      </Dialog>
+    </>
+  );
 }
 
 /**
@@ -48,6 +80,14 @@ export function IconField({
 
   async function replaceIcon(file: File) {
     if (busy) return;
+    if (!ICON_TYPES.includes(file.type)) {
+      toast.error(t("avatar_invalid_type"));
+      return;
+    }
+    if (file.size > MAX_ICON_BYTES) {
+      toast.error(t("avatar_too_large"));
+      return;
+    }
     setBusy("upload");
     let uploaded: string | undefined;
     try {
@@ -86,7 +126,7 @@ export function IconField({
         {busy ? (
           <Spinner />
         ) : icon ? (
-          <img src={icon} alt="" className="size-full object-cover" />
+          <IconPreview key={icon} url={icon} />
         ) : (
           <ImagePlus className="size-6" />
         )}
@@ -95,7 +135,7 @@ export function IconField({
         ref={fileInput}
         type="file"
         aria-label={t("upload")}
-        accept="image/png,image/jpeg,image/webp"
+        accept={ICON_TYPES.join(",")}
         className="hidden"
         onChange={(event) => {
           const file = event.target.files?.[0];

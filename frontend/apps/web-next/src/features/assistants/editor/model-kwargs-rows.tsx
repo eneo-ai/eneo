@@ -149,9 +149,12 @@ export function ModelKwargsRows({
               onChange({ ...kwargs, [name]: next }, false);
             }}
             onBlur={onCommit}
-            {...fieldProblemProps(id, problem)}
+            {...fieldProblemProps(id, problem, `${id}-help`)}
           />
         </div>
+        <p id={`${id}-help`} className="text-muted-foreground text-sm">
+          {t(name === "temperature" ? "temperature_tooltip" : `${name}_tooltip`)}
+        </p>
         <FieldProblem id={id} problem={problem} />
       </div>
     );
@@ -167,7 +170,7 @@ export function ModelKwargsRows({
         <div className="flex flex-col gap-3">
           <Select
             value={behaviour}
-            disabled={!presetsSupported}
+            disabled={!model || !presetsSupported}
             onValueChange={(value) => selectBehaviour(value as ModelBehaviour)}
           >
             <SelectTrigger
@@ -206,28 +209,33 @@ export function ModelKwargsRows({
               }
               const id = `${idPrefix}-kwarg-${name}`;
               return (
-                <div key={name} className="flex items-center justify-between gap-4">
-                  <Label htmlFor={id} className="text-muted-foreground font-normal">
-                    {modelKwargLabel(name, t)}
-                  </Label>
-                  <Select
-                    value={(kwargs[name] as string | null | undefined) ?? "__default"}
-                    onValueChange={(value) =>
-                      onChange({ ...kwargs, [name]: value === "__default" ? null : value }, true)
-                    }
-                  >
-                    <SelectTrigger id={id} className="w-44">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="__default">{t("default_behavior")}</SelectItem>
-                      {(kwargCapability(model, name)?.options ?? []).map((option) => (
-                        <SelectItem key={option} value={option}>
-                          {modelKwargOptionLabel(option, t)}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+                <div key={name} className="flex flex-col gap-1">
+                  <div className="flex flex-wrap items-center justify-between gap-4">
+                    <Label htmlFor={id} className="text-muted-foreground font-normal">
+                      {modelKwargLabel(name, t)}
+                    </Label>
+                    <Select
+                      value={(kwargs[name] as string | null | undefined) ?? "__default"}
+                      onValueChange={(value) =>
+                        onChange({ ...kwargs, [name]: value === "__default" ? null : value }, true)
+                      }
+                    >
+                      <SelectTrigger id={id} className="w-44" aria-describedby={`${id}-help`}>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="__default">{t("default_behavior")}</SelectItem>
+                        {(kwargCapability(model, name)?.options ?? []).map((option) => (
+                          <SelectItem key={option} value={option}>
+                            {modelKwargOptionLabel(option, t)}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <p id={`${id}-help`} className="text-muted-foreground text-sm">
+                    {t(`${name}_tooltip`)}
+                  </p>
                 </div>
               );
             })}

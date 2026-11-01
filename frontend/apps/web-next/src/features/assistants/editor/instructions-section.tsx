@@ -3,7 +3,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { FileText, History, Maximize2, Sparkles } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { AssistantContextMeter } from "./assistant-context-meter";
 import type { Schema } from "@/lib/api/models";
 import { assistantToolModel } from "./effective-config";
@@ -27,6 +27,7 @@ import {
 } from "@/features/help-assistants/prompt-guide/helper-runs";
 import { PromptGuideDialog } from "@/features/help-assistants/prompt-guide/prompt-guide-dialog";
 import { PromptVersionDialog } from "@/features/prompts/prompt-version-dialog";
+import { promptDraftsMatch, type PromptDraft } from "@/features/prompts/prompt-draft";
 import { useSpace } from "@/features/spaces/use-space";
 import { isPromptLocked } from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
@@ -72,8 +73,7 @@ export function InstructionsSection({
   const update = useUpdateAssistant(assistant.id);
   const savedPrompt = assistant.prompt?.text ?? "";
   const promptLocked = isPromptLocked(assistant.effective_config);
-  // Only read when a save starts; Prompt Guide sets it for the version it applies.
-  const promptDescription = useRef("");
+  const savedDescription = assistant.prompt?.description ?? "";
   const [showHistory, setShowHistory] = useState(false);
   const [showPromptGuide, setShowPromptGuide] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -84,24 +84,23 @@ export function InstructionsSection({
 
   // Each save creates a new prompt version, so commit on blur, after a pause,
   // or on an explicit apply rather than on every keystroke.
-  const promptField = useAutosaveField({
+  const promptField = useAutosaveField<PromptDraft>({
     key: "assistant-prompt",
-    value: savedPrompt,
+    value: { kind: "server", text: savedPrompt, description: savedDescription },
+    equals: promptDraftsMatch,
     validate: () => !promptLocked,
-    save: (text) =>
-      update.mutateAsync({ prompt: { text, description: promptDescription.current } }),
-    onSaved: () => {
-      promptDescription.current = "";
-    },
+    save: (value) =>
+      update.mutateAsync({
+        prompt: { text: value.text, description: value.kind === "manual" ? "" : value.description }
+      }),
     commitDebounceMs: PROMPT_AUTOSAVE_DEBOUNCE_MS,
     commitOnVisibilityChange: true
   });
-  const prompt = promptField.value;
+  const prompt = promptField.value.text;
   const dirty = promptField.dirty;
 
   function editPrompt(text: string) {
-    promptField.setValue(text);
-    promptDescription.current = "";
+    promptField.setValue({ kind: "manual", text });
   }
 
   const effectiveModelId = assistantToolModel(space.completion_models, assistant)?.id;
@@ -222,19 +221,26 @@ export function InstructionsSection({
           const description = t("prompt_guide_apply_description", {
             date: formatDateTime(new Date().toISOString())
           });
-          promptField.setValue(text);
-          promptDescription.current = description;
-          void promptField.commit(text);
+          const value: PromptDraft = { kind: "annotated", text, description };
+          promptField.setValue(value);
+          void promptField.commit(value);
         }}
       />
       <PromptVersionDialog
         resource={{ type: "assistant", id: assistant.id }}
         open={showHistory && !promptLocked}
         onOpenChange={setShowHistory}
-        onUseVersion={(text) => {
+        onUseVersion={(version) => {
           if (promptLocked) return;
-          editPrompt(text);
-          void promptField.commit(text);
+          const value: PromptDraft = {
+            kind: "annotated",
+            text: version.text,
+            description: t("prompt_restored_from_date", {
+              date: version.created_at ? formatDateTime(version.created_at) : t("unknown")
+            })
+          };
+          promptField.setValue(value);
+          void promptField.commit(value);
         }}
       />
       <Dialog open={expanded} onOpenChange={setExpanded}>

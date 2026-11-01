@@ -42,11 +42,6 @@
       "count": 1
     }
   },
-  "src/features/assistants/editor/ai-section.tsx": {
-    "eneo/no-literal-accessible-name": {
-      "count": 1
-    }
-  },
   "src/features/services/editor/service-editor.tsx": {
     "eneo/no-literal-accessible-name": {
       "count": 1
