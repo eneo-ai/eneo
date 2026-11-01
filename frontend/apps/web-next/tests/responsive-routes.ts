@@ -7,6 +7,12 @@
  * why the contract does not (a `skip` with its reason).
  *
  * A skip is a debt, not a verdict. SKIP_BUDGET only goes down.
+ *
+ * A route that only redirects (`redirect`) is not a screen and no debt: the
+ * page it lands on is opened under its own pattern. Opened itself, it would be
+ * that page twice, or, where it lands on a #section, that page partway down
+ * with the browser's focus starting point at the section instead of the skip
+ * link.
  */
 
 /** What the contract creates once and routes can point at. */
@@ -27,13 +33,19 @@ export type Fixtures = {
   userId: string;
 };
 
-export type Entry = { url: (f: Fixtures) => string; auth?: "in" | "out" } | { skip: string };
+export type Entry =
+  { url: (f: Fixtures) => string; auth?: "in" | "out" } | { skip: string; redirectsTo?: string };
 
 const open = (path: string): Entry => ({ url: () => path });
 const closed = (path: string): Entry => ({ url: () => path, auth: "out" });
+/** `to` is the pattern of the route it lands on, which this list opens. */
+const redirect = (to: string): Entry => ({
+  skip: `Redirects to ${to}, which is opened under its own pattern.`,
+  redirectsTo: to
+});
 
 export const ROUTES: Record<string, Entry> = {
-  "/": { skip: "Redirects to the start page; the page it lands on is covered." },
+  "/": redirect("/spaces/$/chat"),
   "/*": open("/nothing-here-at-all"),
   "/account": open("/account"),
   "/account/api-keys": open("/account/api-keys"),
@@ -48,9 +60,10 @@ export const ROUTES: Record<string, Entry> = {
   },
   "/admin/crawler": open("/admin/crawler"),
   "/admin/federation": open("/admin/federation"),
-  "/admin/flow-data-retention": open("/admin/flow-data-retention"),
-  "/admin/flow-input-limits": open("/admin/flow-input-limits"),
-  "/admin/flow-knowledge-evidence": open("/admin/flow-knowledge-evidence"),
+  // The Svelte page's old addresses, now sections of the one settings page.
+  "/admin/flow-data-retention": redirect("/admin/flow-settings"),
+  "/admin/flow-input-limits": redirect("/admin/flow-settings"),
+  "/admin/flow-knowledge-evidence": redirect("/admin/flow-settings"),
   "/admin/flow-settings": open("/admin/flow-settings"),
   "/admin/help-assistants": open("/admin/help-assistants"),
   "/admin/help-assistants/$": { skip: "Needs a help assistant fixture." },
@@ -90,7 +103,7 @@ export const ROUTES: Record<string, Entry> = {
   "/module-login": closed("/module-login"),
   "/module-login/failed": closed("/module-login/failed"),
   "/password-change": closed("/password-change"),
-  "/spaces": { skip: "Redirects to the spaces list." },
+  "/spaces": redirect("/spaces/list"),
   "/spaces/$": { url: (f) => f.space },
   "/spaces/$/*": { url: (f) => `${f.space}/nothing-here-at-all` },
   "/spaces/$/apps": { url: (f) => `${f.space}/apps` },
@@ -125,6 +138,8 @@ export const ROUTES: Record<string, Entry> = {
 };
 
 /** Routes the contract does not open yet. Lower it when a fixture lands; never raise it. */
-export const SKIP_BUDGET = 11;
+export const SKIP_BUDGET = 8;
 
-export const skipped = () => Object.entries(ROUTES).filter(([, entry]) => "skip" in entry);
+/** The skips that are a debt: a redirect is not one. */
+export const skipped = () =>
+  Object.entries(ROUTES).filter(([, entry]) => "skip" in entry && !entry.redirectsTo);

@@ -24,4 +24,13 @@ describe("the responsive contract's routes", () => {
     }
     expect(skipped().length).toBeLessThanOrEqual(SKIP_BUDGET);
   });
+
+  it("opens the page every redirect lands on", () => {
+    for (const [route, entry] of Object.entries(ROUTES)) {
+      if (!("redirectsTo" in entry) || !entry.redirectsTo) continue;
+      expect("url" in (ROUTES[entry.redirectsTo] ?? {}), `${route} → ${entry.redirectsTo}`).toBe(
+        true
+      );
+    }
+  });
 });
