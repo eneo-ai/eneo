@@ -14,10 +14,35 @@ const count = new Intl.NumberFormat("sv");
 // Real persistence and execution, using the completion provider already seeded in E2E.
 async function historyFlow(page: Page) {
   await page.goto("/spaces/list");
+  const models = await apiRequest<Schema<"PaginatedResponse_CompletionModelPublic_">>(
+    page,
+    "/completion-models/"
+  );
+  const seededModel = models.items.find((item) => item.name === "e2e-mock");
+  if (!seededModel?.provider_id) throw new Error("The E2E mock completion provider is missing");
+  // Declare a test-specific setting on the mock route without changing the shared seed model.
+  // This exercises persisted parameters, not temperature's effect on generated text.
+  const model = await apiRequest<Schema<"CompletionModelPublic">>(
+    page,
+    "/admin/tenant-models/completion/",
+    {
+      method: "POST",
+      body: {
+        provider_id: seededModel.provider_id,
+        name: uniqueName("e2e-history").replaceAll(" ", "-"),
+        display_name: uniqueName("E2E history model"),
+        max_input_tokens: 32768,
+        max_output_tokens: 2048,
+        model_kwargs_capabilities: {
+          temperature: { supported: true, control: "slider", minimum: 0, maximum: 2, step: 0.01 }
+        }
+      } satisfies Schema<"TenantCompletionModelCreate">
+    }
+  );
+  expect(model.supported_model_kwargs.temperature).toMatchObject({ supported: true });
   const spaceId = await apiPost(page, "/spaces/", { name: uniqueName("E2E history") });
   const space = await apiRequest<Schema<"SpacePublic">>(page, `/spaces/${spaceId}/`);
-  const model = space.completion_models.find((item) => item.name === "e2e-mock");
-  if (!model) throw new Error("The E2E space has no seeded e2e-mock completion model");
+  expect(space.completion_models.some((item) => item.id === model.id)).toBe(true);
   const flow = await apiRequest<Schema<"FlowPublic">>(page, "/flows/", {
     method: "POST",
     body: { space_id: spaceId, name: uniqueName("Historikflöde") }
@@ -132,6 +157,7 @@ test(
     expect(older.step.effective_prompt).toContain(originalPrompt);
     expect(older.step.effective_prompt).not.toContain(revisedPrompt);
     expect(older.step.model_parameters_json).toMatchObject({ temperature: 0.2 });
+    expect(newer.step.model_parameters_json).toMatchObject({ temperature: 0.7 });
 
     await page.goto(`${url}?tab=runs`);
     await expect(page.getByRole("link", { name: newerLabel, exact: true })).toBeVisible();
