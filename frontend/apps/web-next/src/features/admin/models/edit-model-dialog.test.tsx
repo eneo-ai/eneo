@@ -381,6 +381,30 @@ const descriptions = (element: HTMLElement) =>
     .split(" ")
     .map((id) => document.getElementById(id)?.textContent);
 
+it("points each open form's switch at its own help, not at another form's", () => {
+  renderInApp(
+    <>
+      {["hosted_vllm", "openai"].map((providerType) => (
+        <EditModelDialog
+          key={providerType}
+          model={transcriptionModel(providerType)}
+          kind="transcription"
+          classifications={[]}
+          securityEnabled={false}
+          open
+          onOpenChange={vi.fn()}
+        />
+      ))}
+    </>
+  );
+  for (const toggle of screen.getAllByRole("switch", { name: "Livetranskribering" })) {
+    for (const id of (toggle.getAttribute("aria-describedby") ?? "").split(" ")) {
+      // An id the page has twice names whichever comes first, perhaps the other dialog's.
+      expect(document.querySelectorAll(`[id="${id}"]`)).toHaveLength(1);
+    }
+  }
+});
+
 describe("live transcription on a transcription model", () => {
   // "vllm" is the backend's alias for hosted_vllm, and a provider created
   // through the API keeps the type it was given.

@@ -2,7 +2,7 @@
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useId, useState } from "react";
 import {
   FieldProblem,
   fieldProblemProps,
@@ -111,6 +111,11 @@ function EditModelForm({
   const t = useTranslations();
   const queryClient = useQueryClient();
   const imageLabels = useImageOptionLabels();
+  // Two forms can be on the page at once (a dialog over another): ids of their own.
+  const helpId = useId();
+  const realtimeHelpId = `${helpId}-realtime`;
+  const realtimeUnavailableId = `${helpId}-realtime-unavailable`;
+  const strictToolsHelpId = `${helpId}-strict-tools`;
 
   const [displayName, setDisplayName] = useState(model.nickname ?? model.name);
   const [litellmName, setLitellmName] = useState(model.name);
@@ -511,16 +516,16 @@ function EditModelForm({
                   disabled={!realtimeAvailable}
                   aria-describedby={
                     realtimeAvailable
-                      ? "model-realtime-help"
-                      : "model-realtime-help model-realtime-unavailable"
+                      ? realtimeHelpId
+                      : `${realtimeHelpId} ${realtimeUnavailableId}`
                   }
                 />
               </Label>
-              <p id="model-realtime-help" className="text-muted-foreground text-xs">
+              <p id={realtimeHelpId} className="text-muted-foreground text-xs">
                 {t("live_transcription_help")}
               </p>
               {!realtimeAvailable && (
-                <p id="model-realtime-unavailable" className="text-muted-foreground text-xs">
+                <p id={realtimeUnavailableId} className="text-muted-foreground text-xs">
                   {t("live_transcription_needs_vllm")}
                 </p>
               )}
@@ -729,10 +734,10 @@ function EditModelForm({
                       setStrictRoute(declared ? litellmName.trim() : null);
                       setStrictTouched(true);
                     }}
-                    aria-describedby="model-strict-tools-help"
+                    aria-describedby={strictToolsHelpId}
                   />
                 </Label>
-                <p id="model-strict-tools-help" className="text-muted-foreground text-xs">
+                <p id={strictToolsHelpId} className="text-muted-foreground text-xs">
                   {t("strict_tool_schema_help")}
                 </p>
               </div>
