@@ -282,7 +282,7 @@ export function WhatsNewPage({ title }: { title: string }) {
         href="https://docs.eneo.ai/about/release-notes"
         target="_blank"
         rel="noreferrer"
-        className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-2"
+        className="text-muted-foreground hover:text-foreground inline-flex items-center self-start text-sm underline underline-offset-2 pointer-coarse:min-h-11"
       >
         {t("whats_new_docs_link")}
       </a>
@@ -304,7 +304,7 @@ function FilterButton({
       type="button"
       aria-pressed={selected}
       onClick={onClick}
-      className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground rounded-full border px-3 py-1 text-xs font-medium transition-colors pointer-coarse:py-3"
+      className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-medium transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11"
     >
       {children}
     </button>

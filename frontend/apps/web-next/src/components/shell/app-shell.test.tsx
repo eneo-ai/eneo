@@ -228,6 +228,19 @@ describe("AppShellFrame on a phone", () => {
     expect(within(drawer).getByRole("button", { name: "Jobbklockan" })).toBeTruthy();
   });
 
+  it("keeps the home link a 44 px target when only the mark shows", () => {
+    // Below 360px the link holds the 24 px mark alone; without min-w-11 it was
+    // 32 px wide. jsdom applies no CSS, so the class is what is checked;
+    // tests/responsive-contract.spec.ts measures it at 320px.
+    renderShell();
+    const home = within(screen.getByRole("banner")).getByRole("link", {
+      name: "Eneo, till startsidan"
+    });
+    expect(home.className).toMatch(/(^| )h-11( |$)/);
+    expect(home.className).toMatch(/(^| )min-w-11( |$)/);
+    expect(home.className).toMatch(/(^| )shrink-0( |$)/);
+  });
+
   it("opens search from the top bar", async () => {
     renderShell();
     const topBar = screen.getByRole("banner");

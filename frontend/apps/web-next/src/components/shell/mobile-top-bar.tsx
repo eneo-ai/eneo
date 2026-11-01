@@ -33,10 +33,12 @@ export function MobileTopBar() {
       <Link
         href="/"
         aria-label={t("shell_home_link")}
-        className="rounded-ax-inner focus-visible:outline-ring flex h-11 items-center px-1 focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="rounded-ax-inner focus-visible:outline-ring flex h-11 min-w-11 shrink-0 items-center justify-center px-1 focus-visible:outline-2 focus-visible:outline-offset-2"
       >
         {/* Below 360px the mark alone, so search, both bells and "Ny
-            konversation" still fit at 320px. */}
+            konversation" still fit at 320px; it is 24 px wide, so the link
+            is centred in a 44 px box to stay a full touch target (the word
+            mark is wider, so min-w-11 changes nothing above 360px). */}
         <EneoIcon className="h-6 w-auto min-[22.5rem]:hidden" />
         <EneoWordMark className="hidden h-5 w-auto min-[22.5rem]:block" />
       </Link>

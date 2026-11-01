@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createTranslator } from "use-intl";
 import {
@@ -844,6 +844,21 @@ it("opens enabled what's new using the shared settings and marker owners", async
   await screen.findByRole("heading", { name: messages.whats_new, level: 1 });
   expect(document.title).toBe(`${messages.whats_new} · Eneo`);
   expect(requestedPaths().filter((path) => path === "/api/v1/settings/")).toHaveLength(1);
+});
+
+it("gives what's new filter chips and the docs link 44 px touch targets", async () => {
+  replies.set("/api/v1/settings/", { ...context.settings, whats_new_enabled: true });
+  replies.set("/api/v1/whats-new/seen/", { seen_version: "0.0.0" });
+  await renderRoute("/whats-new");
+  await screen.findByRole("heading", { name: messages.whats_new, level: 1 });
+  // jsdom applies no CSS: the coarse-pointer height is asserted as its class.
+  // The chips used to grow by padding only (pointer-coarse:py-3, 42 px).
+  const filters = screen.getByRole("group", { name: messages.whats_new_filters_label });
+  const all = within(filters).getByRole("button", { name: messages.whats_new_filter_all });
+  expect(all.className).toContain("pointer-coarse:min-h-11");
+  expect(all.className).toContain("pointer-coarse:min-w-11");
+  const docs = screen.getByRole("link", { name: messages.whats_new_docs_link });
+  expect(docs.className).toContain("pointer-coarse:min-h-11");
 });
 
 afterEach(() => {

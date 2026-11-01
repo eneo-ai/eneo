@@ -123,12 +123,14 @@ function BundledOffer({
           {t("tools_builtin_turn_on")}
         </Button>
       </div>
-      <p className="text-ax-text-secondary text-sm">
+      {/* A flex row, so on a touch screen the button gets a 44 px row of its own
+          height and wraps under the question on a narrow phone. */}
+      <p className="text-ax-text-secondary flex flex-wrap items-center gap-x-1 text-sm">
         {t("tools_prefer_own_service")}{" "}
         <button
           type="button"
           onClick={onConnectExternal}
-          className="text-ax-text focus-visible:outline-ring rounded-ax-inner font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2"
+          className="text-ax-text focus-visible:outline-ring rounded-ax-inner text-left font-medium underline underline-offset-2 focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
         >
           {t("tools_connect_external")}
         </button>

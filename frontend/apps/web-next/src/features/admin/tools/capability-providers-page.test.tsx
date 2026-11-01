@@ -165,6 +165,16 @@ describe("admin function sources", () => {
     expect(await screen.findByText("tools_builtin_turned_on")).toBeTruthy();
   });
 
+  it("gives the external server's button a 44 px row on a touch screen", async () => {
+    show();
+    const connect = await screen.findAllByRole("button", { name: "tools_connect_external" });
+    expect(connect.length).toBeGreaterThan(0);
+    for (const button of connect) {
+      expect(button.className.split(/\s+/)).toContain("pointer-coarse:min-h-11");
+      expect(button.parentElement!.className.split(/\s+/)).toContain("items-center");
+    }
+  });
+
   it("names a bundled source after its function and keeps it out of the edit form", async () => {
     get.mockImplementation((path?: string) => {
       if (path === "/api/v1/mcp-servers/settings/")
