@@ -7373,6 +7373,7 @@
   "flow_step_editor_instruction_description": "Describe what the AI should do with its input. Use Insert variable to refer to form fields and earlier steps.",
   "flow_step_editor_instruction_placeholder": "For example: Summarise the case in three points for a case officer.",
   "flow_step_editor_instruction_missing": "The step has no instruction. Write what the AI should do with its input.",
+  "flow_step_editor_prompt_version_used": "The version is now in the instruction. Save the step to keep it.",
   "flow_step_editor_instruction_none": "No instruction yet",
   "flow_step_editor_model_missing": "The step has no model. Choose one before the flow is published.",
   "flow_step_editor_model_below_classification": "The model does not meet the security class of what the step reads. Choose one of these: {models}.",

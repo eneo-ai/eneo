@@ -3,10 +3,11 @@
 import { Button } from "@astryxdesign/core/Button";
 import { FieldLabel } from "@astryxdesign/core/Field";
 import { FileInput } from "@astryxdesign/core/FileInput";
+import { useAnnounce } from "@astryxdesign/core/hooks";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
-import { Paperclip, X } from "lucide-react";
+import { History, Paperclip, X } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { ModelSelector } from "@/components/ai-elements/model-selector";
@@ -27,6 +28,7 @@ import {
 import { fileRestrictionsRules, planFileUploads } from "@/features/files/upload-plan";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";
 import { KnowledgePicker } from "@/features/knowledge/select/knowledge-picker";
+import { PromptVersionDialog } from "@/features/prompts/prompt-version-dialog";
 import type { KnowledgeSelections } from "@/features/knowledge/select/logic";
 import { useSpace } from "@/features/spaces/use-space";
 import { browserApi } from "@/lib/api/browser";
@@ -251,7 +253,8 @@ function Attachments({
 }
 
 /**
- * The step's AI: its instruction, its model and the model's settings, and
+ * The step's AI: its instruction (with the step assistant's earlier
+ * versions to take one back from), its model and the model's settings, and
  * the knowledge and files it reads. All of it belongs to the step's
  * flow-managed assistant and is saved with the step in one edit.
  */
@@ -279,9 +282,11 @@ export function StepAiSection({
   classification: StepClassification | null;
 }) {
   const t = useTranslations();
+  const announce = useAnnounce();
   const { space } = useSpace();
   const { tenant } = useAppContext();
   const modelSelectorId = useId();
+  const [showHistory, setShowHistory] = useState(false);
   const selections: KnowledgeSelections = {
     collections: assistant.groups,
     websites: assistant.websites,
@@ -334,7 +339,26 @@ export function StepAiSection({
             {t("flow_step_editor_instruction_missing")}
           </Text>
         )}
+        <div className="flex flex-wrap gap-2">
+          <Button
+            label={t("show_prompt_history")}
+            icon={<History aria-hidden="true" className="size-4" />}
+            variant="ghost"
+            size="sm"
+            onClick={() => setShowHistory(true)}
+          />
+        </div>
       </Anchor>
+      {/* A version taken back goes into the draft; saving the step makes it the instruction. */}
+      <PromptVersionDialog
+        resource={{ type: "assistant", id: savedAssistant.id }}
+        open={showHistory}
+        onOpenChange={setShowHistory}
+        onUseVersion={(version) => {
+          onAssistantChange({ prompt: version.text });
+          announce(t("flow_step_editor_prompt_version_used"));
+        }}
+      />
 
       <Anchor formId={formId} anchor="completion_model" className="flex flex-col gap-2">
         <FieldLabel label={t("completion_model")} inputID={modelSelectorId} />

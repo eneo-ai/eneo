@@ -821,6 +821,62 @@ describe("FlowStepEditor", () => {
     expect(assistantReads.length).toBeGreaterThanOrEqual(2);
   });
 
+  it("puts an earlier instruction from the step assistant's history in the draft, to save with the step", async () => {
+    const author = { id: "user-1", email: "anna.lind@example.se", username: "Anna Lind" };
+    const versions = [
+      {
+        id: "prompt-1",
+        text: "Sammanfatta ärendet.",
+        description: null,
+        is_selected: true,
+        created_at: "2026-10-20T09:00:00Z",
+        user: author
+      },
+      {
+        id: "prompt-0",
+        text: "Sammanfatta kort.",
+        description: "Första utkastet",
+        is_selected: false,
+        created_at: "2026-10-01T09:00:00Z",
+        user: author
+      }
+    ];
+    api.routes["GET /api/v1/assistants/{id}/prompts/"] = () => ({
+      body: { items: versions, count: versions.length }
+    });
+    api.routes["GET /api/v1/prompts/{id}/"] = (init: { params: { path: { id: string } } }) => ({
+      body: versions.find((version) => version.id === init.params.path.id)
+    });
+    api.routes[EDITOR] = () => ({ body: makeFlow({ draft_revision: 5 }) });
+    const { onSaved } = renderEditor(makeFlow());
+    await nameField();
+
+    fireEvent.click(screen.getByRole("button", { name: messages.show_prompt_history }));
+    const dialog = await screen.findByRole("dialog", { name: messages.prompt_history });
+    fireEvent.click(await within(dialog).findByRole("button", { name: /Första utkastet/ }));
+    await within(dialog).findByText("Sammanfatta kort.");
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.restore_this_version }));
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect((screen.getByLabelText(/^Instruktion/) as HTMLTextAreaElement).value).toBe(
+      "Sammanfatta kort."
+    );
+    expect(
+      api.stub.calls.find((call) => call.path === "/api/v1/assistants/{id}/prompts/")?.init
+    ).toMatchObject({ params: { path: { id: "assistant-1" } } });
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+    await waitFor(() => expect(onSaved).toHaveBeenCalled());
+    expect(patchBodies()).toEqual([
+      expect.objectContaining({
+        assistants: [
+          expect.objectContaining({
+            changes: { prompt: { text: "Sammanfatta kort.", description: null } }
+          })
+        ]
+      })
+    ]);
+  });
+
   it("keeps the edits when the draft moved on, and saves them on the reloaded revision", async () => {
     let attempts = 0;
     api.routes[EDITOR] = () =>
