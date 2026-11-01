@@ -11,6 +11,7 @@ import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog"
 import { inputFieldRules } from "@/features/files/upload-plan";
 import { saveBlob } from "@/features/files/signed-file-url";
 import { formatBytes, formatDateTime } from "@/lib/format";
+import { ScreenWakeLock } from "@/lib/audio/screen-wake-lock";
 import { withRecordedDuration } from "@/lib/audio/webm-duration";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
 import { toast } from "@/lib/toast";
@@ -64,9 +65,12 @@ type Capture = {
   cleanupListeners: () => void;
   stallTimer: ReturnType<typeof setInterval> | null;
   diagnostics: string[];
+  /** A phone whose screen locks can stop the capture: the screen stays on while recording. */
+  wakeLock: ScreenWakeLock;
 };
 
 function releaseCapture(capture: Capture) {
+  capture.wakeLock.release();
   capture.cleanupListeners();
   if (capture.stallTimer !== null) clearInterval(capture.stallTimer);
   if (capture.raf !== null) cancelAnimationFrame(capture.raf);
@@ -154,7 +158,8 @@ export function AudioRecorderInput({
       raf: null,
       stallTimer: null,
       diagnostics: [],
-      cleanupListeners: () => {}
+      cleanupListeners: () => {},
+      wakeLock: new ScreenWakeLock()
     };
     captureRef.current = capture;
     setPhase("acquiring");
@@ -304,6 +309,7 @@ export function AudioRecorderInput({
       recorder.start(TIMESLICE_MS);
       recordingSince = performance.now();
       capture.phase = "recording";
+      capture.wakeLock.hold();
       capture.stallTimer = setInterval(() => {
         if (captureRef.current !== capture || capture.phase !== "recording") return;
         if (Date.now() - lastChunkAt >= STALL_TIMEOUT_MS) {

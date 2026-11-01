@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { WakeLockHost } from "@/lib/audio/screen-wake-lock";
 import type { JournalPart } from "./recording-keeper";
 import {
   AudioRecorder,
@@ -85,7 +86,11 @@ function fakeStream() {
 
 function setup(
   getUserMedia: (constraints: MediaStreamConstraints) => Promise<MediaStream>,
-  { meter = false, journal }: { meter?: boolean; journal?: JournalSpy } = {}
+  {
+    meter = false,
+    journal,
+    wakeLock
+  }: { meter?: boolean; journal?: JournalSpy; wakeLock?: WakeLockHost } = {}
 ) {
   let now = 0;
   let hidden = false;
@@ -98,7 +103,7 @@ function setup(
       MediaRecorder: FakeMediaRecorder as unknown as typeof MediaRecorder,
       AudioContext: meter ? (FakeAudioContext as unknown as typeof AudioContext) : undefined,
       isSecureContext: true,
-      wakeLock: undefined,
+      wakeLock,
       now: () => now,
       wallNow: () => Date.UTC(2026, 9, 22, 8, 0, 0) + now,
       isHidden: () => hidden
@@ -204,6 +209,19 @@ describe("AudioRecorder", () => {
     expect(parts[0]).toMatchObject({ sessionId: "abc", index: 2, durationMs: 12_000 });
     expect(parts[0]!.file.name).toBe("recording-abc-seg02-2026-10-22T08-00-00-000Z.ogg");
     expect(track.stop).toHaveBeenCalled();
+  });
+
+  it("keeps the screen on from the start to the stop, pauses included", async () => {
+    const lock = Object.assign(new EventTarget(), { release: vi.fn(async () => undefined) });
+    const wakeLock = { request: vi.fn(async () => lock) };
+    const { recorder } = setup(() => Promise.resolve(fakeStream().stream), { wakeLock });
+    await recorder.start({ sessionId: "abc", firstIndex: 0, limits: limits() });
+    await vi.waitFor(() => expect(wakeLock.request).toHaveBeenCalledExactlyOnceWith("screen"));
+    recorder.pause();
+    recorder.resume();
+    expect(lock.release).not.toHaveBeenCalled();
+    await recorder.stop();
+    expect(lock.release).toHaveBeenCalledOnce();
   });
 
   it("goes on in a new part at the part length, overlapping the last, in order", async () => {

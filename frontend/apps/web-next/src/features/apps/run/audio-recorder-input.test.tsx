@@ -87,6 +87,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  Reflect.deleteProperty(navigator, "wakeLock");
+  Reflect.deleteProperty(document, "visibilityState");
   vi.useRealTimers();
   vi.clearAllMocks();
   vi.restoreAllMocks();
@@ -160,6 +162,63 @@ it("saves the captured audio with its dated filename, including while queued", a
   rerender(<AudioRecorderInput {...props} files={[]} />);
   fireEvent.click(screen.getByRole("button", { name: "Spara som fil" }));
   expect(saveBlob).toHaveBeenLastCalledWith(file, name);
+});
+
+it("keeps the screen on while recording, again after the page was hidden, until stop", async () => {
+  class Lock extends EventTarget {
+    release = vi.fn(async () => {
+      this.dispatchEvent(new Event("release"));
+    });
+  }
+  const locks: Lock[] = [];
+  const wakeLock = {
+    request: vi.fn(async () => {
+      const lock = new Lock();
+      locks.push(lock);
+      return lock;
+    })
+  };
+  Object.defineProperty(navigator, "wakeLock", { configurable: true, value: wakeLock });
+  let visibility: DocumentVisibilityState = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  const turn = (state: DocumentVisibilityState) => {
+    visibility = state;
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
+
+  show();
+  expect(wakeLock.request).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole("button", { name: "Starta inspelning" }));
+  const stop = await screen.findByRole("button", { name: "Stoppa inspelning" });
+  await waitFor(() => expect(wakeLock.request).toHaveBeenCalledExactlyOnceWith("screen"));
+
+  // Hidden, the browser lets the lock go; visible again, a new one is taken.
+  await act(async () => {
+    turn("hidden");
+    locks[0]!.dispatchEvent(new Event("release"));
+  });
+  await act(async () => turn("visible"));
+  await waitFor(() => expect(wakeLock.request).toHaveBeenCalledTimes(2));
+
+  act(() => Recorder.instances[0]!.data());
+  fireEvent.click(stop);
+  await screen.findByRole("button", { name: "Använd denna inspelning" });
+  expect(locks[1]!.release).toHaveBeenCalledOnce();
+  await act(async () => turn("hidden"));
+  await act(async () => turn("visible"));
+  expect(wakeLock.request).toHaveBeenCalledTimes(2);
+});
+
+it("lets the screen lock again when the recorder is closed mid-recording", async () => {
+  const lock = Object.assign(new EventTarget(), { release: vi.fn(async () => undefined) });
+  const wakeLock = { request: vi.fn(async () => lock) };
+  Object.defineProperty(navigator, "wakeLock", { configurable: true, value: wakeLock });
+  const { unmount } = show();
+  fireEvent.click(screen.getByRole("button", { name: "Starta inspelning" }));
+  await screen.findByRole("button", { name: "Stoppa inspelning" });
+  await waitFor(() => expect(wakeLock.request).toHaveBeenCalledOnce());
+  unmount();
+  expect(lock.release).toHaveBeenCalledOnce();
 });
 
 async function recordAndSave(...chunks: string[]) {
