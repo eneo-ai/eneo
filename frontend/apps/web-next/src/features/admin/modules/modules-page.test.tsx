@@ -10,7 +10,7 @@ const api = vi.hoisted(() => ({
   GET: vi.fn((path: string) =>
     Promise.resolve({
       data:
-        path === "/api/v1/admin/api-keys"
+        path === "/api/v1/admin/modules/service-keys/"
           ? { items: [], next_cursor: null }
           : { items: path === "/api/v1/admin/modules/" ? api.installations : [] },
       response: new Response("{}")
@@ -41,6 +41,53 @@ it("introduces the page under its title, not under the installed modules", () =>
   expect(
     screen.getByRole("heading", { level: 1, name: "Moduler" }).parentElement?.contains(intro)
   ).toBe(true);
+});
+
+const serviceKey = (id: string, name: string, suffix: string) => ({
+  id,
+  name,
+  key_prefix: "sk_",
+  key_suffix: suffix
+});
+
+it("offers only the service keys the backend lets a module bind, from every page", async () => {
+  api.GET.mockImplementation(((
+    path: string,
+    init?: { params?: { query?: { cursor?: string } } }
+  ) => {
+    const cursor = init?.params?.query?.cursor;
+    const data =
+      path === "/api/v1/admin/modules/service-keys/"
+        ? cursor === "page-2"
+          ? { items: [serviceKey("k2", "Ärendetjänst", "b2b2")], next_cursor: null }
+          : { items: [serviceKey("k1", "Diarietjänst", "a1a1")], next_cursor: "page-2" }
+        : path === "/api/v1/admin/api-keys"
+          ? // Every key of the organization, a person's own key among them.
+            {
+              items: [
+                serviceKey("k1", "Diarietjänst", "a1a1"),
+                serviceKey("k3", "Annas nyckel", "c3c3")
+              ],
+              next_cursor: null
+            }
+          : { items: [] };
+    return Promise.resolve({ data, response: new Response("{}") });
+  }) as never);
+  renderInApp(<ModulesPage title="Moduler" />);
+
+  const select = screen.getByLabelText("Tjänstenyckel") as HTMLSelectElement;
+  await waitFor(() => expect(select.disabled).toBe(false));
+  const options = [...select.options].map((option) => option.textContent);
+  expect(options).toContain("Diarietjänst · sk_••••a1a1");
+  expect(options).toContain("Ärendetjänst · sk_••••b2b2");
+  expect(options.some((option) => option?.includes("Annas nyckel"))).toBe(false);
+  // At most the backend's page size, and the next page by its cursor.
+  expect(api.GET).toHaveBeenCalledWith("/api/v1/admin/modules/service-keys/", {
+    params: { query: { limit: 100 } }
+  });
+  expect(api.GET).toHaveBeenCalledWith("/api/v1/admin/modules/service-keys/", {
+    params: { query: { limit: 100, cursor: "page-2" } }
+  });
 });
 
 const problemOf = (control: HTMLElement) =>
