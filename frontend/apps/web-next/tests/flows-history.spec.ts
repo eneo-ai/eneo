@@ -248,10 +248,21 @@ test(
     await oldLink.focus();
     await page.keyboard.press("Enter");
     await expect(page).toHaveURL(`${new URL(url, page.url()).href}/runs/${older.detail.id}`);
+    // The router keeps the history on screen until the run's page has loaded (its route code
+    // arrives on demand), and that table has this usage in both rows and the older row's
+    // version: read the run's own page once it has replaced the list, never the outgoing table.
+    await expect(
+      page.getByRole("heading", { level: 1, name: olderLabel, exact: true })
+    ).toBeVisible();
+    await expect(page.getByRole("table", { name: "Körningar", exact: true })).toHaveCount(0);
     await expect(
       page.getByText(`Version ${older.detail.flow_version}`, { exact: true })
     ).toBeVisible();
-    await expect(page.getByText(usageText, { exact: true })).toBeVisible();
+    await expect(
+      page
+        .getByRole("region", { name: "Användning", exact: true })
+        .getByText(usageText, { exact: true })
+    ).toBeVisible();
 
     const article = page.getByRole("article", { name: `Steg 1: ${stepName}`, exact: true });
     await test.step("opens the older run's file and recorded knowledge passage after republishing", async () => {
