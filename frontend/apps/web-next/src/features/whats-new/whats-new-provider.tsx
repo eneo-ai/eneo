@@ -1,6 +1,7 @@
 "use client";
 
 import { hasUnseenRelease, latestRelease, releases, visibleEntries } from "@eneo/whats-new";
+import type { Release } from "@eneo/whats-new";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { createContext, useCallback, useContext, useRef } from "react";
 import { useAppContext } from "@/components/providers/app-context";
@@ -11,6 +12,8 @@ import { sessionQueries } from "@/lib/api/session";
 import { pendingAnnouncement, type Marker } from "./release-model";
 
 interface WhatsNewContextValue {
+  /** Releases with at least one entry visible under the user's permissions. */
+  releases: Release[];
   enabled: boolean;
   seenVersion: Marker;
   hasUnseen: boolean;
@@ -40,6 +43,7 @@ export function WhatsNewProvider({ children }: { children: React.ReactNode }) {
   const { data: state } = useSuspenseQuery(markers);
   const seenVersion: Marker = state?.seen_version;
   const announcedVersion: Marker = state?.announced_version;
+  const visibleReleases = releases.filter((release) => visibleEntries(release, can).length > 0);
   const latest = latestRelease();
   const latestVisible = latest && visibleEntries(latest, can).length > 0;
   const seenInFlight = useRef<Promise<void> | null>(null);
@@ -57,9 +61,7 @@ export function WhatsNewProvider({ children }: { children: React.ReactNode }) {
   const hasUnseen =
     enabled &&
     seenVersion !== undefined &&
-    releases.some(
-      (release) => visibleEntries(release, can).length > 0 && hasUnseenRelease(seenVersion, release)
-    );
+    visibleReleases.some((release) => hasUnseenRelease(seenVersion, release));
 
   const markLatestSeen = useCallback((): Promise<void> => {
     if (!hasUnseen) return Promise.resolve();
@@ -112,6 +114,7 @@ export function WhatsNewProvider({ children }: { children: React.ReactNode }) {
   return (
     <WhatsNewContext.Provider
       value={{
+        releases: visibleReleases,
         enabled,
         seenVersion,
         hasUnseen,
