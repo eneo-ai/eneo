@@ -1,3 +1,4 @@
+import { withRecordedDuration } from "@/lib/audio/webm-duration";
 import { partFileName, recordingTimeLeftMs, type RecordingOptions } from "./recording-format";
 import type { RecorderAudioGraph } from "./live-transcript";
 import type { JournalPart, RecorderJournal } from "./recording-keeper";
@@ -7,7 +8,6 @@ import {
   type MicrophoneSettings,
   type RecorderDiagnostics
 } from "./recorder-diagnostics";
-import { withRecordedDuration } from "./webm-duration";
 
 /**
  * One microphone recording in the run form, from the permission prompt to
