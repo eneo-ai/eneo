@@ -301,6 +301,12 @@ describe("StartRunDialog", () => {
     act(() => timeouts.fire?.({ reason, timeoutMs: 30_000 }));
 
     expect(await within(dialog).findByText(text)).toBeTruthy();
+    // A screen reader hears why, not only that it failed.
+    await waitFor(() =>
+      expect(document.querySelector('[data-astryx-live-region="polite"]')?.textContent).toContain(
+        `${messages.flow_runs_upload_failed.replace("{name}", "brev.pdf")} ${text}`
+      )
+    );
     // It may pass: the file can be sent again.
     expect(
       button(dialog, messages.flow_transcript_upload_retry.replace("{name}", "brev.pdf"))

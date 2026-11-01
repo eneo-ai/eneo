@@ -279,13 +279,15 @@ export function useRuntimeUploads(flowId: string, policy: UploadPolicy | undefin
       const retryable = passes(error);
       // A recorded part goes again by itself; a picked file waits for the person.
       const nextRetryAt = entry.recording && retryable ? retries.failed(entry.key) : undefined;
+      const problem = uploadProblem(error, input, t, locale);
       const failed = update(input.step_id, entry.key, {
         state: "failed",
-        problem: uploadProblem(error, input, t, locale),
+        problem,
         retryable,
         nextRetryAt
       });
-      if (failed) announce(t("flow_runs_upload_failed", { name: entry.name }));
+      // Why, too: which timeout ran out, or what the server said, as the row shows it.
+      if (failed) announce(`${t("flow_runs_upload_failed", { name: entry.name })} ${problem}`);
       else retries.reset(entry.key);
     } finally {
       inFlight.current.delete(entry.key);
