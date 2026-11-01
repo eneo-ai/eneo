@@ -42,6 +42,21 @@ function show(count: number) {
   return renderInApp(<AppsPage />);
 }
 
+describe("AppsPage on a phone", () => {
+  it("names itself for screen readers only, and keeps focus on the visible page", () => {
+    setViewport("phone");
+    const { container } = show(3);
+    // The space's active tab above says "Appar": the title is not drawn again.
+    const title = screen.getByRole("heading", { level: 2, name: "Appar" });
+    expect(title.closest(".max-md\\:sr-only")).toBeTruthy();
+    // What a removal or an action needs to focus is the page, not the clipped title.
+    const page = container.querySelector<HTMLElement>("div.flex.w-full.flex-col[tabindex='-1']");
+    expect(page).toBeTruthy();
+    expect(page!.contains(title)).toBe(true);
+    expect(page!.className).toContain("focus-visible:outline-2");
+  });
+});
+
 describe("AppsPage filter", () => {
   it("is left out on a phone while there are few apps, and comes with many", () => {
     setViewport("phone");

@@ -95,6 +95,13 @@ const busySpace = () =>
   });
 
 describe("SpaceOverview", () => {
+  it("leaves knowledge to the Kunskap tab on a phone, where the overview lists what to act on", () => {
+    setViewport("phone");
+    show(busySpace());
+    expect(screen.getByRole("region", { name: "Assistenter" })).toBeTruthy();
+    expect(screen.queryByRole("region", { name: "Kunskap" })).toBeNull();
+  });
+
   it("shows the newest assistants and a compact knowledge list", async () => {
     const { container } = show(busySpace());
 

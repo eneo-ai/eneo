@@ -67,7 +67,7 @@ export function KnowledgePage({
         headingLevel={2}
         title={t("knowledge")}
         description={t("space_knowledge_description")}
-        className="max-md:sr-only"
+        isTitleHiddenOnPhone
       />
       {tabs.length > 0 ? (
         <div className="@container flex flex-col gap-4">

@@ -44,6 +44,13 @@ export type PageHeaderProps = {
   children?: React.ReactNode;
   /** `data-tour` anchor for the guided tour. */
   tour?: string;
+  /**
+   * A space tab on a phone, where the active tab of the space's strip already
+   * names the page: below 768 px the title and description stay for screen
+   * readers only and the header takes no room in the page. Its actions are
+   * expected to be `DockedActions`, fixed at the bottom there.
+   */
+  isTitleHiddenOnPhone?: boolean;
   className?: string;
 };
 
@@ -77,6 +84,7 @@ export function PageHeader({
   actions,
   children,
   tour,
+  isTitleHiddenOnPhone = false,
   className
 }: PageHeaderProps) {
   const actionSlot = actions ?? children;
@@ -84,7 +92,10 @@ export function PageHeader({
   // below 1024 px, or below 768 px on a space's pages.
 
   return (
-    <div data-tour={tour} className={cn("flex flex-col gap-2", className)}>
+    <div
+      data-tour={tour}
+      className={cn("flex flex-col gap-2", isTitleHiddenOnPhone && "max-md:contents", className)}
+    >
       {breadcrumbs && breadcrumbs.length > 0 ? (
         <Breadcrumbs
           variant="supporting"
@@ -103,8 +114,15 @@ export function PageHeader({
           ))}
         </Breadcrumbs>
       ) : null}
-      <div className="flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-2">
-        <div className="flex min-w-0 flex-col gap-1">
+      <div
+        className={cn(
+          "flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-2",
+          isTitleHiddenOnPhone && "max-md:contents"
+        )}
+      >
+        <div
+          className={cn("flex min-w-0 flex-col gap-1", isTitleHiddenOnPhone && "max-md:sr-only")}
+        >
           <Heading
             level={headingLevel}
             id={headingId}
@@ -123,7 +141,16 @@ export function PageHeader({
             </Text>
           ) : null}
         </div>
-        {actionSlot ? <div className="flex flex-wrap items-center gap-2">{actionSlot}</div> : null}
+        {actionSlot ? (
+          <div
+            className={cn(
+              "flex flex-wrap items-center gap-2",
+              isTitleHiddenOnPhone && "max-md:contents"
+            )}
+          >
+            {actionSlot}
+          </div>
+        ) : null}
       </div>
     </div>
   );

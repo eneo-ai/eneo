@@ -25,7 +25,8 @@ export function SpaceOverview() {
     <div className="flex w-full min-w-0 flex-col gap-7">
       {showAssistants ? <OverviewAssistants /> : null}
       {showApps ? <OverviewApps /> : null}
-      {showKnowledge ? <OverviewKnowledge /> : null}
+      {/* A phone has the Kunskap tab in the space's strip: its overview lists what to act on. */}
+      {showKnowledge && !phone ? <OverviewKnowledge /> : null}
       {phone !== false ? (
         <div className="md:hidden">
           <OverviewManage />

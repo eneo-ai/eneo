@@ -64,6 +64,24 @@ describe("PageHeader", () => {
     expect(screen.getByRole("table", { name: "Promptbibliotek" })).toBeTruthy();
   });
 
+  it("keeps the title for screen readers only on a phone, its actions in view", () => {
+    render(
+      <PageHeader
+        title="Appar"
+        description="Alla appar i ytan"
+        headingLevel={2}
+        isTitleHiddenOnPhone
+        actions={<button type="button">Skapa app</button>}
+      />
+    );
+    const title = screen.getByRole("heading", { level: 2, name: "Appar" });
+    const hidden = title.closest(".max-md\\:sr-only");
+    expect(hidden).toBeTruthy();
+    expect(screen.getByText("Alla appar i ytan").closest(".max-md\\:sr-only")).toBe(hidden);
+    const create = screen.getByRole("button", { name: "Skapa app" });
+    expect(create.closest(".max-md\\:sr-only")).toBeNull();
+  });
+
   it("keeps the legacy children actions slot", () => {
     render(
       <PageHeader title="Appar">

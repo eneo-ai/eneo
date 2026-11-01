@@ -13,6 +13,7 @@ import { RemovalFocusScope } from "@/features/spaces/removal";
 import { filterSpaceResources } from "@/features/spaces/resource-filter";
 import { ResourceFilterInput, useFilterShown } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { AppActionScope } from "./actions";
 import { spaceApps, type AppSparse } from "./apps";
 import { CreateAppButton } from "./create-app";
@@ -48,6 +49,11 @@ export function AppsPage() {
   const { space, can } = useSpace();
   const collator = useCollator();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  // On a phone the title is for screen readers only (the space's active tab names the page), so
+  // focus that a removal or an action needs to put somewhere goes to the visible page instead.
+  const phone = useMediaMatch(PHONE_QUERY);
+  const focusTarget = phone ? panelRef : headingRef;
   const [filter, setFilter] = useState("");
 
   const items = spaceApps(space, collator.compare);
@@ -59,13 +65,18 @@ export function AppsPage() {
   const canCreate = can("create", "app");
 
   return (
-    <RemovalFocusScope target={headingRef}>
-      <AppActionScope focusTarget={headingRef}>
-        <div className="flex w-full flex-col gap-6">
+    <RemovalFocusScope target={focusTarget}>
+      <AppActionScope focusTarget={focusTarget}>
+        <div
+          ref={panelRef}
+          tabIndex={-1}
+          className="focus-visible:outline-ring rounded-ax-element flex w-full flex-col gap-6 focus-visible:outline-2 focus-visible:outline-offset-4"
+        >
           <PageHeader
             headingLevel={2}
             headingRef={headingRef}
             title={t("apps")}
+            isTitleHiddenOnPhone
             actions={
               canCreate && items.length > 0 ? (
                 <DockedActions label={t("space_apps_actions")}>

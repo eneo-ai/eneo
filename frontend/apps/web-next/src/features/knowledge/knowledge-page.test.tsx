@@ -1014,6 +1014,9 @@ describe("Kunskap on a phone", () => {
     expect(policy.getAttribute("href")).toBe("/spaces/space-1/knowledge/collections/collection-1");
     const row = policy.closest("li")!;
     expect(within(row).getByText(/42 filer/)).toBeTruthy();
+    // The tile is as wide as an assistant's or app's, so names line up across the tabs.
+    const tile = row.querySelector("span[aria-hidden='true'].shrink-0");
+    expect(tile?.className).toContain("size-9");
     // A healthy row says nothing more; its menu sits beside the link.
     expect(within(row).queryByText("Indexerad")).toBeNull();
     const menu = within(row).getByRole("button", { name: "Fler åtgärder för Upphandlingspolicy" });
