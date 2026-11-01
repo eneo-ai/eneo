@@ -80,6 +80,7 @@ export function DocumentTemplateDialog({
     >
       <form onSubmit={submit} noValidate>
         <Layout
+          padding={4}
           header={
             <DialogHeader
               title={t(
