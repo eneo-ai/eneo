@@ -135,19 +135,23 @@ export function FlowsPage() {
       key: "name",
       header: t("name"),
       width: proportional(3),
-      renderCell: (flow) => (
-        <span className="flex min-w-0 flex-col gap-0.5 py-1">
-          <Link
-            href={`${base}/${flow.id}`}
-            className="text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 w-fit items-center font-semibold break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
-          >
-            {flow.name}
-          </Link>
-          {flow.description ? (
-            <span className="text-ax-text-secondary text-xs break-words">{flow.description}</span>
-          ) : null}
-        </span>
-      )
+      renderCell: (flow) => {
+        const kind = kindLine(flow);
+        return (
+          <span className="flex min-w-0 flex-col gap-0.5 py-1">
+            <Link
+              href={`${base}/${flow.id}`}
+              className="text-ax-text focus-visible:outline-ring rounded-ax-inner inline-flex min-h-6 w-fit items-center font-semibold break-words hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
+            >
+              {flow.name}
+            </Link>
+            {flow.description ? (
+              <span className="text-ax-text-secondary text-xs break-words">{flow.description}</span>
+            ) : null}
+            {kind ? <span className="text-ax-text-secondary text-xs">{kind}</span> : null}
+          </span>
+        );
+      }
     },
     {
       key: "status",

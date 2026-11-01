@@ -123,6 +123,17 @@ describe("FlowsPage", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("says under each name what the flow takes in and gives back, as the phone rows do", () => {
+    renderPage(dated());
+    const table = screen.getByRole("table", { name: "Flöden" });
+    const cell = within(table).getByRole("link", { name: "Mötesprotokoll" }).parentElement!;
+    expect(within(cell).getByText("Skriver ut mötet.")).toBeTruthy();
+    expect(within(cell).getByText("Indata: Ljud · Resultat: Word-dokument")).toBeTruthy();
+    // A flow with nothing to say about its input or result adds no empty line.
+    const bare = within(table).getByRole("link", { name: "Remissvar" }).parentElement!;
+    expect(bare.children).toHaveLength(1);
+  });
+
   it("says whose each flow is, by the names the space's members go by", async () => {
     const { container } = renderPage(dated());
     const table = screen.getByRole("table", { name: "Flöden" });
