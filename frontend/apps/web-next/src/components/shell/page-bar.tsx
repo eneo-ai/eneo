@@ -64,7 +64,9 @@ export function PageBar({
         // main#main-content keeps focused and scrolled-to content clear of it (app-shell.tsx).
         {...(phone ? { "data-phone-page-bar": "" } : { "data-page-bar": "" })}
         className={cn(
-          "bg-ax-surface border-ax-border sticky top-0 z-10 grid h-14 shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center gap-1 border-b px-1.5",
+          // The back side keeps 44 px (2.75rem) however long the title and the action are:
+          // the title column truncates and gives way, the back link does not.
+          "bg-ax-surface border-ax-border sticky top-0 z-10 grid h-14 shrink-0 grid-cols-[minmax(2.75rem,1fr)_minmax(0,auto)_minmax(max-content,1fr)] items-center gap-1 border-b px-1.5",
           phone ? "md:hidden" : "lg:hidden"
         )}
       >
