@@ -241,7 +241,8 @@ export const eneoTheme = defineTheme({
   // triggers, tabs, nav items, inputs and selectors; segmented items sit 4 px
   // inside theirs, checkbox, radio and switch rows get the height their
   // enlarged inputs need (globals.css), and a Selector's search field and
-  // option rows get 44 px of their own.
+  // option rows get 44 px of their own. A Collapsible's trigger is as tall as
+  // its label (trimmed to the cap height), so it gets 44 px too.
   adaptations: {
     rules: [
       {
@@ -261,7 +262,8 @@ export const eneoTheme = defineTheme({
             "radio-list-item": { base: { minHeight: "44px" } },
             "switch-field": { base: { minHeight: "44px" } },
             "selector-search": { base: { minHeight: "44px" } },
-            "selector-option-row": { base: { minHeight: "44px" } }
+            "selector-option-row": { base: { minHeight: "44px" } },
+            "collapsible-trigger": { base: { minHeight: "44px" } }
           }
         }
       }

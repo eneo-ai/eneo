@@ -160,7 +160,9 @@ describe("globals.css", () => {
       "radio-list-item",
       "switch-field",
       "selector-search",
-      "selector-option-row"
+      "selector-option-row",
+      // A disclosure's trigger is as tall as its label, cut to the cap height.
+      "collapsible-trigger"
     ]) {
       expect(coarse.get(`.astryx-${component}`)).toMatchObject({ "min-height": "44px" });
     }
