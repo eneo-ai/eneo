@@ -26,7 +26,13 @@ def seed_default_models():
     yield
 
 
-@pytest.mark.parametrize("start", ["base", "202610281000", "202610291900"])
+# Each deployed history: a fresh database; the flow run date (202610281000) and develop's
+# skill revision dependencies (202610291900), the two parents; the Flows source's head
+# (202610301000), which still lacks 202610291900's table; and this candidate's own merge
+# (202610301500), which only the final merge revision follows.
+@pytest.mark.parametrize(
+    "start", ["base", "202610281000", "202610291900", "202610301000", "202610301500"]
+)
 def test_fresh_database_and_each_parent_reach_combined_schema(test_settings, start):
     cfg = Config(str(Path(__file__).parents[3] / "alembic.ini"))
     cfg.set_main_option("sqlalchemy.url", test_settings.sync_database_url)
