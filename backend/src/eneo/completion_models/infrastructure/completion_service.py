@@ -1255,6 +1255,7 @@ class CompletionService:
             model=model,
             extended_logging=logging_details,
             total_token_count=total_token_count,
+            knowledge_trace=context.knowledge_trace,
             usage=usage,
         )
 
