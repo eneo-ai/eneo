@@ -29,8 +29,9 @@ function readStored(key: string | undefined): number | null {
 
 /**
  * The width of a panel the user drags or keys wider and narrower beside a
- * main area, with the WAI-ARIA separator semantics on the handle. Astryx has
- * no split-pane component (0.6.4), so the behaviour lives here.
+ * main area, with the WAI-ARIA separator semantics on the handle. Astryx's
+ * Resizable (0.7.3) resolves a size once and does not follow its container
+ * afterwards, so the behaviour lives here.
  *
  * The width the user chose is kept; what is shown is that width as far as
  * the container allows (on drag, on restore and on every resize), so a

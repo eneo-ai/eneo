@@ -701,7 +701,7 @@ and with the text size at 130 %.
 
 <!-- ASTRYX:START -->
 
-Astryx 0.6.4 quick reference for this app (edited for web-next; see above).
+Astryx 0.7.3 quick reference for this app (edited for web-next; see above).
 
 - Discover: `bunx astryx search "<q>"`, `bunx astryx component <Name> --dense`,
   `bunx astryx build "<idea>"`, `bunx astryx docs layout`.
