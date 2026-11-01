@@ -30,7 +30,7 @@ describe("the responsive contract's baseline", () => {
   });
 
   it("names only the kinds of violation the contract measures", () => {
-    const measured = ["clipped", "outside", "overlap", "small", "zoom", "hint"];
+    const measured = ["clipped", "clippedY", "outside", "overlap", "small", "zoom", "hint"];
     const kinds = new Set(entries.map((entry) => entry.split(" ")[0]));
     expect([...kinds].filter((kind) => !measured.includes(kind!))).toEqual([]);
   });

@@ -12,7 +12,8 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * content. Never baselined: a screen either survives it or does not.
  *
  * - Text at 200% (WCAG 1.4.4; a phone's "larger text", a browser's font size):
- *   no screen may scroll sideways as a whole. Every rem grows with the text,
+ *   no screen may scroll sideways as a whole, and no text may be cut off at the
+ *   bottom of its box that was not at 100%. Every rem grows with the text,
  *   buttons and bars included, so a bar that lined up its controls in a row at
  *   100% pushes the page wide at 200% (the phone top bar did, on every
  *   screen). A table or a tab strip scrolling inside its own region is fine.
@@ -76,12 +77,20 @@ test(
     test.setTimeout(15 * 60_000);
     const problems = await walkScreens(browser, baseURL, "Text", async (page, pattern) => {
       // Through the CSSOM: the page's CSP forbids an inline <style>.
+      const before = await measure(page, { vertical: true });
       await page.evaluate(() =>
         document.documentElement.style.setProperty("font-size", "200%", "important")
       );
       await page.waitForTimeout(400);
-      const { overflowDoc } = await measure(page);
-      return overflowDoc > 0 ? [`${pattern}: the page scrolls sideways by ${overflowDoc} px`] : [];
+      const after = await measure(page, { vertical: true });
+      const was = new Set(before.violations.filter((v) => v.kind === "clippedY").map((v) => v.key));
+      const cut = after.violations.filter((v) => v.kind === "clippedY" && !was.has(v.key));
+      return [
+        ...(after.overflowDoc > 0
+          ? [`${pattern}: the page scrolls sideways by ${after.overflowDoc} px`]
+          : []),
+        ...cut.map((v) => `${pattern}: text cut off at the bottom at 200%: ${v.key}`)
+      ];
     });
     expect(problems, problems.join("\n")).toEqual([]);
   }
@@ -94,8 +103,12 @@ test(
     test.setTimeout(15 * 60_000);
     const problems = await walkScreens(browser, baseURL, "Spacing", async (page, pattern) => {
       const clipped = (result: Awaited<ReturnType<typeof measure>>) =>
-        new Set(result.violations.filter((v) => v.kind === "clipped").map((v) => v.key));
-      const before = await measure(page);
+        new Set(
+          result.violations
+            .filter((v) => v.kind === "clipped" || v.kind === "clippedY")
+            .map((v) => v.key)
+        );
+      const before = await measure(page, { vertical: true });
       // A constructed stylesheet, which the page's CSP allows (an inline <style> it forbids).
       await page.evaluate((css) => {
         const sheet = new CSSStyleSheet();
@@ -103,7 +116,7 @@ test(
         document.adoptedStyleSheets = [...document.adoptedStyleSheets, sheet];
       }, SPACING);
       await page.waitForTimeout(400);
-      const after = await measure(page);
+      const after = await measure(page, { vertical: true });
       const was = clipped(before);
       const cut = [...clipped(after)].filter((key) => !was.has(key));
       return [

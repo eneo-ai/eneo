@@ -134,4 +134,18 @@ test.describe("the responsive measure", () => {
     );
     expect(violations.filter((violation) => violation.kind === "small")).toEqual([]);
   });
+
+  test("finds text cut off at the bottom only when asked, and not a line clamp", async ({
+    page
+  }) => {
+    await page.setContent(
+      `<body style="margin:0"><div id="cut" style="margin:8px 16px;width:200px;height:20px;overflow:hidden">Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt</div><p id="clamp" style="margin:8px 16px;width:200px;display:-webkit-box;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden">Lorem ipsum dolor sit amet consectetur adipiscing elit sed do eiusmod tempor incididunt</p></body>`
+    );
+    const kinds = async (vertical: boolean) =>
+      (await measure(page, { vertical })).violations
+        .filter((violation) => violation.kind === "clippedY")
+        .map(({ key }) => key);
+    expect(await kinds(false)).toEqual([]);
+    expect(await kinds(true)).toEqual(["y div:lorem ipsum dolor sit amet c"]);
+  });
 });
