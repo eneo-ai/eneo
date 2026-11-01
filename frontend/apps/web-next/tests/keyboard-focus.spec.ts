@@ -18,11 +18,14 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * hidden by something fixed or sticky (2.4.11): the page bar, the docked action
  * bar, the composer, a toast. The browser scrolls a focused element into view;
  * the page's scroll padding has to keep it clear of those bars.
+ *
+ * KEYBOARD_ROUTES narrows a run to routes matching a regular expression.
  */
 
 const STOPS = 30;
 const PAD = 6;
 const VIEWPORT = { width: 1280, height: 800 };
+const only = process.env.KEYBOARD_ROUTES ? new RegExp(process.env.KEYBOARD_ROUTES) : null;
 
 test(
   "every screen starts at the skip link and draws its keyboard focus",
@@ -42,7 +45,7 @@ test(
     const problems: string[] = [];
 
     for (const [pattern, entry] of Object.entries(ROUTES)) {
-      if ("skip" in entry) continue;
+      if ("skip" in entry || (only && !only.test(pattern))) continue;
       const signedIn = entry.auth !== "out";
       const page = pages[signedIn ? "in" : "out"];
       try {
@@ -135,7 +138,7 @@ for (const size of TOUCH_SIZES) {
       const problems: string[] = [];
 
       for (const [pattern, entry] of Object.entries(ROUTES)) {
-        if ("skip" in entry) continue;
+        if ("skip" in entry || (only && !only.test(pattern))) continue;
         const signedIn = entry.auth !== "out";
         const page = pages[signedIn ? "in" : "out"];
         try {
