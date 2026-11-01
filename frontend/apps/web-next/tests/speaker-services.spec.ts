@@ -24,7 +24,7 @@ test.describe("speaker identification services", { tag: "@vite" }, () => {
     await dialog.getByLabel(/^API-nyckel/).fill(KEY);
     await dialog.getByRole("button", { name: "Anslut", exact: true }).click();
     await expect(dialog.getByRole("heading", { name: `${name} är ansluten` })).toBeVisible();
-    await expect(dialog.getByText("Tar emot jobb")).toBeVisible();
+    await expect(dialog.getByText("Tar emot jobb", { exact: true })).toBeVisible();
     // The key is write-only: the field is empty again and nothing shows it.
     await expect(dialog.getByLabel(/^API-nyckel/)).toHaveValue("");
     await expect(dialog.getByRole("button", { name: "Klar" })).toBeFocused();
