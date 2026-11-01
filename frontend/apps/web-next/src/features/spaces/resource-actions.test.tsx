@@ -110,6 +110,62 @@ describe("a resource's menu dialog when a turned phone swaps rows for cards", ()
     expect(openDialog()).toBe(dialog);
   });
 
+  it("keeps the destination chosen in a service's move dialog across a turn in both directions", async () => {
+    space.current = makeSpace({ services: [service] });
+    // The spaces the service can be moved to (this space itself is left out of the list).
+    api.GET.mockImplementation((path: string) =>
+      Promise.resolve({
+        data:
+          path === "/api/v1/spaces/"
+            ? {
+                items: [
+                  { id: "space-1", name: "Den här ytan" },
+                  { id: "space-9", name: "Upphandling Norr" }
+                ]
+              }
+            : {},
+        response: new Response("{}")
+      })
+    );
+    api.POST.mockResolvedValue({ data: {}, response: new Response("{}") });
+    setViewport("phone");
+    renderInApp(
+      <Page scope={ServiceActionScope}>
+        <ServiceTile service={service} />
+      </Page>
+    );
+    choose("Kontrollerar avtal", "Flytta");
+    await waitFor(() => expect(openDialog()).not.toBeNull());
+    const dialog = openDialog()!;
+
+    const picker = within(dialog).getByRole("combobox", { name: "Destination" });
+    fireEvent.click(picker);
+    fireEvent.click(await screen.findByRole("option", { name: "Upphandling Norr" }));
+    expect(within(dialog).getByRole("combobox", { name: "Destination" }).textContent).toContain(
+      "Upphandling Norr"
+    );
+
+    // Turned both ways: the same dialog, with the destination still chosen.
+    act(() => setViewport("tablet-portrait"));
+    expect(openDialog()).toBe(dialog);
+    expect(within(dialog).getByRole("combobox", { name: "Destination" }).textContent).toContain(
+      "Upphandling Norr"
+    );
+    act(() => setViewport("phone"));
+    expect(openDialog()).toBe(dialog);
+    expect(within(dialog).getByRole("combobox", { name: "Destination" }).textContent).toContain(
+      "Upphandling Norr"
+    );
+
+    // And it moves to the destination that was chosen before the turn.
+    fireEvent.click(within(dialog).getByRole("button", { name: "Flytta tjänst" }));
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(api.POST.mock.calls[0]![1]).toEqual({
+      params: { path: { id: "svc-1" } },
+      body: { target_space_id: "space-9" }
+    });
+  });
+
   it("still deletes the service from the dialog it opened on a phone", async () => {
     space.current = makeSpace({ services: [service] });
     api.DELETE.mockResolvedValue({ data: {}, response: new Response("{}") });
