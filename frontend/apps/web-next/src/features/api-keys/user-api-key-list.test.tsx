@@ -154,6 +154,8 @@ describe("UserApiKeyList", () => {
     renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
     const search = screen.getByRole("textbox", { name: "Sök API-nycklar" });
     expect((search as HTMLInputElement).disabled).toBe(true);
+    // The label and its description say what is searched; a placeholder only repeated them.
+    expect(search.getAttribute("placeholder") ?? "").toBe("");
 
     await screen.findByText("Integration 1");
     expect(

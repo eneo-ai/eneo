@@ -265,6 +265,22 @@ describe("TabsList", () => {
   it("starts its tabs, so an overflowing list scrolls to every one", () => {
     expect(tabsListVariants().split(" ")).not.toContain("justify-center");
   });
+
+  // flex-1 shared the list's width equally: on touch (min-w-11 replaces the
+  // automatic minimum) a long label spilled onto the tab beside it.
+  it("makes each tab at least as wide as its label", () => {
+    render(
+      <Tabs defaultValue="tokens">
+        <TabsList>
+          <TabsTrigger value="tokens">Tokens</TabsTrigger>
+          <TabsTrigger value="users">Användare</TabsTrigger>
+        </TabsList>
+      </Tabs>
+    );
+    const classes = classesOf(screen.getByRole("tab", { name: "Användare" }));
+    expect(classes).toContain("flex-[1_0_auto]");
+    expect(classes).not.toContain("flex-1");
+  });
 });
 
 describe("AlertDescription", () => {

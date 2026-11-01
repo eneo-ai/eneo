@@ -331,13 +331,13 @@
   "admin_overview_users_link": "View users",
   "admin_overview_usage_title": "Token usage in the last 30 days",
   "admin_overview_usage_models": "{count, plural, =0 {No models used} one {# model used} other {# models used}}",
-  "admin_overview_usage_empty": "No usage in the last 30 days.",
+  "admin_overview_usage_empty": "No usage in the last 30 days",
   "admin_overview_usage_link": "View usage",
-  "admin_overview_crawler_empty": "No crawls are running or waiting.",
+  "admin_overview_crawler_empty": "No crawls are running or waiting",
   "admin_overview_crawler_link": "View crawler",
   "admin_overview_audit_title": "Latest audit events",
-  "admin_overview_audit_empty": "No events have been logged yet.",
-  "admin_overview_audit_locked": "The audit logs open after a justified access session.",
+  "admin_overview_audit_empty": "No events have been logged yet",
+  "admin_overview_audit_locked": "Shown after a justified access session",
   "admin_overview_audit_unlock": "Open the audit logs",
   "admin_overview_audit_link": "View audit logs",
   "admin_users_description": "Manage who has access to Eneo and which roles they have.",
@@ -1808,5 +1808,9 @@
   "mcp_tags_placeholder_touch": "Add a tag",
   "skills_reference_placeholder_touch": "Describe how this Skill should help.",
   "skills_reference_hint_touch": "Tap Insert reference to add a Skill, function or MCP.",
-  "roles_view_users_short": "Users"
+  "roles_view_users_short": "Users",
+  "security_and_privacy": "Security and privacy",
+  "all_changes_saved": "All changes saved",
+  "token_summary": "Token summary (last 30 days)",
+  "account_api_keys_actions": "My API Keys, actions"
 }

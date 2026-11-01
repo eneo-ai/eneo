@@ -8,6 +8,7 @@ import { useTranslations } from "use-intl";
 import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { QueryStateBoundary } from "@/components/composites/query-state";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { useAutosaveField } from "@/components/composites/use-autosave";
 import { useAppContext } from "@/components/providers/app-context";
 import { settingSwitchScope, useSettingSwitch } from "@/features/admin/use-setting-switch";
@@ -260,11 +261,15 @@ export function ApiKeys() {
         onRotated={secrets.reveal(t("api_keys_rotated_title"))}
         toolbar={
           can("api_keys") ? (
-            <CreateApiKeyDialog
-              idPrefix="account"
-              trigger={<Button variant="primary" label={t("api_keys_create")} />}
-              onCreated={secrets.reveal(t("api_keys_created_title"))}
-            />
+            // The page's one primary action: docked at the bottom on a phone, beside Uppdatera
+            // from 768 px.
+            <DockedActions label={t("account_api_keys_actions")}>
+              <CreateApiKeyDialog
+                idPrefix="account"
+                trigger={<Button variant="primary" label={t("api_keys_create")} />}
+                onCreated={secrets.reveal(t("api_keys_created_title"))}
+              />
+            </DockedActions>
           ) : (
             <p className="text-muted-foreground text-sm">{t("api_keys_no_create_permission")}</p>
           )

@@ -149,7 +149,9 @@ export function InstructionsSection({
             </label>
             <p className="text-muted-foreground text-sm">{t("describe_assistant_behavior")}</p>
           </div>
-          <div className="flex min-w-0 flex-wrap items-center gap-1">
+          {/* Wrapped under the label on a phone: the ghost buttons' own inset is pulled
+              back so their icons start on the gutter with the label. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-1 max-md:-ms-2.5">
             {promptGuide && availability && !promptLocked && (
               <Tooltip>
                 <TooltipTrigger asChild>

@@ -102,6 +102,8 @@ describe("ChangePasswordCard", () => {
       expect(input.getAttribute("aria-required")).toBe("true");
     }
     expect(container.textContent).not.toContain("Obligatoriskt");
+    // The title says "Byt lösenord": no line under it says it again.
+    expect(container.textContent).not.toContain("Byt lösenordet som du använder för att logga in.");
     for (const input of [field(/^Nytt lösenord/), field(/^Bekräfta lösenord/)]) {
       expect(input.getAttribute("autocomplete")).toBe("new-password");
     }

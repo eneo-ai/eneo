@@ -62,6 +62,10 @@ describe("Konto on a phone (decision 22)", () => {
     expect(row(/^Kopieringsformat/).dataset.tour).toBe("account-copy-format");
     expect(row("Mina API-nycklar").getAttribute("href")).toBe("/account/api-keys");
     expect(row("Integrationer").getAttribute("href")).toBe("/account/integrations");
+    // Each row leads with its destination's icon, as the editor's index and the profile menu do.
+    const links = [...konto().querySelectorAll("li > a")];
+    expect(links.length).toBeGreaterThan(0);
+    for (const link of links) expect(link.firstElementChild?.tagName.toLowerCase()).toBe("svg");
     expect(row(/^Nyheter ?, Nya uppdateringar$/).getAttribute("href")).toBe("/whats-new");
     // Administration is for admins.
     expect(screen.queryByRole("link", { name: "Administration" })).toBeNull();

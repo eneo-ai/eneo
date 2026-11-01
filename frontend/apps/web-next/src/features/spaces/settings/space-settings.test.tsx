@@ -117,7 +117,7 @@ it("offers section links and keeps each model type separate from tools", () => {
   const navigation = sectionLinks();
   for (const name of [
     "Allmänt",
-    "Säkerhet & Integritet",
+    "Säkerhet och integritet",
     "Modeller",
     "Verktyg och anslutningar",
     "Funktioner",
@@ -167,7 +167,7 @@ it("opens on a phone with an index of the sections, as the assistant editor does
   // The space's page bar is above it: the index has none of its own, a section has one back to it.
   expect(container.querySelector("[data-phone-page-bar]")).toBeNull();
   // What the space holds is said on the row, so the index tells before it is opened.
-  expect(rows[1]!.textContent).toMatch(/^Säkerhet & Integritet, .*30/);
+  expect(rows[1]!.textContent).toMatch(/^Säkerhet och integritet, .*30/);
   // The index names itself (the frame's bar shows its title only after a scroll), under the
   // frame's h1, not beside it.
   const names = [...container.querySelectorAll("h2.md\\:hidden")].map(
@@ -185,7 +185,7 @@ it("says nothing about a space's security while it keeps nothing back", () => {
   const rows = within(document.querySelector<HTMLElement>("[data-editor-index]")!).getAllByRole(
     "link"
   );
-  expect(rows[1]!.textContent).toBe("Säkerhet & Integritet");
+  expect(rows[1]!.textContent).toBe("Säkerhet och integritet");
 });
 
 it("lists each model type in the models section once the models have loaded", async () => {
@@ -202,7 +202,7 @@ it("shows organization settings without personal space sections", () => {
 
   const navigation = sectionLinks();
   expect(within(navigation).queryByRole("link", { name: "Allmänt" })).toBeNull();
-  expect(within(navigation).queryByRole("link", { name: "Säkerhet & Integritet" })).toBeNull();
+  expect(within(navigation).queryByRole("link", { name: "Säkerhet och integritet" })).toBeNull();
   expect(within(navigation).queryByRole("link", { name: "Funktioner" })).toBeNull();
   expect(within(navigation).queryByRole("link", { name: "Farozon" })).toBeNull();
   expect(within(navigation).getByRole("link", { name: "Modeller" })).toBeTruthy();

@@ -103,6 +103,14 @@ describe("ApiKeys (account)", () => {
     expect(await within(table).findByText("Min integration")).toBeTruthy();
   });
 
+  it("docks Skapa API-nyckel, the page's one primary action, on a phone", async () => {
+    renderInApp(<ApiKeys />, { appContext: testAppContext({ permissions: ["api_keys"] }) });
+
+    const create = screen.getByRole("button", { name: "Skapa API-nyckel" });
+    expect(create.closest("[data-docked-actions]")).not.toBeNull();
+    await screen.findByRole("table", { name: "API-nycklar" });
+  });
+
   it("shows the reminder settings after the keys, and only once they have loaded", async () => {
     let release!: () => void;
     state.keysGate = new Promise<void>((resolve) => {

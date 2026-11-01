@@ -315,7 +315,6 @@ export function UserApiKeyList({
         value={search}
         onChange={setSearch}
         isDisabled={keys.isPending}
-        placeholder={t("api_keys_search_placeholder")}
         description={t("api_keys_search_loaded_hint")}
         width="100%"
         {...KEYBOARD.search}

@@ -331,13 +331,13 @@
   "admin_overview_users_link": "Visa användare",
   "admin_overview_usage_title": "Tokenanvändning senaste 30 dagarna",
   "admin_overview_usage_models": "{count, plural, =0 {Inga modeller använda} one {# modell använd} other {# modeller använda}}",
-  "admin_overview_usage_empty": "Ingen användning de senaste 30 dagarna.",
+  "admin_overview_usage_empty": "Ingen användning de senaste 30 dagarna",
   "admin_overview_usage_link": "Visa användning",
-  "admin_overview_crawler_empty": "Inga indexeringar pågår eller väntar.",
+  "admin_overview_crawler_empty": "Inga indexeringar pågår eller väntar",
   "admin_overview_crawler_link": "Visa crawler",
   "admin_overview_audit_title": "Senaste granskningshändelser",
-  "admin_overview_audit_empty": "Inga händelser har loggats ännu.",
-  "admin_overview_audit_locked": "Granskningsloggarna visas först efter en motiverad åtkomstsession.",
+  "admin_overview_audit_empty": "Inga händelser har loggats ännu",
+  "admin_overview_audit_locked": "Visas efter en motiverad åtkomstsession",
   "admin_overview_audit_unlock": "Öppna granskningsloggarna",
   "admin_overview_audit_link": "Visa granskningsloggar",
   "admin_users_description": "Hantera vilka som har tillgång till Eneo och vilka roller de har.",
@@ -1808,5 +1808,9 @@
   "mcp_tags_placeholder_touch": "Lägg till en tagg",
   "skills_reference_placeholder_touch": "Beskriv hur Skillen ska hjälpa till.",
   "skills_reference_hint_touch": "Tryck på Infoga referens för att lägga till en Skill, funktion eller MCP.",
-  "roles_view_users_short": "Användare"
+  "roles_view_users_short": "Användare",
+  "security_and_privacy": "Säkerhet och integritet",
+  "all_changes_saved": "Alla ändringar sparade",
+  "token_summary": "Token-sammanfattning (senaste 30 dagarna)",
+  "account_api_keys_actions": "Mina API-nycklar, åtgärder"
 }
