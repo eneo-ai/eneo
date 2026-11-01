@@ -74,7 +74,8 @@ export function measure(page: Page, { vertical = false } = {}): Promise<PageMeas
       const violations: Violation[] = [];
       const targets: { element: Element; box: DOMRect }[] = [];
       // A text field is tapped anywhere in its frame, not only on the <input>
-      // inside it: Astryx draws the 44 px frame around a 23 px input.
+      // inside it: Astryx draws the 44 px frame around a 23 px input. A number
+      // field's frame focuses its spinbutton the same way (useInputContainer).
       // The same goes for a selector: its frame opens it wherever a finger lands,
       // and the <button> inside is only the 16 px label and chevron. A typeahead's
       // frame focuses its combobox <input> on click (Astryx handleWrapperClick).
@@ -87,7 +88,7 @@ export function measure(page: Page, { vertical = false } = {}): Promise<PageMeas
       const hitArea = (element: Element) =>
         element.matches("input:not([type=checkbox], [type=radio], [type=file]), textarea")
           ? (element.closest(
-              "label, [class*='text-input'], [class*='textarea'], .astryx-typeahead"
+              "label, [class*='text-input'], [class*='textarea'], .astryx-number-input, .astryx-typeahead"
             ) ?? element)
           : element.matches("input[type=checkbox], input[type=radio]")
             ? // A native checkbox or radio inside a <label> is checked by a tap anywhere on that

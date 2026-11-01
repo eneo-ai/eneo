@@ -135,6 +135,17 @@ test.describe("the responsive measure", () => {
     expect(violations.filter((violation) => violation.kind === "small")).toEqual([]);
   });
 
+  test("measures a number input's spinbutton by its frame, and still finds a small frame", async ({
+    page
+  }) => {
+    const small = (violations: Violation[]) =>
+      violations.filter((violation) => violation.kind === "small").map(({ key }) => key);
+    const markup = (height: number) =>
+      `<div class="astryx-number-input" style="margin:8px 16px;height:${height}px;width:300px"><input role="spinbutton" style="width:200px;height:23px;margin:4px 10px;font-size:16px"></div>`;
+    expect(small(await violationsOn(page, markup(44)))).toEqual([]);
+    expect(small(await violationsOn(page, markup(32)))).toEqual(["input[spinbutton]:"]);
+  });
+
   test("finds text cut off at the bottom only when asked, and not a line clamp", async ({
     page
   }) => {
