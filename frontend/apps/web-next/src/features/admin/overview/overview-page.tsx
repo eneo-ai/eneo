@@ -8,7 +8,16 @@ import { Heading } from "@astryxdesign/core/Heading";
 import { Link } from "@astryxdesign/core/Link";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
-import { Activity, ChevronRight, Cpu, Globe, History, Users, type LucideIcon } from "lucide-react";
+import {
+  Activity,
+  ChevronRight,
+  Cpu,
+  Globe,
+  History,
+  Users,
+  Workflow,
+  type LucideIcon
+} from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { ClientTime } from "@/components/composites/client-time";
@@ -306,7 +315,7 @@ function AuditCard() {
   );
 }
 
-/** A query with nothing to wait for or fail: a locked area's row. */
+/** A query with nothing to wait for or fail: a locked area's row, or an area with nothing to read. */
 const SETTLED: CardQuery = {
   data: null,
   isPending: false,
@@ -317,6 +326,21 @@ const SETTLED: CardQuery = {
   error: null,
   refetch: () => Promise.reject(new Error("settled"))
 };
+
+/** Flow settings (the Svelte overview's "Flödesinställningar → Öppna"): what they cover, and their page. */
+function FlowsCard() {
+  const t = useTranslations();
+  return (
+    <OverviewCard
+      title={t("flow_admin_title")}
+      href="/admin/flow-settings"
+      linkLabel={t("flow_settings_open")}
+      query={SETTLED}
+    >
+      <p className="text-ax-text-secondary text-sm">{t("flow_admin_description")}</p>
+    </OverviewCard>
+  );
+}
 
 /** One area on a phone: its name, how it stands now, and its page. */
 function AreaRow({
@@ -512,6 +536,15 @@ function AreaRows({ className }: { className?: string }) {
             }
           />
         ) : null}
+        {settings.flows_enabled ? (
+          <AreaRow
+            href="/admin/flow-settings"
+            icon={Workflow}
+            label={t("flow_admin_title")}
+            query={SETTLED}
+            state={t("flow_admin_description")}
+          />
+        ) : null}
       </List>
     </section>
   );
@@ -547,6 +580,7 @@ export function AdminOverviewPage() {
             <UsageCard />
             <CrawlerCard />
             {settings.audit_logging_enabled ? <AuditCard /> : null}
+            {settings.flows_enabled ? <FlowsCard /> : null}
           </div>
         ) : null}
       </div>
