@@ -24,6 +24,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { EneoApiError } from "@/lib/api/errors";
 import { formatBytes } from "@/lib/format";
 import { useBeforeUnloadWarning } from "@/lib/hooks/use-before-unload-warning";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import type { RecordingPartInfo, UploadEntry } from "../run-contract";
 import {
   liveSocketUrl,
@@ -91,16 +92,23 @@ export function lengthText(ms: number, t: Translator): string {
   return t("flow_transcript_length_hours_minutes", { hours, minutes });
 }
 
-function problemText(problem: RecorderProblem, t: Translator): string {
+/** `touch`: a phone or tablet, where there is no address bar icon and no microphone to plug in. */
+function problemText(problem: RecorderProblem, t: Translator, touch: boolean): string {
   switch (problem) {
     case "unsupported":
       return t("flow_transcript_rec_unsupported");
     case "insecure":
       return t("flow_transcript_rec_insecure");
     case "permission_denied":
-      return t("flow_transcript_rec_permission_denied");
+      return t(
+        touch
+          ? "flow_transcript_rec_permission_denied_touch"
+          : "flow_transcript_rec_permission_denied"
+      );
     case "no_microphone":
-      return t("flow_transcript_rec_no_microphone");
+      return t(
+        touch ? "flow_transcript_rec_no_microphone_touch" : "flow_transcript_rec_no_microphone"
+      );
     case "microphone_busy":
       return t("flow_transcript_rec_microphone_busy");
     case "microphone_failed":
@@ -294,6 +302,8 @@ export function RunRecorder({
   const t = useTranslations();
   const locale = useLocale();
   const announce = useAnnounce();
+  // A touch screen has no address bar icon to point at and no microphone to plug in.
+  const coarse = useMediaMatch("(pointer: coarse)");
   const [support] = useState(() => recordingSupport(browserEnvironment()));
   const [options] = useState(() =>
     selectRecordingOptions((type) =>
@@ -577,6 +587,8 @@ export function RunRecorder({
 
   const laterId = useId();
   const startButton = useRef<HTMLButtonElement>(null);
+  const pauseButton = useRef<HTMLButtonElement>(null);
+  const resumeButton = useRef<HTMLButtonElement>(null);
   const [discardProblem, setDiscardProblem] = useState(false);
   const [filesFull, setFilesFull] = useState(false);
   const [backlogFull, setBacklogFull] = useState(false);
@@ -676,6 +688,22 @@ export function RunRecorder({
     });
   });
 
+  // The button that was pressed gives way to the one that follows it (Spela in, Pausa, Fortsätt,
+  // Spela in mer): focus goes on to that one instead of to the page, where a keyboard or a screen
+  // reader would start over. Only when focus was lost, so a person elsewhere in the form keeps it.
+  const shownPhase = snapshot.phase;
+  const lastPhase = useRef(shownPhase);
+  useEffect(() => {
+    const before = lastPhase.current;
+    lastPhase.current = shownPhase;
+    if (before === shownPhase) return;
+    const active = document.activeElement;
+    if (active && active !== document.body && active.isConnected) return;
+    if (shownPhase === "recording") pauseButton.current?.focus();
+    else if (shownPhase === "paused") resumeButton.current?.focus();
+    else if (shownPhase === "idle" && before !== "starting") startButton.current?.focus();
+  }, [shownPhase]);
+
   if (!recordsInto(input, options.mimeType)) {
     return (
       <Banner
@@ -692,7 +720,7 @@ export function RunRecorder({
       <Banner
         status="info"
         title={t("flow_transcript_rec_heading")}
-        description={problemText(support, t)}
+        description={problemText(support, t, coarse)}
         collapsible={false}
       />
     );
@@ -790,7 +818,7 @@ export function RunRecorder({
         <Banner
           status="error"
           title={t("flow_transcript_rec_problem_title")}
-          description={problemText(problem, t)}
+          description={problemText(problem, t, coarse)}
           collapsible={false}
         />
       ) : null}
@@ -867,7 +895,8 @@ export function RunRecorder({
         />
       ) : null}
 
-      <div className="flex flex-wrap items-center gap-3">
+      {/* On a phone each control is the width of the screen, and the clock is read first. */}
+      <div className="flex flex-wrap items-center gap-3 max-md:[&>button]:w-full">
         {phase === "idle" || phase === "starting" ? (
           <Button
             ref={startButton}
@@ -881,6 +910,7 @@ export function RunRecorder({
         ) : null}
         {phase === "recording" ? (
           <Button
+            ref={pauseButton}
             label={t("flow_transcript_rec_pause")}
             icon={<Pause aria-hidden="true" />}
             onClick={() => recorder.pause()}
@@ -888,6 +918,7 @@ export function RunRecorder({
         ) : null}
         {phase === "paused" ? (
           <Button
+            ref={resumeButton}
             label={t("flow_transcript_rec_resume")}
             icon={<Play aria-hidden="true" />}
             onClick={() => recorder.resume()}
@@ -907,7 +938,7 @@ export function RunRecorder({
           </span>
         ) : null}
         {running ? (
-          <span className="text-ax-text flex items-center gap-2 text-sm">
+          <span className="text-ax-text flex items-center gap-2 text-sm max-md:order-first max-md:w-full max-md:justify-center max-md:text-xl">
             <span className="font-medium">
               {phase === "recording"
                 ? t("flow_transcript_rec_recording")

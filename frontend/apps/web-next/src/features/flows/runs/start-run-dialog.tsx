@@ -15,7 +15,14 @@ import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { ListError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
+import {
+  HANDHELD_QUERY,
+  PHONE_QUERY,
+  useMediaMatch,
+  usePhoneScreen
+} from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
+import { cn } from "@/lib/utils";
 import { restrictedBeforeApproval } from "../flow-form-fields";
 import type { FlowPublic } from "../flows-api";
 import { RecordingKeeper } from "./recording/recording-keeper";
@@ -38,7 +45,12 @@ import {
   type FieldValue,
   type FormValues
 } from "./run-contract";
-import { inputAnchorId, inputProblemText, RunFileInput } from "./run-file-inputs";
+import {
+  inputAnchorId,
+  inputFileAnchorId,
+  inputProblemText,
+  RunFileInput
+} from "./run-file-inputs";
 import {
   fieldAnchorId,
   fieldProblemText,
@@ -319,7 +331,7 @@ function StartRunForm({
             }
           }))
         );
-        focusFirstControl(inputAnchorId(formId, first.stepId));
+        focusFirstControl(inputFileAnchorId(formId, first.stepId));
         return;
       }
       // A republished flow may ask for other fields: read the contract again.
@@ -355,7 +367,7 @@ function StartRunForm({
     }
     const firstInput = inputs.find((input) => foundInputs[input.step_id]);
     if (firstInput) {
-      focusFirstControl(inputAnchorId(formId, firstInput.step_id));
+      focusFirstControl(inputFileAnchorId(formId, firstInput.step_id));
       return;
     }
     if (exceedsAggregate(contract, uploads)) {
@@ -405,6 +417,10 @@ function StartRunForm({
   }
 
   const maxSpeakerOption = contract.transcription?.max_speakers;
+  // What the run is called is optional: on a phone it comes last, so the input is what the
+  // first screen holds.
+  const handheld = useMediaMatch(HANDHELD_QUERY);
+  const labelField = <RunLabelField value={runLabel} onChange={setRunLabel} />;
 
   return (
     // Kept while the summary shows: the uploads and recordings live in it.
@@ -444,7 +460,7 @@ function StartRunForm({
           setServer((current) => ({ ...current, fields: {} }));
         }}
       />
-      <RunLabelField value={runLabel} onChange={setRunLabel} />
+      {handheld ? null : labelField}
 
       {fields.map((field) => (
         <RunFormFieldControl
@@ -552,6 +568,7 @@ function StartRunForm({
           width="100%"
         />
       ) : null}
+      {handheld ? labelField : null}
     </form>
   );
 }
@@ -576,6 +593,11 @@ export function StartRunDialog({
   onStarted: (run: RunPublic) => void;
 }) {
   const t = useTranslations();
+  // A phone gets the whole screen (the form is long and the keyboard takes half of it) and a
+  // footer that stacks with the primary action first, under the thumb. Held sideways it is wider
+  // than a phone but just as short: the whole screen still, so the form scrolls above its footer.
+  const phone = useMediaMatch(PHONE_QUERY);
+  const whole = usePhoneScreen();
   const formId = useId();
   const [pending, setPending] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
@@ -660,17 +682,42 @@ export function StartRunDialog({
     }
   }
 
+  const secondary = summary ? (
+    <Button key="back" label={t("back")} isDisabled={pending} onClick={backToForm} />
+  ) : (
+    <Button
+      key="cancel"
+      label={t("cancel")}
+      isDisabled={pending}
+      onClick={() => requestOpenChange(false)}
+    />
+  );
+  const primary = contract.data ? (
+    <Button
+      key="next"
+      type="submit"
+      form={formId}
+      variant="primary"
+      label={summary ? t("flow_runs_start_submit") : t("flow_runs_summary_next")}
+      isLoading={pending}
+      isInterruptible
+    />
+  ) : null;
+
   return (
     <>
       <Dialog
         isOpen={open}
         onOpenChange={requestOpenChange}
         purpose="form"
+        variant={whole ? "fullscreen" : "standard"}
         width={640}
         maxHeight="85dvh"
       >
         <Layout
-          height="auto"
+          // Whole screen: the form scrolls and the footer stays. A dialog that sizes to its form
+          // would clip a long one with its buttons beyond the screen.
+          height={whole ? "fill" : "auto"}
           header={
             <DialogHeader
               title={t("flow_runs_start_title", { name: flow.name })}
@@ -681,32 +728,15 @@ export function StartRunDialog({
           footer={
             open ? (
               <LayoutFooter>
-                <div className="flex flex-wrap justify-end gap-2">
-                  {summary ? (
-                    <Button
-                      key="back"
-                      label={t("back")}
-                      isDisabled={pending}
-                      onClick={backToForm}
-                    />
-                  ) : (
-                    <Button
-                      key="cancel"
-                      label={t("cancel")}
-                      isDisabled={pending}
-                      onClick={() => requestOpenChange(false)}
-                    />
+                <div
+                  className={cn(
+                    "flex gap-2",
+                    phone ? "flex-col [&>*]:w-full" : "flex-wrap justify-end"
                   )}
-                  {contract.data ? (
-                    <Button
-                      type="submit"
-                      form={formId}
-                      variant="primary"
-                      label={summary ? t("flow_runs_start_submit") : t("flow_runs_summary_next")}
-                      isLoading={pending}
-                      isInterruptible
-                    />
-                  ) : null}
+                >
+                  {/* Keyed: the primary action is first where it is on top (a phone), so Tab goes
+                      the way the eye does, and last where the row reads left to right. */}
+                  {phone ? [primary, secondary] : [secondary, primary]}
                 </div>
               </LayoutFooter>
             ) : null

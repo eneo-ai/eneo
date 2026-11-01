@@ -7,14 +7,7 @@ import { ResizeHandle, useResizable } from "@astryxdesign/core/Resizable";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import {
-  goHistory,
-  pushUrl,
-  readUrlState,
-  replaceUrl,
-  useRouter,
-  useSearchParams
-} from "@/lib/navigation";
+import { goHistory, pushUrl, readUrlState, replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useLayoutEffect, useId, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -25,6 +18,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { focusAfterRemoval } from "@/lib/focus-after-removal";
 import { useFocusRescue } from "@/lib/focus-rescue";
+import { HANDHELD_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { useSpaceDisplayName, useSpaceSections } from "@/features/spaces/frame/space-header";
 import { spaceLandingHref } from "@/features/spaces/frame/space-sections";
@@ -77,10 +71,9 @@ import { FlowStatusBadge } from "./flow-status";
 import { FlowStepList, showStepCard, stepControlId } from "./flow-step-list";
 import { orderWithMove, orderWithout, stepName, stepsInOrder } from "./flow-steps";
 import { speakerStepCandidate, speakerStepOption, speakerStepUpdate } from "./speaker-step-offer";
-import { runKeys } from "./runs/runs-api";
-import { FlowRunsList, runHref } from "./runs/runs-list";
-import { rememberStartedRun } from "./runs/runs-optimistic";
-import { StartRunDialog } from "./runs/start-run-dialog";
+import { FlowPhonePage } from "./flow-phone-page";
+import { FlowRunStarter } from "./flow-run-starter";
+import { FlowRunsList } from "./runs/runs-list";
 
 type Notice = {
   key: number;
@@ -129,7 +122,7 @@ function focusMoveControl(stepId: string, delta: -1 | 1) {
  * the visit ("Räkna med de senaste körningarna"). An editor can dismiss a
  * suggestion for the flow ("Ignorera") and show the dismissed ones again.
  */
-export function FlowPage({ flowId }: { flowId: string }) {
+function FlowWorkspace({ flowId, onStart }: { flowId: string; onStart: () => void }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
@@ -172,11 +165,9 @@ export function FlowPage({ flowId }: { flowId: string }) {
   });
   const [addAt, setAddAt] = useState<number | null>(null);
   const [confirmUnpublish, setConfirmUnpublish] = useState(false);
-  const [starting, setStarting] = useState(false);
   const [exporting, setExporting] = useState(false);
   // The chat's composer while it is on screen (the chat panel reports it).
   const [chatComposer, setChatComposer] = useState<ComposerInsert | null>(null);
-  const router = useRouter();
   const searchParams = useSearchParams();
   // The open step lives in ?step=, so a refresh or a shared link opens it
   // again (an id the flow does not have shows the list).
@@ -668,11 +659,7 @@ export function FlowPage({ flowId }: { flowId: string }) {
     mayEdit || canPublish || canRun ? (
       <div className="flex flex-wrap items-center gap-2">
         {canRun ? (
-          <Button
-            label={t("flow_runs_start")}
-            variant="primary"
-            onClick={() => setStarting(true)}
-          />
+          <Button label={t("flow_runs_start")} variant="primary" onClick={onStart} />
         ) : null}
         {mayEdit ? (
           <Button
@@ -941,22 +928,6 @@ export function FlowPage({ flowId }: { flowId: string }) {
             }}
           />
         ) : null}
-        {canRun ? (
-          <StartRunDialog
-            flow={flow}
-            open={starting}
-            onOpenChange={setStarting}
-            onStarted={(run) => {
-              setStarting(false);
-              // The runs list shows the run at once, before it is read again.
-              rememberStartedRun(queryClient, flow.id, run);
-              void queryClient.invalidateQueries({ queryKey: runKeys.list(flow.id) });
-              announce(t("flow_runs_started"));
-              // The run's own page follows it while it moves.
-              router.push(runHref(routeId, flow.id, run.id));
-            }}
-          />
-        ) : null}
         {mayEdit ? (
           <FlowPackageExportDialog flow={flow} open={exporting} onOpenChange={setExporting} />
         ) : null}
@@ -974,5 +945,30 @@ export function FlowPage({ flowId }: { flowId: string }) {
         />
       </div>
     </FlowReferences>
+  );
+}
+
+/**
+ * A flow's page. A phone (a screen you touch and hold in a hand, upright or
+ * sideways) runs flows and reads their runs and builds none, so it gets the
+ * lean page; everyone else the workspace.
+ * A desktop window dragged below 768 px keeps the workspace, and what is being
+ * edited in it.
+ */
+export function FlowPage({ flowId }: { flowId: string }) {
+  const handheld = useMediaMatch(HANDHELD_QUERY);
+  // The start form is here, not in either page: turning a phone across 768 px swaps the pages,
+  // and a recording in the form goes on.
+  const [starting, setStarting] = useState(false);
+  const onStart = () => setStarting(true);
+  return (
+    <>
+      {handheld ? (
+        <FlowPhonePage flowId={flowId} onStart={onStart} />
+      ) : (
+        <FlowWorkspace flowId={flowId} onStart={onStart} />
+      )}
+      <FlowRunStarter flowId={flowId} open={starting} onOpenChange={setStarting} />
+    </>
   );
 }

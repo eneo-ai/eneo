@@ -5,6 +5,7 @@ import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeRunDetail, makeRunSummary } from "./run-fixtures";
 import type { RunListItem } from "./runs-api";
 
@@ -567,5 +568,82 @@ describe("FlowRunsList", () => {
     await act(() => queryClient.invalidateQueries({ queryKey: ["flows", "flow-1", "runs"] }));
     await vi.waitFor(() => expect(listCalls().length).toBeGreaterThan(1));
     expect(screen.getAllByRole("link", { name: "Ärende 7" })).toHaveLength(1);
+  });
+});
+
+describe("FlowRunsList on a phone", () => {
+  const withRun = () =>
+    renderInApp(<List />, {
+      appContext: testAppContext({ permissions: ["flows_view", "flows_run"] })
+    });
+
+  it("lists the runs as rows with their state, who started them and how long, and the retry of a failed one", async () => {
+    setViewport("phone");
+    answerList([
+      makeRunSummary({ id: "run-f", status: "failed" }),
+      {
+        ...makeRunSummary({ id: "run-ok" }),
+        token_usage: {
+          num_tokens_input: 1000,
+          num_tokens_output: 200,
+          num_tokens_total: 1200,
+          input_completeness: "complete",
+          output_completeness: "complete"
+        }
+      }
+    ]);
+    const { container } = withRun();
+
+    const list = await screen.findByRole("list", { name: messages.flow_runs_heading });
+    expect(screen.queryByRole("table")).toBeNull();
+    const rows = within(list).getAllByRole("listitem");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]!).getByText(messages.flow_runs_status_failed)).toBeTruthy();
+    expect(within(rows[0]!).getByText("Anna Lind · 1 min 5 s")).toBeTruthy();
+    expect(within(rows[0]!).getByRole("link", { name: /./ }).getAttribute("href")).toBe(
+      "/spaces/space-1/flows/flow-1/runs/run-f"
+    );
+    expect(within(rows[0]!).getByRole("button", { name: messages.flow_runs_retry })).toBeTruthy();
+    expect(within(rows[1]!).queryByRole("button", { name: messages.flow_runs_retry })).toBeNull();
+    // What only a wide screen has room for.
+    expect(screen.queryByText(messages.flow_runs_usage_tokens_explainer)).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("says only who started a run with no time to report, not a bare dash after a dot", async () => {
+    setViewport("phone");
+    // Not running and never finished: there is no duration to give.
+    answerList([makeRunSummary({ id: "run-x", status: "failed", finished_at: null })]);
+    withRun();
+    const list = await screen.findByRole("list", { name: messages.flow_runs_heading });
+    const row = within(list).getByRole("listitem");
+    expect(within(row).getByText("Anna Lind")).toBeTruthy();
+    expect(row.textContent).not.toContain("–");
+  });
+
+  it("leaves out the filters while there is nothing to filter, and keeps them for a search that finds nothing", async () => {
+    setViewport("phone");
+    answerList([]);
+    withRun();
+    expect(await screen.findByText(messages.flow_runs_empty_title)).toBeTruthy();
+    expect(screen.queryByRole("textbox", { name: /Sök körningar/ })).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: messages.flow_runs_only_mine })).toBeNull();
+    cleanup();
+
+    answerList([makeRunSummary({ id: "run-1" })]);
+    withRun();
+    const search = await screen.findByRole("textbox", { name: /Sök körningar/ });
+    // Searching for something that is not there leaves an empty list: the field stays.
+    answerList([]);
+    fireEvent.change(search, { target: { value: "finns inte" } });
+    await screen.findByText(/finns inte/);
+    expect(screen.getByRole("textbox", { name: /Sök körningar/ })).toBeTruthy();
+  });
+
+  it("keeps the table on a tablet", async () => {
+    setViewport("tablet-portrait");
+    answerList([makeRunSummary({ id: "run-f", status: "failed" })]);
+    withRun();
+    expect(await screen.findByRole("table", { name: messages.flow_runs_heading })).toBeTruthy();
   });
 });

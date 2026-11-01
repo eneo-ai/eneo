@@ -462,14 +462,18 @@ export function useTranscriptPlayback({
               size="sm"
             />
           </div>
-          <Text type="supporting" as="p" id={shortcutsId}>
-            {t.rich("flow_transcript_audio_shortcuts", {
-              j: () => <Kbd keys="j" />,
-              k: () => <Kbd keys="k" />,
-              l: () => <Kbd keys="l" />,
-              seconds: SKIP_SECONDS
-            })}
-          </Text>
+          {/* Keys j, k and l: a touch screen has no keyboard to press them on. The
+              player still points at it with aria-describedby, so a screen reader hears it. */}
+          <div className="pointer-coarse:hidden">
+            <Text type="supporting" as="p" id={shortcutsId}>
+              {t.rich("flow_transcript_audio_shortcuts", {
+                j: () => <Kbd keys="j" />,
+                k: () => <Kbd keys="k" />,
+                l: () => <Kbd keys="l" />,
+                seconds: SKIP_SECONDS
+              })}
+            </Text>
+          </div>
         </div>
       ) : (
         <div>

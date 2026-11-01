@@ -6,6 +6,7 @@ import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/r
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { makeFlow } from "../flow-fixtures";
 import { makeContract, makeInput, makeRunDetail, makeRunSummary } from "./run-fixtures";
 import type { RunContract, RunPublic } from "./runs-api";
@@ -410,5 +411,115 @@ describe("StartRunDialog", () => {
     fireEvent.click(button(dialog, messages.flow_runs_summary_next));
     expect(await within(dialog).findByText(messages.flow_runs_blocked)).toBeTruthy();
     expect(api.stub.calls.filter((call) => call.method === "POST")).toEqual([]);
+  });
+});
+
+describe("StartRunDialog on a phone", () => {
+  it("takes the whole screen, stacks the footer with the primary action first and has nothing to drag", async () => {
+    const standard = (await openDialog()).dialog.className;
+    cleanup();
+
+    setViewport("phone");
+    const { dialog } = await openDialog();
+    // The fullscreen variant is another set of the dialog's own classes.
+    expect(dialog.className).not.toBe(standard);
+    const next = button(dialog, "Granska");
+    const cancel = button(dialog, "Avbryt");
+    expect(next.parentElement).toBe(cancel.parentElement);
+    // The primary action is on top, and first in the DOM, so Tab goes the way the eye does.
+    expect(next.parentElement?.className).toContain("flex-col");
+    expect(next.parentElement?.className).not.toContain("flex-col-reverse");
+    expect(Boolean(next.compareDocumentPosition(cancel) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+      true
+    );
+    expect(within(dialog).getByText("Välj filer")).toBeTruthy();
+    expect(within(dialog).queryByText(/dra hit/)).toBeNull();
+  });
+
+  describe("an audio step", () => {
+    const audio = {
+      ...contract,
+      steps_requiring_input: [
+        makeInput({
+          label: "Ljud",
+          input_format: "audio",
+          accepted_mimetypes: ["audio/wav"]
+        })
+      ]
+    };
+    /** Whether `first` comes before `second` in the document. */
+    const before = (first: Element, second: Element) =>
+      Boolean(first.compareDocumentPosition(second) & Node.DOCUMENT_POSITION_FOLLOWING);
+    const pieces = (dialog: HTMLElement) => ({
+      recording: within(dialog).getByText(messages.flow_transcript_rec_heading),
+      file: dialog.querySelector<HTMLInputElement>("input[type=file]")!,
+      name: within(dialog).getByLabelText(/^Namn på körningen/)
+    });
+
+    it("puts recording first and the run's name last on a phone", async () => {
+      setViewport("phone");
+      const { dialog } = await openDialog(audio);
+      const { recording, file, name } = pieces(dialog);
+      expect(before(recording, file)).toBe(true);
+      expect(before(file, name)).toBe(true);
+    });
+
+    it("keeps recording first when the phone is held sideways", async () => {
+      setViewport({ width: 844, height: 390, pointer: "coarse" });
+      const { dialog } = await openDialog(audio);
+      const { recording, file, name } = pieces(dialog);
+      expect(before(recording, file)).toBe(true);
+      expect(before(file, name)).toBe(true);
+    });
+
+    it("names the step's recording and file together, for a screen reader", async () => {
+      const { dialog } = await openDialog(audio);
+      const group = within(dialog).getByRole("group", { name: /^Ljud/ });
+      const { recording, file } = pieces(dialog);
+      expect(group.contains(recording)).toBe(true);
+      expect(group.contains(file)).toBe(true);
+    });
+
+    it("keeps the run's name first and the file above the recording for a mouse", async () => {
+      const { dialog } = await openDialog(audio);
+      const { recording, file, name } = pieces(dialog);
+      expect(before(name, file)).toBe(true);
+      expect(before(file, recording)).toBe(true);
+    });
+
+    it("keeps the file above the recording on a narrow window with a mouse", async () => {
+      setViewport({ width: 600, height: 800, pointer: "fine" });
+      const { dialog } = await openDialog(audio);
+      const { recording, file, name } = pieces(dialog);
+      expect(before(name, file)).toBe(true);
+      expect(before(file, recording)).toBe(true);
+    });
+  });
+
+  it("keeps the whole screen when the phone is held sideways, where it is as short as ever", async () => {
+    const standard = (await openDialog()).dialog.className;
+    cleanup();
+
+    setViewport({ width: 844, height: 390, pointer: "coarse" });
+    const { dialog } = await openDialog();
+    expect(dialog.className).not.toBe(standard);
+    cleanup();
+
+    // A tablet held upright is tall: its dialog stays the centred one.
+    setViewport("tablet-portrait");
+    expect((await openDialog()).dialog.className).toBe(standard);
+  });
+
+  it("keeps the dialog, its row of buttons and the drag wording for a mouse", async () => {
+    const { dialog } = await openDialog();
+    const next = button(dialog, "Granska");
+    const cancel = button(dialog, "Avbryt");
+    expect(next.parentElement?.className).toContain("justify-end");
+    expect(next.parentElement?.className).not.toContain("flex-col");
+    // A row reads left to right: Avbryt, then Granska, in Tab order too.
+    expect(Boolean(cancel.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(
+      true
+    );
+    expect(within(dialog).getByText("Välj filer eller dra hit dem")).toBeTruthy();
   });
 });

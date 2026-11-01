@@ -13,7 +13,9 @@ import { useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@astryxdesign/core/TextInput";
 import { ClientTime } from "@/components/composites/client-time";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { EneoApiError } from "@/lib/api/errors";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { CitationSummary } from "./run-citations";
 import { focusFirstControl } from "./run-form-fields";
 import { JsonValue } from "./run-json";
@@ -195,6 +197,20 @@ function SpeakersEditor({
 }
 
 /**
+ * The row of decision buttons. On a phone it is docked at the bottom, under the
+ * thumb: a reviewer reads a long draft and the decision must not wait at its end.
+ */
+function DecisionBar({ children }: { children: React.ReactNode }) {
+  const t = useTranslations();
+  const phone = usePhoneScreen();
+  return phone ? (
+    <DockedActions label={t("flow_runs_review_actions")}>{children}</DockedActions>
+  ) : (
+    <div className="flex flex-wrap gap-2">{children}</div>
+  );
+}
+
+/**
  * A run paused for review at one step: what the step produced, a deadline,
  * and the reviewer's choices. In edit mode the output can be corrected (a
  * text as text, a flat JSON object field by field, other JSON as JSON
@@ -229,6 +245,7 @@ export function ReviewPanel({
   const [draft, setDraft] = useState<ReviewDraft>(() => reviewDraftOf(checkpoint));
   const [problem, setProblem] = useState<Problem | null>(null);
   const [rejecting, setRejecting] = useState(false);
+  const rejectButton = useRef<HTMLButtonElement>(null);
   const [reason, setReason] = useState("");
   const [reasonProblem, setReasonProblem] = useState<string | null>(null);
   // The transcript holds approval while one of its edits is not saved.
@@ -562,8 +579,12 @@ export function ReviewPanel({
               label={t("flow_runs_review_reject_back")}
               onClick={() => {
                 if (reject.isPending) return;
-                setRejecting(false);
-                setReasonProblem(null);
+                flushSync(() => {
+                  setRejecting(false);
+                  setReasonProblem(null);
+                });
+                // Back to the decision, on the button that led away from it.
+                rejectButton.current?.focus();
               }}
             />
           </div>
@@ -574,7 +595,7 @@ export function ReviewPanel({
         <p className="text-ax-error m-0 text-sm">{approvalHeld}</p>
       ) : null}
       {options.canDecide && !rejecting ? (
-        <div className="flex flex-wrap gap-2">
+        <DecisionBar>
           <Button
             label={changed ? t("flow_runs_review_approve_changed") : t("flow_runs_review_approve")}
             variant="primary"
@@ -610,6 +631,7 @@ export function ReviewPanel({
             />
           ) : null}
           <Button
+            ref={rejectButton}
             label={t("flow_runs_review_reject")}
             variant="destructive"
             onClick={() => {
@@ -618,7 +640,7 @@ export function ReviewPanel({
               focusFirstControl(`${baseId}-reason`);
             }}
           />
-        </div>
+        </DecisionBar>
       ) : null}
       {options.canResume ? (
         <div className="flex flex-col gap-2">

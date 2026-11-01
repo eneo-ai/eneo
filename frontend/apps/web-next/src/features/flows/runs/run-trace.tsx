@@ -125,12 +125,15 @@ export function RunTrace({
   flow,
   summary,
   steps,
-  access
+  access,
+  headingHidden = false
 }: {
   flow: FlowPublic;
   summary: RunSummary;
   steps: readonly RunStepView[];
   access: EvidenceAccess | undefined;
+  /** The page already names the section (a phone folds it under that name): the heading is for screen readers only. */
+  headingHidden?: boolean;
 }) {
   const t = useTranslations();
   const headingId = useId();
@@ -147,7 +150,10 @@ export function RunTrace({
 
   return (
     <section aria-labelledby={headingId} className="flex flex-col gap-4">
-      <h2 id={headingId} className="text-ax-text text-lg font-semibold">
+      <h2
+        id={headingId}
+        className={headingHidden ? "sr-only" : "text-ax-text text-lg font-semibold"}
+      >
         {t("flow_run_extras_trace_heading")}
       </h2>
       <Part title={t("flow_run_extras_export_heading")}>

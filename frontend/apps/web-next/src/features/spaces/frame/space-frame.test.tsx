@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import {
   spaceHasPermission,
@@ -288,6 +288,29 @@ describe("SpaceFrame on a phone (decision 24)", () => {
     expect(screen.queryByRole("navigation", { name: /brödsmulor|breadcrumb/i })).toBeNull();
     expect(screen.queryByRole("group", { name: /medlemmar/ })).toBeNull();
     await expectNoAxeViolations(container);
+  });
+
+  it("adds Flöden to the tabs where the tenant has flows, and not where it has none", () => {
+    setViewport("phone");
+    state.space = sharedSpace();
+    state.segments = ["overview"];
+    state.routeId = "space-1";
+    renderInApp(
+      <SpaceFrame>
+        <p>Sidans innehåll</p>
+      </SpaceFrame>,
+      { appContext: testAppContext({ featureFlags: { federation: false, flows: true } }) }
+    );
+    expect(tabHrefs()).toEqual([
+      "/spaces/space-1/overview",
+      "/spaces/space-1/assistants",
+      "/spaces/space-1/apps",
+      "/spaces/space-1/flows",
+      "/spaces/space-1/knowledge"
+    ]);
+    cleanup();
+    show(sharedSpace(), ["overview"]);
+    expect(tabHrefs()).not.toContain("/spaces/space-1/flows");
   });
 
   it("keeps the menu for the personal space, which the menu leads to", () => {

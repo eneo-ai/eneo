@@ -15,6 +15,13 @@ import { flowKeys, type FlowPublic } from "./flows-api";
 import messages from "@/lib/i18n/messages/sv.json";
 import { FlowPage } from "./flow-page";
 
+/**
+ * A narrow window on a computer. A phone (narrow and touched) gets the lean page, tested in
+ * flow-phone-page.test.tsx; the workspace's one-view-at-a-time layout is what a desktop window
+ * dragged narrow shows.
+ */
+const NARROW_WINDOW = { width: 390, height: 844, pointer: "fine" } as const;
+
 type Reply = { data?: unknown; error?: unknown; response: Response };
 
 const ok = (data: unknown): Reply => ({ data, response: new Response(null, { status: 200 }) });
@@ -407,7 +414,7 @@ describe("FlowPage", () => {
     expect(handle.getAttribute("aria-valuemin")).toBe("352");
     expect(handle.tabIndex).toBe(0);
 
-    act(() => setViewport("phone"));
+    act(() => setViewport(NARROW_WINDOW));
     expect(screen.queryByRole("separator", { name: "Ändra storlek på chatten" })).toBeNull();
     // The chat is one of the tabbed views there, laid out by the stylesheet alone.
     expect(screen.getByRole("region", { name: "Chatt om flödet" }).style.width).toBe("");
@@ -781,7 +788,7 @@ describe("FlowPage", () => {
   it("hands a suggestion to the chat, bringing the chat into view on a phone, unsent", async () => {
     state.chat = ok({ ...CHAT, editing: false });
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
-    setViewport("phone");
+    setViewport(NARROW_WINDOW);
     const { container } = renderPage();
     const definition = screen.getByRole("region", { name: "Flödet" });
     const chat = screen.getByRole("region", { name: "Chatt om flödet" });
@@ -1203,7 +1210,7 @@ describe("FlowPage", () => {
   it("opens one reference card for both sides, and inserts from the definition into the chat", async () => {
     state.chat = ok({ ...CHAT, editing: false });
     state.suggestions = suggestions(4, [DUPLICATE_READ]);
-    setViewport("phone");
+    setViewport(NARROW_WINDOW);
     renderPage();
     const chat = screen.getByRole("region", { name: "Chatt om flödet" });
 

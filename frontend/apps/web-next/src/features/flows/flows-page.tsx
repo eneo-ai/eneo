@@ -16,6 +16,7 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useAppContext } from "@/components/providers/app-context";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { useRemovalMutation } from "@/features/spaces/removal";
@@ -24,6 +25,7 @@ import { deleteFlow, flowKeys, flowsListQueryOptions, type FlowSparse } from "./
 import { evidenceExportAllowed } from "./flow-form-fields";
 import { FlowPackageImportDialog } from "./flow-package-import-dialog";
 import { flowRefusalMessage } from "./flow-refusals";
+import { FlowRows } from "./flows-rows";
 import { FlowStatusBadge } from "./flow-status";
 import { NewFlowDialog } from "./new-flow-dialog";
 
@@ -44,6 +46,9 @@ export function FlowsPage() {
   const [deleteTarget, setDeleteTarget] = useState<FlowSparse | null>(null);
   const flows = useQuery(flowsListQueryOptions(browserApi, space.id));
   const canManage = can("flows_manage");
+  // A phone runs and reviews flows; building one (many settings, prompts and
+  // steps) is for a computer, so nothing here offers to.
+  const phone = usePhoneScreen();
   const base = `/spaces/${routeId}/flows`;
 
   const remove = useRemovalMutation({
@@ -58,21 +63,22 @@ export function FlowsPage() {
     focusTarget: headingRef
   });
 
-  const createButton = canManage ? (
-    <div className="flex flex-wrap items-center gap-2">
-      <Button
-        label={t("flow_editor_tools_package_import")}
-        icon={<Upload aria-hidden="true" />}
-        onClick={() => setImporting(true)}
-      />
-      <Button
-        label={t("flows_new")}
-        variant="primary"
-        icon={<Plus aria-hidden="true" />}
-        onClick={() => setCreating(true)}
-      />
-    </div>
-  ) : undefined;
+  const createButton =
+    canManage && !phone ? (
+      <div className="flex flex-wrap items-center gap-2">
+        <Button
+          label={t("flow_editor_tools_package_import")}
+          icon={<Upload aria-hidden="true" />}
+          onClick={() => setImporting(true)}
+        />
+        <Button
+          label={t("flows_new")}
+          variant="primary"
+          icon={<Plus aria-hidden="true" />}
+          onClick={() => setCreating(true)}
+        />
+      </div>
+    ) : undefined;
 
   const columns: TableColumn<FlowSparse>[] = [
     {
@@ -154,6 +160,8 @@ export function FlowsPage() {
               description={t("flows_empty_description")}
               actions={createButton}
             />
+          ) : phone ? (
+            <FlowRows flows={items} base={base} showStatus={canManage} />
           ) : (
             <Table
               data={items}
@@ -165,6 +173,9 @@ export function FlowsPage() {
           )
         }
       </QueryStateBoundary>
+      {phone && canManage ? (
+        <p className="text-ax-text-secondary -mt-2 text-sm">{t("flows_create_on_desktop")}</p>
+      ) : null}
       <NewFlowDialog open={creating} onOpenChange={setCreating} />
       {canManage ? <FlowPackageImportDialog open={importing} onOpenChange={setImporting} /> : null}
       <AlertDialog

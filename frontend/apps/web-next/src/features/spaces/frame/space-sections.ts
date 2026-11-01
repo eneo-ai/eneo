@@ -135,11 +135,12 @@ export function spaceLandingHref(sections: SpaceSection[], routeId: SpaceRouteId
   return sections[0]?.href ?? `/spaces/${routeId}/overview`;
 }
 
-/** What a phone keeps as tabs: the space's content. */
+/** What a phone keeps as tabs: the space's content, flows (where the tenant has them) beside the apps. */
 const CONTENT_SECTION_IDS: readonly SpaceSectionId[] = [
   "overview",
   "assistants",
   "apps",
+  "flows",
   "knowledge"
 ];
 /** What manages the space, in the order "Hantera ytan" lists it. */
