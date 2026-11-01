@@ -1778,6 +1778,33 @@ it.each([
   expect(router.state.location.hash).toBe(hash);
 });
 
+it.each([
+  ["uploads", "flow-files"],
+  ["evidence", "flow-evidence-text"],
+  ["builder", "flow-chat"]
+])(
+  "lands an old Flow settings link with ?tab=%s on the section that holds it now",
+  async (tab, hash) => {
+    serveFlowSettings();
+    const { router } = await renderRoute(`/admin/flow-settings?tab=${tab}`);
+    await screen.findByLabelText("Antal filer per körning");
+    expect(router.state.location.pathname).toBe("/admin/flow-settings");
+    expect(router.state.location.search).toEqual({});
+    expect(router.state.location.hash).toBe(hash);
+    expect(router.history.length).toBe(1);
+  }
+);
+
+it("lands an old Flow settings link with ?tab=retention where the old retention page does", async () => {
+  serveFlowSettings();
+  // Where retention is shown is admin/flow-data-retention's to say.
+  const { router } = await renderRoute("/admin/flow-settings?tab=retention");
+  await screen.findByLabelText("Antal filer per körning");
+  expect(router.state.location.pathname).toBe("/admin/flow-settings");
+  expect(router.state.location.search).toEqual({});
+  expect(router.history.length).toBe(1);
+});
+
 it("opens admin user groups with its title and one current admin link", async () => {
   setViewport("desktop");
   replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
