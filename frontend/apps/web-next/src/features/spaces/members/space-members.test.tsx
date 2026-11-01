@@ -9,7 +9,9 @@ import { makeMember, makeSpace } from "@/features/spaces/testing/space-fixture";
 
 const ok = () => Promise.resolve({ data: {}, response: new Response("{}") });
 const api = vi.hoisted(() => ({
-  GET: vi.fn(() => Promise.resolve({ data: { items: [] }, response: new Response("{}") })),
+  GET: vi.fn<
+    (path: string, options?: unknown) => Promise<{ data: { items: unknown[] }; response: Response }>
+  >(),
   POST: vi.fn(),
   PATCH: vi.fn(),
   DELETE: vi.fn()
@@ -30,6 +32,8 @@ beforeAll(() => {
 });
 beforeEach(() => {
   state.space = makeSpace();
+  api.GET.mockReset().mockResolvedValue({ data: { items: [] }, response: new Response("{}") });
+  api.POST.mockImplementation(ok);
   api.PATCH.mockImplementation(ok);
   api.DELETE.mockImplementation(ok);
 });
@@ -80,6 +84,50 @@ it("says a user must be picked when adding a member, at the search field", async
   await expectNoAxeViolations(dialog);
 });
 
+it("pages through users and keeps existing members visible but unavailable for adding", async () => {
+  state.space = spaceWithMembers();
+  api.GET.mockImplementation((path, options) => {
+    const cursor = (options as { params?: { query?: { cursor?: string } } })?.params?.query?.cursor;
+    return Promise.resolve({
+      data:
+        path === "/api/v1/users/"
+          ? {
+              items: cursor
+                ? [{ id: "u4", email: "new@example.se", username: "Ny" }]
+                : [makeMember()],
+              total_count: 2,
+              next_cursor: cursor ? null : "next-users"
+            }
+          : { items: [] },
+      response: new Response("{}")
+    });
+  });
+  const { dialog, add } = await openDialog("Lägg till medlem");
+  const existing = await within(dialog).findByRole("radio", { name: "anna.lind@example.com" });
+  expect((existing as HTMLInputElement).disabled).toBe(true);
+  expect(within(dialog).getByText("Redan tillagd")).toBeTruthy();
+  await expectNoAxeViolations(dialog);
+  fireEvent.click(existing);
+  fireEvent.click(add);
+  expect(api.POST).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Ladda fler (1/2)" }));
+  const nextUser = await within(dialog).findByRole("radio", { name: "new@example.se" });
+  expect(api.GET).toHaveBeenCalledWith(
+    "/api/v1/users/",
+    expect.objectContaining({
+      params: { query: { email: undefined, limit: 100, cursor: "next-users" } }
+    })
+  );
+  fireEvent.click(nextUser);
+  fireEvent.click(add);
+  await waitFor(() =>
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/spaces/{id}/members/", {
+      params: { path: { id: "space-1" } },
+      body: { id: "u4", role: "admin" }
+    })
+  );
+});
+
 it("searches users from the first character, once typing pauses", async () => {
   const { dialog } = await openDialog("Lägg till medlem");
   const search = within(dialog).getByLabelText("E-post");
@@ -108,12 +156,91 @@ it("searches users from the first character, once typing pauses", async () => {
   }
 });
 
+it("resets the user cursor and cancels an unfinished next page when the search changes", async () => {
+  let finish!: (value: { data: { items: unknown[] }; response: Response }) => void;
+  let previousSignal: AbortSignal | undefined;
+  api.GET.mockImplementation((_path, options) => {
+    const request = options as {
+      params: { query: { email?: string; cursor?: string } };
+      signal: AbortSignal;
+    };
+    if (request.params.query.cursor) {
+      previousSignal = request.signal;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    }
+    return Promise.resolve({
+      data: {
+        items: [
+          {
+            id: "candidate",
+            email: request.params.query.email ? "bea@example.se" : "anna@example.se"
+          }
+        ],
+        total_count: request.params.query.email ? 1 : 2,
+        next_cursor: request.params.query.email ? null : "next"
+      },
+      response: new Response("{}")
+    });
+  });
+  const { dialog } = await openDialog("Lägg till medlem");
+  await within(dialog).findByRole("radio", { name: "anna@example.se" });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Ladda fler (1/2)" }));
+  await waitFor(() => expect(previousSignal).toBeDefined());
+  fireEvent.change(within(dialog).getByLabelText("E-post"), { target: { value: "b" } });
+  expect(await within(dialog).findByRole("radio", { name: "bea@example.se" })).toBeTruthy();
+  expect(previousSignal?.aborted).toBe(true);
+  expect(api.GET).toHaveBeenLastCalledWith(
+    "/api/v1/users/",
+    expect.objectContaining({
+      params: { query: { email: "b", limit: 100, cursor: undefined } }
+    })
+  );
+  await act(async () =>
+    finish({
+      data: { items: [{ id: "late", email: "late@example.se" }] },
+      response: new Response("{}")
+    })
+  );
+  expect(within(dialog).queryByRole("radio", { name: "late@example.se" })).toBeNull();
+  expect(within(dialog).queryByRole("radio", { name: "anna@example.se" })).toBeNull();
+});
+
+it("searches the group picker and adds the chosen group with its role", async () => {
+  api.GET.mockResolvedValue({
+    data: {
+      items: [
+        { id: "g1", name: "HR" },
+        { id: "g2", name: "Miljöenheten" }
+      ]
+    },
+    response: new Response("{}")
+  });
+  const { dialog, add } = await openDialog("Lägg till grupp");
+  fireEvent.click(within(dialog).getByRole("button", { name: "Användargrupper" }));
+  const search = await screen.findByPlaceholderText("Välj en användargrupp...");
+  fireEvent.change(search, { target: { value: "miljö" } });
+  expect(screen.queryByRole("option", { name: "HR" })).toBeNull();
+  fireEvent.click(await screen.findByRole("option", { name: "Miljöenheten" }));
+  expect(
+    within(dialog).getByRole("button", { name: /Användargrupper.*Miljöenheten/ })
+  ).toBeTruthy();
+  fireEvent.click(add);
+  await waitFor(() =>
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/spaces/{id}/group-members/", {
+      params: { path: { id: "space-1" } },
+      body: { id: "g2", role: "admin" }
+    })
+  );
+});
+
 it("says a group must be picked when adding a group, at its picker", async () => {
   const { dialog, add } = await openDialog("Lägg till grupp");
 
   fireEvent.click(add);
 
-  const group = within(dialog).getByRole("combobox", { name: "Användargrupper" });
+  const group = within(dialog).getByRole("button", { name: "Användargrupper" });
   expect(group.getAttribute("aria-invalid")).toBe("true");
   expect(document.activeElement).toBe(group);
   expect(api.POST).not.toHaveBeenCalled();

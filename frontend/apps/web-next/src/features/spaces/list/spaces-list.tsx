@@ -4,7 +4,7 @@ import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useSuspenseQuery } from "@tanstack/react-query";
-import { LayoutGrid, SearchX, Trash2 } from "lucide-react";
+import { LayoutGrid, Pencil, SearchX, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useMemo, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
@@ -16,6 +16,7 @@ import {
   type TableColumn
 } from "@astryxdesign/core/Table";
 import Link from "@/lib/link";
+import { useRouter } from "@/lib/navigation";
 import { ResourceViewControls, useResourceView } from "@/features/spaces/resource-view";
 import { EmptyState } from "@/components/composites/empty-state";
 import { AREA_HUES } from "@/components/composites/icon-tile";
@@ -44,23 +45,42 @@ function spaceMeta(space: SpaceSparse, t: ReturnType<typeof useTranslations>): s
 }
 
 /** The same permission-gated menu in cards, phone rows and the desktop table. */
-function spaceActions(
-  space: SpaceSparse,
-  onDelete: (space: SpaceSparse) => void,
-  t: ReturnType<typeof useTranslations>
-) {
-  if (!space.permissions?.includes("delete")) return null;
+function SpaceActions({
+  space,
+  onDelete
+}: {
+  space: SpaceSparse;
+  onDelete: (space: SpaceSparse) => void;
+}) {
+  const t = useTranslations();
+  const router = useRouter();
+  const canEdit = space.permissions?.includes("edit");
+  const canDelete = space.permissions?.includes("delete");
+  if (!canEdit && !canDelete) return null;
   return (
     <MoreMenu
       label={t("space_more_actions_for", { name: space.name })}
       alignment="end"
       items={[
-        {
-          label: t("delete_space"),
-          icon: <Trash2 aria-hidden="true" />,
-          variant: "destructive",
-          onClick: () => onDelete(space)
-        }
+        ...(canEdit
+          ? [
+              {
+                label: t("edit"),
+                icon: <Pencil aria-hidden="true" />,
+                onClick: () => router.push(`/spaces/${spaceRouteId(space)}/settings`)
+              }
+            ]
+          : []),
+        ...(canDelete
+          ? [
+              {
+                label: t("delete_space"),
+                icon: <Trash2 aria-hidden="true" />,
+                variant: "destructive" as const,
+                onClick: () => onDelete(space)
+              }
+            ]
+          : [])
       ]}
     />
   );
@@ -93,7 +113,7 @@ function SpaceCard({
         description || <span className="text-ax-text-tertiary">{t("space_no_description")}</span>
       }
       meta={spaceMeta(space, t)}
-      actions={spaceActions(space, onDelete, t)}
+      actions={<SpaceActions space={space} onDelete={onDelete} />}
     />
   );
 }
@@ -149,7 +169,7 @@ export function SpacesList({ title }: { title: string }) {
       key: "actions",
       header: t("actions"),
       width: pixel(64),
-      renderCell: (space) => spaceActions(space, setDeleteTarget, t)
+      renderCell: (space) => <SpaceActions space={space} onDelete={setDeleteTarget} />
     }
   ];
   const canCreate = can("shared_spaces");
