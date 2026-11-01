@@ -6,6 +6,7 @@ import { expect, test } from "./csp";
 import { STORAGE_STATE } from "../playwright.config";
 import { createFixtures, openRoute } from "./responsive-fixtures";
 import { ROUTES, type Fixtures } from "./responsive-routes";
+import { AXE_PAGE_RULES, WCAG_22_AA_TAGS } from "../src/test/wcag";
 
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
@@ -25,8 +26,8 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
  * A11Y_SHOTS=<dir> saves a screenshot of every screen it opens.
  */
 
-const WCAG_22_AA = ["wcag2a", "wcag2aa", "wcag21a", "wcag21aa", "wcag22aa"];
-const PAGE_STRUCTURE = ["page-has-heading-one", "landmark-one-main", "heading-order"];
+const WCAG_22_AA = WCAG_22_AA_TAGS;
+const PAGE_STRUCTURE = AXE_PAGE_RULES;
 // Development-only tooling, absent from the production build CI scans.
 const DEV_ONLY = ["vite-error-overlay", ".tsqd-parent-container"];
 

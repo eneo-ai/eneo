@@ -36,6 +36,8 @@ describe("ResultsTable", () => {
 
     const table = await screen.findByRole("table", { name: "Resultat" });
     expect(within(table).getByText(/Sammanfatta protokollet/)).toBeTruthy();
+    // The column of row menus has a header a screen reader can say (not an empty cell).
+    expect(within(table).getAllByRole("columnheader").at(-1)?.textContent).toBe("Åtgärder");
   });
 
   it("names each run's menu by the time its row shows", async () => {

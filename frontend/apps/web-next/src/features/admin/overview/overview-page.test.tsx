@@ -178,7 +178,9 @@ describe("AdminOverviewPage", () => {
     expect(screen.getByRole("heading", { level: 1, name: "Översikt" })).toBeTruthy();
 
     const users = region("Aktiva användare");
-    expect(await within(users).findByText("42")).toBeTruthy();
+    const figure = await within(users).findByText("42");
+    // Large and bold, but not a paragraph: axe takes a big bold <p> for a heading (p-as-heading).
+    expect(figure.tagName).not.toBe("P");
     expect(within(users).getByText("3 inaktiva konton")).toBeTruthy();
     expect(within(users).getByRole("link", { name: "Visa användare" }).getAttribute("href")).toBe(
       "/admin/users"

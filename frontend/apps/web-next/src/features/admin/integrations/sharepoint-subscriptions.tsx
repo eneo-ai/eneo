@@ -148,7 +148,9 @@ export function SharePointSubscriptions() {
                 <TableHead>{t("sharepoint_subscription_owner")}</TableHead>
                 <TableHead>{t("sharepoint_subscription_site")}</TableHead>
                 <TableHead>{t("sharepoint_subscription_expires")}</TableHead>
-                <TableHead className="w-12" />
+                <TableHead className="w-12">
+                  <span className="sr-only">{t("actions")}</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

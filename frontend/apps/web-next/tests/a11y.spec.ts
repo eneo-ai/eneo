@@ -3,7 +3,7 @@ import type { Page } from "@playwright/test";
 import sv from "../src/lib/i18n/messages/sv.json";
 import type { FederationView } from "../src/features/admin/federation/federation";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "../src/components/shell/side-nav-preference";
-import { assertDocumented, WCAG_22_AA_TAGS } from "../src/test/wcag";
+import { assertDocumented, AXE_PAGE_RULES, WCAG_22_AA_TAGS } from "../src/test/wcag";
 import { expect, test } from "./csp";
 import {
   activityPill,
@@ -37,10 +37,10 @@ import {
 // the Next.js dev overlay and the TanStack Query devtools button.
 const DEV_ONLY = ["nextjs-portal", "vite-error-overlay", ".tsqd-parent-container"];
 
-// Best-practice rules on top of the WCAG tags, for ACCESSIBILITY.md rule 1:
-// one h1, one main landmark, headings in order. While a modal is open axe
+// Best-practice rules on top of the WCAG tags (src/test/wcag.ts): one h1, one main
+// landmark, headings in order, table and landmark structure. While a modal is open axe
 // treats the page behind it as hidden and passes the first two.
-const PAGE_STRUCTURE_RULES = ["page-has-heading-one", "landmark-one-main", "heading-order"];
+const PAGE_STRUCTURE_RULES = AXE_PAGE_RULES;
 
 // @axe-core/playwright is typed against the workspace's hoisted playwright-core
 // (apps/web's newer Playwright); it only uses Page APIs both versions share.

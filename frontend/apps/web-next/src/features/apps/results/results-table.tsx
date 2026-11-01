@@ -191,7 +191,9 @@ export function ResultsTable({
             <TableHead>{t("name")}</TableHead>
             <TableHead>{t("status")}</TableHead>
             <TableHead>{t("created")}</TableHead>
-            <TableHead className="w-12" />
+            <TableHead className="w-12">
+              <span className="sr-only">{t("actions")}</span>
+            </TableHead>
           </TableRow>
         </TableHeader>
         <TableBody>

@@ -362,7 +362,9 @@ export function UserApiKeyList({
                           <TableHead>{t("api_keys_last_used")}</TableHead>
                           <TableHead>{t("api_keys_expires")}</TableHead>
                           <TableHead>{t("api_keys_created")}</TableHead>
-                          <TableHead className="bg-ax-surface sticky end-0 w-14 min-w-14" />
+                          <TableHead className="bg-ax-surface sticky end-0 w-14 min-w-14">
+                            <span className="sr-only">{t("actions")}</span>
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>

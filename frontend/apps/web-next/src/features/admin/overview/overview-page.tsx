@@ -113,8 +113,9 @@ function OverviewCard({
   );
 }
 
+/** A figure, not a paragraph: a large bold <p> reads as a fake heading to axe (p-as-heading). */
 function BigNumber({ value }: { value: string }) {
-  return <p className="text-3xl font-semibold tabular-nums">{value}</p>;
+  return <div className="text-3xl font-semibold tabular-nums">{value}</div>;
 }
 
 function UsersCard() {

@@ -112,6 +112,13 @@ describe("UserApiKeyList", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("gives the column of row menus a header a screen reader can say", async () => {
+    state.items = [key("1")];
+    renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
+    const table = await screen.findByRole("table");
+    expect(within(table).getAllByRole("columnheader").at(-1)?.textContent).toBe("Åtgärder");
+  });
+
   it("requests application names when refreshed keys need them, with a distinct spaces response", async () => {
     state.items = [key("1", { scope_type: "space", scope_id: "space-1" })];
     const { queryClient } = renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
