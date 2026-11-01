@@ -66,13 +66,28 @@ export function measure(page: Page): Promise<PageMeasure> {
     // A text field is tapped anywhere in its frame, not only on the <input>
     // inside it: Astryx draws the 44 px frame around a 23 px input.
     // The same goes for a selector: its frame opens it wherever a finger lands,
-    // and the <button> inside is only the 16 px label and chevron.
+    // and the <button> inside is only the 16 px label and chevron. A typeahead's
+    // frame focuses its combobox <input> on click (Astryx handleWrapperClick).
+    // The <label> a tap on which checks this input (not one around several controls, or one
+    // whose `for` points at another).
+    const labelOf = (input: Element) => {
+      const label = input.closest("label");
+      return label && label.control === input ? label : input;
+    };
     const hitArea = (element: Element) =>
       element.matches("input:not([type=checkbox], [type=radio], [type=file]), textarea")
-        ? (element.closest("label, [class*='text-input'], [class*='textarea']") ?? element)
-        : element.matches("button[aria-haspopup]")
-          ? (element.closest(".astryx-selector") ?? element)
-          : element;
+        ? (element.closest(
+            "label, [class*='text-input'], [class*='textarea'], .astryx-typeahead"
+          ) ?? element)
+        : element.matches("input[type=checkbox], input[type=radio]")
+          ? // A native checkbox or radio inside a <label> is checked by a tap anywhere on that
+            // label (the browser forwards it), so the label is its target: the choice cards on
+            // /admin/storage are whole-card labels around a 13 px radio. A label too small to
+            // tap is still reported, by its own box.
+            labelOf(element)
+          : element.matches("button[aria-haspopup]")
+            ? (element.closest(".astryx-selector") ?? element)
+            : element;
     // A control under something else at its centre cannot be tapped: a list
     // clipped by its scroll area, a menu under another. Below the fold or
     // beside the screen it is reachable by scrolling, so it still counts.
@@ -82,6 +97,34 @@ export function measure(page: Page): Promise<PageMeasure> {
       if (x < 0 || x >= innerWidth || y < 0 || y >= innerHeight) return false;
       const top = document.elementFromPoint(x, y);
       return !top || !(element.contains(top) || top.contains(element));
+    };
+    // A control beside the screen in a strip or table that scrolls sideways
+    // (Astryx TabList fades its edges, snaps and keeps the current tab in view;
+    // the legacy tab list shows the next tab cut off; a wide table's scroll
+    // region takes the keyboard) is a swipe away, like one below the fold. It is
+    // outside only when its nearest sideways scroller cannot show it: the scroller
+    // runs past the screen itself, is narrower than the control, or holds it before
+    // its scroll origin, where a centred strip pushes its overflow and no scrolling
+    // reaches.
+    // Left-to-right only: the app ships no right-to-left locale.
+    const scrollsIntoView = (element: Element, box: DOMRect) => {
+      for (let node = element.parentElement; node; node = node.parentElement) {
+        if (
+          !/^(auto|scroll|overlay)$/.test(getComputedStyle(node).overflowX) ||
+          node.scrollWidth <= node.clientWidth
+        )
+          continue;
+        const port = node.getBoundingClientRect();
+        const start = port.left + node.clientLeft - node.scrollLeft;
+        return (
+          port.left >= -1 &&
+          port.right <= width + 1 &&
+          box.width <= node.clientWidth + 1 &&
+          box.left >= start - 1 &&
+          box.right <= start + node.scrollWidth + 1
+        );
+      }
+      return false;
     };
     for (const element of document.querySelectorAll(controls)) {
       if (!shown(element) || element.closest("[inert], [aria-hidden=true]")) continue;
@@ -95,7 +138,7 @@ export function measure(page: Page): Promise<PageMeasure> {
         element.tagName === "A" &&
         getComputedStyle(element).display === "inline" &&
         !!element.closest("p, li, span, td");
-      if (box.right > width + 1 || box.left < -1)
+      if ((box.right > width + 1 || box.left < -1) && !scrollsIntoView(element, box))
         violations.push({ kind: "outside", key: name(element) });
       // A list row's link is stretched over the whole row by its ::after
       // (globals.css 12b), so the row is what a finger lands on.

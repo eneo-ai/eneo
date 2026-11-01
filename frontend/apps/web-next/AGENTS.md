@@ -615,6 +615,10 @@ the route list `tests/responsive-routes.ts`; a route missing from it fails a
 unit test (`src/test/responsive-routes.test.ts`), so a new screen cannot ship
 unchecked: add its route, with a way to open it.
 
+The contract counts a control as outside the screen only when no sideways scroller
+(a tab strip, a wide table) can bring it into view; `tests/responsive-measure.spec.ts`
+holds that rule on small hand-made pages.
+
 | What it finds                                                                                                                                                                           | Run                                                                                              |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | Sideways scroll, a target under 44 px, one outside the screen, two on top of each other, text cut off, a text field under 16 px on a phone (iPhone Safari zooms into it), at five sizes | `tests/responsive-contract.spec.ts` (`CONTRACT_VIEWPORTS`, `CONTRACT_ROUTES`)                    |
@@ -629,11 +633,9 @@ unchecked: add its route, with a way to open it.
 | A raw `<select>` without 16 px text and a 44 px touch height, in the dialogs the contract never opens                                                                                   | `src/test/raw-select.test.ts`                                                                    |
 | Patterns in the source: `vh`, a fixed bar without safe area, missing labels, label association                                                                                          | `eslint` (the `no-restricted-syntax` selectors and `jsx-a11y`)                                   |
 
-What is already wrong is in `tests/responsive-contract.baseline.json`; it only
-shrinks: a violation that is not there fails, so does an entry that no longer
-occurs, and `BASELINE_BUDGET` in `src/test/responsive-baseline.test.ts` caps
-the total. Fix a screen, run the contract with `CONTRACT_UPDATE=1`, lower the
-budget. Example of a narrow run:
+`tests/responsive-contract.baseline.json` is where a known violation would be
+listed. It is empty and `BASELINE_BUDGET` in `src/test/responsive-baseline.test.ts`
+is 0: a violation fails the run, so fix the screen. Example of a narrow run:
 `CONTRACT_VIEWPORTS=390x844 CONTRACT_ROUTES='^/spaces' bun run test:e2e tests/responsive-contract.spec.ts`.
 
 Automation finds the mechanical faults; it does not feel a tap, hear a screen

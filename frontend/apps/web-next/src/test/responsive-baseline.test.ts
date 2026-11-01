@@ -10,12 +10,11 @@ const entries = Object.values(baseline).flat();
 
 /**
  * How many known violations tests/responsive-contract.baseline.json may list.
- * It only goes down: fix a screen, run the contract with CONTRACT_UPDATE=1,
- * and lower this number to what the file now holds. Raising it is a decision
- * to ship a screen that is worse on a phone, and shows up in review as this
- * line.
+ * It is empty: every screen meets the contract, so a violation fails the run and
+ * is fixed, not listed. Raising this is a decision to ship a screen that is worse
+ * on a phone, and shows up in review as this line.
  */
-const BASELINE_BUDGET = 100;
+const BASELINE_BUDGET = 0;
 
 describe("the responsive contract's baseline", () => {
   it("never grows", () => {
