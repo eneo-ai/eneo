@@ -24,11 +24,13 @@ type FailureError = RunError &
 function FactLine({
   fact,
   t,
-  stepName
+  stepName,
+  onShowStep
 }: {
   fact: FailureFact;
   t: Translate;
   stepName?: (order: number) => string | null;
+  onShowStep: (order: number) => void;
 }) {
   switch (fact.kind) {
     case "stopped_at": {
@@ -45,7 +47,7 @@ function FactLine({
               label={t("flow_run_show_failed_step")}
               size="sm"
               variant="secondary"
-              onClick={() => showRunStep(fact.order)}
+              onClick={() => onShowStep(fact.order)}
             />
           </span>
         </li>
@@ -144,13 +146,15 @@ function ReviewPolicyStepList({
 export function RunFailure({
   error,
   stepName,
-  reviewSteps = []
+  reviewSteps = [],
+  onShowStep = showRunStep
 }: {
   error: FailureError;
   /** The step's label in the run's version, for the facts that name a step. */
   stepName?: (order: number) => string | null;
   /** The flow's steps, for a refused review policy that names no step. */
   reviewSteps?: readonly ReviewPolicyStep[];
+  onShowStep?: (order: number) => void;
 }) {
   const t = useTranslations();
   const [technicalOpen, setTechnicalOpen] = useState(false);
@@ -184,7 +188,13 @@ export function RunFailure({
         ) : (
           <ul className="text-ax-text m-0 flex list-disc flex-col gap-1 pl-5 text-sm">
             {failureFacts(error).map((fact) => (
-              <FactLine key={fact.kind} fact={fact} t={t} stepName={stepName} />
+              <FactLine
+                key={fact.kind}
+                fact={fact}
+                t={t}
+                stepName={stepName}
+                onShowStep={onShowStep}
+              />
             ))}
           </ul>
         )}

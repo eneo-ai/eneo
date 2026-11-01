@@ -16,7 +16,7 @@ import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useAppContext } from "@/components/providers/app-context";
-import { usePhoneScreen } from "@/lib/hooks/use-media-match";
+import { HANDHELD_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { useRemovalMutation } from "@/features/spaces/removal";
@@ -48,7 +48,7 @@ export function FlowsPage() {
   const canManage = can("flows_manage");
   // A phone runs and reviews flows; building one (many settings, prompts and
   // steps) is for a computer, so nothing here offers to.
-  const phone = usePhoneScreen();
+  const phone = useMediaMatch(HANDHELD_QUERY);
   const base = `/spaces/${routeId}/flows`;
 
   const remove = useRemovalMutation({

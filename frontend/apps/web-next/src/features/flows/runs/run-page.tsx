@@ -13,6 +13,7 @@ import {
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -39,7 +40,7 @@ import { progressSignature, runStepViews, type RunStepView } from "./run-progres
 import { RunLiveProgress } from "./run-live-progress";
 import { RunKnowledge } from "./run-knowledge";
 import { starterName } from "./run-starter";
-import { RunSteps, stepTitle } from "./run-steps";
+import { RunSteps, showRunStep, stepTitle } from "./run-steps";
 import { RunText } from "./run-text";
 import { RunUsage } from "./run-usage";
 import { RunTrace } from "./run-trace";
@@ -172,11 +173,13 @@ function RunInput({ flow, run }: { flow: FlowPublic; run: RunDetail }) {
 function RunProblem({
   run,
   flow,
-  steps
+  steps,
+  onShowStep
 }: {
   run: RunDetail;
   flow: FlowPublic;
   steps: readonly RunStepView[];
+  onShowStep: (order: number) => void;
 }) {
   const t = useTranslations();
   if (run.status === "failed" && run.error) {
@@ -185,6 +188,7 @@ function RunProblem({
         error={run.error}
         stepName={(order) => steps.find((step) => step.order === order)?.label.trim() || null}
         reviewSteps={flow.steps}
+        onShowStep={onShowStep}
       />
     );
   }
@@ -234,11 +238,13 @@ function Section({ title, children }: { title: string; children: React.ReactNode
  */
 function FoldSection({
   title,
-  defaultOpen = false,
+  isOpen,
+  onOpenChange,
   children
 }: {
   title: string;
-  defaultOpen?: boolean;
+  isOpen?: boolean;
+  onOpenChange?: (open: boolean) => void;
   children: React.ReactNode;
 }) {
   const phone = usePhoneScreen();
@@ -250,7 +256,9 @@ function FoldSection({
         trigger={
           <span className="inline-flex min-h-6 items-center pointer-coarse:min-h-11">{title}</span>
         }
-        defaultIsOpen={defaultOpen}
+        defaultIsOpen={false}
+        isOpen={isOpen}
+        onOpenChange={onOpenChange}
         className="w-full"
       >
         <div className="pt-2 pb-1">
@@ -335,6 +343,13 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
 
   const summary: RunSummary | undefined = progress.data?.status;
   const status = summary?.status ?? null;
+  const [stepsOpen, setStepsOpen] = useState<boolean | null>(null);
+  // Only the first loaded status sets the default; finishing must not fold what someone is reading.
+  if (stepsOpen === null && status !== null) setStepsOpen(status !== "completed");
+  function revealStep(order: number) {
+    flushSync(() => setStepsOpen(true));
+    showRunStep(order);
+  }
   // "Send again" and a review's decision turn at their deadline, not at the next poll.
   const now = useNowAt([
     summary?.dispatch_next_attempt_at,
@@ -452,7 +467,12 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   ) : undefined;
 
   const stepsSection = summary ? (
-    <FoldSection title={t("flow_runs_steps_heading")} defaultOpen={status !== "completed"}>
+    <FoldSection
+      key="steps"
+      title={t("flow_runs_steps_heading")}
+      isOpen={stepsOpen ?? false}
+      onOpenChange={setStepsOpen}
+    >
       {steps.isError ? (
         <ListError
           error={steps.error}
@@ -476,7 +496,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   ) : null;
   const transcriptSection =
     transcriptTargets(steps.data).length > 0 && !reviewTranscript ? (
-      <Section title={t("flow_runs_transcript_heading")}>
+      <Section key="transcript" title={t("flow_runs_transcript_heading")}>
         <RunTranscripts
           flowId={flowId}
           runId={runId}
@@ -577,7 +597,9 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
           />
         ) : (
           <>
-            {run ? <RunProblem run={run} flow={flow} steps={stepViews} /> : null}
+            {run ? (
+              <RunProblem run={run} flow={flow} steps={stepViews} onShowStep={revealStep} />
+            ) : null}
             {awaitingReview && review.isError ? (
               <ListError
                 error={review.error}
@@ -618,9 +640,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
                 <LoadingState rows={2} />
               )}
             </Section>
-            {phone ? transcriptSection : null}
-            {stepsSection}
-            {phone ? null : transcriptSection}
+            {phone ? [transcriptSection, stepsSection] : [stepsSection, transcriptSection]}
             {run?.evidence_access.can_read_evidence ? (
               <FoldSection title={t("flow_runs_knowledge_heading")}>
                 <RunKnowledge

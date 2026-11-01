@@ -271,4 +271,13 @@ describe("FlowsPage on a phone", () => {
     expect(screen.getByRole("table", { name: "Flöden" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Nytt flöde" })).toBeTruthy();
   });
+
+  it("keeps create, import and delete available in a narrow mouse-driven desktop window", () => {
+    setViewport({ width: 600, height: 900, pointer: "fine" });
+    renderPage(flows());
+    expect(screen.getByRole("button", { name: "Nytt flöde" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Importera" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Ta bort.*Svar på ärende/ })).toBeTruthy();
+    expect(screen.queryByText("Skapa och redigera flöden görs på dator.")).toBeNull();
+  });
 });

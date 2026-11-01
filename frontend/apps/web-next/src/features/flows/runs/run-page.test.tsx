@@ -968,6 +968,27 @@ describe("FlowRunPage", () => {
       expect(before(stepsHeading, wideLines)).toBe(true);
     });
 
+    it("keeps unsaved transcript text and speaker names when the layout changes", async () => {
+      setViewport("tablet-portrait");
+      answerAudioRun();
+      renderRun(["flows_view", "flows_manage"]);
+      const lines = await screen.findByRole("list", { name: messages.flow_runs_transcript_lines });
+      fireEvent.change(screen.getByLabelText("Namn för SPEAKER_00"), { target: { value: "Anna" } });
+      fireEvent.click(within(lines).getByRole("button", { name: "Rätta raden 1:05" }));
+      fireEvent.change(screen.getByLabelText("Texten på raden 1:05"), {
+        target: { value: "Tack så mycket." }
+      });
+
+      for (const viewport of ["phone", "tablet-portrait"] as const) {
+        act(() => setViewport(viewport));
+        expect([
+          screen.queryByLabelText<HTMLInputElement>("Namn för SPEAKER_00")?.value,
+          screen.queryByLabelText<HTMLTextAreaElement>("Texten på raden 1:05")?.value
+        ]).toEqual(["Anna", "Tack så mycket."]);
+      }
+      expect(calls(EDIT)).toHaveLength(0);
+    });
+
     it("shows each line with its time and speaker, and saves the speakers' names", async () => {
       answerAudioRun();
       state.routes[EDIT] = () => ({ body: {} });
@@ -1696,6 +1717,41 @@ describe("FlowRunPage", () => {
 });
 
 describe("FlowRunPage on a phone", () => {
+  it("opens the folded steps before focusing the failed step", async () => {
+    setViewport("phone");
+    const failed = makeRunSummary({ status: "failed" });
+    answerRun(
+      failed,
+      makeRunDetail({
+        ...failed,
+        result: null,
+        error: {
+          schema_version: 1,
+          code: "flow_step_timeout",
+          message: "Step 2 exceeded its execution budget.",
+          step_order: 2,
+          details: null,
+          retryable: false,
+          consumer_action: null,
+          user_action: null
+        }
+      })
+    );
+    renderRun();
+    const showStep = await screen.findByRole("button", {
+      name: messages.flow_run_show_failed_step
+    });
+    const steps = screen.getByRole("button", { name: messages.flow_runs_steps_heading });
+    fireEvent.click(steps);
+    expect(steps.getAttribute("aria-expanded")).toBe("false");
+
+    fireEvent.click(showStep);
+    expect(steps.getAttribute("aria-expanded")).toBe("true");
+    expect(document.activeElement).toBe(
+      screen.getByRole("article", { name: "Steg 2: Skriv svar" })
+    );
+  });
+
   it("shows the result first and folds the steps, what it was started with and what it used", async () => {
     setViewport("phone");
     answerRun(makeRunSummary());
@@ -1721,12 +1777,18 @@ describe("FlowRunPage on a phone", () => {
     await expectNoAxeViolations(container);
   });
 
-  it("keeps the steps open while the run is still going, where its progress is", async () => {
+  it("keeps the steps open while the run progresses and finishes", async () => {
     setViewport("phone");
-    answerRun(makeRunSummary({ status: "running", finished_at: null }));
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
     renderRun();
     expect(await screen.findByRole("article", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
     const steps = screen.getByRole("button", { name: messages.flow_runs_steps_heading });
+    expect(steps.getAttribute("aria-expanded")).toBe("true");
+    answerRun(makeRunSummary({ revision: 3 }));
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(await screen.findByText("Beslutet är fattat.")).toBeTruthy();
     expect(steps.getAttribute("aria-expanded")).toBe("true");
   });
 
