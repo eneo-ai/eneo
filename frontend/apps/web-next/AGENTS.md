@@ -619,6 +619,11 @@ The contract counts a control as outside the screen only when no sideways scroll
 (a tab strip, a wide table) can bring it into view; `tests/responsive-measure.spec.ts`
 holds that rule on small hand-made pages.
 
+`tests/turn-and-resize.spec.ts` opens the form dialogs that each screen's create buttons
+open, on a phone, types into one and crosses 768 px and back (a phone turned, an iPad
+split): the same field must be there, with its text and its focus, and the dialog open.
+A component that swaps at a breakpoint rebuilds what is open and fails it.
+
 | What it finds                                                                                                                                                                           | Run                                                                                              |
 | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | Sideways scroll, a target under 44 px, one outside the screen, two on top of each other, text cut off, a text field under 16 px on a phone (iPhone Safari zooms into it), at five sizes | `tests/responsive-contract.spec.ts` (`CONTRACT_VIEWPORTS`, `CONTRACT_ROUTES`)                    |

@@ -493,6 +493,36 @@ mode:
 
 Write what you checked in the PR's **Accessibility** section.
 
+### Real-device pass (about 30 minutes, before a release that changes touch layouts)
+
+The simulator and emulator cannot run VoiceOver or TalkBack, and a headless browser cannot
+show what a screen reader says. Use one iPhone (VoiceOver) and one Android phone (TalkBack),
+in Swedish, signed in to a test tenant with a space that has an assistant, an app, a
+knowledge collection and a flow.
+
+1. **Start.** Chat start screen: swipe right through everything. Order matches the picture,
+   every control says what it is ("Skicka, knapp"), the composer says it is a text field.
+2. **Navigate by headings** (VoiceOver rotor → Headings; TalkBack → Headings): a space, an
+   assistant editor and Settings each have one h1 and sensible h2s; no screen has two h1s.
+3. **A pushed screen.** Open an assistant editor from a list: the Back link reads "Tillbaka
+   till ...", focus lands on the new screen's heading, Back returns focus to the row.
+4. **A form dialog.** Create a space: the dialog is announced, focus is inside, swiping does
+   not reach the page behind, a required field says it is required, an error is read when
+   it appears (leave the name empty and submit), Cancel returns focus to the opener.
+5. **A bottom bar.** Anywhere with a docked action: it is reachable after the content, it is
+   not read twice, and the last row of the page is not hidden behind it.
+6. **A picker and a menu.** Open a model picker and a "More actions" menu: options are read
+   with their state ("vald"), Escape/Back closes them, focus returns.
+7. **Turn the phone** with a dialog open and something typed (sideways and back): the dialog
+   is still there, text and focus are kept, nothing is announced twice.
+8. **Text size.** Settings → Larger Text / Font size to the largest: the chat start, a
+   list, a settings index and a dialog still show every control; nothing is cut off.
+9. **Flows.** Start a run with the microphone: the permission prompt, "Spela in", pause and
+   resume are named, and the clock is not read every second. Review a run: Godkänn/Avvisa
+   are reachable at 320 px wide.
+10. **Write what you heard** in the PR's **Accessibility** section: device, OS version,
+    screen reader and anything that was announced wrongly, twice or not at all.
+
 ## Exceptions
 
 Fix rather than suppress. If a violation can't be fixed in the PR (an Astryx or
