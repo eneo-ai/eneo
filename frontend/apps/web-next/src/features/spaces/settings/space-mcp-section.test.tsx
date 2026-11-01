@@ -71,11 +71,11 @@ let catalog: McpServer[];
 let completeServers: McpServer[];
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
 function applyUpdate(body: Update): Space {
-  const ids =
-    body.mcp_servers?.map((ref) => ref.id) ?? state.space.mcp_servers.map((item) => item.id);
+  const savedServers = state.space.mcp_servers ?? [];
+  const ids = body.mcp_servers?.map((ref) => ref.id) ?? savedServers.map((item) => item.id);
   const settings =
     body.mcp_tools ??
-    state.space.mcp_servers.flatMap((item) =>
+    savedServers.flatMap((item) =>
       item.tools.map((entry) => ({
         tool_id: String(entry.id),
         is_enabled: entry.is_enabled === true
@@ -86,7 +86,7 @@ function applyUpdate(body: Update): Space {
     mcp_servers: ids.flatMap((id) => {
       const item = completeServers.find((entry) => entry.id === id);
       if (item) return [savedServer(item, settings)];
-      const saved = state.space.mcp_servers.find((entry) => entry.id === id);
+      const saved = savedServers.find((entry) => entry.id === id);
       return saved ? [saved] : [];
     })
   };
@@ -270,7 +270,7 @@ it("blocks classified additions, keeps saved unavailable resources removable and
     ...state.space,
     security_classification: { id: "high", name: "Hemlig", description: null, security_level: 3 },
     mcp_servers: [
-      ...state.space.mcp_servers,
+      ...(state.space.mcp_servers ?? []),
       savedServer(missing, [{ tool_id: "missing-tool", is_enabled: true }])
     ]
   };
