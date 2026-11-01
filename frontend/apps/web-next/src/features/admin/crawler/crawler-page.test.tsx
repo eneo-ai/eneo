@@ -109,7 +109,10 @@ const details = () => ({
 const state = vi.hoisted(() => ({
   requests: [] as { path: string; query: Record<string, unknown> | undefined }[],
   posted: [] as string[],
-  /** Replaces the overview response; `null` leaves the request pending. */
+  /**
+   * Replaces the overview response; `null` leaves the request pending. A
+   * promise answers when it settles, and fails the read when it rejects.
+   */
   overview: undefined as (() => unknown) | null | undefined
 }));
 
@@ -138,7 +141,7 @@ vi.mock("@/lib/api/browser", () => ({
                       details_available: true,
                       run: run()
                     };
-      return Promise.resolve({ data, response: new Response("{}") });
+      return Promise.resolve(data).then((data) => ({ data, response: new Response("{}") }));
     },
     POST: (path: string) => {
       state.posted.push(path);
@@ -185,6 +188,33 @@ describe("CrawlerPage", () => {
     ).toBe(true);
     expect(screen.queryByText("—")).toBeNull();
     expect(screen.queryByRole("group", { name: "Idag" })).toBeNull();
+  });
+
+  it("keeps the tabs and filters back until the overview arrives above them", async () => {
+    let answer!: (data: unknown) => void;
+    const answered = new Promise((resolve) => (answer = resolve));
+    state.overview = () => answered;
+    show();
+    await waitFor(() => expect(lastOverviewQuery()).toBeDefined());
+    expect(screen.queryByRole("tablist")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Sök" })).toBeNull();
+
+    answer(overview());
+    expect(await screen.findByRole("tablist", { name: "Crawler" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Schemaläggare" })).toBeTruthy();
+    expect(screen.getByRole("group", { name: "Idag" })).toBeTruthy();
+  });
+
+  it("shows the tabs with a failed first read's error, and keeps them while another view loads", async () => {
+    state.overview = () => Promise.reject(new Error("unavailable"));
+    show();
+    expect(await screen.findByText("Kunde inte hämta crawleröversikten.")).toBeTruthy();
+    const tabs = screen.getByRole("tablist", { name: "Crawler" });
+
+    state.overview = null;
+    fireEvent.click(within(tabs).getByRole("tab", { name: "Schema" }));
+    await waitFor(() => expect(lastOverviewQuery()).toMatchObject({ view: "all", limit: 1 }));
+    expect(screen.getByRole("tab", { name: "Schema" }).getAttribute("aria-selected")).toBe("true");
   });
 
   it("replaces the day cards with an empty state that leads to the websites when nothing has run", async () => {
