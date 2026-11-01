@@ -91,7 +91,7 @@ It is neither an authentication credential nor a CSRF token.
 
 A document must remember its initial generation and send it on subsequent
 cookie-authenticated requests. Only GET and HEAD may omit it for bootstrap;
-a supplied mismatch on any method returns HTTP 401 with `eneo_error_code: 9080`
+a supplied mismatch on any method returns HTTP 401 with `eneo_error_code: 9090`
 before authentication or domain work. Cookie writes without the header are
 also refused. This prevents a tab from acting as another account after a
 different tab replaces the shared cookie. Bearer and API-key authentication
