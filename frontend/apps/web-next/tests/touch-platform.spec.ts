@@ -56,6 +56,9 @@ test(
   "text fields are 16 px and controls skip double-tap zoom, screen by screen",
   { tag: "@vite" },
   async ({ page }) => {
+    // One test walks about 15 screens (24 s on CI's first run, 30 s on a slower one):
+    // its budget is its work, not the 30 s a single-screen test gets.
+    test.setTimeout(90_000);
     const { space, editor } = await assistantEditor(page);
     const faults: string[] = [];
     const open = async (path: string) => {

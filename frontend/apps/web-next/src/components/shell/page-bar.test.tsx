@@ -25,4 +25,13 @@ describe("PageBar", () => {
     expect(bar().className).toContain("md:hidden");
     expect(bar().className).not.toContain("lg:hidden");
   });
+
+  it("keeps the back link's side at 44 px however much room the title and action ask for", () => {
+    renderInApp(
+      <PageBar until="md" parent={{ label: "Assistenter", href: "/spaces/1/assistants" }} />
+    );
+    // jsdom has no layout, so the track is asserted as its class. At 320 px a 160 px title and
+    // an icon-and-text action left the back side about 44 px: CI measured it under the contract.
+    expect(bar().className).toContain("grid-cols-[minmax(2.75rem,1fr)_");
+  });
 });

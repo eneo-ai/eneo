@@ -26,6 +26,11 @@ test(
     const log = conversationLog(page);
     await expect(log.locator(".katex math")).toHaveCount(2);
     await expect(log.getByText("Priser: $5 och $10.", { exact: false })).toBeVisible();
+    // The diagram is the answer's last render and moves its actions down: a menu opened
+    // before it can follow its button out of view, where the browser stops drawing it.
+    const diagram = log.locator('[data-streamdown="mermaid"] svg[id^="mermaid-"]');
+    await expect(diagram).toBeVisible();
+    await expect(diagram).toHaveAccessibleName("Testflöde");
     await log.getByRole("button", { name: /fler åtgärder|more actions/i }).click();
     await page.getByRole("menuitem", { name: /kopiera som rich text|copy as rich text/i }).click();
     await expect(page.getByText(sv.copied, { exact: true })).toBeVisible();
@@ -39,9 +44,6 @@ test(
     });
     expect(copied.html).toContain("<math");
     expect(copied.text).toContain("Priser: $5 och $10.");
-    const diagram = log.locator('[data-streamdown="mermaid"] svg[id^="mermaid-"]');
-    await expect(diagram).toBeVisible();
-    await expect(diagram).toHaveAccessibleName("Testflöde");
     const node = diagram.locator(".node rect").first();
     const lightFill = await node.evaluate((element) => getComputedStyle(element).fill);
     await expect(diagram.locator("style")).toHaveCount(1);
