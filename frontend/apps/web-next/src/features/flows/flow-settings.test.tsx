@@ -223,7 +223,9 @@ describe("FlowSettings", () => {
       })
     );
     // Reordering renames nothing.
-    expect(onSave.mock.calls[0]?.[0]).not.toHaveProperty("form_field_renames");
+    expect(onSave).toHaveBeenCalledWith(
+      expect.not.objectContaining({ form_field_renames: expect.anything() })
+    );
   });
 
   it("sends a renamed field's saved name, so the steps' reads follow it", async () => {
