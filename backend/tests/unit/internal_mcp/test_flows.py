@@ -9,7 +9,7 @@ import pytest
 from eneo.flows.application import flow_authoring_chat, flow_authoring_operations
 from eneo.internal_mcp import flows
 from eneo.internal_mcp.foundation import ToolContext
-from eneo.main.exceptions import BadRequestException
+from eneo.main.exceptions import BadRequestException, ConflictException
 
 
 def test_large_read_has_explicit_continuation_and_no_false_complete_claim(monkeypatch):
@@ -493,7 +493,12 @@ def _changing_chat(
         if fail
         else AsyncMock(side_effect=[prompts for _, prompts in drafts])
     )
-    saved_step = SimpleNamespace(id=_DRAFT_IDS[1], assistant_id=_DRAFT_IDS[3])
+    saved_step = SimpleNamespace(
+        id=_DRAFT_IDS[1],
+        assistant_id=_DRAFT_IDS[3],
+        step_order=2,
+        user_description="Steg 2",
+    )
     read = MagicMock(id=_DRAFT_IDS[1], assistant_id=_DRAFT_IDS[3])
     read.model_dump.return_value = {}
     monkeypatch.setattr(
@@ -503,6 +508,14 @@ def _changing_chat(
     )
     save = AsyncMock(return_value=SimpleNamespace(steps=[saved_step], draft_revision=5))
     monkeypatch.setattr(flow_authoring_operations, "apply_editor_update", save)
+    # The step's assistant as saved, read when a change touches it.
+    from eneo.flows.api import flow_assistant_router
+
+    assistant = MagicMock()
+    assistant.model_dump.return_value = {"prompt": {"text": before}}
+    monkeypatch.setattr(
+        flow_assistant_router, "get_flow_assistant", AsyncMock(return_value=assistant)
+    )
     return save
 
 
@@ -611,8 +624,500 @@ def test_every_draft_changing_tool_reports_introduced_suggestions():
     assert changing == {
         "update_flow_settings",
         "update_step",
+        "update_steps",
+        "contract_from_example",
         "add_step",
         "move_step",
         "remove_step",
         "apply_flow_suggestions",
     }
+
+
+async def test_an_example_gives_the_step_its_contract_and_is_not_kept(monkeypatch):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    result = await flows.contract_from_example(
+        MagicMock(),
+        expected_revision=4,
+        step_id=_DRAFT_IDS[1],
+        example='{"beslut": "Bifall", "belopp": 4500, "a.b": [], "n": null}',
+    )
+
+    assert result.isError is not True
+    page = json.loads(result.content[0].text)
+    body = json.loads(page["content"])
+    assert body["saved"] is True
+    assert body["fields"] == [
+        {"name": "beslut", "type": "string", "variable": True},
+        {"name": "belopp", "type": "number", "variable": True},
+        {"name": "a.b", "type": "array", "variable": False},
+        {"name": "n", "type": ["string", "null"], "variable": True},
+    ]
+    assert body["notes"] == ["empty_list", "null_value"]
+    request = save.await_args.args[2]
+    (edit,) = request.step_edits
+    assert edit.changes.output_type == "json"
+    assert edit.changes.output_contract["required"] == [
+        "beslut",
+        "belopp",
+        "a.b",
+        "n",
+    ]
+    # The contract carries the fields' types, never the example's values.
+    assert "Bifall" not in json.dumps(request.model_dump(mode="json"))
+
+
+async def test_an_example_that_gives_no_contract_is_refused_without_saving(monkeypatch):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    result = await flows.contract_from_example(
+        MagicMock(), expected_revision=4, step_id=_DRAFT_IDS[1], example="[1]"
+    )
+
+    assert result.isError is True
+    assert "JSON object" in result.content[0].text
+    save.assert_not_awaited()
+
+
+async def test_read_run_summarises_a_run_from_its_audited_reads(monkeypatch):
+    from eneo.flows.api import flow_run_lifecycle_router, flow_run_steps_router
+
+    container = _transaction_container([])
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=False)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    monkeypatch.setattr(
+        flow_authoring_chat,
+        "FlowAuthoringChatPublic",
+        SimpleNamespace(model_validate=lambda item: item),
+    )
+    run_id = uuid4()
+    detail = SimpleNamespace(
+        id=run_id,
+        status="completed",
+        flow_version=2,
+        purpose="production",
+        started_at=None,
+        finished_at=None,
+        token_usage=None,
+        error=None,
+        result=None,
+    )
+    step = SimpleNamespace(
+        step_order=1,
+        status="completed",
+        current_attempt_no=1,
+        started_at=None,
+        finished_at=None,
+        num_tokens_input=5,
+        num_tokens_output=7,
+        effective_prompt_truncated=False,
+        long_material=None,
+        diagnostics=[],
+        error_code=None,
+        error_message=None,
+    )
+    get_run = AsyncMock(return_value=detail)
+    list_steps = AsyncMock(return_value=[step])
+    graph = AsyncMock(
+        return_value=SimpleNamespace(
+            nodes=[
+                SimpleNamespace(step_order=None, label="Start"),
+                SimpleNamespace(step_order=1, label="Sammanfatta"),
+            ]
+        )
+    )
+    monkeypatch.setattr(flow_run_lifecycle_router, "get_flow_run", get_run)
+    monkeypatch.setattr(flow_run_steps_router, "list_flow_run_steps", list_steps)
+    monkeypatch.setattr(flow_run_steps_router, "get_flow_graph", graph)
+    repo = container.flow_run_review_checkpoint_repo.return_value
+    repo.list_review_checkpoints_for_run = AsyncMock(
+        return_value=[
+            SimpleNamespace(
+                id=uuid4(),
+                step_order=1,
+                attempt_no=1,
+                state="approved",
+                review_mode="view",
+            )
+        ]
+    )
+    container.user.return_value = SimpleNamespace(tenant_id=uuid4())
+
+    result = await flows.read_run(MagicMock(), run_id=run_id)
+
+    assert result.isError is not True
+    page = json.loads(result.content[0].text)
+    summary = json.loads(page["content"])
+    assert summary["run_id"] == str(run_id)
+    assert summary["steps"] == [
+        {
+            "step_order": 1,
+            "name": "Sammanfatta",
+            "status": "completed",
+            "attempts": 1,
+            "duration_seconds": None,
+            "tokens": {"input": 5, "output": 7},
+            "prompt_truncated": False,
+            "coverage": None,
+            "diagnostics": [],
+            "error": None,
+            "review": {
+                "state": "approved",
+                "attempt": 1,
+                "mode": "view",
+                "open": False,
+            },
+        }
+    ]
+    assert summary["open_review"] is None
+    assert result.structuredContent == {
+        "flow_id": str(chat.flow_id),
+        "run_id": str(run_id),
+    }
+    # Every read goes through the audited router reads for this flow's run.
+    for read in (get_run, list_steps, graph):
+        assert read.await_args.kwargs["id"] == chat.flow_id
+        assert read.await_args.kwargs["run_id"] == run_id
+
+
+def _runtime_chat(monkeypatch):
+    """A chat whose runtime tools reach the flow's run endpoints."""
+    container = _transaction_container([])
+    chat = SimpleNamespace(flow_id=uuid4(), space_id=uuid4(), editing=False)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    monkeypatch.setattr(
+        flow_authoring_chat,
+        "FlowAuthoringChatPublic",
+        SimpleNamespace(model_validate=lambda item: item),
+    )
+    return container, chat
+
+
+async def test_retry_run_starts_the_failed_run_again_and_names_the_new_run(monkeypatch):
+    from eneo.flows.api import flow_run_retry_router
+
+    _, chat = _runtime_chat(monkeypatch)
+    source_id, new_id = uuid4(), uuid4()
+    public = MagicMock()
+    public.run = SimpleNamespace(id=new_id)
+    public.source_run_id = source_id
+    public.created = True
+    public.model_dump.return_value = {
+        "run": {"id": str(new_id), "status": "queued"},
+        "created": True,
+        "source_run_id": str(source_id),
+        "first_executed_step_order": 2,
+        "reused_step_orders": [1],
+    }
+    retry = AsyncMock(return_value=public)
+    monkeypatch.setattr(flow_run_retry_router, "retry_flow_run_from_failed_step", retry)
+
+    result = await flows.retry_run(MagicMock(), run_id=source_id, idempotency_key="k-1")
+
+    assert result.isError is not True
+    kwargs = retry.await_args.kwargs
+    assert kwargs["id"] == chat.flow_id
+    assert kwargs["run_id"] == source_id
+    assert kwargs["idempotency_key"] == "k-1"
+    page = json.loads(result.content[0].text)
+    assert json.loads(page["content"])["reused_step_orders"] == [1]
+    assert result.structuredContent == {
+        "flow_id": str(chat.flow_id),
+        "run_id": str(new_id),
+        "source_run_id": str(source_id),
+        "created": True,
+    }
+
+
+async def test_a_refused_retry_is_an_error_the_model_can_read(monkeypatch):
+    from eneo.flows.api import flow_run_retry_router
+
+    _runtime_chat(monkeypatch)
+    monkeypatch.setattr(
+        flow_run_retry_router,
+        "retry_flow_run_from_failed_step",
+        AsyncMock(
+            side_effect=ConflictException(
+                "The source run's flow version is no longer published."
+            )
+        ),
+    )
+
+    result = await flows.retry_run(MagicMock(), run_id=uuid4(), idempotency_key="k-2")
+
+    assert result.isError is True
+    assert "no longer published" in result.content[0].text
+
+
+def test_every_tool_that_needs_edit_mode_is_withheld_while_the_chat_asks():
+    import inspect
+
+    needs_edit = {
+        name
+        for name, tool in vars(flows).items()
+        if inspect.iscoroutinefunction(tool)
+        and (
+            "changes_draft=True" in inspect.getsource(tool)
+            or "editing=True" in inspect.getsource(tool)
+        )
+    }
+
+    assert needs_edit == flows.EDIT_MODE_TOOLS
+
+
+async def test_a_turn_in_ask_mode_gets_no_tool_that_changes_the_flow():
+    asking = await flows.build_flows_mcp_server(
+        token="t", tenant_id=uuid4(), editing=False
+    )
+    editing = await flows.build_flows_mcp_server(
+        token="t", tenant_id=uuid4(), editing=True
+    )
+    offered = {tool.name for tool in asking.tools}
+    assert offered.isdisjoint(flows.EDIT_MODE_TOOLS)
+    assert {"read_flow", "run_flow", "read_flow_suggestions"} <= offered
+    assert {tool.name for tool in editing.tools} - offered == flows.EDIT_MODE_TOOLS
+
+
+# --- Reading the flow by section ---------------------------------------------
+
+
+_STEP_2_PROMPT = "Sammanfatta {{ step_1.output.text }}."
+
+
+def _reading_chat(monkeypatch):
+    """A view-mode chat over the example flow: step 2 reads step 1 as its
+    input and again in its prompt."""
+    from eneo.flows.api.flow_models import FLOW_PUBLIC_EXAMPLE, FlowPublic
+    from eneo.flows.infrastructure.flow_repo import StoredAssistantPrompt
+    from tests.unit.flows.application.test_flow_suggestion_service import (
+        _flow,
+        _step,
+    )
+
+    public = FlowPublic.model_validate(FLOW_PUBLIC_EXAMPLE)
+    saved = _flow(
+        [
+            _step(
+                step.step_order,
+                id=step.id,
+                assistant_id=step.assistant_id,
+                user_description=step.user_description,
+                input_source=step.input_source.value,
+                input_type=step.input_type.value,
+                output_mode=step.output_mode.value,
+                output_type=step.output_type.value,
+            )
+            for step in public.steps
+        ]
+    )
+    prompts = {
+        public.steps[1].assistant_id: StoredAssistantPrompt(
+            text=_STEP_2_PROMPT, description=None
+        )
+    }
+    container = _transaction_container([])
+    chat = SimpleNamespace(flow_id=public.id, space_id=uuid4(), editing=False)
+    monkeypatch.setattr(flows, "internal_tool_context", _tool_context(container))
+    monkeypatch.setattr(
+        flow_authoring_chat, "load_authoring_chat", AsyncMock(return_value=chat)
+    )
+    service = container.flow_service.return_value
+    service.get_flow = AsyncMock(return_value=saved)
+    service.get_flow_assistant_prompts = AsyncMock(return_value=prompts)
+    monkeypatch.setattr(
+        flow_authoring_operations, "get_flow", AsyncMock(return_value=public)
+    )
+    return public
+
+
+async def _read(**kwargs):
+    result = await flows.read_flow(MagicMock(), **kwargs)
+    assert result.isError is not True, result.content[0].text
+    page = json.loads(result.content[0].text)
+    assert page["next_offset"] is None
+    return page, json.loads(page["content"])
+
+
+async def test_the_overview_lists_every_step_with_its_reads_and_readers(monkeypatch):
+    public = _reading_chat(monkeypatch)
+
+    page, content = await _read()
+
+    assert page["draft_revision"] == public.draft_revision
+    assert content["name"] == public.name
+    assert "run_form_fields" in content
+    first, second = content["steps"]
+    assert first["step_order"] == 1 and first["id"] == str(public.steps[0].id)
+    assert first["output_fields"] is None and first["review"] is False
+    # Short: no prompt and no configuration columns in the overview.
+    assert "prompt" not in second and "input_config" not in second
+    assert [(read["step_order"], read["value"]) for read in second["reads"]] == [
+        (1, "{{step_1.output.text}}"),
+        (1, "{{step_1.output.text}}"),
+    ]
+    assert second["reads"][1]["where"] == "in its prompt ({{ step_1.output.text }})"
+    assert [reader["step_order"] for reader in first["readers"]] == [2, 2]
+    assert first["readers"][0]["name"] == public.steps[1].user_description
+    assert second["readers"] == []
+    # Every step says what services it talks to, here none.
+    assert first["connections"] == [] and second["connections"] == []
+
+
+async def test_the_steps_section_gives_the_chosen_steps_in_full_with_prompts(
+    monkeypatch,
+):
+    public = _reading_chat(monkeypatch)
+
+    _page, content = await _read(section="steps", steps=[2])
+
+    (step,) = content["steps"]
+    assert step["id"] == str(public.steps[1].id)
+    assert step["prompt"] == _STEP_2_PROMPT
+    assert "input_bindings" in step and "output_config" in step
+    assert len(step["reads"]) == 2
+
+
+async def test_a_step_number_the_flow_lacks_is_refused(monkeypatch):
+    _reading_chat(monkeypatch)
+
+    result = await flows.read_flow(MagicMock(), steps=[2, 7])
+
+    assert result.isError is True
+    assert "No step 7" in json.loads(result.content[0].text)["message"]
+
+
+async def test_the_settings_section_leaves_the_steps_out(monkeypatch):
+    public = _reading_chat(monkeypatch)
+
+    _page, content = await _read(section="settings")
+
+    assert "steps" not in content
+    assert content["permissions"] == public.permissions.model_dump(mode="json")
+    assert content["draft_revision"] == public.draft_revision
+
+
+async def test_the_all_section_is_the_whole_definition(monkeypatch):
+    public = _reading_chat(monkeypatch)
+
+    _page, content = await _read(section="all")
+
+    assert content == public.model_dump(mode="json")
+
+
+# --- Several steps in one change -----------------------------------------------
+
+
+async def test_update_steps_saves_every_edit_and_the_settings_in_one_revision(
+    monkeypatch,
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after=_DUPLICATE_PROMPT)
+
+    result = await flows.update_steps(
+        MagicMock(),
+        expected_revision=4,
+        edits=[
+            {
+                "step_id": str(_DRAFT_IDS[1]),
+                "changes": {"user_description": "Steg 2"},
+                "assistant_changes": {"prompt": {"text": _DUPLICATE_PROMPT}},
+            }
+        ],
+        settings={"description": "Ny beskrivning"},
+    )
+
+    assert result.isError is not True, result.content[0].text
+    save.assert_awaited_once()
+    request = save.await_args.args[2]
+    assert request.expected_revision == 4
+    assert [edit.step_id for edit in request.step_edits] == [_DRAFT_IDS[1]]
+    assert request.step_edits[0].changes.user_description == "Steg 2"
+    assert [(a.assistant_id, a.step_id) for a in request.assistants] == [
+        (_DRAFT_IDS[3], _DRAFT_IDS[1])
+    ]
+    assert request.definition.description == "Ny beskrivning"
+    page = json.loads(result.content[0].text)
+    assert page["draft_revision"] == 5
+    changes = [
+        {"field": "user_description", "before": None, "after": "Steg 2"},
+        {
+            "field": "assistant.prompt",
+            "before": "Sammanfatta.",
+            "after": _DUPLICATE_PROMPT,
+        },
+    ]
+    assert json.loads(page["content"]) == {
+        "saved": True,
+        "steps": [
+            {
+                "step_id": str(_DRAFT_IDS[1]),
+                "step_order": 2,
+                "name": "Steg 2",
+                "assistant_id": str(_DRAFT_IDS[3]),
+                "changes": changes,
+            }
+        ],
+    }
+    # The affected steps, with each field before and after, travel with the
+    # call for the chat's change card.
+    assert result.structuredContent == {
+        "flow_id": page["flow_id"],
+        "draft_revision": 5,
+        "changes": [
+            {
+                "step_id": str(_DRAFT_IDS[1]),
+                "step_order": 2,
+                "name": "Steg 2",
+                "fields": changes,
+            }
+        ],
+    }
+    # A batch reports what it introduced like any other change.
+    assert [item["code"] for item in page["introduced_suggestions"]] == [
+        "duplicate_read"
+    ]
+
+
+@pytest.mark.parametrize(
+    "edits,settings",
+    [
+        ([], None),
+        ([{"step_id": str(_DRAFT_IDS[1])}], None),
+        (
+            [
+                {"step_id": str(_DRAFT_IDS[1]), "changes": {"user_description": "a"}},
+                {"step_id": str(_DRAFT_IDS[1]), "changes": {"user_description": "b"}},
+            ],
+            None,
+        ),
+        ([{"step_id": str(_DRAFT_IDS[1]), "edits": {}}], None),
+        ([{"step_id": str(uuid4()), "changes": {"user_description": "a"}}], None),
+        ([{"step_id": str(_DRAFT_IDS[1]), "changes": {"step_order": 1}}], None),
+        (
+            [
+                {
+                    "step_id": str(_DRAFT_IDS[1]),
+                    "changes": {"output_config": {"auth": {"token": "secret"}}},
+                }
+            ],
+            None,
+        ),
+        ([], {"published_version": 2}),
+    ],
+)
+async def test_update_steps_refuses_a_bad_batch_without_saving(
+    monkeypatch, edits, settings
+):
+    save = _changing_chat(monkeypatch, before="Sammanfatta.", after="Sammanfatta.")
+
+    result = await flows.update_steps(
+        MagicMock(), expected_revision=4, edits=edits, settings=settings
+    )
+
+    assert result.isError is True
+    save.assert_not_awaited()

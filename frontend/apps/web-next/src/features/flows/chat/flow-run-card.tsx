@@ -38,28 +38,35 @@ import {
   type RunDetail
 } from "../runs/runs-api";
 
-/** The tool of the flow chat that starts a run. */
-const RUN_FLOW_TOOL = "run_flow";
+/** The tools of the flow chat that start a run: a new one, or a failed one again. */
+const RUN_STARTING_TOOLS = new Set(["run_flow", "retry_run"]);
 
-/** The run a `run_flow` call of the flow chat started, from the call's data; null for any other call. */
+/** The run a `run_flow` or `retry_run` call of the flow chat started, from the call's data; null for any other call. */
 export function startedRunId(
   call: Pick<ToolCallRecord, "toolName" | "structuredContent" | "serverName" | "isInternal">
 ): string | null {
-  if (!isFlowsToolCall(call) || call.toolName !== RUN_FLOW_TOOL) return null;
+  if (!isFlowsToolCall(call) || !RUN_STARTING_TOOLS.has(call.toolName)) return null;
   const runId = call.structuredContent?.run_id;
   return typeof runId === "string" && runId ? runId : null;
 }
 
-/** The chat's card for a tool call: the run card for a run `run_flow` started, nothing for other calls. */
+/** The chat's card for a tool call: the run card for a run the chat started, nothing for other calls. */
 export function flowRunCardFor(
   call: ToolCallRecord,
   flow: { id: string; name: string },
-  spaceRouteId: string
+  spaceRouteId: string,
+  onAskChat?: (text: string) => void
 ): ReactNode {
   const runId = startedRunId(call);
   if (!runId) return null;
   return (
-    <FlowRunCard flowId={flow.id} flowName={flow.name} runId={runId} spaceRouteId={spaceRouteId} />
+    <FlowRunCard
+      flowId={flow.id}
+      flowName={flow.name}
+      runId={runId}
+      spaceRouteId={spaceRouteId}
+      onAskChat={onAskChat}
+    />
   );
 }
 
@@ -77,18 +84,25 @@ function resultText(run: RunDetail | undefined): string | null {
  * what it is doing step by step while it runs (read the way the run page
  * reads it, so the model does not have to wait for it), the result when it
  * is done, why it failed when it did, and the way to the run's own page.
- * Reopening the conversation shows the run as it ended.
+ * Reopening the conversation shows the run as it ended. Once the run has
+ * ended, "Förklara felet", "Förbättra utifrån körningen" and "Resultatet
+ * blev fel" put a prepared request about this run in the composer
+ * (`onAskChat`), never send it; while it waits for review, "Rätta
+ * resultatet" asks the chat to propose the correction in the review, the
+ * one place a run's content can still change.
  */
 export function FlowRunCard({
   flowId,
   flowName,
   runId,
-  spaceRouteId
+  spaceRouteId,
+  onAskChat
 }: {
   flowId: string;
   flowName: string;
   runId: string;
   spaceRouteId: string;
+  onAskChat?: (text: string) => void;
 }) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -253,6 +267,46 @@ export function FlowRunCard({
             label={t("copy")}
             icon={<Copy aria-hidden="true" className="size-4" />}
             onClick={() => void copy(text)}
+          />
+        ) : null}
+        {onAskChat && status === "failed" && detail.data?.error?.retryable ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_retry")}
+            onClick={() => onAskChat(t("flows_run_card_retry_request", { run: runId }))}
+          />
+        ) : null}
+        {onAskChat && status === "failed" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_explain")}
+            onClick={() => onAskChat(t("flows_run_card_explain_request", { run: runId }))}
+          />
+        ) : null}
+        {onAskChat && (status === "completed" || status === "failed") ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_improve")}
+            onClick={() => onAskChat(t("flows_run_card_improve_request", { run: runId }))}
+          />
+        ) : null}
+        {onAskChat && status === "completed" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_wrong")}
+            onClick={() => onAskChat(t("flows_run_card_wrong_request", { run: runId }))}
+          />
+        ) : null}
+        {onAskChat && status === "awaiting_review" ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            label={t("flows_run_card_correct")}
+            onClick={() => onAskChat(t("flows_run_card_correct_request", { run: runId }))}
           />
         ) : null}
         {status && isCancellable(status) ? (

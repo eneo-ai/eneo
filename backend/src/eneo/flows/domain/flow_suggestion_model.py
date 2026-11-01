@@ -514,17 +514,23 @@ def read_payload(read: StepRead) -> dict[str, object]:
 
 
 def describe_read(read: StepRead, step: SuggestionStep) -> str:
-    if read.site == INPUT_SOURCE_READ_SITE:
+    return describe_site(read.site, step)
+
+
+def describe_site(site: str, step: SuggestionStep) -> str:
+    """Where a read of ``step`` is written, in words: a ``StepRead`` or
+    ``FormFieldRead`` site."""
+    if site == INPUT_SOURCE_READ_SITE:
         return f"as its input ({FlowInputSource(step.input_source).value})"
-    if read.site == "input_bindings.question":
+    if site == "input_bindings.question":
         return "in its question"
-    if read.site.startswith("input_bindings.source_refs["):
-        index = read.site.removeprefix("input_bindings.source_refs[").rstrip("]")
+    if site.startswith("input_bindings.source_refs["):
+        index = site.removeprefix("input_bindings.source_refs[").rstrip("]")
         return f"in source reference {int(index) + 1}"
-    if read.site.startswith(PROMPT_READ_SITE_PREFIX):
-        expression = read.site.removeprefix(PROMPT_READ_SITE_PREFIX)
+    if site.startswith(PROMPT_READ_SITE_PREFIX):
+        expression = site.removeprefix(PROMPT_READ_SITE_PREFIX)
         return f"in its prompt ({{{{ {expression} }}}})"
-    return f"in {read.site}"
+    return f"in {site}"
 
 
 def join_descriptions(described: Sequence[str]) -> str:
@@ -548,6 +554,7 @@ __all__ = [
     "SuggestionFlow",
     "SuggestionStep",
     "describe_read",
+    "describe_site",
     "exact_expression",
     "join_descriptions",
     "make_suggestion",

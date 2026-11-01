@@ -3,6 +3,7 @@ import { createMemoryHistory, RouterProvider } from "@tanstack/react-router";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { createTranslator } from "use-intl";
+import { latestRelease } from "@eneo/whats-new";
 import {
   Profiler,
   useState,
@@ -892,6 +893,11 @@ it("puts what's new intro in its header and the tour button on the start line", 
   const tour = screen.getByRole("button", { name: messages.whats_new_tour_start });
   expect(tour.className.split(" ")).not.toContain("ml-auto");
   expect(tour.className).toContain("sm:ml-auto");
+  // The notes open on develop's unreleased block, which is never read: a released version is.
+  const released = latestRelease()!.version;
+  fireEvent.click(
+    screen.getByRole("button", { name: new RegExp(`^${released.replaceAll(".", "\\.")}`) })
+  );
   // "Läst" has the size of "Kommande" (the date) beside it.
   expect(screen.getByText(messages.whats_new_read).className).toContain("text-sm");
 });

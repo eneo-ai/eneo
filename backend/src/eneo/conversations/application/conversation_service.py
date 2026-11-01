@@ -89,6 +89,7 @@ class ConversationService:
         tool_assistant_id: Optional["UUID"] = None,
         version: int = 1,
         require_tool_approval: bool = False,
+        allow_questions: bool = False,
         disabled_mcp_server_ids: "list[UUID] | None" = None,
         disabled_capabilities: list[CapabilityPurpose] | None = None,
     ) -> "AssistantResponse":
@@ -150,6 +151,7 @@ class ConversationService:
                     tool_assistant_id=tool_assistant_id,
                     version=version,
                     require_tool_approval=require_tool_approval,
+                    allow_questions=allow_questions,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
                     disabled_capabilities=disabled_capabilities,
                 )
@@ -178,6 +180,7 @@ class ConversationService:
                     tool_assistant_id=tool_assistant_id,
                     version=version,
                     require_tool_approval=require_tool_approval,
+                    allow_questions=allow_questions,
                     disabled_mcp_server_ids=disabled_mcp_server_ids,
                     disabled_capabilities=disabled_capabilities,
                 )

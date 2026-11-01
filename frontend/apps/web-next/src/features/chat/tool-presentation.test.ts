@@ -16,6 +16,27 @@ const t = (key: string, values?: Record<string, string | number>) =>
   `${key}${values?.query ? `:${values.query}` : ""}${values?.offset ? `:${values.offset}` : ""}`;
 
 describe("chat tool presentation", () => {
+  it("labels a question to the person as Eneo's own step, not by the server's name", () => {
+    const call = {
+      toolName: "ask_user",
+      input: { question: "Vem ska läsa PM:et?" },
+      providerMetadata: { eneo: { server_name: "questions", is_internal: true } }
+    };
+    expect(toolPresentation(call, t, false)).toEqual({
+      label: "tool_ask_user",
+      server: "questions_server"
+    });
+    expect(toolPresentation(call, t, true).label).toBe("tool_ask_user_done");
+    // An external server named "questions" keeps its own tool's name.
+    expect(
+      toolPresentation(
+        { ...call, providerMetadata: { eneo: { server_name: "questions", is_internal: false } } },
+        t,
+        false
+      ).label
+    ).toBe("Ask user");
+  });
+
   it("labels a capability by purpose even when an external provider names the tool differently", () => {
     const call = {
       toolName: "look_up",
@@ -402,6 +423,8 @@ describe("Eneo's flows server", () => {
     "update_flow_settings",
     "read_step_assistant",
     "update_step",
+    "update_steps",
+    "contract_from_example",
     "add_step",
     "move_step",
     "remove_step",
@@ -412,6 +435,7 @@ describe("Eneo's flows server", () => {
     "apply_flow_suggestions",
     "dismiss_flow_suggestion",
     "run_flow",
+    "retry_run",
     "read_run",
     "cancel_run",
     "read_review",

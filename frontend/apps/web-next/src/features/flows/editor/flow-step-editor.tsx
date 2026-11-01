@@ -10,7 +10,7 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tansta
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { ArrowLeft, ArrowRight, Check, ChevronLeft, ChevronRight } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { Suspense, useId, useRef, useState } from "react";
+import { Suspense, useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import { LeaveConfirmation } from "@/components/composites/leave-confirmation";
@@ -102,6 +102,8 @@ type EditorProps = {
   suggestionRuns?: number;
   /** The steps before and after this one, for "Föregående steg" and "Nästa steg". */
   navigation?: StepNavigation;
+  /** A field to focus once the form is on the page ("Anslut tjänst" opens a connection field). */
+  initialAnchor?: FieldAnchor | null;
 };
 
 /** Where the editor's top bar can go besides back to the list. */
@@ -282,7 +284,8 @@ function StepEditorSession({
   onAskChat,
   suggestionFix,
   suggestionDismissal,
-  suggestionRuns = 0
+  suggestionRuns = 0,
+  initialAnchor = null
 }: Omit<EditorProps, "navigation">) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -348,6 +351,16 @@ function StepEditorSession({
 
   const pinnedSession = pinned ? sessionOf(pinned) : null;
   const session = pinnedSession?.dirty ? pinnedSession : sessionOf(latest);
+  // A requested field gets focus once the form is there: the page opened
+  // the step to configure it (a connection the chat pointed at).
+  const formReady = session !== null;
+  useEffect(() => {
+    if (!initialAnchor || !formReady) return;
+    const frame = requestAnimationFrame(() => {
+      focusAnchor(formId, initialAnchor);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [initialAnchor, formReady, formId]);
   const newerElsewhere =
     session !== null && session.dirty && session.flow.draft_revision < latest.draft_revision;
   const dirty = session?.dirty ?? false;

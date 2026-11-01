@@ -34,8 +34,19 @@ mcp = FastMCP(
     instructions="""Configure the flow bound to this chat. Tools cannot be pointed at another flow.
 Read the current saved revision and configuration before editing; use that revision
 on every change. Keep unchanged fields. Every change goes through the flow's own
-validation, permissions, classification and audit. The user must enter edit mode in
-the editor.
+validation, permissions, classification and audit. The tools that change the flow
+are offered only while the chat is in edit mode (Redigera); when they are absent,
+say what you would change and that the person can switch the mode beside the send
+button.
+read_flow's overview (the default) lists every step in short with what it reads and
+which later steps read it; section "steps" with steps=[...] gives those steps in
+full with their prompts, section "settings" the flow without its steps. Each step
+lists its connections (an HTTP source or delivery, an MCP tool) with the address,
+the auth mode and whether the credential is stored, never the value. Read a step
+in full before changing it. A change that reaches several steps goes in one
+update_steps call. When the person shows an example of what a step should give as
+JSON, contract_from_example gives the step the contract the example implies; the
+example itself is not kept.
 Read pages until next_offset is null before claiming you reviewed the whole value.
 Credentials belong in the editor and must never be requested or placed in tools.
 A completion step whose input may exceed its model's window can set
@@ -257,6 +268,7 @@ async def _call_runtime(
             return await operation(scope.container, binding, request)
     except (
         BadRequestException,
+        ConflictException,
         NotFoundException,
         UnauthorizedException,
         ValidationError,
@@ -301,19 +313,100 @@ def _runtime_result(value: Any, *, flow_id: UUID, offset: int = 0) -> CallToolRe
     return result
 
 
+FlowSection = Literal["overview", "steps", "settings", "all"]
+
+# What the overview says of a step besides its reads.
+_OVERVIEW_STEP_FIELDS = frozenset(
+    {
+        "id",
+        "step_order",
+        "assistant_id",
+        "user_description",
+        "input_source",
+        "input_type",
+        "output_mode",
+        "output_type",
+    }
+)
+
+
 @mcp.tool()
-async def read_flow(ctx: Context, offset: int = 0) -> CallToolResult:
-    """Read a page of the current flow definition; follow next_offset to read all settings."""
+async def read_flow(
+    ctx: Context,
+    section: FlowSection = "overview",
+    steps: list[int] | None = None,
+    offset: int = 0,
+) -> CallToolResult:
+    """Read the saved draft. The overview (default) is short: the flow's name,
+    its run form fields and every step with its kind, the fields its result
+    declares (output_fields), whether a person reviews it, what it reads
+    (reads: each earlier result as the reference the flow resolves and
+    where the read is written), which later steps read its result (readers,
+    the same way) and the run form fields it reads. Section "steps" gives
+    the steps in full with their assistants' prompts and the same reads;
+    section "settings" the flow without its steps (description,
+    metadata_json with the run form, retention, permissions); section "all"
+    everything, paged. steps=[5, 8] limits the overview or the steps section
+    to those step numbers (1 is first). A step marked unreadable has a
+    configuration the flow cannot read; read it in full and fix it. Follow
+    next_offset until it is null."""
 
     async def operation(container, chat, request):
         from eneo.flows.application.flow_authoring_operations import get_flow
+        from eneo.flows.application.flow_authoring_reads import (
+            output_fields,
+            run_form_fields,
+            step_connections,
+            step_reads_summary,
+        )
 
         flow = await get_flow(chat.flow_id, request, container)
+        if section == "all":
+            value: Any = flow.model_dump(mode="json")
+        elif section == "settings":
+            value = flow.model_dump(mode="json", exclude={"steps"})
+        else:
+            orders = {step.step_order for step in flow.steps}
+            if steps is not None and (missing := sorted(set(steps) - orders)):
+                raise BadRequestException(
+                    f"No step {', '.join(map(str, missing))}; the flow has "
+                    f"{len(orders)} step(s), numbered from 1."
+                )
+            chosen = [
+                step for step in flow.steps if steps is None or step.step_order in steps
+            ]
+            saved = await container.flow_service().get_flow(chat.flow_id)
+            prompts = await container.flow_service().get_flow_assistant_prompts(saved)
+            reads = step_reads_summary(saved, prompts)
+            items: list[dict[str, Any]] = []
+            for step in chosen:
+                dump = step.model_dump(mode="json")
+                if section == "overview":
+                    item = {
+                        key: value
+                        for key, value in dump.items()
+                        if key in _OVERVIEW_STEP_FIELDS
+                    }
+                    item["output_fields"] = output_fields(step.output_contract)
+                    item["review"] = step.review_policy is not None
+                else:
+                    item = dump
+                    prompt = prompts.get(step.assistant_id)
+                    item["prompt"] = prompt.text if prompt is not None else None
+                # The services the step talks to, never their secrets.
+                item["connections"] = step_connections(dump)
+                item.update(reads.get(step.step_order, {}))
+                items.append(item)
+            value = {
+                "name": flow.name,
+                "published_version": flow.published_version,
+                "steps": items,
+            }
+            if section == "overview":
+                value["description"] = flow.description
+                value["run_form_fields"] = run_form_fields(flow.metadata_json)
         return page_result(
-            flow.model_dump(mode="json"),
-            flow_id=flow.id,
-            offset=offset,
-            revision=flow.draft_revision,
+            value, flow_id=flow.id, offset=offset, revision=flow.draft_revision
         )
 
     return await _call(ctx, operation)
@@ -479,34 +572,148 @@ async def update_step(
     input_config.long_material). Renaming the step (user_description) rewrites
     the reads of its old name in every step. When other steps share the step's
     assistant, the step gets its own copy with assistant_changes and the others
-    keep theirs; the result names the step's assistant_id."""
+    keep theirs; the result names the step's assistant_id. A change that
+    reaches several steps goes in one update_steps call instead."""
 
     async def operation(container, chat, request):
-        from eneo.flows.api.flow_models import (
-            FlowEditorUpdateRequest,
-            FlowStepUpdateRequest,
-        )
+        from eneo.flows.api.flow_models import FlowEditorUpdateRequest
         from eneo.flows.application.flow_authoring_operations import (
             apply_editor_update,
             get_flow,
         )
 
         flow = await get_flow(chat.flow_id, request, container)
-        step = next((item for item in flow.steps if item.id == step_id), None)
-        if step is None:
-            raise NotFoundException("Step not found.")
-        if set(changes) - (
-            set(FlowStepUpdateRequest.model_fields)
-            - {"id", "assistant_id", "step_order"}
-        ):
-            raise BadRequestException(
-                "Use a step configuration field; step identity and order cannot be changed here."
-            )
-        saved = step.model_dump(
-            mode="json", include=set(FlowStepUpdateRequest.model_fields)
+        step = _saved_step(flow, step_id)
+        before = await _assistant_before(
+            container, request, chat.flow_id, step, assistant_changes
         )
-        require_safe_model_configuration(changes, saved)
-        assistants = (
+        edit = _step_edit(step, changes, assistant_changes, before)
+        updated = await apply_editor_update(
+            chat.flow_id,
+            request,
+            FlowEditorUpdateRequest.model_validate(
+                {
+                    "expected_revision": expected_revision,
+                    "definition": {},
+                    "step_edits": edit.step_edits,
+                    "assistants": edit.assistants,
+                }
+            ),
+            container,
+        )
+        saved_step = next(item for item in updated.steps if item.id == step_id)
+        return _change_result(
+            {
+                "saved": True,
+                "step_id": str(step_id),
+                "assistant_id": str(saved_step.assistant_id),
+                "changes": edit.fields,
+            },
+            [_changed_step(saved_step, edit.fields)],
+            flow_id=chat.flow_id,
+            revision=updated.draft_revision,
+        )
+
+    return await _call(ctx, operation, changes_draft=True)
+
+
+def _saved_step(flow: Any, step_id: UUID) -> Any:
+    step = next((item for item in flow.steps if item.id == step_id), None)
+    if step is None:
+        raise NotFoundException("Step not found.")
+    return step
+
+
+async def _assistant_before(
+    container, request, flow_id: UUID, step: Any, assistant_changes: Any
+) -> dict[str, Any] | None:
+    """The step's assistant as saved, read only when the change touches it,
+    so the change can say what each field was."""
+    if assistant_changes is None:
+        return None
+    from eneo.flows.api.flow_assistant_router import get_flow_assistant
+
+    assistant = await get_flow_assistant(
+        id=flow_id, assistant_id=step.assistant_id, request=request, container=container
+    )
+    return cast(
+        dict[str, Any],
+        assistant.model_dump(mode="json")
+        if hasattr(assistant, "model_dump")
+        else assistant,
+    )
+
+
+def _changed_step(saved_step: Any, fields: list[dict[str, Any]]) -> dict[str, Any]:
+    return {
+        "step_id": str(saved_step.id),
+        "step_order": saved_step.step_order,
+        "name": saved_step.user_description,
+        "fields": fields,
+    }
+
+
+def _change_result(
+    page: dict[str, Any],
+    changed: list[dict[str, Any]],
+    *,
+    flow_id: UUID,
+    revision: int,
+) -> CallToolResult:
+    """A change's page for the model, and the affected steps with each
+    field's value before and after in the structured content, which the
+    chat draws as a card and keeps with the conversation."""
+    result = page_result(page, flow_id=flow_id, revision=revision)
+    result.structuredContent = {
+        "flow_id": str(flow_id),
+        "draft_revision": revision,
+        "changes": changed,
+    }
+    return result
+
+
+class _StepEdit:
+    """One step's part of an editor update, checked as update_step checks
+    it: only configuration fields change, and no credential is sent or
+    retargeted. ``fields`` is what the edit changes, each with its value
+    before and after."""
+
+    def __init__(
+        self,
+        step_edits: list[dict[str, Any]],
+        assistants: list[dict[str, Any]],
+        fields: list[dict[str, Any]],
+    ):
+        self.step_edits = step_edits
+        self.assistants = assistants
+        self.fields = fields
+
+
+def _step_edit(
+    step: Any,
+    changes: dict[str, Any] | None,
+    assistant_changes: dict[str, Any] | None,
+    assistant_before: dict[str, Any] | None = None,
+) -> _StepEdit:
+    from eneo.flows.api.flow_models import FlowStepUpdateRequest
+    from eneo.flows.application.flow_authoring_reads import step_changes
+
+    step_id = step.id
+    changes = changes or {}
+    if set(changes) - (
+        set(FlowStepUpdateRequest.model_fields) - {"id", "assistant_id", "step_order"}
+    ):
+        raise BadRequestException(
+            "Use a step configuration field; step identity and order cannot be changed here."
+        )
+    saved = step.model_dump(
+        mode="json", include=set(FlowStepUpdateRequest.model_fields)
+    )
+    require_safe_model_configuration(changes, saved)
+    return _StepEdit(
+        step_edits=[{"step_id": str(step_id), "changes": changes}] if changes else [],
+        fields=step_changes(saved, changes, assistant_before, assistant_changes),
+        assistants=(
             []
             if assistant_changes is None
             else [
@@ -516,6 +723,158 @@ async def update_step(
                     "changes": assistant_changes,
                 }
             ]
+        ),
+    )
+
+
+_SETTINGS_FIELDS = frozenset(
+    {"name", "description", "metadata_json", "form_field_renames"}
+)
+
+
+@mcp.tool()
+async def update_steps(
+    ctx: Context,
+    expected_revision: int,
+    edits: list[dict[str, Any]],
+    settings: dict[str, Any] | None = None,
+) -> CallToolResult:
+    """Change several saved steps, and optionally the flow's settings, in one
+    revision: everything is saved or nothing. Each edit is {"step_id": ...,
+    "changes": {...}, "assistant_changes": {...}} with the fields update_step
+    takes (either part may be left out); a step appears once. settings takes
+    what update_flow_settings takes. Use it when one change reaches several
+    steps: when a step's result changes, the steps that read it (readers in
+    read_flow) get their new instructions in the same call, so the flow is
+    never saved half-changed. A refusal names what to fix and saves nothing.
+    The result lists the saved steps with their assistant ids."""
+
+    async def operation(container, chat, request):
+        from eneo.flows.api.flow_models import FlowEditorUpdateRequest
+        from eneo.flows.application.flow_authoring_operations import (
+            apply_editor_update,
+            get_flow,
+        )
+
+        if not edits and not settings:
+            raise BadRequestException("Send at least one edit or a settings change.")
+        if settings and set(settings) - _SETTINGS_FIELDS:
+            raise BadRequestException(
+                "Only name, description, metadata_json and form_field_renames "
+                "can be changed in settings."
+            )
+        flow = await get_flow(chat.flow_id, request, container)
+        step_edits: list[dict[str, Any]] = []
+        assistants: list[dict[str, Any]] = []
+        edited: list[UUID] = []
+        fields: dict[UUID, list[dict[str, Any]]] = {}
+        for edit in edits:
+            if set(edit) - {"step_id", "changes", "assistant_changes"}:
+                raise BadRequestException(
+                    "An edit has step_id, changes and assistant_changes only."
+                )
+            try:
+                step_id = UUID(str(edit.get("step_id")))
+            except ValueError:
+                raise BadRequestException("Each edit needs a step_id.") from None
+            if step_id in edited:
+                raise BadRequestException("A step appears once per call.")
+            if not edit.get("changes") and edit.get("assistant_changes") is None:
+                raise BadRequestException(
+                    f"The edit of step {step_id} changes nothing."
+                )
+            step = _saved_step(flow, step_id)
+            before = await _assistant_before(
+                container, request, chat.flow_id, step, edit.get("assistant_changes")
+            )
+            part = _step_edit(
+                step, edit.get("changes"), edit.get("assistant_changes"), before
+            )
+            step_edits.extend(part.step_edits)
+            assistants.extend(part.assistants)
+            edited.append(step_id)
+            fields[step_id] = part.fields
+        updated = await apply_editor_update(
+            chat.flow_id,
+            request,
+            FlowEditorUpdateRequest.model_validate(
+                {
+                    "expected_revision": expected_revision,
+                    "definition": settings or {},
+                    "step_edits": step_edits,
+                    "assistants": assistants,
+                }
+            ),
+            container,
+        )
+        by_id = {step.id: step for step in updated.steps}
+        return _change_result(
+            {
+                "saved": True,
+                "steps": [
+                    {
+                        "step_id": str(step_id),
+                        "step_order": by_id[step_id].step_order,
+                        "name": by_id[step_id].user_description,
+                        "assistant_id": str(by_id[step_id].assistant_id),
+                        "changes": fields[step_id],
+                    }
+                    for step_id in edited
+                ],
+            },
+            [_changed_step(by_id[step_id], fields[step_id]) for step_id in edited],
+            flow_id=chat.flow_id,
+            revision=updated.draft_revision,
+        )
+
+    return await _call(ctx, operation, changes_draft=True)
+
+
+_EXAMPLE_PROBLEMS = {
+    "syntax": "The example is not valid JSON.",
+    "not_object": "The example must be a JSON object with the fields the step gives.",
+    "no_fields": "The example has no fields.",
+    "inexact_number": (
+        "A number in the example cannot be held exactly; round it or write it as text."
+    ),
+    "too_large": "The example is too large; keep it to the fields the step gives.",
+}
+
+
+@mcp.tool()
+async def contract_from_example(
+    ctx: Context, expected_revision: int, step_id: UUID, example: str
+) -> CallToolResult:
+    """Give a step the output contract one example of its answer implies, the way
+    the editor's "Skapa från exempel" does: example is a JSON object whose keys
+    become required fields typed by their values (numbers as number, lists by
+    their first element). Saves output_type json and the contract on the step;
+    the example itself is not kept. The result lists the fields, marks a name a
+    later step cannot read as a reference, and notes what one example could
+    not decide (an empty list, a null, a list of mixed elements)."""
+
+    async def operation(container, chat, request):
+        from eneo.flows.api.flow_models import FlowEditorUpdateRequest
+        from eneo.flows.application.flow_authoring_operations import (
+            apply_editor_update,
+            get_flow,
+        )
+        from eneo.flows.domain.contract_from_example import (
+            ExampleProblemError,
+        )
+        from eneo.flows.domain.contract_from_example import (
+            contract_from_example as read_example,
+        )
+
+        try:
+            reading = read_example(example)
+        except ExampleProblemError as error:
+            raise BadRequestException(_EXAMPLE_PROBLEMS[error.problem]) from error
+        flow = await get_flow(chat.flow_id, request, container)
+        edit = _step_edit(
+            _saved_step(flow, step_id),
+            {"output_type": "json", "output_contract": reading.contract},
+            None,
         )
         updated = await apply_editor_update(
             chat.flow_id,
@@ -524,18 +883,25 @@ async def update_step(
                 {
                     "expected_revision": expected_revision,
                     "definition": {},
-                    "step_edits": [{"step_id": str(step_id), "changes": changes}],
-                    "assistants": assistants,
+                    "step_edits": edit.step_edits,
+                    "assistants": [],
                 }
             ),
             container,
         )
-        saved_step = next(item for item in updated.steps if item.id == step_id)
         return page_result(
             {
                 "saved": True,
                 "step_id": str(step_id),
-                "assistant_id": str(saved_step.assistant_id),
+                "fields": [
+                    {
+                        "name": item.name,
+                        "type": item.schema.get("type"),
+                        "variable": item.variable,
+                    }
+                    for item in reading.fields
+                ],
+                "notes": list(reading.notes),
             },
             flow_id=chat.flow_id,
             revision=updated.draft_revision,
@@ -944,16 +1310,104 @@ async def run_flow(
 
 
 @mcp.tool()
-async def read_run(ctx: Context, run_id: UUID, offset: int = 0) -> CallToolResult:
-    """Read paged run results through the authorized evidence snapshot and audit."""
+async def retry_run(ctx: Context, run_id: UUID, idempotency_key: str) -> CallToolResult:
+    """Start a failed run again from its failed step, on the same flow version
+    with the same inputs, keeping the steps that completed before it. Only
+    after the person has agreed, and only for a transient error (the run's
+    error is retryable); a setting error is fixed in the flow instead.
+    Refused when the run did not fail, when its version is no longer
+    published, or when no step completed before the failure. Reuse
+    idempotency_key after an uncertain response: the same key returns the
+    run it already started."""
 
     async def operation(container, chat, request):
+        from fastapi import BackgroundTasks
+        from starlette.responses import Response
+
+        from eneo.flows.api.flow_run_retry_router import (
+            retry_flow_run_from_failed_step,
+        )
+
+        tasks = BackgroundTasks()
+        result = await retry_flow_run_from_failed_step(
+            id=chat.flow_id,
+            run_id=run_id,
+            request=request,
+            response=Response(),
+            background_tasks=tasks,
+            idempotency_key=idempotency_key,
+            container=container,
+        )
+        # The core has committed the run before this dispatch; MCP drains
+        # the tasks FastAPI would drain after the response.
+        await tasks()
+        page = _runtime_result(result, flow_id=chat.flow_id)
+        if not isinstance(result, Response):
+            # The new run, for the chat's run card.
+            page.structuredContent = {
+                "flow_id": str(chat.flow_id),
+                "run_id": str(result.run.id),
+                "source_run_id": str(result.source_run_id),
+                "created": result.created,
+            }
+        return page
+
+    return await _call_runtime(ctx, operation)
+
+
+RunSection = Literal["summary", "all"]
+
+
+@mcp.tool()
+async def read_run(
+    ctx: Context, run_id: UUID, section: RunSection = "summary", offset: int = 0
+) -> CallToolResult:
+    """Read a run of this flow. The summary (the default) gives the run's
+    status, timing, tokens, error and result in short, and each step in one
+    line: its status, duration, tokens, whether its prompt was cut, its
+    long-material coverage, its diagnostics, its error and its review's
+    outcome, so you can say which step costs or failed and why; open_review
+    names a review still waiting for a decision and whether its result can
+    be edited. Section "all" pages the whole run detail. Both are audited
+    evidence reads."""
+
+    async def operation(container, chat, request):
+        from starlette.responses import Response
+
         from eneo.flows.api.flow_run_lifecycle_router import get_flow_run
 
         result = await get_flow_run(
             id=chat.flow_id, run_id=run_id, request=request, container=container
         )
-        return _runtime_result(result, flow_id=chat.flow_id, offset=offset)
+        if section == "all" or isinstance(result, Response):
+            return _runtime_result(result, flow_id=chat.flow_id, offset=offset)
+        from eneo.flows.api.flow_run_steps_router import (
+            get_flow_graph,
+            list_flow_run_steps,
+        )
+        from eneo.flows.application.flow_authoring_reads import run_summary
+
+        steps = await list_flow_run_steps(
+            id=chat.flow_id, run_id=run_id, request=request, container=container
+        )
+        graph = await get_flow_graph(
+            id=chat.flow_id, request=request, run_id=run_id, container=container
+        )
+        labels = {
+            node.step_order: node.label
+            for node in graph.nodes
+            if node.step_order is not None
+        }
+        checkpoints = await container.flow_run_review_checkpoint_repo().list_review_checkpoints_for_run(
+            run_id=run_id, tenant_id=container.user().tenant_id
+        )
+        page = page_result(
+            run_summary(result, steps, labels, checkpoints),
+            flow_id=chat.flow_id,
+            offset=offset,
+        )
+        page.structuredContent = {"flow_id": str(chat.flow_id), "run_id": str(run_id)}
+        return page
 
     return await _call_runtime(ctx, operation)
 
@@ -1057,11 +1511,33 @@ async def review_run(
     return await _call_runtime(ctx, operation)
 
 
-async def build_flows_mcp_server(*, token: str, tenant_id: UUID):
+EDIT_MODE_TOOLS = frozenset(
+    {
+        "update_flow_settings",
+        "update_step",
+        "update_steps",
+        "contract_from_example",
+        "add_step",
+        "move_step",
+        "remove_step",
+        "publish_flow",
+        "unpublish_flow",
+        "apply_flow_suggestions",
+        "dismiss_flow_suggestion",
+    }
+)
+"""The tools ``_call`` refuses outside edit mode. A turn in Fråga mode does not
+offer them, so the model never calls what would be refused."""
+
+
+async def build_flows_mcp_server(*, token: str, tenant_id: UUID, editing: bool = True):
+    """The flows server for one turn: every tool in edit mode, the reading and
+    run tools alone while the chat only asks."""
     return await build_ephemeral_server(
         mcp,
         name=FLOWS_SERVER_NAME,
         description="Configure the flow bound to this chat.",
         token=token,
         tenant_id=tenant_id,
+        exclude_tools=() if editing else EDIT_MODE_TOOLS,
     )

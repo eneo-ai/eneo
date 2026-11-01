@@ -44,6 +44,96 @@ def test_the_instructions_turn_a_pasted_task_into_a_flow_instead_of_doing_it() -
     assert "When edit mode is off, describe the steps" in instructions
 
 
+def test_the_instructions_ask_one_shaping_question_at_a_time() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "Ask only where the answer changes the shape of the flow" in instructions
+    assert "Ask one question at a time" in instructions
+    assert (
+        "Never ask what the flow, an uploaded file or an earlier answer already says"
+        in instructions
+    )
+    assert "take a reasonable first option" in instructions
+    assert (
+        "Permission to send data anywhere or to start a run is never assumed"
+        in instructions
+    )
+    assert "ask before it, every time" in instructions
+    assert "instructions to follow, an example of what a run gets as input" in (
+        instructions
+    )
+
+
+def test_the_instructions_take_a_contract_from_an_example() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "derive the step's contract from it with contract_from_example" in (
+        instructions
+    )
+    assert "the example itself is not saved" in instructions
+    assert "ask for one when the wanted result is structured" in instructions
+
+
+def test_the_instructions_show_the_expected_result_without_doing_the_work() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "say in a few lines what its result will look like" in instructions
+    assert "mark what is not saved yet as a proposal" in instructions
+    assert "Use placeholders for content" in instructions
+    assert "Describing the shape of the result this way is part of building" in (
+        instructions
+    )
+    assert "filling it with content is doing the work the flow is for" in instructions
+    assert "Explaining a run the person asks about" in instructions
+
+
+def test_the_instructions_carry_a_change_to_the_steps_that_read_it() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "read its readers in read_flow" in instructions
+    assert "in the same update_steps call" in instructions
+    assert "Leave the steps that do not read it untouched" in instructions
+    assert "read a step in full (section steps) before changing it" in instructions
+
+
+def test_the_instructions_tell_a_runs_kinds_of_failure_apart() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "read it with read_run first" in instructions
+    assert "A transient error never changes a prompt" in instructions
+    assert "For content, follow the correction rules below" in instructions
+    assert "call a token impact an estimate" in instructions
+    assert "offer it only for a transient error" in instructions
+    assert "call it only after a yes" in instructions
+    assert "the way is a new run once it is published, not a retry" in instructions
+
+
+def test_the_instructions_correct_content_in_the_run_or_in_the_instruction() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "correct this run's result, or change the instruction" in instructions
+    assert "Offer the first only while the run waits for review" in instructions
+    assert "a result of an ended run cannot be changed" in instructions
+    assert "call review_run with action edit only after a yes" in instructions
+    assert "never approve, reject or resume a review on your own" in instructions
+    assert "corrected by the person in the run's own transcript" in instructions
+    assert "this run stays as it is" in instructions
+    assert "say that, and offer both" in instructions
+
+
+def test_the_instructions_keep_every_secret_out_of_the_chat() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    assert "Build everything but the secret" in instructions
+    assert "Never ask for a key, token or password in the chat" in instructions
+    assert "never put one in a tool argument" in instructions
+    assert 'so its pill offers "Anslut tjänst"' in instructions
+    assert "an administrator must add the server or grant it to the space" in (
+        instructions
+    )
+    assert "Testing a connection is the person's action in the editor" in instructions
+
+
 def test_the_chat_gets_the_tool_runtime_functions_its_space_offers_and_a_provider_serves():
     states = [
         CapabilityAvailability(purpose="file_analysis", available=True),

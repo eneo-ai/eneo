@@ -85,6 +85,8 @@ import {
 } from "./tool-approvals";
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
+import { QuestionPrompt } from "./question-prompt";
+import { questionAnsweredBy, questionToAnswer } from "./questions";
 import type { PendingUpload } from "./message-files";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
@@ -522,6 +524,16 @@ function ConversationView({
     });
 
   const busy = status === "submitted" || status === "streaming";
+  // The question the last answer ends with, until any message answers it.
+  const openQuestion = questionToAnswer(messages, busy);
+  const openQuestionId = openQuestion?.toolCallId ?? null;
+  const openQuestionText = openQuestion?.question ?? null;
+  useEffect(() => {
+    // A new question is announced; focus stays where the person has it.
+    if (openQuestionId && openQuestionText) {
+      announce(t("chat_announce_question", { question: openQuestionText }));
+    }
+  }, [announce, openQuestionId, openQuestionText, t]);
   // The composer is taken from the moment a question leaves it, uploads included.
   const sending = busy || pendingQuestion !== null;
 
@@ -779,6 +791,8 @@ function ConversationView({
     });
     return {
       tools: mention ? { assistants: [{ id: mention.id, handle: mention.handle }] } : null,
+      // The assistant may end a turn with a question; the dock shows it.
+      allow_questions: partner.type !== "group-chat" ? true : undefined,
       disabled_capabilities: disabledCapabilitiesForRequest(toolChoices.disabledCapabilities),
       ...mcpOptions
     };
@@ -1275,7 +1289,16 @@ function ConversationView({
             sheetOver={sheetOver}
             sheetOpener={activityTrigger}
             composer={
-              <div ref={dockElement} className="mx-auto w-full max-w-[680px]">
+              <div ref={dockElement} className="mx-auto flex w-full max-w-[680px] flex-col gap-2.5">
+                {openQuestion && (
+                  <QuestionPrompt
+                    key={openQuestion.toolCallId}
+                    question={openQuestion}
+                    sending={sending}
+                    onAnswer={sendQuestion}
+                    onDismiss={() => dockInputRef.current?.focus()}
+                  />
+                )}
                 {decisionBar ? (
                   <ToolDecisionBar data={decisionBar} assistantName={partnerName} />
                 ) : (
@@ -1315,6 +1338,7 @@ function ConversationView({
                     draft={streaming ? liveDraft : null}
                     references={references}
                     toolCards={toolCards}
+                    answersQuestion={questionAnsweredBy(messages, messageIndex)}
                   />
                 );
               })}

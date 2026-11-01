@@ -27,6 +27,7 @@ import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { useSpace } from "@/features/spaces/use-space";
 import { useSpaceDisplayName } from "@/features/spaces/frame/space-header";
 import type { ComposerInsert } from "@/features/chat/chat-references";
+import { flowChangeCardFor } from "./chat/flow-change-card";
 import { flowRunCardFor } from "./chat/flow-run-card";
 import { isFlowsToolCall } from "./chat/flows-tool-call";
 import { useFlowChatReferences } from "./chat/use-flow-chat-references";
@@ -165,8 +166,9 @@ function AuthoringConversation({
   chat,
   onFlowMayHaveChanged,
   onRefused,
-  onComposer
-}: Pick<ChatPanelProps, "onComposer"> & {
+  onComposer,
+  onAskChat
+}: Pick<ChatPanelProps, "onComposer" | "onAskChat"> & {
   flow: FlowPublic;
   chat: FlowAuthoringChat;
   onFlowMayHaveChanged: () => void;
@@ -258,8 +260,11 @@ function AuthoringConversation({
       onActivityChange={setActivity}
       startHeadingLevel={3}
       references={references}
-      // A run the chat starts shows in the answer, with its progress and result.
-      toolCards={(call) => flowRunCardFor(call, flow, routeId)}
+      // A run the chat starts shows in the answer, with its progress and
+      // result; a change shows the steps it touched, each field before and after.
+      toolCards={(call) =>
+        flowRunCardFor(call, flow, routeId, onAskChat) ?? flowChangeCardFor(call)
+      }
       footerActions={<ModePicker chat={chat} onRefused={onRefused} />}
       placeholder={
         chat.editing ? t("flows_chat_placeholder_edit") : t("flows_chat_placeholder_ask")
@@ -337,6 +342,7 @@ export function FlowChatPanel({
           onFlowMayHaveChanged={onFlowMayHaveChanged}
           onRefused={onRefused}
           onComposer={onComposer}
+          onAskChat={onAskChat}
         />
       ) : mayEdit && !chat.isError ? (
         <LoadingState label={t("flows_chat_loading")} rows={3} className="p-4" />
