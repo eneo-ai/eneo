@@ -863,7 +863,8 @@ it("gives what's new filter chips and the docs link 44 px touch targets", async 
 });
 
 it("puts what's new intro in its header and the tour button on the start line", async () => {
-  // An admin sees the release's tour (its one Visa mig entry is for admins); all is read.
+  // An admin sees the opening release's tour (its Visa mig entries are for admins); every
+  // released version is read.
   replies.set("/api/v1/users/me/", testAppContext({ permissions: ["admin"] }).user);
   replies.set("/api/v1/settings/", { ...context.settings, whats_new_enabled: true });
   replies.set("/api/v1/whats-new/state/", {
@@ -882,8 +883,9 @@ it("puts what's new intro in its header and the tour button on the start line", 
   // the latest released one.
   const released = latestRelease();
   expect(released).toBeDefined();
+  expect(screen.queryByText(messages.whats_new_read)).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: released?.version }));
-  // "Läst" has the size of "Kommande" (the date) beside it.
+  // "Läst" has the size of the date beside it.
   expect(screen.getByText(messages.whats_new_read).className).toContain("text-sm");
 });
 
