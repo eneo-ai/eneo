@@ -84,6 +84,10 @@ describe("OrgApiKeysPage", () => {
     show();
     const create = screen.getByRole("button", { name: "Skapa API-nyckel" });
     expect(create.closest("[data-docked-actions]")).not.toBeNull();
+    // The filter form's submit is not a second primary.
+    expect(
+      screen.getByRole("button", { name: "Tillämpa filter" }).getAttribute("data-variant")
+    ).toBe("outline");
     await screen.findByRole("table", { name: "API-nycklar" });
   });
 

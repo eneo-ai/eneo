@@ -116,7 +116,10 @@ export function PageHeader({
       ) : null}
       <div
         className={cn(
-          "flex min-h-9 flex-wrap items-center justify-between gap-x-4 gap-y-2",
+          "flex min-h-9 flex-wrap justify-between gap-x-4 gap-y-2",
+          // Under a description the actions stand on the title's line, not halfway
+          // down the paragraph (a three-line one put "Skapa roll" beside its middle).
+          description ? "items-start" : "items-center",
           isTitleHiddenOnPhone && "max-md:contents"
         )}
       >

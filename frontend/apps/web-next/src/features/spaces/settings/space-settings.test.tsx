@@ -268,6 +268,8 @@ it("keeps an empty space name and explains the error at the field until correcte
 it("keeps invalid retention input, explains the allowed format and saves a correction", async () => {
   const { container } = showSettings();
   const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
+  // "yta", as the rest of the settings say.
+  expect(screen.getByText(/appar i denna yta som inte har/)).toBeTruthy();
 
   fireEvent.change(retention, { target: { value: "1.5" } });
   fireEvent.blur(retention);

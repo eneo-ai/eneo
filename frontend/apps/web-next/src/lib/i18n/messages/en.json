@@ -554,7 +554,7 @@
   "viewers": "Viewers",
   "viewers_description": "Viewers can only view and use published assistants and apps. They cannot see unpublished content or make changes.",
   "you": "you",
-  "no_viewers_in_space": "There are currently no viewers in this space",
+  "no_viewers_in_space": "No viewers have been added to this space",
   "over": "over",
   "overview": "Overview",
   "welcome_to_space": "Welcome to {space}",
@@ -7104,5 +7104,6 @@
   "space_new_app_hint": "Create an app for a recurring task",
   "chat_announce_generating": "The assistant is writing a reply",
   "mcp_tags_placeholder_touch": "Add a tag",
-  "chat_start_guidance": "Describe the task and the result you need."
+  "chat_start_guidance": "Describe the task and the result you need.",
+  "insights_assistant_row_counts": "{questions, plural, one {# question} other {# questions}} · {sessions, plural, one {# session} other {# sessions}}"
 }

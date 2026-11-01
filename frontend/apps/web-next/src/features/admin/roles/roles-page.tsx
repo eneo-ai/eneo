@@ -526,7 +526,8 @@ function RoleRow({
   const granted = new Set(role.permissions);
   return (
     <article role="listitem" className="space-y-4 p-5">
-      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-start">
+      {/* The name and its badges stand on the line of the 44 px actions, not above it. */}
+      <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
           <h2 className="min-w-0 font-semibold [overflow-wrap:anywhere]">{role.name}</h2>
           {isDefault && (

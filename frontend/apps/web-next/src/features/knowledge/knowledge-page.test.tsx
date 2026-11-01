@@ -146,7 +146,9 @@ describe("KnowledgePage", () => {
     expect(
       within(policy).getByRole("button", { name: "Fler åtgärder för Upphandlingspolicy" })
     ).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Filtrera samlingar" })).toBeTruthy();
+    // As wide as the filter on Assistenter and Appar, so it keeps its size across the tabs.
+    const filter = screen.getByRole("textbox", { name: "Filtrera samlingar" });
+    expect(filter.closest(".max-w-sm")!.className).toContain("sm:w-96");
     await expectNoAxeViolations(container);
   });
 
@@ -412,6 +414,11 @@ describe("KnowledgePage", () => {
     expect(screen.getAllByText("2 källor uppdateras inte")).toHaveLength(1);
     expect(screen.getAllByRole("radio", { name: /^Alla/ })).toHaveLength(1);
     expect(screen.getAllByRole("textbox", { name: "Filtrera integrationer" })).toHaveLength(1);
+    // Many status segments and the filter wrap instead of pushing the page sideways.
+    const statusRow = screen
+      .getByRole("radiogroup", { name: "Filtrera på status" })
+      .closest(".lg\\:flex-row")!;
+    expect(statusRow.className).toContain("lg:flex-wrap");
     const second = screen.getByRole("table", { name: "Text Embedding 3" });
     expect(within(second).getByText("2 600")).toBeTruthy();
 

@@ -93,7 +93,13 @@ export function SpaceHeader({
             size={isHeading ? "xl" : "md"}
             className={isHeading ? "size-12 text-lg [&_svg]:size-6" : undefined}
           />
-          <div className={cn("flex min-w-0 flex-1 flex-col gap-1", !isHeading && "self-center")}>
+          <div
+            className={cn(
+              "flex min-w-0 flex-1 flex-col gap-1",
+              // No description under the name: it centres on the tile, as the actions do.
+              (!isHeading || !description) && "self-center"
+            )}
+          >
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
               {isHeading ? (
                 <Heading

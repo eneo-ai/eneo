@@ -397,6 +397,10 @@ describe("ModelsPage", () => {
     renderPage();
     const toggle = screen.getByRole("switch", { name: "Aktivera Multilingual E5 Large" });
     expect((toggle as HTMLInputElement).checked).toBe(false);
+    // In the table too, the track is centred in its 44 px touch box, level with the row.
+    expect(toggle.closest("td")?.firstElementChild?.className).toContain(
+      "pointer-coarse:[&>*]:min-h-11"
+    );
 
     fireEvent.click(toggle);
 

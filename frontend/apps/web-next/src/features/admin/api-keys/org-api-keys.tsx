@@ -609,8 +609,9 @@ function KeyFilterForm({
         <Button type="button" variant="ghost" onClick={onClear}>
           {t("api_keys_admin_clear_all")}
         </Button>
-        {/* Never disabled: busy, it keeps focus and a second press is ignored. */}
-        <Button type="submit" aria-busy={pending || undefined}>
+        {/* Secondary: Skapa API-nyckel is the page's one primary action. Never disabled:
+            busy, it keeps focus and a second press is ignored. */}
+        <Button type="submit" variant="outline" aria-busy={pending || undefined}>
           {t("api_keys_admin_apply_filters")}
         </Button>
       </div>

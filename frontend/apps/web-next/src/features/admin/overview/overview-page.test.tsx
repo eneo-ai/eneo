@@ -199,6 +199,10 @@ describe("AdminOverviewPage", () => {
     expect(within(crawler).getByText("Fel och varningar").nextElementSibling?.textContent).toBe(
       "4"
     );
+    // A label that wraps in its narrow column keeps the three numbers on one line.
+    expect(within(crawler).getByText("Fel och varningar").parentElement?.className).toContain(
+      "justify-between"
+    );
     expect(within(crawler).getByText("Fungerar")).toBeTruthy();
     expect(within(crawler).getByRole("link", { name: "Visa crawler" }).getAttribute("href")).toBe(
       "/admin/crawler"

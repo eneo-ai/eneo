@@ -160,11 +160,20 @@ describe("UsagePage", () => {
     expect(within(tokens).getByText("GPT-5")).toBeTruthy();
     expect(within(tokens).getByText("GPT-5 (annan konfiguration)")).toBeTruthy();
     expect(consoleError.mock.calls.flat().join(" ")).not.toContain("same key");
+    // The columns use the summary's words for the same numbers.
+    for (const name of [/Indata/, /Utdata/, /Totalt tokens/]) {
+      expect(within(tokens).getByRole("button", { name })).toBeTruthy();
+    }
+    expect(within(tokens).queryByRole("button", { name: /Inmatning|Utmatning/ })).toBeNull();
     await expectNoAxeViolations(container);
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Användare" }));
     const users = await screen.findByRole("table", { name: "Användning per användare" });
     expect(within(users).getByRole("link", { name: /Anna Lind/ })).toBeTruthy();
+    for (const name of [/Indata/, /Utdata/, /Totalt tokens/]) {
+      expect(within(users).getByRole("button", { name })).toBeTruthy();
+    }
+    expect(within(users).queryByRole("button", { name: /Inmatning|Utmatning/ })).toBeNull();
 
     fireEvent.mouseDown(screen.getByRole("tab", { name: "Lagring" }));
     const storage = await screen.findByRole("table", { name: "Offentliga ytor" });

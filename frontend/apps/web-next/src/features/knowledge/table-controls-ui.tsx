@@ -88,7 +88,8 @@ export function KnowledgeTableControls({
         label={filterLabel}
         placeholder={filterPlaceholder}
         resultCount={resultCount}
-        className="sm:w-72"
+        // As wide as the filter on the other space tabs (ResourceFilterInput's max-w-sm).
+        className="sm:w-96"
       />
       {/* contents on a phone: a docked action leaves the flow (no gap for it),
           and the others keep to the end. */}

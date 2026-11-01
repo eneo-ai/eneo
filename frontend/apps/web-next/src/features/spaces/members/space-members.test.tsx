@@ -419,6 +419,16 @@ describe("members on a tablet", () => {
       .map((select) => select.textContent);
     expect(roles).toEqual(["Redigerare", "Visare", "Visare"]);
   });
+
+  it("says who is missing in the words of the headings above", () => {
+    setViewport("tablet-portrait");
+    state.space = makeSpace({ members: [makeMember()] });
+    renderInApp(<SpaceMembers />);
+    // "Visare" and "yta", as the role heading and the rest of the app say.
+    expect(screen.getByText("Inga visare har lagts till i denna yta")).toBeTruthy();
+    expect(screen.getByText("Inga användargrupper har lagts till i denna yta")).toBeTruthy();
+    expect(screen.queryAllByText(/tittare|utrymme/)).toHaveLength(0);
+  });
 });
 
 describe("members across 768 px (a phone turned)", () => {

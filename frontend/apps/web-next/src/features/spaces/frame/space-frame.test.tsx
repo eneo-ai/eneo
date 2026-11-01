@@ -130,6 +130,17 @@ describe("SpaceFrame", () => {
     await expectNoAxeViolations(container);
   });
 
+  it("centres the name on the tile when no description runs under it", () => {
+    const column = () =>
+      screen.getByRole("heading", { level: 1, name: "Upphandling" }).closest(".flex-col")!;
+    show(sharedSpace(), ["overview"]);
+    // A description under the name: both start at the tile's top edge.
+    expect(column().className).not.toContain("self-center");
+    cleanup();
+    show(makeSpace({ overrides: { description: null } }), ["overview"]);
+    expect(column().className).toContain("self-center");
+  });
+
   it("scrolls with the page panel instead of a scroll container of its own", () => {
     const { container } = show(sharedSpace(), ["overview"]);
     // main#main-content (the app shell) is the one scroll container, so Page

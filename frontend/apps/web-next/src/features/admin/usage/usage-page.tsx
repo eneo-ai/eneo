@@ -228,7 +228,8 @@ function ModelTable({
     },
     {
       key: "input",
-      header: t("input_tokens"),
+      // The summary's words (Indata, Utdata), not a second name for the same number.
+      header: t("input"),
       width: proportional(1),
       align: "end",
       sortable: true,
@@ -236,7 +237,7 @@ function ModelTable({
     },
     {
       key: "output",
-      header: t("output_tokens"),
+      header: t("output"),
       width: proportional(1),
       align: "end",
       sortable: true,
@@ -438,7 +439,7 @@ function UserTable({
     },
     {
       key: "input_tokens",
-      header: t("input_tokens"),
+      header: t("input"),
       width: proportional(1),
       align: "end",
       sortable: true,
@@ -446,7 +447,7 @@ function UserTable({
     },
     {
       key: "output_tokens",
-      header: t("output_tokens"),
+      header: t("output"),
       width: proportional(1),
       align: "end",
       sortable: true,

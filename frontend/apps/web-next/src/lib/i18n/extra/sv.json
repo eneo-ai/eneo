@@ -1886,5 +1886,10 @@
   "enable_templates": "Mallar",
   "to": "Till",
   "finished": "Avslutad",
-  "chat_start_guidance": "Beskriv uppgiften och vilket resultat du behöver."
+  "chat_start_guidance": "Beskriv uppgiften och vilket resultat du behöver.",
+  "no_viewers_in_space": "Inga visare har lagts till i denna yta",
+  "no_group_members_in_space": "Inga användargrupper har lagts till i denna yta",
+  "user_groups_description": "Grupper av användare som har åtkomst till denna yta. Alla medlemmar i en grupp ärver gruppens roll.",
+  "conversation_retention_space_description": "Gäller för alla assistenter och appar i denna yta som inte har sin egen kvarhållningspolicy",
+  "insights_assistant_row_counts": "{questions, plural, one {# fråga} other {# frågor}} · {sessions, plural, one {# session} other {# sessioner}}"
 }

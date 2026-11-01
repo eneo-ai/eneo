@@ -112,7 +112,9 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
       )}
       <div className="border-border bg-card flex w-full max-w-[64ch] flex-col gap-4 rounded-xl border p-4 shadow-lg max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:p-0 max-md:shadow-none">
         <div className="flex flex-col items-center gap-3 pt-2 max-md:pt-0">
-          {/* On a phone the page's own heading names the app: the icon and the second name give the field its width back. */}
+          {/* The page's own heading names the app at every width (both pages that show this
+              have it as their h1), so the card does not repeat it; on a phone the icon gives
+              the field its width back too. */}
           <span className="bg-muted text-muted-foreground flex size-16 items-center justify-center overflow-hidden rounded-2xl max-md:hidden">
             {icon ? (
               <img src={icon} alt="" className="size-full object-cover" />
@@ -120,7 +122,6 @@ export function RunView({ app, resultHref }: { app: App; resultHref: (runId: str
               <AppWindow className="size-8" />
             )}
           </span>
-          <h2 className="text-center text-2xl font-extrabold max-md:hidden">{app.name}</h2>
           {app.description && (
             <p className="text-muted-foreground max-w-[50ch] text-center text-sm">
               {app.description}

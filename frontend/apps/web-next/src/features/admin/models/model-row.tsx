@@ -271,21 +271,25 @@ export function ModelRow({
   // falls back to the saved state when the last write failed.
   const enabled = enable.isPending ? enable.variables : (model.is_org_enabled ?? false);
 
+  // The track centred in its 44 px touch box (Astryx draws it at the box's top), level
+  // with the row's other cells and its menu, in the table and in the phone rows.
   const enableSwitch = (
-    <Switch
-      label={t("admin_models_enable_model", { name: label })}
-      isLabelHidden
-      value={enabled}
-      onChange={(next) => enable.mutate(next)}
-      isDisabled={locked || migrated}
-      disabledMessage={
-        migrated
-          ? t("model_tooltip_migrated")
-          : locked
-            ? t("api_credentials_required_for_provider")
-            : undefined
-      }
-    />
+    <div className="[&>*]:flex [&>*]:items-center pointer-coarse:[&>*]:min-h-11">
+      <Switch
+        label={t("admin_models_enable_model", { name: label })}
+        isLabelHidden
+        value={enabled}
+        onChange={(next) => enable.mutate(next)}
+        isDisabled={locked || migrated}
+        disabledMessage={
+          migrated
+            ? t("model_tooltip_migrated")
+            : locked
+              ? t("api_credentials_required_for_provider")
+              : undefined
+        }
+      />
+    </div>
   );
   const name = (
     <button
@@ -429,8 +433,7 @@ export function ModelRow({
             <Capabilities model={model} label={t("capabilities")} />
           </div>
         </div>
-        {/* The track centred in its 44 px touch box, level with the menu. */}
-        <div className="[&>*]:flex [&>*]:min-h-11 [&>*]:items-center">{enableSwitch}</div>
+        {enableSwitch}
         {menu}
       </li>
     );

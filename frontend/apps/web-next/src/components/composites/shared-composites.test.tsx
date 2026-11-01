@@ -33,6 +33,10 @@ describe("PageHeader", () => {
     expect(within(trail).getByRole("link", { name: "Ytor" }).getAttribute("href")).toBe("/spaces");
     expect(within(trail).getByText("Min yta").closest("[aria-current='page']")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Lägg till" })).toBeTruthy();
+    // jsdom applies no CSS: the actions stand on the title's line, not centred on the paragraph.
+    const row = screen.getByRole("button", { name: "Lägg till" }).closest(".justify-between");
+    expect(row?.className.split(" ")).toContain("items-start");
+    expect(row?.className.split(" ")).not.toContain("items-center");
   });
 
   it("keeps a section label without a link out of aria-current", () => {
@@ -89,6 +93,9 @@ describe("PageHeader", () => {
       </PageHeader>
     );
     expect(screen.getByRole("button", { name: "Skapa" })).toBeTruthy();
+    // A title alone is centred on its actions' line.
+    const row = screen.getByRole("button", { name: "Skapa" }).closest(".justify-between");
+    expect(row?.className.split(" ")).toContain("items-center");
     expect(screen.queryByRole("navigation")).toBeNull();
   });
 });

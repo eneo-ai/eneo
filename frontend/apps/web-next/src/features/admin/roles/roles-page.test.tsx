@@ -94,6 +94,9 @@ describe("role administration", () => {
     // The actions wrap on a phone instead of running out of the card (320 px).
     const actions = screen.getAllByRole("button", { name: /^edit$|Redigera/ })[0]!.parentElement!;
     expect(actions.className).toContain("flex-wrap");
+    // Beside them, the name is centred on their line (it sat 10 px higher on an iPad).
+    expect(actions.parentElement!.className).toContain("sm:items-center");
+    expect(actions.parentElement!.className).not.toContain("sm:items-start");
     fireEvent.change(screen.getByRole("searchbox"), { target: { value: "permission_admin" } });
     expect(screen.getByText("Manager")).toBeTruthy();
     expect(screen.queryByText("Everyone")).toBeNull();

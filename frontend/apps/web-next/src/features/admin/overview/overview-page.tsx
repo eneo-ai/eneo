@@ -223,7 +223,7 @@ function CrawlerCard() {
           ) : (
             <dl className="grid grid-cols-3 gap-3">
               {counts.map((count) => (
-                <div key={count.key} className="flex min-w-0 flex-col gap-0.5">
+                <div key={count.key} className="flex min-w-0 flex-col justify-between gap-0.5">
                   <dt className="text-ax-text-secondary text-sm">{t(count.key)}</dt>
                   <dd
                     className={cn(
