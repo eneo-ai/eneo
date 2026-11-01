@@ -415,6 +415,7 @@ describe("ModelsPage", () => {
   it("moves between tabs with the arrow keys and opens them with Enter", async () => {
     renderPage();
     const models = screen.getByRole("tab", { name: "Modeller" });
+    const speakers = screen.getByRole("tab", { name: "Ordtider och talaridentifiering" });
     const history = screen.getByRole("tab", { name: "Migreringshistorik" });
     // Roving tabindex: the tab strip is one tab stop.
     expect(models.tabIndex).toBe(0);
@@ -422,6 +423,8 @@ describe("ModelsPage", () => {
 
     models.focus();
     fireEvent.keyDown(models, { key: "ArrowRight" });
+    expect(document.activeElement).toBe(speakers);
+    fireEvent.keyDown(speakers, { key: "ArrowRight" });
     expect(document.activeElement).toBe(history);
     fireEvent.keyDown(history, { key: "Enter" });
     fireEvent.click(history);
@@ -450,6 +453,25 @@ describe("ModelsPage", () => {
     await act(async () => {
       await expectNoAxeViolations(document.body);
     });
+  });
+
+  it("lists the speaker identification services in their own tab, read when it is opened", async () => {
+    renderPage();
+    expect(api.GET).not.toHaveBeenCalledWith(
+      "/api/v1/admin/transcription-services/",
+      expect.anything()
+    );
+    api.GET.mockImplementation((path: string) =>
+      ok(path === "/api/v1/admin/transcription-services/" ? { items: [], has_more: false } : {})
+    );
+
+    fireEvent.click(screen.getByRole("tab", { name: "Ordtider och talaridentifiering" }));
+
+    const panel = screen.getByRole("tabpanel");
+    expect(
+      await within(panel).findByText("Ingen tjänst för ordtider och talare ansluten")
+    ).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: "Anslut tjänst" })).toBeTruthy();
   });
 
   it("removes an embedding model's security class: Ingen is sent as null", async () => {

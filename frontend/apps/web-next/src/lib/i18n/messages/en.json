@@ -9724,5 +9724,7 @@
   "mcp_tags_placeholder_touch": "Add a tag",
   "chat_start_guidance": "Describe the task and the result you need.",
   "insights_assistant_row_counts": "{questions, plural, one {# question} other {# questions}} · {sessions, plural, one {# session} other {# sessions}}",
-  "enable_mcp_in_space_settings": "Enable MCP servers in space settings first."
+  "enable_mcp_in_space_settings": "Enable MCP servers in space settings first.",
+  "speaker_service_checked_at": "Tested <time></time>",
+  "speaker_service_check_announce": "Connection test for {name}: {status}"
 }
