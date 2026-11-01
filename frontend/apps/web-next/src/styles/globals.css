@@ -900,6 +900,14 @@
       position: absolute;
       inset: -12px 0;
     }
+    /* A field's clear button (Astryx InputClearButton, every field with a clear affordance)
+       is a 20 px glyph whose hit area Astryx grows only to 24 px: it reaches 44 × 44, the
+       height of the field's frame (the flow settings show filled number fields). */
+    .astryx-input-clear-button::after {
+      content: "";
+      position: absolute;
+      inset: -12px;
+    }
   }
 }
 
