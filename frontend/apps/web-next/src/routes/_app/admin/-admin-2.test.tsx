@@ -195,6 +195,19 @@ it("redirects an admin without modules permission without reading me again", asy
   expect(requestedPaths()).not.toContain("/api/v1/admin/modules/");
 });
 
+it("opens the overview once the reads that decide what needs action have answered, also with a failure", async () => {
+  let answer!: (reply: Response) => void;
+  replies.set("/api/v1/admin/crawler/", new Promise<Response>((resolve) => (answer = resolve)));
+  const opened = renderRoute("/admin");
+  await waitFor(() => expect(requestedPaths()).toContain("/api/v1/admin/crawler/"));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  expect(screen.queryByRole("heading", { name: "Administration" })).toBeNull();
+
+  answer(failure(500));
+  await opened;
+  await screen.findByRole("heading", { name: "Administration", level: 1 });
+});
+
 it("reports an unknown MCP server before requesting its tools", async () => {
   replies.set("/api/v1/mcp-servers/unknown/tools/", failure(422));
   const { router } = await renderRoute("/admin/mcp-servers/unknown");
