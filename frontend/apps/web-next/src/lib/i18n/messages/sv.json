@@ -7374,6 +7374,7 @@
   "flow_step_editor_instruction_placeholder": "Till exempel: Sammanfatta ärendet i tre punkter för en handläggare.",
   "flow_step_editor_instruction_missing": "Steget har ingen instruktion. Skriv vad AI:n ska göra med underlaget.",
   "flow_step_editor_prompt_version_used": "Versionen ligger nu i instruktionen. Spara steget för att behålla den.",
+  "flow_step_editor_prompt_guide_applied": "Promptguidens förslag ligger nu i instruktionen. Spara steget för att behålla det.",
   "flow_step_editor_instruction_none": "Ingen instruktion ännu",
   "flow_step_editor_model_missing": "Steget har ingen modell. Välj en innan flödet publiceras.",
   "flow_step_editor_model_below_classification": "Modellen klarar inte säkerhetsklassen för det steget läser. Välj någon av de här: {models}.",

@@ -628,6 +628,9 @@ function StepEditorSession({
 
   function submit(event: React.SubmitEvent<HTMLFormElement>) {
     event.preventDefault();
+    // A dialog's own form (the Prompt Guide's answer box) submits up the React
+    // tree through its portal too; only this form saves the step.
+    if (event.target !== event.currentTarget) return;
     if (!session || save.isPending || effectiveReadOnly) return;
     const problems = localProblems(session.draft);
     const first = FIELD_ANCHORS.find((anchor) => problems[anchor]);
