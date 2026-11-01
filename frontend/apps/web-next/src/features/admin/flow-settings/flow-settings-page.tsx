@@ -254,7 +254,7 @@ function FlowSettingsEditor({ initial }: { initial: FlowSettings }) {
     // Focused fields stay clear of the sticky save bar (WCAG 2.4.11).
     <div className="flex flex-col gap-6 [&_input]:scroll-mb-32">
       <Text type="supporting" size="sm" as="p" display="block" className="m-0">
-        <Link href={AUDIT_HREF} hasUnderline>
+        <Link href={AUDIT_HREF} hasUnderline className="pointer-coarse:min-h-11">
           {t("flow_admin_audit_link")}
         </Link>
       </Text>

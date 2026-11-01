@@ -123,7 +123,7 @@ function StorageLimit({ label, value, note }: { label: string; value: string; no
       </MetadataList>
       <Text type="supporting" size="sm" as="p" display="block" className="m-0">
         {t("flow_admin_size_from_storage")}{" "}
-        <Link href="/admin/storage" hasUnderline>
+        <Link href="/admin/storage" hasUnderline className="pointer-coarse:min-h-11">
           {t("flow_admin_manage_storage")}
         </Link>
       </Text>

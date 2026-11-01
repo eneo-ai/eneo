@@ -118,6 +118,17 @@ describe("flow settings page", { timeout: 20_000 }, () => {
     await expectNoAxeViolations(container);
   });
 
+  it("makes its links to the audit log and file storage 44 px tall on touch", async () => {
+    await show();
+    // jsdom applies no CSS: the coarse-pointer height is asserted as its class.
+    const links = [
+      screen.getByRole("link", { name: "Ändringar loggas i granskningsloggen" }),
+      ...screen.getAllByRole("link", { name: "Hantera i Fillagring" })
+    ];
+    expect(links).toHaveLength(3);
+    for (const link of links) expect(link.className).toContain("pointer-coarse:min-h-11");
+  });
+
   it("saves only the changed fields, endpoint by endpoint, and says so", async () => {
     await show();
     enter("Antal filer per körning", "40");

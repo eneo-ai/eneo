@@ -812,6 +812,10 @@
     .astryx-selector-option-row {
     min-height: 44px;
   }
+
+    .astryx-collapsible-trigger {
+    min-height: 44px;
+  }
   }
 }
 }

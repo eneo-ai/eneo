@@ -160,7 +160,9 @@ describe("globals.css", () => {
       "radio-list-item",
       "switch-field",
       "selector-search",
-      "selector-option-row"
+      "selector-option-row",
+      // A disclosure's trigger is as tall as its label, cut to the cap height.
+      "collapsible-trigger"
     ]) {
       expect(coarse.get(`.astryx-${component}`)).toMatchObject({ "min-height": "44px" });
     }
@@ -412,6 +414,28 @@ describe("globals.css", () => {
     expect(rules.get("(pointer: coarse)")).toMatchObject({ position: "relative" });
     // 21 px of text plus 12 px above and below: a 45 px target across the button's width.
     expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-12px 0" });
+  });
+
+  it("makes an input's clear button a 44 px target on touch, the height of its frame", () => {
+    const clear = ".astryx-input-clear-button";
+    const rules = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.startsWith(clear)) return;
+      const parent = rule.parent as AtRule | undefined;
+      const media = parent?.type === "atrule" && parent.name === "media" ? parent.params : "";
+      const declarations: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      rules.set(`${media} ${rule.selector.slice(clear.length)}`.trim(), declarations);
+    });
+    // A 20 px glyph plus 12 px around it: 44 × 44, no taller than the field.
+    expect(rules.get("(pointer: coarse) ::after")).toMatchObject({
+      content: '""',
+      position: "absolute",
+      inset: "-12px"
+    });
+    expect(rules.has("::after")).toBe(false);
   });
 
   it("self-hosts every required font subset as a Vite asset", () => {
