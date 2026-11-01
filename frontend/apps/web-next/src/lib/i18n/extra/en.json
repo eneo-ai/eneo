@@ -2571,6 +2571,7 @@
   "flows_notice_mode_not_changed": "Edit mode was not changed",
   "flows_notice_stale_title": "The flow had changed",
   "flows_publish_needs_steps": "Add at least one step before you publish.",
+  "flows_publish_unsaved": "Save or cancel your changes before you publish. Only what is saved is published.",
   "flows_published": "The flow was published as version {version}",
   "flows_unpublished": "The flow was unpublished. You can change it now.",
   "flows_published_title": "Version {version} is published",

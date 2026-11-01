@@ -604,6 +604,20 @@ describe("FlowPage", () => {
     });
   });
 
+  it("publishes nothing while the settings form is open, and says to save or cancel it", async () => {
+    state.publish = ok(makeFlow({ steps, published_version: 1 }));
+    renderPage();
+    fireEvent.click(screen.getByRole("button", { name: messages.flows_settings_edit }));
+    fireEvent.click(screen.getByRole("button", { name: "Publicera" }));
+
+    expect(await screen.findByText(messages.flows_publish_unsaved)).toBeTruthy();
+    expect(posted()).not.toContain("/api/v1/flows/{id}/publish/");
+
+    fireEvent.click(screen.getByRole("button", { name: messages.cancel }));
+    fireEvent.click(screen.getByRole("button", { name: "Publicera" }));
+    await waitFor(() => expect(posted()).toContain("/api/v1/flows/{id}/publish/"));
+  });
+
   it("keeps a published flow read only until it is unpublished", async () => {
     const published = makeFlow({ steps, published_version: 3 });
     state.unpublish = ok({ ...published, published_version: null });

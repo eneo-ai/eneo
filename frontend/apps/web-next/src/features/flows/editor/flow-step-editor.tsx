@@ -104,6 +104,8 @@ type EditorProps = {
   navigation?: StepNavigation;
   /** A field to focus once the form is on the page ("Anslut tjänst" opens a connection field). */
   initialAnchor?: FieldAnchor | null;
+  /** Told true while the step has edits that are not saved, and false once it has none. */
+  onUnsavedChange?: (unsaved: boolean) => void;
 };
 
 /** Where the editor's top bar can go besides back to the list. */
@@ -285,7 +287,8 @@ function StepEditorSession({
   suggestionFix,
   suggestionDismissal,
   suggestionRuns = 0,
-  initialAnchor = null
+  initialAnchor = null,
+  onUnsavedChange
 }: Omit<EditorProps, "navigation">) {
   const t = useTranslations();
   const announce = useAnnounce();
@@ -365,6 +368,14 @@ function StepEditorSession({
     session !== null && session.dirty && session.flow.draft_revision < latest.draft_revision;
   const dirty = session?.dirty ?? false;
   const effectiveReadOnly = readOnly || latest.published_version != null;
+  // The page publishes only what is saved, so it holds Publicera back while
+  // this is true; leaving the step (or saving it) says false again.
+  const unsaved = dirty && !effectiveReadOnly;
+  useEffect(() => {
+    if (!unsaved) return;
+    onUnsavedChange?.(true);
+    return () => onUnsavedChange?.(false);
+  }, [unsaved, onUnsavedChange]);
   const stepPatch = session ? stepChanges(session.saved, session.draft) : null;
   const previewJson = JSON.stringify(
     session && assistantDraft && assistantSaved
@@ -907,7 +918,7 @@ function StepEditorSession({
         />
       </div>
 
-      <LeaveConfirmation active={dirty && !effectiveReadOnly} onLeave={uploads.release} />
+      <LeaveConfirmation active={unsaved} onLeave={uploads.release} />
     </section>
   );
 }

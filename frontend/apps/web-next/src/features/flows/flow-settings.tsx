@@ -9,7 +9,7 @@ import { Heading, Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { Plus, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { TextInput } from "@/components/astryx/text-input";
 import type { FlowDefinitionUpdate, FlowPublic } from "./flows-api";
@@ -245,7 +245,8 @@ export function FlowSettings({
   flow,
   canEdit,
   transcription,
-  onSave
+  onSave,
+  onEditingChange
 }: {
   flow: FlowPublic;
   canEdit: boolean;
@@ -253,6 +254,8 @@ export function FlowSettings({
   transcription: TranscriptionResources;
   /** Saves the definition change; resolves true when it was saved. */
   onSave: (definition: FlowDefinitionUpdate) => Promise<boolean>;
+  /** Told true while the form is open (its edits are not saved), and false once it closes. */
+  onEditingChange?: (editing: boolean) => void;
 }) {
   const t = useTranslations();
   const headingId = useId();
@@ -276,6 +279,12 @@ export function FlowSettings({
   const problems = formFieldProblems(fields);
   const nameMissing = !name.trim();
   const takesAudio = flowTakesAudio(flow.steps);
+
+  useEffect(() => {
+    if (!editing) return;
+    onEditingChange?.(true);
+    return () => onEditingChange?.(false);
+  }, [editing, onEditingChange]);
 
   function startEditing() {
     setName(flow.name);

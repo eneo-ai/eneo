@@ -8075,6 +8075,7 @@
   "flows_notice_mode_not_changed": "Redigeringsläget ändrades inte",
   "flows_notice_stale_title": "Flödet hade ändrats",
   "flows_publish_needs_steps": "Lägg till minst ett steg innan du publicerar.",
+  "flows_publish_unsaved": "Spara eller avbryt dina ändringar innan du publicerar. Bara det som är sparat publiceras.",
   "flows_published": "Flödet publicerades som version {version}",
   "flows_unpublished": "Flödet avpublicerades. Nu kan du ändra det.",
   "flows_published_title": "Version {version} är publicerad",

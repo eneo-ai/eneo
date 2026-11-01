@@ -1,39 +1,46 @@
+import type { Page } from "@playwright/test";
 import type { Schema } from "../src/lib/api/models";
 import { expect, test } from "./csp";
 import { apiPost, apiRequest, collectAssetFailures, productionAsset, uniqueName } from "./helpers";
 
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served production Vite build.");
 
+/** A draft flow with one manual step, opened at that step's editor. */
+async function openDraftStep(page: Page, spaceName: string) {
+  await page.goto("/spaces/list");
+  const spaceId = await apiPost(page, "/spaces/", { name: uniqueName(spaceName) });
+  const flow = await apiRequest<Schema<"FlowPublic">>(page, "/flows/", {
+    method: "POST",
+    body: { space_id: spaceId, name: uniqueName("E2E draft") }
+  });
+  const saved = await apiRequest<Schema<"FlowPublic">>(page, `/flows/${flow.id}/editor/`, {
+    method: "PATCH",
+    body: {
+      expected_revision: flow.draft_revision,
+      definition: {},
+      new_steps: [
+        {
+          name: "Manuellt steg",
+          assistant: {},
+          configuration: {
+            input_source: "flow_input",
+            input_type: "text",
+            output_mode: "pass_through",
+            output_type: "text"
+          }
+        }
+      ]
+    } satisfies Schema<"FlowEditorUpdateRequest">
+  });
+  await page.goto(`/spaces/${spaceId}/flows/${flow.id}?step=${saved.steps[0]!.id}`);
+  return flow;
+}
+
 test(
   "keeps a flow draft on Stay and confirms a missing-chunk departure once",
   { tag: "@vite" },
   async ({ page }, info) => {
-    await page.goto("/spaces/list");
-    const spaceId = await apiPost(page, "/spaces/", { name: uniqueName("E2E flow navigation") });
-    const flow = await apiRequest<Schema<"FlowPublic">>(page, "/flows/", {
-      method: "POST",
-      body: { space_id: spaceId, name: uniqueName("E2E draft") }
-    });
-    const saved = await apiRequest<Schema<"FlowPublic">>(page, `/flows/${flow.id}/editor/`, {
-      method: "PATCH",
-      body: {
-        expected_revision: flow.draft_revision,
-        definition: {},
-        new_steps: [
-          {
-            name: "Manuellt steg",
-            assistant: {},
-            configuration: {
-              input_source: "flow_input",
-              input_type: "text",
-              output_mode: "pass_through",
-              output_type: "text"
-            }
-          }
-        ]
-      } satisfies Schema<"FlowEditorUpdateRequest">
-    });
-    await page.goto(`/spaces/${spaceId}/flows/${flow.id}?step=${saved.steps[0]!.id}`);
+    const flow = await openDraftStep(page, "E2E flow navigation");
     const name = page.getByRole("textbox", { name: /^Stegnamn/ });
     await name.fill("Osparat steg");
     const originalUrl = page.url();
@@ -99,5 +106,38 @@ test(
       contentType: "application/json",
       body: JSON.stringify({ missingRequests, reloads, nativePrompts })
     });
+  }
+);
+
+test(
+  "publishes only the saved draft: unsaved step edits hold Publicera back and say why",
+  { tag: "@vite" },
+  async ({ page }) => {
+    const flow = await openDraftStep(page, "E2E publish while editing");
+    const isPublish = (url: string) => new URL(url).pathname.endsWith(`/flows/${flow.id}/publish/`);
+    const publishes: string[] = [];
+    page.on("request", (request) => {
+      if (isPublish(request.url())) publishes.push(request.method());
+    });
+    const name = page.getByRole("textbox", { name: /^Stegnamn/ });
+    await name.fill("Osparat steg");
+    await page.getByRole("button", { name: "Publicera", exact: true }).click();
+    await expect(
+      page.getByText(
+        "Spara eller avbryt dina ändringar innan du publicerar. Bara det som är sparat publiceras.",
+        { exact: true }
+      )
+    ).toBeVisible();
+    await expect(name).toHaveValue("Osparat steg");
+    expect(publishes).toEqual([]);
+    const draft = await apiRequest<Schema<"FlowPublic">>(page, `/flows/${flow.id}/`);
+    expect(draft.published_version).toBeNull();
+
+    // Saved, the same press publishes the draft that is now stored.
+    await page.getByRole("button", { name: "Spara steget", exact: true }).click();
+    await expect(page.getByText("Steget är sparat.", { exact: true })).toBeVisible();
+    const publish = page.waitForRequest((request) => isPublish(request.url()));
+    await page.getByRole("button", { name: "Publicera", exact: true }).click();
+    expect((await publish).method()).toBe("POST");
   }
 );
