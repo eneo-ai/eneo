@@ -178,7 +178,14 @@ test(
     expect(historyAxe.violations).toEqual([]);
     await historyLink.click();
     await expect(page).toHaveURL(runUrl);
-    await page.getByRole("button", { name: "Försök", exact: true }).click();
+    // A phone shows the result first and folds the steps under it (run-page.tsx FoldSection):
+    // the attempts are one tap into them.
+    const steps = page.getByRole("region", { name: "Steg", exact: true });
+    const stepsFold = steps.getByRole("button", { name: "Steg", exact: true });
+    await expect(stepsFold).toHaveAttribute("aria-expanded", "false");
+    await stepsFold.click();
+    await expect(stepsFold).toHaveAttribute("aria-expanded", "true");
+    await steps.getByRole("button", { name: "Försök", exact: true }).click();
     const attemptDetails = page.getByRole("button", { name: "Detaljer för försök 1", exact: true });
     await attemptDetails.focus();
     await page.keyboard.press("Enter");
