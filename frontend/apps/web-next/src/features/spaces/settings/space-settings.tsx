@@ -83,6 +83,7 @@ import { SpaceModelSelect, type ModelKind, type ModelSelectionChange } from "./s
 import { SpaceDeletionHint } from "@/features/spaces/list/delete-space-dialog";
 
 type SpaceUpdate = Schema<"PartialUpdateSpaceRequest">;
+type SpaceUpdateRequest = SpaceUpdate | ((currentSpace: Space) => SpaceUpdate);
 const SECURITY_IMPACT_LABEL_KEYS: Record<SpaceSecurityImpactKey, string> = {
   assistants: "assistants",
   group_chats: "group_chats",
@@ -129,13 +130,21 @@ function useUpdateSpace() {
   // mutation writes the server's full response to the detail cache.
   return useMutation({
     scope: { id: `space:${space.id}` },
-    mutationFn: (body: SpaceUpdate) =>
-      unwrap(
+    mutationFn: (request: SpaceUpdateRequest) => {
+      let body: SpaceUpdate;
+      if (typeof request === "function") {
+        // A scoped mutation starts after earlier space writes have settled.
+        const current = queryClient.getQueryData<Space>(["spaces", routeId]);
+        if (!current) throw new Error("Space must be loaded before updating its settings");
+        body = request(current);
+      } else body = request;
+      return unwrap(
         browserApi.PATCH("/api/v1/spaces/{id}/", {
           params: { path: { id: space.id } },
           body
         })
-      ),
+      );
+    },
     onSuccess: async (saved) => {
       // PATCH returns the authoritative full space. An older GET must not
       // replace it while the detail query is being refreshed.
@@ -638,9 +647,18 @@ function ToolsSection() {
   );
 }
 
+type SpaceMcpChange =
+  | {
+      kind: "server";
+      server: Pick<SpaceMcpServerChoice, "id" | "name" | "tools">;
+      enabled: boolean;
+    }
+  | { kind: "tool"; serverId: string; toolId: string; enabled: boolean };
+
 function McpServersSection() {
   const t = useTranslations();
-  const { space, can } = useSpace();
+  const { space, routeId, can } = useSpace();
+  const queryClient = useQueryClient();
   const update = useUpdateSpace();
   const autosave = useAutosave("mcp-servers");
   const servers = useQuery(mcpServersQueryOptions(browserApi));
@@ -650,11 +668,30 @@ function McpServersSection() {
   const selectionRef = useRef<SpaceMcpSelection | null>(null);
   const version = useRef(0);
 
-  function save(next: SpaceMcpSelection, body: SpaceUpdate) {
+  function save(change: SpaceMcpChange) {
+    const cached = queryClient.getQueryData<Space>(["spaces", routeId]);
+    if (!cached) return;
+    const current = selectionRef.current ?? spaceMcpSelection(cached.mcp_servers ?? []);
+    if (change.kind === "tool" && !current.serverIds.includes(change.serverId)) return;
+    const applyChange = (selection: SpaceMcpSelection) =>
+      change.kind === "server"
+        ? setSpaceMcpServer(selection, change.server, change.enabled)
+        : setSpaceMcpTool(selection, change.toolId, change.enabled);
+    const next = applyChange(current);
     const attempt = ++version.current;
     selectionRef.current = next;
     setOptimistic(next);
-    void autosave(() => update.mutateAsync(body)).then(() => {
+    void autosave(() =>
+      update.mutateAsync((currentSpace) => {
+        const next = applyChange(spaceMcpSelection(currentSpace.mcp_servers ?? []));
+        return change.kind === "tool"
+          ? { mcp_tools: next.tools }
+          : {
+              mcp_servers: next.serverIds.map((id) => ({ id })),
+              ...(change.enabled ? { mcp_tools: next.tools } : {})
+            };
+      })
+    ).then(() => {
       // A failed queued intent must recover the last confirmed response,
       // rather than a previous optimistic intent that may also have failed.
       if (version.current === attempt) {
@@ -722,22 +759,15 @@ function McpServersSection() {
                   reason={reason}
                   onServerChange={(enabled, tools) => {
                     if (!canEdit || (enabled && reason)) return;
-                    const next = setSpaceMcpServer(
-                      selectionRef.current ?? confirmed,
-                      { ...server, tools },
+                    save({
+                      kind: "server",
+                      server: { id: server.id, name: server.name, tools },
                       enabled
-                    );
-                    save(next, {
-                      mcp_servers: next.serverIds.map((id) => ({ id })),
-                      ...(enabled ? { mcp_tools: next.tools } : {})
                     });
                   }}
                   onToolChange={(id, enabled) => {
-                    const current = selectionRef.current ?? confirmed;
-                    if (!canEdit || !current.serverIds.includes(server.id) || (enabled && reason))
-                      return;
-                    const next = setSpaceMcpTool(current, id, enabled);
-                    save(next, { mcp_tools: next.tools });
+                    if (!canEdit || (enabled && reason)) return;
+                    save({ kind: "tool", serverId: server.id, toolId: id, enabled });
                   }}
                 />
               );
@@ -983,6 +1013,7 @@ function SpaceCapabilitiesSection() {
               disabled={!can("edit", "space") || blocked !== null}
               aria-busy={
                 (update.isPending &&
+                  typeof update.variables !== "function" &&
                   update.variables?.enabled_capabilities?.includes(capability.purpose) !==
                     enabled) ||
                 undefined

@@ -64,7 +64,9 @@ const savedServer = (
   security_classification: item.security_classification ?? null,
   tools: (item.tools ?? []).map((entry) => ({
     ...entry,
-    is_enabled: settings.find((setting) => setting.tool_id === entry.id)?.is_enabled ?? false
+    is_enabled:
+      settings.find((setting) => setting.tool_id === entry.id)?.is_enabled ??
+      entry.is_enabled_by_default
   }))
 });
 let catalog: McpServer[];
@@ -142,6 +144,127 @@ async function expand(name = "Sparad server") {
   fireEvent.click(await screen.findByRole("button", { name: `Verktyg för ${name}` }));
   return screen.findByRole("group", { name: `Verktyg för ${name}` });
 }
+
+it.each(["saved", "failed"])(
+  "adds a server after a delayed catalog read without undoing an intervening %s tool save",
+  async (outcome) => {
+    const added = server("added", "Ny server", [tool("new", "Nytt verktyg", "added")]);
+    completeServers.push(added);
+    catalog.push({ ...added, tools: undefined });
+    let finish!: (result: { data: { items: McpServerTool[] }; response: Response }) => void;
+    const read = new Promise<{ data: { items: McpServerTool[] }; response: Response }>(
+      (resolve) => {
+        finish = resolve;
+      }
+    );
+    const originalGet = api.GET.getMockImplementation()!;
+    api.GET.mockImplementation((path: string, options: unknown) =>
+      path === "/api/v1/mcp-servers/{id}/tools/" ? read : originalGet(path, options)
+    );
+    const first = deferredPatch();
+    api.PATCH.mockReturnValueOnce(first.promise);
+    renderInApp(<SpaceSettings />);
+    const group = await expand();
+    fireEvent.click(screen.getByRole("switch", { name: "Ny server" }));
+    await waitFor(() =>
+      expect(api.GET).toHaveBeenCalledWith("/api/v1/mcp-servers/{id}/tools/", {
+        params: { path: { id: "added" } }
+      })
+    );
+    fireEvent.click(within(group).getByRole("switch", { name: "Påslaget verktyg" }));
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      if (outcome === "saved")
+        first.resolve({
+          mcp_tools: [
+            { tool_id: "off", is_enabled: false },
+            { tool_id: "on", is_enabled: false }
+          ]
+        });
+      else first.reject(new Error("Tool save refused"));
+    });
+    await waitFor(() =>
+      expect(within(group).getByRole("switch", { name: "Påslaget verktyg" })).toHaveProperty(
+        "checked",
+        outcome !== "saved"
+      )
+    );
+    await act(async () =>
+      finish({ data: { items: added.tools ?? [] }, response: new Response("{}") })
+    );
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+    await screen.findByText("Alla ändringar sparade!", { selector: "span" });
+    expect.soft(api.PATCH.mock.calls[1]?.[1].body).toEqual({
+      mcp_servers: [{ id: "saved" }, { id: "added" }],
+      mcp_tools: [
+        { tool_id: "off", is_enabled: false },
+        { tool_id: "on", is_enabled: outcome !== "saved" },
+        { tool_id: "new", is_enabled: true }
+      ]
+    });
+    expect
+      .soft(within(group).getByRole("switch", { name: "Påslaget verktyg" }))
+      .toHaveProperty("checked", outcome !== "saved");
+  }
+);
+
+it.each(["failed", "saved"])(
+  "dispatches a complete tool selection after an earlier %s server removal",
+  async (outcome) => {
+    const other = server("other", "Annan server", [tool("other-tool", "Annat verktyg", "other")]);
+    catalog.push(other);
+    completeServers.push(other);
+    state.space = {
+      ...state.space,
+      mcp_servers: [
+        ...(state.space.mcp_servers ?? []),
+        savedServer(other, [{ tool_id: "other-tool", is_enabled: false }])
+      ]
+    };
+    const removal = deferredPatch();
+    api.PATCH.mockReturnValueOnce(removal.promise);
+    renderInApp(<SpaceSettings />);
+    await expand();
+    const otherGroup = await expand("Annan server");
+    fireEvent.click(screen.getByRole("switch", { name: "Sparad server" }));
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+    fireEvent.click(within(otherGroup).getByRole("switch", { name: "Annat verktyg" }));
+    await act(async () => {
+      if (outcome === "saved") removal.resolve({ mcp_servers: [{ id: "other" }] });
+      else removal.reject(new Error("Server removal refused"));
+    });
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+    await screen.findByText("Alla ändringar sparade!", { selector: "span" });
+    const retained =
+      outcome === "failed"
+        ? [
+            { tool_id: "off", is_enabled: false },
+            { tool_id: "on", is_enabled: true }
+          ]
+        : [];
+    expect
+      .soft(api.PATCH.mock.calls[1]?.[1].body)
+      .toEqual({ mcp_tools: [...retained, { tool_id: "other-tool", is_enabled: true }] });
+    expect
+      .soft(screen.getByRole("switch", { name: "Sparad server" }))
+      .toHaveProperty("checked", outcome === "failed");
+    expect
+      .soft(within(otherGroup).getByRole("switch", { name: "Annat verktyg" }))
+      .toHaveProperty("checked", true);
+    if (outcome === "failed") {
+      expect
+        .soft(screen.getByRole("switch", { name: "Avstängt verktyg" }))
+        .toHaveProperty("checked", false);
+      expect
+        .soft(
+          state.space.mcp_servers
+            ?.find((item) => item.id === "saved")
+            ?.tools.find((item) => item.id === "off")?.is_enabled
+        )
+        .toBe(false);
+    } else expect(state.space.mcp_servers?.map((item) => item.id)).toEqual(["other"]);
+  }
+);
 
 it("shows tags and saved tool flags and saves only the complete tool selection", async () => {
   renderInApp(<SpaceSettings />);
@@ -324,9 +447,10 @@ it.each(["failed", "saved"])(
         });
     });
     await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(2));
+    // The later intent must not retry an earlier failed tool change.
     expect(api.PATCH.mock.calls[1]?.[1].body).toEqual({
       mcp_tools: [
-        { tool_id: "off", is_enabled: true },
+        { tool_id: "off", is_enabled: firstOutcome === "saved" },
         { tool_id: "on", is_enabled: false }
       ]
     });
