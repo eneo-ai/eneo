@@ -93,14 +93,16 @@ test(
     );
     await dialog.getByRole("button", { name: "Bekräfta borttagning", exact: true }).click();
     try {
-      await expect(dialog.getByText(messages.delete_space_hint, { exact: true })).toBeVisible({
-        timeout: 7_000
-      });
+      await expect(dialog.locator("p").filter({ hasText: messages.delete_space_hint })).toBeVisible(
+        {
+          timeout: 7_000
+        }
+      );
       await dialog.screenshot({ path: testInfo.outputPath("slow-space-delete.png") });
     } finally {
       deliverDelete();
+      expect((await deletion).status()).toBe(204);
     }
-    expect((await deletion).status()).toBe(204);
     await expect(page).toHaveURL("/spaces/list");
     await expect(page.getByRole("alertdialog")).toHaveCount(0);
   }
@@ -202,23 +204,26 @@ test(
         headers: sessionResponseHeaders(route)
       })
     );
-    await page.route("**/api/v1/ai-models/", async (route) => {
-      const response = await route.fetch();
-      expect(response.status()).toBe(200);
-      const models: Schema<"ModelsPresentation"> = await response.json();
-      expect(models.completion_models.length).toBeGreaterThan(0);
-      await route.fulfill({
-        response,
-        json: {
-          ...models,
-          completion_models: models.completion_models.map((model) => ({
-            ...model,
-            is_deprecated: true,
-            deprecation_date: "2020-01-01"
-          }))
-        }
-      });
-    });
+    await page.route(
+      (url) => url.pathname === "/api/v1/ai-models/",
+      async (route) => {
+        const response = await route.fetch();
+        expect(response.status()).toBe(200);
+        const models: Schema<"ModelsPresentation"> = await response.json();
+        expect(models.completion_models.length).toBeGreaterThan(0);
+        await route.fulfill({
+          response,
+          json: {
+            ...models,
+            completion_models: models.completion_models.map((model) => ({
+              ...model,
+              is_deprecated: true,
+              deprecation_date: "2020-01-01"
+            }))
+          }
+        });
+      }
+    );
     const impact: Schema<"UpdateSpaceDryRunResponse"> = {
       assistants: [],
       group_chats: [],
