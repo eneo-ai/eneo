@@ -1664,6 +1664,26 @@ it("loads the Flows list using the personal space's real id", async () => {
   expect(request?.searchParams.get("space_id")).toBe("space-1");
 });
 
+it("keeps the Flows list and its data while its search and state change in the address", async () => {
+  enableFlows();
+  replies.set("/api/v1/flows/", { items: [], has_more: false });
+  const { router } = await renderRoute(
+    "/spaces/space-1/flows?q=brev",
+    undefined,
+    ({ queryClient }) => {
+      queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
+    }
+  );
+  const heading = await screen.findByRole("heading", { name: "Flows list" });
+  await act(() => router.navigate({ href: "/spaces/space-1/flows?q=brev&status=drafts" }));
+  expect(screen.getByRole("heading", { name: "Flows list" })).toBe(heading);
+  expect(router.state.matches.at(-1)?.search).toEqual({ q: "brev", status: "drafts" });
+  await act(() => router.navigate({ href: "/spaces/space-1/flows?status=unknown" }));
+  expect(router.state.matches.at(-1)?.search).toEqual({});
+  expect(screen.getByRole("heading", { name: "Flows list" })).toBe(heading);
+  expect(requestedPaths().filter((path) => path === "/api/v1/flows/")).toHaveLength(1);
+});
+
 it.each([
   "/admin/users",
   "/admin/user-groups",

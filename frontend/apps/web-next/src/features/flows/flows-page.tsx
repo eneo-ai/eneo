@@ -3,37 +3,47 @@
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";
 import { IconButton } from "@astryxdesign/core/IconButton";
+import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2, Upload, Workflow } from "lucide-react";
+import { Plus, SearchX, Trash2, Upload, Workflow } from "lucide-react";
 import Link from "@/lib/link";
+import { replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { useAppContext } from "@/components/providers/app-context";
+import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { HANDHELD_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import { browserApi } from "@/lib/api/browser";
 import { toast } from "@/lib/toast";
 import { useRemovalMutation } from "@/features/spaces/removal";
+import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
 import { useSpace } from "@/features/spaces/use-space";
 import { deleteFlow, flowKeys, flowsListQueryOptions, type FlowSparse } from "./flows-api";
 import { evidenceExportAllowed } from "./flow-form-fields";
+import { FLOW_LIST_STATUSES, visibleFlows, type FlowListStatus } from "./flow-list-filter";
 import { FlowPackageImportDialog } from "./flow-package-import-dialog";
 import { flowRefusalMessage } from "./flow-refusals";
-import { FlowRows } from "./flows-rows";
+import { flowListHref, parseFlowListSearch } from "./flow-search";
+import { FlowRows, flowKindLine } from "./flows-rows";
 import { FlowStatusBadge } from "./flow-status";
 import { NewFlowDialog } from "./new-flow-dialog";
 
 /**
- * A space's flows: name and description, whether each is published, how many
- * steps it has and when it last changed. "Nytt flöde" creates an empty draft
- * and opens it; a flow is built on its own page, by hand or in its chat. A
- * flow's own controls follow what the core says the caller may do with it.
+ * A space's flows, the last changed first: name and description, what each
+ * takes in and gives back, whether it is published, how many steps it has,
+ * whose it is and when it last changed. A search and (for those who manage
+ * flows) a state filter narrow the list; both live in the address. "Nytt
+ * flöde" creates an empty draft and opens it; a flow is built on its own page,
+ * by hand or in its chat. A flow's own controls follow what the core says the
+ * caller may do with it.
  */
 export function FlowsPage() {
   const t = useTranslations();
@@ -41,6 +51,8 @@ export function FlowsPage() {
   const { can } = useAppContext();
   const queryClient = useQueryClient();
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const allStatesRef = useRef<HTMLButtonElement>(null);
   const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<FlowSparse | null>(null);
@@ -50,6 +62,32 @@ export function FlowsPage() {
   // steps) is for a computer, so nothing here offers to.
   const phone = useMediaMatch(HANDHELD_QUERY);
   const base = `/spaces/${routeId}/flows`;
+
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const view = parseFlowListSearch({
+    q: searchParams.get("q"),
+    status: searchParams.get("status")
+  });
+  // The list follows each key; the address follows once typing pauses.
+  const { draft, setDraft, settled } = useSearchDraft(view.q ?? "");
+  // Others see published flows only, so only those who manage flows filter by state.
+  const status: FlowListStatus = canManage ? (view.status ?? "all") : "all";
+  const kindLine = (flow: FlowSparse) => flowKindLine(flow, t);
+  const shown = visibleFlows(flows.data ?? [], { query: draft, status }, kindLine);
+  const count = t("flow_list_count", { count: shown.length });
+  // The search field announces its own matches; a change of state is said here.
+  useAnnounceChange(count, status);
+
+  useEffect(() => {
+    if (settled !== (view.q ?? "")) {
+      replaceUrl(flowListHref(pathname, searchParams, { q: settled }));
+    }
+  }, [settled, view.q, pathname, searchParams]);
+
+  function showState(next: FlowListStatus) {
+    replaceUrl(flowListHref(pathname, searchParams, { status: next }));
+  }
 
   const remove = useRemovalMutation({
     mutationFn: (flow: FlowSparse) => deleteFlow(flow.id),
@@ -115,8 +153,11 @@ export function FlowsPage() {
       key: "updated",
       header: t("flows_updated"),
       width: pixel(170),
-      renderCell: (flow) =>
-        flow.updated_at ? <ClientTime value={flow.updated_at} format="auto" /> : "—"
+      // The date the list sorts by: a flow never changed since it was created shows when that was.
+      renderCell: (flow) => {
+        const changed = flow.updated_at ?? flow.created_at;
+        return changed ? <ClientTime value={changed} format="auto" /> : "—";
+      }
     },
     ...((flows.data ?? []).some((flow) => flow.permissions.can_delete)
       ? [
@@ -160,16 +201,88 @@ export function FlowsPage() {
               description={t("flows_empty_description")}
               actions={createButton}
             />
-          ) : phone ? (
-            <FlowRows flows={items} base={base} showStatus={canManage} />
           ) : (
-            <Table
-              data={items}
-              columns={columns}
-              idKey="id"
-              aria-label={t("flows")}
-              pinnedColumn="name"
-            />
+            // One set of controls above both layouts, so a search being typed
+            // and the chosen state survive a turn across the breakpoint.
+            <div className="flex flex-col gap-4">
+              <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
+                <ResourceFilterInput
+                  value={draft}
+                  onChange={setDraft}
+                  label={t("flow_list_search_aria")}
+                  placeholder={t("flow_list_search_placeholder")}
+                  resultCount={shown.length}
+                  inputRef={searchRef}
+                  className="md:w-80"
+                />
+                {canManage ? (
+                  <SegmentedControl
+                    label={t("flow_list_filter_aria")}
+                    value={status}
+                    onChange={(next) => showState(next as FlowListStatus)}
+                  >
+                    {FLOW_LIST_STATUSES.map((option) => (
+                      <SegmentedControlItem
+                        key={option}
+                        ref={option === "all" ? allStatesRef : undefined}
+                        value={option}
+                        label={t(`flow_list_filter_${option}`)}
+                      />
+                    ))}
+                  </SegmentedControl>
+                ) : null}
+                <p className="text-ax-text-secondary text-sm md:ms-auto">{count}</p>
+              </div>
+              {shown.length === 0 ? (
+                draft.trim() ? (
+                  <EmptyState
+                    icon={<SearchX />}
+                    headingLevel={3}
+                    isCompact
+                    title={t("flow_list_no_match_title")}
+                    actions={
+                      <Button
+                        label={t("flow_list_clear_search")}
+                        onClick={() => {
+                          setDraft("");
+                          searchRef.current?.focus();
+                        }}
+                      />
+                    }
+                  />
+                ) : (
+                  <EmptyState
+                    icon={<SearchX />}
+                    headingLevel={3}
+                    isCompact
+                    title={
+                      status === "published"
+                        ? t("flow_list_no_published_title")
+                        : t("flow_list_no_drafts_title")
+                    }
+                    actions={
+                      <Button
+                        label={t("flow_list_show_all")}
+                        onClick={() => {
+                          showState("all");
+                          allStatesRef.current?.focus();
+                        }}
+                      />
+                    }
+                  />
+                )
+              ) : phone ? (
+                <FlowRows flows={shown} base={base} showStatus={canManage} />
+              ) : (
+                <Table
+                  data={shown}
+                  columns={columns}
+                  idKey="id"
+                  aria-label={t("flows")}
+                  pinnedColumn="name"
+                />
+              )}
+            </div>
           )
         }
       </QueryStateBoundary>
