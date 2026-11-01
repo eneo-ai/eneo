@@ -148,4 +148,14 @@ test.describe("the responsive measure", () => {
     expect(await kinds(false)).toEqual([]);
     expect(await kinds(true)).toEqual(["y div:lorem ipsum dolor sit amet c"]);
   });
+
+  test("leaves out what a closed details holds", async ({ page }) => {
+    const small = (violations: Violation[]) =>
+      violations.filter((violation) => violation.kind === "small").map(({ key }) => key);
+    const markup = (open: string) =>
+      `<details ${open} style="margin:8px 16px"><summary style="min-height:44px;display:block">More</summary><input style="display:block;width:200px;height:20px"></details>`;
+    // Closed, the field is not on the screen; open, it is a target under 44 px.
+    expect(small(await violationsOn(page, markup("")))).toEqual([]);
+    expect(small(await violationsOn(page, markup("open")))).toEqual(["input:"]);
+  });
 });

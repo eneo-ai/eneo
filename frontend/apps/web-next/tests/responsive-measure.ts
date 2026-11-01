@@ -33,6 +33,9 @@ export function measure(page: Page, { vertical = false } = {}): Promise<PageMeas
     ([minTarget, withVertical]) => {
       const width = innerWidth;
       const shown = (element: Element) => {
+        // What a closed <details> holds is not on screen, whatever box it kept from before.
+        const closed = element.closest("details:not([open])");
+        if (closed && !element.closest("summary")) return false;
         const box = element.getBoundingClientRect();
         if (!box.width || !box.height) return false;
         const style = getComputedStyle(element);
