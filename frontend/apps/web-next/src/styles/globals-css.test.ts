@@ -375,6 +375,25 @@ describe("globals.css", () => {
     expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-10px" });
   });
 
+  it("makes the DateRangeInput's period button as tall as its 44 px frame on touch", () => {
+    const period =
+      ".astryx-date-range-input > button:not(:has(> .astryx-date-range-input-toggle-icon))";
+    const rules = new Map<string, Record<string, string>>();
+    postcss.parse(css).walkRules((rule: Rule) => {
+      if (!rule.selector.startsWith(period)) return;
+      const parent = rule.parent as AtRule | undefined;
+      const media = parent?.type === "atrule" && parent.name === "media" ? parent.params : "";
+      const declarations: Record<string, string> = {};
+      rule.walkDecls((decl) => {
+        declarations[decl.prop] = decl.value;
+      });
+      rules.set(`${media} ${rule.selector.slice(period.length)}`.trim(), declarations);
+    });
+    expect(rules.get("(pointer: coarse)")).toMatchObject({ position: "relative" });
+    // 21 px of text plus 12 px above and below: a 45 px target across the button's width.
+    expect(rules.get("(pointer: coarse) ::after")).toMatchObject({ inset: "-12px 0" });
+  });
+
   it("self-hosts every required font subset as a Vite asset", () => {
     // family → subsets, from the file names (<family>-<subset>-wght-normal.woff2)
     const subsets = new Map<string, string[]>();

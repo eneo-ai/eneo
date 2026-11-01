@@ -878,6 +878,16 @@
       position: absolute;
       inset: -10px;
     }
+    /* The period itself is a button of its own, a line tall inside the 44 px frame: its hit
+       area grows to the frame's height (the insights page shows it on the screen). */
+    .astryx-date-range-input > button:not(:has(> .astryx-date-range-input-toggle-icon)) {
+      position: relative;
+    }
+    .astryx-date-range-input > button:not(:has(> .astryx-date-range-input-toggle-icon))::after {
+      content: "";
+      position: absolute;
+      inset: -12px 0;
+    }
   }
 }
 

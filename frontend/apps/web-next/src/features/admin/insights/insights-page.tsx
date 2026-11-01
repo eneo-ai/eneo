@@ -128,7 +128,7 @@ function TokensCard({ range }: { range: InsightRange }) {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <h2 className="font-semibold">{t("tokens")}</h2>
         <Link
-          className="text-ax-text-accent underline underline-offset-4"
+          className="text-ax-text-accent inline-flex min-h-6 items-center underline underline-offset-4 pointer-coarse:min-h-11"
           href={`/admin/usage?tab=tokens&from=${range.start}&to=${range.end}`}
         >
           {t("insights_token_usage_link")}

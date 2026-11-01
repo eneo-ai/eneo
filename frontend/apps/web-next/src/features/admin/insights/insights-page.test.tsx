@@ -93,9 +93,10 @@ describe("InsightsPage", () => {
     expect(aggregate).toMatchObject(tokens!);
     expect(aggregate!.time_zone).toBe(Intl.DateTimeFormat().resolvedOptions().timeZone);
     expect(tokens!.end_date).toMatch(/\.999999Z$/);
-    expect(screen.getByRole("link", { name: "Visa tokenanvändning" }).getAttribute("href")).toMatch(
-      /tab=tokens&from=/
-    );
+    const usageLink = screen.getByRole("link", { name: "Visa tokenanvändning" });
+    expect(usageLink.getAttribute("href")).toMatch(/tab=tokens&from=/);
+    // A stand-alone link: a touch-sized row of its own (the contract measures it on the screen).
+    expect(usageLink.className).toContain("pointer-coarse:min-h-11");
     expect(state.calls.some((call) => call.path === "/api/v1/analysis/counts/")).toBe(false);
   });
 
