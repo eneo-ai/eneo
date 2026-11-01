@@ -57,6 +57,7 @@ test(
     await edit.focus();
     await edit.press("Enter");
     await expect(page).toHaveURL(`${space}/settings`);
+    await page.unroute("**/api/v1/spaces/");
     const renamed = `${name} sparad`;
     const nameInput = page.getByRole("textbox", { name: "Namn", exact: true });
     await nameInput.fill(renamed);
@@ -273,7 +274,9 @@ test(
     await page.getByRole("option", { name: "Hemlig", exact: true }).click();
     const confirm = page.getByRole("alertdialog");
     await expect(confirm.getByText("Webbsökning", { exact: true })).toBeVisible();
-    await expect(confirm.getByText("Hemlig", { exact: true })).toBeVisible();
+    await expect(
+      confirm.getByText("Säkerhetsklassificering: Hemlig", { exact: true })
+    ).toBeVisible();
     expect(writes).toEqual([]);
     await confirm.getByRole("button", { name: "Avbryt", exact: true }).click();
     await expect(confirm).toBeHidden();
