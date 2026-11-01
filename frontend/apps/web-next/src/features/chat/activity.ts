@@ -20,7 +20,8 @@ export type ToolPart = Extract<Part, { type: "dynamic-tool" }>;
 type McpReference = Schema<"McpToolReferencePublic">;
 
 /** `stopped`: the turn ended (stopped or failed) before the step finished. */
-export type StepStatus = "waiting" | "running" | "done" | "error" | "denied" | "stopped";
+export type StepStatus =
+  "waiting" | "running" | "done" | "error" | "denied" | "stopped" | "previous-attempt";
 
 export type ActivityStep =
   | { kind: "reasoning"; key: string; status: StepStatus; text: string }
@@ -114,7 +115,8 @@ const STATUS_PRIORITY: readonly StepStatus[] = [
   "error",
   "denied",
   "stopped",
-  "done"
+  "done",
+  "previous-attempt"
 ];
 
 export function toolGroupStatus(calls: readonly { status: StepStatus }[]): StepStatus {
@@ -122,6 +124,30 @@ export function toolGroupStatus(calls: readonly { status: StepStatus }[]): StepS
     if (calls.some((call) => call.status === status)) return status;
   }
   return "done";
+}
+
+/** The same server/tool may retry with different arguments, even across step groups. */
+function previousToolAttempts(parts: Part[], streaming: boolean): Set<string> {
+  const succeeded = new Set<string>();
+  const previous = new Set<string>();
+  for (let index = parts.length - 1; index >= 0; index--) {
+    const part = parts[index]!;
+    if (part.type !== "dynamic-tool" || isSkillCall(part)) continue;
+    const metadata = eneoToolMetadata(part);
+    if (metadata.approved === false) continue;
+    const key = JSON.stringify([metadata.server_name ?? "", part.toolName]);
+    const output =
+      part.output && typeof part.output === "object"
+        ? (part.output as Record<string, unknown>)
+        : null;
+    const result = metadata.result_status ?? output?.status;
+    if (part.state === "output-available" && (result === "succeeded" || result === "completed")) {
+      succeeded.add(key);
+    } else if (toolStatus(part) === "error" && (streaming || succeeded.has(key))) {
+      previous.add(part.toolCallId);
+    }
+  }
+  return previous;
 }
 
 /** Approval decisions from the stream's approval parts and persisted tool calls. */
@@ -286,6 +312,7 @@ export function deriveActivity(
 ): Activity {
   const parts = message.parts;
   const decisions = approvals(parts);
+  const previousAttempts = previousToolAttempts(parts, streaming);
   const mcpReferences = mcpReferencesFromParts(parts, message.metadata?.mcpToolReferences);
   const steps: ActivityStep[] = [];
 
@@ -321,7 +348,7 @@ export function deriveActivity(
       } else {
         const call: ToolCall = {
           part,
-          status: toolStatus(part),
+          status: previousAttempts.has(part.toolCallId) ? "previous-attempt" : toolStatus(part),
           approval: toolApproval(part, decisions),
           references: mcpReferences.filter(
             (reference) =>

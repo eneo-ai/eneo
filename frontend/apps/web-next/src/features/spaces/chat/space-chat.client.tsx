@@ -1,5 +1,6 @@
 "use client";
 
+import { notFound } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
@@ -23,6 +24,7 @@ import { partnerKnowledge } from "@/features/chat/partner-knowledge";
 import { queuePartnerUpdate } from "@/features/chat/partner-updates";
 import { reasoningEffortOptions } from "@/features/chat/reasoning-effort";
 import { ReasoningEffortSelector } from "@/features/chat/reasoning-selector";
+import { personalChatSkillsConfigurationQueryOptions } from "@/features/skills/personal-chat-skills";
 import { useSpace } from "@/features/spaces/use-space";
 
 /** The composer's compact (ghost) trigger look, shared by the model and reasoning pickers. */
@@ -163,6 +165,22 @@ export function SpaceChat() {
   const partnerId = searchParams.get("id");
   const sessionId = searchParams.get("session_id");
 
+  const defaultAssistant = space.default_assistant;
+  const defaultModel = defaultAssistant
+    ? partnerCompletionModel(defaultAssistant, space.completion_models)
+    : null;
+  const personalConfiguration = useQuery({
+    ...personalChatSkillsConfigurationQueryOptions({
+      spaceId: space.id,
+      assistantId: defaultAssistant?.id ?? null,
+      modelId: defaultAssistant?.completion_model?.id ?? null
+    }),
+    enabled:
+      space.personal &&
+      (type === "default-assistant" || !partnerId) &&
+      Boolean(defaultAssistant?.permissions?.includes("read"))
+  });
+
   const assistantQuery = useQuery({
     queryKey: ["assistants", partnerId],
     enabled: type === "assistant" && partnerId !== null,
@@ -188,6 +206,8 @@ export function SpaceChat() {
           ? groupChatQuery
           : null;
 
+  if (type === "assistant" && assistantQuery.data?.is_help_assistant) throw notFound();
+
   const spaceName = space.personal
     ? t("personal")
     : space.organization
@@ -208,6 +228,7 @@ export function SpaceChat() {
       name: groupChat.name,
       allowedAttachments: groupChat.allowed_attachments,
       insightEnabled: groupChat.insight_enabled,
+      permissions: groupChat.permissions,
       iconId: groupChat.icon_id ?? null,
       ...spaceInfo,
       showResponseLabel: groupChat.show_response_label,
@@ -226,6 +247,7 @@ export function SpaceChat() {
       name: assistant.name,
       allowedAttachments: assistant.allowed_attachments,
       insightEnabled: assistant.insight_enabled,
+      permissions: assistant.permissions,
       description: assistant.description ?? null,
       iconId: assistant.icon_id ?? null,
       knowledge: partnerKnowledge(assistant),
@@ -254,7 +276,11 @@ export function SpaceChat() {
         enabledCapabilities: assistant.enabled_capabilities,
         availableCapabilities: assistant.available_capabilities,
         effectiveConfig: assistant.effective_config ?? null,
-        completionModel: partnerCompletionModel(assistant, space.completion_models)
+        completionModel: defaultModel,
+        preflightRevision: JSON.stringify([
+          defaultModel?.id ?? null,
+          personalConfiguration.dataUpdatedAt
+        ])
       };
     }
   }
@@ -267,6 +293,18 @@ export function SpaceChat() {
       <ChatPartnerError
         onRetry={partnerQuery?.isError ? () => void partnerQuery.refetch() : undefined}
       />
+    );
+  }
+
+  if (
+    partner.type === "default-assistant" &&
+    !space.default_assistant?.permissions?.includes("read")
+  ) {
+    return (
+      <div className="mx-auto flex w-full max-w-[712px] flex-col gap-3 p-6">
+        <h1 className="text-lg font-semibold">{t("personal_chat_no_access_title")}</h1>
+        <p className="text-ax-text-secondary text-sm">{t("personal_chat_no_access_description")}</p>
+      </div>
     );
   }
 

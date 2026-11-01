@@ -8,6 +8,7 @@ import { History, SendHorizontal, ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { revealProblems } from "@/components/composites/field-problem";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
@@ -103,7 +104,7 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
   const [asked, setAsked] = useState(false);
   const questionRef = useRef<HTMLTextAreaElement>(null);
   const questionProblem = asked && !question.trim() ? t("required_field") : null;
-  const [answer, setAnswer] = useState("");
+  const [answer, setAnswer] = useState<{ question: string; text: string } | null>(null);
   const params = insightRangeParams(range);
   const query = insightPartnerQuery(partner);
   const request = useRef<AbortController | null>(null);
@@ -152,8 +153,8 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
       );
       return resolveInsightAnswer(response, controller.signal);
     },
-    onSuccess: (text) => {
-      setAnswer(text);
+    onSuccess: (text, submittedQuestion) => {
+      setAnswer({ question: submittedQuestion, text });
       announce(t("chat_announce_answer_ready"));
     },
     onError: () => {
@@ -227,7 +228,7 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
             revealProblems(() => setAsked(true), questionRef.current);
             return;
           }
-          setAnswer("");
+          setAnswer(null);
           ask.mutate(text);
         }}
       >
@@ -260,10 +261,12 @@ export function InsightsPanel({ partner }: { partner: ChatPartner & { type: Insi
             if (ask.variables) ask.mutate(ask.variables);
           }}
         />
-      ) : answer ? (
+      ) : answer?.text ? (
         <div className="bg-ax-sunken border-ax-border rounded-ax-container border p-4">
-          <p className="text-sm font-medium">{t("answer")}</p>
-          <div className="text-ax-text-secondary mt-2 text-sm whitespace-pre-wrap">{answer}</div>
+          <p className="text-sm font-medium">{answer.question}</p>
+          <MessageResponse className="text-ax-text-secondary mt-2 text-sm">
+            {answer.text}
+          </MessageResponse>
         </div>
       ) : null}
     </div>

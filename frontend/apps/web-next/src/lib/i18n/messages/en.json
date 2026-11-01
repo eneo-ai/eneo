@@ -5667,6 +5667,8 @@
   "chat_composer_empty": "Write a question first.",
   "chat_composer_hint": "Return adds a line. Send with the Send button, Command+Return or Ctrl+Return.",
   "chat_composer_label": "Ask {name}",
+  "chat_context_draft_preserved": "Your draft has been preserved. You can edit it or start a new conversation.",
+  "chat_context_rejection_counts": "{used} / {limit} tokens ({excess} over the limit).",
   "chat_conversation_label": "Conversation",
   "chat_conversation_load_failed": "The conversation could not be loaded.",
   "chat_copy_answer": "Copy the answer",

@@ -37,6 +37,9 @@ export type ChatPartner = {
   effectiveConfig?: Schema<"EffectiveConfigPublic"> | null;
   /** Whether the partner exposes the conversation insights tab. */
   insightEnabled?: boolean;
+  /** Invalidate estimates when this partner's saved context configuration changes. */
+  preflightRevision?: string;
+  permissions?: Schema<"AssistantPublic">["permissions"];
   /** Short description shown on the start screen (assistants, group chats). */
   description?: string | null;
   /** Uploaded icon id (tile image), when the partner has one. */

@@ -5667,6 +5667,8 @@
   "chat_composer_empty": "Skriv en fråga först.",
   "chat_composer_hint": "Retur ger en ny rad. Skicka med Skicka-knappen, Kommando+Retur eller Ctrl+Retur.",
   "chat_composer_label": "Fråga {name}",
+  "chat_context_draft_preserved": "Ditt utkast har bevarats. Du kan ändra det eller börja en ny konversation.",
+  "chat_context_rejection_counts": "{used} / {limit} tokens ({excess} över gränsen).",
   "chat_conversation_label": "Konversation",
   "chat_conversation_load_failed": "Konversationen kunde inte laddas.",
   "chat_copy_answer": "Kopiera svaret",

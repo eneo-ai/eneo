@@ -38,7 +38,11 @@ type ActiveConversation = {
 function hasInsights(partner: ChatPartner): partner is ChatPartner & {
   type: "assistant" | "group-chat";
 } {
-  return Boolean(partner.insightEnabled && partner.type !== "default-assistant");
+  return Boolean(
+    partner.insightEnabled &&
+    partner.permissions?.includes("insight_view") &&
+    partner.type !== "default-assistant"
+  );
 }
 
 /**

@@ -1708,3 +1708,27 @@ it("preloads federation with GET requests without waiting for its optional data"
     expect(input instanceof Request ? input.method : (init?.method ?? "GET")).toBe("GET");
   }
 });
+
+it.each([
+  "/dashboard/helper-1/private-session",
+  "/spaces/space-1/chat?type=assistant&id=helper-1&session_id=private-session"
+])("rejects a help assistant before mounting chat: %s", async (path) => {
+  replies.set("/api/v1/spaces/space-1/", makeSpace());
+  replies.set("/api/v1/assistants/helper-1/", {
+    id: "helper-1",
+    name: "Prompt guide",
+    is_help_assistant: true,
+    groups: [],
+    websites: [],
+    integration_knowledge_list: []
+  });
+  await renderRoute(path);
+  await screen.findByRole("heading", { name: messages.page_not_found });
+  expect(screen.queryByRole("textbox", { name: "Draft" })).toBeNull();
+  expect(
+    requestedPaths().filter(
+      (request) =>
+        request === "/api/v1/conversations/" || request.includes("/conversations/private-session/")
+    )
+  ).toEqual([]);
+});

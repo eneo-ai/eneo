@@ -15,7 +15,16 @@ const spies = vi.hoisted(() => ({
   announce: vi.fn(),
   sent: [] as { text: string; body: unknown }[],
   mode: "fail" as
-    "fail" | "refused" | "json" | "answer" | "hold" | "approval" | "approval-break" | "provider",
+    | "fail"
+    | "refused"
+    | "json"
+    | "answer"
+    | "hold"
+    | "approval"
+    | "approval-break"
+    | "provider"
+    | "late-context",
+  contextStream: null as ReadableStreamDefaultController<Record<string, unknown>> | null,
   titled: [] as string[],
   rated: [] as { path: string; params: unknown; body: unknown }[],
   /** While set, the files upload waits for the test to finish it. */
@@ -44,6 +53,21 @@ vi.mock("@/lib/chat/transport", () => ({
       }
       // The SDK hands the backend's error text over as an Error message.
       if (spies.mode === "json") throw new Error('{"message":"Not authenticated"}');
+      if (spies.mode === "late-context") {
+        return new ReadableStream<Record<string, unknown>>({
+          start(controller) {
+            spies.contextStream = controller;
+            controller.enqueue({
+              type: "data-session",
+              data: {
+                session_id: "s-context",
+                files: [],
+                web_search_references: []
+              }
+            });
+          }
+        });
+      }
       if (spies.mode === "approval" || spies.mode === "approval-break") {
         // A tool asks first; the stream waits for the decision, or breaks.
         return new ReadableStream({
@@ -165,6 +189,7 @@ afterEach(() => {
   spies.rated.length = 0;
   spies.mode = "fail";
   spies.holdUpload = null;
+  spies.contextStream = null;
 });
 
 const partner: ChatPartner = {
@@ -544,6 +569,49 @@ describe("ChatView when generation fails", () => {
     );
     await waitFor(() => expect(revoke).toHaveBeenCalledWith("blob:policy"));
     vi.unstubAllGlobals();
+  });
+
+  it("restores late-rejected text without reclaiming or reuploading accepted files", async () => {
+    const deleteCount = vi.mocked(browserApi.DELETE).mock.calls.length;
+    const uploadCount = () =>
+      vi.mocked(browserApi.POST).mock.calls.filter((call) => call[0] === "/api/v1/files/").length;
+    const uploadsBefore = uploadCount();
+    spies.mode = "late-context";
+    const appContext = testAppContext({
+      limits: {
+        attachments: {
+          formats: [
+            { mimetype: "application/pdf", extensions: ["pdf"], size: 1000000, vision: false }
+          ]
+        }
+      }
+    });
+    const view = renderInApp(<Harness />, { appContext });
+    fireEvent.change(view.container.querySelector('input[type="file"]')!, {
+      target: {
+        files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })]
+      }
+    });
+    await waitFor(() => expect(screen.queryByText("Laddar upp…")).toBeNull());
+    ask("Sammanfatta policyn");
+    await waitFor(() => expect(spies.contextStream).not.toBeNull());
+    await act(async () => {
+      spies.contextStream!.enqueue({ type: "data-error", data: { code: 9003 } });
+      spies.contextStream!.enqueue({ type: "error", errorText: "Context window exceeded" });
+      spies.contextStream!.close();
+    });
+    await screen.findByText(/Din input är för stor för denna modell/);
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: /^Fråga / }).value).toBe(
+      "Sammanfatta policyn"
+    );
+    expect(screen.queryByRole("button", { name: "Ta bort Policy.pdf" })).toBeNull();
+    spies.mode = "answer";
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    await waitFor(() => expect(spies.sent).toHaveLength(2));
+    expect(spies.sent[1]?.body).toMatchObject({ files: [{ id: "file-1" }] });
+    expect(uploadCount()).toBe(uploadsBefore + 1);
+    view.unmount();
+    expect(vi.mocked(browserApi.DELETE).mock.calls.length).toBe(deleteCount);
   });
 
   it("sends a question with uploads still running and issues the request once they are done", async () => {

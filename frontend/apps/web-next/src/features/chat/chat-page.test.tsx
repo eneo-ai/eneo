@@ -445,7 +445,7 @@ describe("ChatPage history (decision 14: the conversation keeps 480 px)", () => 
   });
 
   it("leaves a panel open behind Insikter out of the history's room", async () => {
-    renderPage("s-file", { ...partner, insightEnabled: true });
+    renderPage("s-file", { ...partner, insightEnabled: true, permissions: ["insight_view"] });
     await screen.findByRole("log", { name: "Konversation" });
     layOut(1000);
     await openPanel();
@@ -455,7 +455,7 @@ describe("ChatPage history (decision 14: the conversation keeps 480 px)", () => 
   });
 
   it("lays nothing over Insikter for the conversation behind it", async () => {
-    renderPage("s-file", { ...partner, insightEnabled: true });
+    renderPage("s-file", { ...partner, insightEnabled: true, permissions: ["insight_view"] });
     await screen.findByRole("log", { name: "Konversation" });
     layOut(1000);
     await openPanel();
@@ -524,8 +524,22 @@ describe("ChatPage while an answer streams", () => {
     expect(screen.queryByText("Gammalt svar")).toBeNull();
   });
 
+  it.each<{ permissions: ChatPartner["permissions"] }>([
+    { permissions: undefined },
+    { permissions: [] },
+    { permissions: ["read"] }
+  ])("hides Insights without insight_view (%j)", ({ permissions }) => {
+    renderPage(null, {
+      ...partner,
+      insightEnabled: true,
+      permissions
+    });
+    expect(screen.queryByRole("radio", { name: "Insikter" })).toBeNull();
+    expect(composer()).toBeTruthy();
+  });
+
   it("keeps Insights selected when the first session id arrives in the background", async () => {
-    renderPage(null, { ...partner, insightEnabled: true });
+    renderPage(null, { ...partner, insightEnabled: true, permissions: ["insight_view"] });
     askWithKeyboard("Vilken gräns gäller?");
     await waitFor(() => expect(spies.streams).toHaveLength(1));
     fireEvent.click(screen.getByRole("radio", { name: "Insikter" }));
@@ -544,7 +558,7 @@ describe("ChatPage while an answer streams", () => {
   });
 
   it("keeps this visit's turns when switching to Insikter and back", async () => {
-    renderPage(null, { ...partner, insightEnabled: true });
+    renderPage(null, { ...partner, insightEnabled: true, permissions: ["insight_view"] });
     askWithKeyboard("Vilken gräns gäller?");
     await waitFor(() => expect(spies.streams).toHaveLength(1));
     await act(async () => answer(spies.streams[0]!, "session-1", "Gränsen är 700 000 kr."));
@@ -561,7 +575,11 @@ describe("ChatPage while an answer streams", () => {
   });
 
   it("follows external tab changes without mistaking another parameter for the insights tab", async () => {
-    const rerender = renderPage(null, { ...partner, insightEnabled: true });
+    const rerender = renderPage(null, {
+      ...partner,
+      insightEnabled: true,
+      permissions: ["insight_view"]
+    });
     setRoute("/chat?tab=insights");
     rerender(null);
     expect(await screen.findByText("Totala konversationer")).toBeTruthy();
@@ -570,6 +588,33 @@ describe("ChatPage while an answer streams", () => {
     expect(composer()).toBeTruthy();
     expect(screen.queryByText("Totala konversationer")).toBeNull();
   });
+
+  it.each([false, true])(
+    "preserves the draft after a late context rejection (newer draft: %s)",
+    async (newerDraft) => {
+      renderPage(null);
+      askWithKeyboard("Vilken gräns gäller?");
+      await waitFor(() => expect(spies.streams).toHaveLength(1));
+      const stream = spies.streams[0]!;
+      await act(async () =>
+        stream.enqueue({
+          type: "data-session",
+          data: { session_id: "s-context", files: [], web_search_references: [] }
+        })
+      );
+      if (newerDraft) fireEvent.change(composer(), { target: { value: "Mitt nästa utkast" } });
+      await act(async () => {
+        stream.enqueue({ type: "data-error", data: { code: 9003 } });
+        stream.enqueue({ type: "error", errorText: "Context window exceeded" });
+        stream.close();
+      });
+      await screen.findByText(/Din input är för stor för denna modell/);
+      expect(composer().value).toBe(newerDraft ? "Mitt nästa utkast" : "Vilken gräns gäller?");
+      expect(within(screen.getByRole("log")).getByText("Vilken gräns gäller?")).toBeTruthy();
+      const notice = screen.getByText(/Din input är för stor för denna modell/).parentElement!;
+      expect(within(notice).getByRole("button", { name: "Ny konversation" })).toBeTruthy();
+    }
+  );
 
   it("returns a first question that fails before it is sent to the start composer", async () => {
     const failure = deferred();
