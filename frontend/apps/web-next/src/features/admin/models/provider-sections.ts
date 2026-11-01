@@ -2,7 +2,7 @@ import {
   formatCostPerImage,
   formatCostPerMillionTokens,
   formatCostPerMinute,
-  getDeprecationStatus
+  modelLifecycle
 } from "@/features/ai-models/format-model-stats";
 import { modelDisplayName } from "@/lib/models/model-display-name";
 import { matchesSearch } from "@/lib/search";
@@ -202,19 +202,7 @@ export function countByKind(
   return counts;
 }
 
-export type ModelLifecycle =
-  | { kind: "active" }
-  | { kind: "retiring"; date: string }
-  | { kind: "deprecated"; date: string | null };
-
-/** Deprecation from the recorded date, or the admin's manual deprecation flag. */
-export function modelLifecycle(model: AdminModel, today?: string): ModelLifecycle {
-  const status = getDeprecationStatus(model, today);
-  if (status.kind === "deprecated") return { kind: "deprecated", date: status.date };
-  if (model.is_deprecated) return { kind: "deprecated", date: null };
-  if (status.kind === "retiring") return { kind: "retiring", date: status.date };
-  return { kind: "active" };
-}
+export { modelLifecycle, type ModelLifecycle } from "@/features/ai-models/format-model-stats";
 
 /** An active provider with something to fix. */
 export interface ProviderAttention {
