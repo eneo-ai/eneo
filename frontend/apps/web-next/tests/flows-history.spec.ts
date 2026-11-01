@@ -186,22 +186,25 @@ test(
     await test.step("expands and copies the secondary step result without hiding the main result", async () => {
       const output = older.step.output_payload_json?.text;
       expect(output).toBe(MOCK_REPLY);
-      const results = page.getByText(MOCK_REPLY, { exact: true });
+      const primary = page
+        .getByRole("region", { name: "Resultat", exact: true })
+        .getByText(MOCK_REPLY, { exact: true });
       const secondary = article.getByText(MOCK_REPLY, { exact: true });
       const disclosure = article.getByRole("button", { name: "Stegets resultat", exact: true });
       const copy = article.getByRole("button", { name: "Kopiera resultatet", exact: true });
       await expect(disclosure).toHaveAttribute("aria-expanded", "false");
       await expect(secondary).toHaveCount(0);
-      await expect(results).toHaveCount(1);
-      await expect(results).toBeVisible();
+      await expect(primary).toHaveCount(1);
+      await expect(primary).toBeVisible();
       await expect(copy).toBeVisible();
       await disclosure.focus();
       await page.keyboard.press("Enter");
       await expect(disclosure).toHaveAttribute("aria-expanded", "true");
       await expect(disclosure).toBeFocused();
+      await expect(secondary).toHaveCount(1);
       await expect(secondary).toBeVisible();
-      await expect(results).toHaveCount(2);
-      await expect(results.first()).toBeVisible();
+      await expect(primary).toHaveCount(1);
+      await expect(primary).toBeVisible();
       await page.screenshot({
         path: test.info().outputPath("flow-step-output-expanded.png"),
         fullPage: true
@@ -213,8 +216,8 @@ test(
       await expect(disclosure).toHaveAttribute("aria-expanded", "false");
       await expect(disclosure).toBeFocused();
       await expect(secondary).toHaveCount(0);
-      await expect(results).toHaveCount(1);
-      await expect(results).toBeVisible();
+      await expect(primary).toHaveCount(1);
+      await expect(primary).toBeVisible();
       await expect(copy).toBeVisible();
     });
     await article
@@ -249,7 +252,10 @@ test(
     const access = await apiRequest<Schema<"FlowRunDetailPublic">>(page, `${older.path}/`);
     expect(access.evidence_access.can_export_redacted).toBe(true);
     const downloaded = page.waitForEvent("download");
-    await page.getByRole("button", { name: "Ladda ner bevisunderlag", exact: true }).click();
+    await page
+      .getByRole("region", { name: "Bevisunderlag", exact: true })
+      .getByRole("button", { name: "Ladda ner bevisunderlag", exact: true })
+      .click();
     const download = await downloaded;
     expect(await download.failure()).toBeNull();
     const exported = JSON.parse(
@@ -266,7 +272,10 @@ test(
       path: test.info().outputPath("flow-history-stored-run.png"),
       fullPage: true
     });
-    await page.getByRole("link", { name: published.name, exact: true }).click();
+    await page
+      .getByRole("navigation", { name: "Sökväg", exact: true })
+      .getByRole("link", { name: published.name, exact: true })
+      .click();
     await expect(page).toHaveURL(`${new URL(url, page.url()).href}?tab=runs`);
     await expect(page.getByRole("link", { name: olderLabel, exact: true })).toBeVisible();
     await expect(page.getByRole("link", { name: newerLabel, exact: true })).toBeVisible();
