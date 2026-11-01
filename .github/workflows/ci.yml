@@ -523,7 +523,10 @@ jobs:
     needs: changes
     if: needs.changes.outputs.web_next_e2e == 'true'
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    # Headroom while layout-shift, responsive-contract and responsive-text-size have
+    # no CI timing: a job that times out also loses its !cancelled() report upload.
+    # Tighten it from the first run's leg durations.
+    timeout-minutes: 60
     # The suite outgrew one 45-minute job (run 41297645205). Each leg runs one worker
     # on its own stack. Playwright's --shard balances test counts, but a whole-route
     # walk is one test of 1.5-4 minutes, so two legs take the walks by tag and the

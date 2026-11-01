@@ -198,7 +198,10 @@ are unchanged.
 
 CI enables both backend settings through `docker-compose.e2e.web-app.yml` and
 runs the full browser suite there, including CSP, boot failure and recovery,
-locale, cookie login and cross-origin rejection.
+locale, cookie login and cross-origin rejection. CI splits the suite into three
+legs by tag, each on its own stack: a new whole-route walk adds its tag to a walk
+leg and to the rest leg's exclusion in `.github/workflows/ci.yml`. The commands
+above are unchanged.
 
 The first phase writes `test-results-fastapi/` and the CI HTML report in
 `playwright-report-fastapi/`. The upload phase writes `test-results/upload-worker/`

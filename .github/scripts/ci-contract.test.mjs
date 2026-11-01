@@ -141,8 +141,16 @@ test("web-next runs all browser cases on FastAPI and has no Next runtime job", (
   // A tag that no test carries would quietly move its walk into the rest leg.
   const testsDir = path.join(root, "frontend/apps/web-next/tests");
   const specs = fs.readdirSync(testsDir).filter((file) => file.endsWith(".spec.ts"))
-    .map((file) => fs.readFileSync(path.join(testsDir, file), "utf8")).join("\n");
-  for (const tag of tags) assert.ok(specs.includes(`"${tag}"`), tag);
+    .map((file) => [file, fs.readFileSync(path.join(testsDir, file), "utf8")]);
+  for (const tag of tags) assert.ok(specs.some(([, source]) => source.includes(`"${tag}"`)), tag);
+  // A whole-route walk (a test limit of ten minutes or more) must not land in the rest leg.
+  for (const [file, source] of specs) {
+    const limits = [...source.matchAll(/test\.setTimeout\(([\d_]+)( \* 60_000)?\)/g)]
+      .map(([, value, minutes]) => Number(value.replaceAll("_", "")) * (minutes ? 60_000 : 1));
+    if (limits.some((ms) => ms >= 10 * 60_000)) {
+      assert.ok(tags.some((tag) => source.includes(`"${tag}"`)), `${file}: a route walk without a walk leg's tag`);
+    }
+  }
   const workerIndex = job.indexOf("- name: Start and check the knowledge upload worker");
   assert.ok(workerIndex > job.indexOf("- name: Run E2E and accessibility tests"));
   assert.ok(workerIndex < job.indexOf("- name: Run the native knowledge upload test"));
