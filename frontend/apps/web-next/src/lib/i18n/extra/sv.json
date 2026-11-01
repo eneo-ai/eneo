@@ -1820,5 +1820,16 @@
   "resource_sort": "Sortera",
   "resource_sort_ascending": "Stigande",
   "resource_sort_descending": "Fallande",
-  "resource_filter_results": "Filtrera resultat"
+  "resource_filter_results": "Filtrera resultat",
+  "document_template_status_ready": "Klar",
+  "document_template_status_invalid": "Ogiltig",
+  "document_template_status_unchecked": "Inte kontrollerad",
+  "document_template_name_too_long": "Använd högst {max} tecken.",
+  "document_template_download_builtin": "Ladda ner inbyggd mall",
+  "document_template_builtin_unavailable": "Konfigurera Eneos verktygstjänst för att ladda ner den inbyggda mallen.",
+  "document_template_saved": "Mallen har sparats.",
+  "document_template_removed": "Mallen har tagits bort.",
+  "document_template_download_started": "Nedladdningen av mallen har startat.",
+  "document_template_check_passed": "Godkänd",
+  "document_template_check_failed": "Behöver åtgärdas"
 }

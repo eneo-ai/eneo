@@ -35,6 +35,7 @@ import {
 } from "../mcp/mcp";
 import { bundledIdentity, SOURCE_KINDS, sourceKindOf, type BundledTool } from "./bundled";
 import { CapabilitySourceDialog } from "./capability-source-dialog";
+import { DocumentTemplatesSection } from "./document-templates-section";
 import { RuntimeStatusCard } from "./runtime-status";
 import { TOOLS_TAB_HREF } from "./tools-tabs";
 
@@ -438,6 +439,9 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
                   );
                 })}
               </ul>
+            )}
+            {capability.purpose === "file_creation" && sources.length > 0 && (
+              <DocumentTemplatesSection />
             )}
             {capability.guide && sources.length > 0 && (
               // Usage guidance lives here and in the docs, not in assistant settings.

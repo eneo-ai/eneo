@@ -7062,5 +7062,16 @@
   "resource_sort": "Sort",
   "resource_sort_ascending": "Ascending",
   "resource_sort_descending": "Descending",
-  "resource_filter_results": "Filter results"
+  "resource_filter_results": "Filter results",
+  "document_template_status_ready": "Ready",
+  "document_template_status_invalid": "Invalid",
+  "document_template_status_unchecked": "Unchecked",
+  "document_template_name_too_long": "Use at most {max} characters.",
+  "document_template_download_builtin": "Download built-in template",
+  "document_template_builtin_unavailable": "Configure Eneo’s tool service to download the built-in template.",
+  "document_template_saved": "Template saved.",
+  "document_template_removed": "Template removed.",
+  "document_template_download_started": "Template download started.",
+  "document_template_check_passed": "Passed",
+  "document_template_check_failed": "Needs attention"
 }
