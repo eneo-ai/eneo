@@ -279,10 +279,13 @@ describe("globals.css", () => {
 
   it("hangs a dialog with a text field from the top on touch, under a dvh cap", () => {
     const rules = [...declarationsOf("components", "(pointer: coarse)").entries()].filter(
-      ([selector]) => selector.startsWith(".astryx-dialog:has(")
+      ([selector]) => selector.startsWith(".astryx-dialog:") && selector.includes(":has(")
     );
     expect(rules).toHaveLength(1);
     const [selector, declarations] = rules[0]!;
+    // A full-screen dialog (a phone's whole-screen form) already has the whole visible height and
+    // pads itself: a margin and a cap would take 2rem off the screen it is meant to fill.
+    expect(selector).toContain(':not([data-variant="fullscreen"])');
     for (const field of [
       "input:not(",
       "textarea",

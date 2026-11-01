@@ -1234,23 +1234,24 @@
   /* A dialog with a text field hangs from the top on a touch screen instead of
      centring: the software keyboard rises over the lower half, and a centred
      dialog's field, and the buttons under it, end up behind it. The margin
-     clears the notch; the cap keeps its footer inside the visible height. */
+     clears the notch; the cap keeps its footer inside the visible height. A
+     full-screen dialog already fills the visible height and pads itself. */
   @media (pointer: coarse) {
-    .astryx-dialog:has(
-      input:not(
-        [type="checkbox"],
-        [type="radio"],
-        [type="file"],
-        [type="range"],
-        [type="button"],
-        [type="submit"],
-        [type="hidden"],
-        [type="color"]
-      ),
-      textarea,
-      [contenteditable="true"],
-      [role="combobox"]
-    ) {
+    .astryx-dialog:not([data-variant="fullscreen"]):has(
+        input:not(
+          [type="checkbox"],
+          [type="radio"],
+          [type="file"],
+          [type="range"],
+          [type="button"],
+          [type="submit"],
+          [type="hidden"],
+          [type="color"]
+        ),
+        textarea,
+        [contenteditable="true"],
+        [role="combobox"]
+      ) {
       margin-block: max(1rem, env(safe-area-inset-top, 0px)) auto;
       max-height: calc(100dvh - max(1rem, env(safe-area-inset-top, 0px)) - 1rem);
     }
