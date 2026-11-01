@@ -705,7 +705,7 @@ function McpServersSection() {
           <fieldset className="flex flex-col gap-2" aria-label={t("mcp_servers")}>
             {candidates.map((server) => {
               const reason = !server.is_available
-                ? t(readinessKey(server.readiness_reason ?? "server_disabled"))
+                ? t(readinessKey(server.readiness_reason))
                 : space.security_classification &&
                     (!server.security_classification ||
                       server.security_classification.security_level <

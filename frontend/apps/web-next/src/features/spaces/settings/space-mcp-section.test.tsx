@@ -287,6 +287,7 @@ it("blocks classified additions, keeps saved unavailable resources removable and
   expect(api.PATCH).not.toHaveBeenCalled();
   expect(screen.queryByRole("switch", { name: "Funktionskälla" })).toBeNull();
   const missingSwitch = screen.getByRole("switch", { name: "Saknad server" });
+  expect(screen.getByText("Källan är inte tillgänglig.", { selector: "p" })).toBeTruthy();
   const tools = await expand("Saknad server");
   fireEvent.click(within(tools).getByRole("switch", { name: "Saknat verktyg" }));
   await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
