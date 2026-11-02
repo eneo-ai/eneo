@@ -351,7 +351,9 @@ const TOUCH_LAYOUTS = [
 ] as const;
 
 for (const colorScheme of ["light", "dark"] as const) {
-  test.describe(`WCAG 2.2 AA, ${colorScheme} mode`, () => {
+  // CI runs the two colour schemes in different legs (ci.yml).
+  const tag = colorScheme === "light" ? "@a11y-light" : "@a11y-dark";
+  test.describe(`WCAG 2.2 AA, ${colorScheme} mode`, { tag }, () => {
     // Reduced motion: no fade-ins mid-scan, so contrast is measured at rest.
     test.use({ colorScheme, contextOptions: { reducedMotion: "reduce" } });
 
