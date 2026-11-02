@@ -1,5 +1,3 @@
-"use client";
-
 import { useMergedRefs } from "@astryxdesign/core/hooks";
 import {
   TextInput as AstryxTextInput,

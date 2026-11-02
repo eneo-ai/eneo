@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useLocale, useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";

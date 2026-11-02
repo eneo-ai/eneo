@@ -1,5 +1,3 @@
-"use client";
-
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { useTranslations } from "use-intl";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";

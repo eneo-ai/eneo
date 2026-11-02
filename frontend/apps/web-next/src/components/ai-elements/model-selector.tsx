@@ -1,5 +1,3 @@
-"use client";
-
 import { modelDisplayName } from "@/lib/models/model-display-name";
 import {
   Selector,

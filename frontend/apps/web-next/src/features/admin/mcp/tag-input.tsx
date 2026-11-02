@@ -1,5 +1,3 @@
-"use client";
-
 import { X } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { type KeyboardEvent, useState } from "react";

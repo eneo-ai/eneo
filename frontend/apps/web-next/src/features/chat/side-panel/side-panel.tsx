@@ -1,5 +1,3 @@
-"use client";
-
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Activity, FileText, PanelRightOpen } from "lucide-react";
 import { useTranslations } from "use-intl";

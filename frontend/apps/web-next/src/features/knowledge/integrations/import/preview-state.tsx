@@ -1,5 +1,3 @@
-"use client";
-
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
 import { ListError } from "@/components/composites/query-state";

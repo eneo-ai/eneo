@@ -1,5 +1,3 @@
-"use client";
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleAlert, Database, HardDrive, Info, RefreshCw } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";

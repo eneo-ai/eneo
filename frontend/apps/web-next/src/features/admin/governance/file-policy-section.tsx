@@ -1,5 +1,3 @@
-"use client";
-
 import { Paperclip } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { Label } from "@/components/ui/label";

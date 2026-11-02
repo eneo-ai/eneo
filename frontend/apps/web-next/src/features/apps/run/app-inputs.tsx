@@ -1,5 +1,3 @@
-"use client";
-
 import type { App } from "../apps";
 import { AudioRecorderInput } from "./audio-recorder-input";
 import { TextInput } from "./text-input";

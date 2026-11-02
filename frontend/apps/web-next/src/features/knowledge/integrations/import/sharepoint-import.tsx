@@ -1,5 +1,3 @@
-"use client";
-
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Spinner } from "@astryxdesign/core/Spinner";

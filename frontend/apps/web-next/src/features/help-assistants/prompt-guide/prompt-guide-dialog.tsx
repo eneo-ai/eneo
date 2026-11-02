@@ -1,5 +1,3 @@
-"use client";
-
 import { Spinner } from "@astryxdesign/core/Spinner";
 import {
   Check,

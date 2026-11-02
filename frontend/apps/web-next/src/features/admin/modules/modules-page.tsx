@@ -1,5 +1,3 @@
-"use client";
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";

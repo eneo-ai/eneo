@@ -1,5 +1,3 @@
-"use client";
-
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { CircleHelp } from "lucide-react";

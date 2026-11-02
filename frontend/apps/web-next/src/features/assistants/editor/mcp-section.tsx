@@ -1,5 +1,3 @@
-"use client";
-
 import { ChevronRight, LockKeyhole } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";

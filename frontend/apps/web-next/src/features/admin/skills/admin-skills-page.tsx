@@ -1,5 +1,3 @@
-"use client";
-
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, RotateCcw } from "lucide-react";

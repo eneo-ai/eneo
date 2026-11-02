@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { ChevronRight, Plus, Sparkles } from "lucide-react";
 import { useTranslations } from "use-intl";

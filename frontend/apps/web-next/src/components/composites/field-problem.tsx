@@ -1,5 +1,3 @@
-"use client";
-
 import { FieldStatus } from "@astryxdesign/core/FieldStatus";
 import { flushSync } from "react-dom";
 

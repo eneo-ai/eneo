@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { Button } from "@/components/ui/button";
 import Link from "@/lib/link";

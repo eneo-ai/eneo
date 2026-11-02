@@ -1,5 +1,3 @@
-"use client";
-
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";

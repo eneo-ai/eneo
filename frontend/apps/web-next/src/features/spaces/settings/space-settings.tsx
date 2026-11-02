@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge } from "@astryxdesign/core/Badge";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Switch as SettingSwitch } from "@/components/astryx/switch";

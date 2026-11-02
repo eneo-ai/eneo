@@ -1,5 +1,3 @@
-"use client";
-
 import { AlertCircle, Cpu } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";

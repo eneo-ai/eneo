@@ -1,5 +1,3 @@
-"use client";
-
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { Badge } from "@astryxdesign/core/Badge";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";

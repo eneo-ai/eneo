@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";

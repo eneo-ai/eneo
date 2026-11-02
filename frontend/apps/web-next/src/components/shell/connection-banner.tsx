@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { QuietBanner } from "@/components/astryx/banner";
 import { useAnnounceChange } from "@/lib/hooks/use-announce-change";

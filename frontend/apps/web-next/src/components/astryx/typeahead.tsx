@@ -1,5 +1,3 @@
-"use client";
-
 import {
   Typeahead as AstryxTypeahead,
   type SearchableItem,

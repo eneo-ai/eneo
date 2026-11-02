@@ -1,5 +1,3 @@
-"use client";
-
 import type { LucideIcon } from "lucide-react";
 import Link from "@/lib/link";
 import type { ReactNode } from "react";

@@ -1,5 +1,3 @@
-"use client";
-
 import { SideNavItem, useSideNavRenderMode } from "@astryxdesign/core/SideNav";
 import { Building2, CircleHelp, ExternalLink, Shield } from "lucide-react";
 import { useTranslations } from "use-intl";

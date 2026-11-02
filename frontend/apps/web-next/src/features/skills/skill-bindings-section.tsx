@@ -1,5 +1,3 @@
-"use client";
-
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Plus, RefreshCw, Trash2 } from "lucide-react";
 import Link from "@/lib/link";

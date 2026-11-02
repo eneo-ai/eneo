@@ -1,5 +1,3 @@
-"use client";
-
 import { LoadMore, QueryStateBoundary } from "@/components/composites/query-state";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import {

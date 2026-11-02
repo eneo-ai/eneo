@@ -1,5 +1,3 @@
-"use client";
-
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { TextInput } from "@/components/astryx/text-input";
 import { ToggleButton } from "@astryxdesign/core/ToggleButton";

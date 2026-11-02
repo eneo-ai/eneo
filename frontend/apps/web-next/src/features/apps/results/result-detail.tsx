@@ -1,5 +1,3 @@
-"use client";
-
 import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Button } from "@astryxdesign/core/Button";

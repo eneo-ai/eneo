@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import type { ConfirmKey } from "./policy-draft";

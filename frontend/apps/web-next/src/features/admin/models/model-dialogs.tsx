@@ -1,5 +1,3 @@
-"use client";
-
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";

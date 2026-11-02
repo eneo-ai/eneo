@@ -1,5 +1,3 @@
-"use client";
-
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { ListItem } from "@astryxdesign/core/List";
 import { useAnnounce } from "@astryxdesign/core/hooks";

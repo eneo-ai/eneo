@@ -1,5 +1,3 @@
-"use client";
-
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { ToggleButton, ToggleButtonGroup } from "@astryxdesign/core/ToggleButton";
 import { Activity, AppWindow, Check, Download, Search } from "lucide-react";

@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { useImperativeHandle, useState, type Ref } from "react";
 import { useLeaveConfirmation } from "@/lib/navigation";

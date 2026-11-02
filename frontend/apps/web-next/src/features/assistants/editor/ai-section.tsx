@@ -1,4 +1,3 @@
-"use client";
 import { Brain, Eye, Wrench } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { Button as RetryButton } from "@astryxdesign/core/Button";

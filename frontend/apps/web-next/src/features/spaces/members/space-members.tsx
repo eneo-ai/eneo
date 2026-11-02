@@ -1,5 +1,3 @@
-"use client";
-
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button as AstryxButton } from "@astryxdesign/core/Button";

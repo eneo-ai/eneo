@@ -1,5 +1,3 @@
-"use client";
-
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";

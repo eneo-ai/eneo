@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { ChevronRight } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";

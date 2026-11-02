@@ -1,5 +1,3 @@
-"use client";
-
 import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";

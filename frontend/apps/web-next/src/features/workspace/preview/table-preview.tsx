@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { Tab, TabList } from "@astryxdesign/core/TabList";

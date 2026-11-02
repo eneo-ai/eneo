@@ -1,5 +1,3 @@
-"use client";
-
 import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { adminNavGroups } from "@/components/shell/admin-nav-items";

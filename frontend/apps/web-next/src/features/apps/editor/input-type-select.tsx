@@ -1,5 +1,3 @@
-"use client";
-
 import { Edit, FileAudio, FileImage, FileText, Mic } from "lucide-react";
 import { useTranslations } from "use-intl";
 import {

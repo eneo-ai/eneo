@@ -1,5 +1,3 @@
-"use client";
-
 import { useCollator } from "@astryxdesign/core/i18n";
 import { Bot, SearchX } from "lucide-react";
 import { useTranslations } from "use-intl";

@@ -1,5 +1,3 @@
-"use client";
-
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useTranslations } from "use-intl";
 import type { SpaceSection, SpaceSectionId } from "./space-sections";

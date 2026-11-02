@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";

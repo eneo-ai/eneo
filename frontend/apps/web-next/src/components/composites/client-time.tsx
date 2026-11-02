@@ -1,5 +1,3 @@
-"use client";
-
 import { useLocale } from "@astryxdesign/core/i18n";
 import { Timestamp } from "@astryxdesign/core/Timestamp";
 

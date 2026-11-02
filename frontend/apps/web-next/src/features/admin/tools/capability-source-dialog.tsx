@@ -1,5 +1,3 @@
-"use client";
-
 import { invalidateSpaces } from "@/features/spaces/space";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";

@@ -1,5 +1,3 @@
-"use client";
-
 import { useNow, useTranslations } from "use-intl";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Tab, TabList } from "@astryxdesign/core/TabList";

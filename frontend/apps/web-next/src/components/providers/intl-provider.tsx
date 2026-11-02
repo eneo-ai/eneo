@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { IntlProvider, type AbstractIntlMessages } from "use-intl";
 

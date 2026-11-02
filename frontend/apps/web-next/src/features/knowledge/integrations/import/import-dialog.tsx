@@ -1,5 +1,3 @@
-"use client";
-
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";

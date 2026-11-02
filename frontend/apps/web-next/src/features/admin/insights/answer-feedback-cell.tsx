@@ -1,5 +1,3 @@
-"use client";
-
 import { ThumbsDown, ThumbsUp } from "lucide-react";
 import { useTranslations } from "use-intl";
 import type { Schema } from "@/lib/api/models";

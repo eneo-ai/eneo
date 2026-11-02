@@ -1,5 +1,3 @@
-"use client";
-
 import { Card } from "@astryxdesign/core/Card";
 import { useTranslations } from "use-intl";
 import type { ReactNode, Ref } from "react";

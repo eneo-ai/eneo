@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, LayoutTemplate } from "lucide-react";
 import { useRouter } from "@/lib/navigation";

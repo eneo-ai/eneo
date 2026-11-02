@@ -1,5 +1,3 @@
-"use client";
-
 import { useSyncExternalStore } from "react";
 import { createApiEventSource, JOB_EVENTS_PATH, type ApiEventSource } from "@/lib/api/base";
 import type { Job } from "./jobs";

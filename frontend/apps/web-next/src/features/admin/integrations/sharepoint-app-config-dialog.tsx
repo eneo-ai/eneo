@@ -1,5 +1,3 @@
-"use client";
-
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import {

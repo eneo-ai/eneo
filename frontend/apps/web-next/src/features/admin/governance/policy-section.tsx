@@ -1,5 +1,3 @@
-"use client";
-
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
 import type { BadgeVariant } from "./use-policy-draft";

@@ -1,5 +1,3 @@
-"use client";
-
 import { FileCheck2 } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { formatBytes } from "@/lib/format";

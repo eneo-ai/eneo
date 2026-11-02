@@ -1,5 +1,3 @@
-"use client";
-
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextInput } from "@/components/astryx/text-input";
 import { Search } from "lucide-react";

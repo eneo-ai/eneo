@@ -1,5 +1,3 @@
-"use client";
-
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Dialog as AstryxDialog } from "@astryxdesign/core/Dialog";
 import { useMergedRefs } from "@astryxdesign/core/hooks";

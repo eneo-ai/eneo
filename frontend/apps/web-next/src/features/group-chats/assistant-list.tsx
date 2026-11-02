@@ -1,5 +1,3 @@
-"use client";
-
 import { Bot, Pencil, Plus, Trash2 } from "lucide-react";
 import { Button as FormButton } from "@astryxdesign/core/Button";
 import { TextArea } from "@astryxdesign/core/TextArea";

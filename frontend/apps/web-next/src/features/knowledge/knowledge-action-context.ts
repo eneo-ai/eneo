@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, type RefObject } from "react";
 import type { Collection, IntegrationKnowledge, Website } from "./knowledge";
 

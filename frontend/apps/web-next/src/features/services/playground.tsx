@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation } from "@tanstack/react-query";
 import { Check, Copy } from "lucide-react";
 import { useTranslations } from "use-intl";

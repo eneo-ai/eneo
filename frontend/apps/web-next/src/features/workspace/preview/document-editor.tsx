@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import type { Editor } from "@tiptap/core";
 import { TextSelection } from "@tiptap/pm/state";

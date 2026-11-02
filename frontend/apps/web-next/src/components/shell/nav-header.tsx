@@ -1,5 +1,3 @@
-"use client";
-
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { useSideNavCollapse } from "@astryxdesign/core/SideNav";

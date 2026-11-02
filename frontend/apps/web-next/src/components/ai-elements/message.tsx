@@ -1,5 +1,3 @@
-"use client";
-
 import { cn } from "@/lib/utils";
 import { sanitizeImageSrc, sanitizeLinkHref } from "@/lib/safe-url";
 import { toast } from "@/lib/toast";

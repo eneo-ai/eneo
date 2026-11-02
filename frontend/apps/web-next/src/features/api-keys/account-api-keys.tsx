@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@astryxdesign/core/Button";
 import { Bell } from "lucide-react";

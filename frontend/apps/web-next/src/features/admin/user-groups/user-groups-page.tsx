@@ -1,5 +1,3 @@
-"use client";
-
 import { Avatar } from "@astryxdesign/core/Avatar";
 import { AvatarGroup, AvatarGroupOverflow } from "@astryxdesign/core/AvatarGroup";
 import { Button } from "@astryxdesign/core/Button";

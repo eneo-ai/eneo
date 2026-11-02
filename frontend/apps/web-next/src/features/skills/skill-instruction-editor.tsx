@@ -1,5 +1,3 @@
-"use client";
-
 import { AtSign, Code } from "lucide-react";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { Button } from "@astryxdesign/core/Button";

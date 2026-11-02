@@ -1,5 +1,3 @@
-"use client";
-
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { FileText, Search } from "lucide-react";

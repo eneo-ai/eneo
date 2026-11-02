@@ -1,5 +1,3 @@
-"use client";
-
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef } from "react";
