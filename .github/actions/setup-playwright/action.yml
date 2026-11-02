@@ -1,5 +1,5 @@
 name: Set up Playwright Chromium
-description: Install lockfile-matched Chromium from a per-version cache and its system libraries with bounded network retries.
+description: Install lockfile-matched Chromium from a per-version cache and its missing system libraries with bounded, retried downloads.
 inputs:
   working-directory:
     description: Workspace containing the installed Playwright CLI.
@@ -19,20 +19,20 @@ runs:
       with:
         path: ~/.cache/ms-playwright
         key: playwright-${{ runner.os }}-${{ runner.arch }}-${{ steps.playwright.outputs.version }}-chromium
+    # Playwright simulates its install (`apt-get install -s`) against the
+    # runner's package index and lists only the libraries that are missing.
     - name: Install system libraries
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       run: |
-        # apt retries transient downloads, and its timeouts catch a stalled
-        # connection. The job's timeout-minutes bounds a mirror that is slow but
-        # still progressing: a step deadline would kill downloads that would
-        # have succeeded, and an interrupted dpkg transaction is unsafe to rerun.
-        sudo tee /etc/apt/apt.conf.d/80-eneo-ci-network >/dev/null <<'APT'
-        Acquire::Retries "2";
-        Acquire::http::Timeout "30";
-        Acquire::https::Timeout "30";
-        APT
-        bun run --bun playwright install-deps chromium
+        report="$(bun run --bun playwright install-deps --dry-run chromium 2>&1)" || true
+        echo "$report"
+        if ! grep -qE '^(Missing system dependencies|All system dependencies are installed)' <<< "$report"; then
+          echo "::error::Playwright did not report its missing system libraries."
+          exit 1
+        fi
+        mapfile -t missing < <(sed -n 's/^  \([a-z0-9][a-z0-9.+:-]*\)$/\1/p' <<< "$report")
+        "$GITHUB_WORKSPACE/.github/scripts/ci-apt-install.sh" "${missing[@]}"
     - name: Install Chromium
       if: steps.cache.outputs.cache-hit != 'true'
       shell: bash
