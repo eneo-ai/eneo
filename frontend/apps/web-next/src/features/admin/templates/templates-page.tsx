@@ -22,7 +22,7 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, RotateCcw, Star, Trash2 } from "lucide-react";
 import { useTranslations } from "use-intl";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import { Banner } from "@astryxdesign/core/Banner";
 import { Table } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";
@@ -30,13 +30,11 @@ import { ConfirmDialog, ConfirmDialogControlled } from "@/components/composites/
 import { EmptyState } from "@/components/composites/empty-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
-import { useAppContext } from "@/components/providers/app-context";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { useRouter } from "@/lib/navigation";
 import { matchesSearch } from "@/lib/search";
 import { INPUT_TYPE_META, isInputFieldType } from "@/features/apps/editor/input-type-select";
 import { RemovalFocusScope, useRemovalMutation } from "@/features/spaces/removal";
@@ -632,7 +630,12 @@ function DeletedTemplates() {
   );
 }
 
-function TemplatesAdmin() {
+/**
+ * Template administration: create and edit assistant and app templates, mark
+ * one as the featured default, soft-delete, and restore or permanently remove
+ * deleted ones. The route opens it only while the organisation uses templates.
+ */
+export function TemplatesPage() {
   const t = useTranslations();
   const headingRef = useRef<HTMLHeadingElement>(null);
   const { data: assistantTemplates } = useSuspenseQuery(assistantTemplatesQueryOptions(browserApi));
@@ -693,22 +696,4 @@ function TemplatesAdmin() {
       )}
     </div>
   );
-}
-
-/**
- * Template administration: create and edit assistant and app templates, mark
- * one as the featured default, soft-delete, and restore or permanently remove
- * deleted ones. Only while the organisation uses templates: otherwise it sends
- * the admin to /admin, as the Svelte admin/templates layout does.
- */
-export function TemplatesPage() {
-  const { settings } = useAppContext();
-  const router = useRouter();
-  const enabled = settings.using_templates === true;
-
-  useEffect(() => {
-    if (!enabled) router.replace("/admin");
-  }, [enabled, router]);
-
-  return enabled ? <TemplatesAdmin /> : null;
 }
