@@ -21,11 +21,8 @@ const BUDGET = 0.1;
 const SETTLE_MS = 3000;
 /**
  * route pattern → budget, with the reason. Fix instead of adding to this.
- * /admin/templates: with templates off the route redirects to the overview, and one
- * screen's page bar is swapped for the other's top bar (56 px) after the first paint.
- * Nothing links to it in that state, so only a typed address gets there.
  */
-const EXCEPTIONS: Record<string, number> = { "/admin/templates": 0.15 };
+const EXCEPTIONS: Record<string, number> = {};
 
 const PROBE = `
   window.__shifts = { total: 0, entries: [] };
