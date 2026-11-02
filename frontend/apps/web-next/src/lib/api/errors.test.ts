@@ -179,6 +179,32 @@ describe("getErrorMessage", () => {
     }
   });
 
+  it("asks to wait on a rate-limit refusal, not to contact an administrator about a quota", () => {
+    // The shared limiter's flat 429 body; the envelope fills 9008 as the 429 default.
+    const limited = apiErrorFromResponse(errorResponse(429, { "Retry-After": "12" }), {
+      code: "rate_limit_exceeded",
+      message: "Too many requests",
+      retry_after_seconds: 12,
+      eneo_error_code: 9008,
+      request_id: "req-1",
+      detail: { code: "rate_limit_exceeded", message: "Too many requests", retry_after_seconds: 12 }
+    });
+    expect(getErrorMessage(limited, translator("sv", sv))).toBe(
+      "För många förfrågningar just nu. Vänta en stund och försök igen."
+    );
+    expect(getErrorMessage(limited, translator("en", en))).toBe(
+      "Too many requests right now. Wait a moment and try again."
+    );
+
+    // Genuine quota exhaustion keeps its quota sentence.
+    const quota = apiErrorFromResponse(errorResponse(403), {
+      message: "Quota exceeded",
+      eneo_error_code: 9008
+    });
+    expect(getErrorMessage(quota, translator("sv", sv))).toBe(sv.eneo_error_9008);
+    expect(getErrorMessage(quota, translator("en", en))).toBe(en.eneo_error_9008);
+  });
+
   it("falls back to the backend message for unmapped codes", () => {
     const error = new EneoApiError("Crawl already running", { status: 400, code: 9021 });
     expect(getErrorMessage(error, t)).toBe("Crawl already running");

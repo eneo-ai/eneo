@@ -3,8 +3,11 @@
  * showed the backend's raw JSON), with the technical facts kept for the
  * details disclosure.
  */
+import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
-import { EneoApiError } from "@/lib/api/errors";
+import { apiErrorFromResponse, EneoApiError } from "@/lib/api/errors";
+import en from "@/lib/i18n/messages/en.json";
+import sv from "@/lib/i18n/messages/sv.json";
 import { describeChatFailure, getContextErrorInfo } from "./chat-error";
 import { StreamContractError } from "./transport";
 
@@ -20,7 +23,7 @@ describe("describeChatFailure", () => {
       [413, "chat_error_too_large"],
       [400, "chat_error_invalid"],
       [422, "chat_error_invalid"],
-      [429, "chat_error_rate_limited"],
+      [429, "request_rate_limited"],
       [500, "chat_error_server"],
       [503, "chat_error_server"],
       [418, "request_failed"]
@@ -53,6 +56,34 @@ describe("describeChatFailure", () => {
         JSON.stringify({ message: "Refused", eneo_error_code: 9008, code: reason })
       );
       expect(describeChatFailure(json, null, t).message).toBe(key);
+    }
+  });
+
+  it("asks to wait on a rate-limited question in both languages, as every 429 does", () => {
+    const body = {
+      code: "rate_limit_exceeded",
+      message: "Too many requests",
+      retry_after_seconds: 12,
+      eneo_error_code: 9008,
+      request_id: "req-1",
+      detail: { code: "rate_limit_exceeded", message: "Too many requests", retry_after_seconds: 12 }
+    };
+    const refused = apiErrorFromResponse(new Response(null, { status: 429 }), body);
+    const sdkStyle = new Error(JSON.stringify(body));
+    for (const [locale, messages, sentence] of [
+      ["sv", sv, "För många förfrågningar just nu. Vänta en stund och försök igen."],
+      ["en", en, "Too many requests right now. Wait a moment and try again."]
+    ] as const) {
+      const translate = createTranslator({
+        locale,
+        messages: messages as Record<string, string>
+      });
+      expect(describeChatFailure(refused, null, translate).message).toBe(sentence);
+      expect(describeChatFailure(sdkStyle, null, translate).message).toBe(sentence);
+      // A 429 without a reason reaches the same sentence through its status.
+      expect(
+        describeChatFailure(new EneoApiError("Too many", { status: 429 }), null, translate).message
+      ).toBe(sentence);
     }
   });
 

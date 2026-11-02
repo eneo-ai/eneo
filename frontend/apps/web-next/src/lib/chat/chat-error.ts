@@ -121,7 +121,7 @@ function sentenceForStatus(status: number, t: Translate): string {
   if (status === 404) return t("chat_error_not_found");
   if (status === 413) return t("chat_error_too_large");
   if (status === 400 || status === 422) return t("chat_error_invalid");
-  if (status === 429) return t("chat_error_rate_limited");
+  if (status === 429) return t("request_rate_limited");
   if (status >= 500) return t("chat_error_server");
   return t("request_failed");
 }
