@@ -355,8 +355,9 @@ describe("FlowRunsList", () => {
       has_more: true,
       status_counts: NO_COUNTS
     };
+    let older: { status?: number; body: unknown } = { status: 503, body: { message: "Busy" } };
     state.routes[LIST] = (init: { params: { query: { offset: number } } }) =>
-      init.params.query.offset === 0 ? { body: first } : { status: 503, body: { message: "Busy" } };
+      init.params.query.offset === 0 ? { body: first } : older;
     renderInApp(<List />);
     const table = await screen.findByRole("table");
     fireEvent.click(screen.getByRole("button", { name: messages.flow_runs_show_more }));
@@ -364,6 +365,31 @@ describe("FlowRunsList", () => {
     expect(await screen.findByText(messages.query_error_load_more_title)).toBeTruthy();
     expect(within(table).getAllByRole("row")).toHaveLength(2);
     expect(screen.queryByText(messages.flow_runs_list_failed)).toBeNull();
+
+    older = {
+      body: {
+        count: 1,
+        items: [makeRunSummary({ id: "run-0" })],
+        has_more: false,
+        status_counts: null
+      }
+    };
+    fireEvent.click(
+      screen.getByRole("button", {
+        name: messages.query_error_retry_named.replace(
+          "{section}",
+          messages.query_error_load_more_title
+        )
+      })
+    );
+    await vi.waitFor(() => expect(within(table).getAllByRole("row")).toHaveLength(3));
+    expect(listCalls()).toHaveLength(3);
+    expect(listCalls()[2]?.init.params?.query).toEqual({
+      ...FIRST_PAGE,
+      offset: 25,
+      include_status_counts: false
+    });
+    expect(screen.queryByText(messages.query_error_load_more_title)).toBeNull();
   });
 
   it("counts on the first page only, and keeps those counts fresh while it polls", async () => {
