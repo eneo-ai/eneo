@@ -1,4 +1,9 @@
-import { expect, test as base, type Page } from "@playwright/test";
+import { expect, test as base, type Cookie, type Page } from "@playwright/test";
+import { STORAGE_STATE } from "../playwright.config";
+import { E2E_CREDENTIALS } from "./helpers";
+
+const SESSION_COOKIES = /^(eneo_web|__Host-eneo_web)$/;
+const SAME_ORIGIN = { "Sec-Fetch-Site": "same-origin" };
 
 /**
  * Playwright's `test`, failing any test during which a page broke the
@@ -15,8 +20,20 @@ import { expect, test as base, type Page } from "@playwright/test";
  *
  * Specs use it by importing from here instead of from "@playwright/test":
  * `import { expect, test } from "./csp";`
+ *
+ * Every test also shares one browser session (auth.setup.ts), and sign-out
+ * revokes a session on the server. A test that ends its session (signs out,
+ * switches organisation) names `ownSession` to sign in a session of its own
+ * first; `ownSession.cookies()` reads that session's cookie. Before and after
+ * each test, `sharedSession` checks that the shared session still
+ * authenticates, so a test that ended it fails itself and the tests after it
+ * fail at once instead of timing out.
  */
-export const test = base.extend<{ cspViolations: string[] }>({
+export const test = base.extend<{
+  cspViolations: string[];
+  ownSession: { cookies: () => Promise<Cookie[]> };
+  sharedSession: void;
+}>({
   // Wait for React to mount before interacting with the page.
   // `run`, not `use`: the hooks lint rule would treat use(page) as a hook.
   page: async ({ page }, run) => {
@@ -64,6 +81,40 @@ export const test = base.extend<{ cspViolations: string[] }>({
       });
       await use(violations);
       expect(violations, "Content-Security-Policy violations").toEqual([]);
+    },
+    { auto: true }
+  ],
+  // The password sign-in the login page makes, in place of the shared cookie.
+  ownSession: async ({ context }, run) => {
+    await context.clearCookies({ name: SESSION_COOKIES });
+    const signIn = await context.request.post("/api/v1/auth/session/password/", {
+      form: E2E_CREDENTIALS,
+      headers: SAME_ORIGIN
+    });
+    expect(signIn.status(), "The test's own sign-in").toBe(204);
+    await run({
+      cookies: async () =>
+        (await context.cookies()).filter((cookie) => SESSION_COOKIES.test(cookie.name))
+    });
+  },
+  sharedSession: [
+    async ({ playwright, baseURL }, run) => {
+      const shared = await playwright.request.newContext({ baseURL, storageState: STORAGE_STATE });
+      const authenticates = async () =>
+        (await shared.get("/api/v1/auth/session/", { headers: SAME_ORIGIN })).status() === 204;
+      try {
+        expect(
+          await authenticates(),
+          "The suite's shared session (auth.setup.ts) ended before this test"
+        ).toBe(true);
+        await run();
+        expect(
+          await authenticates(),
+          "This test ended the suite's shared session: a test that ends its session uses ownSession"
+        ).toBe(true);
+      } finally {
+        await shared.dispose();
+      }
     },
     { auto: true }
   ]
