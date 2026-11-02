@@ -659,7 +659,7 @@ describe("the add-model wizard's catalog", () => {
 
     for (const name of [/gpt-5/, /kommun-llama/]) {
       const checkbox = within(dialog).getByRole("checkbox", { name }) as HTMLInputElement;
-      expect(checkbox.disabled).toBe(true);
+      expect(checkbox.getAttribute("aria-disabled")).toBe("true");
       // Said in words, not only by the dimmed box.
       expect(description(checkbox)).toContain("Tillagd");
     }
@@ -674,7 +674,7 @@ describe("the add-model wizard's catalog", () => {
 
     for (const name of [/gpt-5/, /kommun-llama/]) {
       const checkbox = within(dialog).getByRole("checkbox", { name }) as HTMLInputElement;
-      expect(checkbox.disabled).toBe(false);
+      expect(checkbox.hasAttribute("aria-disabled")).toBe(false);
     }
     expect(within(dialog).queryByText(/Tillagd/)).toBeNull();
   });

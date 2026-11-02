@@ -230,7 +230,7 @@ export function OutboundHeadersEditor({
                     onChange={(name) => update({ ...row, name })}
                     autoComplete="off"
                     isRequired
-                    className="min-w-0 flex-1"
+                    containerClassName="min-w-0 flex-1"
                     placeholder={t("outbound_headers_name_placeholder")}
                     status={
                       showErrors && !row.name.trim()

@@ -481,7 +481,7 @@ function KeyFilterForm({
           onChange={(user) => update({ user })}
           minQueryLength={MIN_SEARCH_LENGTH}
           debounceMs={SEARCH_DEBOUNCE_MS}
-          emptySearchResultsText={t("audit_user_search_empty")}
+          emptySearchText={t("audit_user_search_empty")}
           hasClear
           width="100%"
         />

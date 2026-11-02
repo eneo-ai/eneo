@@ -653,7 +653,7 @@ function AllowlistField({
         debounceMs={0}
         isRequired={isRequired}
         isOptional={!isRequired}
-        emptySearchResultsText={t("no_results")}
+        emptySearchText={t("no_results")}
         status={problem ? { type: "error", message: problem } : undefined}
         width="100%"
         // Origins and addresses: the URL keyboard has the dots, colons and slashes.

@@ -1,4 +1,4 @@
-import { Banner } from "@astryxdesign/core/Banner";
+import { AnnouncedBanner } from "@/components/astryx/banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
 import { visibleEntries, type Release } from "@eneo/whats-new";
@@ -80,7 +80,7 @@ function ReleaseBanner({
 
   return (
     <div className="w-full">
-      <Banner
+      <AnnouncedBanner
         status="info"
         title={t("whats_new_announcement_heading")}
         description={t("whats_new_banner_description", { count: entries.length })}

@@ -237,10 +237,18 @@ export async function searchEntries(
   perGroup = 6
 ): Promise<PaletteEntry[]> {
   if (!query.trim()) return bootstrapEntries(entries);
-  const source = createStaticSource(entries, {
-    keywords: (entry) => [entry.subtitle ?? "", ...(entry.keywords ?? [])]
-  });
-  return limitPerGroup(await source.search(query), perGroup);
+  // Wrapped: an Astryx item's own `action` is a ReactNode, not our action.
+  const source = createStaticSource(
+    entries.map((entry) => ({ id: entry.id, label: entry.label, auxiliaryData: entry })),
+    {
+      keywords: ({ auxiliaryData: entry }) => [entry.subtitle ?? "", ...(entry.keywords ?? [])]
+    }
+  );
+  const matches = await source.search(query);
+  return limitPerGroup(
+    matches.map((item) => item.auxiliaryData),
+    perGroup
+  );
 }
 
 /** Splits text around the first occurrence of the query, for match highlighting. */

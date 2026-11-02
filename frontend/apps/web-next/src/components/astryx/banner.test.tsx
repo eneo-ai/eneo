@@ -4,13 +4,10 @@ import { screen } from "@testing-library/react";
 import { createRef } from "react";
 import { expect, it } from "vitest";
 import { renderInApp } from "@/test/render";
-import { QuietBanner } from "./banner";
+import { AnnouncedBanner, QuietBanner } from "./banner";
 
-// Astryx 0.6.4 makes an error banner an assertive alert. When it stops doing
-// so, QuietBanner and this test can go.
-it("is Astryx's error banner without the alert role that reads it out on every mount", () => {
+it("is Astryx's error banner, which is not a live region", () => {
   renderInApp(<Banner status="error" title="Astryx" collapsible={false} />);
-  expect(screen.getByRole("alert").textContent).toContain("Astryx");
 
   const ref = createRef<HTMLDivElement>();
   renderInApp(
@@ -25,10 +22,18 @@ it("is Astryx's error banner without the alert role that reads it out on every m
     />
   );
 
-  expect(screen.getAllByRole("alert")).toHaveLength(1);
+  expect(screen.queryAllByRole("alert")).toHaveLength(0);
   expect(ref.current?.hasAttribute("role")).toBe(false);
   expect(ref.current?.getAttribute("tabindex")).toBe("-1");
   expect(ref.current?.textContent).toContain("Synken misslyckades");
   expect(ref.current?.textContent).toContain("Se vad som hände under Problem.");
   expect(screen.getByRole("button", { name: "Visa problem" })).toBeTruthy();
+});
+
+it("makes an outcome banner an alert, as Astryx 0.6 did for errors and warnings", () => {
+  renderInApp(<AnnouncedBanner status="error" title="Det gick inte att spara" />);
+  renderInApp(<AnnouncedBanner status="info" title="Sparat" />);
+
+  expect(screen.getByText("Det gick inte att spara").closest('[role="alert"]')).not.toBeNull();
+  expect(screen.getByText("Sparat").closest('[role="status"]')).not.toBeNull();
 });

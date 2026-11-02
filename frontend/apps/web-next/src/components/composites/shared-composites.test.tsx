@@ -149,9 +149,8 @@ describe("LoadingState", () => {
         <LoadingState rows={2} />
       </IntlProvider>
     );
-    const region = screen.getByRole("status");
-    expect(region.getAttribute("aria-busy")).toBe("true");
-    expect(within(region).getByText("Laddar...")).toBeTruthy();
+    const region = screen.getByText("Laddar...").closest('[role="status"]');
+    expect(region?.getAttribute("aria-busy")).toBe("true");
   });
 });
 

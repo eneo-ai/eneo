@@ -629,7 +629,8 @@ describe("KnowledgePage", () => {
     });
     await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
 
-    await waitFor(() => expect(liveRegion()?.textContent).toBe("2 källor uppdateras inte"));
+    // Astryx joins what is said in one frame.
+    await waitFor(() => expect(liveRegion()?.textContent).toContain("2 källor uppdateras inte"));
   });
 
   it("polls the sync progress only on the integrations tab of a space with its own", async () => {

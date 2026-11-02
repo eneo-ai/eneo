@@ -1,4 +1,4 @@
-import { Banner } from "@astryxdesign/core/Banner";
+import { AnnouncedBanner } from "@/components/astryx/banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList";
@@ -563,7 +563,7 @@ export function ModelCatalogStep({
                   hasDividers
                   // The options scroll in their own box (focus scrolls them from
                   // the keyboard); the error below stays in view.
-                  className="[&_[role=group]]:border-ax-border [&_[role=group]]:rounded-ax-element [&_[role=group]]:max-h-72 [&_[role=group]]:overflow-y-auto [&_[role=group]]:border [&_[role=group]]:px-3 [&_[role=group]]:py-1"
+                  containerClassName="[&_[role=group]]:border-ax-border [&_[role=group]]:rounded-ax-element [&_[role=group]]:max-h-72 [&_[role=group]]:overflow-y-auto [&_[role=group]]:border [&_[role=group]]:px-3 [&_[role=group]]:py-1"
                   status={
                     noSelection
                       ? { type: "error", message: t("provider_form_select_model_required") }
@@ -684,7 +684,11 @@ export function ModelCatalogStep({
       {validationFailures.length > 0 && (
         <div className="flex flex-col gap-3">
           {/* Mounted by the press on the create button: announced as an alert. */}
-          <Banner status="warning" title={t("model_validation_warning_title")} collapsible={false}>
+          <AnnouncedBanner
+            status="warning"
+            title={t("model_validation_warning_title")}
+            collapsible={false}
+          >
             <ul className="flex flex-col gap-1.5">
               {validationFailures.map((failure) => (
                 <li key={failure.model} className="flex flex-wrap items-center gap-2 text-sm">
@@ -693,7 +697,7 @@ export function ModelCatalogStep({
                 </li>
               ))}
             </ul>
-          </Banner>
+          </AnnouncedBanner>
           <CheckboxInput
             ref={acknowledgeRef}
             label={t("model_validation_create_anyway_ack")}

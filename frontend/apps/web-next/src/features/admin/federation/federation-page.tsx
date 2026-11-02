@@ -1,4 +1,4 @@
-import { Banner } from "@astryxdesign/core/Banner";
+import { AnnouncedBanner } from "@/components/astryx/banner";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Button } from "@astryxdesign/core/Button";
 import { Heading } from "@astryxdesign/core/Heading";
@@ -287,7 +287,7 @@ function FederationForm({
         </div>
         <form className="flex flex-col gap-5 px-5 py-4" noValidate onSubmit={requestSave}>
           {conflict ? (
-            <Banner
+            <AnnouncedBanner
               status="warning"
               title={t("federation_admin_conflict_title")}
               description={t("federation_admin_conflict_description")}

@@ -130,7 +130,7 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
 - **Fix an Astryx gap in one place**, never at each call site: a wrapper in
   `src/components/astryx/` (lint sends imports there), or the bun patch for
   what a wrapper can't reach (How it is wired → Packages). Known gaps in
-  Astryx 0.6.4:
+  Astryx 0.7.5:
   - `Switch` announces a hard-coded English "Loading" in its busy state: use
     `Switch` from `@/components/astryx/switch`, which leaves
     `isLoading`/`changeAction` out.
@@ -138,10 +138,17 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
     from its own description and status only): use `TextInput` from
     `@/components/astryx/text-input`, which adds the caller's ids after
     Astryx's own (as the password policy checklist needs).
-  - An error or warning `Banner` is `role="alert"`, read out assertively each
-    time it mounts. A notice about a state that lasts, shown on every visit to
-    its page or tab, is `QuietBanner` from `@/components/astryx/banner` (no
-    live region), and what is new is announced politely with `useAnnounce`.
+  - A `Banner` is never a live region. A banner for an outcome that just
+    happened (a list that failed to load, a save that failed) is
+    `AnnouncedBanner` from `@/components/astryx/banner`, an alert for an
+    error or warning (as Astryx 0.6 made every such banner). A notice about a state that lasts is a plain
+    `Banner` (or `QuietBanner`), and what is new is announced with `useAnnounce`.
+  - `Typeahead` and `Tokenizer` set no `aria-invalid` for an error status and
+    leave the `KEYBOARD` attributes out of their types: use the wrappers in
+    `@/components/astryx/`.
+  - The Swedish catalog lacks some strings: `astryx-sv-supplement.ts` (next to
+    the provider) adds them, and its test fails when a component we use has an
+    untranslated string.
   - CommandPalette marks only a picked value as selected: patched (the
     highlighted option is exposed as selected, as the APG combobox pattern
     says). DateInput's `nativePicker` is deprecated since 0.6.4: use
@@ -211,7 +218,7 @@ open), so the index has no bar of its own and names itself with a heading.
 - **Packages** (beta, pinned exactly; upgrade together, then run
   `bunx astryx upgrade` and `bun run theme:build`): `@astryxdesign/core`,
   `@astryxdesign/theme-neutral`, `@stylexjs/stylex` (runtime only), dev
-  `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.6.4.patch`
+  `@astryxdesign/cli`. `frontend/patches/@astryxdesign%2Fcore@0.7.5.patch`
   makes CommandPalette mark the highlighted option as selected. After an upgrade bun silently skips
   the stale patch and the guard tests in `src/components/astryx/` fail:
   recreate it with `bun patch @astryxdesign/core` (keep the diff free of bun's
@@ -700,7 +707,7 @@ and with the text size at 130 %.
 
 <!-- ASTRYX:START -->
 
-Astryx 0.6.4 quick reference for this app (edited for web-next; see above).
+Astryx 0.7.5 quick reference for this app (edited for web-next; see above).
 
 - Discover: `bunx astryx search "<q>"`, `bunx astryx component <Name> --dense`,
   `bunx astryx build "<idea>"`, `bunx astryx docs layout`.

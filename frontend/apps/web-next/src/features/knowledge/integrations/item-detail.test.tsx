@@ -128,7 +128,7 @@ describe("ItemDetail", () => {
     show();
     const notFound: boolean[] = [];
     const observer = new MutationObserver(() =>
-      notFound.push(screen.queryByText("Inga resultat hittades") !== null)
+      notFound.push(screen.queryByRole("heading", { name: "Inga resultat hittades" }) !== null)
     );
     observer.observe(document.body, { childList: true, subtree: true });
 
@@ -193,7 +193,7 @@ describe("ItemDetail", () => {
     setRoute("/spaces/space-1/knowledge/integrations/i1");
     const notFound: boolean[] = [];
     const observer = new MutationObserver(() =>
-      notFound.push(screen.queryByText("Inga resultat hittades") !== null)
+      notFound.push(screen.queryByRole("heading", { name: "Inga resultat hittades" }) !== null)
     );
     observer.observe(document.body, { childList: true, subtree: true });
 

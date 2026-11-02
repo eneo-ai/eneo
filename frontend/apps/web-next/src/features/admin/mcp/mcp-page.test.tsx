@@ -168,7 +168,10 @@ it("shows a refused activation beside its server and restores the saved state", 
   fireEvent.click(await screen.findByRole("switch", { name: "Visa funktionsservrar" }));
   const toggle = await screen.findByRole("switch", { name: "Aktivera Images" });
   fireEvent.click(toggle);
-  expect((await screen.findByRole("alert")).textContent).toContain("Provider has no enabled tools");
+  // Astryx's own (empty) assertive live region is an alert too.
+  expect(
+    (await screen.findByText(/Provider has no enabled tools/)).closest('[role="alert"]')
+  ).not.toBeNull();
   expect(toggle.getAttribute("aria-checked")).toBe("false");
 });
 

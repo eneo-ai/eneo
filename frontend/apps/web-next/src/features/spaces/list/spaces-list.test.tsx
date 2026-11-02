@@ -204,7 +204,8 @@ describe("SpacesList", () => {
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera ytor" }), {
       target: { value: "saknas" }
     });
-    await waitFor(() => expect(status()?.textContent).toBe("Inga träffar"));
+    // Astryx's empty state says its own title in the same breath.
+    await waitFor(() => expect(status()?.textContent).toContain("Inga träffar"));
   });
 
   it("deletes a space from its more-menu only after the name is typed", async () => {

@@ -91,7 +91,8 @@ describe("AssistantsPage", () => {
     });
     // Under the tab's h2, the empty result is an h3.
     expect(screen.getByRole("heading", { level: 3, name: "Inga resultat hittades" })).toBeTruthy();
-    await waitFor(() => expect(liveRegion()?.textContent).toBe("Inga träffar"));
+    // Astryx's empty state says its own title in the same breath.
+    await waitFor(() => expect(liveRegion()?.textContent).toContain("Inga träffar"));
   });
 
   it.each(["cards", "list"])("keeps each %s menu apart from the resource link", (view) => {
