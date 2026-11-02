@@ -5,6 +5,7 @@ Space, actor policy, context building and the model adapter remain real.
 """
 
 import asyncio
+import copy
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, Mock
@@ -553,3 +554,38 @@ async def test_active_provider_work_is_cancelled_with_the_ask(turn: TurnFixture)
             if not task.done():
                 task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_conversation_model_rechecks_the_assistants_baseline_before_history(
+    turn: TurnFixture,
+):
+    large = turn.assistant.completion_model
+    assert large is not None
+    small = copy.copy(large)
+    small.id, small.nickname, small.max_input_tokens = uuid4(), "Small model", 64
+    turn.space.completion_models = [large, small]
+    turn.space.user_id = turn.user.id
+    turn.space.default_assistant = turn.assistant
+    turn.user.roles[0].permissions.append(Permission.PERSONAL_CHAT)
+    turn.assistant.prompt.text = "Use the procurement policy. " * 40
+    saved = ConversationSettingsState(
+        revision=2, settings=ConversationSettings(completion_model_id=small.id)
+    )
+    with pytest.raises(BadRequestException, match="context"):
+        await turn.service.ask(
+            question="Check the purchase",
+            assistant_id=turn.assistant.id,
+            conversation_settings=saved,
+        )
+    assert turn.requests == []
+    turn.history.create_session_with_question_placeholder.assert_not_called()
+
+    # The same prompt still fits the assistant's own model.
+    response = await turn.service.ask(
+        question="Check the purchase",
+        assistant_id=turn.assistant.id,
+        conversation_settings=ConversationSettingsState(
+            revision=2, settings=ConversationSettings(completion_model_id=large.id)
+        ),
+    )
+    assert response.completion_model.id == large.id

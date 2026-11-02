@@ -6,6 +6,7 @@ from uuid import uuid4
 
 import pytest
 
+from eneo.ai_models.completion_models.completion_model import ModelKwargs
 from eneo.assistants.assistant_service import AssistantService
 from eneo.completion_models.domain.completion_model import CompletionModel
 from eneo.conversations.application.conversation_service import ConversationService
@@ -98,6 +99,7 @@ def service_with_policy():
     assistant = SimpleNamespace(
         id=uuid4(),
         completion_model=old_model,
+        completion_model_kwargs=ModelKwargs(),
         mcp_servers=[],
         enabled_capabilities=[],
         inline_file_text=True,
@@ -790,3 +792,144 @@ async def test_resolved_tool_selection_uses_the_same_defaults_as_runtime():
     )
     assert not result.mcp_servers[0].selected
     assert not result.capabilities[0].selected
+
+
+def _reasoning_select(*options: str):
+    return lambda: SimpleNamespace(
+        reasoning_effort=SimpleNamespace(
+            supported=True,
+            control="select",
+            options=list(options),
+            accepts=lambda value: value in options,
+        )
+    )
+
+
+@pytest.mark.asyncio
+async def test_defaults_carry_the_assistants_reasoning_preference_when_accepted():
+    service, assistant, model, _, policy = service_with_policy()
+    policy.reasoning_effort_user_configurable = True
+    policy.reasoning_policy_configured = True
+    policy.default_reasoning_effort = "low"
+    model.get_supported_model_kwargs = _reasoning_select("low", "high")
+    assistant.completion_model_kwargs = ModelKwargs(reasoning_effort="high")
+    assert (
+        await service.settings_defaults(assistant_id=assistant.id)
+    ).reasoning_effort == "high"
+    model.get_supported_model_kwargs = _reasoning_select("low")
+    assert (
+        await service.settings_defaults(assistant_id=assistant.id)
+    ).reasoning_effort == "low"
+    policy.reasoning_effort_user_configurable = False
+    assert (
+        await service.settings_defaults(assistant_id=assistant.id)
+    ).reasoning_effort is None
+
+
+@pytest.mark.asyncio
+async def test_first_send_without_a_revision_continues_with_the_winning_initialization():
+    service, assistant, model, server, _ = service_with_policy()
+    session = SimpleNamespace(
+        id=uuid4(), assistant_id=assistant.id, group_chat_id=None, settings=None
+    )
+    winner = ConversationSettingsState(
+        revision=1,
+        settings=ConversationSettings(
+            completion_model_id=model.id, mcp_server_states={server.id: True}
+        ),
+    )
+    initialized = SimpleNamespace(**{**vars(session), "settings": winner})
+    service.session_service.get_context.side_effect = [session, initialized]
+    service.session_service.update_settings.side_effect = (
+        ConversationSettingsConflictException()
+    )
+    await service.ask_conversation("hello", session_id=session.id, stream=True)
+    assert service.assistant_service.ask.await_args.kwargs["conversation_settings"] is (
+        winner
+    )
+
+
+@pytest.mark.asyncio
+async def test_first_send_without_a_revision_still_fails_when_nothing_won():
+    service, assistant, *_ = service_with_policy()
+    session = SimpleNamespace(
+        id=uuid4(), assistant_id=assistant.id, group_chat_id=None, settings=None
+    )
+    service.session_service.get_context.return_value = session
+    service.session_service.update_settings.side_effect = (
+        ConversationSettingsConflictException()
+    )
+    with pytest.raises(ConversationSettingsConflictException):
+        await service.ask_conversation("hello", session_id=session.id)
+    service.assistant_service.ask.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_resolve_rejects_a_model_choice_for_an_ordinary_assistant():
+    service, assistant, model, _, _ = service_with_policy()
+    space = await service.space_service.get_space_by_assistant(assistant.id)
+    space.is_personal = lambda: False
+    assistant.available_capabilities = []
+    service.assistant_service.get_assistant_with_effective_config.return_value = (
+        assistant,
+        [],
+        None,
+    )
+    with pytest.raises(BadRequestException, match="personal chat"):
+        await service.resolve_settings(
+            assistant_id=assistant.id,
+            settings=ConversationSettings(completion_model_id=model.id),
+        )
+
+
+def _titled_session(assistant, state):
+    return SimpleNamespace(
+        id=uuid4(), assistant=SimpleNamespace(id=assistant.id), settings=state
+    )
+
+
+@pytest.mark.asyncio
+async def test_title_is_generated_by_the_conversations_model():
+    service, assistant, model, _, policy = service_with_policy()
+    policy.models_enforced = False
+    service.completion_service = SimpleNamespace(
+        get_response=AsyncMock(
+            return_value=SimpleNamespace(completion=SimpleNamespace(text="Title"))
+        )
+    )
+    service.session_service.update_session = AsyncMock()
+    saved = ConversationSettingsState(
+        revision=1, settings=ConversationSettings(completion_model_id=model.id)
+    )
+    service.session_service.get_session_by_uuid.return_value = _titled_session(
+        assistant, saved
+    )
+    await service.set_title_of_conversation(uuid4())
+    assert service.completion_service.get_response.await_args.kwargs["model"] is model
+    assert assistant.completion_model is not model
+
+    # Without a saved model the assistant's current model answers, as a turn would.
+    service.session_service.get_session_by_uuid.return_value = _titled_session(
+        assistant, None
+    )
+    await service.set_title_of_conversation(uuid4())
+    assert (
+        service.completion_service.get_response.await_args.kwargs["model"]
+        is assistant.completion_model
+    )
+
+
+@pytest.mark.asyncio
+async def test_title_is_not_generated_when_the_saved_model_is_no_longer_allowed():
+    service, assistant, model, _, policy = service_with_policy()
+    service.completion_service = SimpleNamespace(get_response=AsyncMock())
+    saved = ConversationSettingsState(
+        revision=1, settings=ConversationSettings(completion_model_id=model.id)
+    )
+    service.session_service.get_session_by_uuid.return_value = _titled_session(
+        assistant, saved
+    )
+    policy.available_models = []
+    with pytest.raises(BadRequestException, match="policy"):
+        await service.set_title_of_conversation(uuid4())
+    service.completion_service.get_response.assert_not_awaited()

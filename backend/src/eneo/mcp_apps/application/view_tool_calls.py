@@ -55,6 +55,8 @@ MAX_ARGUMENT_BYTES = 1024 * 1024
 # One answer for every reason a view may not make a call, so a view learns
 # nothing about tools and servers it is not offered.
 _NOT_FOUND = "The view cannot call this tool"
+# The one exception names a choice the user made in this conversation.
+_SERVER_SWITCHED_OFF = "This tool is switched off in the conversation's settings."
 
 
 class ViewCallNotReady(Exception):
@@ -204,6 +206,13 @@ async def call_tool_from_view(
     )
     if server is None:
         raise NotFoundException(_NOT_FOUND)
+    if (
+        conversation.settings is not None
+        and conversation.settings.settings.mcp_server_states.get(server.id) is False
+    ):
+        # The view was opened while the server was on; the saved choice
+        # narrows what the conversation may run from now on.
+        raise BadRequestException(_SERVER_SWITCHED_OFF)
 
     # A historical call is not an enduring grant. Check the current pin and
     # originating tool on every request, including already-open browser views.

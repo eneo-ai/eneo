@@ -720,7 +720,14 @@ async def resolve_conversation_settings(
     description="Save choices for an owned conversation using its expected revision; reject concurrent changes with HTTP 409.",
     response_model=ConversationSettingsState,
     responses=responses.get_responses([400, 403, 404, 409]),
-    dependencies=[Depends(require_resource_permission_for_method("conversations"))],
+    dependencies=[
+        Depends(
+            require_resource_permission_for_method(
+                "conversations",
+                read_override_endpoints=frozenset({"update_conversation_settings"}),
+            )
+        )
+    ],
 )
 @endpoint_access(
     authentication=Authentication.USER,

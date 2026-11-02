@@ -454,3 +454,28 @@ async def test_incompatible_saved_settings_block_view_tool_execution():
         await _run(conversation, assistants, factory)
     assert proxy.called == []
     assert factory.created_with == {}
+
+
+async def test_server_switched_off_in_the_conversation_is_refused_from_an_open_view():
+    from eneo.sessions.conversation_settings import (
+        ConversationSettings,
+        ConversationSettingsState,
+    )
+
+    conversation = _conversation([_call()])
+    conversation.settings = ConversationSettingsState(
+        revision=2,
+        settings=ConversationSettings(mcp_server_states={SERVER_ID: False}),
+    )
+    assistants, factory, proxy = _setup()
+    with pytest.raises(BadRequestException, match="switched off"):
+        await _run(conversation, assistants, factory)
+    assert proxy.called == []
+    assert factory.created_with == {}
+
+    conversation.settings = ConversationSettingsState(
+        revision=3,
+        settings=ConversationSettings(mcp_server_states={SERVER_ID: True}),
+    )
+    result = await _run(conversation, assistants, factory)
+    assert result.text == "13 degrees"

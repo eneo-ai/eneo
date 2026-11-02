@@ -1706,8 +1706,9 @@ class AssistantService:
         sends them) against the same ceiling, so an upload that can't fit is
         rejected up front instead of failing at the provider. A zero-Skill turn
         with no uploads keeps the existing fast path because its baseline was
-        validated on save. Skill turns recheck the baseline because bindings can
-        change independently of the Assistant. History is budget-evicted
+        validated on save. Skill turns and conversation-level model choices
+        recheck the baseline because bindings and the window can change
+        independently of the Assistant. History is budget-evicted
         downstream."""
         if not files and not validate_persistent_baseline:
             return
@@ -3734,7 +3735,11 @@ class AssistantService:
             model=effective_completion_model,
             prompt_text=skill_composition.prompt,
             files=files,
+            # The baseline was validated against the assistant's own model on
+            # save; a conversation-level model has its own, possibly smaller,
+            # window, so the baseline is counted again.
             validate_persistent_baseline=bool(skill_composition.provenance)
+            or completion_model_override is not None
             or bool(
                 effective_config is not None
                 and (

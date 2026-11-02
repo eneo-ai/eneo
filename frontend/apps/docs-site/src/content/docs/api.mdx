@@ -71,7 +71,7 @@ curl "https://your-domain.com/api/v1/spaces/" \
 
 Two key types exist: `sk_` secret keys for server-to-server use and `pk_` public keys for browser integrations. Keys are created in the web app under **Account → API keys** (`/account/api-keys`); tenant administrators manage every key in the tenant under **Admin → API keys** (`/admin/api-keys`). The account page has a **Create API Key** button. Keys can also be created with `POST /api/v1/api-keys`, which requires a session token and the `api_keys` role permission.
 
-An API key carries a scope (tenant, space, assistant, or app), a permission level, and optional guardrails. By default the HTTP method decides the required permission level: `GET`, `HEAD`, and `OPTIONS` need `read`; `POST`, `PUT`, and `PATCH` need `write`; `DELETE` needs `admin`. A few semantically read-only `POST` endpoints, including the chat endpoint, accept `read`. Scopes, permission levels, guardrails, ownership, and lifecycle are covered in [API Key Management](/docs/api-key-management).
+An API key carries a scope (tenant, space, assistant, or app), a permission level, and optional guardrails. By default the HTTP method decides the required permission level: `GET`, `HEAD`, and `OPTIONS` need `read`; `POST`, `PUT`, and `PATCH` need `write`; `DELETE` needs `admin`. A few endpoints that are part of chatting, including the chat endpoint and the conversation settings `PATCH`, accept `read`. Scopes, permission levels, guardrails, ownership, and lifecycle are covered in [API Key Management](/docs/api-key-management).
 
 ### Session tokens
 

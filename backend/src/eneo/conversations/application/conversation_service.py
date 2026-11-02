@@ -171,8 +171,12 @@ class ConversationService:
         disabled_capabilities = config.default_disabled_capabilities if config else []
         return ConversationSettings(
             completion_model_id=model.id if personal and model else None,
+            # The assistant's own preference carries over like its model does;
+            # the selector drops it when the model or policy no longer accepts it.
             reasoning_effort=select_effective_reasoning_effort(
-                selected_model=model, stored_effort=None, effective_config=config
+                selected_model=model,
+                stored_effort=assistant.completion_model_kwargs.reasoning_effort,
+                effective_config=config,
             )
             if model and config and config.reasoning_effort_user_configurable
             else None,
@@ -266,6 +270,17 @@ class ConversationService:
             else:
                 model = space.get_completion_model(selected_id)
         else:
+            if settings.completion_model_id is not None:
+                # Same answer the save and the turn give, so the client can
+                # treat the resolution as the "can I save this?" oracle.
+                raise BadRequestException(
+                    self.assistant_service.personal_chat_model_rejection(
+                        space=space,
+                        assistant=assistant,
+                        effective_config=config,
+                        completion_model_id=settings.completion_model_id,
+                    )
+                )
             if model is None or not space.is_completion_model_available(model.id):
                 result.model_unavailable = True
                 model = None
@@ -493,9 +508,20 @@ class ConversationService:
                 context=context,
             )
             if session_id is not None:
-                state = await self.session_service.update_settings(
-                    session_id, choices, 0
-                )
+                try:
+                    state = await self.session_service.update_settings(
+                        session_id, choices, 0
+                    )
+                except ConversationSettingsConflictException:
+                    # Only a caller that observed revision zero can be stale;
+                    # one that sent no revision continues with the state that won.
+                    if settings_revision is not None:
+                        raise
+                    state = (
+                        await self.session_service.get_context(session_id)
+                    ).settings
+                    if state is None:
+                        raise
             else:
                 state = ConversationSettingsState(revision=1, settings=choices)
         state.require_supported()
@@ -925,21 +951,40 @@ class ConversationService:
         )
         return min(models, key=lambda model: model.token_limit), selector_tokens
 
+    def _conversation_model(
+        self, context: _AssistantContext, state: ConversationSettingsState | None
+    ) -> "CompletionModel | None":
+        choice = state.settings.completion_model_id if state is not None else None
+        if choice is not None:
+            return self.assistant_service.resolve_personal_chat_model_override(
+                space=context.space,
+                assistant=context.assistant,
+                effective_config=context.config,
+                completion_model_id=choice,
+            )
+        return select_effective_completion_model(
+            current_model=context.assistant.completion_model,
+            effective_config=context.config,
+        )
+
     async def set_title_of_conversation(
         self, session_id: "UUID"
     ) -> "SessionInDB | None":
         session = await self.session_service.get_session_by_uuid(session_id)
         assert session is not None
         assert session.assistant is not None
-        space = await self.space_service.get_space_by_assistant(
-            assistant_id=session.assistant.id
-        )
-        assistant = space.get_assistant(assistant_id=session.assistant.id)
-        assert assistant.completion_model is not None
+        if session.settings is not None:
+            session.settings.require_supported()
+        context = await self._assistant_context(session.assistant.id)
+        # The history goes to the model the conversation chose, under the
+        # same policy checks as a turn; never to the assistant's stored model.
+        model = self._conversation_model(context, session.settings)
+        if model is None:
+            raise BadRequestException("No model is available for this conversation.")
 
         response = await self.completion_service.get_response(
             text_input="Please set the title of the conversation",
-            model=assistant.completion_model,  # pyright: ignore[reportArgumentType]  # domain CompletionModel aliases ai_models one
+            model=model,  # pyright: ignore[reportArgumentType]  # domain CompletionModel aliases ai_models one
             prompt=SET_TITLE_OF_CONVERSATION_PROMPT,
             session=session,
         )
