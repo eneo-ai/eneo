@@ -133,7 +133,8 @@ export function warmQuery<
  * its first answer, the data or one failed request, and never rejects. What
  * is cached answers at once, as with `readCached`. The query's own retries go
  * on for the component that shows it (as with `warmQuery`), so a failing read
- * holds the page for one request, not for the retry backoff.
+ * holds the page for one request, not for the retry backoff; nor does a read
+ * that waits for the network, which starts when the connection is back.
  */
 export function readFirstAnswer<
   TQueryFnData,
@@ -150,16 +151,18 @@ export function readFirstAnswer<
   );
   const cache = queryClient.getQueryCache();
   const query = cache.find({ queryKey: options.queryKey, exact: true });
-  // A read that already failed is retrying in the background: that was its answer.
-  if (query === undefined || query.state.fetchFailureCount > 0) return Promise.resolve();
+  // A failed attempt is counted before its backoff starts; a read that already failed is retrying
+  // in the background, and one that waits for the network is not going to answer soon: both answered.
+  const answered = (state: { fetchFailureCount: number; fetchStatus: string }) =>
+    state.fetchFailureCount > 0 || state.fetchStatus === "paused";
+  if (query === undefined || answered(query.state)) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {
       unsubscribe();
       resolve();
     };
-    // A failed attempt that will be retried is counted before its backoff starts.
     const unsubscribe = cache.subscribe((event) => {
-      if (event.query === query && query.state.fetchFailureCount > 0) done();
+      if (event.query === query && answered(query.state)) done();
     });
     void read.then(done);
   });

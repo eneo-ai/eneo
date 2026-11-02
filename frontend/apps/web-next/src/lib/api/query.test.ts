@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { QueryClient, QueryObserver } from "@tanstack/react-query";
+import { QueryClient, QueryObserver, onlineManager } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EneoApiError } from "./errors";
 import {
@@ -288,6 +288,28 @@ describe("readFirstAnswer", () => {
     expect(backend.requests()).toBe(1);
     await retriesRun();
     expect(client.getQueryData(["resource"])).toBe("loaded");
+  });
+
+  it("does not wait for a read that waits for the network, which goes on when it is back", async () => {
+    const backend = resource("loaded");
+    const client = makeQueryClient();
+    // The app's provider mounts the client; that is what continues a paused read when it is back.
+    client.mount();
+    onlineManager.setOnline(false);
+    let answered = false;
+
+    try {
+      void readFirstAnswer(client, backend.options).then(() => (answered = true));
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(answered).toBe(true);
+      expect(backend.requests()).toBe(0);
+    } finally {
+      onlineManager.setOnline(true);
+    }
+    await vi.advanceTimersByTimeAsync(10);
+    expect(client.getQueryData(["resource"])).toBe("loaded");
+    client.unmount();
   });
 
   it("does not fail on a refusal", async () => {
