@@ -324,20 +324,26 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const signature = progress.data
     ? progressSignature(progress.data.status, progress.data.graph)
     : null;
+  // Until the run shows, its first reads keep the signature they began with: a run that moves on
+  // faster than they answer would otherwise start them over each time and never show.
+  const [shown, setShown] = useState(false);
+  const [firstSignature, setFirstSignature] = useState<string | null>(null);
+  if (firstSignature === null && signature !== null) setFirstSignature(signature);
+  const readSignature = shown ? signature : firstSignature;
   const detail = useQuery({
-    ...runDetailQueryOptions(browserApi, flowId, runId, signature ?? ""),
-    enabled: signature !== null,
+    ...runDetailQueryOptions(browserApi, flowId, runId, readSignature ?? ""),
+    enabled: readSignature !== null,
     placeholderData: keepPreviousData
   });
   const settled = progress.data ? isTerminal(progress.data.status.status) : false;
   const steps = useQuery({
-    ...runStepsQueryOptions(flowId, runId, signature ?? "", settled),
-    enabled: signature !== null,
+    ...runStepsQueryOptions(flowId, runId, readSignature ?? "", settled),
+    enabled: readSignature !== null,
     placeholderData: keepPreviousData
   });
   const awaitingReview = progress.data ? isAwaitingReview(progress.data.status.status) : false;
   const review = useQuery({
-    ...activeReviewQueryOptions(flowId, runId, signature ?? ""),
+    ...activeReviewQueryOptions(flowId, runId, readSignature ?? ""),
     enabled: awaitingReview
   });
   // The run shows once its first reads are in, and stays shown: the status and graph, then the
@@ -346,7 +352,6 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   // phone). A read that failed shows the page with its error, also while it is retried. Only
   // `isPending` and `failureCount` are read: the update times `blockingError` reads would bring
   // back one render per poll.
-  const [shown, setShown] = useState(false);
   const firstReads = [
     progress,
     ...(signature !== null ? [detail, steps] : []),

@@ -105,6 +105,17 @@ function holdAnswers(route: string) {
   return release;
 }
 
+/** Answers `route` (asked as usual) `ms` after it is asked; for fake timers. */
+function delayAnswers(route: string, ms: number) {
+  const get = state.stub.client.GET;
+  const spy = vi.spyOn(state.stub.client, "GET").mockImplementation((path, init) => {
+    const answer = get(path, init);
+    if (`GET ${path}` !== route) return answer;
+    return new Promise((resolve) => setTimeout(resolve, ms)).then(() => answer);
+  });
+  onTestFinished(() => spy.mockRestore());
+}
+
 /** The person leaves the tab and comes back to it, after the app's 30 s. */
 async function comeBack() {
   await act(() => vi.advanceTimersByTimeAsync(31_000));
@@ -630,6 +641,26 @@ describe("FlowRunPage", () => {
     expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
     expect(screen.getByText("Startad av Anna Lind")).toBeTruthy();
     expect(screen.queryByText(messages.flow_runs_run_loading)).toBeNull();
+  });
+
+  it("shows the run although it moves on faster than its detail is read", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    let revision = 1;
+    const running = () => makeRunSummary({ status: "running", finished_at: null, revision });
+    answerRun(running(), makeRunDetail({ ...running(), result: null }));
+    // Every poll finds the run one revision further, and the detail takes longer than a poll.
+    state.routes[STATUS] = () => ({ body: running() });
+    state.routes[DETAIL] = () => ({ body: makeRunDetail({ ...running(), result: null }) });
+    delayAnswers(DETAIL, 3_000);
+    renderRun();
+    await waitFor(() => expect(calls(STATUS)).toHaveLength(1));
+
+    for (let poll = 0; poll < 4; poll++) {
+      revision += 1;
+      await act(() => vi.advanceTimersByTimeAsync(2_100));
+    }
+    expect(screen.queryByText(messages.flow_runs_run_loading)).toBeNull();
+    expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
   });
 
   it("shows the run with its error when the detail cannot be read", async () => {
