@@ -695,6 +695,13 @@ function ConversationView({
    */
   function sendQuestion(question: string, resendFiles?: SentFiles, fromComposer = false) {
     if (!question || sending || usage.willExceedContext) return;
+    if (partnerCannotAnswer(partner)) {
+      // A retry after the partner lost its model or members: said at the
+      // composer as its own send says it, the draft and files left there.
+      (started ? dockTextareaRef.current : startTextarea())?.focus();
+      announce(t("no_completion_model_description"));
+      return;
+    }
     // A quote from a file or a view opens the question; it is sent once.
     const quote = resendFiles ? null : panel.quote;
     const text = resendFiles ? question : composeQuotedQuestion(quote, question);
