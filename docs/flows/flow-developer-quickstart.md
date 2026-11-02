@@ -375,6 +375,10 @@ Important authoring rules:
   adding runtime repair layers. A Flow is built once and may run many times.
 - Credentials stay with the editor. The chat's tools refuse step configuration
   that carries a credential, or that changes an HTTP configuration holding one.
+  The chat may declare a connection's auth mode with the credential left
+  empty (`api_key` with its header name, `basic_auth` with its username); a
+  draft saves that way, `read_flow` shows the credential as missing, and
+  publish refuses until the person has entered it in the editor.
 
 ## Suggestions
 

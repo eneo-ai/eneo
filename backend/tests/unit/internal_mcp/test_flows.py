@@ -57,6 +57,68 @@ def test_model_can_change_an_uncredentialed_destination():
     )
 
 
+@pytest.mark.parametrize(
+    "auth",
+    [
+        {"mode": "api_key", "header_name": "X-API-Key"},
+        {"mode": "api_key", "header_name": "X-API-Key", "key": ""},
+        {"mode": "bearer_token"},
+        {"mode": "basic_auth", "username": "service-user", "password": ""},
+    ],
+)
+def test_model_declares_how_a_connection_signs_in_and_leaves_the_secret_empty(auth):
+    # The step is built with the auth mode the service needs; the person
+    # enters the key in the editor afterwards.
+    flows.require_safe_model_configuration(
+        {
+            "input_config": {
+                "url": "https://api.test/cases",
+                "auth": auth,
+                "custom_headers": [{"name": "X-Signature", "secret": True}],
+            }
+        },
+        {},
+    )
+
+
+@pytest.mark.parametrize(
+    "auth",
+    [
+        {"mode": "api_key", "header_name": "X-API-Key", "key": "sk-live"},
+        {"mode": "bearer_token", "token": "abc"},
+        {"mode": "basic_auth", "username": "svc", "password": "pw"},
+    ],
+)
+def test_a_declared_mode_that_carries_its_secret_is_refused(auth):
+    with pytest.raises(BadRequestException):
+        flows.require_safe_model_configuration(
+            {"input_config": {"url": "https://api.test/cases", "auth": auth}}, {}
+        )
+
+
+def test_a_declared_mode_without_its_credential_stays_editable_after_save():
+    saved = {
+        "url": "https://api.test/cases",
+        "auth": {"mode": "api_key", "header_name": "X-Key", "key": ""},
+    }
+    flows.require_safe_model_configuration(
+        {
+            "input_config": {
+                **saved,
+                "auth": {**saved["auth"], "header_name": "Api-Key"},
+            }
+        },
+        {"input_config": saved},
+    )
+    # Once the person has stored the key, the configuration is the editor's.
+    stored = {**saved, "auth": {**saved["auth"], "key": {"$secret": "stored"}}}
+    with pytest.raises(BadRequestException):
+        flows.require_safe_model_configuration(
+            {"input_config": {**saved, "url": "https://elsewhere.test"}},
+            {"input_config": stored},
+        )
+
+
 def _transaction_container(order: list[str]) -> MagicMock:
     """A container whose session records how its transaction ends."""
 

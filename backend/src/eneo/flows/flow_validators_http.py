@@ -20,7 +20,9 @@ from eneo.main.config import get_settings
 from eneo.main.exceptions import TypedIOValidationException
 
 
-def validate_http_input_config(*, step: FlowStepValidationView) -> None:
+def validate_http_input_config(
+    *, step: FlowStepValidationView, credentials_required: bool = True
+) -> None:
     if step.input_type in {"document", "file", "image", "audio"}:
         raise FlowStepValidationError(
             f"Step {step.step_order}: input_type '{step.input_type}' is not supported with input_source '{step.input_source}'.",
@@ -42,16 +44,20 @@ def validate_http_input_config(*, step: FlowStepValidationView) -> None:
         config=step.input_config,
         method="GET",
         direction="input",
+        credentials_required=credentials_required,
     )
 
 
-def validate_http_output_config(*, step: FlowStepValidationView) -> None:
+def validate_http_output_config(
+    *, step: FlowStepValidationView, credentials_required: bool = True
+) -> None:
     validate_http_config(
         step_order=step.step_order,
         label="output_config",
         config=step.output_config,
         method="POST",
         direction="output",
+        credentials_required=credentials_required,
     )
 
 
@@ -62,6 +68,7 @@ def validate_http_config(
     config: FlowPersistedJsonObject | None,
     method: str,
     direction: str,
+    credentials_required: bool = True,
 ) -> None:
     validate_authored_http_config(
         step_order=step_order,
@@ -69,6 +76,7 @@ def validate_http_config(
         config=config,
         method=method,
         direction=direction,
+        credentials_required=credentials_required,
     )
 
 
@@ -79,7 +87,10 @@ def validate_authored_http_config(
     config: object,
     method: str,
     direction: str,
+    credentials_required: bool = True,
 ) -> None:
+    """``credentials_required`` False lets a draft declare an auth mode before
+    the person enters its credential in the editor."""
     max_timeout = float(get_settings().flow_http_max_timeout_seconds)
     try:
         authored = parse_authored_http_config(
@@ -90,7 +101,11 @@ def validate_authored_http_config(
             str(exc), step_order=step_order, code=exc.code, context=exc.context
         ) from None
     errors = validate_authored_config(
-        authored, direction=direction, method=method, max_timeout=max_timeout
+        authored,
+        direction=direction,
+        method=method,
+        max_timeout=max_timeout,
+        credentials_required=credentials_required,
     )
     if errors:
         raise FlowStepValidationError(

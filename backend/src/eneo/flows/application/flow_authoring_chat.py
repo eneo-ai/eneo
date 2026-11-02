@@ -271,7 +271,10 @@ _CONNECTIONS = """A step that talks to a service (an http_get source, an http_po
 an MCP tool) shows its connection in read_flow: the address, the auth mode and
 whether the credential is stored, never the value. Build everything but the
 secret: the address, the method, the body and the auth mode the service needs,
-through update_step. Never ask for a key, token or password in the chat and
+through update_step. The auth mode is declared with its credential left empty
+(api_key with its header_name, basic_auth with its username, bearer_token
+alone); a service that wants a key, token or password is never built with mode
+none. Never ask for a key, token or password in the chat and
 never put one in a tool argument; the chat only ever learns that a credential
 is stored. Then say the connection must be configured in the step, name the
 step as @[name](step:id) so its pill offers "Anslut tjänst", and ask with one

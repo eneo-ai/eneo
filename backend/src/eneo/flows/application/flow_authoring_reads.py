@@ -162,11 +162,15 @@ def _http_connection(
     headers_stored = all(
         _credential_state(header.value) == "stored" for header in secret_headers
     )
+    # The address without its query, which may carry a key.
+    item.update(url=http.url.split("?", 1)[0], auth_mode=auth.mode)
+    # The public half of the auth, which the chat may set; never the secret.
+    if isinstance(auth, HttpAuthApiKey):
+        item["header_name"] = auth.header_name
+    elif isinstance(auth, HttpAuthBasicAuth):
+        item["username"] = auth.username
     return {
         **item,
-        # The address without its query, which may carry a key.
-        "url": http.url.split("?", 1)[0],
-        "auth_mode": auth.mode,
         "credential": credential,
         "secret_headers": len(secret_headers),
         "configured": bool(http.url.strip())

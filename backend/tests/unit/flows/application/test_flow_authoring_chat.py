@@ -136,6 +136,7 @@ def test_the_instructions_keep_every_secret_out_of_the_chat() -> None:
     assert "Never ask for a key, token or password in the chat" in instructions
     assert "never put one in a tool argument" in instructions
     assert 'so its pill offers "Anslut tjänst"' in instructions
+    assert "is never built with mode none" in instructions
     assert "an administrator must add the server or grant it to the space" in (
         instructions
     )
