@@ -5,6 +5,7 @@ import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
+import { recordAnnouncements } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { DashboardList } from "@/features/dashboard/dashboard-list.client";
 import type { Dashboard } from "@/features/dashboard/queries";
@@ -82,6 +83,7 @@ describe("DashboardList", () => {
 
   it("filters as you type and announces the number of results", async () => {
     renderList();
+    const said = recordAnnouncements();
     fireEvent.change(screen.getByRole("textbox", { name: "Sök assistenter och appar" }), {
       target: { value: "avtal" }
     });
@@ -98,6 +100,8 @@ describe("DashboardList", () => {
       target: { value: "zzz" }
     });
     expect(screen.getByRole("heading", { name: "Inga träffar" })).toBeTruthy();
+    // The count says it; the empty state, which names the query, stays quiet.
+    await waitFor(() => expect(said).toEqual(["1 träff", "0 träffar"]));
   });
 
   it("explains an empty catalog", () => {

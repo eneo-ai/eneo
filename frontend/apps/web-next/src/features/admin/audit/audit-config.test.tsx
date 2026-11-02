@@ -271,14 +271,14 @@ describe("AuditConfig", () => {
       expect(screen.getByText("Du har osparade ändringar")).toBeTruthy();
       expect(warnsBeforeUnload()).toBe(true);
       for (const checkbox of screen.getAllByRole("checkbox")) {
-        expect(checkbox).toHaveProperty("disabled", true);
+        expect(checkbox.getAttribute("aria-disabled")).toBe("true");
       }
       expect(api.PATCH).toHaveBeenCalledTimes(1);
 
       failRefresh = false;
       fireEvent.click(screen.getByRole("button", { name: "Läs in serverläget" }));
-      await waitFor(() => expect(action).toHaveProperty("disabled", false));
-      expect(category).toHaveProperty("disabled", false);
+      await waitFor(() => expect(action.hasAttribute("aria-disabled")).toBe(false));
+      expect(category.hasAttribute("aria-disabled")).toBe(false);
       expect(enabled("Användare skapad")).toBe("false");
       act(() => action.click());
       expect(enabled("Användare skapad")).toBe("true");

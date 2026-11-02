@@ -76,7 +76,7 @@ function PolicyForm({ policy }: { policy: PasswordLifecyclePolicy }) {
         onChange={setMaxAgeDays}
         placeholder={t("admin_password_policy_never")}
         autoComplete="off"
-        className="max-w-48"
+        containerClassName="max-w-48"
         status={
           maxAgeError
             ? { type: "error", message: t("admin_password_policy_max_age_invalid") }

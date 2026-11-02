@@ -685,6 +685,7 @@ export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: Tab
       <div className="flex flex-col gap-4">
         {toolbar}
         <EmptyState
+          isAnnounced={false}
           icon={<SearchX />}
           title={t("ui_no_items_matching", { resourceNamePlural: t("resource_websites") })}
           headingLevel={3}

@@ -155,7 +155,7 @@ function AddMembers({
                 density="compact"
                 hasDividers
                 // The options scroll in their own box; the problem below stays in view.
-                className="[&_[role=group]]:border-ax-border [&_[role=group]]:rounded-ax-element [&_[role=group]]:max-h-60 [&_[role=group]]:overflow-y-auto [&_[role=group]]:border [&_[role=group]]:px-3 [&_[role=group]]:py-1"
+                containerClassName="[&_[role=group]]:border-ax-border [&_[role=group]]:rounded-ax-element [&_[role=group]]:max-h-60 [&_[role=group]]:overflow-y-auto [&_[role=group]]:border [&_[role=group]]:px-3 [&_[role=group]]:py-1"
                 status={problem ? { type: "error", message: problem } : undefined}
               >
                 {users.map((user) => {

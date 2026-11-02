@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { SECURITY_CLASSIFICATIONS_KEY } from "@/features/admin/security-classifications/security-classifications";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testQueryClient } from "@/test/render";
+import { flushAnnouncements, renderInApp, testQueryClient } from "@/test/render";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn() }));
 const toast = vi.hoisted(() => ({
@@ -190,6 +190,8 @@ async function toModels(models: AdminModel[] = []) {
   await waitFor(() =>
     expect(within(result.dialog).getByRole("checkbox", { name: /gpt-5/ })).toBeTruthy()
   );
+  // The loaded list's count is said on its own, not joined to what a test does next.
+  await flushAnnouncements();
   return result;
 }
 
@@ -659,7 +661,7 @@ describe("the add-model wizard's catalog", () => {
 
     for (const name of [/gpt-5/, /kommun-llama/]) {
       const checkbox = within(dialog).getByRole("checkbox", { name }) as HTMLInputElement;
-      expect(checkbox.disabled).toBe(true);
+      expect(checkbox.getAttribute("aria-disabled")).toBe("true");
       // Said in words, not only by the dimmed box.
       expect(description(checkbox)).toContain("Tillagd");
     }
@@ -674,7 +676,7 @@ describe("the add-model wizard's catalog", () => {
 
     for (const name of [/gpt-5/, /kommun-llama/]) {
       const checkbox = within(dialog).getByRole("checkbox", { name }) as HTMLInputElement;
-      expect(checkbox.disabled).toBe(false);
+      expect(checkbox.hasAttribute("aria-disabled")).toBe(false);
     }
     expect(within(dialog).queryByText(/Tillagd/)).toBeNull();
   });

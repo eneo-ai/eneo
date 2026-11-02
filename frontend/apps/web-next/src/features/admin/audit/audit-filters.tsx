@@ -123,7 +123,7 @@ function UserField({
       }
       minQueryLength={MIN_SEARCH_LENGTH}
       debounceMs={SEARCH_DEBOUNCE_MS}
-      emptySearchResultsText={t("audit_user_search_empty")}
+      emptySearchText={t("audit_user_search_empty")}
       width="100%"
     />
   );
@@ -265,6 +265,7 @@ function FilterButton({ filters, onChange }: { filters: AuditFilters; onChange: 
         onOpenChange={setOpen}
         label={t("audit_filters_button")}
         height="tall"
+        padding={0}
       >
         <div className="p-4">{fields}</div>
       </BottomSheet>

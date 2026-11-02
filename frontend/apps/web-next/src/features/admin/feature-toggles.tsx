@@ -1,6 +1,6 @@
 import { Heading } from "@astryxdesign/core/Heading";
 import { useQueryClient } from "@tanstack/react-query";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import {
   LayoutTemplate,
   PartyPopper,

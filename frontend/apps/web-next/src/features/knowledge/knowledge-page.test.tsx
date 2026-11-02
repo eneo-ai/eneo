@@ -2,7 +2,7 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext } from "@/test/render";
+import { recordAnnouncements, renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { setRoute } from "@/test/navigation";
 import type { Space } from "@/features/spaces/space";
@@ -627,9 +627,10 @@ describe("KnowledgePage", () => {
     state.space = makeSpace({
       integrations: [avtal, makeIntegration({ id: "i2", name: "Bygglov", metadata: signInRefused })]
     });
+    const said = recordAnnouncements();
     await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
 
-    await waitFor(() => expect(liveRegion()?.textContent).toBe("2 källor uppdateras inte"));
+    await waitFor(() => expect(said).toEqual(["2 källor uppdateras inte"]));
   });
 
   it("polls the sync progress only on the integrations tab of a space with its own", async () => {

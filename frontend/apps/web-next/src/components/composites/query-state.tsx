@@ -99,6 +99,7 @@ export function ListError({
 
   return (
     <Banner
+      role="alert"
       status="error"
       title={heading}
       description={error == null || heading === message ? undefined : message}

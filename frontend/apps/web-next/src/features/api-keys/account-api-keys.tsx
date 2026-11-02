@@ -3,7 +3,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { Bell } from "lucide-react";
 import { useCallback, useId, useState } from "react";
 import { useTranslations } from "use-intl";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { DockedActions } from "@/components/shell/docked-actions";

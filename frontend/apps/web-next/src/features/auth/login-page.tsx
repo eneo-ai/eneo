@@ -3,7 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
 import { useTranslations } from "use-intl";
 import { z } from "zod";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { LoadingState } from "@/components/composites/loading-state";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
@@ -99,7 +99,7 @@ export function LoginPage({ search, accessibilityStatementUrl }: Props) {
       ) : (
         <>
           {diagnostics ? <LoginDiagnosticsAlert diagnostics={diagnostics} /> : null}
-          {notice ? <QuietBanner status={notice.status} title={t(notice.message)} /> : null}
+          {notice ? <Banner status={notice.status} title={t(notice.message)} /> : null}
           <QueryStateBoundary
             query={federation}
             rows={1}

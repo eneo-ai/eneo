@@ -20,9 +20,9 @@ export function useFilterShown(count: number): boolean {
  * Filter field above a resource grid or table: Astryx TextInput with a search
  * icon and a clear button. The label names what is filtered ("Filtrera
  * samlingar") and is visually hidden. While a query is typed, the number of
- * matches is announced politely (WCAG 4.1.3): the list changes silently, and
- * an empty-result message that appears with its text is not announced
- * reliably.
+ * matches is announced politely (WCAG 4.1.3): the list changes silently. The
+ * count also says when nothing matches, so the empty state shown for it takes
+ * `isAnnounced={false}`, or both are read together.
  */
 export function ResourceFilterInput({
   value,

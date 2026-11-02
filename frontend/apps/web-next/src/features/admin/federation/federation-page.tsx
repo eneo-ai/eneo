@@ -288,6 +288,7 @@ function FederationForm({
         <form className="flex flex-col gap-5 px-5 py-4" noValidate onSubmit={requestSave}>
           {conflict ? (
             <Banner
+              role="alert"
               status="warning"
               title={t("federation_admin_conflict_title")}
               description={t("federation_admin_conflict_description")}

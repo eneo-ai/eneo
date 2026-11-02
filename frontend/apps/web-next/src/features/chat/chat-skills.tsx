@@ -14,7 +14,7 @@ import {
   type ReactNode,
   type RefObject
 } from "react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
@@ -353,7 +353,7 @@ function SkillsPanel({
             )}
           >
             {layer?.status === "suspended" && layer.reason && (
-              <QuietBanner
+              <Banner
                 status="warning"
                 title={t("personal_chat_skills_paused_title")}
                 description={layerReasonText(layer.reason, layer.detail, t)}
@@ -490,6 +490,7 @@ export function ChatSkills() {
         label={t("personal_chat_skills_button")}
         // A search field brings up the keyboard: only a tall sheet makes room for it.
         height={skills.searchable ? "tall" : "80dvh"}
+        padding={0}
       >
         <SkillsPanel
           skills={skills}

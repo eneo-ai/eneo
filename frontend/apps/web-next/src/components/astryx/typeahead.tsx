@@ -3,10 +3,9 @@ import {
   type SearchableItem,
   type TypeaheadProps
 } from "@astryxdesign/core/Typeahead";
-import { useAriaInvalidOnError } from "./use-aria-invalid-on-error";
 
-/** What a `KEYBOARD` preset sets: Astryx's Typeahead keeps these off its input, so the wrapper sets them. */
-type KeyboardAttributes = {
+/** What a `KEYBOARD` preset sets: left out of Astryx's Typeahead types, but passed on to its `<input>`. */
+export type KeyboardAttributes = {
   enterKeyHint?: string;
   inputMode?: string;
   autoCapitalize?: string;
@@ -15,14 +14,13 @@ type KeyboardAttributes = {
 };
 
 /**
- * Astryx Typeahead whose error status is announced as one (see
- * useAriaInvalidOnError) and whose input takes a `KEYBOARD` preset (spread
- * `{...KEYBOARD.email}`): Astryx does not pass unknown attributes to the
- * `<input>`, so they are set on it after each render. Lint sends every
+ * Astryx Typeahead whose error status is announced as one (Astryx paints the
+ * status but sets no `aria-invalid`) and whose input takes a `KEYBOARD`
+ * preset (spread `{...KEYBOARD.email}`). Astryx passes props it does not know
+ * on to the `<input>`, which is also what the ref points at. Lint sends every
  * Typeahead import here.
  */
 export function Typeahead<T extends SearchableItem>({
-  ref,
   enterKeyHint,
   inputMode,
   autoCapitalize,
@@ -30,12 +28,12 @@ export function Typeahead<T extends SearchableItem>({
   spellCheck,
   ...props
 }: TypeaheadProps<T> & KeyboardAttributes) {
-  const fieldRef = useAriaInvalidOnError(ref, props.status, {
-    enterkeyhint: enterKeyHint,
-    inputmode: inputMode,
-    autocapitalize: autoCapitalize,
-    autocorrect: autoCorrect,
-    spellcheck: spellCheck
-  });
-  return <AstryxTypeahead {...props} ref={fieldRef} />;
+  const keyboard: object = { enterKeyHint, inputMode, autoCapitalize, autoCorrect, spellCheck };
+  return (
+    <AstryxTypeahead
+      aria-invalid={props.status?.type === "error" || undefined}
+      {...keyboard}
+      {...props}
+    />
+  );
 }

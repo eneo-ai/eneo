@@ -5,11 +5,12 @@ import astryxSv from "@astryxdesign/core/locales/sv-SE.json";
 import Link from "@/lib/link";
 import { useLocale } from "use-intl";
 import { eneoTheme } from "@/theme/eneo";
+import { astryxSvSupplement } from "./astryx-sv-supplement";
 
 // Astryx's own component strings (aria labels, pagination, close buttons…).
 // English ships built in; Swedish comes from Astryx's catalog, keyed by our
-// use-intl locale code.
-const ASTRYX_MESSAGES: MessagesByLocale = { sv: astryxSv };
+// use-intl locale code, with our Swedish for the strings it still lacks.
+const ASTRYX_MESSAGES: MessagesByLocale = { sv: { ...astryxSvSupplement, ...astryxSv } };
 
 /**
  * Astryx passes both `href` and `to`; the app's Link accepts `href`.

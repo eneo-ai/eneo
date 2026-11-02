@@ -448,6 +448,7 @@ export function CollectionsTab({ canCreate, name }: { canCreate: boolean; name: 
       <div className="flex flex-col gap-4">
         {toolbar}
         <EmptyState
+          isAnnounced={false}
           icon={<SearchX />}
           title={t("ui_no_items_matching", { resourceNamePlural: t("resource_collections") })}
           headingLevel={3}

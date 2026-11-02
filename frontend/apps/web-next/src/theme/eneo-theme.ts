@@ -136,6 +136,21 @@ export const eneoTheme = defineTheme({
     "--color-error": ["#B42330", "#FF8177"],
     "--color-error-muted": ["#FBE5E6", "rgba(255, 129, 119, 0.15)"],
     "--color-on-error": ["#FFFFFF", "#06101C"],
+    // Info is a status of its own: Eneo blue, as the accent.
+    "--color-info": ["#1A6FD2", "#4D94F2"],
+    "--color-info-muted": ["#E6EEFA", "rgba(77, 148, 242, 0.16)"],
+    "--color-on-info": ["#FFFFFF", "#06101C"],
+    // Status text, and text on the muted status fills (banners, the
+    // destructive button): the categorical status hues. Status icons and
+    // borders follow the text colour.
+    "--color-text-info": ["#1557A8", "#8DBAF7"],
+    "--color-text-success": ["#1E7A32", "#6CC382"],
+    "--color-text-warning": ["#8A5A00", "#E9B949"],
+    "--color-text-error": ["#B42330", "#FF8177"],
+    "--color-on-info-muted": ["#1557A8", "#8DBAF7"],
+    "--color-on-success-muted": ["#1E7A32", "#6CC382"],
+    "--color-on-warning-muted": ["#8A5A00", "#E9B949"],
+    "--color-on-error-muted": ["#B42330", "#FF8177"],
 
     // Effects.
     "--color-skeleton": ["#E6E9EE", "#242A32"],
@@ -191,14 +206,7 @@ export const eneoTheme = defineTheme({
     // Boundary of form controls (inputs, selects, checkboxes, radios, switch
     // tracks): 3:1 on every surface, WCAG 1.4.11. The emphasized border above
     // stays the lighter, decorative edge.
-    "--eneo-color-border-control": ["#7E8593", "#747C8B"],
-    // Neutral paints Badge/StatusDot/ProgressBar status fills from these; point
-    // them at the Eneo status colours so fills pair with the on-* colours above.
-    "--astryx-theme-neutral-color-status-fill-accent": ["#1A6FD2", "#4D94F2"],
-    "--astryx-theme-neutral-color-status-fill-success": ["#1E7A32", "#6CC382"],
-    "--astryx-theme-neutral-color-status-fill-warning": ["#8A5A00", "#E9B949"],
-    "--astryx-theme-neutral-color-status-fill-error": ["#B42330", "#FF8177"],
-    "--astryx-theme-neutral-color-status-muted-accent": ["#E6EEFA", "rgba(77, 148, 242, 0.16)"]
+    "--eneo-color-border-control": ["#7E8593", "#747C8B"]
   },
 
   // Astryx draws form-control boundaries with --color-border-emphasized (and
@@ -245,6 +253,20 @@ export const eneoTheme = defineTheme({
   // option rows get 44 px of their own.
   adaptations: {
     rules: [
+      // Neutral moves touch phones to a 16 px type scale and re-emits its own
+      // font stacks there (no JetBrains Mono for code). Keep Eneo's scale and
+      // fonts; the coarse rule below sets the touch text sizes.
+      {
+        when: { pointer: "coarse", width: { below: "lg" } },
+        value: {
+          typography: { scale: { base: 14, ratio: 1.2 } },
+          tokens: {
+            "--font-family-body": FONT_BODY,
+            "--font-family-heading": FONT_BODY,
+            "--font-family-code": FONT_CODE
+          }
+        }
+      },
       {
         when: { pointer: "coarse" },
         value: {

@@ -425,7 +425,12 @@ export function BlobTable({
         />
       )}
       {filtered.length === 0 ? (
-        <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
+        <EmptyState
+          isAnnounced={false}
+          icon={<SearchX />}
+          title={t("no_results_found")}
+          isCompact
+        />
       ) : (
         <TableFrame>
           <Table

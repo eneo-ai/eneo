@@ -5,7 +5,7 @@ import { QueryStateBoundary } from "@/components/composites/query-state";
 import { ModelUsageBreakdown } from "./model-usage-breakdown";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { sanitizeWebHref } from "@/lib/safe-url";
 import { modelLifecycle, modelPrice } from "./provider-sections";
 import { isEmbeddingFamily } from "./model-metadata-options";
@@ -60,7 +60,7 @@ export function ModelDetailDialog({
           <DialogTitle>{modelDisplayName(model)}</DialogTitle>
         </DialogHeader>
         {lifecycle.kind !== "active" && (
-          <QuietBanner
+          <Banner
             status="warning"
             collapsible={false}
             title={
@@ -74,7 +74,7 @@ export function ModelDetailDialog({
                 {t("migrate")}
               </Button>
             )}
-          </QuietBanner>
+          </Banner>
         )}
         {kind !== "completion" && kind !== "transcription" ? (
           <InfoTab model={model} kind={kind} t={t} />

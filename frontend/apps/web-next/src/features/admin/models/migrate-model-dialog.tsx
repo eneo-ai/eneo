@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { ModelUsageBreakdown } from "./model-usage-breakdown";
 import { browserApi } from "@/lib/api/browser";
@@ -104,7 +104,7 @@ function Warnings({
 }) {
   if (messages.length === 0) return null;
   return (
-    <QuietBanner title={title} status={status} collapsible={false}>
+    <Banner title={title} status={status} collapsible={false}>
       <ul className="flex flex-col gap-1.5">
         {messages.map((message, index) => (
           <li key={index} className="text-sm">
@@ -112,7 +112,7 @@ function Warnings({
           </li>
         ))}
       </ul>
-    </QuietBanner>
+    </Banner>
   );
 }
 
