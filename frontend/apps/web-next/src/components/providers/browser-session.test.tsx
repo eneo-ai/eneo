@@ -107,3 +107,24 @@ it("never exposes logout children from a previously bound suspended document", a
   expect(screen.getByRole("link", { name: "Logga ut" }).getAttribute("href")).toBe("/logout");
   await expectNoAxeViolations();
 });
+
+it("warns before a bound session ends, and only for a session with a known end", () => {
+  const expiresAt = Date.now() + 60_000;
+  renderInApp(
+    <BrowserSessionBoundary>
+      <main>
+        <button>Save draft</button>
+      </main>
+    </BrowserSessionBoundary>
+  );
+  expect(screen.queryByRole("dialog")).toBeNull();
+  // An anonymous document never warns, whatever its probe said.
+  update({ status: "bound", generation: null, expiresAt });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  // A one-minute session is warned for the last half of it, not from the start.
+  update({ status: "bound", generation: "a", expiresAt, lifetime: 60_000 });
+  expect(screen.queryByRole("dialog")).toBeNull();
+  update({ status: "bound", generation: "a", expiresAt });
+  expect(screen.getByRole("dialog", { name: "Din session går snart ut" })).toBeTruthy();
+  expect(screen.getByRole("button", { name: "Save draft", hidden: true })).toBeTruthy();
+});
