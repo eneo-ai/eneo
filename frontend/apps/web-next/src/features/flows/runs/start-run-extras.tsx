@@ -9,7 +9,7 @@ import { useEffect, useRef, useState } from "react";
 import { TextInput } from "@/components/astryx/text-input";
 import { StatusLabel, type StatusTone } from "@/components/composites/status-label";
 import type { Schema } from "@/lib/api/models";
-import { toast } from "@/lib/toast";
+import { toastApiError } from "@/lib/api/toast";
 import { measureAudioSeconds } from "./audio-length";
 import { formatSeconds } from "./run-format";
 import { flowErrorText, refusalText } from "./run-messages";
@@ -189,7 +189,10 @@ export function ReuseLastInput({
       announce(t("flow_run_more_reuse_done"));
     },
     onError: (error) =>
-      toast.error(t("flow_run_more_reuse_failed"), { description: refusalText(error, t) })
+      toastApiError(error, t, {
+        title: t("flow_run_more_reuse_failed"),
+        message: refusalText(error, t)
+      })
   });
   const run = last.data;
   if (!reusable || !run) return null;

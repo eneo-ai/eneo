@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
+import { toast } from "@/lib/toast";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
@@ -128,6 +129,30 @@ describe("FlowRunCard", () => {
     expect(within(card).getByRole("button", { name: messages.flow_runs_cancel })).toBeTruthy();
     // The audited detail is not read while the run moves.
     expect(calls(DETAIL)).toHaveLength(0);
+  });
+
+  it("says why cancelling failed, with the error id for support", async () => {
+    const error = vi.spyOn(toast, "error");
+    onTestFinished(() => error.mockRestore());
+    answerRun(makeRunSummary({ status: "running", finished_at: null }), [
+      { order: 1, label: "Sammanfatta", status: "running" }
+    ]);
+    state.routes["POST /api/v1/flows/{id}/runs/{run_id}/cancel/"] = () => ({
+      status: 500,
+      body: { message: "An unexpected error occurred.", error_id: "err-1" }
+    });
+    renderCard();
+    fireEvent.click(await screen.findByRole("button", { name: messages.flow_runs_cancel }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: messages.flow_runs_cancel_title
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_cancel }));
+
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith(messages.flow_runs_cancel_failed, {
+        description: `${messages.error_occurred} · ${messages.error_id}: err-1`
+      })
+    );
   });
 
   it("stops following a run under way once it is gone", async () => {

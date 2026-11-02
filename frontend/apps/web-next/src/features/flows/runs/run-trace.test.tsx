@@ -13,6 +13,7 @@ import type { EvidenceAccess, RunEvidence } from "./runs-api";
 const state = vi.hoisted(() => ({
   announce: vi.fn(),
   saveBlob: vi.fn(),
+  toast: { error: vi.fn(), success: vi.fn(), info: vi.fn(), warning: vi.fn() },
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
   stub: null as unknown as ReturnType<typeof import("../editor/testing/fixtures").apiStub>
 }));
@@ -27,6 +28,7 @@ vi.mock("@astryxdesign/core/hooks", async (importOriginal) => ({
   useAnnounce: () => state.announce
 }));
 vi.mock("@/features/files/signed-file-url", () => ({ saveBlob: state.saveBlob }));
+vi.mock("@/lib/toast", () => ({ toast: state.toast }));
 
 import { RunTrace } from "./run-trace";
 
@@ -317,6 +319,26 @@ describe("RunTrace", () => {
     });
     expect(state.announce).toHaveBeenCalledWith(messages.flow_run_extras_export_done);
     await expectNoAxeViolations(container);
+  });
+
+  it("says why an export failed and where to look instead, with the error id for support", async () => {
+    state.routes[EXPORT] = () => ({
+      status: 413,
+      body: {
+        message: "Too large",
+        code: "flow_evidence_export_too_large",
+        context: { limit: "provider_call_events" },
+        error_id: "err-1"
+      }
+    });
+    renderTrace();
+
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_run_extras_export_redacted }));
+    await vi.waitFor(() =>
+      expect(state.toast.error).toHaveBeenCalledWith(messages.flow_run_extras_export_failed, {
+        description: `${messages.flow_error_flow_evidence_export_too_large} ${messages.flow_run_extras_export_recovery_calls} · ${messages.error_id}: err-1`
+      })
+    );
   });
 
   it("asks for a reason of one's own before the full export", async () => {

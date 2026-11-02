@@ -22,6 +22,7 @@ import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
 import { HANDHELD_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { useSearchDraft } from "@/lib/hooks/use-search-draft";
 import { browserApi } from "@/lib/api/browser";
+import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
@@ -109,7 +110,7 @@ export function FlowsPage() {
       toast.success(t("flows_deleted", { name: flow.name }));
     },
     // A refusal (one the flags did not foresee, such as a 403) says why in words.
-    onError: (error) => toast.error(flowRefusalMessage(error, [], t)),
+    onError: (error) => toastApiError(error, t, { message: flowRefusalMessage(error, [], t) }),
     focusTarget: headingRef
   });
 

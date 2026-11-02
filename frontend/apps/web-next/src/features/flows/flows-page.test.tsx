@@ -298,10 +298,10 @@ describe("FlowsPage", () => {
     expect(screen.queryByRole("columnheader", { name: "Åtgärder" })).toBeNull();
   });
 
-  it("says in words why a deletion was refused", async () => {
+  it("says in words why a deletion was refused, with the trace id to quote to support", async () => {
     api.DELETE.mockResolvedValue({
       error: { code: "insufficient_space_permission", message: "No.", eneo_error_code: 9007 },
-      response: new Response(null, { status: 403 })
+      response: new Response(null, { status: 403, headers: { "x-trace-id": "trace-1" } })
     });
     renderPage([sparse({ id: "f1", name: "Medborgarbrev" })]);
     fireEvent.click(screen.getByRole("button", { name: "Ta bort Medborgarbrev" }));
@@ -309,7 +309,9 @@ describe("FlowsPage", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
 
     await waitFor(() =>
-      expect(toast.error).toHaveBeenCalledWith(messages.flows_refusal_no_permission)
+      expect(toast.error).toHaveBeenCalledWith(messages.flows_refusal_no_permission, {
+        description: `${messages.trace_id}: trace-1`
+      })
     );
   });
 

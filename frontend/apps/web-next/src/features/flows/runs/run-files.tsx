@@ -4,9 +4,8 @@ import { Button } from "@astryxdesign/core/Button";
 import { Download, FileText } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";
-import { EneoApiError } from "@/lib/api/errors";
+import { toastDownloadError } from "@/features/files/signed-file-url";
 import { formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
 import type { StepInputFile } from "./run-format";
 import { refusalText } from "./run-messages";
 import { artifactDownloadPath, inputFileDownloadPath, type RunResultFile } from "./runs-api";
@@ -14,14 +13,6 @@ import { artifactDownloadPath, inputFileDownloadPath, type RunResultFile } from 
 /** Saves a file through a short-lived signed link; the server names it. */
 function save(path: string, name?: string) {
   Object.assign(document.createElement("a"), { href: path, download: name ?? "" }).click();
-}
-
-/** Says why a download link could not be made, with the trace id for support. */
-function downloadFailed(error: unknown, t: ReturnType<typeof useTranslations>) {
-  const traceId = error instanceof EneoApiError ? error.traceId : undefined;
-  toast.error(refusalText(error, t), {
-    description: traceId ? `Trace ID: ${traceId}` : undefined
-  });
 }
 
 /** A download button that asks the core for a fresh signed link on each press. */
@@ -51,7 +42,8 @@ export function DownloadButton({
         try {
           save(await getPath(), name);
         } catch (error) {
-          downloadFailed(error, t);
+          // Why the link could not be made, in the flow catalog's words, with the support ids.
+          toastDownloadError(error, t, { message: refusalText(error, t) });
         } finally {
           setPending(false);
         }

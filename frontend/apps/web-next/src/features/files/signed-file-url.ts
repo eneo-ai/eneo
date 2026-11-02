@@ -1,7 +1,7 @@
 import { API_BASE } from "@/lib/api/base";
 import type { EneoClient } from "@/lib/api/browser";
 import { EneoApiError, unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
+import { toastApiError, type ApiErrorToastCopy } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 
 /**
@@ -73,10 +73,15 @@ export function saveBlob(blob: Blob, name: string) {
 }
 
 /**
- * A download that failed: the backend's reason and trace id, or, when the
- * signed URL was refused or the network failed, that the file did not load.
+ * A download that failed: the backend's reason (or a feature's own words for
+ * it, `copy`) and trace id, or, when the signed URL was refused or the network
+ * failed, that the file did not load.
  */
-export function toastDownloadError(error: unknown, t: (key: string) => string) {
-  if (error instanceof EneoApiError) toastApiError(error, t);
+export function toastDownloadError(
+  error: unknown,
+  t: (key: string) => string,
+  copy?: ApiErrorToastCopy
+) {
+  if (error instanceof EneoApiError) toastApiError(error, t, copy);
   else toast.error(t("attachment_error_loading_content"));
 }

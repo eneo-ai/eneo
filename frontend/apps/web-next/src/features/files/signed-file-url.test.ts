@@ -2,12 +2,23 @@
 import createClient from "openapi-fetch";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { API_BASE } from "@/lib/api/base";
+import { EneoApiError } from "@/lib/api/errors";
 import type { paths } from "@/lib/api/schema";
-import { proxiedDownloadPath, saveBlob, saveUrl, signedFileUrl } from "./signed-file-url";
+import {
+  proxiedDownloadPath,
+  saveBlob,
+  saveUrl,
+  signedFileUrl,
+  toastDownloadError
+} from "./signed-file-url";
+
+const toast = vi.hoisted(() => ({ error: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ toast }));
 
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
+  toast.error.mockClear();
 });
 
 describe("signed file URLs", () => {
@@ -97,6 +108,24 @@ describe("signed file URLs", () => {
       fetch: async () => Response.json({ detail: "Forbidden" }, { status: 403 })
     });
     await expect(signedFileUrl(api, "file-1", "attachment")).rejects.toThrow();
+  });
+});
+
+describe("toastDownloadError", () => {
+  const t = (key: string) => key;
+
+  it("says a feature's own refusal with the support references", () => {
+    toastDownloadError(new EneoApiError("Gone.", { status: 404, errorId: "err-1" }), t, {
+      message: "Filen finns inte för den här körningen."
+    });
+    expect(toast.error).toHaveBeenCalledWith("Filen finns inte för den här körningen.", {
+      description: "error_id: err-1"
+    });
+  });
+
+  it("says the file did not load when no backend answer explains why", () => {
+    toastDownloadError(new Error("Unexpected signed file URL"), t, { message: "Ignored." });
+    expect(toast.error).toHaveBeenCalledWith("attachment_error_loading_content");
   });
 });
 

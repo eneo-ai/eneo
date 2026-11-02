@@ -2,9 +2,10 @@
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { focusManager } from "@tanstack/react-query";
 import { useState } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
 import messages from "@/lib/i18n/messages/sv.json";
+import { toast } from "@/lib/toast";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
@@ -346,6 +347,33 @@ describe("StartRunDialog", () => {
       expect((within(dialog).getByLabelText(/^Ärende/) as HTMLInputElement).value).toBe("Bygglov")
     );
     expect(FakeUpload.sent).toEqual([]);
+  });
+
+  it("says why the last run's input could not be read, with the error id for support", async () => {
+    const error = vi.spyOn(toast, "error");
+    onTestFinished(() => error.mockRestore());
+    api.routes[LIST] = () => ({
+      body: {
+        count: 1,
+        items: [makeRunSummary({ id: "run-7" })],
+        has_more: true,
+        status_counts: null
+      }
+    });
+    api.routes[DETAIL] = () => ({
+      status: 500,
+      body: { message: "An unexpected error occurred.", error_id: "err-1" }
+    });
+    const { dialog } = await openDialog();
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: messages.flow_run_more_reuse })
+    );
+
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith(messages.flow_run_more_reuse_failed, {
+        description: `${messages.error_occurred} · ${messages.error_id}: err-1`
+      })
+    );
   });
 
   it("does not offer the last run's input to a caller who has not run the flow", async () => {

@@ -5,6 +5,7 @@ import { Profiler, Suspense } from "react";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import type { Permission } from "@/lib/auth/permissions";
+import { toast } from "@/lib/toast";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
@@ -524,6 +525,37 @@ describe("FlowRunPage", () => {
     const files = await screen.findByRole("list", { name: messages.flow_run_more_other_files });
     expect(within(files).getByText("underlag.docx")).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("says why a file of the run cannot be downloaded, with the error id for support", async () => {
+    const error = vi.spyOn(toast, "error");
+    onTestFinished(() => error.mockRestore());
+    const summary = makeRunSummary();
+    answerRun(
+      summary,
+      makeRunDetail({
+        ...summary,
+        result: { kind: "inline_text", text: "Beslutet är fattat." },
+        result_files: [makeResultFile({ file_id: "file-7", name: "underlag.docx" })]
+      })
+    );
+    state.routes["POST /api/v1/flows/{id}/runs/{run_id}/artifacts/{file_id}/signed-url/"] = () => ({
+      status: 410,
+      body: {
+        message: "Gone",
+        code: "flow_run_artifact_content_unavailable",
+        error_id: "err-1"
+      }
+    });
+    renderRun();
+    fireEvent.click(await screen.findByRole("button", { name: "Ladda ned underlag.docx" }));
+
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith(
+        messages.flow_error_flow_run_artifact_content_unavailable,
+        { description: `${messages.error_id}: err-1` }
+      )
+    );
   });
 
   it("follows a moving run through its status alone, and reads the detail again only when it moved", async () => {

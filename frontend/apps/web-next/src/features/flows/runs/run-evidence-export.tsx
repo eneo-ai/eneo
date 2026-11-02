@@ -11,7 +11,7 @@ import { useId, useState } from "react";
 import { flushSync } from "react-dom";
 import { saveBlob } from "@/features/files/signed-file-url";
 import { EneoApiError } from "@/lib/api/errors";
-import { toast } from "@/lib/toast";
+import { toastApiError } from "@/lib/api/toast";
 import { focusFirstControl } from "./run-form-fields";
 import { flowErrorText, refusalText } from "./run-messages";
 import { exportRunEvidence } from "./run-trace-api";
@@ -62,13 +62,12 @@ export function RunEvidenceExport({
         return;
       }
       const recovery = exportRecovery(error);
-      const traceId = error instanceof EneoApiError ? error.traceId : undefined;
-      toast.error(t("flow_run_extras_export_failed"), {
-        description: [
+      toastApiError(error, t, {
+        title: t("flow_run_extras_export_failed"),
+        message: [
           refusalText(error, t),
           recovery === "trace" ? t("flow_run_extras_export_recovery_trace") : null,
-          recovery === "provider_calls" ? t("flow_run_extras_export_recovery_calls") : null,
-          traceId ? `Trace ID: ${traceId}` : null
+          recovery === "provider_calls" ? t("flow_run_extras_export_recovery_calls") : null
         ]
           .filter(Boolean)
           .join(" ")

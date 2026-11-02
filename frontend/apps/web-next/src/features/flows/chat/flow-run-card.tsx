@@ -10,6 +10,7 @@ import { IconTile } from "@/components/composites/icon-tile";
 import { StatusLabel } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { pollEvery } from "@/lib/api/query";
+import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
@@ -319,7 +320,10 @@ export function FlowRunCard({
             size="sm"
             report={(notice) =>
               notice.status === "error"
-                ? toast.error(notice.title, { description: notice.description })
+                ? toastApiError(notice.error, t, {
+                    title: notice.title,
+                    message: notice.description
+                  })
                 : toast.info(notice.title, { description: notice.description })
             }
             onCancelled={() => undefined}

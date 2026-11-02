@@ -39,4 +39,19 @@ describe("toastApiError", () => {
     // No hard-coded English label in the Swedish UI.
     expect(screen.queryByText(/Trace/)).toBeNull();
   });
+
+  it("says a feature's own words, what failed first, and keeps the references after them", async () => {
+    const error = new EneoApiError("Gone.", { status: 404, traceId: "trace-123" });
+    toastApiError(error, t, { message: "Körningen finns inte längre." });
+    toastApiError(error, t, {
+      title: "Det gick inte att avbryta körningen",
+      message: "Körningen finns inte längre."
+    });
+    await act(() => vi.advanceTimersByTimeAsync(300));
+
+    expect(screen.getByText("Körningen finns inte längre.")).toBeTruthy();
+    expect(screen.getByText("Spårnings-ID: trace-123")).toBeTruthy();
+    expect(screen.getByText("Det gick inte att avbryta körningen")).toBeTruthy();
+    expect(screen.getByText("Körningen finns inte längre. · Spårnings-ID: trace-123")).toBeTruthy();
+  });
 });

@@ -35,6 +35,8 @@ export type RunActionNotice = {
   description?: string;
   /** A page the notice points to, offered as a link beside it. */
   link?: { label: string; href: string };
+  /** The failure an error notice reports, for a toast's support references (`toastApiError`). */
+  error?: unknown;
 };
 
 /** Why a failed run cannot be retried by this person now. */
@@ -110,7 +112,8 @@ export function useRetryRun(
       report({
         status: "error",
         title: t("flow_runs_retry_failed"),
-        description: refusalText(error, t)
+        description: refusalText(error, t),
+        error
       });
     }
   });
@@ -202,7 +205,8 @@ export function CancelRunButton({
       report({
         status: "error",
         title: t("flow_runs_cancel_failed"),
-        description: refusalText(error, t)
+        description: refusalText(error, t),
+        error
       });
     }
   });

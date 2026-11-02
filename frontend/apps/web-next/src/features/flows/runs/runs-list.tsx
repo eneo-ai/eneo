@@ -36,6 +36,7 @@ import {
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { pollEvery } from "@/lib/api/query";
+import { toastApiError } from "@/lib/api/toast";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
@@ -147,7 +148,10 @@ function RedispatchButton({ flowId, run }: { flowId: string; run: RunSummary }) 
       void queryClient.invalidateQueries({ queryKey: runKeys.list(flowId) });
     },
     onError: (error) =>
-      toast.error(t("flow_runs_redispatch_failed"), { description: refusalText(error, t) })
+      toastApiError(error, t, {
+        title: t("flow_runs_redispatch_failed"),
+        message: refusalText(error, t)
+      })
   });
   return (
     <Button
@@ -164,9 +168,18 @@ function RedispatchButton({ flowId, run }: { flowId: string; run: RunSummary }) 
 
 /**
  * What came of a row's retry or cancel, as a toast (errors stay until
- * closed); a page the notice points to is the toast's action.
+ * closed, with the failure's support references); a page the notice points
+ * to is the toast's action.
  */
-function toastNotice(notice: RunActionNotice, navigate: (href: string) => void) {
+function toastNotice(
+  notice: RunActionNotice,
+  navigate: (href: string) => void,
+  t: (key: string) => string
+) {
+  if (notice.status === "error") {
+    toastApiError(notice.error, t, { title: notice.title, message: notice.description });
+    return;
+  }
   const { link } = notice;
   const options =
     notice.description || link
@@ -176,9 +189,6 @@ function toastNotice(notice: RunActionNotice, navigate: (href: string) => void) 
         }
       : undefined;
   switch (notice.status) {
-    case "error":
-      toast.error(notice.title, options);
-      return;
     case "warning":
       toast.warning(notice.title, options);
       return;
@@ -228,7 +238,7 @@ export function FlowRunsList({
   const announce = useAnnounce();
   const { can, user } = useAppContext();
   const router = useRouter();
-  const report = (notice: RunActionNotice) => toastNotice(notice, (href) => router.push(href));
+  const report = (notice: RunActionNotice) => toastNotice(notice, (href) => router.push(href), t);
   // A cancelled run's button goes: focus moves to the run's link in its row,
   // or to the heading when the run left the list (a status filter).
   const rescue = useFocusRescue();

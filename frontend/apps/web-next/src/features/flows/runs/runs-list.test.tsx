@@ -435,6 +435,42 @@ describe("FlowRunsList", () => {
     await vi.waitFor(() => expect(listCalls().length).toBeGreaterThan(1));
   });
 
+  it("says why a row's action failed, with the error id to quote to support", async () => {
+    const unexpected = { message: "An unexpected error occurred.", error_id: "err-1" };
+    const queued = makeRunSummary({
+      id: "run-q",
+      status: "queued",
+      started_at: null,
+      finished_at: null,
+      dispatch_next_attempt_at: "2026-10-21T08:00:05Z",
+      dispatch_exhausted_at: null
+    });
+    answerList([queued]);
+    state.routes[REDISPATCH] = () => ({ status: 500, body: unexpected });
+    state.routes[CANCEL] = () => ({ status: 500, body: unexpected });
+    renderInApp(<List />);
+    const table = await screen.findByRole("table");
+    const description = `${messages.error_occurred} · ${messages.error_id}: err-1`;
+
+    fireEvent.click(within(table).getByRole("button", { name: messages.flow_runs_redispatch }));
+    await vi.waitFor(() =>
+      expect(state.toast.error).toHaveBeenCalledWith(messages.flow_runs_redispatch_failed, {
+        description
+      })
+    );
+
+    fireEvent.click(within(table).getByRole("button", { name: messages.flow_runs_cancel }));
+    const dialog = await screen.findByRole("alertdialog", {
+      name: messages.flow_runs_cancel_title
+    });
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.flow_runs_cancel }));
+    await vi.waitFor(() =>
+      expect(state.toast.error).toHaveBeenCalledWith(messages.flow_runs_cancel_failed, {
+        description
+      })
+    );
+  });
+
   it("retries a failed run from its row and opens the new run", async () => {
     answerList([makeRunSummary({ id: "run-f", status: "failed" }), makeRunSummary()]);
     state.routes[RETRY] = () => ({
