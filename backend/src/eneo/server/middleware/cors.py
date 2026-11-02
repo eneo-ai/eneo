@@ -47,8 +47,9 @@ CORS_OPTIONS: CORSOptions = {
     "allow_methods": ("*",),
     "allow_headers": ("*",),
     "allow_credentials": True,
-    # Trace headers a cross-origin caller may read, on every response.
-    "expose_headers": ("X-Trace-Id", "X-Correlation-ID"),
+    # Headers a cross-origin caller may read, on every response: the trace
+    # headers, and Retry-After on a 429.
+    "expose_headers": ("X-Trace-Id", "X-Correlation-ID", "Retry-After"),
     "callback": get_origin,
 }
 
