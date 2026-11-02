@@ -7,7 +7,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
 import { generatePassword } from "@eneo/eneo-js/auth/password-generator";
 import { revealProblems } from "@/components/composites/field-problem";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -24,6 +24,7 @@ import { passwordPolicyQueryOptions } from "@/features/auth/password-policy";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { toast } from "@/lib/toast";
 import { rolesQueryOptions, type Role } from "@/features/admin/roles/roles";
 import { UserGroupField } from "./user-group-field";
@@ -159,7 +160,8 @@ function UserEditorForm({
     onError: (error: Error) => toastApiError(error, t)
   };
 
-  const create = useMutation({
+  // Both saves can send the generated password.
+  const create = useSecretMutation({
     mutationFn: ({ password, email }: Save & { password: string }) =>
       unwrap(
         browserApi.POST("/api/v1/admin/users/", {
@@ -174,7 +176,7 @@ function UserEditorForm({
     ...saveCallbacks
   });
 
-  const updateUser = useMutation({
+  const updateUser = useSecretMutation({
     mutationFn: ({ password, email }: Save) => {
       if (!user?.username) throw new Error("missing username");
       return unwrap(

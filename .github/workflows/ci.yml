@@ -102,6 +102,16 @@ jobs:
       - name: Guard against re-introducing the old product name
         run: python3 scripts/check_no_intric.py --repo-root .
 
+      # User-facing release notes: schema, sv+en parity, newest-first order,
+      # that every "Show me" anchor and route still exists in either web app or
+      # the backend's legacy-page map, and the rules of the branch the change
+      # lands on (unreleased notes only on develop). It reads all three apps,
+      # so it runs on every change; it needs only Python and the checkout.
+      - name: Check What's new release notes
+        env:
+          TARGET_BRANCH: ${{ github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
+        run: python3 scripts/check_whats_new.py --repo-root . --branch "$TARGET_BRANCH"
+
       - name: Check all HTTP route decorators
         if: steps.scope.outputs.route_metadata == 'true'
         run: python3 scripts/check_route_metadata.py --repo-root . --all
@@ -350,15 +360,6 @@ jobs:
           python3 apps/web/scripts/check-i18n-duplicates.py
           python3 apps/web/scripts/check-i18n-parity.py
           python3 apps/web/scripts/check-i18n-unused.py
-
-      # User-facing release notes: schema, sv+en parity, newest-first order,
-      # that every "Show me" anchor still exists in the web app, and the rules
-      # of the branch the change lands on (unreleased notes only on develop).
-      - name: Check What's new release notes
-        working-directory: .
-        env:
-          TARGET_BRANCH: ${{ github.base_ref || github.event.merge_group.base_ref || github.ref_name }}
-        run: python3 scripts/check_whats_new.py --repo-root . --branch "$TARGET_BRANCH"
 
       - name: Set up frontend dependencies
         uses: ./.github/actions/setup-frontend

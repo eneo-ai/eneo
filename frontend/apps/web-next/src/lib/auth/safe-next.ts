@@ -50,11 +50,3 @@ export function safeNextPath(next: string | null | undefined): string {
   }
   return next;
 }
-
-/**
- * Where a sign-in finished by a route handler (the SSO callbacks) continues:
- * the login page, which loads `next` in a new document (ContinueSignedIn).
- */
-export function signedInContinuation(next: string | null | undefined): string {
-  return `/login?next=${encodeURIComponent(safeNextPath(next))}`;
-}

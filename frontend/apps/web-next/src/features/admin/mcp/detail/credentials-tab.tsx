@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useQueryClient } from "@tanstack/react-query";
 import { KeyRound, Lock } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useRef, useState } from "react";
@@ -29,6 +29,7 @@ import {
   SelectValue
 } from "@/components/ui/select";
 import { browserApi } from "@/lib/api/browser";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import {
   MCP_KEY,
   type McpAuthType,
@@ -44,7 +45,6 @@ export function CredentialsTab({ server }: { server: McpServer }) {
   const queryClient = useQueryClient();
   const runAuth = useAutosave("mcp-auth");
   const setSaveStatus = useSetSaveStatus();
-  const pendingBody = useRef<McpServerUpdatePayload | null>(null);
 
   const [draftAuth, setDraftAuth] = useState<McpAuthType | null>(null);
   const authType = draftAuth ?? server.http_auth_type ?? "none";
@@ -108,24 +108,21 @@ export function CredentialsTab({ server }: { server: McpServer }) {
       return;
     }
     if (value !== "none") return;
-    pendingBody.current = {
+    saveToken.mutate({
       http_auth_type: "none",
       http_auth_config_schema: null
-    };
-    saveToken.mutate();
+    });
   }
 
-  const saveToken = useMutation({
-    mutationFn: () =>
+  // The body holds the token.
+  const saveToken = useSecretMutation({
+    mutationFn: (body: McpServerUpdatePayload) =>
       runAuth(async () => {
-        const result = await updateMcpServer(browserApi, server.id, pendingBody.current!);
+        const result = await updateMcpServer(browserApi, server.id, body);
         await invalidate();
         stopEditing();
         return result;
-      }),
-    onSettled: () => {
-      pendingBody.current = null;
-    }
+      })
   });
 
   const tokenProblem = confirmedSecretProblem({ value: token, confirmation, isRequired: true });
@@ -150,15 +147,14 @@ export function CredentialsTab({ server }: { server: McpServer }) {
       setSubmitted(true);
       return;
     }
-    pendingBody.current = {
+    saveToken.mutate({
       http_auth_type: authType === "api_key_header" ? "api_key_header" : "bearer",
       http_auth_config_schema: credentialPayload({
         auth: authType === "api_key_header" ? "api_key_header" : "bearer",
         token,
         headerName
       })
-    };
-    saveToken.mutate();
+    });
   }
 
   return (

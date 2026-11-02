@@ -739,9 +739,10 @@ OAUTH_CALLBACK_URLS=[]
 
 # --- Web app served by the backend ---
 # The reference docker-compose.yml enables both flags on the backend service
-# for the main host. Backend defaults remain false outside that configuration;
-# Compose environment values override this env file. Keep Svelte for UI rollback
-# with FRONTEND_ROUTER_PRIORITY=7 in the deployment .env (not this file).
+# for the main host; set them in the deployment .env (not this file), which the
+# Compose file reads. Backend defaults remain false outside that configuration.
+# Route pages back to Svelte with FRONTEND_ROUTER_PRIORITY=7 in the same .env;
+# WEB_APP_ENABLED=false needs it.
 # BROWSER_SESSION_ENABLED: accept the browser session cookie (__Host-eneo_web).
 # The session lasts JWT_EXPIRY_TIME: an absolute lifetime, no inactivity limit,
 # and logout is local (the IdP session stays).

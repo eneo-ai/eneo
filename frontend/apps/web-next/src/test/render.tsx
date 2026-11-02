@@ -34,6 +34,24 @@ export function testQueryClient(): QueryClient {
   return client;
 }
 
+/**
+ * Everything React Query holds, as text: each query's state and each
+ * mutation's state and options (functions drop out). A secret the UI sends
+ * or receives must never appear in it.
+ */
+export function cachedText(queryClient: QueryClient): string {
+  return JSON.stringify([
+    queryClient
+      .getQueryCache()
+      .getAll()
+      .map((query) => query.state),
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .map((mutation) => [mutation.state, mutation.options])
+  ]);
+}
+
 type AppContextOverrides = { [Key in keyof AppContextData]?: Partial<AppContextData[Key]> } & {
   /** The user's tenant permissions (held by one role). */
   permissions?: Permission[];

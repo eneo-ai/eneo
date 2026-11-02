@@ -4,17 +4,20 @@ Every header here is a default, set only when the response did not set its
 own, so endpoint and path policies win (the MCP view's CSP, icons and SSE keep
 theirs; the module-login pages keep their Referrer-Policy).
 
-- ``/api/`` responses: once the browser session cookie shares the API's
-  origin, an API or file response must not be cached, sniffed or run as a
-  document. They get ``Cache-Control: no-store``, ``X-Content-Type-Options:
-  nosniff`` and a sandbox CSP.
+- ``/api/`` responses, in every deployment whatever the browser flags say:
+  an API or file response is not cached, sniffed or run as a document. They
+  get ``Cache-Control: no-store``, ``X-Content-Type-Options: nosniff`` and a
+  sandbox CSP. A browser that holds the session cookie on the API's origin is
+  the case that needs it most, but a Bearer or API-key response carries the
+  same data.
 - With the web app on, every other response on the host gets the browser
   headers Next sent on every route. The web app's pages carry their own CSP
   (``server/web_app.py``), whose ``frame-ancestors`` decides framing, so
   ``X-Frame-Options`` is not sent: one framing rule per response class.
 
-Outside development both get HSTS; never conditioned on the request scheme,
-which is http behind Traefik.
+Outside development both get HSTS for this host only (no
+``includeSubDomains``, no ``preload``); never conditioned on the request
+scheme, which is http behind Traefik.
 
 An ``/api/`` request admitted with the browser session cookie also names that
 session's generation (``Eneo-Session-Generation``), so a page can tell when

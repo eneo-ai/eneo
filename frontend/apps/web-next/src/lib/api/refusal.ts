@@ -8,12 +8,17 @@ import { navigateTo } from "@/lib/navigate-to";
 export const SESSION_GENERATION_HEADER = "Eneo-Session-Generation";
 const SESSION_PROBE = "/api/v1/auth/session/";
 const SESSION_MISMATCH = 9090;
+/** Refusals of the identity itself: an inactive account, a suspended organisation. */
+const RESTRICTIONS = [9019, 9025] as const;
+export type Restriction = (typeof RESTRICTIONS)[number];
+const restrictionOf = (code: number | undefined): Restriction | undefined =>
+  RESTRICTIONS.find((restriction) => restriction === code);
 
 export type SessionSnapshot =
   | { status: "unbound" }
   | { status: "bound"; generation: string | null; logoutGeneration?: string; checkError?: unknown }
-  | { status: "deactivated"; generation: string }
-  | { status: "stale"; destination: string };
+  | { status: "deactivated"; generation: string; restriction: Restriction }
+  | { status: "stale"; destination: string; restriction?: Restriction };
 
 let snapshot: SessionSnapshot = { status: "unbound" };
 let pendingProbe: Promise<void> | undefined;
@@ -42,7 +47,12 @@ function staleError(): EneoApiError {
 function assertCurrent(): void {
   if (snapshot.status === "stale") throw staleError();
   if (snapshot.status === "deactivated") {
-    throw new EneoApiError("The organisation is deactivated.", { status: 403, code: 9025 });
+    throw new EneoApiError(
+      snapshot.restriction === 9019
+        ? "The account is inactive."
+        : "The organisation is deactivated.",
+      { status: 403, code: snapshot.restriction }
+    );
   }
 }
 
@@ -57,10 +67,14 @@ function resumePath(): string {
   return safeNextPath(window.location.pathname + window.location.search);
 }
 
-function makeStale(destination = loginPathToResume(resumePath()), error = staleError()): never {
+function makeStale(
+  destination = loginPathToResume(resumePath()),
+  error = staleError(),
+  restriction?: Restriction
+): never {
   if (snapshot.status !== "stale") {
     // Publish before navigation: beforeunload may cancel the document load.
-    publish({ status: "stale", destination });
+    publish({ status: "stale", destination, ...(restriction ? { restriction } : {}) });
     requests.abort(new DOMException("The browser session changed", "AbortError"));
     const queryClient = getQueryClient();
     void queryClient.cancelQueries();
@@ -102,7 +116,8 @@ export const handleRefusal: (response: Response, requestUrl: string) => Promise<
   const error = apiErrorFromResponse(response, body);
   assertCurrent();
   if (error.code === SESSION_MISMATCH) makeStale(undefined, error);
-  if (response.status === 403 && error.code === 9025) makeStale("/deactivated", error);
+  const restriction = response.status === 403 ? restrictionOf(error.code) : undefined;
+  if (restriction) makeStale("/deactivated", error, restriction);
   if (response.status === 403 && error.code === 9070)
     makeStale(passwordChangeUrl(resumePath()), error);
   if (publicAuthPage()) return;
@@ -194,17 +209,17 @@ async function probeSession(): Promise<void> {
       // authenticated reads or lets this document adopt a later session.
       logoutGeneration = response.headers.get(SESSION_GENERATION_HEADER) ?? undefined;
     } else {
-      if (
-        before.status === "unbound" &&
-        response.status === 403 &&
-        (await errorCodeFromResponse(response)) === 9025
-      ) {
+      const restriction =
+        before.status === "unbound" && response.status === 403
+          ? restrictionOf(await errorCodeFromResponse(response))
+          : undefined;
+      if (restriction) {
         // No identity was admitted. Only public recovery may render; retrying
         // starts a new document, just as recovering a stale bound session does.
         const generation = response.headers.get(SESSION_GENERATION_HEADER);
         if (!generation)
           throw new EneoApiError("The session probe returned no generation.", { status: 502 });
-        publish({ status: "deactivated", generation });
+        publish({ status: "deactivated", generation, restriction });
         if (!["/deactivated", "/logout"].includes(window.location.pathname)) {
           navigateTo("/deactivated");
         }

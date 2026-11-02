@@ -483,6 +483,61 @@ it("lets a fresh suspended logout document clear its unusable cookie once", asyn
   expect(callsTo("/api/v1/users/me/")).toHaveLength(0);
 });
 
+const inactiveAccount = () =>
+  Response.json(
+    { message: "User is inactive", eneo_error_code: 9019 },
+    { status: 403, headers: { [GENERATION]: "inactive" } }
+  );
+
+it.each([
+  [
+    9019,
+    "Kontot är inaktivt",
+    "Ditt konto är inaktivt. Kontakta din administratör för att få åtkomst igen, eller logga ut och logga in med ett annat konto."
+  ],
+  [
+    9025,
+    "Organisation inaktiverad",
+    "Din åtkomst till Eneo har tillfälligt inaktiverats. Kontakta din administratör för att återfå åtkomsten för din organisation."
+  ]
+])("names restriction %s on its recovery page in Swedish", async (code, heading, text) => {
+  bootstrapRefusal = Response.json(
+    { message: "Refused", eneo_error_code: code },
+    { status: 403, headers: { [GENERATION]: "restricted" } }
+  );
+  await route("/deactivated");
+  expect(await screen.findByRole("heading", { name: heading })).toBeTruthy();
+  expect(screen.getByText(text)).toBeTruthy();
+  await waitFor(() => expect(document.title).toBe(`${heading} · Eneo`));
+  expect(screen.getByRole("link", { name: "Logga ut" }).getAttribute("href")).toBe("/logout");
+  expect(callsTo("/api/v1/users/me/")).toHaveLength(0);
+  expect(navigate).not.toHaveBeenCalled();
+  await expectNoAxeViolations();
+});
+
+it("renders an inactive account's recovery on a fresh login document", async () => {
+  bootstrapRefusal = inactiveAccount();
+  await route("/login");
+  expect(await screen.findByRole("heading", { name: "Kontot är inaktivt" })).toBeTruthy();
+  expect(screen.getByRole("link", { name: "Logga ut" }).getAttribute("href")).toBe("/logout");
+  expect(navigate).toHaveBeenCalledExactlyOnceWith("/deactivated");
+  expect(callsTo("/api/v1/users/me/")).toHaveLength(0);
+  await expectNoAxeViolations();
+});
+
+it("lets a fresh inactive-account logout document clear its unusable cookie once", async () => {
+  bootstrapRefusal = inactiveAccount();
+  await route("/logout");
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?message=logout", { replace: true })
+  );
+  expect(callsTo("/api/v1/auth/session/logout/")).toHaveLength(1);
+  expect(callsTo("/api/v1/auth/session/logout/")[0]![1]?.headers).toEqual({
+    [GENERATION]: "inactive"
+  });
+  expect(callsTo("/api/v1/users/me/")).toHaveLength(0);
+});
+
 it("clears the expired cookie identified by bootstrap after a password change", async () => {
   bootstrapRefusal = Response.json(
     { message: "Expired", eneo_error_code: 9005 },
@@ -546,9 +601,30 @@ it("blocks a previously admitted page when the organisation is suspended during 
   await waitFor(async () =>
     expect((await import("@/lib/api/refusal")).getSessionSnapshot()).toEqual({
       status: "stale",
-      destination: "/deactivated"
+      destination: "/deactivated",
+      restriction: 9025
     })
   );
+  expect(screen.getByRole("link", { name: messages.logout }).getAttribute("href")).toBe("/logout");
+  expect(callsTo("/api/v1/auth/session/logout/")).toHaveLength(0);
+  expect(navigate).not.toHaveBeenCalled();
+});
+
+it("blocks a previously admitted page when its account is made inactive during its read", async () => {
+  generation = "session-a";
+  replies.set(
+    "/api/v1/users/me/",
+    Response.json({ message: "User is inactive", eneo_error_code: 9019 }, { status: 403 })
+  );
+  await route("/deactivated");
+  await waitFor(async () =>
+    expect((await import("@/lib/api/refusal")).getSessionSnapshot()).toEqual({
+      status: "stale",
+      destination: "/deactivated",
+      restriction: 9019
+    })
+  );
+  expect(screen.getByRole("heading", { name: "Kontot är inaktivt" })).toBeTruthy();
   expect(screen.getByRole("link", { name: messages.logout }).getAttribute("href")).toBe("/logout");
   expect(callsTo("/api/v1/auth/session/logout/")).toHaveLength(0);
   expect(navigate).not.toHaveBeenCalled();

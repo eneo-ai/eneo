@@ -283,6 +283,22 @@ it("accepts retirement when the upstream contains the verified source revision a
   expect(result.status, result.stderr).toBe(0);
 });
 
+it("accepts retirement after develop squash-merges the migration, whose commit does not contain the source revision", () => {
+  const f = retiredFixture();
+  // develop squash-merges: one new commit on develop's own history, with the migration's tree
+  // but none of its commits, so the source revision is never an ancestor of the upstream.
+  const commitTree = (tree: string, ...parents: string[]) =>
+    f.git("commit-tree", tree, ...parents.flatMap((parent) => ["-p", parent]), "-m", "develop");
+  const upstreamRevision = commitTree(`${f.sourceRevision}^{tree}`);
+  f.git("update-ref", "refs/remotes/origin/develop", commitTree("HEAD^{tree}", upstreamRevision));
+  f.write(
+    "scripts/route-parity-base.json",
+    JSON.stringify({ sourceRevision: f.sourceRevision, upstreamRevision })
+  );
+  const result = f.run("--strict");
+  expect(result.status, result.stderr).toBe(0);
+});
+
 it("fails when the upstream comparison ref is missing instead of claiming no drift", () => {
   const f = retiredFixture();
   f.git("update-ref", "-d", "refs/remotes/origin/develop");

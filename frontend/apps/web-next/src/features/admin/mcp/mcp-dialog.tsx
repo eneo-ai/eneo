@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
@@ -40,6 +40,7 @@ import {
 } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { toast } from "@/lib/toast";
 import { createMcpServer, MCP_KEY, type McpAuthType, type McpServerCreatePayload } from "./mcp";
 import { initials } from "./mcp-helpers";
@@ -69,14 +70,11 @@ export function McpServerDialog({
   const t = useTranslations();
   const router = useRouter();
   const queryClient = useQueryClient();
-  const pendingBody = useRef<McpServerCreatePayload | null>(null);
 
   // Owned here, not by the form: a pending add outlives a close and reopen.
-  const save = useMutation({
-    mutationFn: () => createMcpServer(browserApi, pendingBody.current!),
-    onSettled: () => {
-      pendingBody.current = null;
-    },
+  // The body holds the server's credential.
+  const save = useSecretMutation({
+    mutationFn: (body: McpServerCreatePayload) => createMcpServer(browserApi, body),
     onSuccess: (result) => {
       void queryClient.invalidateQueries({ queryKey: MCP_KEY });
       toast.success(
@@ -94,10 +92,7 @@ export function McpServerDialog({
         {/* DialogContent remounts on every opening, so each add starts empty. */}
         <McpServerForm
           pending={save.isPending}
-          onSave={(body) => {
-            pendingBody.current = body;
-            save.mutate();
-          }}
+          onSave={(body) => save.mutate(body)}
           onOpenChange={onOpenChange}
         />
       </DialogContent>

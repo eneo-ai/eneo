@@ -249,6 +249,9 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
 const ERROR_REASON_MESSAGE_KEYS = new Map<string, string>([
   ["tenant_quota_exceeded", "job_failure_tenant_quota_exceeded"],
   ["user_quota_exceeded", "job_failure_user_quota_exceeded"],
+  // The shared limiter's 429 also carries 9008 (the envelope's 429 default),
+  // whose quota sentence would tell the user to contact an administrator.
+  ["rate_limit_exceeded", "request_rate_limited"],
   ["provider_unavailable", "provider_failure_unavailable"],
   ["provider_timeout", "provider_failure_timeout"],
   ["provider_unreachable", "provider_failure_unreachable"],

@@ -29,11 +29,18 @@ afterEach(() => {
 describe("ExportDialog", () => {
   it("rechecks the bound session and gets a fresh signed URL when download is requested", async () => {
     api.POST.mockResolvedValue({ data: { job_id: "job-1" }, response: new Response("{}") });
-    const completed = { job_id: "job-1", status: "completed", progress: 100 };
+    // download_url is the credential-authenticated route for API clients; the
+    // browser streams the short-lived signed link instead.
+    const completed = {
+      job_id: "job-1",
+      status: "completed",
+      progress: 100,
+      download_url: "/api/v1/audit/logs/export/job-1/download"
+    };
     api.GET.mockResolvedValueOnce({
       data: {
         ...completed,
-        download_url: "/api/v1/audit/logs/export/job-1/signed-download?token=old"
+        signed_download_url: "/api/v1/audit/logs/export/job-1/signed-download?token=old"
       },
       response: new Response("{}")
     });
@@ -45,7 +52,7 @@ describe("ExportDialog", () => {
     api.GET.mockResolvedValueOnce({
       data: {
         ...completed,
-        download_url: "/api/v1/audit/logs/export/job-1/signed-download?token=fresh"
+        signed_download_url: "/api/v1/audit/logs/export/job-1/signed-download?token=fresh"
       },
       response: new Response("{}")
     });

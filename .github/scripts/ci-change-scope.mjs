@@ -107,13 +107,10 @@ export function classify(rawFiles) {
   const browserRedirectContract = files.includes("frontend/apps/web-next/src/lib/auth/safe-next.cases.json");
   const backend = full || whatsNewContract || browserRedirectContract || files.some(isBackendFile)
     || files.includes("scripts/backend_test_shard.py");
-  // The release-notes check runs in the frontend job against the real file.
   // Shared workspace files (root manifests, the lockfile, patches, packages)
   // belong to both apps; each app's own directory only to that app.
   const frontend =
-    full
-    || files.some((file) => isShippedFrontendFile(file) && !isWebNextFile(file))
-    || files.includes("scripts/check_whats_new.py");
+    full || files.some((file) => isShippedFrontendFile(file) && !isWebNextFile(file));
   const webNext =
     full || files.some((file) => isShippedFrontendFile(file) && !isSvelteAppFile(file));
   const frontendE2e = full || backend || frontend || files.some(isE2eFile);

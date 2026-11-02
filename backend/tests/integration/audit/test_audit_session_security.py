@@ -146,6 +146,8 @@ async def test_rate_limiting_enforces_5_sessions_per_hour(client, auth_headers):
     body = response.json()
     assert body["code"] == "rate_limit_exceeded"
     assert "5" in body["message"]
+    # The deprecated copy keeps the string this route answered before.
+    assert body["detail"] == body["message"]
     retry_after = int(response.headers["Retry-After"])
     assert 0 < retry_after <= 3600
     assert body["retry_after_seconds"] == retry_after

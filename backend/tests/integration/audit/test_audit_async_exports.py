@@ -42,7 +42,8 @@ async def test_completed_export_signed_download_is_independent_of_ambient_identi
     try:
         status = await client.get(f"{base}/status", headers=auth_headers)
         assert status.status_code == 200
-        url = status.json()["download_url"]
+        assert status.json()["download_url"] == f"{base}/download"
+        url = status.json()["signed_download_url"]
         assert url.startswith(f"{base}/signed-download?token=")
         # No cookie, API key or bearer is required for this already-authorized file.
         response = await client.get(url)

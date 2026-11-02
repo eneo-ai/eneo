@@ -40,7 +40,7 @@ export function toSseBody(events: unknown[], { done = true } = {}): string {
   return lines.join("") + (done ? "data: [DONE]\n\n" : "");
 }
 
-/** The response the /api/chat proxy relays, with the protocol marker header. */
+/** The backend's answer response, with the protocol marker header. */
 export function sseResponse(body: string | ReadableStream<Uint8Array>): Response {
   return new Response(body, {
     status: 200,

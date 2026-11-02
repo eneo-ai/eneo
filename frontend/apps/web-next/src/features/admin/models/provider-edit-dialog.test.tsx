@@ -3,7 +3,7 @@ import { act, fireEvent, screen, waitFor, within } from "@testing-library/react"
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testQueryClient } from "@/test/render";
+import { cachedText, renderInApp, testQueryClient } from "@/test/render";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), PUT: vi.fn() }));
 const toast = vi.hoisted(() => ({
@@ -70,9 +70,12 @@ function Opener({ item }: { item: ModelProvider }) {
   );
 }
 
+/** The client the last `renderDialog` rendered with. */
+let queryClient = testQueryClient();
+
 function renderDialog(item: ModelProvider = provider(), headerOptions = true) {
   api.PUT.mockImplementation(() => ok(item));
-  const queryClient = testQueryClient();
+  queryClient = testQueryClient();
   queryClient.setQueryData(PROVIDERS_KEY, [item]);
   queryClient.setQueryData(CAPABILITIES_KEY, capabilities);
   if (headerOptions)
@@ -493,6 +496,69 @@ describe("provider outbound headers", () => {
       }
     ]);
     expect(JSON.stringify(body)).not.toContain("********");
+  });
+});
+
+describe("ProviderEditDialog secrets", () => {
+  const KEY = "sk-synthetic-new-key-5678";
+  const HEADER_SECRET = "synthetic-header-secret-9012";
+  const item = provider({
+    provider_type: "hosted_vllm",
+    outbound_headers: [
+      {
+        id: "h-secret",
+        name: "X-Secret",
+        value: "********",
+        secret: true,
+        encoding: "none",
+        on_missing: "omit",
+        fallback: null
+      }
+    ]
+  });
+
+  /** A new API key and a new value for the secret header, then Spara. */
+  async function saveSecrets(dialog: HTMLElement) {
+    fireEvent.click(within(dialog).getByRole("button", { name: "Ändra API-nyckel" }));
+    fireEvent.change(field(/^API-nyckel/), { target: { value: KEY } });
+    fireEvent.change(field(/^Bekräfta API-nyckel/), { target: { value: KEY } });
+    fireEvent.click(
+      await within(dialog).findByRole("button", { name: "Ändra värdet för X-Secret" })
+    );
+    fireEvent.change(field(/^Värde/), { target: { value: HEADER_SECRET } });
+    save(dialog);
+    await waitFor(() => expect(api.PUT).toHaveBeenCalledTimes(1));
+    const body = api.PUT.mock.calls[0]![1].body;
+    expect(body.credentials).toEqual({ api_key: KEY });
+    expect(body.outbound_headers[0]).toMatchObject({ value: HEADER_SECRET });
+  }
+
+  it("keeps the new key and header secret out of React Query's cache after a save", async () => {
+    const dialog = renderDialog(item);
+
+    await saveSecrets(dialog);
+
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith("Leverantör uppdaterad"));
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    expect(cachedText(queryClient)).not.toContain(KEY);
+    expect(cachedText(queryClient)).not.toContain(HEADER_SECRET);
+  });
+
+  it("keeps them out after a refused save too, which still shows in the form", async () => {
+    const dialog = renderDialog(item);
+    api.PUT.mockImplementation(() =>
+      Promise.resolve({
+        error: { message: "Invalid outbound header value", eneo_error_code: 9007 },
+        response: new Response("{}", { status: 400 })
+      })
+    );
+
+    await saveSecrets(dialog);
+
+    await within(dialog).findByText("Invalid outbound header value");
+    expect(screen.getByRole("dialog", { name: "Redigera leverantör" })).toBe(dialog);
+    expect(cachedText(queryClient)).not.toContain(KEY);
+    expect(cachedText(queryClient)).not.toContain(HEADER_SECRET);
   });
 });
 

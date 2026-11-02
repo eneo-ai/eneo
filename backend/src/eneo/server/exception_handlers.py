@@ -533,6 +533,8 @@ def _http_exception_body(
 
     The raised detail stays in `detail` for one release, so a client reading
     `body.detail.code` keeps working while it moves to the top-level fields.
+    A structured raise whose route answered something else before (a plain
+    string) names that in its own `detail` key, which is kept instead.
     """
     detail: object = exc.detail
     structured = cast(dict[str, Any], detail) if isinstance(detail, dict) else None
@@ -547,7 +549,7 @@ def _http_exception_body(
         )
         if request_id:
             body.setdefault("request_id", request_id)
-        body["detail"] = detail
+        body.setdefault("detail", detail)
         return body
 
     raised_message = structured.get("message") if structured is not None else detail
@@ -569,19 +571,33 @@ def _http_exception_body(
     ).model_dump(exclude_none=True)
 
 
+def http_exception_response(request: Request, exc: StarletteHTTPException) -> Response:
+    """The answer to an `HTTPException`, also for a refusal sent outside the
+    exception middleware (an ASGI middleware, a route's own `handle`)."""
+    # The raiser's headers win; otherwise carry the request's correlation
+    # id like the canonical handlers do, so the header matches the logs.
+    headers = {**(correlation_headers() or {}), **(exc.headers or {})}
+    if exc.status_code in {204, 304}:
+        return Response(status_code=exc.status_code, headers=headers)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_http_exception_body(exc, extract_request_id(request)),
+        headers=headers,
+    )
+
+
 def add_exception_handlers(app: FastAPI):
     async def http_exception_handler(request: Request, exc: Exception) -> Response:
         # Registered on Starlette's class, so routing misses (404, 405) answer
         # in the same envelope as a route's own raise.
         http_exc = cast(StarletteHTTPException, exc)
-        # The raiser's headers win; otherwise carry the request's correlation
-        # id like the canonical handlers do, so the header matches the logs.
-        headers = {**(correlation_headers() or {}), **(http_exc.headers or {})}
         if http_exc.status_code == 500:
             response = await unhandled_exception_handler(request, http_exc)
             response.headers.update(http_exc.headers or {})
             return response
         if http_exc.status_code == 422:
+            # The raiser's headers win; otherwise carry the request's correlation id.
+            headers = {**(correlation_headers() or {}), **(http_exc.headers or {})}
             return JSONResponse(
                 status_code=422,
                 content=validation_error_response_content(
@@ -589,13 +605,7 @@ def add_exception_handlers(app: FastAPI):
                 ),
                 headers=headers,
             )
-        if http_exc.status_code in {204, 304}:
-            return Response(status_code=http_exc.status_code, headers=headers)
-        return JSONResponse(
-            status_code=http_exc.status_code,
-            content=_http_exception_body(http_exc, extract_request_id(request)),
-            headers=headers,
-        )
+        return http_exception_response(request, http_exc)
 
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 

@@ -18132,6 +18132,11 @@ export interface components {
        * @description Progress percentage
        */
       progress: number;
+      /**
+       * Signed Download Url
+       * @description Link valid for 60 seconds that streams the file without credentials, for browsers (when completed)
+       */
+      signed_download_url?: string | null;
       /** Started At */
       started_at?: string | null;
       /**

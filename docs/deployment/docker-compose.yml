@@ -117,8 +117,10 @@ services:
     container_name: eneo_backend
     restart: unless-stopped
     environment:
-      - WEB_APP_ENABLED=true
-      - BROWSER_SESSION_ENABLED=true
+      # The React app on the main host. Turn either off in the deployment .env;
+      # WEB_APP_ENABLED=false needs FRONTEND_ROUTER_PRIORITY=7 so pages reach Svelte.
+      - WEB_APP_ENABLED=${WEB_APP_ENABLED:-true}
+      - BROWSER_SESSION_ENABLED=${BROWSER_SESSION_ENABLED:-true}
       - TOOL_RUNTIME_URL=${TOOL_RUNTIME_URL:-http://tool-runtime:3010}
       - TOOL_RUNTIME_TOKEN=${TOOL_RUNTIME_TOKEN:-}
       - FILE_REFERENCE_BASE_URL=${FILE_REFERENCE_BASE_URL:-http://backend:8000}

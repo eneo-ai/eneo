@@ -340,10 +340,11 @@ async def create_access_session(
         )
         count = rate_limit_result.current_count
     except RateLimitExceededError as exc:
-        raise_rate_limited(
-            exc.result,
-            "Rate limit exceeded. Maximum 5 audit session creations per hour allowed.",
+        message = (
+            "Rate limit exceeded. Maximum 5 audit session creations per hour allowed."
         )
+        # This route answered the bare string before the envelope.
+        raise_rate_limited(exc.result, message, legacy_detail=message)
     except RateLimitServiceUnavailableError:
         raise HTTPException(
             status_code=503,
@@ -1148,7 +1149,8 @@ async def get_export_status(
     Get export job status with progress.
 
     Poll this endpoint to track export progress.
-    When status is 'completed', use the download_url to get the file.
+    When status is 'completed', use the download_url to get the file, or in a
+    browser the short-lived signed_download_url.
 
     Requires: Authentication (JWT token or API key via X-API-Key header)
     Requires: Admin permissions
@@ -1169,9 +1171,11 @@ async def get_export_status(
             detail="Export job not found or expired",
         )
 
-    # Build download URL if completed
+    # Build download URLs if completed
     download_url = None
+    signed_download_url = None
     if job.status.value == "completed" and job.file_path:
+        download_url = f"/api/v1/audit/logs/export/{job_id}/download"
         issued_at = int(time.time())
         token = generate_audit_export_download_token(
             job_id,
@@ -1179,7 +1183,7 @@ async def get_export_status(
             current_user.tenant_id,
             issued_at=issued_at,
         )
-        download_url = (
+        signed_download_url = (
             f"/api/v1/audit/logs/export/{job_id}/signed-download?token={token}"
         )
 
@@ -1193,6 +1197,7 @@ async def get_export_status(
         file_size_bytes=job.file_size_bytes,
         error_message=job.error_message,
         download_url=download_url,
+        signed_download_url=signed_download_url,
         created_at=job.created_at,
         started_at=job.started_at,
         completed_at=job.completed_at,

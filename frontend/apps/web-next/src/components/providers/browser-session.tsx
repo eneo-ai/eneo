@@ -33,6 +33,7 @@ export function BrowserSessionBoundary({ children }: { children: ReactNode }) {
   ) {
     return (
       <DeactivatedNotice
+        restriction={session.restriction}
         headingRef={heading}
         accessibilityStatementUrl={runtimeConfig().accessibility_statement_url}
       />

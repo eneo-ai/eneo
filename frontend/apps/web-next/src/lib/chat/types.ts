@@ -198,7 +198,7 @@ export type EneoMessageMetadata = {
 
 export type EneoUIMessage = UIMessage<EneoMessageMetadata, EneoDataParts>;
 
-/** The request body the /api/chat proxy forwards to the backend (v3). */
+/** The request body of an answer request to the backend (v3). */
 export type ConversationBody = {
   question: string;
   session_id?: string | null;
