@@ -46,8 +46,9 @@ pytestmark = [pytest.mark.asyncio, pytest.mark.integration]
 # Providers a status read reaches, JWT or API key: the copies it touched and
 # every provider they reach, override Objects included, at the measured
 # count. Lower it when wiring
-# shrinks; raise it only with the reason.
-_STATUS_COPY_CEILING = 74
+# shrinks; raise it only with the reason. 75: the user service takes the
+# browser session service, which admits a browser session's token.
+_STATUS_COPY_CEILING = 75
 
 Headers = dict[str, str]
 _user_container = get_container(with_user=True)
