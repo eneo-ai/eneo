@@ -48,7 +48,7 @@ const astryxWrappedImports = [
   {
     name: "@astryxdesign/core/TextInput",
     message:
-      'Use `TextInput` from "@/components/astryx/text-input": Astryx drops a caller\'s aria-describedby.'
+      'Use `TextInput` from "@/components/astryx/text-input": its search key puts the phone keyboard away.'
   }
 ];
 

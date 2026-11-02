@@ -134,10 +134,6 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   - `Switch` announces a hard-coded English "Loading" in its busy state: use
     `Switch` from `@/components/astryx/switch`, which leaves
     `isLoading`/`changeAction` out.
-  - `TextInput` drops a caller's `aria-describedby` (it sets the attribute
-    from its own description and status only): use `TextInput` from
-    `@/components/astryx/text-input`, which adds the caller's ids after
-    Astryx's own (as the password policy checklist needs).
   - A `Banner` is never a live region. A banner for an outcome that just
     happened (a list that failed to load, a save that failed) is
     `AnnouncedBanner` from `@/components/astryx/banner`, an alert for an
