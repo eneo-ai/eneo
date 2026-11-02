@@ -30,6 +30,7 @@ from scripts.release_workflow import (
     Releases,
     Run,
     Version,
+    identify,
     managed_tag,
     obj,
     plan,
@@ -140,8 +141,17 @@ class GitHubFixture:
                     }
                 }
             if path == "/pulls":
-                branch = query["head"][0].split(":", 1)[1]
-                return 200, [p for p in self.prs if obj(p["head"])["ref"] == branch]
+                found = self.prs
+                if "head" in query:
+                    branch = query["head"][0].split(":", 1)[1]
+                    found = [p for p in found if obj(p["head"])["ref"] == branch]
+                if "base" in query:
+                    found = [
+                        p for p in found if obj(p["base"])["ref"] == query["base"][0]
+                    ]
+                if query.get("state", ["all"])[0] != "all":
+                    found = [p for p in found if p["state"] == query["state"][0]]
+                return 200, found
             if path.startswith("/commits/") and path.endswith("/pulls"):
                 return 200, [
                     p
@@ -237,6 +247,12 @@ class GitHubFixture:
             if path.startswith("/issues/") and path.endswith("/labels"):
                 self.prs[int(path.split("/")[2]) - 1]["labels"] = data["labels"]
                 return 200, data["labels"]
+            if path.startswith("/issues/") and path.endswith("/comments"):
+                pr = self.prs[int(path.split("/")[2]) - 1]
+                comments = pr.setdefault("comments", [])
+                assert isinstance(comments, list)
+                comments.append(data["body"])
+                return 201, data
             if path == "/releases":
                 release: Object = {**data, "id": len(self.releases) + 1, "assets": []}
                 self.releases.append(release)
@@ -245,12 +261,20 @@ class GitHubFixture:
             release = self.releases[int(path.rsplit("/", 1)[1]) - 1]
             release.update(data)
             return 200, release
+        if method == "PATCH" and path.startswith("/pulls/"):
+            pr = self.prs[int(path.rsplit("/", 1)[1]) - 1]
+            pr.update(data)
+            return 200, pr
+        if method == "DELETE" and path.startswith("/git/refs/heads/"):
+            self.git("update-ref", "-d", "refs/" + path.removeprefix("/git/refs/"))
+            return 204, None
         return 500, {"message": f"Unexpected API operation: {method} {path}"}
 
 
 class ReleaseWorkflowTests(_RepoCase):
     def setUp(self) -> None:
         self.enterContext(redirect_stdout(io.StringIO()))
+        self.enterContext(patch.dict(os.environ, {"RELEASE_MANAGED": "true"}))
         self.history = {"version": "2.2.0", "date": "2026-10-07", "entries": [ENTRY]}
         self.root = self.make_repo(
             {"releases": [{"version": "2.4.0", "entries": [ENTRY]}, self.history]}
@@ -259,6 +283,7 @@ class ReleaseWorkflowTests(_RepoCase):
         for name in [
             ".github/workflows/build_and_push_images.yml",
             "scripts/release_workflow.py",
+            "scripts/check_whats_new.py",
         ]:
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
@@ -298,7 +323,7 @@ class ReleaseWorkflowTests(_RepoCase):
                 status, response = state.request(
                     self.command, path, parse_qs(parsed.query), data
                 )
-                body = json.dumps(response).encode()
+                body = b"" if status == 204 else json.dumps(response).encode()
                 self.send_response(status)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(body)))
@@ -308,6 +333,7 @@ class ReleaseWorkflowTests(_RepoCase):
             do_GET = handle_api
             do_POST = handle_api
             do_PATCH = handle_api
+            do_DELETE = handle_api
 
         self.server = HTTPServer(("127.0.0.1", 0), Handler)
         self.thread = threading.Thread(target=self.server.serve_forever)
@@ -498,6 +524,109 @@ class ReleaseWorkflowTests(_RepoCase):
         self.assertEqual(
             plan(self.root, event, "workflow_run", REPOSITORY, "")[0], "skip"
         )
+
+    def test_a_newer_base_closes_the_stale_preparation_pr(self) -> None:
+        self.releases.prepare(self.version)
+        stale = self.state.prs[0]
+        tree = self.state.git("rev-parse", "release/v2.4^{tree}")
+        advanced = self.state.git(
+            "commit-tree",
+            tree,
+            "-p",
+            self.state.git("rev-parse", "release/v2.4"),
+            "-m",
+            "Additional fix",
+        )
+        self.state.git("update-ref", "refs/heads/release/v2.4", advanced)
+        self.releases.prepare(self.version)
+        current = self.state.prs[1]
+        self.assertEqual(stale["state"], "closed")
+        self.assertIsNone(stale["merged_at"])
+        self.assertEqual(current["state"], "open")
+        comments = stale["comments"]
+        assert isinstance(comments, list)
+        self.assertIn(text(current["html_url"]), text(comments[0]))
+        self.assertEqual(
+            request_at(self.root, text(obj(current["head"])["sha"])).base_sha, advanced
+        )
+        # The replacement is idempotent and never touches the current PR.
+        self.releases.prepare(self.version)
+        self.assertEqual(len(self.state.prs), 2)
+        self.assertEqual(current["state"], "open")
+        self.assertNotIn("comments", current)
+
+    def test_managed_publication_is_off_until_the_repository_variable_is_set(
+        self,
+    ) -> None:
+        head = self.state.git("rev-parse", "release/v2.4")
+        with patch.dict(os.environ, {"RELEASE_MANAGED": "true"}):
+            with self.assertRaisesRegex(ReleaseError, "reviewed release request"):
+                identify(self.root, "refs/tags/v2.4.0", head)
+        for value in ["", "false", "yes"]:
+            with patch.dict(os.environ, {"RELEASE_MANAGED": value}):
+                self.assertFalse(identify(self.root, "refs/tags/v2.4.0", head))
+        with patch.dict(os.environ, {"RELEASE_MANAGED": " TRUE "}):
+            with self.assertRaisesRegex(ReleaseError, "reviewed release request"):
+                identify(self.root, "refs/tags/v2.4.0", head)
+        os.environ.pop("RELEASE_MANAGED")
+        self.assertFalse(identify(self.root, "refs/tags/v2.4.0", head))
+        with patch.dict(os.environ, {"GITHUB_REF": "refs/heads/develop"}):
+            with self.assertRaisesRegex(ReleaseError, "RELEASE_MANAGED=true"):
+                plan(self.root, {}, "workflow_dispatch", REPOSITORY, "2.4.0")
+        with patch.dict(os.environ, {"RELEASE_MANAGED": "true"}):
+            _, sha = self.prepared()
+        event = {"workflow_run": self.state.ci(sha)}
+        self.assertEqual(
+            plan(self.root, event, "workflow_run", REPOSITORY, "")[0], "skip"
+        )
+        with patch.dict(os.environ, {"RELEASE_MANAGED": "true"}):
+            self.assertEqual(
+                plan(self.root, event, "workflow_run", REPOSITORY, "")[0], "tag"
+            )
+
+    def test_shared_release_note_rules_must_match_develop(self) -> None:
+        for path in [
+            "frontend/packages/whats-new/releases.schema.json",
+            "scripts/check_whats_new.py",
+        ]:
+            with self.subTest(path=path):
+                self.state.git("checkout", "-q", "release/v2.4")
+                target = self.root / path
+                target.write_bytes(target.read_bytes() + b"\n")
+                self.state.git("add", ".")
+                self.state.git("commit", "-qm", "Diverged rules")
+                self.state.git("checkout", "-q", "develop")
+                with self.assertRaisesRegex(ReleaseError, "differs from develop"):
+                    self.releases.prepare(self.version)
+                self.assertEqual(self.state.prs, [])
+
+    def test_an_interrupted_port_branch_is_replaced_when_develop_moved_on(
+        self,
+    ) -> None:
+        sha, run = self.built()
+        with self.offline_attestation(sha):
+            self.releases.complete(self.version, run)
+        self.state.fail = ("POST", "/pulls")
+        with self.assertRaises(HTTPError):
+            self.releases.port(self.version, sha)
+        interrupted = self.state.git("rev-parse", "refs/heads/automation/port-v2.4.0")
+        data = json.loads((self.root / NOTES).read_text())
+        data["releases"][0]["entries"].append(
+            {**copy.deepcopy(ENTRY), "id": "later-feature"}
+        )
+        (self.root / NOTES).write_text(format_json(data) + "\n")
+        self.state.git("add", ".")
+        self.state.git("commit", "-qm", "More upcoming news")
+        self.releases.port(self.version, sha)
+        port_pr = self.state.prs[1]
+        self.assertNotEqual(obj(port_pr["head"])["sha"], interrupted)
+        notes = json.loads(
+            self.state.git("show", text(obj(port_pr["head"])["sha"]) + ":" + NOTES)
+        )["releases"]
+        self.assertEqual(
+            [e["id"] for e in notes[0]["entries"]], ["future-feature", "later-feature"]
+        )
+        self.assertEqual(notes[1]["version"], "2.4.0")
 
     def test_moved_tags_are_never_replaced(self) -> None:
         _, sha = self.prepared()

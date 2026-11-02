@@ -27,9 +27,12 @@ env:
 
 jobs:
   reconcile:
+    # A manual run with RELEASE_MANAGED unset still starts, so the plan step
+    # can explain what to configure instead of silently skipping.
     if: >-
       (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/develop') ||
       (github.event_name == 'workflow_run' &&
+       vars.RELEASE_MANAGED == 'true' &&
        github.event.workflow_run.conclusion == 'success' &&
        github.event.workflow_run.event == 'push' &&
        github.event.workflow_run.head_repository.full_name == github.repository)
@@ -50,6 +53,7 @@ jobs:
         id: plan
         env:
           RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_MANAGED: ${{ vars.RELEASE_MANAGED }}
           GH_TOKEN: ${{ github.token }}
         run: python3 -m scripts.release_workflow plan
 

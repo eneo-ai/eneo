@@ -23,7 +23,7 @@ from urllib.error import HTTPError
 from urllib.parse import quote, urlencode
 from urllib.request import Request, urlopen
 
-from scripts.check_whats_new import RELEASES_PATH, check
+from scripts.check_whats_new import RELEASES_PATH, SCHEMA_PATH, check
 from scripts.release_bundle import bundle, environment, may_promote
 from scripts.release_notes import Notes, finalize, port
 
@@ -33,10 +33,24 @@ REQUEST_PATH = ".github/release-request.json"
 SHA = re.compile(r"[0-9a-f]{40}")
 PREPARATION_LABELS: list[Json] = ["kind:chore", "ci", "documentation"]
 HISTORY_LABELS: list[Json] = ["documentation"]
+# The trusted checkout this controller runs from. Release branches must carry
+# byte-identical copies of the rules both sides validate notes with.
+TRUSTED_ROOT = Path(__file__).resolve().parents[1]
+SHARED_RULES = ("scripts/check_whats_new.py", SCHEMA_PATH.as_posix())
 
 
 class ReleaseError(Exception):
     """Stop safely; retry the same workflow after correcting the reported cause."""
+
+
+def enabled() -> bool:
+    """Repository variable RELEASE_MANAGED gates every managed transition.
+
+    Until it is true, final tags keep their manual publication path and the
+    controller refuses to prepare, so merging the controller never blocks a
+    release before the App and tag rules exist.
+    """
+    return os.environ.get("RELEASE_MANAGED", "").strip().lower() == "true"
 
 
 def obj(value: Json) -> Object:
@@ -128,7 +142,8 @@ class GitHub:
         )
         try:
             with urlopen(request, timeout=30) as response:
-                return json.load(response)
+                body = response.read()
+                return json.loads(body) if body else None  # DELETE answers 204.
         except HTTPError as error:
             error.close()
             raise
@@ -309,19 +324,16 @@ class Releases:
         else:
             ref = "/git/ref/heads/" + quote(branch, safe="")
             previous = self.github.optional(ref)
-            if previous:
-                sha = text(obj(previous["object"])["sha"])
-                for path, content in changes.items():
-                    file = obj(
-                        self.github.request(
-                            "GET", "/contents/" + path + "?" + urlencode({"ref": sha})
-                        )
-                    )
-                    if base64.b64decode(text(file["content"])).decode() != content:
-                        raise ReleaseError(
-                            "An unfinished automation branch has different content; inspect it before retrying"
-                        )
-            else:
+            if previous and not self.branch_matches(
+                text(obj(previous["object"])["sha"]), changes
+            ):
+                # No PR references this branch, so nothing on it was reviewed.
+                # Replace the interrupted attempt instead of stopping on it.
+                self.github.request(
+                    "DELETE", "/git/refs/heads/" + quote(branch, safe="")
+                )
+                previous = None
+            if previous is None:
                 if self.github.branch_sha(base) != base_sha:
                     raise ReleaseError(
                         "The target branch advanced during preparation; retry from its current head"
@@ -374,6 +386,41 @@ class Releases:
         print(text(pr["html_url"]))
         return pr
 
+    def branch_matches(self, sha: str, changes: dict[str, str]) -> bool:
+        for path, content in changes.items():
+            file = obj(
+                self.github.request(
+                    "GET", "/contents/" + path + "?" + urlencode({"ref": sha})
+                )
+            )
+            if base64.b64decode(text(file["content"])).decode() != content:
+                return False
+        return True
+
+    def supersede(self, version: Version, request: ReleaseRequest, pr: Object) -> None:
+        """Close earlier preparation PRs for this version once a newer base exists."""
+        query = urlencode({"state": "open", "base": version.branch})
+        prefix = f"automation/release-{version.tag}-"
+        for stale in self.github.pages("/pulls?" + query):
+            head = obj(stale["head"])
+            if (
+                obj(head["repo"])["full_name"] != self.github.repository
+                or not text(head["ref"]).startswith(prefix)
+                or head["ref"] == request.branch
+            ):
+                continue
+            self.github.request(
+                "POST",
+                f"/issues/{stale['number']}/comments",
+                {
+                    "body": f"Superseded by {text(pr['html_url'])}: `{version.branch}` "
+                    "advanced past this candidate, so a new request was prepared."
+                },
+            )
+            self.github.request(
+                "PATCH", f"/pulls/{stale['number']}", {"state": "closed"}
+            )
+
     def prepare(self, version: Version) -> None:
         tagged = self.github.tag_sha(version)
         if tagged:
@@ -425,7 +472,7 @@ class Releases:
                 str(RELEASES_PATH): notes.path.read_text(),
                 REQUEST_PATH: request.content(),
             }
-        self.notes_pr(
+        pr = self.notes_pr(
             request.branch,
             version.branch,
             changes,
@@ -441,6 +488,7 @@ class Releases:
             sha,
             PREPARATION_LABELS,
         )
+        self.supersede(version, request, pr)
 
     @staticmethod
     def validate(source: Path, version: Version) -> None:
@@ -456,6 +504,17 @@ class Releases:
             raise ReleaseError(
                 "This release branch predates managed publication; backport the release controller and image coordinator before preparing it"
             )
+        # Preparation validates with develop's checker while the tag build runs
+        # the branch's own copy; only identical rules make both verdicts agree.
+        for path in SHARED_RULES:
+            shared = source / path
+            if (
+                not shared.is_file()
+                or shared.read_bytes() != (TRUSTED_ROOT / path).read_bytes()
+            ):
+                raise ReleaseError(
+                    f"{path} on this release branch differs from develop; backport the release-note checker and schema before preparing it"
+                )
         _, errors = check(source, version.branch, version.tag)
         if errors:
             raise ReleaseError("; ".join(errors))
@@ -741,7 +800,13 @@ def plan(
     if event_name == "workflow_dispatch":
         if os.environ["GITHUB_REF"] != "refs/heads/develop":
             raise ReleaseError("Prepare releases from the develop workflow only")
+        if not enabled():
+            raise ReleaseError(
+                "Managed publication is off; install the release App and set repository variable RELEASE_MANAGED=true as described in docs/DEPLOYMENT_WORKFLOW.md"
+            )
         return "prepare", Version(version_input), None
+    if not enabled():
+        return "skip", None, None
     run = Run.from_event(event, repository)
     if run is None:
         return "skip", None, None
@@ -760,15 +825,20 @@ def plan(
     return "skip", None, None
 
 
+def identify(root: Path, ref: str, sha: str) -> bool:
+    """Whether the image workflow must leave publication to the controller."""
+    if not enabled():
+        return False  # Manual final tags keep building and promoting as before.
+    return managed_tag(ref, request_at(root, sha))
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=["plan", "run", "port", "identify"])
     args = parser.parse_args()
     root = Path.cwd()
     if args.command == "identify":
-        ref = os.environ["GITHUB_REF"]
-        request = request_at(root, os.environ["GITHUB_SHA"])
-        managed = managed_tag(ref, request)
+        managed = identify(root, os.environ["GITHUB_REF"], os.environ["GITHUB_SHA"])
         with open(os.environ["GITHUB_OUTPUT"], "a") as output:
             output.write(f"managed={str(managed).lower()}\n")
         return

@@ -152,13 +152,26 @@ the first preparation, not the time of an eventual retry or publication.
 
 #### Release App setup (once)
 
-The controller requires an installed GitHub App scoped to this repository.
-Configure repository variable `RELEASE_APP_CLIENT_ID` and repository secret
-`RELEASE_APP_PRIVATE_KEY`. The private key is never checked into the repository.
-Give the App **Contents, Pull requests and Issues: read/write**, and
-**Actions and Attestations: read**. Contents permits the preparation branch,
-tag and release; Issues permits the required PR labels. The ordinary job token
-retains only repository read access and package write access for alias promotion.
+Managed publication is off until repository variable `RELEASE_MANAGED` is
+`true`. Before that, final tags created in the Releases UI build and promote
+exactly as before, and **Prepare and Publish Release** stops with a message
+naming this section. Complete the steps in order; only the last one changes
+behaviour:
+
+1. An organisation owner creates a GitHub App and installs it on this
+   repository only, with **Contents, Pull requests and Issues: read/write** and
+   **Actions and Attestations: read**. Contents permits the preparation branch,
+   tag and release; Issues permits the required PR labels.
+2. Configure repository variable `RELEASE_APP_CLIENT_ID` and repository secret
+   `RELEASE_APP_PRIVATE_KEY`. The private key is never checked into the repository.
+3. Adjust the `v*` tag rules as described below so the App may create tags.
+4. Set repository variable `RELEASE_MANAGED` to `true`. From then on, a final
+   tag without a reviewed request fails its image build, and the controller
+   drives every final release. Setting it back stops automatic transitions
+   and leaves managed finals as drafts for recovery.
+
+The ordinary job token retains only repository read access and package write
+access for alias promotion.
 
 Allow this App to **create** `v*` tags in the repository tag rules. Keep tag
 updates/deletions protected and retain all PR, CI and merge-queue rules. The
@@ -180,12 +193,13 @@ from a PR, release checkout, artifact or event-supplied ref.
 | State | Recovery |
 | --- | --- |
 | Open preparation PR | Rerun preparation with the same version. Reuse its PR, commit and date. |
-| Branch created but PR creation failed | Rerun preparation. The existing branch is reused only when its content matches. |
+| Branch created but PR creation failed | Rerun preparation or reconciliation. A branch that no PR references is reused when its content matches and replaced otherwise. |
 | Merged PR, CI still running or failed | Fix the CI failure. A successful push-CI event resumes tagging. Rerunning preparation also checks CI. |
-| Release branch advanced before tagging | Prepare the same version again. A new base commit produces a new request PR for review. |
+| Release branch advanced before tagging | Prepare the same version again. A new base commit produces a new request PR for review, and the earlier open preparation PR is closed with a comment naming it. |
+| Checker or schema differs from `develop` | Backport `scripts/check_whats_new.py` and `releases.schema.json` to the release branch, then prepare again. Preparation and the tag build must validate the notes with identical rules. |
 | Draft created, tag creation failed | Fix App/tag permissions and rerun the failed controller job or preparation. The same draft and commit are reused. |
 | Images, smoke tests or SBOM generation failed | Rerun failed jobs in **Build and Push Docker Images**. The release stays a draft and its `latest` aliases are not promoted. |
-| Publication, alias promotion or history PR failed | Rerun the failed **Prepare and Publish Release** reconciliation. It revalidates the tag and bundle, preserves publication metadata and reuses an open history PR. |
+| Publication, alias promotion or history PR failed | Rerun the failed **Prepare and Publish Release** reconciliation. It revalidates the tag and bundle, preserves publication metadata, reuses an open history PR and recreates an interrupted history branch from the current `develop`. |
 | Existing tag names another commit | Stop. The controller refuses to replace it; use a new version. |
 
 Publication transitions and image builds use queued concurrency so a newer

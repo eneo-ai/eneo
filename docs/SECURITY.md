@@ -169,7 +169,8 @@ on the documentation site.
   commits dismiss earlier approvals, review conversations must be resolved,
   and merges go through the merge queue.
 - **Releases.** Only Core Maintainers can create, update or delete
-  `release/**` branches and control human `v*` tag operations. When configured,
+  `release/**` branches and control human `v*` tag operations. When configured
+  and enabled with repository variable `RELEASE_MANAGED`,
   the repository-scoped release App can create final tags after a reviewed
   preparation PR is merged and push CI succeeds on that exact commit. Its tag
   creation permission must be separate from update/deletion protections; it

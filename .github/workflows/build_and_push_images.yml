@@ -31,6 +31,10 @@ jobs:
           persist-credentials: false
       - name: Resolve shared build identity
         id: resolve
+        env:
+          # Until this repository variable is true, final tags keep the manual
+          # publication path and promote their own aliases.
+          RELEASE_MANAGED: ${{ vars.RELEASE_MANAGED }}
         run: |
           python3 scripts/release_bundle.py resolve
           python3 -m scripts.release_workflow identify
