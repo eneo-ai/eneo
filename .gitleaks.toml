@@ -72,11 +72,11 @@ regexes = [
 ]
 
 [[rules.allowlists]]
-description = "Synthetic provider key and secret header value the provider editor tests assert never reach the caches"
+description = "Synthetic secret header value the provider editor tests assert never reaches the caches"
 condition = "AND"
 paths = ['''^frontend/apps/web-next/src/features/admin/models/provider-edit-dialog\.test\.tsx$''']
 regexTarget = "secret"
-regexes = ['''^sk-synthetic-new-key-5678$''', '''^synthetic-header-secret-9012$''']
+regexes = ['''^synthetic-header-secret-9012$''']
 
 [[rules.allowlists]]
 description = "Keyword-argument pair in SharePoint sync tests that the generic rule reads as a token"

@@ -33,7 +33,6 @@ const examples = [
   ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "secret-1234"]],
   ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "other-5678"]],
   ["frontend/apps/web-next/src/lib/api/use-secret-mutation.test.tsx", ["sk-synthetic-", "second-2222"]],
-  ["frontend/apps/web-next/src/features/admin/models/provider-edit-dialog.test.tsx", ["sk-synthetic-", "new-key-5678"]],
   ["frontend/apps/web-next/src/features/admin/models/provider-edit-dialog.test.tsx", ["synthetic-header-", "secret-9012"]],
 ].map(([path, parts]) => ({ path, value: parts.join("") }));
 
