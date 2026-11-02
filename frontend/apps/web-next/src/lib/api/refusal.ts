@@ -79,14 +79,16 @@ function makeStale(
     const queryClient = getQueryClient();
     void queryClient.cancelQueries();
     queryClient.clear();
-    if (!publicAuthPage()) navigateTo(destination);
+    // Replace this entry: Back would reload the page only to be sent here again,
+    // so the person could never go Back past Eneo.
+    if (!publicAuthPage()) navigateTo(destination, { replace: true });
   }
   throw error;
 }
 
 /** The explicit retry keeps the document blocked until a new document loads. */
 export function reloadSession(): void {
-  if (snapshot.status === "stale") navigateTo(snapshot.destination);
+  if (snapshot.status === "stale") navigateTo(snapshot.destination, { replace: true });
 }
 
 /** Check headers before a response body reaches a cache or stream consumer. */
@@ -221,7 +223,7 @@ async function probeSession(): Promise<void> {
           throw new EneoApiError("The session probe returned no generation.", { status: 502 });
         publish({ status: "deactivated", generation, restriction });
         if (!["/deactivated", "/logout"].includes(window.location.pathname)) {
-          navigateTo("/deactivated");
+          navigateTo("/deactivated", { replace: true });
         }
         return;
       }
