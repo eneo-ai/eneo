@@ -671,7 +671,12 @@ describe("TranscriptLines with audio", () => {
   });
 
   it("signs the audio link again a minute before it runs out, where the person is", async () => {
-    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date"], shouldAdvanceTime: true });
+    // The clock moves only when the test moves it, on a whole second: a slow render
+    // must not bring the minute closer.
+    vi.useFakeTimers({
+      toFake: ["setTimeout", "clearTimeout", "Date"],
+      now: Date.parse("2026-10-22T09:00:00Z")
+    });
     try {
       answerAudio();
       const expires = Math.floor(Date.now() / 1000) + 3_600;
@@ -682,7 +687,12 @@ describe("TranscriptLines with audio", () => {
       const play = vi.spyOn(HTMLMediaElement.prototype, "play").mockResolvedValue();
       vi.spyOn(HTMLMediaElement.prototype, "pause").mockImplementation(() => {});
       const { lines } = renderLines(audioTarget);
-      const audio = await startAudio(lines);
+      // Flushed, not waited for: Testing Library's waits settle on a timer, and this
+      // clock stands still.
+      fireEvent.click(within(lines).getByRole("button", { name: /^Spela från 0:05/ }));
+      await act(() => vi.advanceTimersByTimeAsync(0));
+      const audio = screen.getByLabelText<HTMLAudioElement>(messages.flow_transcript_audio_label);
+      fireEvent.loadedMetadata(audio);
       Object.defineProperty(audio, "currentTime", {
         configurable: true,
         writable: true,
@@ -700,7 +710,7 @@ describe("TranscriptLines with audio", () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(2_000);
       });
-      await waitFor(() => expect(signs()).toHaveLength(2));
+      expect(signs()).toHaveLength(2);
       fireEvent.loadedMetadata(audio);
       expect(audio.currentTime).toBe(42);
       expect(play).not.toHaveBeenCalled();
