@@ -14,7 +14,7 @@
  * guard only after the migration has landed.
  */
 import { createHash } from "node:crypto";
-import { execFileSync, spawnSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -195,11 +195,10 @@ function retiredSources(root, baseline) {
   const upstream = process.env.ROUTE_PARITY_UPSTREAM || "origin/develop";
   const current = gitSources(root, upstream);
   const previous = gitSources(root, baseline.upstreamRevision);
-  const landed =
-    current.size === 0 &&
-    spawnSync("git", ["merge-base", "--is-ancestor", baseline.sourceRevision, upstream], {
-      cwd: root
-    }).status === 0;
+  // Once the upstream has no Next sources the migration has landed, however it was merged:
+  // develop squash-merges, so the source revision is never its ancestor. Drift before that is
+  // still caught by every run against the pre-merge upstream.
+  const landed = current.size === 0;
   const errors = landed
     ? []
     : [...new Set([...previous.keys(), ...current.keys()])]
