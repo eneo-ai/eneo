@@ -9,6 +9,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconTile } from "@/components/composites/icon-tile";
 import { StatusLabel } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
+import { pollEvery } from "@/lib/api/query";
 import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
@@ -35,7 +36,9 @@ import {
   getRunStatus,
   runDetailQueryOptions,
   runKeys,
-  type RunDetail
+  type RunDetail,
+  type RunGraph,
+  type RunSummary
 } from "../runs/runs-api";
 
 /** The tools of the flow chat that start a run: a new one, or a failed one again. */
@@ -121,11 +124,11 @@ export function FlowRunCard({
       ]);
       return { status, graph };
     },
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (!data) return false;
-      return clock(progressSignature(data.status, data.graph), shouldPoll(data.status.status));
-    },
+    refetchInterval: pollEvery<{ status: RunSummary; graph: RunGraph }>((data) =>
+      data
+        ? clock(progressSignature(data.status, data.graph), shouldPoll(data.status.status))
+        : false
+    ),
     refetchIntervalInBackground: false
   });
   const summary = progress.data?.status;

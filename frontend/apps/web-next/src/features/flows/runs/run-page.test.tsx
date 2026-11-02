@@ -550,6 +550,20 @@ describe("FlowRunPage", () => {
     expect(calls(STATUS)).toHaveLength(3);
   });
 
+  it("stops following a moving run once it is gone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    renderRun();
+    await screen.findByText(messages.flow_runs_result_pending);
+
+    state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    const reads = calls(STATUS).length;
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(calls(STATUS)).toHaveLength(reads);
+  });
+
   it("reads the trace once more when the run it was read from ends, and keeps it from then on", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
@@ -1620,6 +1634,60 @@ describe("FlowRunPage", () => {
           .getByRole("link", { name: messages.flow_transcript_regenerate_open })
           .getAttribute("href")
       ).toBe("/spaces/space-1/flows/flow-1/runs/run-2");
+    });
+
+    it("stops following the run started from the transcript once it is gone", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerAudioRun();
+      state.routes[CORRECTIONS] = () => ({
+        body: [
+          {
+            flow_run_id: "run-1",
+            step_id: "step-1",
+            created_at: "2026-10-21T09:00:00Z",
+            updated_at: "2026-10-21T09:00:00Z",
+            edited_by_principal_type: "user",
+            schema_version: 3,
+            segments_hash: "hash-1",
+            stale: false,
+            revision: 2,
+            occurrences: [],
+            speaker_edits: [],
+            speaker_names: {}
+          }
+        ]
+      });
+      state.routes[
+        "POST /api/v1/flows/{id}/runs/{run_id}/steps/{step_id}/transcript-regenerations/"
+      ] = () => ({
+        status: 201,
+        body: {
+          run: makeRunSummary({ id: "run-2", status: "queued" }),
+          created: true,
+          source_run_id: "run-1",
+          correction_revision: 2,
+          first_regenerated_step_id: "step-2"
+        }
+      });
+      const answered = state.routes[STATUS]!;
+      state.routes[STATUS] = (init: { params: { path: { run_id: string } } }) =>
+        init.params.path.run_id === "run-2"
+          ? { status: 404, body: { message: "Not found" } }
+          : answered(init as never);
+      const started = () =>
+        calls(STATUS).filter(
+          (call) =>
+            (call.init as { params: { path: { run_id: string } } }).params.path.run_id === "run-2"
+        );
+      renderRun(["flows_view", "flows_manage"]);
+
+      fireEvent.click(
+        await screen.findByRole("button", { name: messages.flow_transcript_regenerate })
+      );
+      expect(await screen.findByText(messages.flow_transcript_regenerate_started)).toBeTruthy();
+      await waitFor(() => expect(started()).toHaveLength(1));
+      await act(() => vi.advanceTimersByTimeAsync(30_000));
+      expect(started()).toHaveLength(1);
     });
 
     it("shows a correction saved since the history was open when it opens again", async () => {

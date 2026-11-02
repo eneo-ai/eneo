@@ -5,6 +5,7 @@ import { EneoApiError } from "./errors";
 import {
   hasAnswered,
   makeQueryClient,
+  pollEvery,
   pollWhile,
   readCached,
   readFirstAnswer,
@@ -86,6 +87,29 @@ describe("pollWhile", () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(stopped.requests()).toBe(1);
     stopped.stop();
+  });
+});
+
+describe("pollEvery", () => {
+  it("polls after the delay the data asks for, and never after a final error", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    let requests = 0;
+    const observer = new QueryObserver(client, {
+      queryKey: ["job"],
+      queryFn: () => (requests++ < 2 ? Promise.resolve<Job>({ status: "running" }) : refuse(404)()),
+      refetchInterval: pollEvery<Job>((job) => (job?.status === "running" ? 3_000 : false))
+    });
+    const unsubscribe = observer.subscribe(() => {});
+    await vi.advanceTimersByTimeAsync(2_900);
+    expect(requests).toBe(1);
+    await vi.advanceTimersByTimeAsync(3_200);
+    expect(requests).toBe(3);
+
+    // The data is still "running" after the 404, and the run is gone.
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(requests).toBe(3);
+    unsubscribe();
+    client.clear();
   });
 });
 

@@ -35,6 +35,7 @@ import {
 } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
+import { pollEvery } from "@/lib/api/query";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { toast } from "@/lib/toast";
@@ -251,10 +252,10 @@ export function FlowRunsList({
     ...runsListQueryOptions(flowId, filter),
     // A new search or order keeps the rows and counts on screen until it answers.
     placeholderData: keepPreviousData,
-    refetchInterval: (query) => {
-      const items = query.state.data?.pages.flatMap((page) => page.items) ?? [];
+    refetchInterval: pollEvery((data) => {
+      const items = data?.pages.flatMap((page) => page.items) ?? [];
       return clock(listSignature(items), listNeedsPolling(items));
-    },
+    }),
     refetchIntervalInBackground: false
   });
 

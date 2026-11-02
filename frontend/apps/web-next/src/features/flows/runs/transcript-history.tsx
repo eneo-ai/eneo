@@ -13,6 +13,7 @@ import { ClientTime } from "@/components/composites/client-time";
 import { StatusLabel } from "@/components/composites/status-label";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
+import { pollWhile } from "@/lib/api/query";
 import { refusalText } from "./run-messages";
 import { runStatusView, shouldPoll } from "./run-status";
 import {
@@ -21,6 +22,7 @@ import {
   regenerateTranscript,
   transcriptRevisionsQueryOptions,
   type CorrectionRevision,
+  type RunSummary,
   type TranscriptRegeneration
 } from "./runs-api";
 
@@ -161,8 +163,10 @@ function StartedRun({
   const status = useQuery({
     queryKey: ["flows", flowId, "runs", started.run.id, "regenerated-status"],
     queryFn: ({ signal }) => getRunStatus(flowId, started.run.id, signal),
-    refetchInterval: (query) =>
-      shouldPoll(query.state.data?.status ?? started.run.status) ? 5_000 : false
+    refetchInterval: pollWhile<RunSummary>(
+      (run) => shouldPoll(run?.status ?? started.run.status),
+      5_000
+    )
   });
   const view = runStatusView(status.data?.status ?? started.run.status);
   return (

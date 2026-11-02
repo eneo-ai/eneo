@@ -22,7 +22,7 @@ import { blockingError, ListError, RefreshError } from "@/components/composites/
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
-import { hasAnswered } from "@/lib/api/query";
+import { hasAnswered, pollEvery } from "@/lib/api/query";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { PHONE_QUERY, useMediaMatch, usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { CopyableValue } from "@/features/chat/debug-section";
@@ -68,6 +68,7 @@ import {
   runKeys,
   runStepsQueryOptions,
   type RunDetail,
+  type RunGraph,
   type RunSummary
 } from "./runs-api";
 import { useNowAt } from "./use-now-at";
@@ -314,11 +315,11 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
       ]);
       return { status, graph };
     },
-    refetchInterval: (query) => {
-      const data = query.state.data;
-      if (!data) return false;
-      return clock(progressSignature(data.status, data.graph), shouldPoll(data.status.status));
-    },
+    refetchInterval: pollEvery<{ status: RunSummary; graph: RunGraph }>((data) =>
+      data
+        ? clock(progressSignature(data.status, data.graph), shouldPoll(data.status.status))
+        : false
+    ),
     refetchIntervalInBackground: false
   });
 

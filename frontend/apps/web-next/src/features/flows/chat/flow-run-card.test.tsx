@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import messages from "@/lib/i18n/messages/sv.json";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -87,6 +87,7 @@ afterEach(() => {
   cleanup();
   state.stub.calls.length = 0;
   vi.clearAllMocks();
+  vi.useRealTimers();
 });
 
 describe("startedRunId", () => {
@@ -127,6 +128,21 @@ describe("FlowRunCard", () => {
     expect(within(card).getByRole("button", { name: messages.flow_runs_cancel })).toBeTruthy();
     // The audited detail is not read while the run moves.
     expect(calls(DETAIL)).toHaveLength(0);
+  });
+
+  it("stops following a run under way once it is gone", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerRun(makeRunSummary({ status: "running", finished_at: null }), [
+      { order: 1, label: "Sammanfatta", status: "running" }
+    ]);
+    renderCard();
+    await screen.findByText(messages.flow_runs_status_running);
+
+    state.routes[STATUS] = () => ({ status: 404, body: { message: "Not found" } });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    const reads = calls(STATUS).length;
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(calls(STATUS)).toHaveLength(reads);
   });
 
   it("shows a finished run's result, with a copy and the way to the whole run", async () => {

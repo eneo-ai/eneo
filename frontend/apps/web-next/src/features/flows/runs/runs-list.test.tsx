@@ -299,6 +299,19 @@ describe("FlowRunsList", () => {
     expect(within(table).getByText(new RegExp(`^1 min [56] s${so}$`))).toBeTruthy();
   });
 
+  it("stops polling a list the person may no longer read", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerList([makeRunSummary({ status: "running", finished_at: null })]);
+    renderInApp(<List />);
+    await screen.findByRole("table");
+
+    state.routes[LIST] = () => ({ status: 403, body: { message: "Forbidden" } });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(listCalls()).toHaveLength(2);
+    await act(() => vi.advanceTimersByTimeAsync(60_000));
+    expect(listCalls()).toHaveLength(2);
+  });
+
   it("does not poll a list where every run has ended", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     answerList([makeRunSummary({ status: "completed" })]);
