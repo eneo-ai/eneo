@@ -101,7 +101,10 @@ describe("Verktyg", () => {
     // Decorative while pending: no heading, no busy announcement.
     expect(area!.firstElementChild!.getAttribute("aria-hidden")).toBe("true");
     expect(within(area as HTMLElement).queryByRole("heading")).toBeNull();
-    expect(screen.queryByRole("status")).toBeNull();
+    // Astryx keeps its own (empty) live regions on the page; none of the page's own.
+    expect(
+      screen.queryAllByRole("status").filter((el) => !el.closest("[data-astryx-live-region]"))
+    ).toEqual([]);
 
     answer(
       await ok({
