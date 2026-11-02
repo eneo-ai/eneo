@@ -1,5 +1,3 @@
-"use client";
-
 import { DateInput } from "@astryxdesign/core/DateInput";
 import { useTranslations } from "use-intl";
 import { useState } from "react";

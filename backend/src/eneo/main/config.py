@@ -681,6 +681,14 @@ class Settings(BaseSettings):
                 "BROWSER_SESSION_ENABLED with ENVIRONMENT=development needs "
                 "PUBLIC_ORIGIN set to a localhost origin"
             )
+        # The web app signs in only through the browser session.
+        if self.web_app_enabled and not self.browser_session_enabled:
+            raise ValueError(
+                "WEB_APP_ENABLED needs BROWSER_SESSION_ENABLED, the web app's only "
+                "sign-in. To serve the Svelte app instead, set WEB_APP_ENABLED=false "
+                "and route pages to Svelte (FRONTEND_ROUTER_PRIORITY=7 in the "
+                "reference Compose deployment)"
+            )
         return self
 
     # DEPRECATED: Mobilityguard (use OIDC_* instead - will be removed in v3.0)

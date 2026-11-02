@@ -1,5 +1,3 @@
-"use client";
-
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "use-intl";

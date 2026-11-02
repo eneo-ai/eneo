@@ -1,5 +1,3 @@
-"use client";
-
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Item } from "@astryxdesign/core/Item";
 import { Badge } from "@astryxdesign/core/Badge";

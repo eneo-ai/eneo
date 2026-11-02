@@ -1,5 +1,3 @@
-"use client";
-
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { useLocale, useTranslations } from "use-intl";

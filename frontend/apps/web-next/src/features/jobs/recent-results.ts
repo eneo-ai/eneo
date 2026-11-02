@@ -1,5 +1,3 @@
-"use client";
-
 import { useSyncExternalStore } from "react";
 import { jobResultInfoBlobId, type Job } from "./jobs";
 

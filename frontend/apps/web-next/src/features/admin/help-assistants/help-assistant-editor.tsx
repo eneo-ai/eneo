@@ -1,5 +1,3 @@
-"use client";
-
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { Info } from "lucide-react";
 import Link from "@/lib/link";

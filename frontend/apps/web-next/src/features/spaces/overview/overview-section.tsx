@@ -1,5 +1,3 @@
-"use client";
-
 import { Heading } from "@astryxdesign/core/Heading";
 import Link from "@/lib/link";
 import { Plus } from "lucide-react";

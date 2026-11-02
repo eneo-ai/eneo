@@ -4279,5 +4279,6 @@
   "app_recording_device_disconnected": "Inspelningen stoppades eftersom mikrofonen kopplades bort.",
   "enable_mcp_in_space_settings": "Aktivera MCP-servrar i space-inställningarna först.",
   "speaker_service_checked_at": "Testad <time></time>",
-  "speaker_service_check_announce": "Anslutningstest för {name}: {status}"
+  "speaker_service_check_announce": "Anslutningstest för {name}: {status}",
+  "tools_bundled_unavailable": "Det gick inte att läsa Eneos inbyggda verktyg"
 }

@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { TextQuote } from "lucide-react";
 import { useTranslations } from "use-intl";

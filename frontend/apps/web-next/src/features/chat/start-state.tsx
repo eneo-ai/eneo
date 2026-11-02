@@ -1,5 +1,3 @@
-"use client";
-
 import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery } from "@tanstack/react-query";
 import { MessageSquare } from "lucide-react";

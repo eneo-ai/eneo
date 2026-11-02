@@ -1,5 +1,3 @@
-"use client";
-
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState } from "react";
@@ -29,7 +27,7 @@ import { spacesListQueryOptions } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 
 /**
- * Move an assistant or service to another accessible space. The hint warns
+ * Move an assistant to another accessible space. The hint warns
  * about what the move breaks; the transfer itself fails if the target lacks
  * matching models. A missing destination shows at its picker on move, which
  * takes focus.

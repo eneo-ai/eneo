@@ -2,8 +2,9 @@
 
 Sign-in sets the session cookie and answers 204 with an empty body; its
 errors are exactly those of ``/users/login/token/``. Both run the Sec-Fetch-Site
-gate first. Sign-out clears the cookies, but not a session the page did not
-expect. The probe names the generation of the cookie session it admitted.
+gate first. Sign-out ends the cookie's session in the store and clears the
+cookies, but not a session the page did not expect. The probe names the
+generation of the cookie session it admitted.
 """
 
 import logging
@@ -13,6 +14,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from dependency_injector import providers
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from freezegun import freeze_time
 from httpx import Response
@@ -28,6 +30,7 @@ from eneo.authentication.browser_session_router import (
     end_browser_session,
     get_browser_session,
 )
+from eneo.authentication.browser_session_service import BrowserSessionService
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -74,7 +77,6 @@ FORM = {"username": EMAIL, "password": PASSWORD}
 NOW = "2026-10-28 12:00:00"
 REFUSING_SITES = [{}, {"Sec-Fetch-Site": "cross-site"}]
 REFUSING_SITES += [{"Sec-Fetch-Site": "same-site"}, {"Sec-Fetch-Site": "none"}]
-NEXT_ERA = ("eneo_session", "eneo_oidc_txn", "eneo_federation_txn")
 # SimpleCookie renders an empty value as a quoted empty string.
 EMPTY = '""'
 
@@ -94,6 +96,11 @@ def mint(minutes: float = 15) -> str:
     return AuthService().create_access_token_for_user(TEST_USER, expires_in=minutes)
 
 
+def with_session(token: str) -> str:
+    """What the session store's ``start`` returns for a sign-in's token."""
+    return AuthService().add_session_id(token, "s" * 43)
+
+
 @dataclass
 class Endpoints:
     client: TestClient
@@ -101,6 +108,7 @@ class Endpoints:
     count: AsyncMock
     user: UserInDB
     valid_tokens: set[str]
+    sessions: AsyncMock
 
 
 @pytest.fixture
@@ -108,14 +116,18 @@ def endpoints(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> Iterator[Endpoints]:
     """The real app. Password login stops at UserService.login and the attempt
-    counter; canonical authentication stops at the token lookup."""
+    counter, the session store at BrowserSessionService; canonical
+    authentication stops at the token lookup."""
     service = AsyncMock(spec=UserService)
     count = AsyncMock(return_value=LoginAttempt(True, 4, 600))
     monkeypatch.setattr(user_router, "count_login_attempt", count)
     monkeypatch.setattr(user_router, "clear_login_attempts", AsyncMock())
+    sessions = AsyncMock(spec=BrowserSessionService)
+    sessions.start.side_effect = with_session
     login_container = Container(
         user_service=providers.Object(service),
         redis_client=providers.Object(object()),
+        browser_session_service=providers.Object(sessions),
     )
 
     user = make_user()
@@ -145,7 +157,7 @@ def endpoints(
     app.dependency_overrides[get_session] = session
     app.dependency_overrides[get_session_with_transaction] = session
     for route in endpoint_routes(app.routes):
-        if route.path in (SESSION_LOGIN, TOKEN_LOGIN):
+        if route.path in (SESSION_LOGIN, TOKEN_LOGIN, LOGOUT):
             assert route.dependant is not None
             [container] = [
                 dependency
@@ -164,7 +176,7 @@ def endpoints(
         logger.addHandler(caplog.handler)
     client = TestClient(app, client=("10.0.0.1", 50000))
     try:
-        yield Endpoints(client, service.login, count, user, valid_tokens)
+        yield Endpoints(client, service.login, count, user, valid_tokens, sessions)
     finally:
         client.close()
         for logger in loggers:
@@ -205,11 +217,14 @@ def test_password_session_sets_cookie_without_token_in_body(
         )
 
         response = endpoints.client.post(SESSION_LOGIN, data=FORM, headers=SAME_ORIGIN)
+        session_token = with_session(token)
 
     assert response.status_code == 204
     assert response.content == b""
+    # The cookie carries the login's token once the store recorded its session.
+    endpoints.sessions.start.assert_awaited_once_with(token)
     assert set_cookies(response) == [
-        expected_set_cookie(SESSION, token, 15 * 60, production=True)
+        expected_set_cookie(SESSION, session_token, 15 * 60, production=True)
     ]
     assert response.headers["cache-control"] == "no-store"
     # Sign-in ends the document that sent it; no page adopts its generation.
@@ -218,6 +233,7 @@ def test_password_session_sets_cookie_without_token_in_body(
     assert endpoints.login.await_args is not None
     assert endpoints.login.await_args.args[:2] == (EMAIL, PASSWORD)
     assert token not in all_logs(caplog)
+    assert session_token not in all_logs(caplog)
     assert PASSWORD not in all_logs(caplog)
 
 
@@ -234,7 +250,7 @@ def test_password_session_replaces_a_planted_session(endpoints: Endpoints):
 
     assert response.status_code == 204
     [cookie] = set_cookies(response)
-    assert cookie.startswith(f"{SESSION}={issued};")
+    assert cookie.startswith(f"{SESSION}={with_session(issued)};")
     assert planted not in cookie
 
 
@@ -375,7 +391,7 @@ def test_password_session_keeps_login_error_contract(
         ("development", "eneo_web", "eneo_web_txn", False),
     ],
 )
-def test_logout_clears_session_txn_and_next_era_cookies(
+def test_logout_clears_session_and_txn_cookies(
     endpoints: Endpoints,
     browser_settings: Settings,
     environment: str,
@@ -394,10 +410,29 @@ def test_logout_clears_session_txn_and_next_era_cookies(
 
     assert response.status_code == 204
     assert response.content == b""
+    # The server ends the session the cookie names before clearing it.
+    endpoints.sessions.end.assert_awaited_once_with(token)
     assert set_cookies(response) == [
         expected_set_cookie(name, EMPTY, 0, production=production)
-        for name in (session, txn, *NEXT_ERA)
+        for name in (session, txn)
     ]
+
+
+def test_logout_that_cannot_end_the_session_keeps_the_cookie(endpoints: Endpoints):
+    token = mint()
+    endpoints.sessions.end.side_effect = HTTPException(
+        503, detail={"code": "sign_out_unavailable", "message": "Try again."}
+    )
+
+    response = endpoints.client.post(
+        LOGOUT,
+        headers=SAME_ORIGIN
+        | {"Cookie": f"{SESSION}={token}", GENERATION: session_generation(token)},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "sign_out_unavailable"
+    assert set_cookies(response) == []
 
 
 @pytest.mark.parametrize("site", REFUSING_SITES)
@@ -409,6 +444,7 @@ def test_logout_refuses_cross_site(endpoints: Endpoints, site: dict[str, str]):
     assert response.status_code == 403
     assert response.json()["code"] == "browser_origin_refused"
     assert set_cookies(response) == []
+    endpoints.sessions.end.assert_not_awaited()
 
 
 @pytest.mark.parametrize("expected", [None, "stale"])
@@ -431,6 +467,7 @@ def test_logout_keeps_a_session_the_page_did_not_expect(
     assert body["code"] == "session_generation_mismatch"
     assert body["message"] == "The browser session changed after this page was loaded."
     assert set_cookies(response) == []
+    endpoints.sessions.end.assert_not_awaited()
     # Logged once, by the shared domain-exception handler.
     assert [
         (r.name, r.levelno) for r in caplog.records if r.name.startswith("eneo.")
@@ -455,6 +492,10 @@ def test_logout_clears_what_the_page_expects_or_cannot_use(
     assert set_cookies(response)[0] == expected_set_cookie(
         SESSION, EMPTY, 0, production=True
     )
+    if case == "no session":
+        endpoints.sessions.end.assert_not_awaited()
+    else:
+        endpoints.sessions.end.assert_awaited_once_with(token)
 
 
 @pytest.mark.parametrize("path", [SESSION_LOGIN, LOGOUT, PROBE])
@@ -587,19 +628,19 @@ def test_a_refused_cookie_session_names_no_generation(
     assert GENERATION not in response.headers
 
 
-def test_retired_next_cookie_does_not_authenticate(endpoints: Endpoints):
+def test_only_the_session_cookie_name_authenticates(endpoints: Endpoints):
     token = mint()
     endpoints.valid_tokens.add(token)
 
-    retired = endpoints.client.get(
-        ME, headers=SAME_ORIGIN | {"Cookie": f"eneo_session={token}"}
+    other = endpoints.client.get(
+        ME, headers=SAME_ORIGIN | {"Cookie": f"other_session={token}"}
     )
     current = endpoints.client.get(
         ME, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
     )
 
-    assert retired.status_code == 401
-    assert GENERATION not in retired.headers
+    assert other.status_code == 401
+    assert GENERATION not in other.headers
     assert current.status_code == 200
     assert current.headers[GENERATION] == session_generation(token)
 

@@ -1,5 +1,3 @@
-"use client";
-
 import { Heading } from "@astryxdesign/core/Heading";
 import { useQueryClient } from "@tanstack/react-query";
 import { Switch } from "@astryxdesign/core/Switch";

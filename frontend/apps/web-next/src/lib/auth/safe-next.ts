@@ -42,7 +42,7 @@ export function safeNextPath(next: string | null | undefined): string {
       path.split("/").some((segment) => segment === "." || segment === "..")
     )
       return DEFAULT_LANDING;
-    for (const prefix of ["/login", "/logout", "/api", "/auth", "/_next"]) {
+    for (const prefix of ["/login", "/logout", "/api", "/auth", "/assets"]) {
       if (path === prefix || path.startsWith(`${prefix}/`)) return DEFAULT_LANDING;
     }
   } catch {

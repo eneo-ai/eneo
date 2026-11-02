@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, use, useState, useSyncExternalStore, type ReactNode } from "react";
 import { signedOriginalUrl } from "@/features/files/signed-original-url";
 import { browserApi } from "@/lib/api/browser";

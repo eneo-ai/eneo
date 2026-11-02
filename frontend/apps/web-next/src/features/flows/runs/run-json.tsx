@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 
 /** The core's stand-in for a stored credential: `{ "$secret": "stored" }`. */

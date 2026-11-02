@@ -319,7 +319,8 @@ async def test_websocket_user_authenticates_on_its_own_session_in_a_transaction(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     session = _Session()
-    user = SimpleNamespace()
+    # A token that is not a browser session's: those cannot open a socket.
+    user = SimpleNamespace(browser_session=None)
     seen: list[tuple[bool, bool, str]] = []
 
     @asynccontextmanager

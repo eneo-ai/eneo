@@ -208,6 +208,15 @@ it("opens the overview once the reads that decide what needs action have answere
   await screen.findByRole("heading", { name: "Administration", level: 1 });
 });
 
+it("opens the tools while the runtime status above the tabs is still being read", async () => {
+  // The backend probes the tool runtime for it; a request that never answers
+  // must not hold the page (the page keeps the status's place instead).
+  replies.set("/api/v1/mcp-servers/bundled/", new Promise<Response>(() => {}));
+  await renderRoute("/admin/tools");
+  await screen.findByRole("heading", { name: "Tools functions", level: 1 });
+  expect(requestedPaths()).toContain("/api/v1/mcp-servers/bundled/");
+});
+
 it("reports an unknown MCP server before requesting its tools", async () => {
   replies.set("/api/v1/mcp-servers/unknown/tools/", failure(422));
   const { router } = await renderRoute("/admin/mcp-servers/unknown");

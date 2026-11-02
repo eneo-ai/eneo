@@ -1,5 +1,3 @@
-"use client";
-
 import { DropdownMenu as AxDropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useMutation, useQuery, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
@@ -40,7 +38,6 @@ import { securityClassificationsQueryOptions } from "@/features/admin/security-c
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { BUNDLED_SERVERS, SOURCE_KINDS } from "@/features/admin/tools/bundled";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { matchesSearch } from "@/lib/search";
 import { toast } from "@/lib/toast";
@@ -48,7 +45,6 @@ import { cn } from "@/lib/utils";
 import { McpServerDialog } from "./mcp-dialog";
 import { activationState, hostFromUrl, initials, pendingTools } from "./mcp-helpers";
 import {
-  BUNDLED_KEY,
   bundledToolsQueryOptions,
   createBundledMcpServer,
   deleteMcpServer,
@@ -334,16 +330,9 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
     mutationFn: (tool: string) => createBundledMcpServer(browserApi, tool, false),
     onSuccess: async (_, tool) => {
       toast.success(t("tools_bundled_added", { name: t(BUNDLED_SERVERS[tool]?.label ?? tool) }));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: MCP_KEY }),
-        queryClient.invalidateQueries({ queryKey: BUNDLED_KEY })
-      ]);
+      await queryClient.invalidateQueries({ queryKey: MCP_KEY });
     },
-    onError: (cause, tool) =>
-      toast.error(
-        getErrorMessage(cause, t) ||
-          t("tools_bundled_add_failed", { name: t(BUNDLED_SERVERS[tool]?.label ?? tool) })
-      )
+    onError: (cause) => toastApiError(cause, t)
   });
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
   const securityEnabled = security.security_enabled;

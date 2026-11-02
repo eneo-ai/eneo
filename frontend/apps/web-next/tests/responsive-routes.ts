@@ -23,7 +23,6 @@ export type Fixtures = {
   app: string;
   run: string;
   groupChat: string;
-  service: string;
   website: string;
   collection: string;
   /** A published flow in `space`, and a finished run of it. */
@@ -127,8 +126,6 @@ export const ROUTES: Record<string, Entry> = {
   "/spaces/$/knowledge/websites/$": { url: (f) => `${f.space}/knowledge/websites/${f.website}` },
   "/spaces/$/members": { url: (f) => `${f.space}/members` },
   "/spaces/$/overview": { url: (f) => `${f.space}/overview` },
-  "/spaces/$/services": { url: (f) => `${f.space}/services` },
-  "/spaces/$/services/$": { url: (f) => `${f.space}/services/${f.service}` },
   "/spaces/$/settings": { url: (f) => `${f.space}/settings` },
   "/spaces/$/skills": { url: (f) => `${f.space}/skills` },
   "/spaces/$/skills/$": { skip: "Needs a skill fixture." },

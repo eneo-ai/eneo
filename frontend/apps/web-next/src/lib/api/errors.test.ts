@@ -9,6 +9,7 @@ import {
   errorReferenceLines,
   extractTraceId,
   getErrorMessage,
+  orOn404,
   unwrap
 } from "./errors";
 
@@ -136,6 +137,24 @@ describe("unwrap", () => {
     expect((error as EneoApiError).status).toBe(404);
     expect((error as EneoApiError).code).toBe(9000);
     expect((error as EneoApiError).traceId).toBe("abc");
+  });
+});
+
+describe("orOn404", () => {
+  it("reads a missing resource as the fallback", async () => {
+    const missing = Promise.reject(new EneoApiError("Not found", { status: 404 }));
+    await expect(orOn404(missing, [])).resolves.toEqual([]);
+    await expect(orOn404(Promise.resolve(["entry"]), [])).resolves.toEqual(["entry"]);
+  });
+
+  it.each([403, 500])("passes on a %s, which is no missing resource", async (status) => {
+    const error = new EneoApiError("Refused", { status });
+    await expect(orOn404(Promise.reject(error), [])).rejects.toBe(error);
+  });
+
+  it("passes on a network failure", async () => {
+    const error = new TypeError("Failed to fetch");
+    await expect(orOn404(Promise.reject(error), null)).rejects.toBe(error);
   });
 });
 

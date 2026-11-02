@@ -593,6 +593,79 @@ describe("ChatView offline", () => {
   });
 });
 
+describe("ChatView with nobody to answer", () => {
+  it.each([
+    ["an assistant without a usable model", { ...partner, completionModel: null }],
+    [
+      "a group chat without assistants",
+      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 0 }
+    ]
+  ] satisfies [string, ChatPartner][])(
+    "says so at the field and sends nothing: %s",
+    (_, chatPartner) => {
+      spies.mode = "answer";
+      renderInApp(<Harness chatPartner={chatPartner} />);
+      const notice =
+        "Ingen AI-modell tillgänglig. Kontakta din administratör för att aktivera modeller.";
+      expect(screen.getByText(notice)).toBeTruthy();
+      ask("Vilken gräns gäller?");
+      expect(spies.sent).toHaveLength(0);
+      expect(spies.announce).toHaveBeenCalledWith(notice);
+    }
+  );
+
+  it.each([
+    ["the assistant loses its model", partner, { ...partner, completionModel: null }],
+    [
+      "the group chat loses its assistants",
+      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 2 },
+      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 0 }
+    ]
+  ] satisfies [string, ChatPartner, ChatPartner][])(
+    "keeps a failed question and its files when Retry finds nobody to answer: %s",
+    async (_, before, after) => {
+      vi.stubGlobal(
+        "URL",
+        Object.assign(URL, { createObjectURL: () => "blob:policy", revokeObjectURL: vi.fn() })
+      );
+      const appContext = testAppContext({
+        limits: {
+          attachments: {
+            formats: [
+              { mimetype: "application/pdf", extensions: ["pdf"], size: 10_000_000, vision: false }
+            ]
+          }
+        }
+      });
+      const view = renderInApp(<Harness chatPartner={before} />, { appContext });
+      fireEvent.change(view.container.querySelector('input[type="file"]')!, {
+        target: { files: [new File(["%PDF"], "Policy.pdf", { type: "application/pdf" })] }
+      });
+      const list = await screen.findByRole("list", { name: "1 bilaga bifogad" });
+      await waitFor(() => expect(within(list).queryByText("Laddar upp…")).toBeNull());
+      ask("Sammanfatta policyn");
+      expect(await screen.findByText("Något gick fel. Försök igen.")).toBeTruthy();
+      await screen.findByRole("button", { name: "Ta bort Policy.pdf" });
+
+      // The partner data refreshes while the failure is on screen.
+      view.rerender(<Harness chatPartner={after} />);
+      spies.mode = "answer";
+      fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+      await act(async () => {});
+
+      const notice =
+        "Ingen AI-modell tillgänglig. Kontakta din administratör för att aktivera modeller.";
+      expect(spies.sent).toHaveLength(1);
+      expect(spies.announce).toHaveBeenLastCalledWith(notice);
+      const field = screen.getByRole("textbox", { name: /^Fråga / }) as HTMLTextAreaElement;
+      expect(field.value).toBe("Sammanfatta policyn");
+      expect(document.activeElement).toBe(field);
+      expect(screen.getByRole("button", { name: "Ta bort Policy.pdf" })).toBeTruthy();
+      vi.unstubAllGlobals();
+    }
+  );
+});
+
 describe("ChatView when generation fails", () => {
   it("says the session expired when the request is refused, with status and trace id for support", async () => {
     spies.mode = "refused";

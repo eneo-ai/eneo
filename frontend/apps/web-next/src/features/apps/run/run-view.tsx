@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation } from "@tanstack/react-query";
 import { AppWindow, Play, Upload } from "lucide-react";
 import { useRouter } from "@/lib/navigation";

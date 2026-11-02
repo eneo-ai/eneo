@@ -1,7 +1,5 @@
-"use client";
-
 import { List, ListItem } from "@astryxdesign/core/List";
-import { ChevronRight, Settings2, Sparkles, Users, Webhook, type LucideIcon } from "lucide-react";
+import { ChevronRight, Settings2, Sparkles, Users, type LucideIcon } from "lucide-react";
 import { useId } from "react";
 import { useTranslations } from "use-intl";
 import { phoneSections, spaceSections, type SpaceSectionId } from "../frame/space-sections";
@@ -11,8 +9,7 @@ import { OverviewSection } from "./overview-section";
 const ICONS: Partial<Record<SpaceSectionId, LucideIcon>> = {
   members: Users,
   settings: Settings2,
-  skills: Sparkles,
-  services: Webhook
+  skills: Sparkles
 };
 
 /**

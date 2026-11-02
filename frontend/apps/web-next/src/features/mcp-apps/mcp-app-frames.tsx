@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { lazy, Suspense, useState, type ComponentType } from "react";
 import type { EneoUIMessage } from "@/lib/chat/types";

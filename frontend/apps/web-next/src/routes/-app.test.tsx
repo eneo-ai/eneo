@@ -459,7 +459,7 @@ it.each([
   expect(requestedPaths()).toContain(apiPath);
 });
 
-it.each(["assistants", "apps", "services"] as const)(
+it.each(["assistants", "apps"] as const)(
   "opens the space %s list with its space title",
   async (kind) => {
     replies.set("/api/v1/spaces/space-1/", makeSpace({ resourcePermissions: [] }));
@@ -530,10 +530,21 @@ it.each([
   }
 );
 
+it.each(["services", "services/service-1"])(
+  "has no legacy services page at %s, as on develop",
+  async (path) => {
+    replies.set("/api/v1/spaces/space-1/", makeSpace());
+    await renderRoute(`/spaces/space-1/${path}`);
+    await screen.findByRole("heading", { name: messages.page_not_found });
+    expect(requestedPaths().some((requested) => requested.startsWith("/api/v1/services/"))).toBe(
+      false
+    );
+  }
+);
+
 it.each([
   ["apps/missing", "/api/v1/apps/missing/"],
-  ["group-chats/missing/edit", "/api/v1/group-chats/missing/"],
-  ["services/missing", "/api/v1/services/missing/"]
+  ["group-chats/missing/edit", "/api/v1/group-chats/missing/"]
 ])("maps a missing space resource %s to not-found after reading it", async (path, apiPath) => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());
   replies.set(apiPath, new Response(null, { status: 404 }));
@@ -545,33 +556,31 @@ it.each([
 
 it("shows a resource load failure through the route error boundary", async () => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());
-  replies.set("/api/v1/services/failed/", new Response(null, { status: 500 }));
-  await renderRoute("/spaces/space-1/services/failed");
+  replies.set("/api/v1/apps/failed/", new Response(null, { status: 500 }));
+  replies.set("/api/v1/apps/failed/runs/", { items: [] });
+  await renderRoute("/spaces/space-1/apps/failed");
   await screen.findByRole("heading", { name: messages.something_went_wrong });
   expect(screen.queryByRole("heading", { name: messages.page_not_found })).toBeNull();
 });
 
-it("awaits a fresh existence check when returning to an invalidated service", async () => {
+it("awaits a fresh existence check when returning to an invalidated app", async () => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());
-  replies.set("/api/v1/services/service-1/", {
-    id: "service-1",
-    name: "Old service",
-    permissions: []
-  });
-  const href = "/spaces/space-1/services/service-1";
+  replies.set("/api/v1/apps/app-1/", { ...dashboardApp, name: "Old app", permissions: [] });
+  replies.set("/api/v1/apps/app-1/runs/", { items: [] });
+  const href = "/spaces/space-1/apps/app-1";
   const { router, queryClient } = await renderRoute(href, undefined, ({ queryClient }) => {
     queryClient.setDefaultOptions({ queries: { retry: false, staleTime: 30_000 } });
   });
-  await screen.findByRole("heading", { name: "Old service", level: 1 });
+  await screen.findByRole("heading", { name: "Old app", level: 1 });
   await act(() => router.navigate({ href: "/account" }));
   let release!: (response: Response) => void;
   replies.set(
-    "/api/v1/services/service-1/",
+    "/api/v1/apps/app-1/",
     new Promise<Response>((resolve) => {
       release = resolve;
     })
   );
-  await queryClient.invalidateQueries({ queryKey: ["services", "service-1"], refetchType: "none" });
+  await queryClient.invalidateQueries({ queryKey: ["apps", "app-1"], refetchType: "none" });
   let complete = false;
   let navigation!: Promise<void>;
   try {
@@ -582,7 +591,7 @@ it("awaits a fresh existence check when returning to an invalidated service", as
       });
     });
     expect(complete).toBe(false);
-    expect(screen.queryByRole("heading", { name: "Old service", level: 1 })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Old app", level: 1 })).toBeNull();
   } finally {
     await act(async () => {
       release(new Response(null, { status: 404 }));
@@ -654,19 +663,6 @@ it.each([false, true])(
     );
   }
 );
-
-it("keeps a service without edit permission in its playground and isolates its input", async () => {
-  replies.set("/api/v1/spaces/space-1/", makeSpace());
-  for (const id of ["service-1", "service-2"])
-    replies.set(`/api/v1/services/${id}/`, { id, name: id, permissions: [] });
-  const { router } = await renderRoute("/spaces/space-1/services/service-1?tab=settings");
-  const input = await screen.findByRole("textbox", { name: messages.input });
-  expect(screen.queryByRole("tab", { name: messages.settings })).toBeNull();
-  expect(document.title).toBe("service-1 · Upphandling · Eneo");
-  fireEvent.change(input, { target: { value: "First service's input" } });
-  await act(() => router.navigate({ href: "/spaces/space-1/services/service-2" }));
-  expect(screen.getByRole<HTMLTextAreaElement>("textbox", { name: messages.input }).value).toBe("");
-});
 
 it("opens the dashboard catalog with its title and existing app links", async () => {
   replies.set("/api/v1/dashboard/", {
@@ -1438,7 +1434,9 @@ it("leaves a me 401 to the single refusal owner and never renders the shell", as
   );
   await renderRoute();
   await waitFor(() =>
-    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fdoes-not-exist")
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fdoes-not-exist", {
+      replace: true
+    })
   );
   expect(document.getElementById("main-content")).toBeNull();
 });
@@ -1494,7 +1492,8 @@ it("holds a cache-only navigation for the resume check and blocks a changed sess
     await check;
     await navigation;
   });
-  expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fdoes-not-exist");
+  // Another credential: sign-in starts over instead of resuming this page as it.
+  expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
   expect(queryClient.getQueryData(sessionKeys.me)).toBeUndefined();
   expect(document.getElementById("main-content")).toBeNull();
 });
@@ -1575,7 +1574,9 @@ it("returns a signed-out account visit to login with its destination preserved",
     })
   );
   await renderRoute("/account");
-  await waitFor(() => expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Faccount"));
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Faccount", { replace: true })
+  );
   expect(document.getElementById("main-content")).toBeNull();
 });
 

@@ -1,5 +1,3 @@
-"use client";
-
 import { notFound } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSearchParams } from "@/lib/navigation";
@@ -11,11 +9,7 @@ import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import type { ChatPartner } from "@/lib/chat/types";
 import { selectEffectiveModelId } from "@/features/ai-models/select-effective-chat-model";
-import {
-  ChatPartnerError,
-  ChatPartnerLoading,
-  retryPartnerQuery
-} from "@/features/chat/chat-partner-state";
+import { ChatPartnerError, ChatPartnerLoading } from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
 import { ChatSkills } from "@/features/chat/chat-skills";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
@@ -185,16 +179,14 @@ export function SpaceChat() {
     queryKey: ["assistants", partnerId],
     enabled: type === "assistant" && partnerId !== null,
     queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/assistants/{id}/", { params: { path: { id: partnerId! } } })),
-    retry: retryPartnerQuery
+      unwrap(browserApi.GET("/api/v1/assistants/{id}/", { params: { path: { id: partnerId! } } }))
   });
 
   const groupChatQuery = useQuery({
     queryKey: ["group-chats", partnerId],
     enabled: type === "group-chat" && partnerId !== null,
     queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/group-chats/{id}/", { params: { path: { id: partnerId! } } })),
-    retry: retryPartnerQuery
+      unwrap(browserApi.GET("/api/v1/group-chats/{id}/", { params: { path: { id: partnerId! } } }))
   });
   // The query that loads a non-default partner (null for the space's own assistant).
   const partnerQuery =
@@ -232,6 +224,7 @@ export function SpaceChat() {
       iconId: groupChat.icon_id ?? null,
       ...spaceInfo,
       showResponseLabel: groupChat.show_response_label,
+      assistantCount: groupChat.tools.assistants.length,
       mentionableAssistants: groupChat.allow_mentions
         ? groupChat.tools.assistants.map((assistant) => ({
             id: assistant.id,

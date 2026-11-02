@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { Token } from "@astryxdesign/core/Token";

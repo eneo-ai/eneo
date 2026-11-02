@@ -1,10 +1,47 @@
-"use client";
-
 import { ExternalLink, FileText, Globe2 } from "lucide-react";
 import { useTranslations } from "use-intl";
+import { useState } from "react";
+import { BlobPreviewDialog } from "@/features/knowledge/blobs";
 import { cn } from "@/lib/utils";
 import type { ActivitySource } from "./activity";
-import { McpSnippetButton } from "./message-parts";
+import { McpSnippetButton, type SourceChip } from "./message-parts";
+
+/**
+ * A cited knowledge document: its title opens the document's text in the
+ * knowledge tab's viewer, with the text to download and the original where
+ * the document keeps one (the viewer asks the backend).
+ */
+function DocumentSourceButton({
+  title,
+  blob,
+  className
+}: {
+  title: string;
+  blob: NonNullable<SourceChip["infoBlob"]>;
+  className: string;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        aria-haspopup="dialog"
+        onClick={() => setOpen(true)}
+        className={className}
+      >
+        {title}
+      </button>
+      {open && (
+        <BlobPreviewDialog
+          blob={{ id: blob.id, metadata: { title } }}
+          properties={blob.properties}
+          open={open}
+          onOpenChange={setOpen}
+        />
+      )}
+    </>
+  );
+}
 
 /** Id of the source entry that inline citation N (1-based) opens. */
 export function sourceAnchorId(messageId: string, number: number): string {
@@ -95,6 +132,12 @@ export function SourceList({
                   <McpSnippetButton
                     source={source}
                     snippet={source.mcpSnippet}
+                    className={cn(titleClass, "hover:underline")}
+                  />
+                ) : source.infoBlob ? (
+                  <DocumentSourceButton
+                    title={source.title}
+                    blob={source.infoBlob}
                     className={cn(titleClass, "hover:underline")}
                   />
                 ) : (

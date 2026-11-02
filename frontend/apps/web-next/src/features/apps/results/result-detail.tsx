@@ -1,5 +1,3 @@
-"use client";
-
 import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Button } from "@astryxdesign/core/Button";
@@ -8,7 +6,7 @@ import { useMutation, useQuery, useSuspenseQuery } from "@tanstack/react-query";
 import { Check, Copy, Download, Printer } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState, type RefObject } from "react";
-import { Streamdown } from "streamdown";
+import { MessageResponse } from "@/components/ai-elements/message";
 import { LoadingState } from "@/components/composites/loading-state";
 import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
@@ -109,7 +107,7 @@ function RunOutput({
   }
   return (
     <div ref={printElement}>
-      <Streamdown>{run.output}</Streamdown>
+      <MessageResponse>{run.output}</MessageResponse>
     </div>
   );
 }
@@ -199,7 +197,7 @@ function Transcription({
       </div>
       {audioUrl && <audio controls src={audioUrl} className="w-full px-3 py-2" />}
       <div ref={printElement} className="p-4">
-        <Streamdown>{file.transcription ?? ""}</Streamdown>
+        <MessageResponse>{file.transcription ?? ""}</MessageResponse>
       </div>
     </section>
   );

@@ -235,7 +235,7 @@ def test_startup_log_treats_blank_mcp_base_url_as_unset(
     [
         ({}, False),
         ({"browser_session_enabled": True}, True),
-        ({"web_app_enabled": True}, True),
+        ({"browser_session_enabled": True, "web_app_enabled": True}, True),
     ],
 )
 def test_startup_log_runs_only_for_the_browser_platform(

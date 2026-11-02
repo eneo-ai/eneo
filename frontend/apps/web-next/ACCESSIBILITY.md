@@ -297,9 +297,9 @@ says "Radix" it means the legacy shadcn primitives in `src/components/ui`.
 
 ### 12. Language (3.1.1, 3.1.2)
 
-- `<html lang>` follows the next-intl locale (root layout). All UI text,
+- `<html lang>` follows the use-intl locale (`src/main.tsx`). All UI text,
   including accessible names, alt text, titles and placeholders, comes from
-  next-intl (`eneo/no-hardcoded-text`, `eneo/no-literal-accessible-name`).
+  use-intl (`eneo/no-hardcoded-text`, `eneo/no-literal-accessible-name`).
   Swedish is the default; add every key to `sv` and `en`.
 - Text in another language than the page gets `lang`: language names in the
   language picker, quoted foreign text, and model output when its language is

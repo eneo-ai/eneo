@@ -1,5 +1,3 @@
-"use client";
-
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
 import { useTranslations } from "use-intl";

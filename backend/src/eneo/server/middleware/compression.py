@@ -1,4 +1,4 @@
-"""Gzip for text responses only, once, at level 6 (replaces Next's compress).
+"""Gzip for text responses only, once, at level 6.
 
 Starlette's GZipMiddleware would also compress downloads, Range responses and
 every other type. This responder decides on ``http.response.start`` and passes

@@ -1,5 +1,3 @@
-"use client";
-
 import { DynamicIcon, iconNames, type IconName } from "lucide-react/dynamic";
 import type { LucideProps } from "lucide-react";
 import { LUCIDE_ALIASES } from "./lucide-aliases";

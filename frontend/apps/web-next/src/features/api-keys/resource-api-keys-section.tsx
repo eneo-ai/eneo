@@ -1,5 +1,3 @@
-"use client";
-
 import { Bell, BellOff, KeyRound } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { SettingsGroup } from "@/components/composites/settings-rows";

@@ -50,6 +50,7 @@ from eneo.authentication.api_key_resolver import ApiKeyAuthResolver
 from eneo.authentication.api_key_scope_revoker import ApiKeyScopeRevoker
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
 from eneo.authentication.auth_service import AuthService
+from eneo.authentication.browser_session_service import BrowserSessionService
 from eneo.collections.application.collection_crud_service import CollectionCRUDService
 from eneo.completion_models.application import CompletionModelCRUDService
 from eneo.completion_models.application.completion_model_migration_history_service import (
@@ -1263,6 +1264,11 @@ class Container(containers.DeclarativeContainer):
         tenant_repo=tenant_repo,
         http_runtime=flow_http_runtime,
     )
+    browser_session_service = providers.Factory(
+        BrowserSessionService,
+        session=session,
+        auth_service=auth_service,
+    )
     scim_token_repository = providers.Factory(
         ScimTokenRepository,
         session=session,
@@ -1800,6 +1806,7 @@ class Container(containers.DeclarativeContainer):
         api_key_rate_limiter=api_key_rate_limiter,
         feature_flag_service=feature_flag_service,
         session=session,
+        browser_session_service=browser_session_service,
     )
     module_auth_broker = providers.Factory(
         ModuleAuthBroker,

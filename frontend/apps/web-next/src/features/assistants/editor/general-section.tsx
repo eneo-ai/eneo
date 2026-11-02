@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { useEffect, useRef } from "react";
 import { IconField } from "@/components/composites/icon-field";

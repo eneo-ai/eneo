@@ -73,14 +73,32 @@ def test_development_cookie_allowed_on_localhost(public_origin: str, normalized:
     assert settings.public_origin == normalized
 
 
-def test_production_session_allowed():
+@pytest.mark.parametrize("web_app_enabled", [False, True])
+def test_production_session_allowed(web_app_enabled: bool):
     settings = _settings(
         browser_session_enabled=True,
+        web_app_enabled=web_app_enabled,
         environment="production",
         public_origin="https://eneo.example.se",
     )
 
     assert settings.browser_session_enabled is True
+    assert settings.web_app_enabled is web_app_enabled
+
+
+def test_web_app_refused_without_browser_session():
+    # The web app signs in only through the browser session.
+    with pytest.raises(ValidationError) as error:
+        _settings(web_app_enabled=True, environment="production")
+
+    message = str(error.value)
+    for name in (
+        "WEB_APP_ENABLED",
+        "BROWSER_SESSION_ENABLED",
+        "WEB_APP_ENABLED=false",
+        "FRONTEND_ROUTER_PRIORITY",
+    ):
+        assert name in message
 
 
 def test_env_backend_template_lists_web_app_settings():

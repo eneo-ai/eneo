@@ -1,5 +1,3 @@
-"use client";
-
 import { DropdownMenu, type DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { Heading, Text } from "@astryxdesign/core/Text";
 import { Braces } from "lucide-react";

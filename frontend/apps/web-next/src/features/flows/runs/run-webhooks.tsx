@@ -1,5 +1,3 @@
-"use client";
-
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { useTranslations } from "use-intl";
 import { Table } from "@/components/astryx/table";

@@ -139,6 +139,12 @@ class SpaceSecurityClassificationImpactAnalysis:
 
 
 TENANT_SPACE_NAME = "Organization space"
+# The effect_on_get of a GET that calls get_or_create_tenant_space.
+TENANT_HUB_ON_GET = (
+    "Resolving the tenant hub creates it when missing and makes its members exactly "
+    "the tenant's admins. Idempotent, and the outcome follows from tenant state, "
+    "not from the request."
+)
 
 
 class SpaceService:

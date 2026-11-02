@@ -26,7 +26,7 @@ import {
 export type AdminNavItem = {
   href: string;
   icon: LucideIcon;
-  /** next-intl key of the label (the page's own title key where it has one). */
+  /** Message key of the label (the page's own title key where it has one). */
   labelKey: string;
 };
 

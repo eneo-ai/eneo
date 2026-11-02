@@ -27,6 +27,8 @@ export type ChatPartner = {
   } | null;
   /** Group chats: assistants available for @mentions. */
   mentionableAssistants?: { id: string; handle: string }[];
+  /** Group chats: how many assistants take part (none: nobody can answer). */
+  assistantCount?: number;
   /** Group chats: label which assistant answered. */
   showResponseLabel?: boolean;
   /** MCP servers that can be toggled for this partner when no policy overrides them. */

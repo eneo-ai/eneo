@@ -1,5 +1,3 @@
-"use client";
-
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";
 import { pushUrl, replaceUrl, usePathname, useSearchParams } from "@/lib/navigation";

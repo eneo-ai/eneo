@@ -29,9 +29,20 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
+const toast = vi.hoisted(() => ({ warning: vi.fn(), error: vi.fn(), success: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ toast }));
+const spaceModels = vi.hoisted(() => ({
+  current: { transcription_models: [{ id: "whisper", name: "whisper" }] } as Record<string, unknown>
+}));
 vi.mock("@/features/spaces/use-space", async () => {
   const { makeSpace } = await import("@/features/spaces/testing/space-fixture");
-  return { useSpace: () => ({ space: makeSpace(), routeId: "space-1", can: () => true }) };
+  return {
+    useSpace: () => ({
+      space: makeSpace({ overrides: spaceModels.current }),
+      routeId: "space-1",
+      can: () => true
+    })
+  };
 });
 
 import { CreateAppButton } from "./create-app";
@@ -46,6 +57,7 @@ const collision = () =>
 
 afterEach(() => {
   vi.clearAllMocks();
+  spaceModels.current = { transcription_models: [{ id: "whisper", name: "whisper" }] };
   clearJustCreated("app", "p-new");
 });
 
@@ -98,6 +110,67 @@ describe("CreateAppButton", () => {
     expect(
       api.POST.mock.calls.map((call) => (call[1] as { body: { name: string } }).body.name)
     ).toEqual(["Ny app", "Ny app 2"]);
+  });
+
+  it("creates no app, blank or from a template, until the space has a completion and a transcription model", () => {
+    spaceModels.current = { completion_models: [], transcription_models: [] };
+    renderInApp(<CreateAppButton />, {
+      appContext: testAppContext({ settings: { using_templates: true } })
+    });
+    const warnings = [
+      "Denna yta har för närvarande inga completion-modeller aktiverade. Aktivera minst en completion-modell för att kunna skapa en app.",
+      "Denna yta har för närvarande inga transkriptionsmodeller aktiverade. Aktivera minst en transkriptionsmodell för att kunna skapa en app."
+    ];
+
+    const create = screen.getByRole("button", { name: "Skapa app" }) as HTMLButtonElement;
+    // Never disabled: pressing it says what is missing.
+    expect(create.disabled).toBe(false);
+    fireEvent.click(create);
+    expect(toast.warning.mock.calls.map(([message]) => message)).toEqual(warnings);
+
+    toast.warning.mockClear();
+    fireEvent.keyDown(screen.getByRole("button", { name: "Fler sätt att skapa" }), {
+      key: "Enter"
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Börja med en mall..." }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(toast.warning.mock.calls.map(([message]) => message)).toEqual(warnings);
+    expect(api.POST).not.toHaveBeenCalled();
+  });
+
+  it("creates nothing from the gallery once the space loses a model, and keeps the draft", async () => {
+    const view = renderInApp(<CreateAppButton />, {
+      appContext: testAppContext({ settings: { using_templates: true } })
+    });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Fler sätt att skapa" }), {
+      key: "Enter"
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Börja med en mall..." }));
+    const dialog = await screen.findByRole("dialog", { name: "Välj en mall" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: /Protokollsammanfattning/ }));
+
+    // The space data refreshes while the gallery is open: its last
+    // transcription model is gone.
+    spaceModels.current = { transcription_models: [] };
+    view.rerender(<CreateAppButton />);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skapa app" }));
+
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        "Denna yta har för närvarande inga transkriptionsmodeller aktiverade. Aktivera minst en transkriptionsmodell för att kunna skapa en app.",
+        expect.anything()
+      )
+    );
+    expect(api.POST).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Välj en mall" })).toBe(dialog);
+    expect((within(dialog).getByLabelText("Namn") as HTMLInputElement).value).toBe(
+      "Protokollsammanfattning"
+    );
+    expect(
+      within(dialog)
+        .getByRole("button", { name: /Protokollsammanfattning/ })
+        .getAttribute("aria-pressed")
+    ).toBe("true");
   });
 
   it("says a template is needed, then its name, when creating from a template", async () => {

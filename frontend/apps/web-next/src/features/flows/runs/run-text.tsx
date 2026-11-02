@@ -1,5 +1,3 @@
-"use client";
-
 import { MessageResponse } from "@/components/ai-elements/message";
 
 /**

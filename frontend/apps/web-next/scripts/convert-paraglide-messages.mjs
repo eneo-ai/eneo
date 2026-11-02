@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Generates web-next's next-intl catalogs, src/lib/i18n/messages/{sv,en}.json,
+ * Generates web-next's use-intl catalogs, src/lib/i18n/messages/{sv,en}.json,
  * from the SvelteKit app's Paraglide catalogs (apps/web/messages) with
  * src/lib/i18n/extra/{sv,en}.json merged over them (extra wins).
  *
@@ -14,7 +14,7 @@
  * Messages that need manual review are flagged on stdout and copied through
  * unchanged:
  *   - non-string values (Paraglide variants/plurals)
- *   - keys containing "." (next-intl treats dots as namespace separators)
+ *   - keys containing "." (use-intl treats dots as namespace separators)
  *   - apostrophes directly before "{" or "}" (ICU escape semantics differ)
  *   - "<" before a letter (markup or a <placeholder>; ICU parses tags)
  * To fix one for web-next, put its ICU version in extra/; that clears the flag.

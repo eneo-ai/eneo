@@ -1,5 +1,3 @@
-"use client";
-
 import { ChevronDown, CircleAlert, Database, ExternalLink, HardDrive, Info } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useState } from "react";

@@ -286,7 +286,7 @@ function rateLimitProblem(draft: ApiKeyDraft, max: number | null | undefined, t:
  * shows them. An edit (`stored` is the key as it was opened) is only checked
  * where it changes something: a key's own rate limit or allowlist, even one a
  * later policy no longer allows, does not stop a rename. `t` translates
- * (next-intl's, or a stub in tests).
+ * (use-intl's, or a stub in tests).
  */
 export function draftProblems(
   draft: ApiKeyDraft,

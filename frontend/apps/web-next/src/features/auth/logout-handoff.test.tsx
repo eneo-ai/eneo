@@ -64,6 +64,33 @@ it.each([403, 503, "network"])("keeps a failed logout visible (%s)", async (fail
   expect(screen.getByRole("link").getAttribute("href")).toBe("/logout");
 });
 
+it("keeps the person signed in when the server cannot end the session (503)", async () => {
+  // The real session owner: a 503 must neither expire nor replace the session.
+  const real = await vi.importActual<typeof import("@/lib/api/refusal")>("@/lib/api/refusal");
+  window.history.replaceState({}, "", "/logout");
+  fetchMock.mockResolvedValueOnce(
+    new Response(null, { status: 204, headers: { "Eneo-Session-Generation": "generation-a" } })
+  );
+  await real.initializeBrowserSession();
+  vi.mocked(getSessionSnapshot).mockImplementation(real.getSessionSnapshot);
+  vi.mocked(handleRefusal).mockImplementation(real.handleRefusal);
+  fetchMock.mockResolvedValueOnce(
+    Response.json(
+      { code: "sign_out_unavailable", message: "Sign-out could not be completed. Try again." },
+      { status: 503 }
+    )
+  );
+
+  renderInApp(<LogoutHandoff target="/login" />);
+
+  expect(await screen.findByText("Utloggningen misslyckades. Försök igen.")).toBeTruthy();
+  expect(screen.getByRole("link").getAttribute("href")).toBe("/logout");
+  expect(handleRefusal).toHaveBeenCalledOnce();
+  expect(real.getSessionSnapshot()).toEqual({ status: "bound", generation: "generation-a" });
+  expect(real.getSessionSignal().aborted).toBe(false);
+  expect(navigateTo).not.toHaveBeenCalled();
+});
+
 it("never clears a newer cookie from a stale bound document", async () => {
   vi.mocked(getSessionSnapshot).mockReturnValue({ status: "stale", destination: "/deactivated" });
   renderInApp(<LogoutHandoff target="/login" />);

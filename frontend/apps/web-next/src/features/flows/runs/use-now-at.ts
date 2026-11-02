@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState } from "react";
 
 /** The longest delay a browser timer holds; a later deadline is waited for in steps. */

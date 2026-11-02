@@ -1455,6 +1455,10 @@ The reference `docker-compose.yml` serves React pages and assets from the backen
 on the main HTTPS host. It sets `WEB_APP_ENABLED=true` and
 `BROWSER_SESSION_ENABLED=true` on that service. These Compose values override
 `env_backend.env`; the backend defaults remain `false` in other deployments.
+The web app signs in only through the browser session, so the backend refuses
+to start with `WEB_APP_ENABLED=true` and `BROWSER_SESSION_ENABLED=false`. To
+stop serving React pages, use the `FRONTEND_ROUTER_PRIORITY=7` rollback below;
+`WEB_APP_ENABLED=false` also needs it, since the backend then serves no pages.
 The Svelte service stays in the release bundle for UI rollback.
 
 Before switching an existing installation, rehearse the upgrade on staging.
@@ -1614,7 +1618,7 @@ defaults; the reference Compose file sets both enable flags to `true` itself.
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `BROWSER_SESSION_ENABLED` | `false` | Accept the backend's browser session cookie. |
-| `WEB_APP_ENABLED` | `false` | Serve the web app from the backend. |
+| `WEB_APP_ENABLED` | `false` | Serve the web app from the backend. Requires `BROWSER_SESSION_ENABLED=true`. |
 | `SHOW_HELP_CENTER` | `false` | Show the configured help-center link. |
 | `HELP_CENTER_URL` | `https://www.eneo.ai/en/external-support-assistant` | Help-center destination. Set an empty value to hide the link even when `SHOW_HELP_CENTER` is enabled. |
 | `LEGACY_APP_URL` | unset | Optional Svelte return link. Leave unset once the main host serves React. |
@@ -1642,7 +1646,9 @@ With `ENVIRONMENT=development`, the backend refuses to start with
 `BROWSER_SESSION_ENABLED=true` unless `PUBLIC_ORIGIN` is a `localhost` or
 `127.0.0.1` URL, so the development cookie, which is not marked Secure, never
 reaches a public host. The browser session lasts `JWT_EXPIRY_TIME`: an absolute
-lifetime with no inactivity limit, and logout is local.
+lifetime with no inactivity limit. Signing out ends the Eneo session on the
+server at once, so a copy of its cookie stops working; the identity provider's
+session stays. A password change still ends every session of the user.
 
 ### Enable the invitation banner
 

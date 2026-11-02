@@ -1,5 +1,3 @@
-"use client";
-
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";

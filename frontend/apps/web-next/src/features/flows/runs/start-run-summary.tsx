@@ -1,5 +1,3 @@
-"use client";
-
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { useLocale, useTranslations } from "use-intl";
 import { useId, type ReactNode, type Ref } from "react";

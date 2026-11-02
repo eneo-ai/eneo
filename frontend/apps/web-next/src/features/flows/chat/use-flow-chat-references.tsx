@@ -1,5 +1,3 @@
-"use client";
-
 import type { ChatComposerToken, ChatComposerTrigger } from "@astryxdesign/core/Chat";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Text } from "@astryxdesign/core/Text";

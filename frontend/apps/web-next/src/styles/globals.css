@@ -35,11 +35,11 @@
 
 /*
  * 2b. Fonts, self-hosted from src/assets/fonts (OFL, licences next to the files):
- *    every subset of each variable wght axis that Next's font loader served,
- *    byte-identical. unicode-range keeps the browser to the subsets a page's
+ *    every subset of each variable wght axis, byte-identical to Google Fonts'
+ *    files. unicode-range keeps the browser to the subsets a page's
  *    text needs; only Figtree latin is preloaded (index.html). The
- *    "… Fallback" faces size a local font to each web font's metrics (the
- *    values Next generated), so swapping in the web font does not move text.
+ *    "… Fallback" faces size a local font to each web font's metrics, so
+ *    swapping in the web font does not move text.
  *    The theme (src/theme/eneo-theme.ts) and --font-voice read the :root
  *    variables. Guarded by globals-css.test.ts.
  *

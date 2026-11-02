@@ -1,5 +1,3 @@
-"use client";
-
 import type { UseQueryResult } from "@tanstack/react-query";
 import { useState } from "react";
 import { blockingError, type QueryLike } from "@/components/composites/query-state";

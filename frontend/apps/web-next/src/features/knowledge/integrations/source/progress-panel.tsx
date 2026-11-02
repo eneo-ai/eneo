@@ -1,5 +1,3 @@
-"use client";
-
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Check, Loader2 } from "lucide-react";
 import { useTranslations } from "use-intl";

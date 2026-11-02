@@ -1,5 +1,3 @@
-"use client";
-
 import { useQuery } from "@tanstack/react-query";
 import { blockingError } from "@/components/composites/query-state";
 import { usePathname, useSearchParams } from "@/lib/navigation";

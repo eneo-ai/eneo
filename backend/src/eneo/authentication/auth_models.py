@@ -44,6 +44,20 @@ class JWTCreds(BaseModel):
     # Retained as descriptive claims for clients; never used to resolve a user.
     sub: EmailStr
     username: Optional[str] = None
+    # The server-side browser session (eneo.authentication.
+    # browser_session_service). Only a browser sign-in adds it to a token, so
+    # minting never dumps it. A present claim is a session id: null or any
+    # other value is refused, never read as a token without one.
+    sid: Optional[str] = Field(
+        default=None, exclude=True, strict=True, pattern=r"^[A-Za-z0-9_-]{43}$"
+    )
+
+    @field_validator("sid", mode="before")
+    @classmethod
+    def _refuse_null_sid(cls, value: object) -> object:
+        if value is None:
+            raise ValueError("sid must not be null")
+        return value
 
 
 class JWTPayload(JWTMeta, JWTCreds):

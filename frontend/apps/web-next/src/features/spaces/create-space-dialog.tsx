@@ -1,5 +1,3 @@
-"use client";
-
 import { invalidateSpacesList } from "@/features/spaces/space";
 
 import { Button } from "@astryxdesign/core/Button";

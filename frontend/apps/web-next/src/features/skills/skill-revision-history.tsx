@@ -1,5 +1,3 @@
-"use client";
-
 import { useInfiniteQuery, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Eye, RotateCcw } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";

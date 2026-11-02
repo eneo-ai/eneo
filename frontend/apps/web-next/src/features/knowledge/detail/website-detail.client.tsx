@@ -1,5 +1,3 @@
-"use client";
-
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Selector } from "@astryxdesign/core/Selector";

@@ -121,7 +121,7 @@ hard-coded colours.
 ## i18n
 
 The app uses use-intl.
-The locale comes from the `NEXT_LOCALE` cookie (default `sv`, also `en`), and
+The locale comes from the `eneo_locale` cookie (default `sv`, also `en`), and
 changing it reloads the document. Catalogs in `src/lib/i18n/messages/` are
 generated from the SvelteKit app's Paraglide catalogs:
 

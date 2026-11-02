@@ -1,5 +1,3 @@
-"use client";
-
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { Link } from "@astryxdesign/core/Link";
@@ -17,7 +15,8 @@ import { useOptionalWhatsNew } from "./whats-new-provider";
  * The one-time release notice: a dismissible banner above the start page's
  * composer the first time a user is here after a release (it is recorded as
  * announced when it mounts; the unseen dot in the account menu stays until
- * the Nyheter page is opened). It never blocks the page.
+ * the Nyheter page is opened). It never blocks the page. "Later" brings it back
+ * a day later while the release is unread.
  */
 export function WhatsNewBanner() {
   const whatsNew = useOptionalWhatsNew();
@@ -27,6 +26,7 @@ export function WhatsNewBanner() {
     <ReleaseBanner
       pendingRelease={whatsNew.pendingRelease ?? null}
       markLatestAnnounced={whatsNew.markLatestAnnounced}
+      snoozeLatest={whatsNew.snoozeLatest}
       tour={tour}
     />
   );
@@ -35,10 +35,12 @@ export function WhatsNewBanner() {
 function ReleaseBanner({
   pendingRelease,
   markLatestAnnounced,
+  snoozeLatest,
   tour
 }: {
   pendingRelease: Release | null;
   markLatestAnnounced: () => Promise<void>;
+  snoozeLatest: () => void;
   tour: NonNullable<ReturnType<typeof useOptionalTour>>;
 }) {
   const t = useTranslations();
@@ -47,13 +49,13 @@ function ReleaseBanner({
   // Captured once: recording the release as announced clears pendingRelease,
   // and the banner must stay until the user leaves or dismisses it.
   const [release] = useState<Release | null>(() =>
-    pendingRelease &&
-    visibleEntries(pendingRelease, can).length > 0 &&
-    shouldShowAnnouncement(pendingRelease, user.created_at)
-      ? pendingRelease
-      : null
+    pendingRelease && visibleEntries(pendingRelease, can).length > 0 ? pendingRelease : null
   );
-  const [open, setOpen] = useState(release !== null);
+  // An account created after the release was never "here" before it: the
+  // release is recorded as announced without showing "since you were last here".
+  const [open, setOpen] = useState(
+    () => release !== null && shouldShowAnnouncement(release, user.created_at)
+  );
   const announced = useRef<string | null>(null);
 
   useEffect(() => {
@@ -80,6 +82,15 @@ function ReleaseBanner({
     }
   }
 
+  function remindLater() {
+    try {
+      snoozeLatest();
+      setOpen(false);
+    } catch {
+      toast.error(t("whats_new_reminder_failed"));
+    }
+  }
+
   return (
     <div className="w-full">
       <Banner
@@ -102,6 +113,12 @@ function ReleaseBanner({
                 onClick={() => void startTour()}
               />
             )}
+            <Button
+              variant="secondary"
+              size="sm"
+              label={t("whats_new_announcement_later")}
+              onClick={remindLater}
+            />
             <Link href="/whats-new" hasUnderline>
               {t("whats_new_announcement_all", { count: entries.length })}
             </Link>

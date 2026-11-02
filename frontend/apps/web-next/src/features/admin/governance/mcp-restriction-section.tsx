@@ -1,5 +1,3 @@
-"use client";
-
 import { AlertCircle, ChevronRight, Info, Plug } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useState } from "react";

@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { FieldLabel } from "@astryxdesign/core/Field";
 import { FileInput } from "@astryxdesign/core/FileInput";

@@ -1,5 +1,4 @@
 // Copyright (c) 2026 Sundsvalls Kommun
-"use client";
 
 import { Button } from "@astryxdesign/core/Button";
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";

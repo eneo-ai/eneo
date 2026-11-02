@@ -378,6 +378,37 @@ def test_raised_server_error_preserves_correlation_without_exposing_detail(monke
     assert response.headers["access-control-allow-origin"] == "https://app.example.com"
 
 
+def test_api_key_rate_limit_exposes_retry_after_to_an_allowed_origin(monkeypatch):
+    _origin_checks(monkeypatch, True)
+    app = get_application()
+
+    @app.get("/_test-api-key-rate-limit")
+    @endpoint_access(
+        authentication=Authentication.PUBLIC,
+        authorization=Authorization.PUBLIC,
+        reason="Test-only route for the API key rate limit response.",
+    )
+    async def _test_api_key_rate_limit():
+        raise_api_key_http_error(
+            ApiKeyValidationError(
+                status_code=429,
+                code="rate_limit_exceeded",
+                message="API key rate limit exceeded.",
+                headers={"Retry-After": "25"},
+            )
+        )
+
+    response = TestClient(app).get(
+        "/_test-api-key-rate-limit", headers={"Origin": "https://app.example.com"}
+    )
+
+    assert response.status_code == 429
+    assert response.headers["access-control-allow-origin"] == "https://app.example.com"
+    assert response.headers["retry-after"] == "25"
+    expose = response.headers["access-control-expose-headers"].lower()
+    assert "retry-after" in expose
+
+
 def test_unhandled_error_keeps_its_json_body_when_the_origin_check_fails(monkeypatch):
     """The origin check can need the database the 500 came from."""
     _origin_checks(monkeypatch, True, RuntimeError("database unavailable"))

@@ -1,5 +1,3 @@
-"use client";
-
 import { ClickableCard } from "@astryxdesign/core/ClickableCard";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { Text } from "@astryxdesign/core/Text";

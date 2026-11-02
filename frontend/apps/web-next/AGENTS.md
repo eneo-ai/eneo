@@ -15,8 +15,7 @@ The UI rules below apply to web-next.
 On `feat/web-next-vite` and its slice branches, the target is a Vite SPA with
 TanStack Router and Query; FastAPI is the only server. Build framework-neutral
 React in `src/features`, `src/components` and `src/lib`, with routes in
-`src/routes`. Next.js, its server routes and its standalone image are removed.
-Do not reintroduce `src/app`, Next imports or a frontend auth server. SvelteKit in `apps/web` is the production behaviour reference and
+`src/routes`. Do not reintroduce `src/app` or a frontend auth server. SvelteKit in `apps/web` is the production behaviour reference and
 must not be changed by migration slices.
 
 Follow the migration epic `eneo-web-next-vite-ded5` in Beads from the
@@ -291,7 +290,7 @@ open), so the index has no bar of its own and names itself with a heading.
   decision 14: the conversation keeps 480 px), not from a media query; the
   chat page owns that row and the history gives way to a panel that opens
   where both do not fit. Widths in that rule are px, set inline.
-- **Collections of resources** (spaces, assistants, apps, services, the
+- **Collections of resources** (spaces, assistants, apps and the
   catalog) render through `ResourceCollection` (`resource-tile.tsx`): list
   rows on a phone (`PHONE_QUERY`), cards from 768 px in a grid that fits as
   many columns as the page has room for. A list row with a link is one
@@ -300,9 +299,9 @@ open), so the index has no bar of its own and names itself with a heading.
   delete) are not in the item: `createResourceActions`
   (`resource-action-scope.tsx`) puts them in one scope above the collection,
   the menus only ask to open one, and an open dialog survives the turn. Follow
-  `services/actions.tsx` for a new resource.
+  `apps/actions.tsx` for a new resource.
 - **Navigation and links**: app code imports `@/lib/navigation` and
-  `@/lib/link`, which own the TanStack adapters. Next imports are lint errors.
+  `@/lib/link`, which own the TanStack adapters.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
   `sonner` elsewhere). Errors and warnings don't time out; every toast has a
   close button; success and info close after 6 s. Sonner's stylesheet is
@@ -485,8 +484,8 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   on the first render. Where the text
   must go into a label (an accessible name), `useClientTimeText` returns the
   same string.
-- `ResourceCard` (`resource-tile.tsx`) — the card for assistants, apps and
-  services (Astryx `ClickableCard`; its action menu is a sibling, so actions
+- `ResourceCard` (`resource-tile.tsx`) — the card for assistants and apps
+  (Astryx `ClickableCard`; its action menu is a sibling, so actions
   never open the card).
 - `ConfirmDialog` / `ConfirmDialogControlled` — confirmations; put the
   controlled one outside menus.
@@ -550,7 +549,7 @@ build served by FastAPI. Never loosen the policy.
 
 ## Text and i18n
 
-- use-intl, locales `sv` (default) and `en`. `switchLocale` writes the `NEXT_LOCALE` preference cookie and reloads the document so React, router titles and boot data change language together. `AppIntlProvider` owns the Vite app's viewer time zone. Calendar dates and backend day aggregates keep their own semantics.
+- use-intl, locales `sv` (default) and `en`. `switchLocale` writes the `eneo_locale` preference cookie and reloads the document so React, router titles and boot data change language together. `AppIntlProvider` owns the Vite app's viewer time zone. Calendar dates and backend day aggregates keep their own semantics.
   No hardcoded UI text (`eneo/no-hardcoded-text`).
 - `src/lib/i18n/messages/{sv,en}.json` are generated; never edit them.
   `bun run i18n:convert` builds them from the SvelteKit app's catalogs

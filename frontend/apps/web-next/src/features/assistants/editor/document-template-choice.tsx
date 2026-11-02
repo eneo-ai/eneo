@@ -1,5 +1,3 @@
-"use client";
-
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { Selector } from "@astryxdesign/core/Selector";

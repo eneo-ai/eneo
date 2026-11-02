@@ -1,5 +1,3 @@
-"use client";
-
 import type { SearchableItem, SearchSource } from "@astryxdesign/core/Typeahead";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Plus, RefreshCw, Settings, ShieldCheck } from "lucide-react";

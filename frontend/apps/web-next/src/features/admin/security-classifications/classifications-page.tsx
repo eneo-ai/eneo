@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import {
   ArrowDownToLine,

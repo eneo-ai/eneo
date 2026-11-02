@@ -1,5 +1,3 @@
-"use client";
-
 import { useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 
 const KEYBOARD_STEP = 24;

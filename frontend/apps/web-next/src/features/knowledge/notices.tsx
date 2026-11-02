@@ -1,5 +1,3 @@
-"use client";
-
 import { Banner } from "@astryxdesign/core/Banner";
 import { Link } from "@astryxdesign/core/Link";
 import { useTranslations } from "use-intl";

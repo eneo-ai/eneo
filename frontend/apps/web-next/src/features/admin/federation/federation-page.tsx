@@ -1,5 +1,3 @@
-"use client";
-
 import { Banner } from "@astryxdesign/core/Banner";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { Button } from "@astryxdesign/core/Button";

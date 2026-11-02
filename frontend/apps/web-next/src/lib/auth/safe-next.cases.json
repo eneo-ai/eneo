@@ -38,7 +38,7 @@
     "/api/chat",
     "/auth/login",
     "/auth/callback?code=x&state=y",
-    "/_next/static/chunks/main.js",
+    "/assets/index-CyYPWCXK.js",
     "/spaces/../api/v1/users/me/",
     "/%61pi/v1/users/me/",
     "/.//api/v1/users/me/",

@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { useEffect, useRef } from "react";
 import { DocumentEditor } from "@/features/workspace/preview/document-editor";

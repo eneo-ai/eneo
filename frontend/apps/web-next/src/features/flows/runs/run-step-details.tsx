@@ -1,5 +1,3 @@
-"use client";
-
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useTranslations } from "use-intl";
 import { useState } from "react";

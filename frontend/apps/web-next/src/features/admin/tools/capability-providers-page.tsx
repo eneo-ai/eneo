@@ -1,5 +1,3 @@
-"use client";
-
 import { invalidateSpaces } from "@/features/spaces/space";
 
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
@@ -19,12 +17,9 @@ import {
   type CapabilityDescriptor
 } from "@/features/capabilities/capabilities";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
-import { toast } from "@/lib/toast";
 import { cn } from "@/lib/utils";
 import {
-  BUNDLED_KEY,
   bundledToolsQueryOptions,
   createBundledMcpServer,
   deleteMcpServer,
@@ -191,7 +186,6 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: MCP_KEY }),
-      queryClient.invalidateQueries({ queryKey: BUNDLED_KEY }),
       invalidateSpaces(queryClient)
     ]);
   };
@@ -234,10 +228,7 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
       });
       void invalidate().catch((cause) => toastApiError(cause, t));
     },
-    onError: (cause) =>
-      toast.error(
-        getErrorMessage(cause, t) || t("tools_bundled_add_failed", { name: t("mcp_auth_bundled") })
-      )
+    onError: (cause) => toastApiError(cause, t)
   });
 
   // Servers built into Eneo that this tenant has not added yet. A function

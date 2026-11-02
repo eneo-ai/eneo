@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { referenceAuditRows } from "@eneo/skill-instructions/audit";
 import { referenceUri } from "@eneo/skill-instructions";

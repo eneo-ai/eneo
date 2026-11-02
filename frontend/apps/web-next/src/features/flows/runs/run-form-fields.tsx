@@ -1,5 +1,3 @@
-"use client";
-
 import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList";
 import { DateInput, type DateInputProps } from "@astryxdesign/core/DateInput";
 import { NumberInput } from "@astryxdesign/core/NumberInput";

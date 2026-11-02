@@ -1,5 +1,3 @@
-"use client";
-
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { useTranslations } from "use-intl";
 import { useEffect, useState } from "react";

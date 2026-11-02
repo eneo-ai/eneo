@@ -19,13 +19,26 @@ export function mcpToolDefaultEnabled(tool: AssistantMcpTool): boolean {
   return tool.is_enabled ?? tool.is_enabled_by_default ?? false;
 }
 
+/**
+ * The servers the picker lists: those offered, with only the tools the space
+ * enabled (the assistant never gets the others), then any server an
+ * administrator deactivated that the assistant still has. That one has left
+ * the offer, but is listed as unavailable so it can be seen and switched off.
+ */
 export function availableAssistantMcpServers<Server extends AssistantMcpServer>(
-  servers: Server[]
+  offered: Server[],
+  attached: Server[] = []
 ): Server[] {
-  return servers.map((server) => ({
-    ...server,
-    tools: (server.tools ?? []).filter((tool) => !tool.removed_from_remote)
-  }));
+  const offeredIds = new Set(offered.map((server) => server.id));
+  return [
+    ...offered.map((server) => ({
+      ...server,
+      tools: (server.tools ?? []).filter(
+        (tool) => tool.is_enabled !== false && !tool.removed_from_remote
+      )
+    })),
+    ...attached.filter((server) => server.is_enabled === false && !offeredIds.has(server.id))
+  ];
 }
 
 export function isMcpToolEnabled(
@@ -46,19 +59,28 @@ function serverToolSettings(
   return (server.tools ?? []).map((tool) => ({ tool_id: tool.id, is_enabled: isEnabled }));
 }
 
+/** Switches `server` on or off; `servers` are the servers the picker lists. */
 export function toggleMcpServerSelection(
   selectedIds: Set<string>,
   settings: AssistantMcpToolSetting[],
-  server: AssistantMcpServer
+  server: AssistantMcpServer,
+  servers: AssistantMcpServer[]
 ): { selectedIds: Set<string>; settings: AssistantMcpToolSetting[] } {
   const nextIds = new Set(selectedIds);
-  const serverToolIds = new Set((server.tools ?? []).map((tool) => tool.id));
 
   if (nextIds.has(server.id)) {
     nextIds.delete(server.id);
+    // Only overrides for tools of the servers still selected remain (the
+    // backend refuses others): a listed server leaves out the tools the space
+    // disabled, so their saved overrides cannot be matched to it.
+    const keptToolIds = new Set(
+      selectedMcpServers(servers, nextIds).flatMap((kept) =>
+        (kept.tools ?? []).map((tool) => tool.id)
+      )
+    );
     return {
       selectedIds: nextIds,
-      settings: settings.filter((setting) => !serverToolIds.has(setting.tool_id))
+      settings: settings.filter((setting) => keptToolIds.has(setting.tool_id))
     };
   }
 

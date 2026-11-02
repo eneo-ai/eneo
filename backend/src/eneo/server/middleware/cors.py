@@ -50,10 +50,13 @@ CORS_OPTIONS: CORSOptions = {
     "allow_methods": ("*",),
     "allow_headers": ("*",),
     "allow_credentials": True,
-    # Trace headers a cross-origin caller may read, on every response.
+    # Headers a cross-origin caller may read, on every response: the trace
+    # headers, Retry-After on a 429, and the flow-package export's count of
+    # omitted MCP assistants.
     "expose_headers": (
         "X-Trace-Id",
         "X-Correlation-ID",
+        "Retry-After",
         FLOW_PACKAGE_OMITTED_MCP_ASSISTANT_COUNT_HEADER,
     ),
     "callback": get_origin,

@@ -22,9 +22,6 @@ import type { AppSparse } from "@/features/apps/apps";
 import { ChatAppActionScope } from "@/features/assistants/actions";
 import { ChatAppTile } from "@/features/assistants/tile";
 import type { ChatAppItem } from "@/features/assistants/assistants";
-import { ServiceActionScope } from "@/features/services/actions";
-import { ServiceTile } from "@/features/services/tile";
-import type { ServiceSparse } from "@/features/services/services";
 import { makeAssistant, makeSpace } from "@/features/spaces/testing/space-fixture";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 
@@ -38,11 +35,6 @@ afterEach(() => {
 });
 
 const PERMISSIONS = ["read", "edit", "delete", "publish"];
-const service = {
-  id: "svc-1",
-  name: "Kontrollerar avtal",
-  permissions: PERMISSIONS
-} as ServiceSparse;
 const app = {
   id: "app-1",
   name: "Protokollsammanfattning",
@@ -92,27 +84,9 @@ const openDialog = () =>
   document.querySelector<HTMLElement>('dialog[open], [role="alertdialog"], [role="dialog"]');
 
 describe("a resource's menu dialog when a turned phone swaps rows for cards", () => {
-  it("keeps a service's move dialog open", async () => {
-    space.current = makeSpace({ services: [service] });
-    setViewport("phone");
-    renderInApp(
-      <Page scope={ServiceActionScope}>
-        <ServiceTile service={service} />
-      </Page>
-    );
-    choose("Kontrollerar avtal", "Flytta");
-    await waitFor(() => expect(openDialog()).not.toBeNull());
-    const dialog = openDialog();
-
-    act(() => setViewport("tablet-portrait"));
-    expect(openDialog()).toBe(dialog);
-    act(() => setViewport("phone"));
-    expect(openDialog()).toBe(dialog);
-  });
-
-  it("keeps the destination chosen in a service's move dialog across a turn in both directions", async () => {
-    space.current = makeSpace({ services: [service] });
-    // The spaces the service can be moved to (this space itself is left out of the list).
+  it("keeps the destination chosen in an assistant's move dialog across a turn in both directions", async () => {
+    space.current = makeSpace({ assistants: [assistant] });
+    // The spaces the assistant can be moved to (this space itself is left out of the list).
     api.GET.mockImplementation((path: string) =>
       Promise.resolve({
         data:
@@ -130,11 +104,11 @@ describe("a resource's menu dialog when a turned phone swaps rows for cards", ()
     api.POST.mockResolvedValue({ data: {}, response: new Response("{}") });
     setViewport("phone");
     renderInApp(
-      <Page scope={ServiceActionScope}>
-        <ServiceTile service={service} />
+      <Page scope={ChatAppActionScope}>
+        <ChatAppTile item={assistant} showStatus />
       </Page>
     );
-    choose("Kontrollerar avtal", "Flytta");
+    choose("Upphandlingsassistenten", "Flytta");
     await waitFor(() => expect(openDialog()).not.toBeNull());
     const dialog = openDialog()!;
 
@@ -158,24 +132,24 @@ describe("a resource's menu dialog when a turned phone swaps rows for cards", ()
     );
 
     // And it moves to the destination that was chosen before the turn.
-    fireEvent.click(within(dialog).getByRole("button", { name: "Flytta tjänst" }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Flytta assistent" }));
     await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
     expect(api.POST.mock.calls[0]![1]).toEqual({
-      params: { path: { id: "svc-1" } },
+      params: { path: { id: "as-1" } },
       body: { target_space_id: "space-9" }
     });
   });
 
-  it("still deletes the service from the dialog it opened on a phone", async () => {
-    space.current = makeSpace({ services: [service] });
+  it("still deletes the assistant from the dialog it opened on a phone", async () => {
+    space.current = makeSpace({ assistants: [assistant] });
     api.DELETE.mockResolvedValue({ data: {}, response: new Response("{}") });
     setViewport("phone");
     renderInApp(
-      <Page scope={ServiceActionScope}>
-        <ServiceTile service={service} />
+      <Page scope={ChatAppActionScope}>
+        <ChatAppTile item={assistant} showStatus />
       </Page>
     );
-    choose("Kontrollerar avtal", "Ta bort");
+    choose("Upphandlingsassistenten", "Ta bort");
     await waitFor(() => expect(openDialog()).not.toBeNull());
     const dialog = openDialog()!;
 
@@ -184,7 +158,7 @@ describe("a resource's menu dialog when a turned phone swaps rows for cards", ()
     fireEvent.click(within(dialog).getByRole("button", { name: "Ta bort" }));
 
     await waitFor(() => expect(api.DELETE).toHaveBeenCalledTimes(1));
-    expect(api.DELETE.mock.calls[0]![1]).toEqual({ params: { path: { id: "svc-1" } } });
+    expect(api.DELETE.mock.calls[0]![1]).toEqual({ params: { path: { id: "as-1" } } });
     await waitFor(() => expect(openDialog()).toBeNull());
   });
 

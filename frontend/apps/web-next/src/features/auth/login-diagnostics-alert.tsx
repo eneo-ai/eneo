@@ -4,9 +4,29 @@ import { Button } from "@astryxdesign/core/Button";
 import { loginDiagnosticMessageKey, type LoginDiagnostics } from "@/lib/auth/login-diagnostics";
 import { useCopy } from "@/lib/hooks/use-copy";
 
-export function LoginDiagnosticsAlert({ diagnostics }: { diagnostics: LoginDiagnostics }) {
+/** The reference support asks for after a failed sign-in, with a button that copies it. */
+export function CorrelationReference({ id }: { id: string }) {
   const t = useTranslations();
   const { copy, isCopied } = useCopy();
+  return (
+    <div className="flex flex-col items-start gap-2 text-xs [overflow-wrap:anywhere]">
+      <p>
+        {t("oidc_correlation_hint")}
+        <code>{id}</code>
+      </p>
+      <Button
+        label={t(isCopied ? "copied" : "copy_correlation_id")}
+        variant="secondary"
+        onClick={() => {
+          void copy(id);
+        }}
+      />
+    </div>
+  );
+}
+
+export function LoginDiagnosticsAlert({ diagnostics }: { diagnostics: LoginDiagnostics }) {
+  const t = useTranslations();
   return (
     <Banner
       status="error"
@@ -19,21 +39,7 @@ export function LoginDiagnosticsAlert({ diagnostics }: { diagnostics: LoginDiagn
           <p>{t("oidc_error_detail", { detail: diagnostics.rawDetail })}</p>
         ) : null}
         {diagnostics.info ? <code>{diagnostics.info}</code> : null}
-        {diagnostics.correlation ? (
-          <div className="flex flex-col items-start gap-2">
-            <p>
-              {t("oidc_correlation_hint")}
-              <code>{diagnostics.correlation}</code>
-            </p>
-            <Button
-              label={t(isCopied ? "copied" : "copy_correlation_id")}
-              variant="secondary"
-              onClick={() => {
-                void copy(diagnostics.correlation!);
-              }}
-            />
-          </div>
-        ) : null}
+        {diagnostics.correlation ? <CorrelationReference id={diagnostics.correlation} /> : null}
       </div>
     </Banner>
   );

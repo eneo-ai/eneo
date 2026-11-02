@@ -1,12 +1,10 @@
-"use client";
-
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
-import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
+import { EneoApiError } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { modelDisplayName } from "@/lib/models/model-display-name";
@@ -55,22 +53,15 @@ export function ModelDialogs({
       toast.success(t("model_deleted_success"));
     },
     onError: (error) => {
-      if (
+      const migratable =
         error instanceof EneoApiError &&
         error.code === 9039 &&
-        (kind === "completion" || kind === "transcription")
-      ) {
-        toast.error(getErrorMessage(error, t), {
-          action: {
-            label: t("migrate"),
-            onClick: () => {
-              onMigrate();
-            }
-          }
-        });
-        return;
-      }
-      toastApiError(error, t);
+        (kind === "completion" || kind === "transcription");
+      toastApiError(
+        error,
+        t,
+        migratable ? { action: { label: t("migrate"), onClick: () => onMigrate() } } : {}
+      );
     }
   });
 

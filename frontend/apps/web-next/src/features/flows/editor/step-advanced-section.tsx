@@ -1,5 +1,3 @@
-"use client";
-
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { TextArea } from "@astryxdesign/core/TextArea";
 import { useQuery } from "@tanstack/react-query";

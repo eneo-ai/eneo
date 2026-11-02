@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import {
   DropdownMenu,
@@ -21,7 +19,6 @@ import { mapSessionMessages } from "@/lib/chat/map-session";
 import type { ChatPartner } from "@/lib/chat/types";
 import { cn } from "@/lib/utils";
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
-import { retryPartnerQuery } from "@/features/chat/chat-partner-state";
 import { ChatView, type ActivityState } from "@/features/chat/chat-view";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
 import { useSpace } from "@/features/spaces/use-space";
@@ -193,8 +190,7 @@ function AuthoringConversation({
           params: { path: { id: chat.assistant_id } },
           signal
         })
-      ),
-    retry: retryPartnerQuery
+      )
   });
   // Read once per visit: the view owns the messages from then on.
   const conversation = useQuery({

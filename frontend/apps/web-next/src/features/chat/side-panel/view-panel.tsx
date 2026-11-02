@@ -1,5 +1,3 @@
-"use client";
-
 import { AppWindow } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useCallback } from "react";

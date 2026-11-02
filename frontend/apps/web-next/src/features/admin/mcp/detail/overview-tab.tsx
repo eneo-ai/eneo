@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ExternalLink } from "lucide-react";

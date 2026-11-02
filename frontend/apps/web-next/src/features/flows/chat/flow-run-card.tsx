@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
 import { useQuery } from "@tanstack/react-query";

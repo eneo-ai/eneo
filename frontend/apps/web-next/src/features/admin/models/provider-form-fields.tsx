@@ -1,5 +1,3 @@
-"use client";
-
 import { TextInput } from "@/components/astryx/text-input";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useTranslations } from "use-intl";

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { makeQueryClient } from "@/lib/api/query";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { SpaceChat } from "@/features/spaces/chat/space-chat.client";
 
@@ -103,6 +104,35 @@ describe("SpaceChat", () => {
     expect(screen.getByRole("button", { name: "Försök igen" })).toBeTruthy();
   });
 
+  it.each([
+    ["assistant", 403, 1],
+    ["group-chat", 404, 1],
+    ["assistant", 503, 2],
+    ["group-chat", 503, 2]
+  ] as const)(
+    "sends the %s request after a %s %s time(s) in its first second, under the app's retry policy",
+    async (type, status, requests) => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      try {
+        api.GET.mockImplementation(async () => ({
+          data: undefined,
+          error: { message: "Failed" },
+          response: new Response(null, { status })
+        }));
+        renderInApp(<SpaceChat />, {
+          route: `/spaces/space-1/chat?type=${type}&id=partner-9`,
+          queryClient: makeQueryClient()
+        });
+        await waitFor(() => expect(api.GET).toHaveBeenCalledTimes(1));
+        // The first retry waits one second, the next two more.
+        await act(() => vi.advanceTimersByTimeAsync(1_500));
+        expect(api.GET).toHaveBeenCalledTimes(requests);
+      } finally {
+        vi.useRealTimers();
+      }
+    }
+  );
+
   it("says so without a retry when the space has no assistant to chat with", () => {
     renderRoute();
     expect(screen.getByText("Det gick inte att öppna chatten")).toBeTruthy();
@@ -120,7 +150,9 @@ describe("SpaceChat", () => {
       permissions: ["read", "insight_view"],
       groups: [],
       websites: [],
-      integration_knowledge_list: []
+      integration_knowledge_list: [],
+      // A group chat always lists its member assistants (GroupChatPublic.tools).
+      ...(type === "group-chat" && { tools: { assistants: [{ id: "member-1", handle: "avtal" }] } })
     });
     renderInApp(<SpaceChat />, {
       route: `/spaces/space-1/chat?type=${type}&id=partner-9`,

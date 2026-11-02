@@ -1,5 +1,3 @@
-"use client";
-
 import { Heading } from "@astryxdesign/core/Heading";
 import { List, ListItem } from "@astryxdesign/core/List";
 import { useQuery } from "@tanstack/react-query";

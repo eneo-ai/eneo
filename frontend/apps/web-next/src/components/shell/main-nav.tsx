@@ -1,5 +1,3 @@
-"use client";
-
 import { AppShellMobileContext, useAppShellMobile } from "@astryxdesign/core/AppShell";
 import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { Button } from "@astryxdesign/core/Button";

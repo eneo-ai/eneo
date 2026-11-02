@@ -1,5 +1,3 @@
-"use client";
-
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";

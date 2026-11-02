@@ -1,5 +1,3 @@
-"use client";
-
 import { Badge } from "@astryxdesign/core/Badge";
 import { useTranslations } from "use-intl";
 

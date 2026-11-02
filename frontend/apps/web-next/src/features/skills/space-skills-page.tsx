@@ -1,5 +1,3 @@
-"use client";
-
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { pixel, proportional, type TableColumn } from "@astryxdesign/core/Table";

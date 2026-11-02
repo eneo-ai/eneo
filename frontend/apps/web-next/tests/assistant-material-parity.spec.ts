@@ -195,13 +195,16 @@ test("uses the real governed prompt baseline without a stored prompt override", 
       assistant_prompt: "Short stored prompt"
     });
     expect(baseline.prompt_tokens).toBeGreaterThan(stored.prompt_tokens ?? 0);
+    const editor = `/spaces/personal/assistants/${id}/edit`;
     const preflight = page.waitForResponse(
       (response) =>
+        // The personal chat still open here estimates the same assistant until the editor commits.
+        new URL(response.frame().url()).pathname === editor &&
         response.url().endsWith("/api/v1/conversations/preflight") &&
         response.ok() &&
         response.request().postDataJSON().assistant_id === id
     );
-    await page.goto(`/spaces/personal/assistants/${id}/edit?section=instructions`);
+    await page.goto(`${editor}?section=instructions`);
     const response = await preflight;
     expect(response.request().postDataJSON()).not.toHaveProperty("assistant_prompt");
     const estimate: Preflight = await response.json();

@@ -1,5 +1,3 @@
-"use client";
-
 import { SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { ArrowLeft } from "lucide-react";
 import { usePathname } from "@/lib/navigation";

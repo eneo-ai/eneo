@@ -246,8 +246,7 @@ describe("SpaceOverview on a phone: Hantera ytan (decision 24)", () => {
     expect(rows()).toEqual([
       ["Medlemmar (2)", "/spaces/space-1/members"],
       ["Inställningar", "/spaces/space-1/settings"],
-      ["Skills", "/spaces/space-1/skills"],
-      ["Tjänster", "/spaces/space-1/services"]
+      ["Skills", "/spaces/space-1/skills"]
     ]);
     // After the space's content.
     const regions = screen
@@ -260,7 +259,7 @@ describe("SpaceOverview on a phone: Hantera ytan (decision 24)", () => {
   it("lists only what the user may manage", () => {
     setViewport("phone");
     show(makeSpace({ permissions: ["read"], skillPermissions: [] }));
-    expect(rows().map(([label]) => label)).toEqual(["Medlemmar (0)", "Tjänster"]);
+    expect(rows().map(([label]) => label)).toEqual(["Medlemmar (0)"]);
   });
 
   it("lists the newest assistants as rows, with the create button in the heading instead of a card", () => {

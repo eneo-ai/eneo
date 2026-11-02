@@ -1,5 +1,3 @@
-"use client";
-
 import { Download, Mic, Square, Trash2 } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";

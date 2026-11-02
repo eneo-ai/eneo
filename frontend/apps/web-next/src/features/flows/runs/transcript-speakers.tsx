@@ -1,5 +1,3 @@
-"use client";
-
 import { Token } from "@astryxdesign/core/Token";
 import { useTranslations } from "use-intl";
 

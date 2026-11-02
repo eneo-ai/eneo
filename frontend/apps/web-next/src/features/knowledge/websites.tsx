@@ -1,5 +1,3 @@
-"use client";
-
 import { embeddingModelGroupTitle } from "./embedding-model-label";
 
 import { Button as AstryxButton } from "@astryxdesign/core/Button";

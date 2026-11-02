@@ -1,5 +1,3 @@
-"use client";
-
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Token } from "@astryxdesign/core/Token";
 import { useTranslations } from "use-intl";

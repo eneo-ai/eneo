@@ -1,5 +1,3 @@
-"use client";
-
 import { Banner } from "@astryxdesign/core/Banner";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Button } from "@astryxdesign/core/Button";

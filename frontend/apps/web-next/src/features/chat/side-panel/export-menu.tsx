@@ -1,5 +1,3 @@
-"use client";
-
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useQuery } from "@tanstack/react-query";
 import { Download } from "lucide-react";

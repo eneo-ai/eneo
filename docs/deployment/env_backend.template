@@ -744,13 +744,15 @@ OAUTH_CALLBACK_URLS=[]
 # Route pages back to Svelte with FRONTEND_ROUTER_PRIORITY=7 in the same .env;
 # WEB_APP_ENABLED=false needs it.
 # BROWSER_SESSION_ENABLED: accept the browser session cookie (__Host-eneo_web).
-# The session lasts JWT_EXPIRY_TIME: an absolute lifetime, no inactivity limit,
-# and logout is local (the IdP session stays).
+# The session lasts JWT_EXPIRY_TIME: an absolute lifetime, no inactivity limit.
+# Sign-out ends the Eneo session on the server at once (the IdP session
+# stays); a password change ends every session of the user.
 # With ENVIRONMENT=development, BROWSER_SESSION_ENABLED needs PUBLIC_ORIGIN set
 # to a localhost URL, e.g. http://localhost:3101.
 # BROWSER_SESSION_ENABLED=false
 # WEB_APP_ENABLED: serve the web app from the backend; /healthz then answers
-# like /api/healthz.
+# like /api/healthz. It needs BROWSER_SESSION_ENABLED, the web app's only
+# sign-in; the backend refuses to start with the web app on and the session off.
 # WEB_APP_ENABLED=false
 # Outside development, either flag turns off the /docs and /redoc pages (and
 # SCIM's): they load third-party scripts on the session's host. /openapi.json stays.

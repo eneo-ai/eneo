@@ -1,5 +1,3 @@
-"use client";
-
 import { useSpaceSegments } from "@/lib/navigation";
 import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { SpaceHeader } from "./space-header";

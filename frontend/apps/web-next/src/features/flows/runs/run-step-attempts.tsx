@@ -1,5 +1,3 @@
-"use client";
-
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";

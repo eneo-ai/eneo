@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, LayoutTemplate } from "lucide-react";
 import { useRouter } from "@/lib/navigation";
@@ -15,6 +13,7 @@ import {
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
+import { toast } from "@/lib/toast";
 import type { Schema } from "@/lib/api/models";
 import { useAppContext } from "@/components/providers/app-context";
 import { markJustCreated } from "@/features/spaces/just-created";
@@ -26,6 +25,8 @@ import { TemplateGalleryDialog } from "@/features/templates/template-gallery-dia
  * Creates a blank app at once, named "Ny app" (numbered on a collision), and
  * opens its editor, which focuses the name: no name dialog in between. With
  * templates enabled, a split-button menu also offers the template gallery.
+ * An app cannot run without both a completion and a transcription model, so
+ * until the space has them, either way says what is missing instead.
  */
 export function CreateAppButton() {
   const t = useTranslations();
@@ -63,9 +64,21 @@ export function CreateAppButton() {
     onError: (error) => toastApiError(error, t)
   });
 
+  const missingModels = [
+    space.completion_models.length === 0 && t("completion_models_warning_app"),
+    space.transcription_models.length === 0 && t("transcription_models_warning_app")
+  ].filter((warning) => warning !== false);
+  const blocked = () => {
+    for (const warning of missingModels) toast.warning(warning, { id: warning });
+    return missingModels.length > 0;
+  };
+
   // Busy, the button stays enabled so it keeps focus; a second press is ignored.
   const createBlank = () => {
-    if (!create.isPending) create.mutate({ appName: t("new_app_default_name") });
+    if (!create.isPending && !blocked()) create.mutate({ appName: t("new_app_default_name") });
+  };
+  const openGallery = () => {
+    if (!blocked()) setDialog("template");
   };
   const busy = create.isPending || undefined;
 
@@ -87,7 +100,7 @@ export function CreateAppButton() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onSelect={() => setDialog("template")}>
+              <DropdownMenuItem onSelect={openGallery}>
                 <LayoutTemplate className="size-4" /> {t("start_with_template")}
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -105,7 +118,10 @@ export function CreateAppButton() {
         onOpenChange={(next) => setDialog(next ? "template" : null)}
         pending={create.isPending}
         onCreate={(fromTemplate, templateName) =>
-          create.mutateAsync({ appName: templateName, fromTemplate }).then(() => undefined)
+          // A model can go while the gallery is open; a rejection keeps its draft.
+          blocked()
+            ? Promise.reject(new Error("The space lacks a model an app needs"))
+            : create.mutateAsync({ appName: templateName, fromTemplate }).then(() => undefined)
         }
       />
     </>

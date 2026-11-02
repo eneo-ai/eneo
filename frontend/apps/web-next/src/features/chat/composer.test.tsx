@@ -24,6 +24,7 @@ function Harness({
   onStop = vi.fn(),
   initial = "",
   sendBlocked = null,
+  unavailable = null,
   inputRef,
   knowledgeMode,
   beforeAnswer = false
@@ -33,6 +34,7 @@ function Harness({
   onStop?: () => void;
   initial?: string;
   sendBlocked?: string | null;
+  unavailable?: string | null;
   inputRef?: Ref<ComposerHandle>;
   knowledgeMode?: "tool" | "inject";
   beforeAnswer?: boolean;
@@ -45,6 +47,7 @@ function Harness({
       onChange={setValue}
       onSubmit={onSubmit}
       sendBlocked={sendBlocked}
+      unavailable={unavailable}
       busy={busy}
       onStop={onStop}
       label="Fråga Upphandlingsassistenten"
@@ -182,6 +185,33 @@ describe("Composer", () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(descriptionOf(textarea)).toContain("Konversationen är full.");
     expect(textarea.value).toBe("Lång fråga");
+  });
+
+  it("says from the start that nobody can answer, and does not send, with the draft kept", async () => {
+    const onSubmit = vi.fn();
+    const { container } = renderComposer({
+      onSubmit,
+      initial: "Hej",
+      unavailable: "Ingen AI-modell tillgänglig."
+    });
+    const textarea = screen.getByRole("textbox") as HTMLTextAreaElement;
+    // Read with the field, not as the user's mistake.
+    expect(descriptionOf(textarea)).toContain("Ingen AI-modell tillgänglig.");
+    expect(textarea.getAttribute("aria-invalid")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Skicka meddelande" }));
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(textarea.value).toBe("Hej");
+    expect(document.activeElement).toBe(textarea);
+    expect(screen.getAllByText("Ingen AI-modell tillgänglig.")).toHaveLength(1);
+    await waitFor(() =>
+      expect(
+        [...document.querySelectorAll("[aria-live]")].some((region) =>
+          region.textContent?.includes("Ingen AI-modell tillgänglig.")
+        )
+      ).toBe(true)
+    );
+    await expectNoAxeViolations(container);
   });
 
   it("is one group for the toasts to clear, so Send stays in view while the user types", () => {

@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, useContext, useMemo } from "react";
 import type { Schema } from "@/lib/api/models";
 import { hasPermission, type PermissionRequirement } from "@/lib/auth/permissions";

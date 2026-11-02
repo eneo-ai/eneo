@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { proportional, type TableColumn } from "@astryxdesign/core/Table";
 import { useMutation } from "@tanstack/react-query";

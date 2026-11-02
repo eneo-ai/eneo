@@ -1,5 +1,3 @@
-"use client";
-
 import { modelEntries } from "../models/provider-sections";
 
 import { Badge } from "@astryxdesign/core/Badge";

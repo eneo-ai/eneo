@@ -54,4 +54,19 @@ describe("toastApiError", () => {
     expect(screen.getByText("Det gick inte att avbryta körningen")).toBeTruthy();
     expect(screen.getByText("Körningen finns inte längre. · Spårnings-ID: trace-123")).toBeTruthy();
   });
+
+  it("offers the way out the error names beside its message and references", async () => {
+    const onClick = vi.fn();
+    toastApiError(
+      new EneoApiError("Model in use", { status: 409, code: 9039, traceId: "trace-9" }),
+      t,
+      { action: { label: "Migrera", onClick } }
+    );
+    await act(() => vi.advanceTimersByTimeAsync(300));
+
+    expect(screen.getByText(t("eneo_error_9039"))).toBeTruthy();
+    expect(screen.getByText("Spårnings-ID: trace-9")).toBeTruthy();
+    act(() => screen.getByRole("button", { name: "Migrera" }).click());
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
 });

@@ -1,5 +1,3 @@
-"use client";
-
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useInfiniteQuery, useQuery } from "@tanstack/react-query";

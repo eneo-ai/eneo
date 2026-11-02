@@ -1,5 +1,3 @@
-"use client";
-
 import {
   ChatComposerInput as AstryxChatComposerInput,
   type ChatComposerInputProps

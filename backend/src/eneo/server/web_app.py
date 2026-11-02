@@ -6,7 +6,8 @@ its 307 and 405 answers (``Mount("/")`` would take both over):
 
 - a reserved prefix, or the MCP content host, gets the API's JSON 404;
 - a path with a file extension is a build file: hashed ``/assets/`` are
-  immutable, other files revalidate. ``index.html`` is never served raw;
+  immutable, other files revalidate, a missing one is not stored.
+  ``index.html`` is never served raw;
 - legacy pages and English-prefixed URLs redirect to their canonical pages;
 - any other GET or HEAD gets ``index.html`` with a fresh nonce, its CSP and
   ``<html lang>``, never stored.
@@ -27,6 +28,7 @@ from urllib.parse import quote, quote_from_bytes
 
 from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
@@ -72,6 +74,8 @@ _PATH_HEADERS = {
 }
 
 _IMMUTABLE = "public, max-age=31536000, immutable"
+# A build file missing now may exist after the next release swap.
+_NOT_STORED = {"Cache-Control": "no-store"}
 
 
 def build_content_security_policy(nonce: str, frame_origins: Sequence[str]) -> str:
@@ -124,9 +128,16 @@ def _is_local_redirect_path(path: str) -> bool:
     )
 
 
+_LOCALE_COOKIE = "eneo_locale"
+# This app's earlier name for the preference: adopted once, then cleared.
+_RETIRED_LOCALE_COOKIE = "NEXT_LOCALE"
+# The SvelteKit app's preference, kept because that app still reads it.
+_LEGACY_LOCALE_COOKIE = "PARAGLIDE_LOCALE"
+
+
 def _set_locale_cookie(response: Response, locale: str, *, secure: bool) -> None:
     response.set_cookie(
-        "NEXT_LOCALE",
+        _LOCALE_COOKIE,
         locale,
         max_age=31536000,
         path="/",
@@ -163,7 +174,7 @@ def _alias_healthz(app: FastAPI) -> None:
     app.add_api_route(
         "/healthz",
         route.endpoint,
-        methods=["GET"],
+        methods=["GET", "HEAD"],
         include_in_schema=False,
         response_model=None,
         description=route.description,
@@ -226,12 +237,17 @@ def install_web_app(app: FastAPI) -> None:
         suffix = PurePosixPath(path).suffix.lower()
         if suffix == ".html":
             # Raw index.html would carry no CSP and the literal placeholders.
-            raise HTTPException(status_code=404)
+            raise HTTPException(status_code=404, headers=_NOT_STORED)
         if suffix:
             # Normalized; StaticFiles refuses traversal out of dist and
             # methods other than GET and HEAD.
             file = static.get_path(scope)
-            response = await static.get_response(file, scope)
+            try:
+                response = await static.get_response(file, scope)
+            except StarletteHTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                raise HTTPException(status_code=404, headers=_NOT_STORED) from None
             hashed = PurePath(file).parts[:1] == ("assets",)
             response.headers["Cache-Control"] = _IMMUTABLE if hashed else "no-cache"
             await response(scope, receive, send)
@@ -240,11 +256,16 @@ def install_web_app(app: FastAPI) -> None:
             raise HTTPException(status_code=404)
 
         nonce = secrets.token_urlsafe(16)
-        current_locale = request.cookies.get("NEXT_LOCALE")
-        legacy_locale = (
-            request.cookies.get("PARAGLIDE_LOCALE") if current_locale is None else None
+        current_locale = request.cookies.get(_LOCALE_COOKIE)
+        legacy_locales = (
+            request.cookies.get(name)
+            for name in (_RETIRED_LOCALE_COOKIE, _LEGACY_LOCALE_COOKIE)
         )
-        migrated_locale = legacy_locale if legacy_locale in ("sv", "en") else None
+        migrated_locale = (
+            next((value for value in legacy_locales if value in ("sv", "en")), None)
+            if current_locale is None
+            else None
+        )
         values = {
             _NONCE: nonce,
             _LANG: "en" if (migrated_locale or current_locale) == "en" else "sv",
@@ -264,6 +285,10 @@ def install_web_app(app: FastAPI) -> None:
         if migrated_locale is not None:
             _set_locale_cookie(
                 response, migrated_locale, secure=not settings.is_development
+            )
+        if _RETIRED_LOCALE_COOKIE in request.cookies:
+            response.delete_cookie(
+                _RETIRED_LOCALE_COOKIE, secure=not settings.is_development
             )
         await response(scope, receive, send)
 

@@ -520,7 +520,7 @@ it("renders an inactive account's recovery on a fresh login document", async () 
   await route("/login");
   expect(await screen.findByRole("heading", { name: "Kontot är inaktivt" })).toBeTruthy();
   expect(screen.getByRole("link", { name: "Logga ut" }).getAttribute("href")).toBe("/logout");
-  expect(navigate).toHaveBeenCalledExactlyOnceWith("/deactivated");
+  expect(navigate).toHaveBeenCalledExactlyOnceWith("/deactivated", { replace: true });
   expect(callsTo("/api/v1/users/me/")).toHaveLength(0);
   await expectNoAxeViolations();
 });

@@ -1,5 +1,3 @@
-"use client";
-
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { NumberInput } from "@astryxdesign/core/NumberInput";
 import { Section } from "@astryxdesign/core/Section";

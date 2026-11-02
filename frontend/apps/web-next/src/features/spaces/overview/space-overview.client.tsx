@@ -1,5 +1,3 @@
-"use client";
-
 import { OverviewApps } from "@/features/spaces/overview/overview-apps";
 import { OverviewAssistants } from "@/features/spaces/overview/overview-assistants";
 import { OverviewKnowledge } from "@/features/spaces/overview/overview-knowledge";

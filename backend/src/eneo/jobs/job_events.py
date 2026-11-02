@@ -10,7 +10,7 @@ client that refetches on the event must see the new row.
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from typing import Any
 from uuid import UUID
 
@@ -76,9 +76,12 @@ async def stream_job_events(
     user_id: UUID,
     request: Request,
     redis: aioredis.Redis | None = None,
+    *,
+    admitted: Callable[[], Awaitable[bool]] | None = None,
 ) -> AsyncIterator[ServerSentEvent]:
     """Relay the user's job channel as ``event: job`` messages until the
-    browser disconnects.
+    browser disconnects, or until ``admitted`` (a browser session's
+    ``SessionWatch``) says the session has ended.
 
     The subscription holds a connection for as long as the browser listens, so
     it takes the process's subscription pool, never the command pool."""
@@ -90,6 +93,10 @@ async def stream_job_events(
             message = await pubsub.get_message(
                 ignore_subscribe_messages=True, timeout=_POLL_SECONDS
             )
+            # After the wait, which can cross the session's expiry or its next
+            # check, and before what it brought is sent; a quiet stream too.
+            if admitted is not None and not await admitted():
+                return
             if message is None:
                 continue
             data = message.get("data")

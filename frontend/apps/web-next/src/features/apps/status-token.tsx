@@ -1,5 +1,3 @@
-"use client";
-
 import { Token, type TokenColor } from "@astryxdesign/core/Token";
 import { Check, Circle, Clock, Hourglass, X, type LucideIcon } from "lucide-react";
 import { useTranslations } from "use-intl";

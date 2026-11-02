@@ -32,7 +32,6 @@ vi.mock("@/lib/api/browser", () => ({
 
 import { AppsPage } from "@/features/apps/apps-page";
 import { AssistantsPage } from "@/features/assistants/assistants-page";
-import { ServicesPage } from "@/features/services/services-page";
 
 afterEach(() => {
   cleanup();
@@ -63,7 +62,7 @@ describe("AssistantsPage", () => {
 
     expect(screen.getByRole("heading", { level: 2, name: "Assistenter" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa assistent" })).toHaveLength(1);
-    // Docked at the bottom on a phone, like the apps and services tabs.
+    // Docked at the bottom on a phone, like the apps tab.
     expect(
       within(screen.getByRole("group", { name: "Assistenter, åtgärder" })).getByRole("button", {
         name: "Skapa assistent"
@@ -164,8 +163,8 @@ describe("AssistantsPage", () => {
   });
 });
 
-describe("AppsPage and ServicesPage", () => {
-  it("render the same card grid", async () => {
+describe("AppsPage", () => {
+  it("renders its card grid", async () => {
     const space = makeSpace({
       apps: [
         {
@@ -173,16 +172,6 @@ describe("AppsPage and ServicesPage", () => {
           name: "Protokollsammanfattning",
           description: "Sammanfattar protokoll.",
           published: true,
-          user_id: "u",
-          permissions: ["read", "edit", "delete"]
-        }
-      ],
-      services: [
-        {
-          id: "service-1",
-          name: "Klassificering",
-          prompt: "…",
-          output_format: "json",
           user_id: "u",
           permissions: ["read", "edit", "delete"]
         }
@@ -199,31 +188,16 @@ describe("AppsPage and ServicesPage", () => {
       screen.getByRole("button", { name: "Fler åtgärder för Protokollsammanfattning" })
     ).toBeTruthy();
     await expectNoAxeViolations(apps.container);
-    cleanup();
-
-    const services = show(space, <ServicesPage />);
-    expect(screen.getByRole("link", { name: "Klassificering" }).getAttribute("href")).toBe(
-      "/spaces/space-1/services/service-1?tab=playground"
-    );
-    expect(screen.getByText("JSON")).toBeTruthy();
-    expect(screen.getByRole("textbox", { name: "Filtrera tjänster" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Fler åtgärder för Klassificering" })).toBeTruthy();
-    await expectNoAxeViolations(services.container);
   });
 
-  it("explain empty lists and offer the create action", () => {
-    show(makeSpace(), <ServicesPage />);
-    expect(screen.getByRole("heading", { level: 3, name: "Inga tjänster ännu" })).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "Skapa tjänst" })).toHaveLength(1);
-    cleanup();
-
+  it("explains an empty list", () => {
     show(makeSpace(), <AppsPage />);
     expect(screen.getByRole("heading", { level: 3, name: "Inga appar ännu" })).toBeTruthy();
   });
 });
 
 describe("Collection tabs on a phone (decision 9)", () => {
-  it("list assistants as rows in their groups, apps and services too", async () => {
+  it("list assistants as rows in their groups", async () => {
     setViewport("phone");
     const { container } = show(makeSpace({ assistants }), <AssistantsPage />);
     expect(screen.queryByRole("button", { name: "Lista" })).toBeNull();

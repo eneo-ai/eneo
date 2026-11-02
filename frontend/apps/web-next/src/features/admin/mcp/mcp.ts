@@ -14,22 +14,19 @@ export type McpServerUpdatePayload = Schema<"MCPServerUpdate">;
 export type McpServerCreateResponse = Schema<"MCPServerCreateResponse">;
 
 export const MCP_KEY = ["admin-mcp-servers"];
+// Both under MCP_KEY: invalidating MCP_KEY refreshes them too.
 export const mcpToolsKey = (serverId: string) => ["admin-mcp-servers", serverId, "tools"];
-export const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
+const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
 
 /**
  * The servers the bundled tool runtime offers this tenant, each with whether
- * it was added, and the runtime's state. A backend without the runtime
- * endpoint offers none.
+ * it was added, and the runtime's state (also when no runtime is configured).
  */
 export function bundledToolsQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: BUNDLED_KEY,
-    queryFn: async (): Promise<Schema<"BundledToolList">> => {
-      const { data, response } = await api.GET("/api/v1/mcp-servers/bundled/");
-      if (response.status === 404 || !data) return { items: [], count: 0, runtime: null };
-      return data;
-    }
+    queryFn: (): Promise<Schema<"BundledToolList">> =>
+      unwrap(api.GET("/api/v1/mcp-servers/bundled/"))
   });
 }
 

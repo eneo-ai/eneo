@@ -1,5 +1,3 @@
-"use client";
-
 import { useSuspenseQuery } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { browserApi } from "@/lib/api/browser";

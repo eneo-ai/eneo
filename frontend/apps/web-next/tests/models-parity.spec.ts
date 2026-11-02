@@ -20,7 +20,8 @@ const source: CompletionModelAdmin = {
   is_org_default: true,
   is_locked: false,
   is_deprecated: false,
-  deprecation_date: "2099-01-01",
+  // Inside the six-month window in which a coming deprecation is shown.
+  deprecation_date: new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10),
   token_limit: 128000,
   supported_model_kwargs: {},
   max_input_tokens: 128000,

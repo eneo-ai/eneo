@@ -5,6 +5,7 @@ import { useTranslations } from "use-intl";
 import { Banner } from "@astryxdesign/core/Banner";
 import { PasswordInput } from "@/components/astryx/password-input";
 import { TextInput } from "@/components/astryx/text-input";
+import { CorrelationReference } from "./login-diagnostics-alert";
 import { submitPasswordLogin, type LoginFormState } from "./password-login";
 
 const ERROR_KEYS: Record<NonNullable<LoginFormState["error"]>, string> = {
@@ -12,7 +13,7 @@ const ERROR_KEYS: Record<NonNullable<LoginFormState["error"]>, string> = {
   missing_fields: "invalid_credentials",
   too_many_attempts: "login_too_many_attempts_later",
   deactivated: "login_account_deactivated",
-  unavailable: "login_failed"
+  unavailable: "login_unavailable"
 };
 
 export function LoginForm({ next }: { next?: string }) {
@@ -57,7 +58,10 @@ export function LoginForm({ next }: { next?: string }) {
             description={
               attempts != null ? t("login_attempts_remaining", { count: attempts }) : undefined
             }
-          />
+            collapsible={false}
+          >
+            {state.traceId ? <CorrelationReference id={state.traceId} /> : null}
+          </Banner>
         </div>
       ) : null}
       {/* Both fields are required, the default and unmarked (decision 40). */}

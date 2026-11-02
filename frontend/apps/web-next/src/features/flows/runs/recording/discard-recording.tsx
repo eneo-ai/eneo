@@ -1,5 +1,3 @@
-"use client";
-
 import { AlertDialog } from "@astryxdesign/core/AlertDialog";
 import { Button } from "@astryxdesign/core/Button";
 import { Trash2 } from "lucide-react";

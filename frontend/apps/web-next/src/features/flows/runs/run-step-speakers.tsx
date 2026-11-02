@@ -1,5 +1,3 @@
-"use client";
-
 import { Token } from "@astryxdesign/core/Token";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";

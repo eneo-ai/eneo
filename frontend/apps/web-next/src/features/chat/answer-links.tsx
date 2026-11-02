@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { createContext, useContext, useMemo, type ComponentProps, type ReactNode } from "react";
 import { citationComponents } from "@/components/ai-elements/citation";

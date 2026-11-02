@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@/components/composites/page-header";
 import { RetentionPolicySection } from "./audit/retention-policy-section";

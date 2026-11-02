@@ -9,6 +9,8 @@ import { SpaceModelSelect, type SelectableModel } from "./space-model-select";
 
 afterEach(cleanup);
 
+// Inside the six-month window in which a coming deprecation is shown.
+const SOON = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
 const models: SelectableModel[] = [
   { id: "north-1", name: "Aurora", org: "Nord AI", provider_type: "azure" },
   { id: "north-2", name: "Borealis", org: "Nord AI", provider_type: "azure" },
@@ -72,7 +74,7 @@ describe("SpaceModelSelect", () => {
             is_deprecated: true,
             deprecation_date: "2020-01-01"
           },
-          { id: "future", name: "Kommande utfasning", deprecation_date: "2099-01-01" }
+          { id: "future", name: "Kommande utfasning", deprecation_date: SOON }
         ]}
         initialSelection={["old"]}
       />
@@ -80,7 +82,7 @@ describe("SpaceModelSelect", () => {
     expect(screen.getByText("Utfasad", { exact: true })).toBeTruthy();
     expect(screen.getByText("2020-01-01", { exact: true })).toBeTruthy();
     openCard();
-    expect(screen.getByText("Utfasas 2099-01-01", { exact: true })).toBeTruthy();
+    expect(screen.getByText(`Utfasas ${SOON}`, { exact: true })).toBeTruthy();
     const old = screen.getByRole("switch", { name: "Utfasad modell" });
     old.focus();
     fireEvent.click(old);

@@ -1,4 +1,3 @@
-"use client";
 import { dependencySources } from "@eneo/skill-instructions";
 
 import { Badge } from "@astryxdesign/core/Badge";

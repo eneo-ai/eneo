@@ -1,5 +1,3 @@
-"use client";
-
 import { ExpiringKeysNotification } from "@/features/api-keys/expiring-keys-notification";
 import { JobIndicator } from "@/features/jobs/job-indicator";
 

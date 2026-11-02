@@ -1,5 +1,3 @@
-"use client";
-
 import { useState, type ReactNode, type RefObject } from "react";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { CollectionActionDialog } from "./collections";

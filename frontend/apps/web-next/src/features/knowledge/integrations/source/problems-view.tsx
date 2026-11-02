@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { Collapsible, CollapsibleGroup } from "@astryxdesign/core/Collapsible";
 import { Link } from "@astryxdesign/core/Link";

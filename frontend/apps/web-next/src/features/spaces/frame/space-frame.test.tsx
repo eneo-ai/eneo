@@ -111,7 +111,6 @@ describe("SpaceFrame", () => {
       "/spaces/space-1/apps",
       "/spaces/space-1/knowledge",
       "/spaces/space-1/skills",
-      "/spaces/space-1/services",
       "/spaces/space-1/members",
       "/spaces/space-1/settings"
     ]);
@@ -211,7 +210,7 @@ describe("SpaceFrame", () => {
     expect(within(tabs).queryByRole("link", { name: "Inställningar" })).toBeNull();
   });
 
-  it("keeps the organization space to its four tabs, named by the h1 on its Skills tab", () => {
+  it("keeps the organization space to its three tabs, named by the h1 on its Skills tab", () => {
     show(makeSpace({ overrides: { organization: true } }), ["skills"], "organization");
 
     // The Skills page is a tab like any other: its own title is an h2.
@@ -225,7 +224,6 @@ describe("SpaceFrame", () => {
     ).toEqual([
       "/spaces/organization/knowledge",
       "/spaces/organization/skills",
-      "/spaces/organization/services",
       "/spaces/organization/settings"
     ]);
     expect(within(tabs).getByRole("link", { name: "Skills" }).getAttribute("aria-current")).toBe(
@@ -373,7 +371,6 @@ describe("SpaceFrame on a phone (decision 24)", () => {
     expect(tabHrefs()).toEqual([
       "/spaces/organization/knowledge",
       "/spaces/organization/skills",
-      "/spaces/organization/services",
       "/spaces/organization/settings"
     ]);
   });
@@ -424,6 +421,6 @@ describe("SpaceFrame on a phone (decision 24)", () => {
     setViewport("tablet-portrait");
     show(sharedSpace(), ["overview"]);
     expect(phoneHeader()).toBeNull();
-    expect(tabHrefs()).toHaveLength(8);
+    expect(tabHrefs()).toHaveLength(7);
   });
 });

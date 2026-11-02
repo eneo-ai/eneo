@@ -1,5 +1,3 @@
-"use client";
-
 import { useChat } from "@ai-sdk/react";
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessageList, ChatSystemMessage } from "@astryxdesign/core/Chat";
@@ -88,6 +86,7 @@ import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import { QuestionPrompt } from "./question-prompt";
 import { questionAnsweredBy, questionToAnswer } from "./questions";
 import type { PendingUpload } from "./message-files";
+import { partnerCannotAnswer } from "./partner-model";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
 import { StartState, type StartHeadingLevel } from "./start-state";
@@ -785,6 +784,7 @@ function ConversationView({
         : undefined;
     const mcpOptions = mcpConversationOptions({
       servers: toolChoices.mcpServers,
+      capabilities: toolChoices.capabilities,
       disabledServerIds: toolChoices.disabledMcpServerIds,
       autoAcceptTools: toolChoices.autoAcceptTools,
       supportsToolApproval: partner.type !== "group-chat"
@@ -807,6 +807,13 @@ function ConversationView({
    */
   function sendQuestion(question: string, resendFiles?: SentFiles, fromComposer = false) {
     if (!question || sending || usage.willExceedContext) return;
+    if (partnerCannotAnswer(partner)) {
+      // A retry after the partner lost its model or members: said at the
+      // composer as its own send says it, the draft and files left there.
+      (started ? dockInputRef.current : startInput())?.focus();
+      announce(t("no_completion_model_description"));
+      return;
+    }
     // A quote from a file or a view opens the question; it is sent once.
     const quote = resendFiles ? null : panel.quote;
     const text = resendFiles ? question : composeQuotedQuestion(quote, question);
@@ -1050,6 +1057,7 @@ function ConversationView({
     onChange: setInput,
     onSubmit: () => sendQuestion(input.trim(), undefined, true),
     sendBlocked,
+    unavailable: partnerCannotAnswer(partner) ? t("no_completion_model_description") : null,
     busy: sending,
     // A stop while the question still waits for its uploads takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),

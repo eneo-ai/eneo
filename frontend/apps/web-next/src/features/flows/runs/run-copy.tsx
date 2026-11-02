@@ -1,5 +1,3 @@
-"use client";
-
 import { useClipboard } from "@astryxdesign/core/hooks";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Check, Copy } from "lucide-react";

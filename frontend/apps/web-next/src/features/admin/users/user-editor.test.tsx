@@ -58,13 +58,13 @@ async function renderEditor(
             roles: { items: [] }
           })
   );
-  const { queryClient } = renderInApp(<Harness user={user} />);
+  const { queryClient, rerender } = renderInApp(<Harness user={user} />);
   const invalidate = vi.spyOn(queryClient, "invalidateQueries");
   const dialog = screen.getByRole("dialog", {
     name: user ? "Redigera användare" : "Skapa en ny användare"
   });
   await within(dialog).findByLabelText("Användare");
-  return { dialog, invalidate, queryClient };
+  return { dialog, invalidate, queryClient, rerender };
 }
 
 /** The editor and, as the users page has it, the one-time password view. */
@@ -251,7 +251,7 @@ describe("UserEditorDialog", () => {
     await waitFor(() =>
       expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
         params: { path: { username: "bo.ek" } },
-        body: expect.objectContaining({ email: "bo.ek@example.se", password: undefined })
+        body: expect.objectContaining({ password: undefined })
       })
     );
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] }));
@@ -292,6 +292,19 @@ describe("UserEditorDialog", () => {
     await act(async () => release());
     const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
     within(reveal).getByText(sentPassword(0));
+  });
+
+  it("hands a replaced password over to the account's saved e-mail, also after a refreshed row", async () => {
+    api.POST.mockImplementation(() => ok({ ...existing, email: "bo.ny@example.se" }));
+    const { dialog, rerender } = await renderEditor(existing);
+    // Another administrator changed the email while this dialog was open.
+    rerender(<Harness user={{ ...existing, email: "bo.ny@example.se" } as AdminUser} />);
+
+    fireEvent.click(replaceSwitch(dialog));
+    submit(dialog);
+
+    const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
+    within(reveal).getByText(/^Lämna lösenordet till bo\.ny@example\.se\./);
   });
 
   it("hands the password over to the e-mail that was saved, not one typed meanwhile", async () => {
@@ -443,6 +456,51 @@ describe("UserEditorDialog username", () => {
       expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
         params: { path: { username: "bo.ek" } },
         body: expect.objectContaining({ username: "bo.lind" })
+      })
+    );
+  });
+
+  it("sends an existing user's email only when it changed", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog } = await renderEditor(existing);
+
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(
+      (api.POST.mock.calls[0]?.[1] as { body: { email?: string } }).body.email
+    ).toBeUndefined();
+  });
+
+  it("compares with the user as the dialog opened, not a row refreshed while it is open", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog, rerender } = await renderEditor(existing);
+    // Another administrator changed the email and username; the list refreshed.
+    rerender(
+      <Harness user={{ ...existing, email: "bo.ny@example.se", username: "bo.ny" } as AdminUser} />
+    );
+
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    const { params, body } = api.POST.mock.calls[0]?.[1] as {
+      params: { path: { username: string } };
+      body: { email?: string; username?: string };
+    };
+    expect(body.email).toBeUndefined();
+    expect(body.username).toBeUndefined();
+    expect(params.path.username).toBe("bo.ny");
+  });
+
+  it("sends a changed email, trimmed", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog } = await renderEditor(existing);
+    type(dialog, /^E-post/, " bo.lind@example.se ");
+
+    submit(dialog);
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
+        params: { path: { username: "bo.ek" } },
+        body: expect.objectContaining({ email: "bo.lind@example.se" })
       })
     );
   });

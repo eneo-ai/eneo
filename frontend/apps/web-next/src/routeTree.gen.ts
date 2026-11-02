@@ -80,8 +80,6 @@ import { Route as AppSpacesSpaceIdAssistantsIndexRouteImport } from "./routes/_a
 import { Route as AppSpacesSpaceIdFlowsIndexRouteImport } from "./routes/_app/spaces/$spaceId/flows/index"
 import { Route as AppSpacesSpaceIdFlowsFlowIdRouteImport } from "./routes/_app/spaces/$spaceId/flows/$flowId"
 import { Route as AppSpacesSpaceIdKnowledgeIndexRouteImport } from "./routes/_app/spaces/$spaceId/knowledge/index"
-import { Route as AppSpacesSpaceIdServicesIndexRouteImport } from "./routes/_app/spaces/$spaceId/services/index"
-import { Route as AppSpacesSpaceIdServicesServiceIdRouteImport } from "./routes/_app/spaces/$spaceId/services/$serviceId"
 import { Route as AppSpacesSpaceIdSkillsIndexRouteImport } from "./routes/_app/spaces/$spaceId/skills/index"
 import { Route as AppSpacesSpaceIdSkillsSkillIdRouteImport } from "./routes/_app/spaces/$spaceId/skills/$skillId"
 import { Route as AppSpacesSpaceIdSkillsNewRouteImport } from "./routes/_app/spaces/$spaceId/skills/new"
@@ -471,18 +469,6 @@ const AppSpacesSpaceIdKnowledgeIndexRoute =
     path: "/knowledge/",
     getParentRoute: () => AppSpacesSpaceIdRoute,
   } as any)
-const AppSpacesSpaceIdServicesIndexRoute =
-  AppSpacesSpaceIdServicesIndexRouteImport.update({
-    id: "/services/",
-    path: "/services/",
-    getParentRoute: () => AppSpacesSpaceIdRoute,
-  } as any)
-const AppSpacesSpaceIdServicesServiceIdRoute =
-  AppSpacesSpaceIdServicesServiceIdRouteImport.update({
-    id: "/services/$serviceId",
-    path: "/services/$serviceId",
-    getParentRoute: () => AppSpacesSpaceIdRoute,
-  } as any)
 const AppSpacesSpaceIdSkillsIndexRoute =
   AppSpacesSpaceIdSkillsIndexRouteImport.update({
     id: "/skills/",
@@ -648,7 +634,6 @@ export interface FileRoutesByFullPath {
   "/admin/insights/assistant/$assistantId": typeof AppAdminInsightsAssistantAssistantIdRoute
   "/admin/usage/users/$userId": typeof AppAdminUsageUsersUserIdRoute
   "/spaces/$spaceId/flows/$flowId": typeof AppSpacesSpaceIdFlowsFlowIdRouteWithChildren
-  "/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
@@ -656,7 +641,6 @@ export interface FileRoutesByFullPath {
   "/spaces/$spaceId/assistants/": typeof AppSpacesSpaceIdAssistantsIndexRoute
   "/spaces/$spaceId/flows/": typeof AppSpacesSpaceIdFlowsIndexRoute
   "/spaces/$spaceId/knowledge/": typeof AppSpacesSpaceIdKnowledgeIndexRoute
-  "/spaces/$spaceId/services/": typeof AppSpacesSpaceIdServicesIndexRoute
   "/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
   "/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
   "/spaces/$spaceId/apps/$appId/edit": typeof AppSpacesSpaceIdAppsAppIdEditRoute
@@ -733,7 +717,6 @@ export interface FileRoutesByTo {
   "/spaces/$spaceId": typeof AppSpacesSpaceIdIndexRoute
   "/admin/insights/assistant/$assistantId": typeof AppAdminInsightsAssistantAssistantIdRoute
   "/admin/usage/users/$userId": typeof AppAdminUsageUsersUserIdRoute
-  "/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/dashboard/app/$appId": typeof AppDashboardAppAppIdIndexRoute
@@ -741,7 +724,6 @@ export interface FileRoutesByTo {
   "/spaces/$spaceId/assistants": typeof AppSpacesSpaceIdAssistantsIndexRoute
   "/spaces/$spaceId/flows": typeof AppSpacesSpaceIdFlowsIndexRoute
   "/spaces/$spaceId/knowledge": typeof AppSpacesSpaceIdKnowledgeIndexRoute
-  "/spaces/$spaceId/services": typeof AppSpacesSpaceIdServicesIndexRoute
   "/spaces/$spaceId/skills": typeof AppSpacesSpaceIdSkillsIndexRoute
   "/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
   "/spaces/$spaceId/apps/$appId/edit": typeof AppSpacesSpaceIdAppsAppIdEditRoute
@@ -825,7 +807,6 @@ export interface FileRoutesById {
   "/_app/admin/insights/assistant/$assistantId": typeof AppAdminInsightsAssistantAssistantIdRoute
   "/_app/admin/usage/users/$userId": typeof AppAdminUsageUsersUserIdRoute
   "/_app/spaces/$spaceId/flows/$flowId": typeof AppSpacesSpaceIdFlowsFlowIdRouteWithChildren
-  "/_app/spaces/$spaceId/services/$serviceId": typeof AppSpacesSpaceIdServicesServiceIdRoute
   "/_app/spaces/$spaceId/skills/$skillId": typeof AppSpacesSpaceIdSkillsSkillIdRoute
   "/_app/spaces/$spaceId/skills/new": typeof AppSpacesSpaceIdSkillsNewRoute
   "/_app/dashboard/app/$appId/": typeof AppDashboardAppAppIdIndexRoute
@@ -833,7 +814,6 @@ export interface FileRoutesById {
   "/_app/spaces/$spaceId/assistants/": typeof AppSpacesSpaceIdAssistantsIndexRoute
   "/_app/spaces/$spaceId/flows/": typeof AppSpacesSpaceIdFlowsIndexRoute
   "/_app/spaces/$spaceId/knowledge/": typeof AppSpacesSpaceIdKnowledgeIndexRoute
-  "/_app/spaces/$spaceId/services/": typeof AppSpacesSpaceIdServicesIndexRoute
   "/_app/spaces/$spaceId/skills/": typeof AppSpacesSpaceIdSkillsIndexRoute
   "/_app/dashboard/app/$appId/results/$resultId": typeof AppDashboardAppAppIdResultsResultIdRoute
   "/_app/spaces/$spaceId/apps/$appId/edit": typeof AppSpacesSpaceIdAppsAppIdEditRoute
@@ -917,7 +897,6 @@ export interface FileRouteTypes {
     | "/admin/insights/assistant/$assistantId"
     | "/admin/usage/users/$userId"
     | "/spaces/$spaceId/flows/$flowId"
-    | "/spaces/$spaceId/services/$serviceId"
     | "/spaces/$spaceId/skills/$skillId"
     | "/spaces/$spaceId/skills/new"
     | "/dashboard/app/$appId/"
@@ -925,7 +904,6 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/assistants/"
     | "/spaces/$spaceId/flows/"
     | "/spaces/$spaceId/knowledge/"
-    | "/spaces/$spaceId/services/"
     | "/spaces/$spaceId/skills/"
     | "/dashboard/app/$appId/results/$resultId"
     | "/spaces/$spaceId/apps/$appId/edit"
@@ -1002,7 +980,6 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId"
     | "/admin/insights/assistant/$assistantId"
     | "/admin/usage/users/$userId"
-    | "/spaces/$spaceId/services/$serviceId"
     | "/spaces/$spaceId/skills/$skillId"
     | "/spaces/$spaceId/skills/new"
     | "/dashboard/app/$appId"
@@ -1010,7 +987,6 @@ export interface FileRouteTypes {
     | "/spaces/$spaceId/assistants"
     | "/spaces/$spaceId/flows"
     | "/spaces/$spaceId/knowledge"
-    | "/spaces/$spaceId/services"
     | "/spaces/$spaceId/skills"
     | "/dashboard/app/$appId/results/$resultId"
     | "/spaces/$spaceId/apps/$appId/edit"
@@ -1093,7 +1069,6 @@ export interface FileRouteTypes {
     | "/_app/admin/insights/assistant/$assistantId"
     | "/_app/admin/usage/users/$userId"
     | "/_app/spaces/$spaceId/flows/$flowId"
-    | "/_app/spaces/$spaceId/services/$serviceId"
     | "/_app/spaces/$spaceId/skills/$skillId"
     | "/_app/spaces/$spaceId/skills/new"
     | "/_app/dashboard/app/$appId/"
@@ -1101,7 +1076,6 @@ export interface FileRouteTypes {
     | "/_app/spaces/$spaceId/assistants/"
     | "/_app/spaces/$spaceId/flows/"
     | "/_app/spaces/$spaceId/knowledge/"
-    | "/_app/spaces/$spaceId/services/"
     | "/_app/spaces/$spaceId/skills/"
     | "/_app/dashboard/app/$appId/results/$resultId"
     | "/_app/spaces/$spaceId/apps/$appId/edit"
@@ -1632,20 +1606,6 @@ declare module "@tanstack/react-router" {
       preLoaderRoute: typeof AppSpacesSpaceIdKnowledgeIndexRouteImport
       parentRoute: typeof AppSpacesSpaceIdRoute
     }
-    "/_app/spaces/$spaceId/services/": {
-      id: "/_app/spaces/$spaceId/services/"
-      path: "/services"
-      fullPath: "/spaces/$spaceId/services/"
-      preLoaderRoute: typeof AppSpacesSpaceIdServicesIndexRouteImport
-      parentRoute: typeof AppSpacesSpaceIdRoute
-    }
-    "/_app/spaces/$spaceId/services/$serviceId": {
-      id: "/_app/spaces/$spaceId/services/$serviceId"
-      path: "/services/$serviceId"
-      fullPath: "/spaces/$spaceId/services/$serviceId"
-      preLoaderRoute: typeof AppSpacesSpaceIdServicesServiceIdRouteImport
-      parentRoute: typeof AppSpacesSpaceIdRoute
-    }
     "/_app/spaces/$spaceId/skills/": {
       id: "/_app/spaces/$spaceId/skills/"
       path: "/skills"
@@ -1898,13 +1858,11 @@ interface AppSpacesSpaceIdRouteChildren {
   AppSpacesSpaceIdOverviewRoute: typeof AppSpacesSpaceIdOverviewRoute
   AppSpacesSpaceIdSettingsRoute: typeof AppSpacesSpaceIdSettingsRoute
   AppSpacesSpaceIdIndexRoute: typeof AppSpacesSpaceIdIndexRoute
-  AppSpacesSpaceIdServicesServiceIdRoute: typeof AppSpacesSpaceIdServicesServiceIdRoute
   AppSpacesSpaceIdSkillsSkillIdRoute: typeof AppSpacesSpaceIdSkillsSkillIdRoute
   AppSpacesSpaceIdSkillsNewRoute: typeof AppSpacesSpaceIdSkillsNewRoute
   AppSpacesSpaceIdAppsIndexRoute: typeof AppSpacesSpaceIdAppsIndexRoute
   AppSpacesSpaceIdAssistantsIndexRoute: typeof AppSpacesSpaceIdAssistantsIndexRoute
   AppSpacesSpaceIdKnowledgeIndexRoute: typeof AppSpacesSpaceIdKnowledgeIndexRoute
-  AppSpacesSpaceIdServicesIndexRoute: typeof AppSpacesSpaceIdServicesIndexRoute
   AppSpacesSpaceIdSkillsIndexRoute: typeof AppSpacesSpaceIdSkillsIndexRoute
   AppSpacesSpaceIdAppsAppIdEditRoute: typeof AppSpacesSpaceIdAppsAppIdEditRoute
   AppSpacesSpaceIdAssistantsAssistantIdEditRoute: typeof AppSpacesSpaceIdAssistantsAssistantIdEditRoute
@@ -1926,14 +1884,11 @@ const AppSpacesSpaceIdRouteChildren: AppSpacesSpaceIdRouteChildren = {
   AppSpacesSpaceIdOverviewRoute: AppSpacesSpaceIdOverviewRoute,
   AppSpacesSpaceIdSettingsRoute: AppSpacesSpaceIdSettingsRoute,
   AppSpacesSpaceIdIndexRoute: AppSpacesSpaceIdIndexRoute,
-  AppSpacesSpaceIdServicesServiceIdRoute:
-    AppSpacesSpaceIdServicesServiceIdRoute,
   AppSpacesSpaceIdSkillsSkillIdRoute: AppSpacesSpaceIdSkillsSkillIdRoute,
   AppSpacesSpaceIdSkillsNewRoute: AppSpacesSpaceIdSkillsNewRoute,
   AppSpacesSpaceIdAppsIndexRoute: AppSpacesSpaceIdAppsIndexRoute,
   AppSpacesSpaceIdAssistantsIndexRoute: AppSpacesSpaceIdAssistantsIndexRoute,
   AppSpacesSpaceIdKnowledgeIndexRoute: AppSpacesSpaceIdKnowledgeIndexRoute,
-  AppSpacesSpaceIdServicesIndexRoute: AppSpacesSpaceIdServicesIndexRoute,
   AppSpacesSpaceIdSkillsIndexRoute: AppSpacesSpaceIdSkillsIndexRoute,
   AppSpacesSpaceIdAppsAppIdEditRoute: AppSpacesSpaceIdAppsAppIdEditRoute,
   AppSpacesSpaceIdAssistantsAssistantIdEditRoute:

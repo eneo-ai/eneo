@@ -6,9 +6,9 @@ import type { Fixtures } from "./responsive-routes";
 
 /**
  * What the screens that need a record are opened with: a shared space with an
- * assistant, an app and a run, plus a group chat, a service, a website, a
- * collection and a published flow with a finished run. Created once per run;
- * ROUTES (tests/responsive-routes.ts) points at them.
+ * assistant, an app and a run, plus a group chat, a website, a collection and
+ * a published flow with a finished run. Created once per run; ROUTES
+ * (tests/responsive-routes.ts) points at them.
  */
 export async function createFixtures(
   browser: Browser,
@@ -21,9 +21,6 @@ export async function createFixtures(
   const spaceId = work.space.split("/").pop()!;
   const groupChat = await apiPost(page, `${work.space}/applications/group-chats/`, {
     name: uniqueName("Grupp")
-  });
-  const service = await apiPost(page, `${work.space}/applications/services/`, {
-    name: uniqueName("Tjänst")
   });
   const website = await apiPost(page, `/spaces/${spaceId}/knowledge/websites/`, {
     url: "https://example.org/contract",
@@ -74,7 +71,6 @@ export async function createFixtures(
     app: work.app.split("/apps/")[1]!,
     run: work.result.split("/results/")[1]!,
     groupChat,
-    service,
     website,
     collection,
     flow: flow.flowId,

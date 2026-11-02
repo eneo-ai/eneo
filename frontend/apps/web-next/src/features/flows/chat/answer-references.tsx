@@ -1,5 +1,3 @@
-"use client";
-
 import type { ComponentProps } from "react";
 import type { MessageResponseProps } from "@/components/ai-elements/message";
 import { AnswerLink } from "@/features/chat/answer-links";

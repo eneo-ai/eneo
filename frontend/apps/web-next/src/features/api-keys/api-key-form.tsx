@@ -1,5 +1,3 @@
-"use client";
-
 import { createStaticSource, type SearchableItem } from "@astryxdesign/core/Typeahead";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";

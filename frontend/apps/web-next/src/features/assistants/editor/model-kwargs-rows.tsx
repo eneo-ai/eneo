@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { SettingsRow } from "@/components/composites/settings-rows";

@@ -1,5 +1,3 @@
-"use client";
-
 import { List, ListItem } from "@astryxdesign/core/List";
 import { useTranslations } from "use-intl";
 import { outputTypeLabel, runtimeInputLabel } from "./flow-labels";

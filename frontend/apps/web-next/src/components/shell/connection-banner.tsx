@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { Banner } from "@astryxdesign/core/Banner";
 import { useAnnounceChange } from "@/lib/hooks/use-announce-change";
