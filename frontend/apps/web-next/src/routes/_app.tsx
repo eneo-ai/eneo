@@ -4,7 +4,8 @@ import { AppFrame } from "@/components/shell/app-frame";
 import { readSideNavCollapsedCookie } from "@/components/shell/side-nav-preference";
 import { browserApi } from "@/lib/api/browser";
 import { readCached } from "@/lib/api/query";
-import { requireBrowserSession } from "@/lib/api/refusal";
+import { EneoApiError } from "@/lib/api/errors";
+import { getSessionSnapshot, requireBrowserSession } from "@/lib/api/refusal";
 import { loadSession, sessionQueries } from "@/lib/api/session";
 import { runtimeConfig } from "@/lib/runtime-config";
 import packageJson from "../../package.json";
@@ -14,7 +15,13 @@ const buildRevision = import.meta.env.APP_REVISION;
 const frontendRevision = buildRevision && buildRevision !== "unknown" ? buildRevision : null;
 
 export const Route = createFileRoute("/_app")({
-  beforeLoad: async ({ context }) => {
+  beforeLoad: async ({ context, preload }) => {
+    // A preload is speculative (a link hovered or focused on a signed-out page):
+    // only following the link sends the person to sign in.
+    const session = getSessionSnapshot();
+    if (preload && session.status === "bound" && session.generation === null) {
+      throw new EneoApiError("No browser session", { status: 401 });
+    }
     await requireBrowserSession();
     await readCached(context.queryClient, sessionQueries(browserApi).me);
     // Start the other resources together. Their mounted readers own pending/error UI.
