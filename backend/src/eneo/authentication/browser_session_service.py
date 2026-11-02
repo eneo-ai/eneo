@@ -11,25 +11,33 @@ The rows live in PostgreSQL, not Redis: a revoked session must stay revoked
 after a crash, and restoring a Redis snapshot can bring a deleted key back.
 
 Admission is checked when a request authenticates. Finite HTTP and SSE work
-admitted before sign-out may still finish; a WebSocket keeps its user for as
-long as it is open, so a browser session's token cannot open one.
+admitted before sign-out may still finish. The job-event stream
+(``GET /jobs/events/``) stays open until the client leaves, so while it serves
+a browser session it re-runs admission (``SessionWatch``) and ends at the
+session's expiry. A WebSocket keeps its user for as long as it is open, so a
+browser session's token cannot open one.
 """
 
 import secrets
+import time
 from datetime import datetime, timezone
+from uuid import UUID
 
 import sqlalchemy as sa
 from fastapi import HTTPException, status
 
 from eneo.authentication.auth_models import JWTPayload
 from eneo.authentication.auth_service import AuthService
-from eneo.database.database import AsyncSession
+from eneo.database.database import AsyncSession, sessionmanager
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
 
 logger = get_logger(__name__)
+
+# How often a response that stays open re-runs admission for its session.
+RECHECK_SECONDS = 30.0
 
 
 class BrowserSessionService:
@@ -73,16 +81,25 @@ class BrowserSessionService:
         unexpired. Independent of ``BROWSER_SESSION_ENABLED``: a ``sid`` token
         presented as Bearer is checked all the same.
         """
-        found = await self.session.scalar(
-            sa.select(BrowserSessions.sid).where(
-                BrowserSessions.sid == payload.sid,
-                BrowserSessions.user_id == payload.user_id,
-                BrowserSessions.tenant_id == payload.tenant_id,
+        sid = payload.sid
+        if (
+            sid is None
+            or await self.expires_at(sid, payload.user_id, payload.tenant_id) is None
+        ):
+            raise AuthenticationException("Could not validate token credentials.")
+
+    async def expires_at(
+        self, sid: str, user_id: UUID, tenant_id: UUID
+    ) -> datetime | None:
+        """When an admitted session ends (its token's ``exp``); None once it has."""
+        return await self.session.scalar(
+            sa.select(BrowserSessions.expires_at).where(
+                BrowserSessions.sid == sid,
+                BrowserSessions.user_id == user_id,
+                BrowserSessions.tenant_id == tenant_id,
                 BrowserSessions.expires_at > datetime.now(timezone.utc),
             )
         )
-        if found is None:
-            raise AuthenticationException("Could not validate token credentials.")
 
     async def end(self, token: str) -> None:
         """Delete the session a sign-out's cookie names.
@@ -137,3 +154,46 @@ class BrowserSessionService:
             aud=settings.jwt_audience,
             algs=[settings.jwt_algorithm],
         )
+
+
+class SessionWatch:
+    """Whether the browser session a response that stays open was admitted
+    under still lasts.
+
+    The response asks between messages. Every ``RECHECK_SECONDS``, the first
+    time included, admission's query runs again in a database session of its
+    own, held only for that query; in between, the answer is the clock against
+    the session's expiry. A refusal, the expiry or a check that fails ends the
+    response, and the client reconnects through ordinary admission.
+    """
+
+    def __init__(self, sid: str, user_id: UUID, tenant_id: UUID):
+        self._session = (sid, user_id, tenant_id)
+        self._expires_at: datetime | None = None
+        self._next_check = float("-inf")
+
+    async def __call__(self) -> bool:
+        if time.monotonic() >= self._next_check:
+            self._next_check = time.monotonic() + RECHECK_SECONDS
+            self._expires_at = await self._recheck()
+        return (
+            self._expires_at is not None
+            and datetime.now(timezone.utc) < self._expires_at
+        )
+
+    async def _recheck(self) -> datetime | None:
+        try:
+            async with sessionmanager.session() as session, session.begin():
+                service = BrowserSessionService(session, AuthService())
+                return await service.expires_at(*self._session)
+        except Exception as exc:
+            _, user_id, tenant_id = self._session
+            logger.warning(
+                "browser_session_recheck_failed",
+                extra={
+                    "user_id": str(user_id),
+                    "tenant_id": str(tenant_id),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return None

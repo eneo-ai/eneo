@@ -27,6 +27,7 @@ from eneo.authentication.browser_session import session_generation
 from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
 from eneo.database.database import sessionmanager
 from eneo.database.tables.browser_sessions_table import BrowserSessions
+from eneo.jobs.job_events import job_updates_channel
 from eneo.main.config import Settings, get_settings, set_settings
 from eneo.server.dependencies.container import get_user_from_websocket
 from eneo.server.websockets import websocket_router
@@ -48,6 +49,7 @@ TOKEN_LOGIN = "/api/v1/users/login/token/"
 FORM = {"Content-Type": "application/x-www-form-urlencoded"}
 TICKETS = "/api/v1/module-auth/tickets/"
 TICKET = {"module_key": "no-such-module", "redirect_uri": "https://m.example/cb"}
+JOB_EVENTS = "/api/v1/jobs/events/"
 
 
 @pytest.fixture
@@ -774,3 +776,76 @@ async def test_a_browser_session_cannot_open_a_websocket(
         "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={session}"}
     )
     assert still_in.status_code == 200
+
+
+async def _subscribers(redis_client, user_id: str, count: int) -> None:
+    """Wait until the user's job channel has ``count`` open streams."""
+    channel = job_updates_channel(UUID(user_id))
+    async with asyncio.timeout(10):
+        while dict(await redis_client.pubsub_numsub(channel))[channel.encode()] < count:
+            await asyncio.sleep(0.05)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sign_out_ends_an_open_job_event_stream(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    redis_client,
+    monkeypatch,
+):
+    # The stream authenticates once and stays open; a copy of the cookie that
+    # opened it before sign-out must not keep receiving the user's job events.
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.5)
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    bearer = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    cookie_stream = asyncio.create_task(
+        client.get(JOB_EVENTS, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"})
+    )
+    bearer_stream = asyncio.create_task(client.get(JOB_EVENTS, headers=_bearer(bearer)))
+    try:
+        await _subscribers(redis_client, _claims(token)["user_id"], 2)
+
+        assert (await _sign_out(client, token)).status_code == 204
+        async with asyncio.timeout(5):
+            ended = await cookie_stream
+        assert ended.status_code == 200
+        # The token login's token has no browser session to end.
+        await asyncio.sleep(1)
+        assert not bearer_stream.done()
+    finally:
+        for stream in (cookie_stream, bearer_stream):
+            stream.cancel()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_job_event_stream_ends_when_its_session_expires(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    redis_client,
+):
+    # Between checks too: the stream ends at the session's expiry, which is
+    # the token's.
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    soon = datetime.now(timezone.utc) + timedelta(seconds=2)
+    await _execute(
+        sa.update(BrowserSessions)
+        .where(BrowserSessions.sid == _claims(token)["sid"])
+        .values(expires_at=soon)
+    )
+
+    async with asyncio.timeout(6):
+        ended = await client.get(
+            JOB_EVENTS, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+        )
+    assert ended.status_code == 200
+    assert datetime.now(timezone.utc) >= soon

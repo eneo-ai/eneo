@@ -3453,7 +3453,7 @@ export interface paths {
     };
     /**
      * Job Events
-     * @description Stream the current user's job updates as server-sent events. Each `job` event carries the job as GET /jobs/ returns it, sent whenever its status changes; the connection stays open until the client closes it.
+     * @description Stream the current user's job updates as server-sent events. Each `job` event carries the job as GET /jobs/ returns it, sent whenever its status changes; the connection stays open until the client closes it. A browser session's stream also ends when the session does (sign-out or expiry), within 30 seconds of sign-out.
      */
     get: operations["job_events_api_v1_jobs_events__get"];
     put?: never;

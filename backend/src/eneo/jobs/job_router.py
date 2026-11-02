@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from sse_starlette import EventSourceResponse
 
+from eneo.authentication.browser_session_service import SessionWatch
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -45,7 +46,9 @@ async def get_running_jobs(
     description=(
         "Stream the current user's job updates as server-sent events. Each "
         "`job` event carries the job as GET /jobs/ returns it, sent whenever "
-        "its status changes; the connection stays open until the client closes it."
+        "its status changes; the connection stays open until the client closes "
+        "it. A browser session's stream also ends when the session does "
+        "(sign-out or expiry), within 30 seconds of sign-out."
     ),
     responses=responses.streaming_response(models=[JobPublic]),
 )
@@ -64,8 +67,13 @@ async def job_events(
     # Authentication needs the database; the long-lived Redis stream only
     # needs this user ID. Release the transaction before sending the body.
     user = container.user()
+    # A browser session can end while the stream is open (sign-out, expiry);
+    # other tokens keep it until the client leaves.
+    admitted = None
+    if user.browser_session_id is not None:
+        admitted = SessionWatch(user.browser_session_id, user.id, user.tenant_id)
     return EventSourceResponse(
-        stream_job_events(user.id, request),
+        stream_job_events(user.id, request, admitted=admitted),
         ping=15,
         headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )

@@ -146,6 +146,28 @@ async def test_stream_stops_as_soon_as_the_client_disconnects():
 
 
 @pytest.mark.asyncio
+async def test_stream_ends_when_its_browser_session_does():
+    pubsub = FakePubSub(
+        [{"data": job_events.job_event_payload(make_job())} for _ in range(2)]
+    )
+    redis = MagicMock()
+    redis.pubsub = MagicMock(return_value=pubsub)
+    answers = iter([True, False])
+
+    async def admitted() -> bool:
+        return next(answers)
+
+    events = [
+        event
+        async for event in job_events.stream_job_events(
+            uuid4(), make_request(disconnect_after=5), redis=redis, admitted=admitted
+        )
+    ]
+
+    assert len(events) == 1
+
+
+@pytest.mark.asyncio
 async def test_job_route_releases_auth_database_session_before_streaming(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -179,8 +201,12 @@ async def test_job_route_releases_auth_database_session_before_streaming(
         )
         return container
 
-    async def stream(owner, request: Request) -> AsyncIterator[ServerSentEvent]:
+    async def stream(
+        owner, request: Request, *, admitted
+    ) -> AsyncIterator[ServerSentEvent]:
         assert owner == user_id
+        # Not a browser session: nothing but the client ends the stream.
+        assert admitted is None
         lifecycle.append("stream")
         yield ServerSentEvent(event="job", data='{"status":"complete"}')
 
