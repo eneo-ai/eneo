@@ -720,15 +720,21 @@ class FederatedIdentity(BaseModel):
         email = claims.get(email_claim)
         if not isinstance(email, str) or not email:
             raise ValueError("Email claim not found in ID token")
+        # Entra ID omits email_verified for organisational accounts and sends
+        # xms_edov ("email domain owner verified") instead. A domain the
+        # tenant owner has verified is as authoritative for the address as the
+        # standard flag, and the mandatory domain allowlist still applies.
+        # An explicit email_verified: false is never overridden by xms_edov.
+        verified = _is_verified_claim(claims.get("email_verified")) or (
+            claims.get("email_verified") is not False
+            and _is_verified_claim(claims.get("xms_edov"))
+        )
         try:
             return cls(
                 email=email,
-                # The standard verification claim verifies the standard email,
-                # not an unrelated address selected by a custom claims mapping.
-                email_verified=(
-                    _is_verified_claim(claims.get("email_verified"))
-                    and claims.get("email") == email
-                ),
+                # The verification claims verify the standard email, not an
+                # unrelated address selected by a custom claims mapping.
+                email_verified=verified and claims.get("email") == email,
             )
         except ValueError as exc:
             raise ValueError(
