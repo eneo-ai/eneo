@@ -3,7 +3,8 @@ import {
   isLocale,
   LEGACY_LOCALE_COOKIE,
   LOCALE_COOKIE,
-  type Locale
+  type Locale,
+  RETIRED_LOCALE_COOKIE
 } from "./lib/i18n/locales";
 import { writeLocaleCookie } from "./lib/i18n/switch-locale";
 
@@ -12,16 +13,17 @@ export { loadMessages } from "./lib/i18n/locales";
 
 export function resolveLocale(doc: Document): Locale {
   const cookies = doc.cookie.split(";").map((part) => part.trim());
-  const current = cookies.find((part) => part.startsWith(`${LOCALE_COOKIE}=`));
+  const read = (name: string) =>
+    cookies.find((part) => part.startsWith(`${name}=`))?.slice(name.length + 1);
+  const retired = read(RETIRED_LOCALE_COOKIE);
+  if (retired !== undefined) doc.cookie = `${RETIRED_LOCALE_COOKIE}=; Max-Age=0; Path=/`;
+  const current = read(LOCALE_COOKIE);
   if (current !== undefined) {
     if (isLocale(doc.documentElement.lang)) return doc.documentElement.lang;
-    const value = current.slice(LOCALE_COOKIE.length + 1);
-    return isLocale(value) ? value : defaultLocale;
+    return isLocale(current) ? current : defaultLocale;
   }
 
-  const legacy = cookies
-    .find((part) => part.startsWith(`${LEGACY_LOCALE_COOKIE}=`))
-    ?.slice(LEGACY_LOCALE_COOKIE.length + 1);
+  const legacy = isLocale(retired) ? retired : read(LEGACY_LOCALE_COOKIE);
   if (isLocale(legacy)) {
     writeLocaleCookie(legacy, doc);
     return legacy;

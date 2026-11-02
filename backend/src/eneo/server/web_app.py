@@ -128,9 +128,16 @@ def _is_local_redirect_path(path: str) -> bool:
     )
 
 
+_LOCALE_COOKIE = "eneo_locale"
+# This app's earlier name for the preference: adopted once, then cleared.
+_RETIRED_LOCALE_COOKIE = "NEXT_LOCALE"
+# The SvelteKit app's preference, kept because that app still reads it.
+_LEGACY_LOCALE_COOKIE = "PARAGLIDE_LOCALE"
+
+
 def _set_locale_cookie(response: Response, locale: str, *, secure: bool) -> None:
     response.set_cookie(
-        "NEXT_LOCALE",
+        _LOCALE_COOKIE,
         locale,
         max_age=31536000,
         path="/",
@@ -249,11 +256,16 @@ def install_web_app(app: FastAPI) -> None:
             raise HTTPException(status_code=404)
 
         nonce = secrets.token_urlsafe(16)
-        current_locale = request.cookies.get("NEXT_LOCALE")
-        legacy_locale = (
-            request.cookies.get("PARAGLIDE_LOCALE") if current_locale is None else None
+        current_locale = request.cookies.get(_LOCALE_COOKIE)
+        legacy_locales = (
+            request.cookies.get(name)
+            for name in (_RETIRED_LOCALE_COOKIE, _LEGACY_LOCALE_COOKIE)
         )
-        migrated_locale = legacy_locale if legacy_locale in ("sv", "en") else None
+        migrated_locale = (
+            next((value for value in legacy_locales if value in ("sv", "en")), None)
+            if current_locale is None
+            else None
+        )
         values = {
             _NONCE: nonce,
             _LANG: "en" if (migrated_locale or current_locale) == "en" else "sv",
@@ -273,6 +285,10 @@ def install_web_app(app: FastAPI) -> None:
         if migrated_locale is not None:
             _set_locale_cookie(
                 response, migrated_locale, secure=not settings.is_development
+            )
+        if _RETIRED_LOCALE_COOKIE in request.cookies:
+            response.delete_cookie(
+                _RETIRED_LOCALE_COOKIE, secure=not settings.is_development
             )
         await response(scope, receive, send)
 

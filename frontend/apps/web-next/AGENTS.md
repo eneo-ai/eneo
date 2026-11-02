@@ -549,7 +549,7 @@ build served by FastAPI. Never loosen the policy.
 
 ## Text and i18n
 
-- use-intl, locales `sv` (default) and `en`. `switchLocale` writes the `NEXT_LOCALE` preference cookie and reloads the document so React, router titles and boot data change language together. `AppIntlProvider` owns the Vite app's viewer time zone. Calendar dates and backend day aggregates keep their own semantics.
+- use-intl, locales `sv` (default) and `en`. `switchLocale` writes the `eneo_locale` preference cookie and reloads the document so React, router titles and boot data change language together. `AppIntlProvider` owns the Vite app's viewer time zone. Calendar dates and backend day aggregates keep their own semantics.
   No hardcoded UI text (`eneo/no-hardcoded-text`).
 - `src/lib/i18n/messages/{sv,en}.json` are generated; never edit them.
   `bun run i18n:convert` builds them from the SvelteKit app's catalogs

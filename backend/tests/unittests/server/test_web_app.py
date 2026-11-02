@@ -195,13 +195,13 @@ def test_web_app_redirects_english_urls(
     monkeypatch: pytest.MonkeyPatch, dist: Path, path: str, target: str
 ):
     client = _client(monkeypatch, dist)
-    client.cookies.set("NEXT_LOCALE", "sv")
+    client.cookies.set("eneo_locale", "sv")
     response = client.get(path, follow_redirects=False)
 
     assert response.status_code == 308
     assert response.headers["location"] == target
     assert response.headers["cache-control"] == "no-store"
-    assert response.headers["set-cookie"].startswith("NEXT_LOCALE=en;")
+    assert response.headers["set-cookie"].startswith("eneo_locale=en;")
 
 
 @pytest.mark.parametrize("method", ["GET", "HEAD"])
@@ -227,7 +227,7 @@ def test_web_app_english_redirect_cookie_attributes(
     )
     cookies = SimpleCookie()
     cookies.load(response.headers["set-cookie"])
-    cookie = cookies["NEXT_LOCALE"]
+    cookie = cookies["eneo_locale"]
 
     assert response.status_code == 308
     assert cookie.value == "en"
@@ -314,7 +314,7 @@ def test_web_app_index_migrates_legacy_cookie_once(
 
     first = client.get("/")
     assert f'<html lang="{locale}">' in first.text
-    assert first.headers["set-cookie"].startswith(f"NEXT_LOCALE={locale};")
+    assert first.headers["set-cookie"].startswith(f"eneo_locale={locale};")
     assert client.cookies.get("PARAGLIDE_LOCALE") == locale
     second = client.get("/")
     assert f'<html lang="{locale}">' in second.text
@@ -326,13 +326,51 @@ def test_web_app_current_cookie_blocks_legacy_migration(
     monkeypatch: pytest.MonkeyPatch, dist: Path, current: str
 ):
     client = _client(monkeypatch, dist)
-    client.cookies.set("NEXT_LOCALE", current)
+    client.cookies.set("eneo_locale", current)
     client.cookies.set("PARAGLIDE_LOCALE", "sv" if current == "en" else "en")
     response = client.get("/")
 
     expected = "en" if current == "en" else "sv"
     assert f'<html lang="{expected}">' in response.text
     assert "set-cookie" not in response.headers
+
+
+@pytest.mark.parametrize("locale", ["sv", "en"])
+def test_web_app_index_adopts_the_retired_cookie_name_and_clears_it(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, locale: str
+):
+    client = TestClient(_app(monkeypatch, dist), base_url="https://app.example.com")
+    client.cookies.set("NEXT_LOCALE", locale, domain="app.example.com")
+    client.cookies.set("PARAGLIDE_LOCALE", "sv" if locale == "en" else "en")
+
+    first = client.get("/")
+    cookies = SimpleCookie()
+    for header in first.headers.get_list("set-cookie"):
+        cookies.load(header)
+    assert f'<html lang="{locale}">' in first.text
+    assert cookies["eneo_locale"].value == locale
+    assert cookies["NEXT_LOCALE"]["max-age"] == "0"
+    assert cookies["NEXT_LOCALE"]["path"] == "/"
+    second = client.get("/")
+    assert f'<html lang="{locale}">' in second.text
+    assert "set-cookie" not in second.headers
+
+
+@pytest.mark.parametrize(("current", "retired"), [("sv", "en"), (None, "de")])
+def test_web_app_clears_the_retired_cookie_it_does_not_adopt(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, current: str | None, retired: str
+):
+    client = _client(monkeypatch, dist)
+    if current is not None:
+        client.cookies.set("eneo_locale", current)
+    client.cookies.set("NEXT_LOCALE", retired)
+    response = client.get("/")
+
+    cookies = SimpleCookie()
+    cookies.load(response.headers["set-cookie"])
+    assert '<html lang="sv">' in response.text
+    assert list(cookies) == ["NEXT_LOCALE"]
+    assert cookies["NEXT_LOCALE"]["max-age"] == "0"
 
 
 def test_web_app_invalid_legacy_cookie_uses_default_without_migration(
@@ -430,12 +468,12 @@ def test_csp_nonce_matches_meta_nonce_and_changes_per_request(
 @pytest.mark.parametrize(
     ("cookie", "lang"), [("en", "en"), ("sv", "sv"), ("de", "sv"), (None, "sv")]
 )
-def test_html_lang_follows_next_locale_cookie(
+def test_html_lang_follows_locale_cookie(
     monkeypatch: pytest.MonkeyPatch, dist: Path, cookie: str | None, lang: str
 ):
     client = _client(monkeypatch, dist)
     if cookie is not None:
-        client.cookies.set("NEXT_LOCALE", cookie)
+        client.cookies.set("eneo_locale", cookie)
 
     assert f'<html lang="{lang}">' in client.get("/").text
 
