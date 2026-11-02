@@ -2,6 +2,7 @@
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
+import { openMenuOnRelease } from "@/test/menus";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
 import { clearJustCreated, isJustCreated } from "@/features/spaces/just-created";
@@ -62,19 +63,25 @@ afterEach(() => {
 });
 
 describe("CreateAppButton", () => {
-  it("names the split button's menu after what it offers", () => {
+  it("names the split button's menu after what it offers, and opens it on release", async () => {
     renderInApp(<CreateAppButton />, {
       appContext: testAppContext({ settings: { using_templates: true } })
     });
 
-    const more = screen.getByRole("button", { name: "Fler sätt att skapa" });
-    fireEvent.keyDown(more, { key: "Enter" });
-    const menu = screen.getByRole("menu");
+    const menu = await openMenuOnRelease(
+      screen.getByRole("button", { name: "Fler sätt att skapa" })
+    );
     expect(
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent?.trim())
     ).toEqual(["Börja med en mall..."]);
+  });
+
+  it("is small and unfilled when it is not the screen's primary action", () => {
+    renderInApp(<CreateAppButton secondary />, { appContext: testAppContext() });
+    const create = screen.getByRole("button", { name: "Skapa app" });
+    expect([create.dataset.variant, create.dataset.size]).toEqual(["secondary", "sm"]);
   });
 
   it("creates the app as 'Ny app' at once and opens its editor", async () => {

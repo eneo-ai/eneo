@@ -1,19 +1,13 @@
 import { List, ListItem } from "@astryxdesign/core/List";
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { FileText, MoreHorizontal, Paperclip, Trash2 } from "lucide-react";
+import { FileText, Paperclip, Trash2 } from "lucide-react";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
 import { useMemo, useRef, useState } from "react";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { EmptyState } from "@/components/composites/empty-state";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Table } from "@/components/astryx/table";
 import {
   pixel,
@@ -33,7 +27,7 @@ import { unwrap } from "@/lib/api/errors";
 import { pollWhile } from "@/lib/api/query";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { useFocusAcrossLayouts } from "@/lib/hooks/use-focus-across-layouts";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { appRunsQueryOptions, getResultTitle, isRunActive, type AppRunSparse } from "../apps";
 import { AppRunStatusToken, appRunStatusLabel } from "../status-token";
 
@@ -57,23 +51,19 @@ function ResultActions({
   const time = useClientTimeText(run.created_at, "date_time");
 
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          ref={menuRef}
-          variant="ghost"
-          size="icon"
-          aria-label={time ? t("ui_more_actions_for", { name: time }) : t("actions")}
-        >
-          <MoreHorizontal className="size-4" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end">
-        <DropdownMenuItem variant="destructive" onSelect={() => onDelete(run, menuRef.current)}>
-          <Trash2 className="size-4" /> {t("delete")}
-        </DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <MoreMenu
+      ref={menuRef}
+      label={time ? t("ui_more_actions_for", { name: time }) : t("actions")}
+      alignment="end"
+      items={[
+        {
+          label: t("delete"),
+          icon: <Trash2 aria-hidden="true" />,
+          variant: "destructive",
+          onClick: () => onDelete(run, menuRef.current)
+        }
+      ]}
+    />
   );
 }
 
@@ -119,7 +109,7 @@ export function ResultsTable({
   resultHref: (runId: string) => string;
 }) {
   const t = useTranslations();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   // A finished run arrives through the job feed (every run is a job), which
   // refreshes this list; polling only covers the time the feed is down.
   const live = useJobEventsConnected();

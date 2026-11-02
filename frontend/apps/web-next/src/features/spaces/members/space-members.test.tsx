@@ -267,17 +267,15 @@ describe("members on a phone", () => {
       .closest("li")!;
     // Nobody changes their own role: no button, the role in words.
     expect(within(self).queryByRole("button")).toBeNull();
-    expect(within(self).getByText("Administratör")).toBeTruthy();
-    // A supporting fact at the e-mail's size; under the name below 20rem of the
-    // rows (a 320 px phone), so the e-mail does not break mid-address.
-    expect(within(self).getByText("Administratör").className).toBe(
-      "hidden text-sm @min-[20rem]/rows:inline"
-    );
-    expect(within(self).getByText("Roll: Administratör").className).toBe(
-      "block @min-[20rem]/rows:sr-only"
-    );
+    // The role sits under the name on every width, so the e-mail keeps the
+    // row's width and does not break mid-address; nothing but a chevron at the end.
+    expect(within(self).getByText("Roll: Administratör").className).toBe("block");
+    expect(within(self).queryByText("Administratör")).toBeNull();
+    expect(self.querySelector("svg")).toBeNull();
     const erik = within(editors).getByRole("button", { name: /^erik\.johansson@example\.com/ });
-    expect(erik.closest("li")!.textContent).toContain("Redigerare");
+    const erikRow = erik.closest("li")!;
+    expect(erikRow.textContent!.match(/Redigerare/g)).toEqual(["Redigerare"]);
+    expect(erikRow.querySelectorAll("svg")).toHaveLength(1);
 
     const viewers = screen.getByRole("list", { name: /^Visare/ });
     // A username names the row; the e-mail is under it.
@@ -401,7 +399,7 @@ describe("members on a phone", () => {
     state.space = spaceWithMembers(["read"]);
     renderInApp(<SpaceMembers />);
     expect(screen.queryByRole("button", { name: /^erik\.johansson@example\.com/ })).toBeNull();
-    expect(screen.getAllByText("Redigerare").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Roll: Redigerare").length).toBeGreaterThan(0);
     expect(screen.queryByRole("group", { name: "Medlemmar, åtgärder" })).toBeNull();
   });
 });

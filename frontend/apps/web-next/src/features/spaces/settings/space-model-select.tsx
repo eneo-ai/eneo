@@ -207,6 +207,7 @@ export function SpaceModelSelect({
                 type="button"
                 variant="outline"
                 size="sm"
+                // What it shows, then the card it opens (WCAG 2.5.3).
                 aria-label={
                   isOpen
                     ? t("space_settings_hide_models_named", { kind: title })

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { act, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { openMenuOnRelease, tap } from "@/test/menus";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -31,19 +32,34 @@ afterEach(() => {
 });
 
 describe("CreateChatAppMenu", () => {
-  it("names the split button's menu after what it offers", () => {
+  it("names the split button's menu after what it offers, and opens it on release", async () => {
     renderInApp(<CreateChatAppMenu />, {
       appContext: testAppContext({ settings: { using_templates: true } })
     });
 
-    const more = screen.getByRole("button", { name: "Fler sätt att skapa" });
-    fireEvent.keyDown(more, { key: "Enter" });
-    const menu = screen.getByRole("menu");
+    const menu = await openMenuOnRelease(
+      screen.getByRole("button", { name: "Fler sätt att skapa" })
+    );
     expect(
       within(menu)
         .getAllByRole("menuitem")
         .map((item) => item.textContent?.trim())
     ).toEqual(["Skapa ny assistent", "Börja med en mall...", "Skapa ny gruppchatt"]);
+    // The theme's coarse-pointer rule gives every row 44 px through this class.
+    for (const item of within(menu).getAllByRole("menuitem")) {
+      expect(item.classList).toContain("astryx-dropdown-menu-item");
+    }
+  });
+
+  it("wraps a long Skapa assistent onto a second line instead of cutting it off (1.4.4)", () => {
+    // Astryx buttons keep their label on one line at a fixed height and cut it
+    // with an ellipsis; at 320 px with large text this label would lose its end.
+    renderInApp(<CreateChatAppMenu />);
+
+    const create = screen.getByRole("button", { name: "Skapa assistent" });
+    expect(create.className.split(" ")).toEqual(
+      expect.arrayContaining(["h-auto", "min-h-(--size-element-md)", "whitespace-normal"])
+    );
   });
 
   it("creates the assistant as 'Ny assistent' at once and opens its editor", async () => {
@@ -149,6 +165,52 @@ describe("CreateChatAppMenu", () => {
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(router.push).not.toHaveBeenCalled();
     expect(isJustCreated("group-chat", "g-new")).toBe(false);
+  });
+
+  it.each([
+    [
+      "Avbryt",
+      (dialog: HTMLElement) =>
+        fireEvent.click(within(dialog).getByRole("button", { name: "Avbryt" }))
+    ],
+    ["Escape", (dialog: HTMLElement) => fireEvent.keyDown(dialog, { key: "Escape" })]
+  ])(
+    "returns focus to the menu button when a tapped Skapa ny gruppchatt is closed with %s",
+    async (_, close) => {
+      renderInApp(<CreateChatAppMenu />, { appContext: testAppContext() });
+      const more = screen.getByRole("button", { name: "Fler sätt att skapa" });
+      // A tap: the menu closes and leaves focus on its own hidden list, which
+      // the dialog would otherwise return focus to.
+      tap(
+        within(await openMenuOnRelease(more)).getByRole("menuitem", { name: "Skapa ny gruppchatt" })
+      );
+      const dialog = await screen.findByRole("dialog", { name: "Skapa en ny gruppchatt" });
+
+      close(dialog);
+
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(more));
+    }
+  );
+
+  it("returns focus to the menu button when Skapa ny gruppchatt was chosen from the keyboard", async () => {
+    renderInApp(<CreateChatAppMenu />, { appContext: testAppContext() });
+    const more = screen.getByRole("button", { name: "Fler sätt att skapa" });
+    more.focus();
+    fireEvent.keyDown(more, { key: "Enter" });
+    // A keyboard open focuses the first item (a pointer open, the menu itself).
+    const first = await screen.findByRole("menuitem", { name: "Skapa ny assistent" });
+    await waitFor(() => expect(document.activeElement).toBe(first));
+    fireEvent.keyDown(first, { key: "ArrowDown" });
+    const groupChat = screen.getByRole("menuitem", { name: "Skapa ny gruppchatt" });
+    expect(document.activeElement).toBe(groupChat);
+    fireEvent.keyDown(groupChat, { key: "Enter" });
+    const dialog = await screen.findByRole("dialog", { name: "Skapa en ny gruppchatt" });
+
+    fireEvent.keyDown(dialog, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+    await waitFor(() => expect(document.activeElement).toBe(more));
   });
 
   it.each([false, true])(

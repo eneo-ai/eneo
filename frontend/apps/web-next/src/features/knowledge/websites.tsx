@@ -19,7 +19,7 @@ import {
 } from "@astryxdesign/core/Table";
 import { Table, type TableName } from "@/components/astryx/table";
 import { DockedActions } from "@/components/shell/docked-actions";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Globe, Pencil, RefreshCw, SearchX, Square, Trash2 } from "lucide-react";
@@ -381,7 +381,7 @@ function WebsitesTable({
 
 /** The websites tab; `name` (its tab, or its name on a phone) names an ungrouped table. */
 export function WebsitesTab({ canCreate, name }: { canCreate: boolean; name: TableName }) {
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const t = useTranslations();
   const { space, routeId } = useSpace();
   const queryClient = useQueryClient();

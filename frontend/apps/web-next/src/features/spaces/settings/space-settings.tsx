@@ -1117,6 +1117,8 @@ export function SpaceSettings() {
         // The space's own page bar sits above the index (a phone's settings are a page of the
         // space, not a pushed screen), so the index has none; a section has one back to it.
         phone={{ title: t("settings") }}
+        // Under the space's header: on its line, like the space's other pages.
+        isFramed
         header={
           <PageHeader
             headingLevel={2}

@@ -2,11 +2,11 @@
 import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ChatPartner } from "@/lib/chat/types";
-import { expectNoAxeViolations } from "@/test/axe";
+import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 import { OPEN_NAV_EVENT } from "@/components/shell/routes";
-import { ChatHeader } from "./chat-header";
+import { ChatHeader, PartnerSwitcher } from "./chat-header";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
@@ -37,6 +37,9 @@ const items: ChatPartnerSwitcherItem[] = [
     active: true
   }
 ];
+
+/** From 768 px: what the switcher shows (the assistant, then its space and model), then what it does. */
+const DESKTOP_SWITCHER = "Upphandlingsassistenten. Upphandling · Claude Haiku 4.5. Byt assistent";
 
 /** The header below 1024px: it replaces the shell's top bar (both are in jsdom's DOM). */
 function phoneHeader() {
@@ -71,9 +74,7 @@ describe("ChatHeader", () => {
     for (const element of classes) {
       expect(element.parentElement!.textContent).toBe("Säkerhetsklass: Intern");
     }
-    expect(
-      screen.getAllByRole("button", { name: /byt assistent: upphandlingsassistenten/i }).length
-    ).toBeGreaterThan(0);
+    expect(screen.getAllByRole("button", { name: DESKTOP_SWITCHER })).toHaveLength(1);
   });
 
   it("shows a fixed model under the partner's name from 1024px", () => {
@@ -84,9 +85,7 @@ describe("ChatHeader", () => {
 
   it("switches assistant from a menu that marks the current one as selected", async () => {
     renderHeader();
-    const [trigger] = screen.getAllByRole("button", {
-      name: "Byt assistent: Upphandlingsassistenten"
-    });
+    const [trigger] = screen.getAllByRole("button", { name: DESKTOP_SWITCHER });
     expect(trigger!.getAttribute("aria-haspopup")).toBe("menu");
     fireEvent.click(trigger!);
     const menu = document.getElementById(trigger!.getAttribute("aria-controls") ?? "")!;
@@ -104,6 +103,18 @@ describe("ChatHeader", () => {
   it("renders no heading in the start state (the greeting is the h1 there)", () => {
     renderHeader({ title: null });
     expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("shows the phone header on a phone, held either way, and the full one beside the side navigation", () => {
+    renderHeader();
+    const phone = screen.getByRole("button", { name: "Öppna menyn" }).parentElement!;
+    expect(phone.className).toContain("wide:hidden");
+    // The full header's h1 is shown; the phone's is for assistive technology only.
+    const full = screen
+      .getAllByRole("heading", { level: 1 })
+      .find((heading) => !heading.classList.contains("sr-only"))!.parentElement!;
+    expect(full.className).toContain("wide:flex");
+    expect(full.className).not.toContain("lg:flex");
   });
 
   it("asks the app shell to open its navigation from the phone header", () => {
@@ -141,7 +152,7 @@ describe("ChatHeader below 1024px (decision 2)", () => {
     renderHeader();
     const header = phoneHeader();
     const switcher = within(header).getByRole("button", {
-      name: "Upphandlingsanalys mot LOU. Upphandlingsassistenten i Upphandling, säkerhetsklass Intern. Byt assistent"
+      name: "Upphandlingsanalys mot LOU. Upphandlingsassistenten Intern. I Upphandling. Byt assistent"
     });
     // What the name says, the switcher shows: the title, then the assistant and the class.
     expect(switcher.textContent).toMatch(
@@ -160,7 +171,7 @@ describe("ChatHeader below 1024px (decision 2)", () => {
     renderHeader({ title: null });
     expect(
       within(phoneHeader()).getByRole("button", {
-        name: "Upphandlingsassistenten i Upphandling, säkerhetsklass Intern. Byt assistent"
+        name: "Upphandlingsassistenten Upphandling Intern. Byt assistent"
       })
     ).toBeTruthy();
     expect(within(phoneHeader()).queryByRole("heading")).toBeNull();
@@ -182,6 +193,31 @@ describe("ChatHeader below 1024px (decision 2)", () => {
         name: "Hur långt har ärende BN 2026-0412 kommit? Personlig assistent. Byt assistent"
       })
     ).toBeTruthy();
+  });
+
+  it("starts each switcher's name with what it shows, in order, so a voice command reaches it (WCAG 2.5.3)", () => {
+    const names = {
+      titled:
+        "Upphandlingsanalys mot LOU. Upphandlingsassistenten Intern. I Upphandling. Byt assistent",
+      untitled: "Upphandlingsassistenten Upphandling Intern. Byt assistent"
+    };
+    for (const [variant, name] of Object.entries(names)) {
+      renderHeader(variant === "titled" ? {} : { title: null });
+      expectNameToHoldVisibleText(within(phoneHeader()).getByRole("button", { name }), name);
+      expectNameToHoldVisibleText(
+        screen.getByRole("button", { name: DESKTOP_SWITCHER }),
+        DESKTOP_SWITCHER
+      );
+      cleanup();
+    }
+  });
+
+  it("names the composer's assistant token by the name it shows, then what it does", () => {
+    const name = "Upphandlingsassistenten. Byt assistent";
+    renderInApp(
+      <PartnerSwitcher partner={partner} items={items} subtitle={null} variant="token" />
+    );
+    expectNameToHoldVisibleText(screen.getByRole("button", { name }), name);
   });
 
   it("shows the same lines without a menu when there is no other assistant to switch to", () => {

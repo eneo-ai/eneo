@@ -111,7 +111,7 @@ function sectionLinks() {
 
 /** The model switches sit behind each card's "choose" button. */
 async function openModels(kind: string) {
-  fireEvent.click(await screen.findByRole("button", { name: `Välj ${kind}` }));
+  fireEvent.click(await screen.findByRole("button", { name: `Välj modeller, ${kind}` }));
 }
 
 it("offers section links and keeps each model type separate from tools", () => {
@@ -173,7 +173,7 @@ it("opens on a phone with an index of the sections, as the assistant editor does
   expect(rows[1]!.textContent).toMatch(/^Säkerhet och integritet, .*30/);
   // The index names itself (the frame's bar shows its title only after a scroll), under the
   // frame's h1, not beside it.
-  const names = [...container.querySelectorAll("h2.md\\:hidden")].map(
+  const names = [...container.querySelectorAll("h2.wide\\:hidden")].map(
     (heading) => heading.textContent
   );
   expect(names).toEqual(["Inställningar"]);

@@ -7,7 +7,7 @@ import { useAppContext } from "@/components/providers/app-context";
 import { ResourceCollection } from "@/components/composites/resource-tile";
 import { CreateChatAppMenu } from "@/features/assistants/create-menu";
 import { ChatAppTile } from "@/features/assistants/tile";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { useSpace } from "../use-space";
 import { recentChatItems } from "./overview-data";
 import { OverviewCreateCard, OverviewLink, OverviewSection } from "./overview-section";
@@ -15,14 +15,15 @@ import { OverviewCreateCard, OverviewLink, OverviewSection } from "./overview-se
 /**
  * The newest assistants and group chats as cards (one row), plus the create
  * card for users who may create; on a phone the create control sits in the
- * heading instead of a card. "Visa alla" leads to the assistants tab.
+ * heading instead of a card. Both are small and secondary: the tab's docked
+ * button is the primary action. "Visa alla" leads to the assistants tab.
  */
 export function OverviewAssistants() {
   const t = useTranslations();
   const { space, routeId, can } = useSpace();
   const collator = useCollator();
   const { settings } = useAppContext();
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const items = recentChatItems(space, collator.compare);
   const canCreate = can("create", "assistant");
   const createCard = canCreate && !phone;
@@ -36,7 +37,7 @@ export function OverviewAssistants() {
       end={
         items.length > 0 ? (
           <>
-            {canCreate && phone ? <CreateChatAppMenu /> : null}
+            {canCreate && phone ? <CreateChatAppMenu secondary /> : null}
             <OverviewLink
               href={`/spaces/${routeId}/assistants`}
               label={t("space_view_all_assistants")}
@@ -69,7 +70,7 @@ export function OverviewAssistants() {
                     ? t("space_new_assistant_hint_templates")
                     : t("space_new_assistant_hint")
                 }
-                action={<CreateChatAppMenu />}
+                action={<CreateChatAppMenu secondary />}
               />
             ) : undefined
           }

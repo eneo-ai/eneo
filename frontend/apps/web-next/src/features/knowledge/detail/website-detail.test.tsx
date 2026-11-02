@@ -387,7 +387,7 @@ describe("WebsiteDetail", () => {
 
     expect(screen.getByText("Senaste avslutade körningen hade fel")).toBeTruthy();
     fireEvent.click(
-      screen.getByRole("button", { name: "Visa sidor som inte kunde indexeras (2)" })
+      screen.getByRole("button", { name: "Sidor: 2, visa de som inte kunde indexeras" })
     );
     const dialog = await screen.findByRole("dialog");
     expect(within(dialog).getByRole("radio", { name: "Sidor" }).getAttribute("aria-checked")).toBe(

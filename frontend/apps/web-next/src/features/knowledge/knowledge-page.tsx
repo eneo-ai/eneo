@@ -6,7 +6,7 @@ import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useId, useRef } from "react";
 import type { TableName } from "@/components/astryx/table";
 import { PageHeader } from "@/components/composites/page-header";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { RemovalFocusScope } from "@/features/spaces/removal";
 import { useSpace } from "@/features/spaces/use-space";
 import { CollectionsTab } from "./collections";
@@ -42,7 +42,7 @@ export function KnowledgePage({
   const searchParams = useSearchParams();
   const baseId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
 
   const tabs = KNOWLEDGE_TABS.filter((tab) => can("read", tab.resource)).map((tab) => tab.id);
   const tab = readKnowledgeTab(searchParams, tabs);
@@ -69,8 +69,8 @@ export function KnowledgePage({
       />
       {tabs.length > 0 ? (
         <div className="@container flex flex-col gap-4">
-          {phone !== false ? (
-            <div className="md:hidden">
+          {phone ? (
+            <div>
               <div className="hidden @min-[20.5rem]:block [&_[role=radio]]:px-1.5">
                 <SegmentedControl
                   label={t("space_knowledge_tabs_label")}
@@ -95,22 +95,19 @@ export function KnowledgePage({
                 />
               </div>
             </div>
-          ) : null}
-          {phone !== true ? (
-            <div className="max-md:hidden">
-              <TabList
-                role="tablist"
-                aria-label={t("space_knowledge_tabs_label")}
-                value={tab}
-                onChange={(value) => selectTab(value as KnowledgeTab)}
-                hasDivider
-              >
-                {tabs.map((id) => (
-                  <Tab key={id} id={tabId(id)} value={id} label={t(id)} panelId={panelId} />
-                ))}
-              </TabList>
-            </div>
-          ) : null}
+          ) : (
+            <TabList
+              role="tablist"
+              aria-label={t("space_knowledge_tabs_label")}
+              value={tab}
+              onChange={(value) => selectTab(value as KnowledgeTab)}
+              hasDivider
+            >
+              {tabs.map((id) => (
+                <Tab key={id} id={tabId(id)} value={id} label={t(id)} panelId={panelId} />
+              ))}
+            </TabList>
+          )}
           <div
             ref={panelRef}
             id={panelId}

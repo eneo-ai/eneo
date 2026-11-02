@@ -7,7 +7,7 @@ import type { TableName } from "@/components/astryx/table";
 import { ClientTime } from "@/components/composites/client-time";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useFocusAcrossLayouts } from "@/lib/hooks/use-focus-across-layouts";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { VendorIcon } from "./integrations/vendor";
 import { rowNeedsStatus, type KnowledgeRow } from "./knowledge-rows";
 
@@ -121,22 +121,16 @@ export function KnowledgeRows({ items, name, empty }: RowsProps) {
 }
 
 /**
- * Rows on a phone, the table (`children`) from 768 px. Both render until the
- * width is known (CSS shows one from the server render); a turn across
- * 768 px keeps focus on the same item.
+ * Rows on a phone, held either way, the table (`children`) otherwise; a turn
+ * between the two keeps focus on the same item.
  */
 export function RowsOrTable({ children, ...rows }: RowsProps & { children: ReactNode }) {
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const box = useRef<HTMLDivElement>(null);
   useFocusAcrossLayouts(box, phone);
   return (
     <div ref={box} className="contents">
-      {phone !== false ? (
-        <div className="md:hidden">
-          <KnowledgeRows {...rows} />
-        </div>
-      ) : null}
-      {phone !== true ? <div className="max-md:hidden">{children}</div> : null}
+      {phone ? <KnowledgeRows {...rows} /> : children}
     </div>
   );
 }

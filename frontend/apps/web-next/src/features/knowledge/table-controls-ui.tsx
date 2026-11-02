@@ -92,7 +92,7 @@ export function KnowledgeTableControls({
       {/* contents on a phone: a docked action leaves the flow (no gap for it),
           and the others keep to the end. */}
       {children ? (
-        <div className="flex flex-wrap justify-end gap-2 max-md:contents max-md:*:self-end">
+        <div className="phone:contents phone:*:self-end flex flex-wrap justify-end gap-2">
           {children}
         </div>
       ) : null}

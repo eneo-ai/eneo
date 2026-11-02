@@ -405,8 +405,8 @@ function AnswerActions({
     if (trigger) open(trigger);
   };
   const moreItems = [
-    { label: t("copy_as_markdown"), onClick: () => void copy("markdown") },
     { label: t("copy_as_richtext"), onClick: () => void copy("richtext") },
+    { label: t("copy_as_markdown"), onClick: () => void copy("markdown") },
     ...(hasActivity
       ? [{ label: t("chat_show_activity"), onClick: () => openPanel(onShowActivity) }]
       : []),
@@ -477,12 +477,17 @@ function AnswerActions({
         </span>
       )}
       <div ref={moreRef} className="contents">
+        {/* No className: MoreMenu puts it on the menu, not on its button (the
+            theme already makes the button 44 px on touch). Centred, the menu
+            slides along the row to fit its longest label: start-aligned, a
+            button near the right edge (the labelled row on a phone) left it
+            only the space to its right. */}
         <MoreMenu
           label={t("chat_more_actions")}
           items={moreItems}
           size="sm"
           placement="below"
-          className={iconClass}
+          alignment="center"
         />
       </div>
       <span className="flex-1" />

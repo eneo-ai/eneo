@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { expectNoAxeViolations } from "@/test/axe";
+import { openMenuOnRelease } from "@/test/menus";
 import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 
 const api = vi.hoisted(() => ({
@@ -135,6 +136,23 @@ describe("ApiKeyActions", () => {
       "Återkalla",
       "Ta bort permanent"
     ]);
+  });
+
+  it("opens its menu on release, and Escape closes it back onto the button (2.5.2)", async () => {
+    serve();
+    show();
+    const more = screen.getByRole("button", { name: "Fler åtgärder för Webbwidget" });
+    await openMenuOnRelease(more);
+    fireEvent.click(more);
+    await waitFor(() => expect(more.getAttribute("aria-expanded")).toBe("false"));
+
+    await openMenu();
+    // A keyboard open focuses the first item a step later; Escape from there.
+    await waitFor(() => expect(document.activeElement?.getAttribute("role")).toBe("menuitem"));
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    await waitFor(() => expect(more.getAttribute("aria-expanded")).toBe("false"));
+    // Astryx returns focus after the menu has closed, a step later.
+    await waitFor(() => expect(document.activeElement).toBe(more));
   });
 
   it("suspends only after a dialog that names the key and takes a reason", async () => {

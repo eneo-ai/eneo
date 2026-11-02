@@ -3,7 +3,9 @@ import type { Schema } from "@/lib/api/models";
 
 export type AssistantCopyFormat = "markdown" | "richtext";
 
-const DEFAULT_COPY_FORMAT: AssistantCopyFormat = "markdown";
+// Formatted text looks right where most answers go (Word, e-mail); a user who
+// has chosen a format under Konto keeps it.
+const DEFAULT_COPY_FORMAT: AssistantCopyFormat = "richtext";
 const COPY_FORMAT_SETTING_KEY = "preferred_text_format";
 
 type SettingsWithChatWidget = Pick<Schema<"SettingsPublic">, "chatbot_widget">;

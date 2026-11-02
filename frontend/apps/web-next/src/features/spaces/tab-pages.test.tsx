@@ -62,12 +62,13 @@ describe("AssistantsPage", () => {
 
     expect(screen.getByRole("heading", { level: 2, name: "Assistenter" })).toBeTruthy();
     expect(screen.getAllByRole("button", { name: "Skapa assistent" })).toHaveLength(1);
-    // Docked at the bottom on a phone, like the apps tab.
+    // Docked at the bottom on a phone, like the apps tab. It is the tab's
+    // primary action, so it stays filled (the overview's are secondary).
     expect(
       within(screen.getByRole("group", { name: "Assistenter, åtgärder" })).getByRole("button", {
         name: "Skapa assistent"
-      })
-    ).toBeTruthy();
+      }).dataset.variant
+    ).toBe("primary");
     const published = screen.getByRole("region", { name: "Publicerad" });
     const card = within(published).getByRole("link", { name: "Upphandlingsassistenten" });
     expect(card.getAttribute("href")).toBe("/spaces/space-1/chat?type=assistant&id=assistant-1");
@@ -190,6 +191,8 @@ describe("AppsPage", () => {
     expect(
       screen.getByRole("button", { name: "Fler åtgärder för Protokollsammanfattning" })
     ).toBeTruthy();
+    // The tab's primary action stays filled (the overview's are secondary).
+    expect(screen.getByRole("button", { name: "Skapa app" }).dataset.variant).toBe("primary");
     await expectNoAxeViolations(apps.container);
   });
 

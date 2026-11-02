@@ -162,6 +162,38 @@ describe("ChatMessage", () => {
     expect(onActivityToggle).toHaveBeenCalledWith(more, { tab: "steps" });
   });
 
+  it("opens the more menu as wide as its longest label, centred on its button, on a phone and with a mouse", () => {
+    for (const size of ["phone", "desktop"] as const) {
+      setViewport(size);
+      renderMessages(
+        <ChatMessage message={answer} assistant={assistant} onActivityToggle={vi.fn()} canDebug />
+      );
+      const more = screen.getByRole("button", { name: "Fler åtgärder" });
+      fireEvent.click(more);
+      const menu = document.getElementById(more.getAttribute("aria-controls") ?? "")!;
+      // MoreMenu puts its className on the menu, not on its button: a size
+      // meant for the button made the menu a 44 px square showing "K…".
+      expect(
+        menu.className.split(/\s+/).filter((name) => /(^|:)(size|w|h|max-w|max-h)-/.test(name))
+      ).toEqual([]);
+      // Start-aligned, a button near the right edge left the menu only the
+      // space to its right; centred, it slides along the row to fit.
+      expect(menu.closest<HTMLElement>("[popover]")?.style.getPropertyValue("position-area")).toBe(
+        "self-block-end"
+      );
+      const labels = within(menu)
+        .getAllByRole("menuitem")
+        .map((item) => item.textContent);
+      expect(labels).toEqual([
+        "Kopiera som formaterad text",
+        "Kopiera som markdown",
+        "Visa aktivitet",
+        "Felsök"
+      ]);
+      cleanup();
+    }
+  });
+
   it("lists the answer's sources under it, numbered, each opening its source (decision 6)", async () => {
     const onActivityToggle = vi.fn();
     const { container } = renderMessages(

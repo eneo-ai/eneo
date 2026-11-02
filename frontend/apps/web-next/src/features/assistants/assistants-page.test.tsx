@@ -49,7 +49,7 @@ describe("AssistantsPage on a phone", () => {
     const { container } = show(3);
     // The space's active tab above says "Assistenter": the title is not drawn again.
     const title = screen.getByRole("heading", { level: 2, name: "Assistenter" });
-    expect(title.closest(".max-md\\:sr-only")).toBeTruthy();
+    expect(title.closest(".phone\\:sr-only")).toBeTruthy();
     // What a removal or an action needs to focus is the page, not the clipped title.
     const page = container.querySelector<HTMLElement>("div.flex.w-full.flex-col[tabindex='-1']");
     expect(page).toBeTruthy();

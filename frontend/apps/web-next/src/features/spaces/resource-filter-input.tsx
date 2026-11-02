@@ -3,7 +3,7 @@ import { TextInput } from "@/components/astryx/text-input";
 import { Search } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, type Ref } from "react";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
@@ -12,7 +12,7 @@ export const PHONE_FILTER_FROM = 7;
 
 /** Whether a list of `count` items shows its filter: always but on a phone, which needs many items. */
 export function useFilterShown(count: number): boolean {
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   return !phone || count >= PHONE_FILTER_FROM;
 }
 

@@ -18,13 +18,16 @@ beforeAll(async () => {
 });
 
 describe("getPreferredAssistantCopyFormat", () => {
-  it("falls back to markdown for missing or invalid settings", () => {
-    expect(getPreferredAssistantCopyFormat(null)).toBe("markdown");
-    expect(getPreferredAssistantCopyFormat({ chatbot_widget: {} })).toBe("markdown");
+  it("copies formatted text until the user has chosen, and keeps a chosen format", () => {
+    expect(getPreferredAssistantCopyFormat(null)).toBe("richtext");
+    expect(getPreferredAssistantCopyFormat({ chatbot_widget: {} })).toBe("richtext");
     expect(
       getPreferredAssistantCopyFormat({
         chatbot_widget: { preferred_text_format: "html" }
       })
+    ).toBe("richtext");
+    expect(
+      getPreferredAssistantCopyFormat({ chatbot_widget: { preferred_text_format: "markdown" } })
     ).toBe("markdown");
   });
 

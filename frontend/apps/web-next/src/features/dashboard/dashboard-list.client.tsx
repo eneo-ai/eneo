@@ -21,8 +21,13 @@ import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: string }) {
   const t = useTranslations();
-  const subtitle =
-    entry.kind === "app" ? t("shell_catalog_app_in_space", { space: spaceName }) : spaceName;
+  // The second line says the kind: the space's name is the heading above the
+  // group. Screen readers still hear "App i …" / "Assistent i …" in the name.
+  const kind = entry.kind === "app" ? t("app") : t("assistant");
+  const kindInSpace =
+    entry.kind === "app"
+      ? t("shell_catalog_app_in_space", { space: spaceName })
+      : t("shell_palette_assistant_in_space", { space: spaceName });
   const icon =
     entry.kind === "app" ? <AppWindow /> : entry.kind === "personal-assistant" ? <User /> : null;
   const avatar = (
@@ -41,7 +46,12 @@ function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: strin
       <ListItem
         href={entry.href}
         label={<span className="block truncate font-semibold">{entry.name}</span>}
-        description={subtitle}
+        description={
+          <>
+            <span aria-hidden="true">{kind}</span>
+            <span className="sr-only">{kindInSpace}</span>
+          </>
+        }
         startContent={avatar}
       />
     );
@@ -50,7 +60,7 @@ function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: strin
   return (
     <li>
       <ClickableCard
-        label={t("shell_catalog_card_label", { name: entry.name, space: subtitle })}
+        label={t("shell_catalog_card_label", { name: entry.name, space: kindInSpace })}
         href={entry.href}
         padding={3}
         className="h-full"
@@ -60,7 +70,7 @@ function EntryCard({ entry, spaceName }: { entry: CatalogEntry; spaceName: strin
           {avatar}
           <span className="flex min-w-0 flex-col gap-0.5">
             <span className="truncate font-semibold">{entry.name}</span>
-            <span className="text-ax-text-secondary truncate text-xs">{subtitle}</span>
+            <span className="text-ax-text-secondary truncate text-xs">{kind}</span>
           </span>
         </span>
       </ClickableCard>
