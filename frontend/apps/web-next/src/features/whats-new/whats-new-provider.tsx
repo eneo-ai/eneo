@@ -12,7 +12,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { sessionQueries } from "@/lib/api/session";
-import { pendingAnnouncement, type Marker, type Reminder } from "./release-model";
+import { isReadRelease, pendingAnnouncement, type Marker, type Reminder } from "./release-model";
 
 interface WhatsNewContextValue {
   /** Releases with at least one entry visible under the user's permissions. */
@@ -36,7 +36,12 @@ const markers = sessionQueries(browserApi).whatsNew;
 
 const REMINDER_DELAY_MS = 24 * 60 * 60 * 1000;
 
-function readReminder(key: string): Reminder {
+/** The reminder this app load finds; one for a release already read (in another browser, say) is dropped. */
+function readReminder(key: string, read: boolean): Reminder {
+  if (read) {
+    forgetReminder(key);
+    return null;
+  }
   try {
     const remindAt = Number(globalThis.localStorage?.getItem(key) ?? "");
     if (!Number.isFinite(remindAt) || remindAt <= 0) return null;
@@ -78,7 +83,9 @@ export function WhatsNewProvider({ children }: { children: React.ReactNode }) {
   // "Later" reminders are this browser's, per account and installed release
   // (RCs included), read once per app load.
   const reminderKey = `eneo:whats-new:remind-after:${user.id}:${latest?.version}`;
-  const [reminder, setReminder] = useState(() => readReminder(reminderKey));
+  const [reminder, setReminder] = useState(() =>
+    readReminder(reminderKey, latest !== undefined && isReadRelease(latest, seenVersion ?? null))
+  );
 
   // One marker at a time, so an answer never overwrites the other marker's
   // pending change. Unknown markers (null) stay unknown.

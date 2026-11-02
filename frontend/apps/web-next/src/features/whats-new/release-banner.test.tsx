@@ -138,6 +138,7 @@ describe("WhatsNewBanner", () => {
 
     expect(banner()).toBeNull();
     expect(put).not.toHaveBeenCalled();
+    expect(localStorage.getItem(reminderKey)).toBeNull();
   });
 
   it("stays open and says so when the reminder cannot be saved", async () => {
