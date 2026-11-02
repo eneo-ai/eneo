@@ -133,8 +133,8 @@ describe("ShellCommandPalette", () => {
     const combobox = within(dialog).getByRole("combobox", {
       name: "Sök bland assistenter, ytor, konversationer, kunskap och åtgärder"
     });
+    // The results are a listbox once there are results to pick from.
     await within(dialog).findByRole("option", { name: /Upphandlingsassistenten/ });
-    // The list is a listbox while it holds results.
     expect(combobox.getAttribute("aria-controls")).toBe(
       within(dialog).getByRole("listbox").getAttribute("id")
     );
