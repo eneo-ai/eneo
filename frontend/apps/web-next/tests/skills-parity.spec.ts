@@ -32,7 +32,7 @@ test(
       content("Reviewed version")
     );
     await page.goto(`/spaces/organization/skills/${skill.id}`);
-    await page.getByRole("button", { name: "Visa version 1", exact: true }).click();
+    await page.getByRole("button", { name: "Förhandsvisning av version 1", exact: true }).click();
     const preview = page.getByRole("dialog", { name: "Version 1", exact: true });
     await expect(
       preview.getByText(skill.current_revision.instructions, { exact: true })

@@ -3,7 +3,7 @@ import { expect, test } from "./csp";
 import { createSpace, productionAsset, uniqueName } from "./helpers";
 import sv from "../src/lib/i18n/messages/sv.json";
 
-// Below 1024 px a page's own header replaces the shell's top bar. These
+// On a phone a page's own header replaces the shell's top bar. These
 // checks cover loaded screens and navigation when a page chunk is delayed or missing.
 
 const PHONE = { viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true };
@@ -11,6 +11,8 @@ test.use(PHONE);
 
 // The shell's top bar: a space's own header (tablets, desktop) is a <header> in main.
 const TOP_BAR = "header:not(main *)";
+// A page's own header: a pushed screen's (Konto, the chat) or a phone's only (a space, an admin area).
+const OWN_HEADER = "[data-own-mobile-header], [data-own-phone-header]";
 
 type Frame = { top: boolean; own: boolean; h1: boolean; at: number };
 
@@ -19,28 +21,31 @@ type Frame = { top: boolean; own: boolean; h1: boolean; at: number };
  * page's own header and the page's h1 are on screen (`window.__headerFrames`).
  */
 async function recordHeaders(page: Page) {
-  await page.addInitScript((topBar) => {
-    const frames: Frame[] = [];
-    (window as unknown as { __headerFrames: Frame[] }).__headerFrames = frames;
-    const shown = (element: Element | null) => !!element && element.getClientRects().length > 0;
-    const start = performance.now();
-    const tick = () => {
-      if (document.body) {
-        const frame = {
-          top: shown(document.querySelector(topBar)),
-          own: [...document.querySelectorAll("[data-own-mobile-header]")].some(shown),
-          h1: [...document.querySelectorAll("main h1")].some(shown),
-          at: Math.round(performance.now() - start)
-        };
-        const last = frames.at(-1);
-        if (!last || last.top !== frame.top || last.own !== frame.own || last.h1 !== frame.h1) {
-          frames.push(frame);
+  await page.addInitScript(
+    ([topBar, ownHeader]) => {
+      const frames: Frame[] = [];
+      (window as unknown as { __headerFrames: Frame[] }).__headerFrames = frames;
+      const shown = (element: Element | null) => !!element && element.getClientRects().length > 0;
+      const start = performance.now();
+      const tick = () => {
+        if (document.body) {
+          const frame = {
+            top: shown(document.querySelector(topBar)),
+            own: [...document.querySelectorAll(ownHeader)].some(shown),
+            h1: [...document.querySelectorAll("main h1")].some(shown),
+            at: Math.round(performance.now() - start)
+          };
+          const last = frames.at(-1);
+          if (!last || last.top !== frame.top || last.own !== frame.own || last.h1 !== frame.h1) {
+            frames.push(frame);
+          }
         }
-      }
+        requestAnimationFrame(tick);
+      };
       requestAnimationFrame(tick);
-    };
-    requestAnimationFrame(tick);
-  }, TOP_BAR);
+    },
+    [TOP_BAR, OWN_HEADER] as const
+  );
 }
 
 const headerFrames = (page: Page) =>
@@ -51,7 +56,7 @@ test("a loaded pushed screen or chat shows only its own header", async ({ page }
 
   for (const pushed of ["/admin/users", "/account/appearance", "/spaces/personal/chat"]) {
     await open(pushed);
-    await expect(page.locator("[data-own-mobile-header]")).toBeVisible({ timeout: 15_000 });
+    await expect(page.locator(OWN_HEADER)).toBeVisible({ timeout: 15_000 });
     await expect(page.locator(TOP_BAR)).toBeHidden();
   }
   await open("/admin/users");
@@ -61,12 +66,12 @@ test("a loaded pushed screen or chat shows only its own header", async ({ page }
 
   for (const root of ["/admin", "/account", "/spaces/list"]) {
     await open(root);
-    // Konto is rendered with "Mitt konto" until the width is known, CSS showing one.
+    // Konto is rendered with the frame's heading until the width is known, CSS showing one.
     await expect(page.locator("main h1").filter({ visible: true })).toBeVisible({
       timeout: 15_000
     });
     await expect(page.locator(TOP_BAR)).toBeVisible();
-    await expect(page.locator("[data-own-mobile-header]")).toHaveCount(0);
+    await expect(page.locator(OWN_HEADER)).toHaveCount(0);
   }
 });
 
@@ -130,6 +135,35 @@ test("a long space name in the back link never makes a 320 px page scroll sidewa
   expect(box.x + box.width).toBeLessThanOrEqual(320);
 });
 
+test("every admin area's back link shows Administration, whatever the area's title", async ({
+  page
+}) => {
+  for (const area of ["/admin/users", "/admin/user-groups", "/admin/security-classifications"]) {
+    await page.goto(area);
+    const back = page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ });
+    await expect(back).toBeVisible({ timeout: 15_000 });
+    await expect(back).toHaveText(/^(Administration)$/);
+  }
+});
+
+test("an iPad held upright shows an admin area beside the icon rail, without the phone's bars", async ({
+  page
+}) => {
+  await page.setViewportSize({ width: 820, height: 1180 });
+  await page.goto("/admin/users");
+  await expect(page.locator("main h1")).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator(TOP_BAR)).toBeHidden();
+  await expect(page.getByRole("button", { name: /^(Öppna menyn|Open menu)$/ })).toHaveCount(0);
+  await expect(
+    page.getByRole("link", { name: /^(Tillbaka till|Back to) Administration$/ })
+  ).toBeHidden();
+  // The rail lists every area; each item is named, as its tooltip shows.
+  await expect(
+    page.getByRole("button", { name: /^(Fäll ut sidomenyn|Expand the side menu)$/ })
+  ).toBeVisible();
+  await expect(page.getByRole("link", { name: /^(Användare|Users)$/ }).first()).toBeVisible();
+});
+
 test("the shell remains usable while a destination's code loads", async ({ page }) => {
   const asset = productionAsset("src/routes/_app/admin/users.tsx?tsr-split=component");
   let held = 0;
@@ -160,7 +194,7 @@ test("the shell remains usable while a destination's code loads", async ({ page 
 
     release();
     await expect(page).toHaveURL(/\/admin\/users$/);
-    await expect(page.locator("[data-own-mobile-header]")).toBeVisible();
+    await expect(page.locator(OWN_HEADER)).toBeVisible();
     await expect(page.locator(TOP_BAR)).toBeHidden();
     await expect(
       page.getByRole("button", { name: /^(Skapa användare|Create user)$/ })
@@ -193,7 +227,7 @@ test("focus moving up a pushed screen stops below its PageBar", async ({ page })
   await page.setViewportSize({ width: 390, height: 480 });
   await page.goto("/admin/users");
   const barBottom = await page
-    .locator("[data-page-bar]")
+    .locator("[data-phone-page-bar]")
     .evaluate((bar) => bar.getBoundingClientRect().bottom);
   const main = page.locator("#main-content");
 
@@ -210,7 +244,11 @@ test("focus moving up a pushed screen stops below its PageBar", async ({ page })
     await page.keyboard.press("Shift+Tab");
     const top = await page.evaluate(() => {
       const focused = document.activeElement;
-      if (!focused || !focused.closest("#main-content") || focused.closest("[data-page-bar]")) {
+      if (
+        !focused ||
+        !focused.closest("#main-content") ||
+        focused.closest("[data-phone-page-bar]")
+      ) {
         return null;
       }
       return focused.getBoundingClientRect().top;

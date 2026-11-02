@@ -150,7 +150,9 @@ test("a lazy feature in an open conversation survives replacement", async ({
     await conversationLog(page)
       .getByRole("button", { name: /fler åtgärder|more actions/i })
       .click();
-    await page.getByRole("menuitem", { name: /kopiera som rich text|copy as rich text/i }).click();
+    await page
+      .getByRole("menuitem", { name: /kopiera som formaterad text|copy as formatted text/i })
+      .click();
   }
   try {
     await swap("B");

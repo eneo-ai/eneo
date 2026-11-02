@@ -29,6 +29,8 @@ const VIEWPORTS = [
   { name: "phone-390", width: 390, height: 844 },
   // A phone turned: the browser's own bars leave about 300 px of height.
   { name: "phone-landscape", width: 667, height: 300 },
+  // A larger phone turned: wider than 768 px but under 500 px tall, it keeps the phone's layout.
+  { name: "phone-turned", width: 844, height: 390 },
   { name: "ipad-portrait", width: 820, height: 1180 },
   { name: "ipad-landscape", width: 1180, height: 820 }
 ].filter(

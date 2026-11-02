@@ -7,7 +7,7 @@ test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
 /*
  * What opens and closes takes the time of the Eneo motion scale (globals.css; the owner's
- * "Rörelse, touch och prestanda" board): a menu opens in 165 ms and leaves in 125, a drawer, a
+ * "Rörelse, touch och prestanda" board): a menu opens in 165 ms and closes at once, a drawer, a
  * sheet and a dialog open in 225. With the system's "reduce motion" on, nothing runs at all
  * (WCAG 2.3.3, and 2.2.2 for anything that would keep moving). Measured as the browser runs
  * it (document.getAnimations()), a few ms after the control is pressed.
@@ -87,15 +87,6 @@ for (const reduced of [false, true]) {
       );
       await press("drawer close", () => page.keyboard.press("Escape"));
 
-      await openRoute(page, "/account/api-keys", true);
-      await press("legacy menu open", () =>
-        page
-          .getByRole("button", { name: /fler åtgärder för/i })
-          .first()
-          .click()
-      );
-      await press("legacy menu close", () => page.keyboard.press("Escape"));
-
       await openRoute(page, "/spaces/personal/chat", true);
       await press("sheet open", () =>
         page
@@ -118,10 +109,6 @@ for (const reduced of [false, true]) {
       expect(durations(seen["dialog open"]!, /dialog/), "dialog open").toEqual([225]);
       expect(durations(seen["menu open"]!, /^div\./), "menu open").toContain(165);
       expect(durations(seen["drawer open"]!, /dialog|div/), "drawer open").toEqual([225, 225]);
-      expect(durations(seen["legacy menu open"]!, /bg-popover/), "legacy menu open").toContain(165);
-      expect(durations(seen["legacy menu close"]!, /bg-popover/), "legacy menu close").toContain(
-        125
-      );
       expect(durations(seen["sheet open"]!, /dialog|bottom-sheet/).sort(), "sheet open").toEqual([
         225, 225
       ]);

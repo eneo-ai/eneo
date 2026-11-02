@@ -1,6 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect, test } from "./csp";
-import { apiPost, createSpace, uniqueName } from "./helpers";
+import { apiPost, createSpace, spaceWithWork, uniqueName } from "./helpers";
 
 /**
  * Creates an app in a new space and starts a text run; returns the run's
@@ -64,4 +64,31 @@ test.describe("a pending result on a tablet", () => {
     const headingBox = (await heading.boundingBox())!;
     expect((await dock.boundingBox())!.y).toBeLessThan(headingBox.y + headingBox.height + 64);
   });
+});
+
+test.describe("an app's Kör tab from 768 px", () => {
+  for (const width of [820, 1280]) {
+    test.describe(`at ${width} px`, () => {
+      test.use({ viewport: { width, height: 1180 } });
+
+      test("starts the card on the left line of the heading and the tabs", async ({ page }) => {
+        const { app, dashboardApp } = await spaceWithWork(page, uniqueName("Run card"));
+        for (const url of [app, dashboardApp]) {
+          await page.goto(url);
+          const main = page.getByRole("main");
+          const tabs = main
+            .getByRole("tablist")
+            .filter({ has: page.getByRole("tab", { name: "Kör" }) });
+          // The card is the Kör panel's first box (the drop overlay is not shown).
+          const card = main.getByRole("tabpanel", { name: "Kör" }).locator(":scope > div > div");
+          await expect(card).toBeVisible();
+          const left = Math.round((await card.boundingBox())!.x);
+          expect(left).toBe(Math.round((await tabs.boundingBox())!.x));
+          expect(left).toBe(
+            Math.round((await main.getByRole("heading", { level: 1 }).boundingBox())!.x)
+          );
+        }
+      });
+    });
+  }
 });

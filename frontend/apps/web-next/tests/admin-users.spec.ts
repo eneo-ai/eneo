@@ -1,80 +1,37 @@
 import { expect, test } from "./csp";
 
-test.describe("the admin users table on a phone (decision 9)", () => {
+test.describe("the admin users list on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
-  test("leaves enough room to read a role between fixed columns at 320 px", async ({ page }) => {
+  test("shows a user on the first screen at 320 px, as a row with a 44 px menu", async ({
+    page
+  }) => {
     await page.setViewportSize({ width: 320, height: 568 });
     await page.goto("/admin/users");
-    const table = page.getByRole("table", { name: "Aktiva användare" });
-    const role = table.locator("tbody tr").first().getByRole("cell").nth(1).locator("li").first();
-    await expect(role).toBeVisible();
-    const widths = await role.evaluate((element) => {
-      const region = element.closest(".astryx-table-scroll-wrapper")!;
-      const headers = [...region.querySelectorAll<HTMLElement>("thead th")];
-      const pinned = headers.filter(
-        (header) => header.style.insetInlineStart || header.style.insetInlineEnd
-      );
-      return {
-        role: element.getBoundingClientRect().width,
-        readable:
-          region.getBoundingClientRect().width -
-          pinned.reduce((sum, header) => sum + header.getBoundingClientRect().width, 0)
-      };
-    });
-    expect(widths.readable, JSON.stringify(widths)).toBeGreaterThanOrEqual(widths.role);
+    const list = page.getByRole("list", { name: "Aktiva användare" });
+    const first = list.getByRole("listitem").first();
+    await expect(first).toBeInViewport();
+    await expect(page.getByRole("table")).toHaveCount(0);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
+      320
+    );
+    const menu = first.getByRole("button", { name: /^Fler åtgärder för / });
+    expect((await menu.boundingBox())!.height).toBeGreaterThanOrEqual(44);
   });
 
-  test("keeps every column, scrolls in its own region with the name in view", async ({ page }) => {
+  test("filters by username in the Filter sheet and clears it", async ({ page }) => {
     await page.goto("/admin/users");
-    const table = page.getByRole("table", { name: "Aktiva användare" });
-    const region = page.getByRole("group", { name: "Aktiva användare" });
-    await expect(table).toBeVisible();
-    await expect(table.getByRole("columnheader")).toHaveCount(5);
-    await expect
-      .poll(() => region.evaluate((el) => el.scrollWidth - el.clientWidth))
-      .toBeGreaterThan(0);
-    // The page itself does not scroll sideways: only the table's region.
-    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
-      390
-    );
-
-    // Edge to edge over the 16 px gutter, and scrolled to its end, the name
-    // still starts each row, on the same surface as the cells it covers.
-    await region.evaluate((el) => {
-      el.scrollLeft = el.scrollWidth;
-    });
-    const pinned = await table.evaluate((el) => {
-      const scroller = el.closest(".astryx-table-scroll-wrapper")!;
-      const header = el.querySelector<HTMLElement>("thead th[data-column-key='name']")!;
-      const cell = el.querySelector<HTMLElement>("tbody td")!;
-      const behind = (from: Element) => {
-        for (let node: Element | null = from; node; node = node.parentElement) {
-          const colour = getComputedStyle(node).backgroundColor;
-          if (colour !== "rgba(0, 0, 0, 0)") return colour;
-        }
-        return null;
-      };
-      const box = scroller.getBoundingClientRect();
-      return {
-        scrolled: scroller.scrollLeft > 0,
-        frameLeft: Math.round(box.left),
-        offset: Math.round(header.getBoundingClientRect().left - box.left),
-        cell: getComputedStyle(cell).backgroundColor,
-        row: behind(cell.parentElement!)
-      };
-    });
-    expect(pinned).toEqual({
-      scrolled: true,
-      frameLeft: 0,
-      offset: 0,
-      cell: pinned.row,
-      row: expect.any(String)
-    });
-    // The row menu is a 44 px target once scrolled into view.
-    const menu = table.getByRole("button", { name: /^Fler åtgärder för / }).first();
-    await menu.scrollIntoViewIfNeeded();
-    expect((await menu.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    const list = page.getByRole("list", { name: "Aktiva användare" });
+    await expect(list.getByRole("listitem").first()).toBeVisible();
+    await page.getByRole("button", { name: "Filter", exact: true }).click();
+    const sheet = page.getByRole("dialog", { name: "Filter" });
+    await sheet.getByRole("textbox", { name: "Användarnamn" }).fill("ingen-sadan-anvandare");
+    await sheet.getByRole("button", { name: "Klar" }).click();
+    await expect(sheet).toBeHidden();
+    await expect(page.getByText("Inga användare hittades")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Filter (1)", exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Rensa filter" }).click();
+    await expect(list.getByRole("listitem").first()).toBeVisible();
   });
 });
 

@@ -4,7 +4,7 @@ import { STORAGE_STATE } from "../playwright.config";
 test.skip(!process.env.E2E_BASE_URL, "Requires the FastAPI-served Vite build");
 
 /*
- * Key hints (⌘ ↵ beside Send, ⌘K in the menu and the palette's footer) point at keys.
+ * Key hints (↵ and ⇧ ↵ beside Send, ⌘K in the menu and the palette's footer) point at keys.
  * A touch screen has none, and a phone-width window with a mouse (a desktop browser
  * narrowed to the phone layout, the way a developer or a split view looks at it) has no
  * room for them: they crowd the send button. From the laptop layout up, with a mouse, the
@@ -69,5 +69,30 @@ test(
     // would keep this green if the composer's went missing.
     expect((await visibleKeyHints(page, "[data-start-composer]")).length).toBeGreaterThan(0);
     await context.close();
+  }
+);
+
+test(
+  "Shift+Return adds a line with a mouse, and Return adds one on a touch screen",
+  { tag: ["@vite", "@key-hints"] },
+  async ({ browser, baseURL }) => {
+    for (const touch of [false, true]) {
+      const context = await browser.newContext({
+        baseURL,
+        storageState: STORAGE_STATE,
+        viewport: touch ? { width: 820, height: 1180 } : { width: 1280, height: 800 },
+        hasTouch: touch,
+        isMobile: touch
+      });
+      const page = await context.newPage();
+      await page.goto("/spaces/personal/chat");
+      const field = page.getByRole("textbox", { name: /^Fråga / });
+      await field.fill("a");
+      // Return itself sends with a mouse (unit-tested): nothing is sent here.
+      await field.press(touch ? "Enter" : "Shift+Enter");
+      await expect(field).toHaveValue("a\n");
+      await expect(page.getByRole("log")).toHaveCount(0);
+      await context.close();
+    }
   }
 );

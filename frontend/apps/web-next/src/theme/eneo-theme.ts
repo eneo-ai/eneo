@@ -59,18 +59,18 @@ const categorical = {
   },
   // Status-aligned hues so Badge/Token colours match the status palette.
   green: {
-    fg: ["#1E7A32", "#6CC382"],
-    icon: ["#1E7A32", "#6CC382"],
+    fg: ["#1A6B2C", "#6CC382"],
+    icon: ["#1A6B2C", "#6CC382"],
     bg: ["#E2F2E5", "rgba(108, 195, 130, 0.15)"]
   },
   yellow: {
-    fg: ["#8A5A00", "#E9B949"],
-    icon: ["#8A5A00", "#E9B949"],
+    fg: ["#805400", "#E9B949"],
+    icon: ["#805400", "#E9B949"],
     bg: ["#FCF0D4", "rgba(233, 185, 73, 0.15)"]
   },
   red: {
-    fg: ["#B42330", "#FF8177"],
-    icon: ["#B42330", "#FF8177"],
+    fg: ["#B22330", "#FF8177"],
+    icon: ["#B22330", "#FF8177"],
     bg: ["#FBE5E6", "rgba(255, 129, 119, 0.15)"]
   }
 } as const satisfies Record<string, Record<"fg" | "icon" | "bg", readonly [string, string]>>;
@@ -127,13 +127,13 @@ export const eneoTheme = defineTheme({
     "--color-border-emphasized": ["#D3D7DE", "#2C323B"],
 
     // Status.
-    "--color-success": ["#1E7A32", "#6CC382"],
+    "--color-success": ["#1A6B2C", "#6CC382"],
     "--color-success-muted": ["#E2F2E5", "rgba(108, 195, 130, 0.15)"],
     "--color-on-success": ["#FFFFFF", "#06101C"],
-    "--color-warning": ["#8A5A00", "#E9B949"],
+    "--color-warning": ["#805400", "#E9B949"],
     "--color-warning-muted": ["#FCF0D4", "rgba(233, 185, 73, 0.15)"],
     "--color-on-warning": ["#FFFFFF", "#06101C"],
-    "--color-error": ["#B42330", "#FF8177"],
+    "--color-error": ["#B22330", "#FF8177"],
     "--color-error-muted": ["#FBE5E6", "rgba(255, 129, 119, 0.15)"],
     "--color-on-error": ["#FFFFFF", "#06101C"],
     // Info is a status of its own: Eneo blue, as the accent.
@@ -206,7 +206,13 @@ export const eneoTheme = defineTheme({
     // Boundary of form controls (inputs, selects, checkboxes, radios, switch
     // tracks): 3:1 on every surface, WCAG 1.4.11. The emphasized border above
     // stays the lighter, decorative edge.
-    "--eneo-color-border-control": ["#7E8593", "#747C8B"]
+    "--eneo-color-border-control": ["#7E8593", "#747C8B"],
+    // The selected option of a segmented control or the legacy tabs: a plate
+    // raised above its track, lighter than it in both modes. Light mode keeps
+    // the white plate with no edge; in dark mode a white lift composes over
+    // whichever track it sits on, and the control border edges it (3:1).
+    "--eneo-color-segment-selected": ["#FFFFFF", "rgba(255, 255, 255, 0.14)"],
+    "--eneo-color-segment-selected-edge": ["rgba(0, 0, 0, 0)", "var(--eneo-color-border-control)"]
   },
 
   // Astryx draws form-control boundaries with --color-border-emphasized (and
@@ -239,6 +245,15 @@ export const eneoTheme = defineTheme({
     ),
     switch: {
       base: { "--color-background-gray": "var(--eneo-color-border-control)" }
+    },
+    // Neutral draws the selected segment in the surface colour, darker than its
+    // track in dark mode, so it looked pressed in: the shared raised plate.
+    // An inset edge adds no size.
+    "segmented-control-item": {
+      selected: {
+        backgroundColor: "var(--eneo-color-segment-selected)",
+        boxShadow: "inset 0 0 0 1px var(--eneo-color-segment-selected-edge)"
+      }
     }
   },
 
@@ -250,7 +265,9 @@ export const eneoTheme = defineTheme({
   // triggers, tabs, nav items, inputs and selectors; segmented items sit 4 px
   // inside theirs, checkbox, radio and switch rows get the height their
   // enlarged inputs need (globals.css), and a Selector's search field and
-  // option rows get 44 px of their own.
+  // option rows, every menu row (plain, checkbox, radio, submenu) and a
+  // Collapsible's trigger get 44 px of their own: Astryx sizes those by text
+  // and padding alone.
   adaptations: {
     rules: [
       // Neutral moves touch phones to a 16 px type scale and re-emits its own
@@ -284,7 +301,9 @@ export const eneoTheme = defineTheme({
             "radio-list-item": { base: { minHeight: "44px" } },
             "switch-field": { base: { minHeight: "44px" } },
             "selector-search": { base: { minHeight: "44px" } },
-            "selector-option-row": { base: { minHeight: "44px" } }
+            "selector-option-row": { base: { minHeight: "44px" } },
+            "dropdown-menu-item": { base: { minHeight: "44px" } },
+            "collapsible-trigger": { base: { minHeight: "44px" } }
           }
         }
       }
