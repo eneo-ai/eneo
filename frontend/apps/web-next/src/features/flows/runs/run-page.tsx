@@ -18,7 +18,7 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -494,7 +494,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
       isOpen={stepsOpen ?? false}
       onOpenChange={setStepsOpen}
     >
-      {steps.isError ? (
+      {blockingError(steps) ? (
         <ListError
           error={steps.error}
           title={t("flow_runs_steps_failed")}
@@ -617,21 +617,34 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
       </div>
 
       <div className="flex w-full max-w-5xl flex-col gap-6 py-4 md:gap-8 md:px-6 md:py-5">
-        {progress.isPending ? (
-          <LoadingState rows={4} label={t("flow_runs_run_loading")} />
-        ) : progress.isError ? (
+        {blockingError({
+          data: progress.data,
+          isError: progress.isError,
+          isPending: progress.isPending,
+          errorUpdatedAt: progress.errorUpdatedAt,
+          // It moves on every poll, so reading it would render the page on each one, and it
+          // decides nothing here: a read without data has none (0).
+          dataUpdatedAt: 0
+        }) ? (
           <ListError
             error={progress.error}
             title={t("flow_runs_run_failed_to_load")}
             onRetry={() => void progress.refetch()}
-            isRetrying={progress.isFetching}
+            // Pending again is the retry in flight; `isFetching` moves on every poll as well.
+            isRetrying={progress.isPending}
           />
+        ) : progress.isPending ? (
+          <LoadingState rows={4} label={t("flow_runs_run_loading")} />
         ) : (
           <>
+            {/* A failed poll or read again keeps the run, and a review's draft, on the page. */}
+            <RefreshError
+              queries={[progress, detail, steps, ...(awaitingReview ? [review] : [])]}
+            />
             {run ? (
               <RunProblem run={run} flow={flow} steps={stepViews} onShowStep={revealStep} />
             ) : null}
-            {awaitingReview && review.isError ? (
+            {awaitingReview && blockingError(review) ? (
               <ListError
                 error={review.error}
                 title={t("flow_runs_review_failed_to_load")}
@@ -655,7 +668,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
               />
             ) : null}
             <Section title={t("flow_runs_result_heading")}>
-              {detail.isError ? (
+              {blockingError(detail) ? (
                 <ListError
                   error={detail.error}
                   title={t("flow_runs_detail_failed")}

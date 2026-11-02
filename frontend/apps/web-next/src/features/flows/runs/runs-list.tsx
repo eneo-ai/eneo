@@ -27,7 +27,12 @@ import { TextInput } from "@/components/astryx/text-input";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { EmptyState } from "@/components/composites/empty-state";
 import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
+import {
+  blockingError,
+  ListError,
+  LoadMore,
+  RefreshError
+} from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { useFocusRescue } from "@/lib/focus-rescue";
@@ -426,15 +431,17 @@ export function FlowRunsList({
           <CheckboxInput label={t("flow_runs_only_mine")} value={mine} onChange={setMine} />
         </div>
       ) : null}
-      {runs.isPending ? (
-        <LoadingState rows={3} label={t("flow_runs_loading")} />
-      ) : runs.isError ? (
+      {/* A failed poll keeps the rows read so far; a failed older page is LoadMore's. */}
+      <RefreshError queries={[runs]} />
+      {blockingError(runs) ? (
         <ListError
           error={runs.error}
           title={t("flow_runs_list_failed")}
           onRetry={() => void runs.refetch()}
           isRetrying={runs.isFetching}
         />
+      ) : runs.isPending ? (
+        <LoadingState rows={3} label={t("flow_runs_loading")} />
       ) : items.length === 0 ? (
         <EmptyState
           icon={<History />}
@@ -498,18 +505,7 @@ export function FlowRunsList({
               {t("flow_runs_usage_tokens_explainer")}
             </p>
           ) : null}
-          {runs.hasNextPage ? (
-            <div className="flex justify-center">
-              <Button
-                label={t("flow_runs_show_more")}
-                isLoading={runs.isFetchingNextPage}
-                isInterruptible
-                onClick={() => {
-                  if (!runs.isFetchingNextPage) void runs.fetchNextPage();
-                }}
-              />
-            </div>
-          ) : null}
+          <LoadMore query={runs} label={t("flow_runs_show_more")} />
           {capped ? (
             <p className="text-ax-text-secondary text-sm">
               {t("flow_runs_capped", {

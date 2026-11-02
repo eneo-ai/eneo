@@ -616,12 +616,37 @@ describe("FlowRunPage", () => {
     expect(commits).toBeGreaterThan(0);
     expect(calls(DETAIL)).toHaveLength(1);
 
+    // A poll that failed keeps the run on the page, under a refresh error.
     state.routes[STATUS] = () => ({
       status: 503,
       body: { message: "Busy", code: "service_unavailable" }
     });
     await act(() => vi.advanceTimersByTimeAsync(2_100));
-    expect(await screen.findByText(messages.flow_runs_run_failed_to_load)).toBeTruthy();
+    expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
+    expect(screen.getByText(messages.flow_runs_result_pending)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_run_failed_to_load)).toBeNull();
+  });
+
+  it("renders nothing again while the polls answer the same after a first read that was retried", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const queued = makeRunSummary({ status: "queued", started_at: null, finished_at: null });
+    answerRun(queued, makeRunDetail({ ...queued, result: null }));
+    let failures = 1;
+    state.routes[STATUS] = () =>
+      failures-- > 0
+        ? { status: 503, body: { message: "Busy", code: "service_unavailable" } }
+        : { body: queued };
+    let commits = 0;
+    renderRun(undefined, () => (commits += 1), { retry: 1, retryDelay: 1_000 });
+    await act(() => vi.advanceTimersByTimeAsync(1_100));
+    await screen.findByText(messages.flow_runs_result_pending);
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    const reads = calls(STATUS).length;
+    commits = 0;
+
+    for (let poll = 0; poll < 3; poll += 1) await act(() => vi.advanceTimersByTimeAsync(2_100));
+    expect(calls(STATUS)).toHaveLength(reads + 3);
+    expect(commits).toBe(0);
   });
 
   it("shows the run once its first reads are in, not piece by piece as they arrive", async () => {
@@ -768,6 +793,26 @@ describe("FlowRunPage", () => {
       expect(
         (approve?.init as { params?: { header?: Record<string, string> } }).params?.header
       ).toEqual({ "Idempotency-Key": "review-approve:checkpoint-1:2" });
+    });
+
+    it("keeps the reviewer's unsaved correction when the review cannot be read again", async () => {
+      vi.useFakeTimers({ shouldAdvanceTime: true });
+      answerReview();
+      renderRun(["flows_view", "flows_manage"]);
+      const panel = await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" });
+      fireEvent.change(within(panel).getByLabelText(/^Stegets text/), {
+        target: { value: "Hej Anna, vi återkommer." }
+      });
+
+      state.routes[REVIEW] = () => ({ status: 503, body: { message: "Busy" } });
+      await comeBack();
+
+      expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
+      expect(screen.queryByText(messages.flow_runs_review_failed_to_load)).toBeNull();
+      const kept = screen.getByRole("region", { name: "Granska steg 2: Skriv svar" });
+      expect((within(kept).getByLabelText(/^Stegets text/) as HTMLTextAreaElement).value).toBe(
+        "Hej Anna, vi återkommer."
+      );
     });
 
     it("edits a structured output field by field and puts problems at the field", async () => {

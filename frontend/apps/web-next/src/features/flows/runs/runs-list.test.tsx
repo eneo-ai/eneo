@@ -321,6 +321,38 @@ describe("FlowRunsList", () => {
     );
   });
 
+  it("keeps the runs on screen when a poll fails, and says so", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    answerList([makeRunSummary({ status: "running", finished_at: null })]);
+    renderInApp(<List />);
+    const table = await screen.findByRole("table");
+
+    state.routes[LIST] = () => ({ status: 503, body: { message: "Busy" } });
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+
+    expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
+    expect(within(table).getByText(messages.flow_runs_status_running)).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_list_failed)).toBeNull();
+  });
+
+  it("keeps the runs read so far when an older page fails, and retries that page", async () => {
+    const first = {
+      count: 1,
+      items: [makeRunSummary()],
+      has_more: true,
+      status_counts: NO_COUNTS
+    };
+    state.routes[LIST] = (init: { params: { query: { offset: number } } }) =>
+      init.params.query.offset === 0 ? { body: first } : { status: 503, body: { message: "Busy" } };
+    renderInApp(<List />);
+    const table = await screen.findByRole("table");
+    fireEvent.click(screen.getByRole("button", { name: messages.flow_runs_show_more }));
+
+    expect(await screen.findByText(messages.query_error_load_more_title)).toBeTruthy();
+    expect(within(table).getAllByRole("row")).toHaveLength(2);
+    expect(screen.queryByText(messages.flow_runs_list_failed)).toBeNull();
+  });
+
   it("counts on the first page only, and keeps those counts fresh while it polls", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const OLDER_PAGE = { ...FIRST_PAGE, offset: 25, include_status_counts: false };
