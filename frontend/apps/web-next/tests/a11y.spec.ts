@@ -35,8 +35,8 @@ import {
 // entries without them. Nothing is excluded globally.
 
 // Development-only tooling, absent from production builds (what CI scans):
-// the Next.js dev overlay and the TanStack Query devtools button.
-const DEV_ONLY = ["nextjs-portal", "vite-error-overlay", ".tsqd-parent-container"];
+// the Vite error overlay and the TanStack Query devtools button.
+const DEV_ONLY = ["vite-error-overlay", ".tsqd-parent-container"];
 
 // Best-practice rules on top of the WCAG tags (src/test/wcag.ts): one h1, one main
 // landmark, headings in order, table and landmark structure. While a modal is open axe

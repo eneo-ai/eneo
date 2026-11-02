@@ -61,7 +61,7 @@ def safe_next_path(value: str | None) -> str:
             return DEFAULT_LANDING
         if any(
             path == prefix or path.startswith(prefix + "/")
-            for prefix in ("/login", "/logout", "/api", "/auth", "/_next")
+            for prefix in ("/login", "/logout", "/api", "/auth", "/assets")
         ):
             return DEFAULT_LANDING
     except (UnicodeError, ValueError):
