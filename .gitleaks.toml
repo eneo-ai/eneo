@@ -61,6 +61,24 @@ regexTarget = "secret"
 regexes = ['''^sk-test-12345678$''']
 
 [[rules.allowlists]]
+description = "Synthetic keys the secret-mutation hook tests assert never reach the TanStack caches"
+condition = "AND"
+paths = ['''^frontend/apps/web-next/src/lib/api/use-secret-mutation\.test\.tsx$''']
+regexTarget = "secret"
+regexes = [
+  '''^sk-synthetic-secret-1234$''',
+  '''^sk-synthetic-other-5678$''',
+  '''^sk-synthetic-second-2222$''',
+]
+
+[[rules.allowlists]]
+description = "Synthetic provider key and secret header value the provider editor tests assert never reach the caches"
+condition = "AND"
+paths = ['''^frontend/apps/web-next/src/features/admin/models/provider-edit-dialog\.test\.tsx$''']
+regexTarget = "secret"
+regexes = ['''^sk-synthetic-new-key-5678$''', '''^synthetic-header-secret-9012$''']
+
+[[rules.allowlists]]
 description = "Keyword-argument pair in SharePoint sync tests that the generic rule reads as a token"
 condition = "AND"
 paths = [
