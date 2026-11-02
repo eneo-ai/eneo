@@ -8,7 +8,7 @@ import { useAnnounce } from "@astryxdesign/core/hooks";
 import { MetadataList, MetadataListItem } from "@astryxdesign/core/MetadataList";
 import { Text } from "@astryxdesign/core/Text";
 import { TextArea } from "@astryxdesign/core/TextArea";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { KeyRound } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useId, useRef, useState, type SubmitEvent } from "react";
@@ -20,6 +20,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { ClientSecretField } from "./client-secret-field";
 import {
@@ -176,9 +177,6 @@ function FederationForm({
   const domainsRef = useRef<HTMLTextAreaElement>(null);
   const replaceSecretRef = useRef<HTMLButtonElement>(null);
   const rescueFocus = useFocusRescue();
-  // The body holds the secret, so it is never the mutation's variables
-  // (React Query keeps those in its cache); it lives here until settled.
-  const pendingBody = useRef<FederationPatch | null>(null);
 
   const changed = changedFields(base, draft);
   const problems = validate(draft);
@@ -209,11 +207,9 @@ function FederationForm({
     setSaveError(null);
   }
 
-  const save = useMutation({
-    mutationFn: () => patchFederation(browserApi, pendingBody.current!),
-    onSettled: () => {
-      pendingBody.current = null;
-    },
+  // The body holds the secret.
+  const save = useSecretMutation({
+    mutationFn: (body: FederationPatch) => patchFederation(browserApi, body),
     onSuccess: (saved) => {
       queryClient.setQueryData(FEDERATION_KEY, saved);
       void queryClient.invalidateQueries({ queryKey: FEDERATION_KEY });
@@ -368,8 +364,7 @@ function FederationForm({
         pending={save.isPending}
         onConfirm={() => {
           if (save.isPending) return;
-          pendingBody.current = toPatch(base, draft);
-          save.mutate();
+          save.mutate(toPatch(base, draft));
         }}
       >
         <div className="flex flex-col gap-2">

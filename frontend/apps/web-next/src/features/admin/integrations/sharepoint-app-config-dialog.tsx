@@ -47,6 +47,7 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { toastApiError } from "@/lib/api/toast";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { toast } from "@/lib/toast";
 import { SHAREPOINT_APP_KEY, sharepointAppQueryOptions } from "./integrations";
 import { followServiceAccountSignIn, toastSignInError } from "./service-account-sign-in";
@@ -86,7 +87,6 @@ export function SharePointAppConfigDialog({
   const secretConfirmationRef = useRef<HTMLInputElement>(null);
   const tenantDomainRef = useRef<HTMLInputElement>(null);
   const updateSecretRef = useRef<HTMLButtonElement>(null);
-  const pendingBody = useRef<Schema<"TenantSharePointAppCreate"> | null>(null);
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: SHAREPOINT_APP_KEY });
   const clientIdProblem = clientId.trim() ? null : t("required_field");
@@ -160,13 +160,10 @@ export function SharePointAppConfigDialog({
     onError: (error) => toastApiError(error, t)
   });
 
-  const save = useMutation({
-    // Mutation variables remain in the cache after settlement; credentials stay local.
-    mutationFn: () =>
-      unwrap(browserApi.POST("/api/v1/admin/sharepoint/app", { body: pendingBody.current! })),
-    onSettled: () => {
-      pendingBody.current = null;
-    },
+  // The body holds the client secret.
+  const save = useSecretMutation({
+    mutationFn: (body: Schema<"TenantSharePointAppCreate">) =>
+      unwrap(browserApi.POST("/api/v1/admin/sharepoint/app", { body })),
     onSuccess: () => {
       toast.success(t("sharepoint_app_configured_successfully"));
       void invalidate();
@@ -379,12 +376,11 @@ export function SharePointAppConfigDialog({
                   aria-busy={save.isPending || undefined}
                   onClick={() => {
                     if (save.isPending || !checkFields()) return;
-                    pendingBody.current = {
+                    save.mutate({
                       client_id: config.client_id,
                       client_secret: clientSecret,
                       tenant_domain: config.tenant_domain
-                    };
-                    save.mutate();
+                    });
                   }}
                 >
                   {t("save")}
@@ -415,12 +411,11 @@ export function SharePointAppConfigDialog({
                 aria-busy={save.isPending || undefined}
                 onClick={() => {
                   if (save.isPending || !checkFields()) return;
-                  pendingBody.current = {
+                  save.mutate({
                     client_id: clientId.trim(),
                     client_secret: clientSecret,
                     tenant_domain: tenantDomain.trim()
-                  };
-                  save.mutate();
+                  });
                 }}
               >
                 {t("save")}
