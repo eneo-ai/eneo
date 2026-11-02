@@ -5,7 +5,8 @@ over http, so each request carries the session in an explicit Cookie header.
 """
 
 import asyncio
-from collections.abc import Iterator
+import contextlib
+from collections.abc import AsyncIterator, Iterator
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
@@ -17,6 +18,7 @@ import sqlalchemy as sa
 from fastapi import WebSocketException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
+from sqlalchemy.engine import Engine
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from starlette.status import WS_1008_POLICY_VIOLATION
@@ -25,7 +27,7 @@ from eneo.authentication import browser_session_service
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import session_generation
 from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
-from eneo.database.database import sessionmanager
+from eneo.database.database import SafeAsyncSession, sessionmanager
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.database.tables.users_table import Users
 from eneo.jobs.job_events import job_updates_channel
@@ -735,28 +737,91 @@ async def test_sign_out_clears_a_cookie_that_names_no_session(
     assert still_in.status_code == 200, still_in.text
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_sign_out_that_cannot_reach_the_store_keeps_the_session(
-    client,
-    super_admin_token,
-    patch_auth_service_jwt,
-    mock_transcription_models,
-    browser_session_on,
-):
-    email = await _create_local_user(client, super_admin_token)
-    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
-    cookie = SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
-
+@contextlib.asynccontextmanager
+async def _deletion_fails(sid: str) -> AsyncIterator[None]:
     def unavailable(state) -> None:
         if state.is_delete and state.statement.table.name == "browser_sessions":
             raise OperationalError("DELETE", {}, ConnectionError("store unavailable"))
 
     event.listen(Session, "do_orm_execute", unavailable)
     try:
-        refused = await _sign_out(client, token)
+        yield
     finally:
         event.remove(Session, "do_orm_execute", unavailable)
+
+
+@contextlib.asynccontextmanager
+async def _commit_fails(sid: str) -> AsyncIterator[None]:
+    def deleting(connection, cursor, statement, *args) -> None:
+        if statement.startswith("DELETE FROM browser_sessions"):
+            connection.info["deleted_browser_session"] = True
+
+    def unavailable(connection) -> None:
+        if connection.info.pop("deleted_browser_session", False):
+            raise OperationalError("COMMIT", {}, ConnectionError("store unavailable"))
+
+    event.listen(Engine, "before_cursor_execute", deleting)
+    event.listen(Engine, "commit", unavailable)
+    try:
+        yield
+    finally:
+        event.remove(Engine, "before_cursor_execute", deleting)
+        event.remove(Engine, "commit", unavailable)
+
+
+@contextlib.asynccontextmanager
+async def _row_locked(sid: str) -> AsyncIterator[None]:
+    # Another transaction holds the session's row until the context ends.
+    async with sessionmanager.session() as holder, holder.begin():
+        await holder.execute(
+            sa.select(BrowserSessions.sid)
+            .where(BrowserSessions.sid == sid)
+            .with_for_update()
+        )
+        yield
+
+
+@contextlib.asynccontextmanager
+async def _store_stops_answering(sid: str) -> AsyncIterator[None]:
+    # The store takes the deletion, then never answers again.
+    execute = SafeAsyncSession.execute
+
+    async def stalls(self, statement, *args, **kwargs):
+        result = await execute(self, statement, *args, **kwargs)
+        if getattr(statement, "is_delete", False):
+            await asyncio.Event().wait()
+        return result
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(SafeAsyncSession, "execute", stalls)
+        yield
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "store_failure",
+    [_deletion_fails, _commit_fails, _row_locked, _store_stops_answering],
+    ids=["deletion fails", "commit fails", "row locked", "store stops answering"],
+)
+async def test_sign_out_that_the_store_cannot_confirm_keeps_the_session(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+    store_failure,
+):
+    deadline = 1.0
+    monkeypatch.setattr(browser_session_service, "STORE_DEADLINE_SECONDS", deadline)
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    cookie = SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+
+    async with store_failure(_claims(token)["sid"]):
+        async with asyncio.timeout(deadline + 1):
+            refused = await _sign_out(client, token)
 
     # Not signed out: the cookie stays as the handle for a retry.
     assert refused.status_code == 503, refused.text
@@ -923,6 +988,43 @@ async def test_what_refuses_a_request_ends_an_open_job_event_stream(
         assert ended.status_code == 200
         refused = await client.get("/api/v1/users/me/", headers=cookie)
         assert refused.status_code in (401, 403), refused.text
+    finally:
+        stream.cancel()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_job_event_stream_ends_when_the_store_cannot_answer_its_check(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    redis_client,
+    monkeypatch,
+):
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.5)
+    monkeypatch.setattr(browser_session_service, "STORE_DEADLINE_SECONDS", 1.0)
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    stream = asyncio.create_task(
+        client.get(JOB_EVENTS, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"})
+    )
+    try:
+        await _subscribers(redis_client, _claims(token)["user_id"], 1)
+        assert sessionmanager._engine is not None
+        pool = sessionmanager._engine.pool
+        idle = pool.checkedout()
+        async with sessionmanager.session() as holder, holder.begin():
+            # Every read of the sessions waits behind this transaction.
+            await holder.execute(
+                sa.text("LOCK TABLE browser_sessions IN ACCESS EXCLUSIVE MODE")
+            )
+            async with asyncio.timeout(4):
+                ended = await stream
+            # The check gave its connection back; only the holder's is out.
+            assert pool.checkedout() == idle + 1
+        assert ended.status_code == 200
     finally:
         stream.cancel()
 

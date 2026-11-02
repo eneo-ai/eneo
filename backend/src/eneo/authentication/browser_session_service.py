@@ -18,8 +18,11 @@ token's expiry. A WebSocket keeps its user for as long as it is open, so a
 browser session's token cannot open one.
 """
 
+import asyncio
+import contextlib
 import secrets
 import time
+from collections.abc import AsyncGenerator
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
@@ -38,6 +41,31 @@ logger = get_logger(__name__)
 
 # How often a response that stays open re-runs admission for its session.
 RECHECK_SECONDS = 30.0
+# How long sign-out or that check waits for the database, from taking a
+# connection to the commit, before it gives up (503, or the response ends).
+STORE_DEADLINE_SECONDS = 5.0
+
+
+@contextlib.asynccontextmanager
+async def _store_transaction(session: AsyncSession) -> AsyncGenerator[None]:
+    """A transaction on ``session`` that ends within ``STORE_DEADLINE_SECONDS``.
+
+    The database itself gives up on a statement, a lock wait included, after
+    half of it, so a slow store normally fails as an error the transaction
+    rolls back. The deadline covers the rest (the connection, the commit, a
+    store that stops answering); its cancellation rolls back as well, and the
+    connection goes back to the pool when the session closes.
+    """
+    async with asyncio.timeout(STORE_DEADLINE_SECONDS), session.begin():
+        limit = str(int(STORE_DEADLINE_SECONDS * 500))
+        await session.execute(
+            sa.text(
+                "SELECT set_config('lock_timeout', :limit, true),"
+                " set_config('statement_timeout', :limit, true)"
+            ),
+            {"limit": limit},
+        )
+        yield
 
 
 class BrowserSessionService:
@@ -105,8 +133,8 @@ class BrowserSessionService:
         gone is success: a retry after a lost response still signs out.
 
         Commits on its own, outside any request transaction. When the deletion
-        cannot be confirmed, raises 503: the cookie stays, as the handle for a
-        retry.
+        cannot be confirmed within ``STORE_DEADLINE_SECONDS``, raises 503: the
+        cookie stays, as the handle for a retry.
         """
         try:
             payload = self._verified_payload(token)
@@ -115,7 +143,7 @@ class BrowserSessionService:
         if payload.sid is None:
             return
         try:
-            async with self.session.begin():
+            async with _store_transaction(self.session):
                 await self.session.execute(
                     sa.delete(BrowserSessions).where(
                         BrowserSessions.sid == payload.sid,
@@ -160,8 +188,9 @@ class SessionWatch:
     held only for that check, so what refuses a new request ends the response
     too: sign-out, a password change, signing out everywhere, a deactivated
     account or a suspended tenant. In between, the answer is the clock against
-    the token's expiry. A refusal, the expiry or a check that fails ends the
-    response, and the client reconnects through ordinary authentication.
+    the token's expiry. A refusal, the expiry or a check that fails or does
+    not finish within ``STORE_DEADLINE_SECONDS`` ends the response, and the
+    client reconnects through ordinary authentication.
     """
 
     def __init__(self, payload: JWTPayload, request: Request):
@@ -184,7 +213,7 @@ class SessionWatch:
         from eneo.main.container.container import Container
 
         try:
-            async with sessionmanager.session() as session, session.begin():
+            async with sessionmanager.session() as session, _store_transaction(session):
                 container = Container(session=providers.Object(session))
                 await container.user_service().authenticate_payload(
                     self._payload, self._request
