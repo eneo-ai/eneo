@@ -22,6 +22,7 @@ import { ListError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
+import { hasAnswered } from "@/lib/api/query";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { PHONE_QUERY, useMediaMatch, usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { CopyableValue } from "@/features/chat/debug-section";
@@ -351,17 +352,15 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   // The run shows once its first reads are in, and stays shown: the status and graph, then the
   // detail and steps they unlock (and an open review). Shown as each arrived, the header's status
   // line and title and each section pushed what was already on the screen (layout shift 0.20 on a
-  // phone). A read that failed shows the page with its error, also while it is retried. Only
-  // `isPending` and `failureCount` are read: the update times `blockingError` reads would bring
-  // back one render per poll.
+  // phone). A read that failed shows the page with its error, also while it is retried
+  // (`hasAnswered`, which reads only `isPending` and `failureCount`: other fields, `fetchStatus`
+  // and the update times `blockingError` reads among them, would render the page on every poll).
   const firstReads = [
     progress,
     ...(signature !== null ? [detail, steps] : []),
     ...(awaitingReview ? [review] : [])
   ];
-  if (!shown && firstReads.every((query) => !query.isPending || query.failureCount > 0)) {
-    setShown(true);
-  }
+  if (!shown && firstReads.every(hasAnswered)) setShown(true);
 
   const summary: RunSummary | undefined = progress.data?.status;
   const status = summary?.status ?? null;
