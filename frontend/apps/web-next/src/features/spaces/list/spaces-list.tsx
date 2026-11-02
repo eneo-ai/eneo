@@ -209,7 +209,12 @@ export function SpacesList({ title }: { title: string }) {
             />
           </div>
           {visibleSpaces.length === 0 ? (
-            <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
+            <EmptyState
+              isAnnounced={false}
+              icon={<SearchX />}
+              title={t("no_results_found")}
+              isCompact
+            />
           ) : (
             <ResourceCollection
               desktopList={

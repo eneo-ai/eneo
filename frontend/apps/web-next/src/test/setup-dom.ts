@@ -381,7 +381,7 @@ if (typeof window !== "undefined") {
   window.scrollTo = () => {};
   Element.prototype.scrollIntoView ??= () => {};
 
-  afterEach(() => {
+  afterEach(async () => {
     // Unmount what the test rendered, and drop its toasts: sonner's store is
     // module-wide, so a toast left behind (errors never time out) reaches the
     // next test's Toaster after this test has ended.
@@ -392,5 +392,18 @@ if (typeof window !== "undefined") {
     listening.clear();
     observers.clear();
     resetNavigation();
+    // Astryx's live regions are module-wide too, and take a message on the
+    // next animation frame, joined with whatever else was said in it: a
+    // message the test left pending would be read with the next test's first.
+    // A test that stubbed requestAnimationFrame may never call back: at most 50 ms.
+    if (!vi.isFakeTimers()) {
+      await new Promise<void>((resolve) => {
+        setTimeout(resolve, 50);
+        requestAnimationFrame(() => resolve());
+      });
+    }
+    document.querySelectorAll("[data-astryx-live-region]").forEach((region) => {
+      region.textContent = "";
+    });
   });
 }

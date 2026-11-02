@@ -4,7 +4,7 @@ import { Link } from "@astryxdesign/core/Link";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { Selector } from "@astryxdesign/core/Selector";
 import { Text } from "@astryxdesign/core/Text";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { useQuery } from "@tanstack/react-query";
 import { Plus, Search } from "lucide-react";
@@ -95,7 +95,7 @@ function AttentionBanner({
   }
 
   return (
-    <QuietBanner
+    <Banner
       status={
         rows.some((row) => row.notices.some((notice) => notice.tone === "error"))
           ? "error"
@@ -132,7 +132,7 @@ function AttentionBanner({
           <Text type="supporting">{t("provider_status_attention_hint")}</Text>
         </div>
       ) : null}
-    </QuietBanner>
+    </Banner>
   );
 }
 
@@ -249,7 +249,7 @@ export function ProviderOverview({
           }
         />
       ) : (
-        <EmptyState title={t("no_providers_match")} />
+        <EmptyState isAnnounced={false} title={t("no_providers_match")} />
       );
   } else {
     content = rendered.map(({ section, models: sectionModels }) => (
@@ -351,7 +351,7 @@ export function ProviderOverview({
 
       <AttentionBanner attention={attention} onShowProvider={showProvider} />
       {attention.retiring.length > 0 && (
-        <QuietBanner
+        <Banner
           status="warning"
           collapsible={false}
           title={t(

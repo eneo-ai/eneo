@@ -58,18 +58,20 @@ test("activates a function source from the MCP list and explains a refusal", asy
   await page.goto("/admin/tools?tab=mcp-servers");
   await page.getByRole("switch", { name: "Visa funktionsservrar" }).click();
   const preferredSwitch = page.getByRole("switch", { name: "Aktivera Preferred source" });
+  // The page's refusal banner; Astryx's own assertive live region is also role="alert".
+  const refusal = page.locator('[role="alert"]:not([data-astryx-live-region])');
   await expect(preferredSwitch).not.toBeChecked();
   await expect(page.getByText("API-nyckel i header", { exact: true })).toBeVisible();
   await preferredSwitch.focus();
   await page.keyboard.press("Space");
-  await expect(page.getByRole("alert")).toContainText("Provider has no enabled tools");
+  await expect(refusal).toContainText("Provider has no enabled tools");
   await expect(preferredSwitch).not.toBeChecked();
   await expect(preferredSwitch).toBeFocused();
   refused = false;
   await page.keyboard.press("Space");
   await expect(preferredSwitch).toBeChecked();
   await expect(page.getByRole("switch", { name: "Aktivera Previous source" })).not.toBeChecked();
-  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(refusal).toHaveCount(0);
   const search = page.getByRole("textbox", { name: "Sök MCP-servrar" });
   await search.fill("illustrationer");
   await expect(page.getByRole("link", { name: "Preferred source", exact: true })).toBeVisible();

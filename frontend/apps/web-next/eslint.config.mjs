@@ -23,11 +23,6 @@ const notShippedUi = ["src/**/*.test.tsx"];
 // you build).
 const astryxWrappedImports = [
   {
-    name: "@astryxdesign/core/Switch",
-    message:
-      'Use `Switch` from "@/components/astryx/switch": Astryx\'s busy state announces an English "Loading".'
-  },
-  {
     name: "@astryxdesign/core/Table",
     importNames: ["Table"],
     message:
@@ -48,7 +43,7 @@ const astryxWrappedImports = [
   {
     name: "@astryxdesign/core/TextInput",
     message:
-      'Use `TextInput` from "@/components/astryx/text-input": Astryx drops a caller\'s aria-describedby.'
+      'Use `TextInput` from "@/components/astryx/text-input": its search key puts the phone keyboard away.'
   }
 ];
 

@@ -160,7 +160,7 @@ describe("UserApiKeyList", () => {
   it("keeps the search field in place while the keys load, disabled, so the table does not move", async () => {
     renderInApp(<UserApiKeyList limit={25} onRotated={vi.fn()} />);
     const search = screen.getByRole("textbox", { name: "Sök API-nycklar" });
-    expect((search as HTMLInputElement).disabled).toBe(true);
+    expect(search.getAttribute("aria-disabled")).toBe("true");
     // The label and its description say what is searched; a placeholder only repeated them.
     expect(search.getAttribute("placeholder") ?? "").toBe("");
 

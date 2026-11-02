@@ -286,6 +286,7 @@ export function ToolDecisionBar({
         label={subject}
         height="hug"
         finalFocusRef={reviewButton}
+        padding={0}
       >
         {/* pt clears the sheet's grab handle. */}
         <div className="flex flex-col gap-4 px-4 pt-7">

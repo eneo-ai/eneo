@@ -297,6 +297,7 @@ export function PromptLibraryPage() {
               />
               {filtered.length === 0 ? (
                 <EmptyState
+                  isAnnounced={false}
                   title={t("governance_prompts_no_results")}
                   actions={
                     <Button

@@ -7,7 +7,7 @@ import { PageHeader } from "@/components/composites/page-header";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Card } from "@astryxdesign/core/Card";
 import { Button } from "@astryxdesign/core/Button";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { InsightsRangePicker } from "@/features/insights/insights-range-picker";
 import { insightRangeOfDays, type InsightRange } from "@/features/insights/insights-range";
 import { tokenUsageQueryOptions } from "@/features/admin/usage/usage";

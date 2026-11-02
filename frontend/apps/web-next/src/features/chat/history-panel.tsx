@@ -403,7 +403,13 @@ export function HistoryAside({
 
   if (!inline) {
     return (
-      <BottomSheet isOpen onOpenChange={(open) => !open && onClose()} label={label} height="tall">
+      <BottomSheet
+        isOpen
+        onOpenChange={(open) => !open && onClose()}
+        label={label}
+        height="tall"
+        padding={0}
+      >
         <HistoryPanel {...props} onClose={onClose} />
       </BottomSheet>
     );

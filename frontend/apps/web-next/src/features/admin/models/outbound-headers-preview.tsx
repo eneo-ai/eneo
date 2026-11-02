@@ -7,7 +7,7 @@ import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslations } from "use-intl";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { TextInput } from "@/components/astryx/text-input";
 import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
@@ -66,7 +66,7 @@ function PreviewForUser({ providerId, user }: { providerId: string; user: Previe
       )}
       {result && (
         <>
-          <QuietBanner
+          <Banner
             status={result.blocked ? "warning" : "success"}
             title={resultLabel}
             description={

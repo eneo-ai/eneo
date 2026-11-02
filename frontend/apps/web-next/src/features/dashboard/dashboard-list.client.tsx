@@ -118,6 +118,7 @@ export function DashboardList() {
       </div>
       {visible.length === 0 ? (
         <EmptyState
+          isAnnounced={false}
           icon={<Search />}
           title={t("shell_catalog_no_matches_title")}
           description={t("shell_catalog_no_matches_description", { query: query.trim() })}

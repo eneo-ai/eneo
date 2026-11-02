@@ -101,7 +101,7 @@ function Continue({ conversations }: { conversations: RecentConversation[] }) {
           {t("chat_continue")}
         </h2>
       </div>
-      <List hasDividers edgeCompensation="inline">
+      <List hasDividers edge="outset">
         {conversations.map((conversation) => {
           const context = conversationContext(conversation, t);
           return (
@@ -149,7 +149,7 @@ function QuickAssistants({ assistants }: { assistants: QuickAssistant[] }) {
           {t("chat_show_all_assistants")}
         </Link>
       </div>
-      <List hasDividers edgeCompensation="inline">
+      <List hasDividers edge="outset">
         {assistants.map((assistant) => (
           <ListItem
             key={assistant.id}

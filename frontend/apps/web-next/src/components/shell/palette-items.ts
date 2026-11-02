@@ -23,7 +23,7 @@ export type PaletteEntry = {
   /** Secondary line: where the result lives. */
   subtitle?: string;
   group: PaletteGroup;
-  action: { type: "navigate"; href: string } | { type: "create-space" };
+  command: { type: "navigate"; href: string } | { type: "create-space" };
   visual: PaletteVisual;
   /** Extra text the query also matches (e.g. the space an assistant lives in). */
   keywords?: string[];
@@ -78,7 +78,7 @@ export function buildPaletteEntries(
         id: `${entry.kind}:${entry.id}`,
         label: entry.name,
         group: "assistants" as const,
-        action: { type: "navigate" as const, href: entry.href }
+        command: { type: "navigate" as const, href: entry.href }
       };
       if (entry.kind === "personal-assistant") {
         entries.push({
@@ -109,7 +109,7 @@ export function buildPaletteEntries(
     id: "space:personal",
     label: t("personal"),
     group: "spaces",
-    action: { type: "navigate", href: "/spaces/personal/overview" },
+    command: { type: "navigate", href: "/spaces/personal/overview" },
     visual: { type: "icon", icon: "personal" }
   });
   for (const space of data.spaces ?? []) {
@@ -119,7 +119,7 @@ export function buildPaletteEntries(
       label: space.name,
       subtitle: space.description?.trim() || undefined,
       group: "spaces",
-      action: { type: "navigate", href: `/spaces/${space.id}/overview` },
+      command: { type: "navigate", href: `/spaces/${space.id}/overview` },
       visual: { type: "entity", id: space.id, name: space.name }
     });
   }
@@ -128,7 +128,7 @@ export function buildPaletteEntries(
       id: "space:organization",
       label: t("organization"),
       group: "spaces",
-      action: { type: "navigate", href: "/spaces/organization/knowledge" },
+      command: { type: "navigate", href: "/spaces/organization/knowledge" },
       visual: { type: "icon", icon: "admin" }
     });
   }
@@ -140,7 +140,7 @@ export function buildPaletteEntries(
       // Who it is with, also searchable: "avtalsgranskaren" finds its conversations.
       subtitle: conversationContext(conversation, t) ?? t("personal_assistant"),
       group: "conversations",
-      action: { type: "navigate", href: conversationHref(conversation) },
+      command: { type: "navigate", href: conversationHref(conversation) },
       visual: { type: "icon", icon: "conversation" },
       activeAt: conversation.last_activity_at
     });
@@ -155,7 +155,7 @@ export function buildPaletteEntries(
         label: collection.name,
         subtitle: t("shell_palette_collection_in_space", { space: spaceName }),
         group: "knowledge",
-        action: {
+        command: {
           type: "navigate",
           href: `/spaces/${routeId}/knowledge/collections/${collection.id}`
         },
@@ -168,7 +168,7 @@ export function buildPaletteEntries(
         label: website.name?.trim() || website.url,
         subtitle: t("shell_palette_website_in_space", { space: spaceName }),
         group: "knowledge",
-        action: { type: "navigate", href: `/spaces/${routeId}/knowledge/websites/${website.id}` },
+        command: { type: "navigate", href: `/spaces/${routeId}/knowledge/websites/${website.id}` },
         visual: { type: "icon", icon: "website" },
         keywords: [website.url]
       });
@@ -179,7 +179,7 @@ export function buildPaletteEntries(
     id: "action:new-conversation",
     label: t("new_conversation"),
     group: "actions",
-    action: { type: "navigate", href: NEW_CONVERSATION_HREF },
+    command: { type: "navigate", href: NEW_CONVERSATION_HREF },
     visual: { type: "icon", icon: "compose" }
   });
   if (permissions.canCreateSpace) {
@@ -187,7 +187,7 @@ export function buildPaletteEntries(
       id: "action:create-space",
       label: t("create_space"),
       group: "actions",
-      action: { type: "create-space" },
+      command: { type: "create-space" },
       visual: { type: "icon", icon: "create" }
     });
   }
@@ -198,7 +198,7 @@ export function buildPaletteEntries(
           id: `admin:${item.href}`,
           label: t("shell_palette_admin_page", { page: t(item.labelKey) }),
           group: "actions",
-          action: { type: "navigate", href: item.href },
+          command: { type: "navigate", href: item.href },
           visual: { type: "icon", icon: "admin" },
           searchOnly: true
         });
