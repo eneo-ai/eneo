@@ -62,15 +62,70 @@ test("workflow, local action, scope and gate changes force full validation", () 
   }
 });
 
-test("only the job limit bounds Playwright system libraries from a slow mirror", () => {
+test("apt has deadlines only on its network phase and installs nothing it did not download", () => {
   const action = fs.readFileSync(path.join(root, ".github/actions/setup-playwright/action.yml"), "utf8");
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
-  // Slow mirrors that kept progressing needed about 590 s (develop run 40352666820)
-  // and more than 720 s (run 40367572604); a step deadline turns them red.
-  const step = action.split("- name: Install system libraries\n")[1]?.split(/\n    - name: /)[0];
-  const install = step?.split("\n").find((line) => line.includes("playwright install-deps"));
-  assert.equal(install?.trim(), "bun run --bun playwright install-deps chromium");
-  assert.doesNotMatch(step, /^      timeout-minutes:/m);
+  assert.match(action, /playwright install-deps --dry-run chromium/);
+  assert.match(action, /"\$GITHUB_WORKSPACE\/\.github\/scripts\/ci-apt-install\.sh" "\$\{missing\[@\]\}"/);
+  assert.doesNotMatch(action, /^        bun run --bun playwright install-deps chromium$/m);
+
+  // Stubs record every apt-get call and whether it ran under `timeout`; FAIL_DOWNLOADS
+  // download attempts fail before one succeeds.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "eneo-ci-apt-"));
+  try {
+    const log = path.join(dir, "apt.log");
+    const stub = (name, body) => fs.writeFileSync(path.join(dir, name), `#!/usr/bin/env bash\n${body}\n`, { mode: 0o755 });
+    // `sed -i` without a suffix is GNU syntax; on macOS the stub supplies BSD's empty one.
+    stub("sudo", [
+      '[ "$1" = tee ] && { cat >/dev/null; exit 0; }',
+      'if [ "$1" = sed ] && ! sed --version >/dev/null 2>&1; then shift 2; exec sed -i "" "$@"; fi',
+      'exec "$@"',
+    ].join("\n"));
+    stub("timeout", 'shift 2\nDEADLINE=1 exec "$@"');
+    stub("apt-get", [
+      'echo "${DEADLINE:+deadline }$*" >> "$APT_LOG"',
+      'if [[ "$*" == *--download-only* ]]; then',
+      '  n=$(grep -c -- --download-only "$APT_LOG")',
+      '  [ "$n" -gt "${FAIL_DOWNLOADS:-0}" ]',
+      "fi",
+    ].join("\n"));
+    const mirrors = path.join(dir, "apt-mirrors.txt");
+    const hosted = "http://azure.archive.ubuntu.com/ubuntu/\tpriority:1\nhttps://archive.ubuntu.com/ubuntu/\tpriority:2\n"
+      + "https://security.ubuntu.com/ubuntu/\tpriority:3\n";
+    const run = (args, failDownloads, mirrorList = hosted) => {
+      fs.rmSync(log, { force: true });
+      fs.writeFileSync(mirrors, mirrorList);
+      const result = spawnSync("bash", [path.join(root, ".github/scripts/ci-apt-install.sh"), ...args], {
+        encoding: "utf8", timeout: 10_000,
+        env: {
+          ...process.env, PATH: `${dir}:${process.env.PATH}`, APT_LOG: log, APT_MIRRORS: mirrors,
+          FAIL_DOWNLOADS: String(failDownloads),
+        },
+      });
+      const calls = fs.existsSync(log) ? fs.readFileSync(log, "utf8").trim().split("\n") : [];
+      return { status: result.status, calls, mirrors: fs.readFileSync(mirrors, "utf8") };
+    };
+    const update = "deadline -q update";
+    const download = "deadline -q install -y --no-install-recommends --download-only fonts-a fonts-b";
+    const install = "install -y -q --no-install-recommends --no-download fonts-a fonts-b";
+
+    const fallback = hosted.split("\n").slice(1).join("\n");
+    assert.deepEqual(run(["fonts-a", "fonts-b"], 0), { status: 0, calls: [update, download, install], mirrors: hosted });
+    // A failed download leaves the Azure mirror and resumes; dpkg still runs only after it.
+    assert.deepEqual(run(["fonts-a", "fonts-b"], 1),
+      { status: 0, calls: [update, download, download, install], mirrors: fallback });
+    // Three failed downloads stop the job without starting dpkg, and keep the other mirrors.
+    assert.deepEqual(run(["fonts-a", "fonts-b"], 3),
+      { status: 1, calls: [update, download, download, download], mirrors: fallback });
+    // A runner without the Azure mirror (an AWS-hosted one) retries on its own list.
+    assert.deepEqual(run(["fonts-a", "fonts-b"], 1, fallback),
+      { status: 0, calls: [update, download, download, install], mirrors: fallback });
+    assert.deepEqual(run([], 0), { status: 0, calls: [], mirrors: hosted });
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  // Three bounded attempts per phase still leave the rest of each Playwright job its time.
   const jobs = workflow.split("\njobs:\n")[1].split(/\n(?=  [a-z][a-z0-9-]*:\n)/)
     .filter((block) => block.includes("uses: ./.github/actions/setup-playwright"));
   assert.ok(jobs.length > 0);
