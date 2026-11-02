@@ -186,3 +186,23 @@ describe("ConfirmDialogControlled", () => {
     expect(onOpenChange).toHaveBeenCalledWith(false);
   });
 });
+
+it("ConfirmDialogControlled shows its body under the description", async () => {
+  renderInApp(
+    <ConfirmDialogControlled
+      open
+      onOpenChange={() => {}}
+      title="Byt klassning"
+      description="Tre resurser påverkas."
+      confirmLabel="Bekräfta"
+      onConfirm={() => {}}
+    >
+      <ul>
+        <li>Två assistenter</li>
+      </ul>
+    </ConfirmDialogControlled>
+  );
+  const dialog = await screen.findByRole("alertdialog", { name: "Byt klassning" });
+  expect(within(dialog).getByText("Två assistenter")).toBeDefined();
+  await expectNoAxeViolations(dialog);
+});

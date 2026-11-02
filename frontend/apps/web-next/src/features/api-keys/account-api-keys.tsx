@@ -1,235 +1,118 @@
-"use client";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bell, Pause, Play, RefreshCw, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useState } from "react";
-import { ConfirmDialog } from "@/components/composites/confirm-dialog";
-import { EmptyState } from "@/components/composites/empty-state";
-import { SecretRevealDialog } from "@/components/composites/secret-reveal";
+import { Button } from "@astryxdesign/core/Button";
+import { Bell } from "lucide-react";
+import { useCallback, useId, useState } from "react";
+import { useTranslations } from "use-intl";
+import { Switch } from "@/components/astryx/switch";
+import { TextInput } from "@/components/astryx/text-input";
+import { QueryStateBoundary } from "@/components/composites/query-state";
+import { DockedActions } from "@/components/shell/docked-actions";
+import { useAutosaveField } from "@/components/composites/use-autosave";
 import { useAppContext } from "@/components/providers/app-context";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Dialog, DialogContent, DialogTrigger } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow
-} from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Switch } from "@/components/ui/switch";
+import { settingSwitchScope, useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
-import { toastApiError } from "@/lib/api/toast";
-import { usePaginatedQuery } from "@/lib/hooks/use-paginated-query";
-import { CreateApiKeyForm, type ApiKeyDraft } from "./create-api-key-form";
+import type { Schema } from "@/lib/api/models";
+import { CreateApiKeyDialog } from "./api-key-form";
 import {
-  API_KEY_STATE_BADGE_VARIANT,
-  API_KEY_STATES,
-  buildTenantApiKeyCreateBody,
-  formatApiKeyDate,
-  type ApiKey,
-  type ApiKeyState
+  API_KEY_NOTIFICATION_PREFERENCES_KEY,
+  apiKeyNotificationPreferencesQueryOptions,
+  apiKeyPolicyConstraintsQueryOptions
 } from "./api-keys";
+import { UserApiKeyList, useSecretReveal } from "./user-api-key-list";
 
-function CreateKeyDialog({ onCreated }: { onCreated: (secret: string) => void }) {
-  const t = useTranslations();
-  const queryClient = useQueryClient();
-  const [open, setOpen] = useState(false);
-
-  const createKey = useMutation({
-    mutationFn: (draft: ApiKeyDraft) =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys", {
-          body: buildTenantApiKeyCreateBody({ ...draft, ownership: "user" })
-        })
-      ),
-    onSuccess: (created) => {
-      queryClient.invalidateQueries({ queryKey: ["api-keys"] });
-      setOpen(false);
-      onCreated(created.secret);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  return (
-    <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button>{t("api_keys_create_short")}</Button>
-      </DialogTrigger>
-      <DialogContent>
-        <CreateApiKeyForm
-          idPrefix="account"
-          title={t("api_keys_create")}
-          pending={createKey.isPending}
-          onSubmit={(draft) => createKey.mutate(draft)}
-          onCancel={() => setOpen(false)}
-        />
-      </DialogContent>
-    </Dialog>
-  );
-}
-
-function KeyActions({
-  apiKey,
-  onRotated
-}: {
-  apiKey: ApiKey;
-  onRotated: (secret: string) => void;
-}) {
-  const t = useTranslations();
-  const queryClient = useQueryClient();
-  const invalidate = () => queryClient.invalidateQueries({ queryKey: ["api-keys"] });
-
-  const rotateKey = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys/{id}/rotate", {
-          params: { path: { id: apiKey.id } },
-          body: {}
-        })
-      ),
-    onSuccess: (rotated) => {
-      invalidate();
-      onRotated(rotated.secret);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const revokeKey = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys/{id}/revoke", {
-          params: { path: { id: apiKey.id } },
-          body: {}
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const suspendKey = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys/{id}/suspend", {
-          params: { path: { id: apiKey.id } },
-          body: {}
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const reactivateKey = useMutation({
-    mutationFn: () =>
-      unwrap(
-        browserApi.POST("/api/v1/api-keys/{id}/reactivate", {
-          params: { path: { id: apiKey.id } }
-        })
-      ),
-    onSuccess: invalidate,
-    onError: (error) => toastApiError(error, t)
-  });
-
-  return (
-    <div className="flex justify-end gap-1">
-      {apiKey.state === "active" && (
-        <>
-          <ConfirmDialog
-            trigger={
-              <Button variant="ghost" size="icon" aria-label={t("api_keys_action_rotate")}>
-                <RefreshCw className="size-4" />
-              </Button>
-            }
-            title={t("api_keys_rotate_confirm_title")}
-            description={t("api_keys_rotate_confirm_description")}
-            confirmLabel={t("api_keys_action_rotate")}
-            pending={rotateKey.isPending}
-            onConfirm={() => rotateKey.mutateAsync().then(() => undefined)}
-          />
-          <ConfirmDialog
-            trigger={
-              <Button variant="ghost" size="icon" aria-label={t("api_keys_action_suspend")}>
-                <Pause className="size-4" />
-              </Button>
-            }
-            title={t("api_keys_action_suspend_title")}
-            description={t("api_keys_action_suspend_description")}
-            confirmLabel={t("api_keys_action_suspend")}
-            pending={suspendKey.isPending}
-            onConfirm={() => suspendKey.mutateAsync().then(() => undefined)}
-          />
-        </>
-      )}
-      {apiKey.state === "suspended" && (
-        <ConfirmDialog
-          trigger={
-            <Button variant="ghost" size="icon" aria-label={t("api_keys_action_reactivate")}>
-              <Play className="size-4" />
-            </Button>
-          }
-          title={t("api_keys_action_reactivate_title")}
-          description={t("api_keys_action_reactivate_description")}
-          confirmLabel={t("api_keys_action_reactivate")}
-          pending={reactivateKey.isPending}
-          onConfirm={() => reactivateKey.mutateAsync().then(() => undefined)}
-        />
-      )}
-      <ConfirmDialog
-        trigger={
-          <Button variant="ghost" size="icon" aria-label={t("api_keys_action_revoke")}>
-            <Trash2 className="text-destructive size-4" />
-          </Button>
-        }
-        title={t("api_keys_action_revoke_title")}
-        description={t("api_keys_action_revoke_description")}
-        confirmLabel={t("api_keys_action_revoke")}
-        pending={revokeKey.isPending}
-        onConfirm={() => revokeKey.mutateAsync().then(() => undefined)}
-      />
-    </div>
-  );
-}
+const PREFERENCES_QUEUE = "api-key-notification-preferences";
 
 function NotificationPreferencesPanel() {
   const t = useTranslations();
-  const queryClient = useQueryClient();
-  const preferences = useQuery({
-    queryKey: ["api-key-notification-preferences"],
-    queryFn: () => unwrap(browserApi.GET("/api/v1/api-keys/notification-preferences"))
-  });
-
-  const updatePreferences = useMutation({
-    mutationFn: (body: {
-      enabled?: boolean | null;
-      days_before_expiry?: number[] | null;
-      auto_follow_published_assistants?: boolean | null;
-      auto_follow_published_apps?: boolean | null;
-    }) => unwrap(browserApi.PUT("/api/v1/api-keys/notification-preferences", { body })),
-    onSuccess: (updated) => {
-      queryClient.setQueryData(["api-key-notification-preferences"], updated);
-    },
-    onError: (error) => toastApiError(error, t)
-  });
-
-  const data = preferences.data;
-  const enabled = data?.enabled ?? false;
-  const firstDay = data?.days_before_expiry?.[0] ?? 30;
-  const disabled = preferences.isPending || updatePreferences.isPending;
-
-  function saveDay(value: string) {
-    const days = Number(value);
-    if (!Number.isInteger(days) || days < 1) return;
-    updatePreferences.mutate({ days_before_expiry: [days] });
-  }
+  const preferences = useQuery(apiKeyNotificationPreferencesQueryOptions(browserApi));
+  const constraints = useQuery(apiKeyPolicyConstraintsQueryOptions(browserApi));
 
   return (
-    <section className="rounded-xl border p-4">
+    <QueryStateBoundary
+      queries={[preferences, constraints]}
+      errorTitle={t("api_keys_notifications_settings_title")}
+    >
+      {() => (
+        <NotificationPreferences
+          preferences={preferences.data!}
+          policy={constraints.data!.notification_policy}
+        />
+      )}
+    </QueryStateBoundary>
+  );
+}
+
+function reminderDays(value: string, maximum: number | null | undefined): number[] | undefined {
+  const parts = value.split(",").map((part) => part.trim());
+  if (parts.some((part) => !/^\d+$/.test(part))) return undefined;
+  const days = parts.map(Number);
+  if (
+    days.some((day) => !Number.isSafeInteger(day) || day < 1 || (maximum != null && day > maximum))
+  )
+    return undefined;
+  return [...new Set(days)].sort((a, b) => b - a);
+}
+
+function NotificationPreferences({
+  preferences,
+  policy
+}: {
+  preferences: Schema<"ApiKeyNotificationPreferencesResponse">;
+  policy: Schema<"ApiKeyNotificationPolicyResponse">;
+}) {
+  const t = useTranslations();
+  const queryClient = useQueryClient();
+  const policyHintId = useId();
+  const [daysVisited, setDaysVisited] = useState(false);
+
+  async function savePreferences(body: Schema<"ApiKeyNotificationPreferencesUpdate">) {
+    const updated = await unwrap(
+      browserApi.PUT("/api/v1/api-keys/notification-preferences", { body })
+    );
+    queryClient.setQueryData(API_KEY_NOTIFICATION_PREFERENCES_KEY, updated);
+    return updated;
+  }
+  const switchOptions = {
+    queue: PREFERENCES_QUEUE,
+    // The shared write updates this resource's cache from the response.
+    onSaved: () => undefined
+  };
+  const [remindersEnabled, setRemindersEnabled, savingEnabled] = useSettingSwitch(
+    "api-key-reminders-enabled",
+    preferences.enabled ?? false,
+    (enabled) => savePreferences({ enabled }),
+    switchOptions
+  );
+  const [followAssistants, setFollowAssistants, savingAssistants] = useSettingSwitch(
+    "api-key-follow-assistants",
+    preferences.auto_follow_published_assistants ?? false,
+    (enabled) => savePreferences({ auto_follow_published_assistants: enabled }),
+    switchOptions
+  );
+  const [followApps, setFollowApps, savingApps] = useSettingSwitch(
+    "api-key-follow-apps",
+    preferences.auto_follow_published_apps ?? false,
+    (enabled) => savePreferences({ auto_follow_published_apps: enabled }),
+    switchOptions
+  );
+  const updateDays = useMutation({
+    scope: settingSwitchScope(PREFERENCES_QUEUE),
+    mutationFn: (days: number[]) => savePreferences({ days_before_expiry: days })
+  });
+  const days = useAutosaveField({
+    key: "api-key-reminder-days",
+    value: preferences.days_before_expiry?.join(", ") ?? "",
+    normalize: (value) => reminderDays(value, policy.max_days_before_expiry)?.join(", ") ?? value,
+    validate: (value) => reminderDays(value, policy.max_days_before_expiry) !== undefined,
+    save: (value) => updateDays.mutateAsync(reminderDays(value, policy.max_days_before_expiry)!)
+  });
+  const parsedDays = reminderDays(days.value, policy.max_days_before_expiry);
+  const enabled = policy.enabled !== false && remindersEnabled;
+  const saving = updateDays.isPending || savingEnabled || savingAssistants || savingApps;
+
+  return (
+    <section aria-busy={saving} className="rounded-xl border p-4">
       <div className="flex flex-col gap-4">
         <div className="flex items-center justify-between gap-4">
           <div className="flex min-w-0 items-start gap-3">
@@ -242,55 +125,118 @@ function NotificationPreferencesPanel() {
             </div>
           </div>
           <Switch
-            checked={enabled}
-            disabled={disabled}
-            aria-label={t("api_keys_notifications_settings_title")}
-            onCheckedChange={(checked) => updatePreferences.mutate({ enabled: checked })}
+            label={t("api_keys_notifications_settings_title")}
+            isLabelHidden
+            value={enabled}
+            isDisabled={policy.enabled === false}
+            disabledMessage={
+              policy.enabled === false ? t("api_keys_notifications_policy_header_hint") : undefined
+            }
+            onChange={setRemindersEnabled}
           />
         </div>
+        {saving && <p className="text-ax-text-secondary text-sm">{t("saving")}</p>}
+        {policy.enabled === false && (
+          <p className="text-ax-text-secondary text-sm">
+            {t("api_keys_notifications_policy_header_hint")}
+          </p>
+        )}
         {enabled && (
           <div className="grid gap-4 border-t pt-4 sm:grid-cols-3">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="api-key-notification-days">
-                {t("api_keys_notifications_days_label")}
-              </Label>
-              <div className="flex items-center gap-2">
-                <Input
-                  id="api-key-notification-days"
-                  type="number"
-                  min={1}
-                  defaultValue={firstDay}
-                  disabled={disabled}
-                  className="w-24"
-                  onBlur={(event) => saveDay(event.target.value)}
-                />
-                <span className="text-muted-foreground text-sm">
-                  {t("api_keys_notifications_days_unit")}
-                </span>
+              <TextInput
+                label={t("api_keys_notifications_reminder_days_label")}
+                description={t("api_keys_notifications_reminder_days_description")}
+                value={days.value}
+                onChange={days.setValue}
+                isReadOnly={updateDays.isPending}
+                aria-busy={updateDays.isPending}
+                aria-describedby={policy.max_days_before_expiry != null ? policyHintId : undefined}
+                onBlur={() => {
+                  setDaysVisited(true);
+                  void days.commit();
+                }}
+                onEnter={() => {
+                  setDaysVisited(true);
+                  void days.commit();
+                }}
+                status={
+                  daysVisited && parsedDays === undefined
+                    ? { type: "error", message: t("api_keys_notifications_days_validation") }
+                    : undefined
+                }
+                statusVariant="detached"
+                width="100%"
+              />
+              {policy.max_days_before_expiry != null && (
+                <p id={policyHintId} className="text-ax-text-secondary text-sm">
+                  {t("api_keys_notifications_max_days_hint", {
+                    days: policy.max_days_before_expiry
+                  })}
+                </p>
+              )}
+              <div className="flex flex-wrap items-center gap-1">
+                {[7, 14, 30, 60, 90]
+                  .filter(
+                    (day) =>
+                      policy.max_days_before_expiry == null || day <= policy.max_days_before_expiry
+                  )
+                  .map((day) => (
+                    <Button
+                      key={day}
+                      label={t("api_keys_notifications_add_day", { days: day })}
+                      size="sm"
+                      variant="secondary"
+                      isDisabled={!parsedDays}
+                      isLoading={updateDays.isPending}
+                      isInterruptible
+                      onClick={() => {
+                        const value = [...new Set([...(parsedDays ?? []), day])]
+                          .sort((a, b) => b - a)
+                          .join(", ");
+                        days.setValue(value);
+                        void days.commit(value);
+                      }}
+                    />
+                  ))}
               </div>
             </div>
-            <Label className="flex items-center justify-between gap-3 rounded-lg border p-3 font-normal sm:col-span-1">
-              <span className="text-sm">
-                {t("api_keys_notifications_auto_follow_assistants_title")}
-              </span>
+            <div className="flex flex-col gap-2 rounded-lg border p-3">
               <Switch
-                checked={data?.auto_follow_published_assistants ?? false}
-                disabled={disabled}
-                onCheckedChange={(checked) =>
-                  updatePreferences.mutate({ auto_follow_published_assistants: checked })
+                label={t("api_keys_notifications_auto_follow_assistants_title")}
+                value={followAssistants}
+                isDisabled={!policy.allow_auto_follow_published_assistants}
+                disabledMessage={
+                  !policy.allow_auto_follow_published_assistants
+                    ? t("api_keys_notifications_auto_follow_assistants_locked_hint")
+                    : undefined
                 }
+                onChange={setFollowAssistants}
               />
-            </Label>
-            <Label className="flex items-center justify-between gap-3 rounded-lg border p-3 font-normal sm:col-span-1">
-              <span className="text-sm">{t("api_keys_notifications_auto_follow_apps_title")}</span>
+              {!policy.allow_auto_follow_published_assistants && (
+                <p className="text-ax-text-secondary text-sm">
+                  {t("api_keys_notifications_auto_follow_assistants_locked_hint")}
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-2 rounded-lg border p-3">
               <Switch
-                checked={data?.auto_follow_published_apps ?? false}
-                disabled={disabled}
-                onCheckedChange={(checked) =>
-                  updatePreferences.mutate({ auto_follow_published_apps: checked })
+                label={t("api_keys_notifications_auto_follow_apps_title")}
+                value={followApps}
+                isDisabled={!policy.allow_auto_follow_published_apps}
+                disabledMessage={
+                  !policy.allow_auto_follow_published_apps
+                    ? t("api_keys_notifications_auto_follow_apps_locked_hint")
+                    : undefined
                 }
+                onChange={setFollowApps}
               />
-            </Label>
+              {!policy.allow_auto_follow_published_apps && (
+                <p className="text-ax-text-secondary text-sm">
+                  {t("api_keys_notifications_auto_follow_apps_locked_hint")}
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>
@@ -301,134 +247,37 @@ function NotificationPreferencesPanel() {
 export function ApiKeys() {
   const t = useTranslations();
   const { can } = useAppContext();
-  const [stateFilter, setStateFilter] = useState<ApiKeyState>("active");
-  const [secret, setSecret] = useState<string | null>(null);
-  const [secretTitle, setSecretTitle] = useState("");
-
-  const keys = usePaginatedQuery({
-    queryKey: ["api-keys", stateFilter],
-    limit: 25,
-    fetchPage: async ({ cursor, limit }) => {
-      const page = await unwrap(
-        browserApi.GET("/api/v1/api-keys", {
-          params: { query: { state: stateFilter, cursor: cursor ?? null, limit } }
-        })
-      );
-      return { ...page, items: page.items, total_count: page.total_count ?? 0 };
-    }
-  });
-
-  function showSecret(title: string) {
-    return (value: string) => {
-      setSecretTitle(title);
-      setSecret(value);
-    };
-  }
-
-  const stateLabels: Record<ApiKeyState, string> = {
-    active: t("api_keys_status_active"),
-    suspended: t("api_keys_status_suspended"),
-    revoked: t("api_keys_status_revoked"),
-    expired: t("api_keys_status_expired")
-  };
+  const secrets = useSecretReveal();
+  const [keysLoaded, setKeysLoaded] = useState(false);
+  const onKeysLoaded = useCallback(() => setKeysLoaded(true), []);
 
   return (
     <div data-tour="account-api-keys" className="flex flex-col gap-4">
-      <NotificationPreferencesPanel />
-      <Tabs
-        value={stateFilter}
-        onValueChange={(value) => setStateFilter(value as ApiKeyState)}
-        className="gap-4"
-      >
-        <div className="flex items-center justify-between gap-4">
-          <TabsList>
-            {API_KEY_STATES.map((state) => (
-              <TabsTrigger key={state} value={state}>
-                {stateLabels[state]}
-              </TabsTrigger>
-            ))}
-          </TabsList>
-          {can("api_keys") && (
-            <CreateKeyDialog onCreated={showSecret(t("api_keys_created_title"))} />
-          )}
-        </div>
-
-        {/* The keys in the selected state: the state tabs' panel. */}
-        <TabsContent value={stateFilter} className="flex flex-col gap-4">
-          {keys.items.length === 0 && !keys.isPending ? (
-            <EmptyState title={t("api_keys_no_keys")} description={t("api_keys_no_keys_desc")} />
+      <UserApiKeyList
+        limit={25}
+        onLoaded={onKeysLoaded}
+        onRotated={secrets.reveal(t("api_keys_rotated_title"))}
+        toolbar={
+          can("api_keys") ? (
+            // The page's one primary action: docked at the bottom on a phone, beside Uppdatera
+            // from 768 px.
+            <DockedActions label={t("account_api_keys_actions")}>
+              <CreateApiKeyDialog
+                idPrefix="account"
+                trigger={<Button variant="primary" label={t("api_keys_create")} />}
+                onCreated={secrets.reveal(t("api_keys_created_title"))}
+              />
+            </DockedActions>
           ) : (
-            <>
-              <Table aria-label={t("api_keys")}>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>{t("name")}</TableHead>
-                    <TableHead>{t("status")}</TableHead>
-                    <TableHead>{t("api_keys_permission_level")}</TableHead>
-                    <TableHead>{t("api_keys_expires")}</TableHead>
-                    <TableHead>{t("api_keys_created")}</TableHead>
-                    <TableHead className="w-24" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {keys.items.map((apiKey) => (
-                    <TableRow key={apiKey.id}>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{apiKey.name}</span>
-                          <code className="text-muted-foreground font-mono text-xs">
-                            {apiKey.key_prefix}…{apiKey.key_suffix}
-                          </code>
-                        </div>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant={API_KEY_STATE_BADGE_VARIANT[apiKey.state]}>
-                          {stateLabels[apiKey.state]}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>{t(`api_keys_permission_${apiKey.permission}`)}</TableCell>
-                      <TableCell>
-                        {apiKey.expires_at
-                          ? formatApiKeyDate(apiKey.expires_at)
-                          : t("api_keys_never")}
-                      </TableCell>
-                      <TableCell>{formatApiKeyDate(apiKey.created_at)}</TableCell>
-                      <TableCell>
-                        <KeyActions
-                          apiKey={apiKey}
-                          onRotated={showSecret(t("api_keys_rotated_title"))}
-                        />
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-              {(keys.hasPreviousPage || keys.hasNextPage) && (
-                <div className="flex justify-end gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!keys.hasPreviousPage}
-                    onClick={keys.previousPage}
-                  >
-                    {t("previous")}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    disabled={!keys.hasNextPage}
-                    onClick={keys.nextPage}
-                  >
-                    {t("next")}
-                  </Button>
-                </div>
-              )}
-            </>
-          )}
-        </TabsContent>
-      </Tabs>
-
-      <SecretRevealDialog title={secretTitle} secret={secret} onClose={() => setSecret(null)} />
+            <p className="text-muted-foreground text-sm">{t("api_keys_no_create_permission")}</p>
+          )
+        }
+      />
+      {/* Below the keys, and once they are there: above, it pushed the list down by its
+          whole height when it loaded; below but earlier, the rows pushed it off the
+          screen (layout shift both ways). */}
+      {keysLoaded && <NotificationPreferencesPanel />}
+      {secrets.dialog}
     </div>
   );
 }

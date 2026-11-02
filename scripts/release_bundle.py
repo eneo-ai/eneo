@@ -9,9 +9,8 @@ import re
 import subprocess
 from pathlib import Path
 
-# web-next is the optional Next beta: published and pinned with every bundle so
-# a deployment that enables it runs the image verified with this release.
-COMPONENTS = ("backend", "frontend", "web-next", "tool-runtime")
+# The backend image includes the optional Vite UI; Svelte keeps its own image.
+COMPONENTS = ("backend", "frontend", "tool-runtime")
 REGISTRY = "ghcr.io/eneo-ai/eneo-"
 SHA = re.compile(r"[0-9a-f]{40}")
 SEMVER = re.compile(

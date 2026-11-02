@@ -1,7 +1,4 @@
-"use client";
-
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
-import { useClipboard } from "@astryxdesign/core/hooks";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import {
@@ -19,17 +16,20 @@ import { Table } from "@/components/astryx/table";
 import { useRecentInfoBlobIds } from "@/features/jobs/recent-results";
 import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Copy, FileText, Pencil, SearchX, Trash2 } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
-import { useMemo, useState } from "react";
-import { flushSync } from "react-dom";
+import { Check, Copy, Download, FileText, Pencil, SearchX, Trash2 } from "lucide-react";
+import { useLocale, useTranslations } from "use-intl";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Streamdown } from "streamdown";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { SourceMetadataList, type SourceMetadataEntry } from "./source-metadata";
 import { EmptyState } from "@/components/composites/empty-state";
-import { LoadingState } from "@/components/composites/loading-state";
-import { ListError } from "@/components/composites/query-state";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import { AREA_HUES } from "@/components/composites/icon-tile";
+import { QueryStateBoundary } from "@/components/composites/query-state";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -45,12 +45,15 @@ import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { formatBytes } from "@/lib/format";
-import { toast } from "@/lib/toast";
+import { useCopy } from "@/lib/hooks/use-copy";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { ResourceFilterInput } from "@/features/spaces/resource-filter-input";
-import { matchesSearch } from "@/features/spaces/resource-filter";
+import { matchesSearch } from "@/lib/search";
 import type { InfoBlob } from "./knowledge";
-import { SpaceTableFrame } from "@/features/spaces/table-frame";
+import { TableFrame } from "@/components/composites/table-frame";
+import { saveBlob, saveUrl, toastDownloadError } from "@/features/files/signed-file-url";
+import { signedInfoBlobOriginalUrl } from "./signed-original-url";
+import { ClientTime } from "@/components/composites/client-time";
 
 const PAGE_SIZE = 100;
 
@@ -72,51 +75,95 @@ export function BlobPreviewDialog({
   onOpenChange,
   properties = []
 }: {
-  blob: { id: string; metadata: { title?: string | null } };
+  blob: { id: string; metadata: { title?: string | null; url?: string | null } };
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** The document's source properties (SharePoint columns), shown above its text. */
   properties?: readonly SourceMetadataEntry[];
 }) {
   const t = useTranslations();
-  const { data, isPending, isError, error, isFetching, refetch } = useQuery({
+  const content = useQuery({
     queryKey: ["info-blobs", blob.id],
-    queryFn: () =>
-      unwrap(browserApi.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } } })),
+    queryFn: ({ signal }) =>
+      unwrap(
+        browserApi.GET("/api/v1/info-blobs/{id}/", { params: { path: { id: blob.id } }, signal })
+      ),
     enabled: open
   });
-  const { copy, isCopied } = useClipboard({ announce: t("copied_to_clipboard") });
+  const data = content.data;
+  const { copy, isCopied } = useCopy();
+  const [downloading, setDownloading] = useState(false);
+  const downloadRequest = useRef<AbortController | null>(null);
+  useEffect(() => () => downloadRequest.current?.abort(), [blob.id, open]);
 
   async function copyText() {
-    if (data?.text && !(await copy(data.text))) toast.error(t("chat_copy_failed"));
+    if (data?.text) await copy(data.text);
+  }
+
+  function downloadText() {
+    if (!data?.text) return;
+    const title = blob.metadata.title || t("untitled");
+    saveBlob(
+      new Blob([data.text], { type: "text/plain;charset=utf-8" }),
+      title.endsWith(".txt") ? title : `${title}.txt`
+    );
+  }
+
+  async function downloadOriginal() {
+    if (downloadRequest.current && !downloadRequest.current.signal.aborted) return;
+    const request = new AbortController();
+    downloadRequest.current = request;
+    setDownloading(true);
+    try {
+      const url = await signedInfoBlobOriginalUrl(browserApi, blob.id, request.signal);
+      if (!request.signal.aborted) saveUrl(url, blob.metadata.title ?? "");
+    } catch (error) {
+      if (!request.signal.aborted) toastDownloadError(error, t);
+    } finally {
+      if (downloadRequest.current === request) {
+        downloadRequest.current = null;
+        setDownloading(false);
+      }
+    }
   }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[80vh] flex-col sm:max-w-2xl">
+      <DialogContent className="flex flex-col sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>{blob.metadata.title ?? blob.id}</DialogTitle>
+          <DialogTitle>{blob.metadata.title || blob.metadata.url || t("untitled")}</DialogTitle>
         </DialogHeader>
         <SourceMetadataList entries={properties} />
         <div className="min-h-0 flex-1 overflow-y-auto rounded-md border p-4 text-sm">
-          {isPending ? (
-            <LoadingState variant="text" rows={4} />
-          ) : isError ? (
-            <ListError
-              error={error}
-              title={t("attachment_error_loading_content")}
-              isRetrying={isFetching}
-              onRetry={() => void refetch()}
-            />
-          ) : (
-            <Streamdown>{data.text ?? ""}</Streamdown>
-          )}
+          <QueryStateBoundary
+            query={content}
+            variant="text"
+            rows={4}
+            errorTitle={t("attachment_error_loading_content")}
+          >
+            {(blobContent) => <Streamdown>{blobContent.text ?? ""}</Streamdown>}
+          </QueryStateBoundary>
         </div>
-        <DialogFooter>
+        <DialogFooter className="sm:flex-wrap">
+          <AstryxButton
+            label={t("download_extracted_text")}
+            icon={<Download aria-hidden="true" />}
+            onClick={downloadText}
+            isDisabled={!data?.text}
+          />
           <Button variant="outline" onClick={() => void copyText()} disabled={!data?.text}>
             {isCopied ? <Check className="size-4" /> : <Copy className="size-4" />}
             {isCopied ? t("copied_to_clipboard") : t("copy_to_clipboard")}
           </Button>
+          {data?.original_available && (
+            <AstryxButton
+              label={downloading ? t("downloading") : t("download_original")}
+              icon={<Download aria-hidden="true" />}
+              isLoading={downloading}
+              isInterruptible
+              onClick={() => void downloadOriginal()}
+            />
+          )}
           <Button onClick={() => onOpenChange(false)}>{t("close")}</Button>
         </DialogFooter>
       </DialogContent>
@@ -195,12 +242,7 @@ function BlobActions({ blob }: { blob: InfoBlob }) {
               {t("cancel")}
             </Button>
             {/* Busy, it stays enabled so it keeps focus; a second press is ignored. */}
-            <Button
-              aria-busy={rename.isPending || undefined}
-              onClick={() => {
-                if (!rename.isPending) rename.mutate();
-              }}
-            >
+            <Button aria-busy={rename.isPending || undefined} onClick={() => rename.mutate()}>
               {rename.isPending ? t("saving") : t("save_changes")}
             </Button>
           </DialogFooter>
@@ -222,6 +264,7 @@ function BlobActions({ blob }: { blob: InfoBlob }) {
 
 /** The file name opens a preview of its extracted text. */
 function BlobNameCell({ blob }: { blob: InfoBlob }) {
+  const t = useTranslations();
   const [showPreview, setShowPreview] = useState(false);
   return (
     <>
@@ -236,8 +279,15 @@ function BlobNameCell({ blob }: { blob: InfoBlob }) {
         >
           <FileText className="size-4" />
         </span>
-        <span className="break-words">{blob.metadata.title}</span>
+        <span className="break-words whitespace-normal">
+          {blob.metadata.title || blob.metadata.url || t("untitled")}
+        </span>
       </button>
+      {blob.metadata.url && (
+        <p className="text-ax-text-secondary mt-1 text-xs break-all whitespace-normal">
+          {blob.metadata.url}
+        </p>
+      )}
       {showPreview && (
         <BlobPreviewDialog blob={blob} open={showPreview} onOpenChange={setShowPreview} />
       )}
@@ -245,19 +295,22 @@ function BlobNameCell({ blob }: { blob: InfoBlob }) {
   );
 }
 
-type BlobSortKey = "name" | "size";
+type BlobSortKey = "name" | "created" | "size";
 
 function blobComparators(
   compare: (a: string, b: string) => number
 ): Record<BlobSortKey, TableSortComparator<InfoBlob>> {
   return {
-    name: (a, b) => compare(a.metadata.title ?? "", b.metadata.title ?? ""),
+    name: (a, b) =>
+      compare(a.metadata.title || a.metadata.url || "", b.metadata.title || b.metadata.url || ""),
+    created: (a, b) =>
+      (Date.parse(a.created_at ?? "") || 0) - (Date.parse(b.created_at ?? "") || 0),
     size: (a, b) => a.metadata.size - b.metadata.size
   };
 }
 
 /**
- * Files of a collection or website: a search box, name and size sortable by
+ * Files of a collection or website: a search box, name, created date and size sortable by
  * their headers (unsorted keeps the upload order), and pages of 100 (the
  * pager only shows when there is more than one). `labelledBy` names the table
  * after what the page shows it under: the collection's title or the website's
@@ -266,11 +319,15 @@ function blobComparators(
 export function BlobTable({
   blobs,
   canEdit,
-  labelledBy
+  labelledBy,
+  filterable = true,
+  paginate = true
 }: {
   blobs: InfoBlob[];
   canEdit: boolean;
   labelledBy: string;
+  filterable?: boolean;
+  paginate?: boolean;
 }) {
   const t = useTranslations();
   const locale = useLocale();
@@ -278,7 +335,9 @@ export function BlobTable({
   const [filter, setFilter] = useState("");
   const [page, setPage] = useState(1);
 
-  const filtered = blobs.filter((blob) => matchesSearch([blob.metadata.title], filter));
+  const filtered = blobs.filter((blob) =>
+    matchesSearch([blob.metadata.title, blob.metadata.url], filter)
+  );
   const comparators = useMemo(() => blobComparators(collator.compare), [collator]);
   const { sortedData, sortConfig } = useTableSortableState<InfoBlob, BlobSortKey>({
     data: filtered,
@@ -310,28 +369,42 @@ export function BlobTable({
   });
 
   if (blobs.length === 0) {
-    return <EmptyState icon={<FileText />} title={t("no_files_uploaded_yet")} />;
+    return (
+      <EmptyState
+        icon={<FileText />}
+        hue={AREA_HUES.knowledge}
+        title={t("knowledge_files_empty_title")}
+      />
+    );
   }
 
   const columns: TableColumn<InfoBlob>[] = [
     {
       key: "name",
       header: t("name"),
-      width: proportional(4),
+      width: proportional(1, { minWidth: 176 }),
       sortable: true,
       renderCell: (blob) => <BlobNameCell blob={blob} />
     },
     {
+      key: "created",
+      header: t("created"),
+      width: pixel(160),
+      sortable: true,
+      renderCell: (blob) =>
+        blob.created_at ? <ClientTime value={blob.created_at} format="date_time" /> : "—"
+    },
+    {
       key: "size",
       header: t("size"),
-      width: proportional(1),
+      width: pixel(96),
       sortable: true,
       renderCell: (blob) => formatBytes(blob.metadata.size, locale)
     },
     {
       key: "actions",
       header: <VisuallyHidden>{t("actions")}</VisuallyHidden>,
-      width: pixel(64),
+      width: pixel(72),
       align: "end",
       renderCell: (blob) => (canEdit ? <BlobActions blob={blob} /> : null)
     }
@@ -339,28 +412,35 @@ export function BlobTable({
 
   return (
     <div className="flex flex-col gap-3">
-      <ResourceFilterInput
-        value={filter}
-        label={t("space_filter_files_label")}
-        placeholder={t("space_filter_files_label")}
-        resultCount={filtered.length}
-        onChange={(value) => {
-          setFilter(value);
-          setPage(1);
-        }}
-      />
+      {filterable && (
+        <ResourceFilterInput
+          value={filter}
+          label={t("space_filter_files_label")}
+          placeholder={t("space_filter_files_label")}
+          resultCount={filtered.length}
+          onChange={(value) => {
+            setFilter(value);
+            setPage(1);
+          }}
+        />
+      )}
       {filtered.length === 0 ? (
         <EmptyState icon={<SearchX />} title={t("no_results_found")} isCompact />
       ) : (
-        <SpaceTableFrame>
+        <TableFrame>
           <Table
-            data={paginateData(sortedData, currentPage, PAGE_SIZE)}
+            data={paginate ? paginateData(sortedData, currentPage, PAGE_SIZE) : sortedData}
             columns={columns}
             idKey="id"
             aria-labelledby={labelledBy}
-            plugins={{ sort: sortPlugin, pagination: paginationPlugin, rowStatus: rowStatusPlugin }}
+            pinnedColumn="name"
+            plugins={{
+              sort: sortPlugin,
+              ...(paginate ? { pagination: paginationPlugin } : {}),
+              rowStatus: rowStatusPlugin
+            }}
           />
-        </SpaceTableFrame>
+        </TableFrame>
       )}
     </div>
   );
@@ -369,10 +449,12 @@ export function BlobTable({
 /** "Add text" — creates an info-blob from pasted text. */
 export function AddTextDialog({
   collectionId,
-  disabled
+  disabled,
+  disabledReason
 }: {
   collectionId: string;
   disabled?: boolean;
+  disabledReason?: string;
 }) {
   const t = useTranslations();
   const invalidateBlobs = useInvalidateBlobs();
@@ -411,9 +493,7 @@ export function AddTextDialog({
     if (create.isPending) return;
     const firstProblem = !title ? "text-title" : !text ? "text-content" : null;
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => setSubmitted(true));
-      document.getElementById(firstProblem)?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem);
       return;
     }
     create.mutate();
@@ -421,7 +501,12 @@ export function AddTextDialog({
 
   return (
     <>
-      <AstryxButton label={t("add_text")} isDisabled={disabled} onClick={() => setOpen(true)} />
+      <AstryxButton
+        label={t("add_text")}
+        isDisabled={disabled}
+        tooltip={disabledReason}
+        onClick={() => setOpen(true)}
+      />
       <Dialog open={open} onOpenChange={changeOpen}>
         <DialogContent className="sm:max-w-2xl">
           <DialogHeader>

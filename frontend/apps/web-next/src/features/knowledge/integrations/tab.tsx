@@ -1,14 +1,15 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { Plug } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
+import type { TableName } from "@/components/astryx/table";
 import { EmptyState } from "@/components/composites/empty-state";
+import { DockedActions } from "@/components/shell/docked-actions";
 import { AREA_HUES } from "@/components/composites/icon-tile";
 import { useAppContext } from "@/components/providers/app-context";
 import { useSpace } from "@/features/spaces/use-space";
+import { embeddingModelGroupTitle } from "../embedding-model-label";
 import { embeddingModelsInUse } from "../knowledge";
 import { NoCreatePermissionInfo } from "../no-create-permission-info";
 import { IntegrationsBetaNotice } from "../notices";
@@ -18,31 +19,31 @@ import { SourcesList, type SourceGroup } from "./sources-table";
 import { groupIntegrationSources } from "./sources";
 import { useSyncProgress } from "./use-sync-progress";
 
-/** Import from a connected integration, or where to connect one first. */
-function ImportAction() {
-  const t = useTranslations();
+/** Whether this user can import, connect an integration first, or only read why not. */
+function useIntegrationSetup() {
   const { space } = useSpace();
   const { can } = useAppContext();
   const { integrations } = useImportableIntegrations();
-  const [showImport, setShowImport] = useState(false);
-  const action = integrationSetupAction({
+  return integrationSetupAction({
     importableCount: integrations.length,
     personal: space.personal,
     organization: space.organization,
     isAdmin: can("admin")
   });
+}
+
+/** Import from a connected integration, or where to connect one first. */
+function ImportAction({
+  action,
+  onImport
+}: {
+  action: ReturnType<typeof integrationSetupAction>;
+  onImport: () => void;
+}) {
+  const t = useTranslations();
 
   if (action.kind === "import") {
-    return (
-      <>
-        <Button
-          label={t("import_knowledge")}
-          variant="primary"
-          onClick={() => setShowImport(true)}
-        />
-        {showImport && <ImportKnowledgeDialog open={showImport} onOpenChange={setShowImport} />}
-      </>
-    );
+    return <Button label={t("import_knowledge")} variant="primary" onClick={onImport} />;
   }
   if (action.kind === "link") {
     return <Button label={t("configure_integrations")} href={action.href} />;
@@ -50,18 +51,19 @@ function ImportAction() {
   return <p className="text-ax-text-secondary text-sm">{t(action.messageKey)}</p>;
 }
 
-/** The integrations tab; `labelledBy` is the tab, which names an ungrouped table. */
+/** The integrations tab; `name` (its tab, or its name on a phone) names an ungrouped table. */
 export function IntegrationsTab({
   canCreate,
   integrationRequestFormUrl,
-  labelledBy
+  name
 }: {
   canCreate: boolean;
   integrationRequestFormUrl?: string;
-  labelledBy: string;
+  name: TableName;
 }) {
   const t = useTranslations();
   const collator = useCollator();
+  const [showImport, setShowImport] = useState(false);
   const { space } = useSpace();
 
   const items = space.knowledge.integration_knowledge_list.items.filter(
@@ -82,16 +84,23 @@ export function IntegrationsTab({
           : [
               {
                 key: model.id,
-                heading: model.inSpace ? model.name : `${model.name} (${t("disabled")})`,
+                heading: embeddingModelGroupTitle(model, model.inSpace, t),
                 sources: modelSources
               }
             ];
       })
     : [{ key: "all", heading: null, sources }];
-  const action = canCreate ? (
-    <ImportAction />
-  ) : (
+  const setup = useIntegrationSetup();
+  // A button or link is the tab's primary action (docked on a phone); a
+  // message saying why there is none stays in the page.
+  const action = !canCreate ? (
     <NoCreatePermissionInfo resourceType={t("resource_integrations")} />
+  ) : setup.kind === "message" ? (
+    <ImportAction action={setup} onImport={() => setShowImport(true)} />
+  ) : (
+    <DockedActions label={t("space_knowledge_actions")}>
+      <ImportAction action={setup} onImport={() => setShowImport(true)} />
+    </DockedActions>
   );
 
   return (
@@ -99,24 +108,27 @@ export function IntegrationsTab({
       {integrationRequestFormUrl ? (
         <IntegrationsBetaNotice integrationRequestFormUrl={integrationRequestFormUrl} />
       ) : null}
+      <ImportKnowledgeDialog open={showImport} onOpenChange={setShowImport} />
       {items.length === 0 ? (
         // Nothing to list yet: the empty state carries the one action.
         <EmptyState
           icon={<Plug />}
           hue={AREA_HUES.knowledge}
           title={t("fix_integrations_empty_title")}
+          description={t("space_integrations_empty_description")}
           headingLevel={3}
           actions={action}
         />
       ) : (
         <>
-          <div className="flex flex-wrap justify-end gap-2">{action}</div>
+          {/* contents on a phone: the docked action leaves the flow, adding no gap. */}
+          <div className="flex flex-wrap justify-end gap-2 max-md:contents">{action}</div>
           <SourcesList
             groups={groups}
             progress={progress}
             queued={queued}
             progressLoaded={progressLoaded}
-            labelledBy={labelledBy}
+            name={name}
           />
         </>
       )}

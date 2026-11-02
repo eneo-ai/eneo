@@ -574,3 +574,35 @@ OTEL_DEPLOYMENT_ENVIRONMENT=production
 # Keep OAUTH_CALLBACK_URL pointing at the existing app. Register each URL with
 # SharePoint/Confluence too. The selected URL is bound to the one-use OAuth state.
 OAUTH_CALLBACK_URLS=[]
+
+# --- Web app served by the backend ---
+# The reference docker-compose.yml enables both flags on the backend service
+# for the main host; set them in the deployment .env (not this file), which the
+# Compose file reads. Backend defaults remain false outside that configuration.
+# Route pages back to Svelte with FRONTEND_ROUTER_PRIORITY=7 in the same .env;
+# WEB_APP_ENABLED=false needs it.
+# BROWSER_SESSION_ENABLED: accept the browser session cookie (__Host-eneo_web).
+# The session lasts JWT_EXPIRY_TIME: an absolute lifetime, no inactivity limit.
+# Sign-out ends the Eneo session on the server at once (the IdP session
+# stays); a password change ends every session of the user.
+# With ENVIRONMENT=development, BROWSER_SESSION_ENABLED needs PUBLIC_ORIGIN set
+# to a localhost URL, e.g. http://localhost:3101.
+# BROWSER_SESSION_ENABLED=false
+# WEB_APP_ENABLED: serve the web app from the backend; /healthz then answers
+# like /api/healthz. It needs BROWSER_SESSION_ENABLED, the web app's only
+# sign-in; the backend refuses to start with the web app on and the session off.
+# WEB_APP_ENABLED=false
+# Outside development, either flag turns off the /docs and /redoc pages (and
+# SCIM's): they load third-party scripts on the session's host. /openapi.json stays.
+# Public runtime links for the React web app, served by FastAPI.
+# Links must be absolute http(s) URLs; any other is dropped (and named in a
+# startup warning when either flag above is on).
+# The web app frames MCP views from the origin of MCP_APP_CONTENT_BASE_URL, so
+# MCP_APP_CONTENT_ORIGIN is not needed here.
+# SHOW_HELP_CENTER=false
+# HELP_CENTER_URL=
+# Leave LEGACY_APP_URL unset when the main host serves React: a link to that
+# same host would return to React, not to the Svelte rollback service.
+# LEGACY_APP_URL=
+# ACCESSIBILITY_STATEMENT_URL=
+# REQUEST_INTEGRATION_FORM_URL=

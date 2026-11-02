@@ -1,10 +1,13 @@
-"use client";
-
 import { useMergedRefs } from "@astryxdesign/core/hooks";
-import { TextInput as AstryxTextInput, type TextInputProps } from "@astryxdesign/core/TextInput";
-import { useLayoutEffect, useRef } from "react";
+import {
+  TextInput as AstryxTextInput,
+  type TextInputProps as AstryxTextInputProps
+} from "@astryxdesign/core/TextInput";
+import { type InputHTMLAttributes, useLayoutEffect, useRef } from "react";
 
-export type { TextInputProps };
+// Astryx forwards native input props but omits maxLength from its public type.
+export type TextInputProps = AstryxTextInputProps &
+  Pick<InputHTMLAttributes<HTMLInputElement>, "maxLength">;
 
 /**
  * Astryx TextInput whose `aria-describedby` works. Astryx 0.6.4 sets the
@@ -14,7 +17,12 @@ export type { TextInputProps };
  * the attribute only when its own ids change, which a render of this wrapper
  * follows. Lint sends every TextInput import here.
  */
-export function TextInput({ "aria-describedby": describedBy, ref, ...props }: TextInputProps) {
+export function TextInput({
+  "aria-describedby": describedBy,
+  ref,
+  onEnter,
+  ...props
+}: TextInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
   const mergedRef = useMergedRefs(ref, inputRef);
 
@@ -27,5 +35,16 @@ export function TextInput({ "aria-describedby": describedBy, ref, ...props }: Te
     if (missing.length > 0) input.setAttribute("aria-describedby", [...ids, ...missing].join(" "));
   });
 
-  return <AstryxTextInput {...props} ref={mergedRef} />;
+  // The search key on a phone's keyboard (KEYBOARD.search) means "show me": the
+  // filter already ran as it was typed, so the keyboard goes and the list is
+  // what is left on screen.
+  const isSearch = (props as { enterKeyHint?: string }).enterKeyHint === "search";
+  const handleEnter = isSearch
+    ? () => {
+        onEnter?.();
+        inputRef.current?.blur();
+      }
+    : onEnter;
+
+  return <AstryxTextInput {...props} onEnter={handleEnter} ref={mergedRef} />;
 }

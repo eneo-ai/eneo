@@ -66,6 +66,18 @@ cd frontend && bun run dev                 # Terminal 2
 cd backend && uv run worker             # Terminal 3
 ```
 
+**Browser calls from the dev server**
+
+The web app on `http://localhost:3000` calls the backend on
+`http://localhost:8123`, another origin. The backend accepts a page on
+`localhost`, `127.0.0.1` or `[::1]` only with `ENVIRONMENT=development`, which
+`backend/.env.template` sets. A `backend/.env` copied from an older template
+lacks it: add the line and restart the backend, or the browser's calls fail with
+`400 disallowed_cors_origin`. To run the backend in another mode against a
+local frontend, add `http://localhost:*` (any port) to your tenant's allowed
+origins, as in
+[TROUBLESHOOTING.md](TROUBLESHOOTING.md#browser-calls-from-another-origin-are-refused-with-disallowed_cors_origin).
+
 **Optional: object storage locally**
 
 Eneo stores file bytes in PostgreSQL by default, which is all most work needs.

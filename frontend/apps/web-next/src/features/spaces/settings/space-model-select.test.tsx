@@ -4,10 +4,13 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import messages from "@/lib/i18n/messages/sv.json";
 import { SpaceModelSelect, type SelectableModel } from "./space-model-select";
 
 afterEach(cleanup);
 
+// Inside the six-month window in which a coming deprecation is shown.
+const SOON = new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10);
 const models: SelectableModel[] = [
   { id: "north-1", name: "Aurora", org: "Nord AI", provider_type: "azure" },
   { id: "north-2", name: "Borealis", org: "Nord AI", provider_type: "azure" },
@@ -61,6 +64,69 @@ function StatefulModels({
 }
 
 describe("SpaceModelSelect", () => {
+  it("shows lifecycle dates, preserves a saved deprecated model and permits removing it without losing focus", () => {
+    renderInApp(
+      <StatefulModels
+        available={[
+          {
+            id: "old",
+            name: "Utfasad modell",
+            is_deprecated: true,
+            deprecation_date: "2020-01-01"
+          },
+          { id: "future", name: "Kommande utfasning", deprecation_date: SOON }
+        ]}
+        initialSelection={["old"]}
+      />
+    );
+    expect(screen.getByText("Utfasad", { exact: true })).toBeTruthy();
+    expect(screen.getByText("2020-01-01", { exact: true })).toBeTruthy();
+    openCard();
+    expect(screen.getByText(`Utfasas ${SOON}`, { exact: true })).toBeTruthy();
+    const old = screen.getByRole("switch", { name: "Utfasad modell" });
+    old.focus();
+    fireEvent.click(old);
+    expect(old.getAttribute("aria-checked")).toBe("false");
+    expect(document.activeElement).toBe(old);
+    expect(old.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(old);
+    expect(old.getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(screen.getByRole("button", { name: "Välj alla" }));
+    expect(
+      screen.getByRole("switch", { name: "Kommande utfasning" }).getAttribute("aria-checked")
+    ).toBe("true");
+    expect(old.getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("explains an empty completion selection", () => {
+    renderModels(models);
+    expect(screen.getByText(messages.enable_completion_model_for_assistants)).toBeTruthy();
+  });
+
+  it.each([false, true])(
+    "explains multiple embedding models for organization=%s",
+    (isOrganization) => {
+      renderInApp(
+        <SpaceModelSelect
+          models={models}
+          selectedIds={["north-1", "north-2"]}
+          title="Inbäddningsmodeller"
+          description="Välj modeller"
+          kind="embedding"
+          isOrganization={isOrganization}
+          onChange={vi.fn()}
+        />
+      );
+      expect(
+        screen.getByText(
+          isOrganization
+            ? messages.embedding_models_multiple_warning_organization
+            : messages.embedding_models_multiple_warning
+        )
+      ).toBeTruthy();
+    }
+  );
+
   it("summarizes the selection and keeps model controls hidden until opened", async () => {
     const { container } = renderModels(models, { selectedIds: ["north-1"] });
 

@@ -1,12 +1,10 @@
-"use client";
-
 import { Icon } from "@astryxdesign/core/Icon";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { Bell, BellDot, ChevronDown } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useState } from "react";
 import { cn } from "@/lib/utils";
 import { isCancelledCrawl, isCrawlWithWarnings, jobFailureMessage } from "./job-failure-message";
@@ -54,7 +52,7 @@ function ExpandableErrorRow({
       <button
         type="button"
         onClick={() => setExpanded((current) => !current)}
-        className="rounded-ax-inner focus-visible:outline-ring flex min-h-6 w-full items-center justify-between gap-x-3 text-start focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="rounded-ax-inner focus-visible:outline-ring flex min-h-6 w-full items-center justify-between gap-x-3 text-start focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
         aria-expanded={expanded}
         aria-controls={messageId}
       >

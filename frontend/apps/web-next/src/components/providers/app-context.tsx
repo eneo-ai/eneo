@@ -1,5 +1,3 @@
-"use client";
-
 import { createContext, useContext, useMemo } from "react";
 import type { Schema } from "@/lib/api/models";
 import { hasPermission, type PermissionRequirement } from "@/lib/auth/permissions";
@@ -9,10 +7,8 @@ export type AppContextData = {
   tenant: Schema<"TenantPublic">;
   settings: Schema<"SettingsPublic">;
   federationStatus: Schema<"FederationStatusResponse">;
+  featureFlags: { federation: boolean };
   limits: Schema<"Limits">;
-  featureFlags: {
-    showWebSearch: boolean;
-  };
   /** Deployment-configured links (env). `null` when not configured: hide the link. */
   links: {
     /** ACCESSIBILITY_STATEMENT_URL: the organisation's tillgänglighetsredogörelse. */
@@ -21,7 +17,7 @@ export type AppContextData = {
     helpCenter: string | null;
     legacyApp: string | null;
   };
-  versions: { frontend: string; backend: string };
+  versions: { frontend: string; frontendRevision?: string | null; backend: string };
 };
 
 export type AppContextValue = AppContextData & {

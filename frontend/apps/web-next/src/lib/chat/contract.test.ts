@@ -7,12 +7,19 @@
  */
 import { Chat } from "@ai-sdk/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { CHAT_API } from "@/lib/api/base";
 import { loadFixtures, sseResponse, toSseBody, type StreamFixture } from "./contract-fixtures";
 import { createChatTransport } from "./transport";
 import type { EneoUIMessage } from "./types";
 
 type FinishArgs = { isAbort: boolean; isError: boolean; isDisconnect: boolean };
 type DataPart = { type: string; data: unknown };
+
+// This suite owns stream decoding; base.test.ts owns cookie/session transport.
+vi.mock("@/lib/api/base", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/api/base")>()),
+  apiFetch: (...args: Parameters<typeof fetch>) => fetch(...args)
+}));
 
 const fetchMock = vi.fn<typeof fetch>();
 vi.stubGlobal("fetch", fetchMock);
@@ -111,7 +118,8 @@ describe.each(fixtures)("$name", (fixture) => {
       expect(chat.error?.message).toBe(fixture.ui.error!.message);
       expect(errors.map((error) => error.message)).toEqual([fixture.ui.error!.message]);
       expect(data.find((part) => part.type === "data-error")?.data).toEqual({
-        code: fixture.ui.error!.code
+        code: fixture.ui.error!.code,
+        reason: fixture.ui.error!.reason
       });
     });
   }
@@ -122,7 +130,7 @@ describe("request body", () => {
     await settle(fixtures.find((fixture) => fixture.name === "plain-text")!);
 
     const [url, init] = fetchMock.mock.calls[0]!;
-    expect(url).toBe("/api/chat");
+    expect(url).toBe(CHAT_API);
     expect(init?.method).toBe("POST");
     expect(JSON.parse(init?.body as string)).toEqual({
       question: "What is in a.txt?",

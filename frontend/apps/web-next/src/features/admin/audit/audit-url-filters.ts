@@ -3,6 +3,10 @@ import type { ActionType, AuditFilters } from "./audit";
 
 type ReadableSearchParams = Pick<URLSearchParams, "get" | "getAll">;
 
+export function parseAuditTab(value: unknown): "logs" | "config" {
+  return value === "config" ? "config" : "logs";
+}
+
 export const DEFAULT_AUDIT_FILTERS: AuditFilters = {
   page: 1,
   actions: [],
@@ -37,8 +41,8 @@ export function parseAuditFilters(searchParams: ReadableSearchParams): AuditFilt
     page: parsePage(searchParams.get("page")),
     from_date: calendarDate(readParam(searchParams, "from_date")),
     to_date: calendarDate(readParam(searchParams, "to_date")),
-    actions: userId ? [] : parseActions(searchParams),
-    search: userId ? "" : (readParam(searchParams, "search") ?? ""),
+    actions: parseActions(searchParams),
+    search: readParam(searchParams, "search") ?? "",
     userId,
     userLabel
   };
@@ -54,7 +58,6 @@ export function auditFiltersSearchParams(filters: AuditFilters): URLSearchParams
   if (filters.userId) {
     params.set("user_id", filters.userId);
     if (filters.userLabel) params.set("user_label", filters.userLabel);
-    return params;
   }
 
   const search = filters.search.trim();

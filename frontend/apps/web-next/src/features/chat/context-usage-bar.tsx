@@ -1,9 +1,7 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { Popover } from "@astryxdesign/core/Popover";
 import { EyeOff, Info, TriangleAlert } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useFormatter, useTranslations } from "use-intl";
 import { useMemo, useState, useSyncExternalStore } from "react";
 import type { ContextUsage } from "@/lib/chat/use-preflight";
 import { cn } from "@/lib/utils";
@@ -11,8 +9,7 @@ import { cn } from "@/lib/utils";
 const PINNED_STORAGE_KEY = "contextUsageBarPinned";
 
 // localStorage-backed "always show" preference, read via useSyncExternalStore
-// so there's no setState-in-effect and no hydration mismatch (server
-// snapshot = not pinned, which renders nothing).
+// so every reader follows the same stored preference.
 const pinListeners = new Set<() => void>();
 
 function subscribePinned(callback: () => void) {
@@ -34,7 +31,7 @@ function readPinned() {
  * SHOW_FROM_PERCENT of the window.
  */
 export function useContextUsagePinned(): boolean {
-  return useSyncExternalStore(subscribePinned, readPinned, () => false);
+  return useSyncExternalStore(subscribePinned, readPinned);
 }
 
 export function setContextUsagePinned(next: boolean) {
@@ -47,14 +44,16 @@ export function setContextUsagePinned(next: boolean) {
 }
 
 /**
- * Four visually distinct segments, mapped to the eneo chart palette so each
+ * Segments use the eneo chart palette so each
  * keeps contrast against the track and each other in both themes:
- *   locked input  → neutral gray (provider prompt: system + RAG + history)
+ *   baseline prompt / locked input → neutral gray (provider prompt: system + RAG + history)
  *   locked output → green  (model's previous reply)
  *   pending text  → blue   (locally estimated tokens for the current input)
- *   pending files → amber  (locally estimated multimodal/file tokens)
+ *   baseline attachments / pending files → amber  (locally estimated multimodal/file tokens)
  */
 const SEGMENT_CLASS: Record<string, string> = {
+  baselinePrompt: "bg-ax-text-secondary",
+  baselineFiles: "bg-ax-orange",
   lockedInput: "bg-ax-text-secondary",
   lockedOutput: "bg-ax-purple",
   pendingText: "bg-ax-blue",
@@ -62,9 +61,8 @@ const SEGMENT_CLASS: Record<string, string> = {
 };
 
 /**
- * From this share of the context window the meter shows on its own. Below it
- * the conversation has room and the meter is noise under the composer, so
- * nothing renders unless the user pinned it from the chat menu.
+ * After the first question, the meter appears from this share of the window,
+ * or when the user pinned it. A new assistant's baseline is shown immediately.
  */
 export const SHOW_FROM_PERCENT = 60;
 
@@ -74,7 +72,7 @@ export const SHOW_FROM_PERCENT = 60;
  * into locked (last turn) vs pending (your text/files) tokens, the running
  * conversation total, and an over-limit warning. Advisory only — the provider
  * validates the final payload. Shown from SHOW_FROM_PERCENT of the window,
- * when the estimate overflows, or always when pinned.
+ * when the estimate overflows, before the first question, or always when pinned.
  */
 export function ContextUsageBar({
   usage,
@@ -90,11 +88,7 @@ export function ContextUsageBar({
   onNewConversation?: () => void;
 }) {
   const t = useTranslations();
-  const locale = useLocale();
-  const fmt = useMemo(() => {
-    const nf = new Intl.NumberFormat(locale === "sv" ? "sv-SE" : "en-US");
-    return (value: number) => nf.format(value);
-  }, [locale]);
+  const { number: fmt } = useFormatter();
 
   const pinned = useContextUsagePinned();
   const [open, setOpen] = useState(false);
@@ -105,19 +99,26 @@ export function ContextUsageBar({
     lockedOutputTokens,
     pendingTextTokens,
     pendingFileTokens,
+    assistantPromptTokens,
+    assistantAttachmentTokens,
+    skillContextTokens,
     usedTokens: projectedTotal,
     willExceedContext: willExceed
   } = usage;
 
+  const baselineTotal = assistantPromptTokens + assistantAttachmentTokens;
   const pendingTotal = pendingTextTokens + pendingFileTokens;
   const hasUsage =
-    contextLimit > 0 && (lockedInputTokens + lockedOutputTokens > 0 || pendingTotal > 0);
+    contextLimit > 0 &&
+    (lockedInputTokens + lockedOutputTokens + baselineTotal > 0 || pendingTotal > 0);
   const projectedPercent = contextLimit > 0 ? (projectedTotal / contextLimit) * 100 : 0;
 
   // Lay segments out left-to-right, capping each so they never overflow the bar.
   const segments = useMemo(() => {
     if (contextLimit <= 0) return [];
     const raw = [
+      { key: "baselinePrompt", tokens: assistantPromptTokens },
+      { key: "baselineFiles", tokens: assistantAttachmentTokens },
       { key: "lockedInput", tokens: lockedInputTokens },
       { key: "lockedOutput", tokens: lockedOutputTokens },
       { key: "pendingText", tokens: pendingTextTokens },
@@ -131,7 +132,15 @@ export function ContextUsageBar({
       cursor += capped;
       return result;
     });
-  }, [contextLimit, lockedInputTokens, lockedOutputTokens, pendingTextTokens, pendingFileTokens]);
+  }, [
+    contextLimit,
+    lockedInputTokens,
+    lockedOutputTokens,
+    pendingTextTokens,
+    pendingFileTokens,
+    assistantPromptTokens,
+    assistantAttachmentTokens
+  ]);
 
   const hasCumulative = cumulativeTokens > 0 && turnCount > 0;
   const cumulativeSummary =
@@ -148,9 +157,10 @@ export function ContextUsageBar({
     return SEGMENT_CLASS[key] ?? "bg-ax-text-secondary";
   }
 
-  // The meter earns its place when the window is filling up; otherwise only a
-  // pin from the chat menu shows it.
-  const warranted = projectedPercent >= SHOW_FROM_PERCENT || willExceed;
+  // Show the assistant's fixed context before the first question; later,
+  // surface the meter as the window fills or when it is pinned.
+  const warranted =
+    projectedPercent >= SHOW_FROM_PERCENT || willExceed || (turnCount === 0 && baselineTotal > 0);
   if (!hasUsage || (!warranted && !pinned)) return null;
 
   const percentLabel = projectedPercent.toFixed(projectedPercent >= 10 ? 0 : 1);
@@ -165,6 +175,41 @@ export function ContextUsageBar({
       </div>
 
       <div className="space-y-3 py-3">
+        {baselineTotal > 0 && (
+          <div className="space-y-1.5">
+            <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
+              {t("context_usage_section_baseline")}
+            </p>
+            <div className="flex items-baseline justify-between gap-3">
+              <span>{t("context_usage_label_assistant_prompt")}</span>
+              <span className="text-ax-text-secondary tabular-nums">
+                {fmt(assistantPromptTokens)}
+              </span>
+            </div>
+            <div className="flex items-baseline justify-between gap-3">
+              <span>{t("context_usage_label_assistant_attachments")}</span>
+              <span className="text-ax-text-secondary tabular-nums">
+                {fmt(assistantAttachmentTokens)}
+              </span>
+            </div>
+            <p className="text-ax-text-secondary text-[10px] leading-snug">
+              {t("context_usage_assistant_baseline_hint")}
+            </p>
+            {skillContextTokens > 0 && (
+              <>
+                <div className="flex items-baseline justify-between gap-3 ps-3">
+                  <span>{t("context_usage_label_skills_subset")}</span>
+                  <span className="text-ax-text-secondary tabular-nums">
+                    {fmt(skillContextTokens)}
+                  </span>
+                </div>
+                <p className="text-ax-text-secondary ps-3 text-[10px] leading-snug">
+                  {t("context_usage_skills_subset_hint")}
+                </p>
+              </>
+            )}
+          </div>
+        )}
         {(lockedInputTokens > 0 || lockedOutputTokens > 0) && (
           <div className="space-y-1.5">
             <p className="text-ax-text-secondary text-[10px] font-medium tracking-wide uppercase">
@@ -318,7 +363,7 @@ export function ContextUsageBar({
         type="button"
         aria-haspopup="dialog"
         aria-expanded={open}
-        className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-[11px] leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2"
+        className="text-ax-text-secondary hover:text-ax-text focus-visible:outline-ring rounded-ax-inner flex min-h-6 w-full items-center gap-3 px-1 text-[11px] leading-none transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 pointer-coarse:min-h-11"
       >
         <span className="sr-only">{t("context_usage")}: </span>
         <div
@@ -330,7 +375,7 @@ export function ContextUsageBar({
               <div
                 key={seg.key}
                 className={cn(
-                  "absolute top-0 bottom-0 my-auto h-[calc(100%-2px)] rounded-full transition-all duration-300 ease-out",
+                  "absolute top-0 bottom-0 my-auto h-[calc(100%-2px)] rounded-full transition-[left,width] duration-(--duration-medium-min) ease-[cubic-bezier(0.22,1,0.36,1)]",
                   segmentClass(seg.key)
                 )}
                 style={{

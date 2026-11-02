@@ -1,15 +1,13 @@
 /**
  * Test-only: renders UI inside the app's providers, in Swedish (the default
- * locale), so tests query what users see and hear: next-intl with the real
- * catalog, the Astryx provider (its Swedish strings, next/link), React Query,
+ * locale), so tests query what users see and hear: use-intl with the real
+ * catalog, the Astryx provider (its Swedish strings, the app's link), React Query,
  * the Radix tooltip provider, the signed-in app context and the app shell's
  * context. Not imported by app code.
  */
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
 import { render, renderHook } from "@testing-library/react";
-import * as nextNavigation from "next/navigation";
-import { NextIntlClientProvider } from "next-intl";
-import { renderToString } from "react-dom/server";
+import { AppIntlProvider } from "@/components/providers/intl-provider";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import { AstryxProvider } from "@/components/providers/astryx-provider";
 import { ShellContext, type ShellContextValue } from "@/components/shell/shell-context";
@@ -17,6 +15,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { makeQueryClient } from "@/lib/api/query";
 import type { Permission } from "@/lib/auth/permissions";
 import messages from "@/lib/i18n/messages/sv.json";
+import * as appNavigation from "@/lib/navigation";
 import * as navigation from "./navigation";
 
 /**
@@ -33,6 +32,24 @@ export function testQueryClient(): QueryClient {
     mutations: { ...defaults.mutations, retry: false }
   });
   return client;
+}
+
+/**
+ * Everything React Query holds, as text: each query's state and each
+ * mutation's state and options (functions drop out). A secret the UI sends
+ * or receives must never appear in it.
+ */
+export function cachedText(queryClient: QueryClient): string {
+  return JSON.stringify([
+    queryClient
+      .getQueryCache()
+      .getAll()
+      .map((query) => query.state),
+    queryClient
+      .getMutationCache()
+      .getAll()
+      .map((mutation) => [mutation.state, mutation.options])
+  ]);
 }
 
 type AppContextOverrides = { [Key in keyof AppContextData]?: Partial<AppContextData[Key]> } & {
@@ -67,8 +84,8 @@ export function testAppContext({
     },
     settings: { using_templates: false, api_key_expiry_notifications: false, chatbot_widget: null },
     federationStatus: { has_multi_tenant_federation: false },
+    featureFlags: { federation: false },
     limits: { attachments: { formats: [] }, info_blobs: { formats: [] } },
-    featureFlags: { showWebSearch: true },
     links: { accessibilityStatement: null, helpCenter: null, legacyApp: null },
     versions: { frontend: "0.1.0", backend: "1.2.3" }
   };
@@ -83,8 +100,7 @@ export function testAppContext({
 /** A shell context whose actions do nothing (pass `vi.fn()`s to check them). */
 export const noopShell: ShellContextValue = {
   openPalette: () => {},
-  openCreateSpace: () => {},
-  registerMobileHeader: () => () => {}
+  openCreateSpace: () => {}
 };
 
 export type RenderInAppOptions = {
@@ -95,8 +111,8 @@ export type RenderInAppOptions = {
   /** Default: `noopShell`. */
   shell?: ShellContextValue;
   /**
-   * The route the next/navigation hooks report, e.g. `/admin/users?page=2`.
-   * Needs `vi.mock("next/navigation", () => import("@/test/navigation"))`.
+   * The route the navigation hooks report, e.g. `/admin/users?page=2`.
+   * Needs `vi.mock("@/lib/navigation", () => import("@/test/navigation"))`.
    */
   route?: string;
 };
@@ -110,13 +126,13 @@ function providers({
   if (route !== undefined) {
     let mocked = false;
     try {
-      mocked = nextNavigation.useRouter === navigation.useRouter;
+      mocked = appNavigation.useRouter === navigation.useRouter;
     } catch {
-      // A test's own next/navigation mock without useRouter.
+      // A test's own navigation mock without useRouter.
     }
     if (!mocked) {
       throw new Error(
-        'renderInApp({ route }) needs vi.mock("next/navigation", () => import("@/test/navigation")).'
+        'renderInApp({ route }) needs vi.mock("@/lib/navigation", () => import("@/test/navigation")).'
       );
     }
     navigation.setRoute(route);
@@ -124,7 +140,7 @@ function providers({
 
   function Providers({ children }: { children: React.ReactNode }) {
     return (
-      <NextIntlClientProvider locale="sv" messages={messages} timeZone="Europe/Stockholm">
+      <AppIntlProvider locale="sv" messages={messages}>
         <AstryxProvider>
           <QueryClientProvider client={queryClient}>
             <TooltipProvider>
@@ -134,7 +150,7 @@ function providers({
             </TooltipProvider>
           </QueryClientProvider>
         </AstryxProvider>
-      </NextIntlClientProvider>
+      </AppIntlProvider>
     );
   }
   return { queryClient, Providers };
@@ -161,10 +177,4 @@ export function renderInApp(ui: React.ReactNode, options: RenderInAppOptions = {
 export function renderHookInApp<Result>(hook: () => Result, options: RenderInAppOptions = {}) {
   const { queryClient, Providers } = providers(options);
   return { queryClient, ...renderHook(hook, { wrapper: Providers }) };
-}
-
-/** The HTML the server sends for `ui` in the app's providers: no effects, no client-only values. */
-export function renderToHtml(ui: React.ReactNode, options: RenderInAppOptions = {}): string {
-  const { Providers } = providers(options);
-  return renderToString(<Providers>{ui}</Providers>);
 }

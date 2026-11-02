@@ -1,17 +1,18 @@
-"use client";
-
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery } from "@tanstack/react-query";
 import { CircleAlert, RotateCcw } from "lucide-react";
-import Link from "next/link";
-import { useLocale, useTranslations } from "next-intl";
+import Link from "@/lib/link";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
-import { flushSync } from "react-dom";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { QueryStateBoundary } from "@/components/composites/query-state";
+import { ListError, QueryStateBoundary } from "@/components/composites/query-state";
 import { SettingsGroup } from "@/components/composites/settings-rows";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -72,8 +73,11 @@ export function AdminSkillsPage() {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
-      <PageHeader title={t("admin_skills_title")} tour="admin-skills" />
-      <p className="text-muted-foreground max-w-3xl text-sm">{t("admin_skills_subtitle")}</p>
+      <PageHeader
+        title={t("admin_skills_title")}
+        description={t("admin_skills_subtitle")}
+        tour="admin-skills"
+      />
       {/* The model projection is optional: the editor says so when it is missing. */}
       <QueryStateBoundary query={policy} rows={4}>
         {(initialPolicy) =>
@@ -87,24 +91,31 @@ export function AdminSkillsPage() {
           )
         }
       </QueryStateBoundary>
-      <SettingsGroup
-        id="skill-catalogue"
-        title={t("admin_skills_catalogue_title")}
-        description={t("admin_skills_catalogue_description")}
-        headerEnd={<Badge variant="outline">{t("admin_skills_catalogue_summary")}</Badge>}
-      >
-        <p className="text-muted-foreground text-sm">{t("admin_skills_catalogue_bindings_note")}</p>
-        <div className="flex flex-wrap gap-2">
-          <Button asChild>
-            <Link href="/spaces/organization/skills">{t("governance_manage_skills_action")}</Link>
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/admin/personal-assistant">
-              {t("admin_skills_open_personal_assistant")}
-            </Link>
-          </Button>
-        </div>
-      </SettingsGroup>
+      {/* With the editor, not before it: shown first, it sat in view and was pushed off the
+          screen when the editor (which waits for the policy and the model projections)
+          arrived above it (layout shift). A failed policy still leaves the catalogue. */}
+      {!policy.isPending && (policy.isError || !projections.isPending) && (
+        <SettingsGroup
+          id="skill-catalogue"
+          title={t("admin_skills_catalogue_title")}
+          description={t("admin_skills_catalogue_description")}
+          headerEnd={<Badge variant="outline">{t("admin_skills_catalogue_summary")}</Badge>}
+        >
+          <p className="text-muted-foreground text-sm">
+            {t("admin_skills_catalogue_bindings_note")}
+          </p>
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline">
+              <Link href="/spaces/organization/skills">{t("governance_manage_skills_action")}</Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/admin/personal-assistant">
+                {t("admin_skills_open_personal_assistant")}
+              </Link>
+            </Button>
+          </div>
+        </SettingsGroup>
+      )}
     </div>
   );
 }
@@ -123,7 +134,7 @@ function PolicyEditor({
   const [modelProjections, setModelProjections] = useState(initialProjections);
   const [busy, setBusy] = useState<"save" | "reset" | null>(null);
   const [resetOpen, setResetOpen] = useState(false);
-  const [error, setError] = useState<"save" | "reset" | null>(null);
+  const [error, setError] = useState<{ kind: "save" | "reset"; cause: unknown } | null>(null);
   const [status, setStatus] = useState<"saved" | "reset" | "unchanged" | null>(null);
   const statusText =
     status === "saved"
@@ -152,12 +163,10 @@ function PolicyEditor({
       ({ key }) => !fieldValid(draft[key], policy.editable_bounds[key])
     );
     if (invalid) {
-      // Rendered before focus moves, so the field is read with its problem.
-      flushSync(() => {
+      revealProblems(() => {
         setSubmitted(true);
         setStatus(null);
-      });
-      document.getElementById(invalid.id)?.focus();
+      }, invalid.id);
       return;
     }
     if (draftsEqual(draft, policyDraft(policy))) {
@@ -190,8 +199,8 @@ function PolicyEditor({
       ).catch(() => null);
       setModelProjections(projection);
       setStatus(kind === "save" ? "saved" : "reset");
-    } catch {
-      setError(kind);
+    } catch (cause) {
+      setError({ kind, cause });
     } finally {
       setBusy(null);
       setResetOpen(false);
@@ -204,7 +213,7 @@ function PolicyEditor({
       title={t("skills_runtime_policy_title")}
       description={t("skills_runtime_policy_description")}
       headerEnd={
-        <Badge variant={policy.selective_activation_enabled ? "default" : "outline"}>
+        <Badge variant={policy.selective_activation_enabled ? "secondary" : "outline"}>
           {t(
             policy.selective_activation_enabled
               ? "admin_skills_runtime_summary_on"
@@ -246,16 +255,14 @@ function PolicyEditor({
         ))}
       </div>
       {error && (
-        <Alert variant="destructive" role="alert">
-          <CircleAlert className="size-4" />
-          <AlertTitle>
-            {t(
-              error === "reset"
-                ? "skills_runtime_policy_reset_error"
-                : "skills_runtime_policy_save_error"
-            )}
-          </AlertTitle>
-        </Alert>
+        <ListError
+          error={error.cause}
+          title={t(
+            error.kind === "reset"
+              ? "skills_runtime_policy_reset_error"
+              : "skills_runtime_policy_save_error"
+          )}
+        />
       )}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
         <p className="text-muted-foreground text-sm">{statusText}</p>
@@ -308,9 +315,11 @@ function PolicyEditor({
                 className="w-full min-w-[44rem] text-sm"
                 aria-labelledby="skill-models-heading"
               >
-                <thead className="bg-background sticky top-0">
+                <thead className="bg-card sticky top-0">
                   <tr className="border-b text-left">
-                    <th className="p-3">{t("skills_runtime_models_model")}</th>
+                    <th className="bg-card sticky start-0 z-10 p-3">
+                      {t("skills_runtime_models_model")}
+                    </th>
                     <th className="p-3 text-right">{t("skills_runtime_models_input_window")}</th>
                     <th className="p-3 text-right">{t("skills_runtime_models_skill_budget")}</th>
                     <th className="p-3">{t("skills_runtime_models_tool_calling")}</th>
@@ -319,7 +328,7 @@ function PolicyEditor({
                 <tbody>
                   {modelProjections.models.map((model) => (
                     <tr key={model.completion_model_id} className="border-b last:border-0">
-                      <td className="p-3 font-medium">
+                      <td className="bg-card sticky start-0 p-3 font-medium">
                         {model.nickname ?? model.name}
                         {model.nickname && (
                           <span className="text-muted-foreground block text-xs">{model.name}</span>

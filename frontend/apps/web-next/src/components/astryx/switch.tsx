@@ -1,5 +1,3 @@
-"use client";
-
 import {
   Switch as AstryxSwitch,
   type SwitchProps as AstryxSwitchProps

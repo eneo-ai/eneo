@@ -50,8 +50,11 @@ assets, so you can compare one version with the next. The backend, frontend
 and tool runtime container images also get provenance attestations when they
 are built and pushed to GitHub Container Registry.
 
-The application publication workflow checks the actual Node runtime in both
-frontend images and blocks fixable HIGH or CRITICAL image vulnerabilities
+The backend image also includes the React/Vite assets and their build dependency
+inventory. It has no Node runtime or separate React frontend image.
+
+The application publication workflow checks the actual Node runtime in the
+Svelte frontend image and blocks fixable HIGH or CRITICAL image vulnerabilities
 before completing the release bundle. These checks use the exact image digest
 and also run when a previously published image is reused. The tools-runtime
 candidate similarly verifies its Bun runtime and Python Brotli version before

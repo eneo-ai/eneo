@@ -9,7 +9,7 @@ import { OPEN_NAV_EVENT } from "@/components/shell/routes";
 import { ChatHeader } from "./chat-header";
 import type { ChatPartnerSwitcherItem } from "./partner-switcher";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 afterEach(cleanup);
 
@@ -38,6 +38,11 @@ const items: ChatPartnerSwitcherItem[] = [
   }
 ];
 
+/** The header below 1024px: it replaces the shell's top bar (both are in jsdom's DOM). */
+function phoneHeader() {
+  return document.querySelector<HTMLElement>("[data-own-mobile-header]")!;
+}
+
 function renderHeader(overrides: Partial<Parameters<typeof ChatHeader>[0]> = {}) {
   const props: Parameters<typeof ChatHeader>[0] = {
     partner,
@@ -60,16 +65,21 @@ describe("ChatHeader", () => {
     expect(
       screen.getAllByRole("heading", { level: 1, name: "Upphandlingsanalys mot LOU" })
     ).toHaveLength(2);
-    expect(screen.getByText("Intern")).toBeTruthy();
+    // Desktop pill and phone line (only one is displayed), read with their prefix.
+    const classes = screen.getAllByText("Intern");
+    expect(classes).toHaveLength(2);
+    for (const element of classes) {
+      expect(element.parentElement!.textContent).toBe("Säkerhetsklass: Intern");
+    }
     expect(
       screen.getAllByRole("button", { name: /byt assistent: upphandlingsassistenten/i }).length
     ).toBeGreaterThan(0);
   });
 
-  it("shows a fixed model under the partner's name on every width", () => {
+  it("shows a fixed model under the partner's name from 1024px", () => {
     renderHeader();
-    // Desktop header and phone header (only one is displayed).
-    expect(screen.getAllByText("Upphandling · Claude Haiku 4.5")).toHaveLength(2);
+    expect(screen.getAllByText("Upphandling · Claude Haiku 4.5")).toHaveLength(1);
+    expect(within(phoneHeader()).queryByText(/Claude Haiku 4.5/)).toBeNull();
   });
 
   it("switches assistant from a menu that marks the current one as selected", async () => {
@@ -123,5 +133,64 @@ describe("ChatHeader", () => {
   it("has no axe violations", async () => {
     const { container } = renderHeader();
     await expectNoAxeViolations(container);
+  });
+});
+
+describe("ChatHeader below 1024px (decision 2)", () => {
+  it("puts the conversation title first, then the assistant and its security class", async () => {
+    renderHeader();
+    const header = phoneHeader();
+    const switcher = within(header).getByRole("button", {
+      name: "Upphandlingsanalys mot LOU. Upphandlingsassistenten i Upphandling, säkerhetsklass Intern. Byt assistent"
+    });
+    // What the name says, the switcher shows: the title, then the assistant and the class.
+    expect(switcher.textContent).toMatch(
+      /^Upphandlingsanalys mot LOU.*Upphandlingsassistenten.*Intern/
+    );
+    expect(
+      within(header).getAllByRole("heading", { level: 1, name: "Upphandlingsanalys mot LOU" })
+    ).toHaveLength(1);
+    fireEvent.click(switcher);
+    const menu = document.getElementById(switcher.getAttribute("aria-controls") ?? "")!;
+    expect(within(menu).getByRole("group", { name: "Välj en assistent" })).toBeTruthy();
+    await expectNoAxeViolations(header);
+  });
+
+  it("names the assistant first before a conversation starts", () => {
+    renderHeader({ title: null });
+    expect(
+      within(phoneHeader()).getByRole("button", {
+        name: "Upphandlingsassistenten i Upphandling, säkerhetsklass Intern. Byt assistent"
+      })
+    ).toBeTruthy();
+    expect(within(phoneHeader()).queryByRole("heading")).toBeNull();
+  });
+
+  it("does not repeat a title's own punctuation or name the personal space", () => {
+    renderHeader({
+      partner: {
+        type: "default-assistant",
+        id: "p",
+        name: "",
+        personalSpace: true,
+        spaceName: "Personligt"
+      },
+      title: "Hur långt har ärende BN 2026-0412 kommit?"
+    });
+    expect(
+      within(phoneHeader()).getByRole("button", {
+        name: "Hur långt har ärende BN 2026-0412 kommit? Personlig assistent. Byt assistent"
+      })
+    ).toBeTruthy();
+  });
+
+  it("shows the same lines without a menu when there is no other assistant to switch to", () => {
+    renderHeader({ switcherItems: [items[1]!] });
+    const header = phoneHeader();
+    expect(within(header).queryByRole("button", { name: /Byt assistent/ })).toBeNull();
+    // Read in full: the space, hidden for room, and the class with its prefix.
+    expect(header.textContent).toContain("Upphandlingsassistenten");
+    expect(header.textContent).toContain("Upphandling");
+    expect(header.textContent).toContain("Säkerhetsklass: Intern");
   });
 });

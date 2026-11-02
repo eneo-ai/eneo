@@ -35,6 +35,11 @@ from eneo.settings.settings import (
 
 logger = get_logger(__name__)
 
+_SKILL_POLICY_SEED_ON_GET = (
+    "Seeds the tenant's default skill runtime policy on first read (INSERT ... ON "
+    "CONFLICT DO NOTHING); the result is the default the read reports either way."
+)
+
 router = APIRouter()
 settings_admin_router = APIRouter()
 _TENANT_SETTINGS_ADMIN_ACCESS_REASON = (
@@ -133,6 +138,7 @@ async def unblock_skill_execution(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    effect_on_get=_SKILL_POLICY_SEED_ON_GET,
 )
 async def get_skill_runtime_policy(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -202,6 +208,7 @@ async def reset_skill_runtime_policy(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason=_TENANT_SETTINGS_ADMIN_ACCESS_REASON,
+    effect_on_get=_SKILL_POLICY_SEED_ON_GET,
 )
 async def get_skill_runtime_model_projections(
     container: Annotated[Container, Depends(get_container(with_user=True))],
@@ -361,7 +368,9 @@ Enable or disable global audit logging for your tenant.
 
 **Behavior:**
 - Updates the `audit_logging_enabled` feature flag for your tenant
-- When disabled: No audit logs are created for any action (global kill switch)
+- When disabled: No audit logs are created (global kill switch), except for
+  changes to the organisation's sign-in settings (`federation_updated`), which
+  are always logged
 - When enabled: Audit logging resumes with category and action-level filtering
 - This is independent from category/action configuration
 - Change takes effect immediately for all workers

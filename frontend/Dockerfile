@@ -30,7 +30,7 @@ ARG APP_REVISION=unknown
 ENV APP_VERSION=${APP_VERSION} APP_REVISION=${APP_REVISION}
 ENV NODE_OPTIONS=--max-old-space-size=8192
 RUN bun run --filter @eneo/ui prepare && bun run --filter @eneo/web prepare
-# This image ships apps/web; web-next has its own Dockerfile and build context.
+# This image ships Svelte; the backend image builds and serves React/Vite.
 RUN bun run --filter @eneo/ui build && bun run --filter @eneo/web build
 
 # Stage 2: Production runtime using Node.js

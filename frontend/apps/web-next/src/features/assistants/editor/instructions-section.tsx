@@ -1,12 +1,12 @@
-"use client";
-
 import { useQuery } from "@tanstack/react-query";
 import { FileText, History, Maximize2, Sparkles } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useRef, useState } from "react";
-import { ContextBudget, type ContextSegment } from "@/components/composites/context-budget";
+import { useFormatter, useTranslations } from "use-intl";
+import { useState } from "react";
+import { AssistantContextMeter } from "./assistant-context-meter";
+import type { Schema } from "@/lib/api/models";
+import { assistantToolModel } from "./effective-config";
 import { SettingsGroup } from "@/components/composites/settings-rows";
-import { useAutosave, useDirtySaveStatus } from "@/components/composites/use-autosave";
+import { useAutosaveField } from "@/components/composites/use-autosave";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,18 +25,18 @@ import {
 } from "@/features/help-assistants/prompt-guide/helper-runs";
 import { PromptGuideDialog } from "@/features/help-assistants/prompt-guide/prompt-guide-dialog";
 import { PromptVersionDialog } from "@/features/prompts/prompt-version-dialog";
+import { promptDraftsMatch, type PromptDraft } from "@/features/prompts/prompt-draft";
 import { useSpace } from "@/features/spaces/use-space";
 import { isPromptLocked } from "./effective-config";
 import { useUpdateAssistant, type Assistant } from "./use-assistant";
 
-// Rough heuristic: ~4 characters per token. Good enough for a live editor hint.
-const CHARS_PER_TOKEN = 4;
 const PROMPT_AUTOSAVE_DEBOUNCE_MS = 1500;
 
 /** Right-aligned muted line: character count + a markdown hint. */
 function PromptMeta({ text }: { text: string }) {
   const t = useTranslations();
-  const characters = new Intl.NumberFormat(undefined).format(Math.round(text.length));
+  const format = useFormatter();
+  const characters = format.number(text.length);
 
   return (
     <span className="text-muted-foreground inline-flex items-center gap-3 text-xs">
@@ -57,19 +57,21 @@ function PromptMeta({ text }: { text: string }) {
  */
 export function InstructionsSection({
   assistant,
-  promptGuide = true
+  promptGuide = true,
+  contextModel,
+  modelConfirmed = true
 }: {
   assistant: Assistant;
   promptGuide?: boolean;
+  contextModel?: Pick<Schema<"CompletionModelPublic">, "id" | "token_limit"> | null;
+  modelConfirmed?: boolean;
 }) {
   const t = useTranslations();
   const { space } = useSpace();
   const update = useUpdateAssistant(assistant.id);
-  const autosave = useAutosave("assistant-prompt");
   const savedPrompt = assistant.prompt?.text ?? "";
   const promptLocked = isPromptLocked(assistant.effective_config);
-  const [prompt, setPrompt] = useState(savedPrompt);
-  const [promptDescription, setPromptDescription] = useState("");
+  const savedDescription = assistant.prompt?.description ?? "";
   const [showHistory, setShowHistory] = useState(false);
   const [showPromptGuide, setShowPromptGuide] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -78,63 +80,32 @@ export function InstructionsSection({
     enabled: promptGuide
   });
 
-  const dirty = prompt !== savedPrompt;
-  useDirtySaveStatus("assistant-prompt", dirty);
+  // Each save creates a new prompt version, so commit on blur, after a pause,
+  // or on an explicit apply rather than on every keystroke.
+  const promptField = useAutosaveField<PromptDraft>({
+    key: "assistant-prompt",
+    value: { kind: "server", text: savedPrompt, description: savedDescription },
+    equals: promptDraftsMatch,
+    validate: () => !promptLocked,
+    save: (value) =>
+      update.mutateAsync({
+        prompt: { text: value.text, description: value.kind === "manual" ? "" : value.description }
+      }),
+    commitDebounceMs: PROMPT_AUTOSAVE_DEBOUNCE_MS,
+    commitOnVisibilityChange: true
+  });
+  const prompt = promptField.value.text;
+  const dirty = promptField.dirty;
 
-  // Adopt the saved prompt when it changes server-side (our save landing, or a
-  // version restored elsewhere) unless the user has unsaved local edits.
-  const serverRef = useRef(savedPrompt);
-  useEffect(() => {
-    if (serverRef.current === savedPrompt) return;
-    const previous = serverRef.current;
-    serverRef.current = savedPrompt;
-    setPrompt((current) => (current === previous ? savedPrompt : current));
-  }, [savedPrompt]);
+  function editPrompt(text: string) {
+    promptField.setValue({ kind: "manual", text });
+  }
 
-  // Each save creates a new prompt version, so commit on blur or an explicit
-  // apply rather than on every keystroke.
-  const commit = useCallback(
-    async (text = prompt, description = promptDescription) => {
-      if (promptLocked) return;
-      if (text === savedPrompt) return;
-      const result = await autosave(() => update.mutateAsync({ prompt: { text, description } }));
-      if (result !== undefined) setPromptDescription("");
-    },
-    [autosave, prompt, promptDescription, promptLocked, savedPrompt, update]
-  );
-
-  useEffect(() => {
-    if (!dirty) return;
-    const timer = window.setTimeout(() => void commit(), PROMPT_AUTOSAVE_DEBOUNCE_MS);
-    return () => window.clearTimeout(timer);
-  }, [commit, dirty]);
-
-  useEffect(() => {
-    if (!dirty) return;
-    const handler = () => {
-      if (document.visibilityState === "hidden") void commit();
-    };
-    document.addEventListener("visibilitychange", handler);
-    return () => document.removeEventListener("visibilitychange", handler);
-  }, [commit, dirty]);
-
-  const promptTokens = Math.ceil(prompt.length / CHARS_PER_TOKEN);
-  const attachmentTokens = (assistant.attachments ?? []).reduce(
-    (sum, file) => sum + (file.token_count ?? 0),
-    0
-  );
+  const effectiveModelId = assistantToolModel(space.completion_models, assistant)?.id;
   const model =
-    space.completion_models.find((candidate) => candidate.id === assistant.completion_model?.id) ??
-    null;
-  const budgetSegments: ContextSegment[] = [
-    { key: "prompt", label: t("prompt"), tokens: promptTokens, className: "bg-chart-1" },
-    {
-      key: "attachments",
-      label: t("attachments"),
-      tokens: attachmentTokens,
-      className: "bg-chart-2"
-    }
-  ];
+    contextModel === undefined
+      ? (space.completion_models.find((candidate) => candidate.id === effectiveModelId) ?? null)
+      : contextModel;
 
   function promptGuideDisabledTooltip(
     reason: HelperAvailability["disabled_reason"] | null | undefined
@@ -159,14 +130,17 @@ export function InstructionsSection({
   return (
     <SettingsGroup title={t("instructions")}>
       <div className="flex flex-col gap-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="flex flex-col gap-0.5">
+        {/* The buttons move under the label where both do not fit on a line. */}
+        <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
+          <div className="flex min-w-0 flex-1 basis-56 flex-col gap-0.5">
             <label htmlFor="assistant-prompt" className="text-sm font-medium">
               {t("prompt")}
             </label>
             <p className="text-muted-foreground text-sm">{t("describe_assistant_behavior")}</p>
           </div>
-          <div className="flex shrink-0 items-center gap-1">
+          {/* Wrapped under the label on a phone: the ghost buttons' own inset is pulled
+              back so their icons start on the gutter with the label. */}
+          <div className="flex min-w-0 flex-wrap items-center gap-1 max-md:-ms-2.5">
             {promptGuide && availability && !promptLocked && (
               <Tooltip>
                 <TooltipTrigger asChild>
@@ -219,15 +193,19 @@ export function InstructionsSection({
           disabled={promptLocked}
           rows={12}
           className="min-h-72 w-full resize-y text-base leading-6"
-          onChange={(event) => {
-            setPrompt(event.target.value);
-            setPromptDescription("");
-          }}
-          onBlur={() => void commit()}
+          onChange={(event) => editPrompt(event.target.value)}
+          onBlur={() => void promptField.commit()}
         />
 
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <ContextBudget segments={budgetSegments} maxTokens={model?.token_limit ?? null} />
+          <AssistantContextMeter
+            assistantId={assistant.id}
+            prompt={promptLocked ? undefined : prompt}
+            attachments={assistant.attachments ?? []}
+            model={model}
+            modelConfirmed={modelConfirmed}
+            revision={assistant.updated_at}
+          />
           <PromptMeta text={prompt} />
         </div>
       </div>
@@ -243,24 +221,30 @@ export function InstructionsSection({
           const description = t("prompt_guide_apply_description", {
             date: formatDateTime(new Date().toISOString())
           });
-          setPrompt(text);
-          setPromptDescription(description);
-          void commit(text, description);
+          const value: PromptDraft = { kind: "annotated", text, description };
+          promptField.setValue(value);
+          void promptField.commit(value);
         }}
       />
       <PromptVersionDialog
         resource={{ type: "assistant", id: assistant.id }}
         open={showHistory && !promptLocked}
         onOpenChange={setShowHistory}
-        onUseVersion={(text) => {
+        onUseVersion={(version) => {
           if (promptLocked) return;
-          setPrompt(text);
-          setPromptDescription("");
-          void commit(text, "");
+          const value: PromptDraft = {
+            kind: "annotated",
+            text: version.text,
+            description: t("prompt_restored_from_date", {
+              date: version.created_at ? formatDateTime(version.created_at) : t("unknown")
+            })
+          };
+          promptField.setValue(value);
+          void promptField.commit(value);
         }}
       />
       <Dialog open={expanded} onOpenChange={setExpanded}>
-        <DialogContent className="flex h-[82vh] max-h-[760px] max-w-[calc(100%-2rem)] flex-col gap-5 p-5 sm:min-h-[560px] sm:max-w-5xl sm:p-6">
+        <DialogContent className="flex h-[min(760px,calc(100dvh-2rem))] max-w-[calc(100%-2rem)] flex-col gap-5 p-5 sm:max-w-5xl sm:p-6">
           <DialogHeader>
             <DialogTitle>{t("prompt")}</DialogTitle>
             <DialogDescription>{t("describe_assistant_behavior")}</DialogDescription>
@@ -270,11 +254,8 @@ export function InstructionsSection({
             value={prompt}
             disabled={promptLocked}
             className="min-h-0 flex-1 resize-none text-base leading-6"
-            onChange={(event) => {
-              setPrompt(event.target.value);
-              setPromptDescription("");
-            }}
-            onBlur={() => void commit()}
+            onChange={(event) => editPrompt(event.target.value)}
+            onBlur={() => void promptField.commit()}
           />
           <div className="flex justify-end">
             <PromptMeta text={prompt} />

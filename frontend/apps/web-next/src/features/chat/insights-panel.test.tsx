@@ -116,6 +116,28 @@ describe("InsightsPanel", () => {
     expect(answer.closest('[role="status"], [aria-live]')).toBeNull();
   });
 
+  it("renders safe Markdown below the submitted question while the next draft changes", async () => {
+    spies.response = {
+      answer:
+        "## Resultat\n\n**LOU** gäller. [Läs mer](https://example.com) [Osäker](javascript:alert(1)) <script>alert(1)</script>"
+    };
+    const { container } = renderPanel();
+    ask("Vilka regler gäller?");
+    fireEvent.change(screen.getByRole("textbox", { name: /Fråga om insikter/ }), {
+      target: { value: "Nästa fråga" }
+    });
+    const heading = await screen.findByRole("heading", { name: "Resultat" });
+    const result = screen.getByText("Vilka regler gäller?").parentElement!;
+    expect(result.contains(heading)).toBe(true);
+    expect(within(result as HTMLElement).getByText("Vilka regler gäller?")).toBeTruthy();
+    expect(within(result as HTMLElement).queryByText("Nästa fråga")).toBeNull();
+    expect(within(result).getByText("LOU")).toBeTruthy();
+    expect(result.textContent).not.toContain("**LOU**");
+    expect(within(result).getByRole("button", { name: "Läs mer" })).toBeTruthy();
+    expect(within(result).queryByRole("button", { name: "Osäker" })).toBeNull();
+    expect(container.querySelector('a[href^="javascript:"], script')).toBeNull();
+  });
+
   it("stops polling an insight job when the view closes", async () => {
     spies.response = { job_id: "job-1", is_async: true };
     const view = renderPanel();

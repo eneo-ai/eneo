@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import {
   DropdownMenu,
@@ -7,22 +5,35 @@ import {
   DropdownMenuItem
 } from "@astryxdesign/core/DropdownMenu";
 import { Heading } from "@astryxdesign/core/Heading";
-import { TableBody, TableHeader, TableHeaderCell, TableRow } from "@astryxdesign/core/Table";
+import {
+  TableBody,
+  TableHeader,
+  TableHeaderCell,
+  TableRow,
+  useTableSortable,
+  useTableSortableState,
+  type HeaderCellRenderProps
+} from "@astryxdesign/core/Table";
+import { useCollator } from "@astryxdesign/core/i18n";
 import { Table } from "@/components/astryx/table";
 import { Text } from "@astryxdesign/core/Text";
 import { useQueryClient } from "@tanstack/react-query";
 import { MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useId, useState } from "react";
+import { useTranslations } from "use-intl";
+import { useId, useMemo, useRef, useState } from "react";
+import { useFocusRescue } from "@/lib/focus-rescue";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { StatusLabel } from "@/components/composites/status-label";
 import type { SecurityClassification } from "@/features/admin/security-classifications/security-classifications";
 import { useRemovalMutation } from "@/features/spaces/removal";
 import { browserApi } from "@/lib/api/browser";
+import { modelDisplayName } from "@/lib/models/model-display-name";
 import { toast } from "@/lib/toast";
 import { DeleteBlockedDialog } from "./delete-blocked-dialog";
 import { deleteProvider, PROVIDERS_KEY } from "./model-providers";
+import { ModelDialogs, type ModelSelection } from "./model-dialogs";
 import { ModelRow } from "./model-row";
 import { MODELS_KEY } from "./models";
 import { ProviderConnectionStatus } from "./provider-connection-status";
@@ -40,28 +51,72 @@ function ModelTable({
   labelledBy,
   showKind,
   classifications,
-  securityEnabled
+  securityEnabled,
+  onModelAction
 }: {
   models: KindedModel[];
   labelledBy: string;
   showKind: boolean;
   classifications: SecurityClassification[];
   securityEnabled: boolean;
+  onModelAction: (selection: ModelSelection) => void;
 }) {
   const t = useTranslations();
+  const collator = useCollator();
+  type SortKey = "name" | "enabled" | "classification";
+  const comparators = useMemo(
+    () => ({
+      name: (a: KindedModel, b: KindedModel) =>
+        collator.compare(modelDisplayName(a.model), modelDisplayName(b.model)),
+      enabled: (a: KindedModel, b: KindedModel) =>
+        Number(Boolean(a.model.is_org_enabled)) - Number(Boolean(b.model.is_org_enabled)),
+      classification: (a: KindedModel, b: KindedModel) =>
+        (a.model.security_classification?.security_level ?? -1) -
+        (b.model.security_classification?.security_level ?? -1)
+    }),
+    [collator]
+  );
+  const { sortedData, sortConfig } = useTableSortableState<KindedModel, SortKey>({
+    data: models,
+    comparators
+  });
+  const sort = useTableSortable<KindedModel, SortKey>(sortConfig);
+
+  // Children mode preserves row-owned mutations; Astryx owns the header's sort controls.
+  function sortableHeader(key: SortKey, label: string, className?: string) {
+    const initial: HeaderCellRenderProps = {
+      htmlProps: { scope: "col", className },
+      xstyle: [],
+      content: label
+    };
+    const props =
+      sort.transformHeaderCell?.(initial, { key, header: label, sortable: true }, 0, []) ?? initial;
+    return (
+      <TableHeaderCell
+        {...props.htmlProps}
+        scope="col"
+        contextMenuActions={props.contextMenuActions}
+      >
+        {props.content}
+      </TableHeaderCell>
+    );
+  }
 
   // Fixed layout: every column but "Modell" has a set width, so the model
   // column takes what is left and long ids truncate instead of widening the
   // table. Below the min width the table scrolls inside its own region.
-  // Each set width is also a min width (AGENTS.md → Tables).
+  // Each set width is also a min width (AGENTS.md → Tables). Without the
+  // security column the table fits an iPad held upright (770 px).
   return (
-    <Table aria-labelledby={labelledBy} hasHover className="min-w-212 table-fixed">
+    <Table
+      aria-labelledby={labelledBy}
+      hasHover
+      className={securityEnabled ? "min-w-212 table-fixed" : "min-w-180 table-fixed"}
+    >
       <TableHeader>
         <TableRow className="bg-ax-sunken [&>th]:text-xs">
-          <TableHeaderCell scope="col" className="w-18 min-w-18">
-            {t("active")}
-          </TableHeaderCell>
-          <TableHeaderCell scope="col">{t("model")}</TableHeaderCell>
+          {sortableHeader("enabled", t("active"), "w-18 min-w-18")}
+          {sortableHeader("name", t("model"))}
           {showKind && (
             <TableHeaderCell scope="col" className="w-30 min-w-30">
               {t("type")}
@@ -73,18 +128,15 @@ function ModelTable({
           <TableHeaderCell scope="col" className="w-38 min-w-38 text-end">
             {t("admin_models_column_price")}
           </TableHeaderCell>
-          {securityEnabled && (
-            <TableHeaderCell scope="col" className="w-34 min-w-34">
-              {t("admin_models_column_security")}
-            </TableHeaderCell>
-          )}
-          <TableHeaderCell scope="col" className="w-14 min-w-14">
+          {securityEnabled &&
+            sortableHeader("classification", t("admin_models_column_security"), "w-34 min-w-34")}
+          <TableHeaderCell scope="col" className="bg-ax-sunken sticky end-0 w-14 min-w-14">
             <span className="sr-only">{t("actions")}</span>
           </TableHeaderCell>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {models.map(({ model, kind }) => (
+        {sortedData.map(({ model, kind }) => (
           <ModelRow
             key={model.id}
             model={model}
@@ -92,6 +144,7 @@ function ModelTable({
             classifications={classifications}
             securityEnabled={securityEnabled}
             showKind={showKind}
+            onAction={(action) => onModelAction({ model, kind, action })}
           />
         ))}
       </TableBody>
@@ -125,10 +178,15 @@ export function ProviderCard({
   const queryClient = useQueryClient();
   const notices = useProviderNotices();
   const headingId = useId();
+  const cardRef = useRef<HTMLElement>(null);
+  const rescueFocus = useFocusRescue();
+  const phone = useMediaMatch(PHONE_QUERY);
+  const [modelSelection, setModelSelection] = useState<ModelSelection | null>(null);
   const [showEdit, setShowEdit] = useState(false);
   const [showDelete, setShowDelete] = useState(false);
   // All of them, not only those the filters show: any one blocks a delete.
-  const modelCount = section.models.length;
+  const dependencyCount = section.models.length;
+  const visibleModelCount = models.length;
 
   // The card, its menu and the dialog go with the provider: focus moves to
   // the page's RemovalFocusScope (the tab panel) once the lists refetched.
@@ -146,7 +204,7 @@ export function ProviderCard({
   });
 
   const summary = [
-    t("provider_model_count", { count: section.models.length }),
+    t("provider_model_count", { count: visibleModelCount }),
     section.maskedKey ? t("admin_models_provider_key", { key: section.maskedKey }) : null
   ]
     .filter(Boolean)
@@ -156,6 +214,7 @@ export function ProviderCard({
 
   return (
     <section
+      ref={cardRef}
       id={providerCardId(section.providerId)}
       aria-labelledby={headingId}
       // Focusable from script only: the banner's link to this provider moves
@@ -210,8 +269,8 @@ export function ProviderCard({
               // The reason is at the action, and the item stays reachable:
               // Astryx menus skip disabled items, reason and all.
               description={
-                modelCount > 0
-                  ? t("provider_delete_models_first", { count: modelCount })
+                dependencyCount > 0
+                  ? t("provider_delete_models_first", { count: dependencyCount })
                   : undefined
               }
               variant="destructive"
@@ -223,27 +282,90 @@ export function ProviderCard({
 
       <ProviderConnectionStatus provider={section.provider} />
 
-      {modelCount === 0 ? (
+      {visibleModelCount === 0 ? (
         <Text type="supporting" className="block px-4 py-3">
-          {t("provider_no_models")}
+          {t(dependencyCount > 0 ? "no_models_found" : "provider_no_models")}
         </Text>
       ) : (
-        <ModelTable
-          models={models}
-          labelledBy={headingId}
-          showKind={showKind}
-          classifications={classifications}
-          securityEnabled={securityEnabled}
-        />
+        <>
+          {/* Rows on a phone (decision 31), the table from 768 px; both until
+              the width is known, CSS showing one. */}
+          {phone !== false ? (
+            <div className="md:hidden">
+              {/* The table's header in short: what the switch at each row's end is. */}
+              <div
+                aria-hidden="true"
+                className="text-ax-text-secondary border-ax-border flex justify-between border-b px-4 py-1.5 text-xs font-medium"
+              >
+                <span>{t("model")}</span>
+                <span className="pe-14">{t("active")}</span>
+              </div>
+              <ul aria-labelledby={headingId} className="divide-ax-border divide-y px-4">
+                {models.map(({ model, kind }) => (
+                  <ModelRow
+                    key={model.id}
+                    model={model}
+                    kind={kind}
+                    classifications={classifications}
+                    securityEnabled={securityEnabled}
+                    showKind={showKind}
+                    onAction={(action) => setModelSelection({ model, kind, action })}
+                    layout="list"
+                  />
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {phone !== true ? (
+            <div className="max-md:hidden">
+              <ModelTable
+                models={models}
+                onModelAction={setModelSelection}
+                labelledBy={headingId}
+                showKind={showKind}
+                classifications={classifications}
+                securityEnabled={securityEnabled}
+              />
+            </div>
+          ) : null}
+        </>
       )}
 
+      {modelSelection && (
+        <ModelDialogs
+          key={`${modelSelection.kind}:${modelSelection.model.id}`}
+          selection={modelSelection}
+          classifications={classifications}
+          securityEnabled={securityEnabled}
+          onClose={() => {
+            rescueFocus(
+              () =>
+                cardRef.current?.querySelector<HTMLElement>(
+                  `[data-model-id="${CSS.escape(modelSelection.model.id)}"] [aria-haspopup="menu"]`
+                ) ?? cardRef.current
+            );
+            setModelSelection((current) => (current === modelSelection ? null : current));
+          }}
+          onMigrate={() => setModelSelection({ ...modelSelection, action: "migrate" })}
+          onEdit={() => setModelSelection({ ...modelSelection, action: "edit" })}
+        />
+      )}
       <ProviderEditDialog provider={section.provider} open={showEdit} onOpenChange={setShowEdit} />
-      {modelCount > 0 ? (
+      {dependencyCount > 0 ? (
         <DeleteBlockedDialog
           open={showDelete}
           onOpenChange={setShowDelete}
           title={t("provider_delete_blocked_title", { name: section.name })}
-          description={t("provider_delete_blocked_description", { count: modelCount })}
+          description={
+            <>
+              <p>{t("provider_delete_blocked_description", { count: dependencyCount })}</p>
+              <ul className="mt-3 list-disc space-y-1 ps-5">
+                {section.models.map(({ model, kind }) => (
+                  <li key={`${kind}:${model.id}`}>{modelDisplayName(model)}</li>
+                ))}
+              </ul>
+            </>
+          }
         />
       ) : (
         <ConfirmDialogControlled

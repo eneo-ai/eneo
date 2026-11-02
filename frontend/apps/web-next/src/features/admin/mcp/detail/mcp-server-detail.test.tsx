@@ -3,7 +3,7 @@ import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const remove = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
@@ -49,6 +49,22 @@ describe("McpServerDetail", () => {
 
     expect(await screen.findByRole("heading", { level: 1, name: "Diariet" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fler åtgärder för Diariet" })).toBeTruthy();
+  });
+
+  it("follows the route's current tab after back or forward navigation", async () => {
+    const view = renderInApp(<McpServerDetail serverId="diariet" initialTab="tools" />);
+    await screen.findByRole("heading", { level: 1, name: "Diariet" });
+    expect(
+      screen.getByRole("tab", { name: "MCP-serververktyg" }).getAttribute("aria-selected")
+    ).toBe("true");
+    view.rerender(<McpServerDetail serverId="diariet" initialTab="credentials" />);
+    expect(screen.getByRole("tab", { name: "Autentisering" }).getAttribute("aria-selected")).toBe(
+      "true"
+    );
+    view.rerender(<McpServerDetail serverId="diariet" initialTab="tools" />);
+    expect(
+      screen.getByRole("tab", { name: "MCP-serververktyg" }).getAttribute("aria-selected")
+    ).toBe("true");
   });
 
   it("keeps focus on the switch while it saves, and saves the press once", async () => {

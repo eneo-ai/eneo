@@ -39,7 +39,7 @@ function descriptionOf(element: Element | null) {
 
 const recentKey = recentConversationsQueryOptions(browserApi).queryKey;
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 function seededClient() {
   const queryClient = testQueryClient();
@@ -93,12 +93,15 @@ function seededClient() {
   return queryClient;
 }
 
-function renderPalette(permissions: Permission[] = []) {
+function renderPalette(permissions: Permission[] = [], federation = false) {
   const onCreateSpace = vi.fn();
   const onOpenChange = vi.fn();
   renderInApp(
     <ShellCommandPalette isOpen onOpenChange={onOpenChange} onCreateSpace={onCreateSpace} />,
-    { queryClient: seededClient(), appContext: testAppContext({ permissions }) }
+    {
+      queryClient: seededClient(),
+      appContext: testAppContext({ permissions, featureFlags: { federation } })
+    }
   );
   return { onCreateSpace, onOpenChange };
 }
@@ -117,6 +120,13 @@ const ok = (data: unknown) =>
   Promise.resolve({ data, error: undefined, response: new Response("{}", { status: 200 }) });
 
 describe("ShellCommandPalette", () => {
+  it("closes from Avbryt beside the field (touch screens have no Escape)", () => {
+    const { onOpenChange } = renderPalette();
+    search("upph");
+    fireEvent.click(screen.getByRole("button", { name: "Avbryt" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
+
   it("is a named dialog with a labelled combobox and grouped results", async () => {
     renderPalette();
     const dialog = screen.getByRole("dialog", { name: "Sök i Eneo" });
@@ -219,6 +229,21 @@ describe("ShellCommandPalette", () => {
     fireEvent.keyDown(combobox, { key: "ArrowDown" });
     fireEvent.keyDown(combobox, { key: "Enter" });
     expect(router.push).toHaveBeenCalledWith("/dashboard/a1?tab=chat");
+  });
+
+  it("offers federation administration when the deployment enables it", async () => {
+    renderPalette(["admin"], true);
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("SSO");
+    fireEvent.click(await screen.findByRole("option", { name: /Administration.*Inloggning.*SSO/ }));
+    expect(router.push).toHaveBeenCalledWith("/admin/federation");
+  });
+
+  it("hides federation administration when the deployment disables it", async () => {
+    renderPalette(["admin"]);
+    await screen.findByRole("option", { name: /Upphandlingsassistenten/ });
+    search("SSO");
+    expect(screen.queryByRole("option", { name: /Administration.*Inloggning.*SSO/ })).toBeNull();
   });
 
   it("offers Skapa yta and admin pages to those allowed", async () => {

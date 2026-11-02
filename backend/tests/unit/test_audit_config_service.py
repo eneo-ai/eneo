@@ -9,7 +9,7 @@ from eneo.audit.application.audit_config_service import (
     AUDIT_CONFIG_CACHE_TTL,
     AuditConfigService,
 )
-from eneo.audit.domain.action_types import ActionType
+from eneo.audit.domain.action_types import ALWAYS_AUDITED_ACTIONS, ActionType
 from eneo.audit.domain.category_mappings import (
     CATEGORY_MAPPINGS,
 )
@@ -518,7 +518,9 @@ class TestGetActionConfig:
         result = await config_service.get_action_config(tenant_id)
 
         for action_config in result.actions:
-            if action_config.category == "admin_actions":
+            if action_config.action in ALWAYS_AUDITED_ACTIONS:
+                assert action_config.enabled is True
+            elif action_config.category == "admin_actions":
                 assert action_config.enabled is False
             elif action_config.category == "user_actions":
                 assert action_config.enabled is True

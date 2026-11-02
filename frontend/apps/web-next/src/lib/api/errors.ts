@@ -48,6 +48,28 @@ export class EneoApiError extends Error {
   }
 }
 
+/**
+ * The ids a user quotes to support for a failed request: the backend's
+ * `error_id` (an unexpected 500 asks for it) and the request's trace id. Both
+ * when present; neither for an error that did not come from the backend.
+ */
+export function errorReference(error: unknown): { errorId?: string; traceId?: string } {
+  if (!(error instanceof EneoApiError)) return {};
+  return {
+    ...(error.errorId ? { errorId: error.errorId } : {}),
+    ...(error.traceId ? { traceId: error.traceId } : {})
+  };
+}
+
+/** `errorReference` as labelled lines ("Fel-ID: …", "Spårnings-ID: …") for every error display. */
+export function errorReferenceLines(error: unknown, t: (key: string) => string): string[] {
+  const { errorId, traceId } = errorReference(error);
+  return [
+    errorId ? `${t("error_id")}: ${errorId}` : null,
+    traceId ? `${t("trace_id")}: ${traceId}` : null
+  ].filter((line): line is string => line !== null);
+}
+
 export function extractTraceId(headers: Headers): string | undefined {
   return headers.get("x-trace-id") ?? headers.get("x-correlation-id") ?? undefined;
 }
@@ -125,6 +147,16 @@ export function apiErrorFromResponse(response: Response, body: unknown): EneoApi
   });
 }
 
+const FINAL_STATUSES = new Set([401, 403, 404, 410]);
+
+/**
+ * A refusal that asking again won't change: signed out (401), forbidden (403)
+ * or gone (404, 410). A conflict, a rate limit or a network error passes.
+ */
+export function isFinalError(error: unknown): boolean {
+  return error instanceof EneoApiError && FINAL_STATUSES.has(error.status);
+}
+
 /**
  * Unwraps an openapi-fetch result, throwing an EneoApiError on failure. Use as
  * the body of every queryFn/mutationFn:
@@ -137,6 +169,22 @@ export async function unwrap<T>(
   const { data, error, response } = await result;
   if (error !== undefined || !response.ok) throw apiErrorFromResponse(response, error);
   return data as T;
+}
+
+/**
+ * A read whose missing resource (404) means `fallback`, such as an empty
+ * history or a backend without the endpoint; a refusal, a server failure or
+ * a network error still rejects, so the reader shows it and can retry:
+ *
+ *   queryFn: () => orOn404(unwrap(api.GET("/api/v1/document-templates/")), null)
+ */
+export async function orOn404<T, F>(read: Promise<T>, fallback: F): Promise<T | F> {
+  try {
+    return await read;
+  } catch (error) {
+    if (error instanceof EneoApiError && error.status === 404) return fallback;
+    throw error;
+  }
 }
 
 /**
@@ -168,6 +216,7 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9036: "eneo_error_9036", // MCP_UPSTREAM_ERROR
   9037: "eneo_error_9037", // MCP_UPSTREAM_AUTH_ERROR
   9017: "eneo_error_9017", // NAME_COLLISION
+  9042: "eneo_error_9042", // ENCRYPTION_NOT_CONFIGURED
   // AI service errors
   9008: "eneo_error_9008", // QUOTA_EXCEEDED
   9010: "eneo_error_9010", // OPENAI_ERROR
@@ -175,6 +224,11 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   // Internal errors
   9024: "eneo_error_9024", // INTERNAL_SERVER_ERROR
   9038: "eneo_error_9038", // RESOURCE_NOT_READY
+  // Files and website crawl lifecycle
+  9056: "eneo_error_9056", // INVALID_FILENAME
+  9057: "eneo_error_9057", // INFO_BLOB_ORIGINAL_UNAVAILABLE
+  9063: "eneo_error_9063", // WEBSITE_CRAWL_ACTIVE
+  9064: "eneo_error_9064", // WEBSITE_CRAWL_CLEANUP_PENDING
   // Model lifecycle
   9039: "eneo_error_9039", // MODEL_IN_USE
   // Icons
@@ -184,6 +238,11 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9069: "eneo_error_9069", // PROMPT_IN_USE_BY_GOVERNANCE
   // Skill lifecycle
   9081: "eneo_error_9081", // SKILL_REFERENCED_BY_REVISION
+  9043: "eneo_error_9043", // SKILL_REVISION_CONFLICT
+  9053: "eneo_error_9053", // SKILL_NOT_PUBLISHED_FOR_BINDING
+  9054: "eneo_error_9054", // SKILL_BLOCKED_FOR_BINDING
+  9055: "eneo_error_9055", // SKILL_RUNTIME_POLICY_CHANGED
+  9062: "eneo_error_9062", // SKILL_REMOVAL_BUSY
   9048: "eneo_error_9048", // SKILL_SLUG_CONFLICT
   9049: "eneo_error_9049", // SKILL_PUBLISHED_DELETE_FORBIDDEN
   9050: "eneo_error_9050", // SKILL_USED_BY_APP_RUN
@@ -191,13 +250,32 @@ const ERROR_MESSAGE_KEYS: Record<number, string> = {
   9052: "eneo_error_9052" // SKILL_EXECUTION_BLOCK_CONFLICT
 };
 
-/**
- * Resolves a user-facing message for any error.
- *
- * Resolution order: mapped backend error code → localized message; unmapped
- * backend error → backend's (English) message; anything else → generic
- * "request failed" fallback.
- */
+/** Public backend reasons shared by HTTP errors and streamed answer failures. */
+const ERROR_REASON_MESSAGE_KEYS = new Map<string, string>([
+  ["tenant_quota_exceeded", "job_failure_tenant_quota_exceeded"],
+  ["user_quota_exceeded", "job_failure_user_quota_exceeded"],
+  // The shared limiter's 429 also carries 9008 (the envelope's 429 default),
+  // whose quota sentence would tell the user to contact an administrator.
+  ["rate_limit_exceeded", "request_rate_limited"],
+  ["provider_unavailable", "provider_failure_unavailable"],
+  ["provider_timeout", "provider_failure_timeout"],
+  ["provider_unreachable", "provider_failure_unreachable"],
+  ["provider_connection_lost", "provider_failure_connection_lost"],
+  ["provider_rate_limited", "provider_failure_rate_limited"],
+  ["provider_model_not_found", "provider_failure_model_not_found"],
+  ["provider_rejected_request", "provider_failure_rejected_request"],
+  ["provider_error", "eneo_error_9010"],
+  ["stream_error", "chat_answer_failed_internal"]
+]);
+
+export function getErrorMessageForReason(
+  reason: string | null | undefined,
+  t: (key: string) => string
+): string | null {
+  const key = reason ? ERROR_REASON_MESSAGE_KEYS.get(reason) : undefined;
+  return key ? t(key) : null;
+}
+
 /**
  * An integration refusal names its cause in the payload's `code`. A Microsoft
  * error code (AADSTS…) in the backend's message is kept: an administrator looks
@@ -223,8 +301,14 @@ function getIntegrationFailureMessage(
 
 export function getErrorMessage(error: unknown, t: (key: string) => string): string {
   if (error instanceof EneoApiError) {
-    const message = getIntegrationFailureMessage(error, t) ?? getErrorMessageForCode(error.code, t);
+    const message =
+      getErrorMessageForReason(error.reason, t) ??
+      getIntegrationFailureMessage(error, t) ??
+      getErrorMessageForCode(error.code, t);
     if (message) return message;
+    // An unexpected failure (500 body: error_id, no code) carries a generic
+    // English sentence; the error id it asks for is shown by errorReference.
+    if (error.errorId !== undefined && error.code === undefined) return t("error_occurred");
     if (error.message) return error.message;
   }
   return t("request_failed");

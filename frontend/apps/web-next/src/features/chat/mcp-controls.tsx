@@ -1,10 +1,8 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { Popover } from "@astryxdesign/core/Popover";
 import { Switch } from "@/components/astryx/switch";
 import { Plug, ShieldCheck } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useState } from "react";
 import { CAPABILITIES, readinessKey, type Capability } from "@/features/capabilities/capabilities";
 import type { Schema } from "@/lib/api/models";
@@ -75,11 +73,14 @@ export function activeMcpServerCount(
 
 export function mcpConversationOptions({
   servers,
+  capabilities,
   disabledServerIds,
   autoAcceptTools,
   supportsToolApproval
 }: {
   servers: McpServerSummary[];
+  /** Web search, image generation, …: external tools the backend asks approval for too. */
+  capabilities: ChatCapability[];
   disabledServerIds: Set<string>;
   autoAcceptTools: boolean;
   supportsToolApproval: boolean;
@@ -89,7 +90,9 @@ export function mcpConversationOptions({
   );
   return {
     require_tool_approval:
-      supportsToolApproval && servers.length > 0 && !autoAcceptTools ? true : undefined,
+      supportsToolApproval && servers.length + capabilities.length > 0 && !autoAcceptTools
+        ? true
+        : undefined,
     disabled_mcp_server_ids: disabledIds.length > 0 ? disabledIds : undefined
   };
 }
@@ -275,8 +278,6 @@ export function ChatTools({
                     <li key={server.id} className={ROW_CLASS}>
                       <span aria-hidden="true" className={ROW_ICON_CLASS}>
                         {server.icon_url ? (
-                          // Backend-served MCP icon URL.
-                          // eslint-disable-next-line @next/next/no-img-element
                           <img src={server.icon_url} alt="" className="size-full object-cover" />
                         ) : (
                           server.name.charAt(0).toUpperCase()

@@ -12,7 +12,7 @@ import { cn } from "@/lib/utils";
  * 44 px targets on a coarse pointer.
  */
 const buttonVariants = cva(
-  "inline-flex shrink-0 items-center justify-center gap-2 rounded-md text-sm font-medium whitespace-nowrap transition-all focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive pointer-coarse:min-h-11 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "inline-flex max-w-full shrink-0 items-center justify-center gap-2 rounded-md text-center text-sm font-medium transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive pointer-coarse:min-h-11 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -26,10 +26,10 @@ const buttonVariants = cva(
         link: "text-ax-text-accent underline-offset-4 hover:underline"
       },
       size: {
-        default: "h-9 px-4 py-2 has-[>svg]:px-3",
-        xs: "h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-8 gap-1.5 rounded-md px-3 has-[>svg]:px-2.5",
-        lg: "h-10 rounded-md px-6 has-[>svg]:px-4",
+        default: "min-h-9 px-4 py-2 has-[>svg]:px-3",
+        xs: "min-h-6 gap-1 rounded-md px-2 text-xs has-[>svg]:px-1.5 [&_svg:not([class*='size-'])]:size-3",
+        sm: "min-h-8 gap-1.5 rounded-md px-3 py-1 has-[>svg]:px-2.5",
+        lg: "min-h-10 rounded-md px-6 py-2 has-[>svg]:px-4",
         icon: "size-9 pointer-coarse:min-w-11",
         "icon-xs": "size-6 rounded-md pointer-coarse:min-w-11 [&_svg:not([class*='size-'])]:size-3",
         "icon-sm": "size-8 pointer-coarse:min-w-11",
@@ -43,6 +43,11 @@ const buttonVariants = cva(
   }
 );
 
+function ignorePress(event: React.MouseEvent) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
 function Button({
   className,
   variant = "default",
@@ -55,13 +60,14 @@ function Button({
     asChild?: boolean;
   }) {
   const Comp = asChild ? Slot.Root : "button";
-  // A busy button stays enabled so it keeps focus (ACCESSIBILITY.md → Forms);
-  // the spinner shows sighted users what aria-busy tells assistive tech. Not
+  // A busy button stays enabled so it keeps focus (ACCESSIBILITY.md → Forms),
+  // and a second press is ignored here, not by every caller: stopped in the
+  // capture phase, so no onClick runs (an asChild child's own included) and no
+  // implicit form submit happens.
+  const ariaBusy = props["aria-busy"] === true || props["aria-busy"] === "true";
+  // The spinner shows sighted users what aria-busy tells assistive tech. Not
   // for icon buttons, whose fixed size has no room for it, nor asChild.
-  const busy =
-    !asChild &&
-    !size?.startsWith("icon") &&
-    (props["aria-busy"] === true || props["aria-busy"] === "true");
+  const busy = ariaBusy && !asChild && !size?.startsWith("icon");
 
   return (
     <Comp
@@ -70,6 +76,7 @@ function Button({
       data-size={size}
       className={cn(buttonVariants({ variant, size, className }), busy && "cursor-progress")}
       {...props}
+      onClickCapture={ariaBusy ? ignorePress : props.onClickCapture}
     >
       {busy ? (
         <>

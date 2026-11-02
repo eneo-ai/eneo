@@ -1,5 +1,3 @@
-"use client";
-
 import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
@@ -12,8 +10,8 @@ import { TextInput } from "@/components/astryx/text-input";
 import { Token } from "@astryxdesign/core/Token";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Plus, RefreshCw, Search } from "lucide-react";
-import { useTranslations } from "next-intl";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "use-intl";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { LoadingState } from "@/components/composites/loading-state";
 import {
@@ -25,6 +23,7 @@ import {
 import { securityClassificationsQueryOptions } from "@/features/admin/security-classifications/security-classifications";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { matchesSearch } from "@/lib/search";
 import { toast } from "@/lib/toast";
 import {
   type CatalogModel,
@@ -45,6 +44,16 @@ import {
   validateProviderModel
 } from "./models";
 import { useFieldFocus } from "./provider-form-fields";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+
+import {
+  defaultModelHosting,
+  EMBEDDING_FAMILIES,
+  HOSTING_REGIONS,
+  isEmbeddingFamily,
+  isHostingRegion,
+  type EmbeddingFamily
+} from "./model-metadata-options";
 
 const NO_CLASSIFICATION = "__none__";
 
@@ -121,6 +130,7 @@ export function ModelCatalogStep({
   supportedModes,
   onModeChange,
   onCreated,
+  onBusyChange,
   onBack,
   frame
 }: {
@@ -129,7 +139,8 @@ export function ModelCatalogStep({
   mode?: ModelKind;
   supportedModes?: ModelKind[];
   onModeChange?: (mode: ModelKind) => void;
-  onCreated: () => void;
+  onCreated: (ids: string[]) => void;
+  onBusyChange?: (busy: boolean) => void;
   onBack: () => void;
   frame: (content: React.ReactNode, footer: React.ReactNode) => React.ReactNode;
 }) {
@@ -181,6 +192,8 @@ export function ModelCatalogStep({
   const [manualBusy, setManualBusy] = useState(false);
   /** An id typed in that the provider has already. */
   const [manualTaken, setManualTaken] = useState<string | null>(null);
+  const [hosting, setHosting] = useState(() => defaultModelHosting(providerType));
+  const [embeddingFamily, setEmbeddingFamily] = useState<EmbeddingFamily>("openai");
   const [classificationId, setClassificationId] = useState(NO_CLASSIFICATION);
   const [validating, setValidating] = useState(false);
   const [createAnyway, setCreateAnyway] = useState(false);
@@ -202,12 +215,11 @@ export function ModelCatalogStep({
   // Picks added by id are not in the catalog; they head the list so they can
   // be seen and unticked like the others.
   const listed = useMemo(() => {
-    const query = search.trim().toLowerCase();
     const added = [...selected.values()].filter(
       (model) => !catalog.some((item) => item.name === model.name)
     );
-    return [...added, ...catalog].filter(
-      (model) => !query || `${model.name} ${model.display_name ?? ""}`.toLowerCase().includes(query)
+    return [...added, ...catalog].filter((model) =>
+      matchesSearch([model.name, model.display_name], search)
     );
   }, [catalog, search, selected]);
 
@@ -306,10 +318,10 @@ export function ModelCatalogStep({
               provider_id: providerId,
               name: model.name,
               display_name: displayName,
-              family: providerType,
+              family: embeddingFamily,
               dimensions: model.output_vector_size ?? null,
               max_input: model.max_input_tokens ?? null,
-              hosting: "swe",
+              hosting,
               input_cost_per_token: model.input_cost_per_token ?? null,
               output_cost_per_token: model.output_cost_per_token ?? null,
               security_classification: selectedClassification
@@ -321,7 +333,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting: "swe",
+              hosting,
               cost_per_image: model.cost_per_image ?? null,
               // The request defaults are edited afterwards; "auto" lets the model decide.
               default_size: "auto",
@@ -336,7 +348,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting: "swe",
+              hosting,
               security_classification: selectedClassification
             });
           }
@@ -346,7 +358,7 @@ export function ModelCatalogStep({
               name: model.name,
               display_name: displayName,
               family: providerType,
-              hosting: "swe",
+              hosting,
               cost_per_minute: model.cost_per_minute ?? null,
               security_classification: selectedClassification
             });
@@ -360,7 +372,7 @@ export function ModelCatalogStep({
             vision: model.supports_vision,
             reasoning: model.supports_reasoning,
             supports_tool_calling: model.supports_function_calling,
-            hosting: "swe",
+            hosting,
             family: providerType,
             input_cost_per_token: model.input_cost_per_token ?? null,
             output_cost_per_token: model.output_cost_per_token ?? null,
@@ -374,19 +386,34 @@ export function ModelCatalogStep({
       if (models.length > 0 && failures.length === models.length) {
         throw (failures[0] as PromiseRejectedResult).reason;
       }
-      return { total: models.length, failed: failures.length };
+      return {
+        total: models.length,
+        failed: failures.length,
+        ids: results.flatMap((result) => (result.status === "fulfilled" ? [result.value.id] : []))
+      };
     },
-    onSuccess: ({ total, failed }) => {
+    onSuccess: ({ total, failed, ids }) => {
       void queryClient.invalidateQueries({ queryKey: MODELS_KEY });
       resetOutcome();
       if (failed === 0) toast.success(t("models_added_count", { count: total }));
       else toast.warning(t("models_added_partial", { added: total - failed, total }));
-      onCreated();
+      onCreated(ids);
     },
     onError: (error) => toastApiError(error, t)
   });
 
   const busy = create.isPending || validating;
+  // Closing during validation can still lead to a write; release the parent's
+  // close guard when this step leaves, including after a failed operation.
+  useLayoutEffect(() => {
+    onBusyChange?.(busy);
+  }, [busy, onBusyChange]);
+  useLayoutEffect(
+    () => () => {
+      onBusyChange?.(false);
+    },
+    [onBusyChange]
+  );
   const canList = !NO_SUGGESTIONS_PROVIDERS.has(providerType);
   const modes = supportedModes?.length ? supportedModes : [mode];
 
@@ -452,6 +479,29 @@ export function ModelCatalogStep({
         />
       )}
 
+      <Selector
+        label={t("hosting_region")}
+        options={HOSTING_REGIONS.map((value) => ({ value, label: t(`hosting_${value}`) }))}
+        value={hosting}
+        onChange={(value) => {
+          if (isHostingRegion(value)) setHosting(value);
+        }}
+      />
+      {mode === "embedding" && (
+        <Selector
+          label={t("model_family")}
+          description={t("model_family_help")}
+          options={EMBEDDING_FAMILIES.map((value) => ({
+            value,
+            label: t(`model_family_${value}`)
+          }))}
+          value={embeddingFamily}
+          onChange={(value) => {
+            if (isEmbeddingFamily(value)) setEmbeddingFamily(value);
+          }}
+        />
+      )}
+
       {securityQuery.data?.security_enabled && (
         <Selector
           label={t("security_classification")}
@@ -476,6 +526,7 @@ export function ModelCatalogStep({
                 isLabelHidden
                 placeholder={t("filter_catalog")}
                 startIcon={Search}
+                {...KEYBOARD.search}
                 value={search}
                 onChange={setSearch}
                 hasClear

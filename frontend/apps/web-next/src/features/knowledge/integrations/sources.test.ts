@@ -1,5 +1,5 @@
 import type { IntegrationKnowledge } from "../knowledge";
-import { createTranslator } from "next-intl";
+import { createTranslator } from "use-intl";
 import { describe, expect, it } from "vitest";
 import sv from "@/lib/i18n/messages/sv.json";
 import {
@@ -15,7 +15,8 @@ import {
   sourceHref,
   sourceTabParam,
   summarizeSource,
-  watchStateLabel
+  watchStateLabel,
+  wrapperPermissions
 } from "./sources";
 import type { IntegrationSyncProgress } from "./sync-progress";
 
@@ -115,6 +116,33 @@ describe("findWrapperSource", () => {
     // Only SharePoint imports group by wrapper.
     expect(findWrapperSource(items, "w2")).toBeUndefined();
     expect(findWrapperSource(items, "w9")).toBeUndefined();
+  });
+});
+
+describe("wrapperPermissions", () => {
+  const own = (id: string, permissions: IntegrationKnowledge["permissions"]) =>
+    item(id, { space_id: "space-1", permissions });
+
+  it("is the first item's permissions when every item belongs to the space", () => {
+    expect(
+      wrapperPermissions([own("a", ["read", "edit", "delete"]), own("b", ["read"])], "space-1")
+    ).toEqual({ canEdit: true, canDelete: true });
+    expect(wrapperPermissions([own("a", ["read", "edit"])], "space-1")).toEqual({
+      canEdit: true,
+      canDelete: false
+    });
+  });
+
+  it("is nothing when one item was shared in from another space, or there are none", () => {
+    const sharedIn = item("b", { space_id: "space-2", permissions: ["read", "edit", "delete"] });
+    expect(wrapperPermissions([own("a", ["read", "edit", "delete"]), sharedIn], "space-1")).toEqual(
+      { canEdit: false, canDelete: false }
+    );
+    expect(wrapperPermissions([sharedIn], "space-1")).toEqual({
+      canEdit: false,
+      canDelete: false
+    });
+    expect(wrapperPermissions([], "space-1")).toEqual({ canEdit: false, canDelete: false });
   });
 });
 

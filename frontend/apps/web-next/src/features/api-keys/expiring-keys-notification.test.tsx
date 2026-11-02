@@ -2,7 +2,8 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testAppContext } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { API_KEY_SUBSCRIPTIONS_KEY, invalidateExpiringApiKeys } from "./api-keys";
 import { ExpiringKeysNotification } from "./expiring-keys-notification";
 
 const appContext = testAppContext({ settings: { api_key_expiry_notifications: true } });
@@ -71,5 +72,28 @@ describe("ExpiringKeysNotification", () => {
     fireEvent.keyDown(panel, { key: "Escape" });
     await waitFor(() => expect(bell.getAttribute("aria-expanded")).toBe("false"));
     expect(document.activeElement).toBe(bell);
+  });
+
+  it("goes away when the tenant turns the reminders off, cached keys or not", async () => {
+    api.items = [
+      { id: "k1", name: "Integration", key_suffix: "a1", expires_at: inDays(2), severity: "urgent" }
+    ];
+    const queryClient = testQueryClient();
+    renderInApp(<ExpiringKeysNotification />, { appContext, queryClient });
+    expect(await screen.findByRole("button", { name: "API-nycklar som går ut" })).toBeTruthy();
+
+    cleanup();
+    renderInApp(<ExpiringKeysNotification />, {
+      queryClient,
+      appContext: testAppContext({ settings: { api_key_expiry_notifications: false } })
+    });
+    expect(screen.queryByRole("button", { name: "API-nycklar som går ut" })).toBeNull();
+  });
+
+  it("reads the followed targets again with the summary (a publish may add one)", async () => {
+    const queryClient = testQueryClient();
+    queryClient.setQueryData(API_KEY_SUBSCRIPTIONS_KEY, { items: [] });
+    await invalidateExpiringApiKeys(queryClient);
+    expect(queryClient.getQueryState(API_KEY_SUBSCRIPTIONS_KEY)?.isInvalidated).toBe(true);
   });
 });

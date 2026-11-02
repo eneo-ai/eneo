@@ -95,10 +95,20 @@ text is still included directly, and knowledge still uses injected retrieval
 unless configured otherwise. On-demand file attachments are not automatically
 indexed as knowledge.
 
-The **Fast kontext** (Fixed context) meter estimates prompt text and directly
-loaded attachments. It is not a total request estimate: chat history, skills,
-tool definitions, references and retrieved content also consume context.
-Including content does not guarantee the assistant will follow it.
+The **Fast kontext** (Fixed context) meter uses server preflight to estimate
+the system prompt, resolved Skill context and Skill tool definitions, and
+directly loaded attachments. Skill context is already included in the prompt
+count. Files that can be opened on demand are excluded; files that require
+inline fallback are included.
+
+This is not a total request estimate: chat history, other tool definitions,
+references and retrieved content also consume context. Warnings use the model
+window minus the server's reserved tokens. Including content does not guarantee
+the assistant will follow it.
+
+In the React/Vite beta, the context meter appears under **Instruktioner**
+(Instructions). It uses the current prompt draft and per-file reading modes,
+and waits for a model change to save before estimating again.
 
 ## Keep four concepts separate
 

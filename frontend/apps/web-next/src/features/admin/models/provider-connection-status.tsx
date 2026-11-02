@@ -1,15 +1,12 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Text } from "@astryxdesign/core/Text";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { ClientTime } from "@/components/composites/client-time";
 import { StatusLabel } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
-import { useHydrated } from "@/lib/hooks/use-hydrated";
 import { toast } from "@/lib/toast";
 import { checkProviderConnection, type ModelProvider, PROVIDERS_KEY } from "./model-providers";
 import { useProviderNotices } from "./provider-notices";
@@ -18,14 +15,13 @@ import { useProviderNotices } from "./provider-notices";
  * A provider's connection line: the latest check ("Anslutningen fungerar",
  * "Anslutningen misslyckades: <orsak>" or "Inte testad") and when it ran, the
  * key-expiry notice, and "Testa anslutning". The expiry and the check time
- * depend on the viewer's clock, so they appear after hydration.
+ * use the viewer's clock.
  */
 export function ProviderConnectionStatus({ provider }: { provider: ModelProvider }) {
   const t = useTranslations();
   const announce = useAnnounce();
   const queryClient = useQueryClient();
   const notices = useProviderNotices();
-  const hydrated = useHydrated();
 
   const check = useMutation({
     mutationFn: () => checkProviderConnection(browserApi, provider.id),
@@ -57,11 +53,13 @@ export function ProviderConnectionStatus({ provider }: { provider: ModelProvider
   const expiry = notices.expiryOf(provider);
   const expiryNotice = expiry ? notices.expiryNotice(expiry) : null;
 
+  // pe-4 like the model rows: the filled button ends on their line (the
+  // card header's pe-2.5 is for the ghost menu button at its end).
   return (
-    <div className="border-ax-border flex flex-wrap items-center gap-x-4 gap-y-2 border-b py-2 ps-4 pe-2.5">
+    <div className="border-ax-border flex flex-wrap items-center gap-x-4 gap-y-2 border-b py-2 ps-4 pe-4">
       <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1">
         <StatusLabel status={connection.tone} label={connection.label} />
-        {hydrated && checkedAt ? (
+        {checkedAt ? (
           <Text type="supporting">
             {t.rich("provider_status_checked_at", {
               time: () => <ClientTime value={checkedAt} format="relative" />

@@ -1,6 +1,5 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import {
   proportional,
@@ -12,7 +11,7 @@ import {
   type TableSelectionState
 } from "@astryxdesign/core/Table";
 import { TextQuote } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Table } from "@/components/astryx/table";
 import type { PreviewCell, PreviewSheet } from "./load-preview";
@@ -155,6 +154,8 @@ export function TablePreview({
   onQuote
 }: TablePreviewProps) {
   const t = useTranslations();
+  // A touch screen has no Shift, Ctrl or Enter key to point at.
+  const coarse = useMediaMatch("(pointer: coarse)");
   const format = useCellFormat();
   const panelId = useId();
   const target = parseTableLocator(highlight?.locator);
@@ -332,7 +333,7 @@ export function TablePreview({
         ) : (
           <p className="text-ax-text-secondary text-xs">
             {targetAvailable
-              ? t("workspace_preview_table_hint")
+              ? t(coarse ? "workspace_preview_table_hint_touch" : "workspace_preview_table_hint")
               : t("table_reference_location_unavailable")}
           </p>
         )}

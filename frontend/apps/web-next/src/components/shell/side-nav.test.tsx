@@ -6,18 +6,13 @@ import { recentConversationsQueryOptions, type RecentConversation } from "@/lib/
 import type { Permission } from "@/lib/auth/permissions";
 import { expectNoAxeViolations } from "@/test/axe";
 import { setRoute } from "@/test/navigation";
-import {
-  noopShell,
-  renderInApp,
-  renderToHtml,
-  testAppContext,
-  testQueryClient
-} from "@/test/render";
+import { noopShell, renderInApp, testAppContext, testQueryClient } from "@/test/render";
+import { PHONE_VIEWPORT, setViewport } from "@/test/setup-dom";
 import type { NavVariant } from "./routes";
 import { DesktopSideNav } from "./side-nav";
 import { SIDE_NAV_COLLAPSED_COOKIE } from "./side-nav-preference";
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/jobs/job-indicator", () => ({ JobIndicator: () => null }));
 vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
   ExpiringKeysNotification: () => null
@@ -25,7 +20,6 @@ vi.mock("@/features/api-keys/expiring-keys-notification", () => ({
 vi.mock("@/features/whats-new/whats-new-provider", () => ({
   useWhatsNew: () => ({ enabled: false, hasUnseen: false })
 }));
-vi.mock("@/lib/i18n/actions", () => ({ setLocale: vi.fn() }));
 
 const SPACES = [
   { id: "s1", name: "Upphandling", description: null, personal: false, organization: false },
@@ -181,6 +175,20 @@ describe("DesktopSideNav (main)", () => {
       expect(document.activeElement).toBe(link);
     }
     await expectNoAxeViolations(container);
+  });
+
+  it("puts who a recent conversation is with into its label on a touch screen, which has no tooltip", () => {
+    setViewport(PHONE_VIEWPORT);
+    renderNav();
+    const recent = screen.getByRole("group", { name: "Senaste" });
+
+    expect(
+      within(recent).getByRole("link", {
+        name: "Sammanfatta KS-protokoll · Avtalsgranskaren i Upphandling"
+      })
+    ).toBeTruthy();
+    // The personal chat has no context to add.
+    expect(within(recent).getByRole("link", { name: "Upphandlingsanalys mot LOU" })).toBeTruthy();
   });
 
   it("shows Organisation and Administration to admins only", () => {
@@ -356,13 +364,16 @@ describe("DesktopSideNav (main)", () => {
     expect(document.activeElement).toBe(toggle);
   });
 
-  it("renders the stored preference on the server, so the nav does not jump", () => {
-    // What the server layout sends when the cookie says "collapsed".
-    const html = renderToHtml(<DesktopSideNav variant="main" navId="side-nav" defaultCollapsed />, {
-      queryClient: seededClient()
-    });
-    expect(html).toContain('aria-label="Fäll ut sidomenyn"');
-    expect(html).not.toContain("Fäll ihop sidomenyn");
+  it("renders the stored preference on first mount", () => {
+    // The route reads the stored cookie before mounting the nav.
+    const { container } = renderInApp(
+      <DesktopSideNav variant="main" navId="side-nav" defaultCollapsed />,
+      {
+        queryClient: seededClient()
+      }
+    );
+    expect(container.innerHTML).toContain('aria-label="Fäll ut sidomenyn"');
+    expect(container.innerHTML).not.toContain("Fäll ihop sidomenyn");
   });
 });
 
@@ -406,6 +417,7 @@ describe("DesktopSideNav (admin)", () => {
     ]);
     expect(hrefsIn("Organisation")).toEqual([
       "/admin/users",
+      "/admin/user-groups",
       "/admin/roles",
       "/admin/help-assistants",
       "/admin/storage",
@@ -438,9 +450,9 @@ describe("DesktopSideNav (admin)", () => {
     });
     const navigation = screen.getByRole("navigation", { name: "Administration" });
     const connections = within(navigation).getByRole("group", { name: "Anslutningar" });
-    const organisation = within(navigation).getByRole("group", { name: "Organisation" });
+    const governance = within(navigation).getByRole("group", { name: "Styrning" });
     expect(within(connections).getByRole("link", { name: "Moduler" })).toBeTruthy();
-    expect(within(organisation).getByRole("link", { name: "Mallar" })).toBeTruthy();
+    expect(within(governance).getByRole("link", { name: "Mallar" })).toBeTruthy();
     for (const name of ["Översikt", "Styrning", "Anslutningar", "Organisation"]) {
       const group = within(navigation).getByRole("group", { name });
       expect(within(group).getAllByRole("link").length).toBeLessThanOrEqual(7);

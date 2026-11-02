@@ -618,7 +618,10 @@ export const eneoTheme = {
           "tokens": {
             "--size-element-sm": "44px",
             "--size-element-md": "44px",
-            "--size-element-lg": "44px"
+            "--size-element-lg": "44px",
+            "--text-body-size": "0.9375rem",
+            "--text-label-size": "0.9375rem",
+            "--text-supporting-size": "0.8125rem"
           },
           "components": {
             "segmented-control-item": {

@@ -1,5 +1,6 @@
 """Unit tests for RequestContextMiddleware audit-context capture."""
 
+import asyncio
 from uuid import UUID
 
 import pytest
@@ -12,6 +13,7 @@ from eneo.main.config import get_settings
 from eneo.main.request_context import (
     clear_request_context,
     get_request_context,
+    set_request_context,
 )
 from eneo.server.middleware.request_context import RequestContextMiddleware
 
@@ -186,7 +188,7 @@ def test_resolve_client_ip_invoked_with_settings(monkeypatch):
     assert captured["snapshot"]["ip_address"] == "1.2.3.4"
 
 
-def test_dispatch_calls_set_request_context(monkeypatch):
+def test_middleware_calls_set_request_context(monkeypatch):
     """Sanity test that the middleware passes audit fields to set_request_context."""
     received: dict[str, dict] = {}
 
@@ -215,3 +217,136 @@ def test_dispatch_calls_set_request_context(monkeypatch):
     assert "correlation_id" in received  # existing field still set
     assert received["path"] == "/probe"
     assert received["method"] == "GET"
+
+
+@pytest.mark.parametrize("trace_id", [None, "1234567890abcdef1234567890abcdef"])
+def test_middleware_preserves_id_header_precedence(monkeypatch, trace_id):
+    monkeypatch.setattr(
+        "eneo.server.middleware.request_context._current_trace_id", lambda: trace_id
+    )
+    captured: dict[str, dict] = {}
+    request_uuid = "550e8400-e29b-41d4-a716-446655440000"
+    correlation_uuid = "11111111-1111-1111-1111-111111111111"
+    with TestClient(_build_app(captured)) as client:
+        client.get(
+            "/probe",
+            headers={
+                "X-Request-ID": request_uuid,
+                "X-Correlation-ID": correlation_uuid,
+            },
+        )
+    context = captured["snapshot"]
+    assert context.get("trace_id") == trace_id
+    assert context["correlation_id"] == (trace_id or correlation_uuid)
+    assert context["request_id"] == UUID(request_uuid)
+
+
+def _scope(correlation_id="request-context-test"):
+    return {
+        "type": "http",
+        "asgi": {"version": "3.0", "spec_version": "2.4"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/stream",
+        "query_string": b"",
+        "headers": [(b"x-correlation-id", correlation_id.encode())],
+        "client": ("127.0.0.1", 1234),
+        "server": ("localhost", 80),
+    }
+
+
+@pytest.mark.parametrize("outcome", ["complete", "error", "cancelled"])
+async def test_context_spans_the_full_stream_and_clears_after_exit(
+    monkeypatch, outcome
+):
+    monkeypatch.setattr(
+        "eneo.server.middleware.request_context._current_trace_id", lambda: None
+    )
+    contexts = []
+    final_context = None
+
+    async def application(scope, receive, send):
+        nonlocal final_context
+        try:
+            await send({"type": "http.response.start", "status": 200, "headers": []})
+            await asyncio.sleep(0)
+            await send(
+                {"type": "http.response.body", "body": b"partial", "more_body": True}
+            )
+            if outcome == "error":
+                raise RuntimeError("upstream failed")
+            if outcome == "cancelled":
+                raise asyncio.CancelledError
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+        finally:
+            final_context = get_request_context()
+
+    async def send(message):
+        contexts.append(get_request_context())
+
+    async def receive():
+        await asyncio.Event().wait()
+
+    middleware = RequestContextMiddleware(application)
+    if outcome == "complete":
+        await middleware(_scope(), receive, send)
+    else:
+        error = RuntimeError if outcome == "error" else asyncio.CancelledError
+        with pytest.raises(error):
+            await middleware(_scope(), receive, send)
+
+    assert contexts
+    assert all(
+        context["correlation_id"] == "request-context-test" for context in contexts
+    )
+    assert final_context["correlation_id"] == "request-context-test"
+    assert get_request_context() == {}
+
+
+async def test_concurrent_request_contexts_are_isolated(monkeypatch):
+    monkeypatch.setattr(
+        "eneo.server.middleware.request_context._current_trace_id", lambda: None
+    )
+    both_started = asyncio.Event()
+    contexts = []
+    entered = 0
+
+    async def application(scope, receive, send):
+        nonlocal entered
+        entered += 1
+        if entered == 2:
+            both_started.set()
+        await both_started.wait()
+        contexts.append(get_request_context())
+
+    async def unused():
+        raise AssertionError("unexpected receive/send")
+
+    middleware = RequestContextMiddleware(application)
+    async with asyncio.timeout(3):
+        await asyncio.gather(
+            middleware(_scope("first"), unused, unused),
+            middleware(_scope("second"), unused, unused),
+        )
+    assert {context["correlation_id"] for context in contexts} == {"first", "second"}
+    assert get_request_context() == {}
+
+
+@pytest.mark.parametrize("scope_type", ["websocket", "lifespan"])
+async def test_non_http_scopes_pass_through_unchanged(scope_type):
+    scope = {"type": scope_type}
+    received = []
+    set_request_context(correlation_id="outer-context")
+
+    async def application(inner_scope, inner_receive, inner_send):
+        received.append((inner_scope, inner_receive, inner_send))
+        assert get_request_context() == {"correlation_id": "outer-context"}
+
+    async def unused():
+        raise AssertionError("unexpected receive/send")
+
+    await RequestContextMiddleware(application)(scope, unused, unused)
+    assert received == [(scope, unused, unused)]
+    assert received[0][0] is scope
+    assert get_request_context() == {"correlation_id": "outer-context"}

@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import {
   DropdownMenu,
@@ -20,7 +18,7 @@ import { VisuallyHidden } from "@astryxdesign/core/VisuallyHidden";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { BookText, History, MoreHorizontal, Pencil, Plus, Trash2 } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { ClientTime } from "@/components/composites/client-time";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
@@ -267,7 +265,8 @@ export function PromptLibraryPage() {
         description={t("governance_prompts_intro")}
         headingId={headingId}
         headingRef={headingRef}
-        actions={createButton}
+        // The empty state carries its own; a failed or loading list still allows creating.
+        actions={list.data?.length === 0 ? undefined : createButton}
       />
       <QueryStateBoundary query={list} rows={4}>
         {(items) =>

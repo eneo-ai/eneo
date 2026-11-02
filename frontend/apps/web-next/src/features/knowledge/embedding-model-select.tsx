@@ -1,6 +1,4 @@
-"use client";
-
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId } from "react";
 import { Label } from "@/components/ui/label";
 import {
@@ -12,11 +10,8 @@ import {
   SelectTrigger,
   SelectValue
 } from "@/components/ui/select";
+import { embeddingModelLabel } from "./embedding-model-label";
 import type { EmbeddingModel } from "./knowledge";
-
-function displayName(model: EmbeddingModel): string {
-  return model.open_source ? `${model.name} (Open Source)` : model.name;
-}
 
 /**
  * Embedding model picker for knowledge creation, grouped by stability like
@@ -52,7 +47,7 @@ export function EmbeddingModelSelect({
               <SelectLabel>{t("stable_embedding_models")}</SelectLabel>
               {stable.map((model) => (
                 <SelectItem key={model.id} value={model.id}>
-                  {displayName(model)}
+                  {embeddingModelLabel(model)}
                 </SelectItem>
               ))}
             </SelectGroup>
@@ -62,7 +57,7 @@ export function EmbeddingModelSelect({
               <SelectLabel>{t("experimental_embedding_models")}</SelectLabel>
               {experimental.map((model) => (
                 <SelectItem key={model.id} value={model.id}>
-                  {displayName(model)}
+                  {embeddingModelLabel(model)}
                 </SelectItem>
               ))}
             </SelectGroup>

@@ -1,0 +1,6 @@
+[install]
+# Install only versions published at least 7 days ago (seconds).
+minimumReleaseAge = 604800
+# Exceptions: exact "pkg@x.y.z" only, each with an advisory link and a removal
+# date at most 7 days out. Never a bare package name.
+minimumReleaseAgeExcludes = []

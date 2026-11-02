@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { EneoUIMessage } from "@/lib/chat/types";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import { ChatMessage, PendingAnswer } from "./chat-message";
 
 type Part = EneoUIMessage["parts"][number];
@@ -89,7 +90,11 @@ describe("ChatMessage", () => {
     expect(article.querySelector("table")).not.toBeNull();
     expect(within(article).getByRole("heading", { level: 3, name: "Sammanfattning" })).toBeTruthy();
 
-    const citation = within(article).getByRole("button", { name: "Källa 1: LOU 19 kap." });
+    // The inline citation (the source list under the answer is named alike).
+    const text = within(article)
+      .getByText(/Gränsen stämmer/)
+      .closest("p")!;
+    const citation = within(text).getByRole("button", { name: "Källa 1: LOU 19 kap." });
     fireEvent.click(citation);
     expect(onActivityToggle).toHaveBeenCalledWith(citation, { tab: "sources", source: 0 });
 
@@ -124,7 +129,8 @@ describe("ChatMessage", () => {
     renderMessages(
       <ChatMessage message={message} assistant={assistant} onActivityToggle={onActivityToggle} />
     );
-    const citations = screen.getAllByRole("button", { name: /^Källa [12]: kaffe_tips/ });
+    const text = screen.getByText(/Smak/).closest("p")!;
+    const citations = within(text).getAllByRole("button", { name: /^Källa [12]: kaffe_tips/ });
     expect(citations.map((citation) => citation.textContent)).toEqual(["1", "2"]);
     expect(citations.map((citation) => citation.getAttribute("aria-label"))).toEqual([
       "Källa 1: kaffe_tips · Utdrag 1",
@@ -154,6 +160,40 @@ describe("ChatMessage", () => {
     fireEvent.click(within(menu).getByRole("menuitem", { name: "Visa aktivitet" }));
     // With a tab the panel opens or switches; without one the pill's toggle would close it.
     expect(onActivityToggle).toHaveBeenCalledWith(more, { tab: "steps" });
+  });
+
+  it("lists the answer's sources under it, numbered, each opening its source (decision 6)", async () => {
+    const onActivityToggle = vi.fn();
+    const { container } = renderMessages(
+      <ChatMessage message={answer} assistant={assistant} onActivityToggle={onActivityToggle} />
+    );
+    const list = screen.getByRole("list", { name: "Källor" });
+    const row = within(list).getByRole("button", { name: "Källa 1: LOU 19 kap." });
+    fireEvent.click(row);
+    expect(onActivityToggle).toHaveBeenCalledWith(expect.any(HTMLElement), {
+      tab: "sources",
+      source: 0
+    });
+    await expectNoAxeViolations(container);
+  });
+
+  it("says what each answer action does on touch (decision 7)", () => {
+    setViewport("phone");
+    renderMessages(
+      <ChatMessage
+        message={{ ...answer, metadata: { ...answer.metadata, createdAt: null } }}
+        assistant={assistant}
+        feedback={{ value: null, onChange: vi.fn() }}
+      />
+    );
+    // Words, not icons; each named as before ("Kopiera" shown, "Kopiera svaret" read).
+    const copy = screen.getByRole("button", { name: "Kopiera svaret" });
+    expect(copy.textContent).toBe("Kopiera");
+    for (const name of ["Kopiera svaret", "Bra svar", "Dåligt svar"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button.querySelector("svg")).toBeNull();
+      expect(button.textContent).toContain(name === "Kopiera svaret" ? "Kopiera" : name);
+    }
   });
 
   it("offers copy and more actions; thumbs where the answer can be rated", () => {

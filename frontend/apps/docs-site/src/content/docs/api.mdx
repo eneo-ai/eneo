@@ -288,16 +288,26 @@ Two response shapes are used.
 
 ## Errors
 
-Errors are JSON. Four shapes occur, depending on where the error is raised:
+Errors are JSON. Every error except request validation answers in one envelope:
 
-| Shape | When |
-|-------|------|
-| `{"detail": "message"}` | Simple HTTP errors, and authentication failures without a code. |
-| `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}` | `422` request validation errors (FastAPI default). |
-| `{"code": "...", "message": "...", "request_id"?: "...", "context"?: {...}}` | Structured errors from API key authentication, scope checks, and endpoints that raise coded errors. `code` is stable; `message` is not. |
-| `{"message": "...", "eneo_error_code": ..., "code"?: "...", "request_id"?: "...", "context"?: {...}, "details"?: {...}}` | Domain errors mapped by the global exception handlers (not found, unauthorized, conflicts, and so on). |
+```json
+{
+  "message": "Human-readable reason",
+  "eneo_error_code": 9001,
+  "code": "forbidden_action",
+  "context": {"auth_layer": "domain_policy"},
+  "details": {},
+  "request_id": "req-123"
+}
+```
 
-Unhandled failures return `500` with `{"error": "Internal server error", "error_id": "...", "message": "..."}`. Quote the `error_id` when reporting a problem; in development mode the body also contains a `detail` object with the exception type and path.
+`message` is always present. `eneo_error_code` is absent when the route refused with a plain message and no code; `code`, `context`, `details` and `request_id` are optional. A route may add fields next to `code`, such as `retry_after_seconds` on a `429` with `code` `rate_limit_exceeded`. Unknown routes (`404`) and unsupported methods (`405`) use the same envelope.
+
+`422` request validation errors keep FastAPI's shape: `{"detail": [{"loc": [...], "msg": "...", "type": "..."}]}`.
+
+A refusal raised as an HTTP exception also carries `detail`, its raw value (a string or an object). It is deprecated and kept for one release so existing clients keep working; read the top-level fields instead. An object without a `code`, such as the `/api/healthz` report, is also in `details`.
+
+Unhandled failures return `500` with `error`, `error_id` and `message`. Quote the `error_id` when reporting a problem; in development mode the body also contains a `detail` object with the exception type and path.
 
 Every response carries an `X-Trace-Id` header (and `X-Correlation-ID` for older clients). If you send `X-Correlation-ID` or `X-Request-ID` with a request, the value is echoed as `request_id` in structured error bodies, which makes client and server logs easy to correlate.
 

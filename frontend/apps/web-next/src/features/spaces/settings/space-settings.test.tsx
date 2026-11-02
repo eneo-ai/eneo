@@ -3,13 +3,16 @@ import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-libra
 import { afterEach, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { router } from "@/test/navigation";
+import messages from "@/lib/i18n/messages/sv.json";
+import { setViewport } from "@/test/setup-dom";
 import type { Space } from "../space";
 import { makeSpace } from "../testing/space-fixture";
 
 const state = vi.hoisted(() => ({ space: null as unknown as Space, routeId: "space-1" }));
-const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn() }));
+const api = vi.hoisted(() => ({ GET: vi.fn(), PATCH: vi.fn(), DELETE: vi.fn() }));
 
-vi.mock("next/navigation", () => import("@/test/navigation"));
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 vi.mock("@/features/spaces/use-space", async () => {
   const { useSpaceFromQuery } = await import("@/features/spaces/testing/space-query");
   return { useSpace: () => useSpaceFromQuery(() => state.space, state.routeId) };
@@ -94,7 +97,17 @@ afterEach(() => {
   cleanup();
   api.GET.mockReset();
   api.PATCH.mockReset();
+  api.DELETE.mockReset();
 });
+
+/** The strip of section links (a phone's index is another navigation of the same name). */
+function sectionLinks() {
+  const strip = screen
+    .getAllByRole("navigation", { name: "Inställningar" })
+    .find((navigation) => navigation.querySelector("a[href^='#']"));
+  if (!strip) throw new Error("No strip of section links");
+  return strip;
+}
 
 /** The model switches sit behind each card's "choose" button. */
 async function openModels(kind: string) {
@@ -104,10 +117,10 @@ async function openModels(kind: string) {
 it("offers section links and keeps each model type separate from tools", () => {
   showSettings();
 
-  const navigation = screen.getByRole("navigation", { name: "Inställningar" });
+  const navigation = sectionLinks();
   for (const name of [
     "Allmänt",
-    "Säkerhet & Integritet",
+    "Säkerhet och integritet",
     "Modeller",
     "Verktyg och anslutningar",
     "Funktioner",
@@ -126,6 +139,58 @@ it("offers section links and keeps each model type separate from tools", () => {
   ).toBeGreaterThan(0);
 });
 
+it("opens on a phone with an index of the sections, as the assistant editor does", async () => {
+  setViewport("phone");
+  const { container } = showSettings();
+
+  const index = document.querySelector<HTMLElement>("[data-editor-index]")!;
+  expect(document.querySelector("[data-editor-view]")?.getAttribute("data-editor-view")).toBe(
+    "index"
+  );
+  const rows = within(index).getAllByRole("link");
+  expect(rows.map((row) => row.getAttribute("href"))).toEqual([
+    "/?section=general",
+    "/?section=security",
+    "/?section=models",
+    "/?section=tools",
+    "/?section=capabilities",
+    "/?section=api-keys",
+    "/?section=danger"
+  ]);
+  expect(
+    within(index)
+      .getAllByRole("heading", { level: 2 })
+      .map((heading) => heading.textContent)
+  ).toEqual(["Ytan", "Modell och funktioner", "Åtkomst"]);
+  // Deleting the space is not an access setting: it stands alone, last, under no heading.
+  const lists = index.querySelectorAll("ul");
+  expect(within(lists[lists.length - 1]!).getAllByRole("link")).toHaveLength(1);
+  expect(within(lists[lists.length - 1]!).getByRole("link", { name: /Farozon/ })).toBeTruthy();
+  expect(within(lists[lists.length - 2]!).queryByRole("link", { name: /Farozon/ })).toBeNull();
+  // The space's page bar is above it: the index has none of its own, a section has one back to it.
+  expect(container.querySelector("[data-phone-page-bar]")).toBeNull();
+  // What the space holds is said on the row, so the index tells before it is opened.
+  expect(rows[1]!.textContent).toMatch(/^Säkerhet och integritet, .*30/);
+  // The index names itself (the frame's bar shows its title only after a scroll), under the
+  // frame's h1, not beside it.
+  const names = [...container.querySelectorAll("h2.md\\:hidden")].map(
+    (heading) => heading.textContent
+  );
+  expect(names).toEqual(["Inställningar"]);
+  expect(container.querySelector("h1")).toBeNull();
+  await expectNoAxeViolations(container);
+});
+
+it("says nothing about a space's security while it keeps nothing back", () => {
+  setViewport("phone");
+  state.space = makeSpace({ overrides: { data_retention_days: null } });
+  showSettings(undefined, [], [], "space-1", state.space);
+  const rows = within(document.querySelector<HTMLElement>("[data-editor-index]")!).getAllByRole(
+    "link"
+  );
+  expect(rows[1]!.textContent).toBe("Säkerhet och integritet");
+});
+
 it("lists each model type in the models section once the models have loaded", async () => {
   showSettings(undefined, availableModels);
 
@@ -138,13 +203,42 @@ it("lists each model type in the models section once the models have loaded", as
 it("shows organization settings without personal space sections", () => {
   showSettings(undefined, [], [], "space-1", makeSpace({ overrides: { organization: true } }));
 
-  const navigation = screen.getByRole("navigation", { name: "Inställningar" });
+  const navigation = sectionLinks();
   expect(within(navigation).queryByRole("link", { name: "Allmänt" })).toBeNull();
-  expect(within(navigation).queryByRole("link", { name: "Säkerhet & Integritet" })).toBeNull();
-  expect(within(navigation).queryByRole("link", { name: "Funktioner" })).toBeNull();
+  expect(within(navigation).queryByRole("link", { name: "Säkerhet och integritet" })).toBeNull();
+  expect(within(navigation).getByRole("link", { name: "Funktioner" })).toBeTruthy();
+  const webSearch = within(document.getElementById("capabilities")!).getByRole("switch", {
+    name: "Webbsökning"
+  });
+  expect(webSearch.hasAttribute("disabled")).toBe(true);
   expect(within(navigation).queryByRole("link", { name: "Farozon" })).toBeNull();
   expect(within(navigation).getByRole("link", { name: "Modeller" })).toBeTruthy();
   expect(within(navigation).getByRole("link", { name: "Verktyg och anslutningar" })).toBeTruthy();
+});
+
+it("saves an available organization capability through the existing space update", async () => {
+  showSettings(
+    undefined,
+    [],
+    [],
+    "organization",
+    makeSpace({
+      overrides: {
+        organization: true,
+        enabled_capabilities: [],
+        available_capabilities: [{ purpose: "web_search", available: true, reason: null }]
+      }
+    })
+  );
+  fireEvent.click(
+    within(document.getElementById("capabilities")!).getByRole("switch", { name: "Webbsökning" })
+  );
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledWith("/api/v1/spaces/{id}/", {
+      params: { path: { id: "space-1" } },
+      body: { enabled_capabilities: ["web_search"] }
+    })
+  );
 });
 
 it("keeps an empty space name and explains the error at the field until corrected", async () => {
@@ -174,13 +268,15 @@ it("keeps an empty space name and explains the error at the field until correcte
 it("keeps invalid retention input, explains the allowed format and saves a correction", async () => {
   const { container } = showSettings();
   const retention = screen.getByRole("textbox", { name: "Gallring av konversationshistorik" });
+  // "yta", as the rest of the settings say.
+  expect(screen.getByText(/appar i denna yta som inte har/)).toBeTruthy();
 
   fireEvent.change(retention, { target: { value: "1.5" } });
   fireEvent.blur(retention);
 
   expect((retention as HTMLInputElement).value).toBe("1.5");
   expect(retention.getAttribute("aria-invalid")).toBe("true");
-  expect(screen.getByText(/Ange ett helt antal dagar större än noll/)).toBeTruthy();
+  expect(screen.getByText(/Ange ett helt antal dagar från 1 till 2555/)).toBeTruthy();
   expect(api.PATCH).not.toHaveBeenCalled();
   await expectNoAxeViolations(container);
 
@@ -392,4 +488,61 @@ it("rolls back only unsaved model selections and explains a failed save", async 
   expect(aurora.getAttribute("data-state")).toBe("checked");
   expect(borealis.getAttribute("data-state")).toBe("unchecked");
   expect(api.PATCH).toHaveBeenCalledTimes(2);
+});
+
+it("keeps a saved deprecated model visible in the space model selector", async () => {
+  const deprecated = {
+    ...availableModels[0]!,
+    is_deprecated: true,
+    deprecation_date: "2020-01-01"
+  };
+  showSettings(
+    undefined,
+    [deprecated],
+    [],
+    "space-1",
+    makeSpace({ overrides: { completion_models: [{ id: "north-1", name: "Aurora" }] } })
+  );
+  await openModels("Chattmodeller");
+  const selected = await screen.findByRole("switch", { name: "Aurora" });
+  expect(selected.getAttribute("aria-checked")).toBe("true");
+  fireEvent.click(selected);
+  await waitFor(() =>
+    expect(api.PATCH).toHaveBeenCalledWith("/api/v1/spaces/{id}/", {
+      params: { path: { id: "space-1" } },
+      body: { completion_models: [] }
+    })
+  );
+});
+
+it("shows and clears the same delayed deletion hint from space settings", async () => {
+  let finish!: (value: unknown) => void;
+  api.DELETE.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    })
+  );
+  showSettings();
+  fireEvent.click(screen.getByRole("button", { name: messages.delete_this_space }));
+  const dialog = await screen.findByRole("alertdialog", { name: messages.delete_space });
+  fireEvent.change(
+    within(dialog).getByRole("textbox", { name: messages.enter_space_name_to_confirm }),
+    { target: { value: state.space.name } }
+  );
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(within(dialog).getByRole("button", { name: messages.confirm_deletion }));
+    await act(async () => vi.advanceTimersByTimeAsync(4999));
+    expect(within(dialog).queryByText(messages.delete_space_hint)).toBeNull();
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+    expect(within(dialog).getByText(messages.delete_space_hint)).toBeTruthy();
+    await act(async () => {
+      finish({ data: null, response: new Response(null, { status: 204 }) });
+      await vi.advanceTimersByTimeAsync(1);
+    });
+    expect(screen.queryByText(messages.delete_space_hint)).toBeNull();
+    expect(router.push).toHaveBeenCalledExactlyOnceWith("/spaces/list");
+  } finally {
+    vi.useRealTimers();
+  }
 });

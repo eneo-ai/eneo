@@ -1,16 +1,16 @@
-"use client";
-
 import { isUnreleased, visibleEntries } from "@eneo/whats-new";
 import type { EntryArea, Locale, Release, ReleaseEntry } from "@eneo/whats-new";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { Sparkles } from "lucide-react";
-import { useLocale, useTranslations } from "next-intl";
+import { useLocale, useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
 import { PageHeader } from "@/components/composites/page-header";
 import { useAppContext } from "@/components/providers/app-context";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { formatCalendarDate } from "@/lib/calendar-date";
+import { navigateTo } from "@/lib/navigate-to";
 import { toast } from "@/lib/toast";
 import {
   areasPresent,
@@ -22,9 +22,11 @@ import {
 import { useTour } from "./tour-provider";
 import { useWhatsNew } from "./whats-new-provider";
 
+// The accent text token, not --primary: primary text on its own tint is below
+// 4.5:1 in light mode.
 const typeTone = {
   new: "border-success/30 bg-success/10 text-success",
-  improved: "border-primary/30 bg-primary/10 text-primary",
+  improved: "border-primary/30 bg-primary/10 text-ax-text-accent",
   fixed: "border-warning/30 bg-warning/10 text-warning"
 } as const;
 
@@ -86,7 +88,7 @@ export function WhatsNewPage({ title }: { title: string }) {
     setResetting(true);
     try {
       await resetState();
-      window.location.reload();
+      navigateTo(window.location.pathname + window.location.search);
     } catch {
       setResetting(false);
       toast.error(t("whats_new_dev_reset_failed"));
@@ -94,16 +96,12 @@ export function WhatsNewPage({ title }: { title: string }) {
   }
 
   function formatDate(date: string): string {
-    const [year = 0, month = 1, day = 1] = date.split("-").map(Number);
-    return new Intl.DateTimeFormat(locale, { dateStyle: "long" }).format(
-      new Date(year, month - 1, day)
-    );
+    return formatCalendarDate(date, locale, { dateStyle: "long" });
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 p-6">
-      <PageHeader title={title} />
-      <p className="text-muted-foreground">{t("whats_new_intro")}</p>
+    <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 p-4 sm:gap-8 sm:p-6">
+      <PageHeader title={title} description={t("whats_new_intro")} />
       {releases.length === 0 ? (
         <p className="text-muted-foreground flex items-center gap-2">
           <Sparkles className="size-4" />
@@ -126,19 +124,20 @@ export function WhatsNewPage({ title }: { title: string }) {
                   type="button"
                   aria-pressed={release.version === current.version}
                   onClick={() => selectRelease(release)}
-                  className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors"
+                  className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex min-h-9 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors pointer-coarse:min-h-11"
                 >
                   {isUnreleased(release) ? (
                     t("whats_new_upcoming")
                   ) : (
                     <>
                       {release.version}
-                      {!release.date && (
-                        <span className="text-xs opacity-80">{t("whats_new_upcoming")}</span>
-                      )}
+                      {!release.date && <span className="text-xs">{t("whats_new_upcoming")}</span>}
                       {seenAtOpen !== null && !isReadRelease(release, seenAtOpen) && (
                         <>
-                          <span aria-hidden="true" className="bg-success size-2 rounded-full" />
+                          <span
+                            aria-hidden="true"
+                            className="bg-success size-2 rounded-full forced-colors:bg-[CanvasText]"
+                          />
                           <span className="sr-only">{t("whats_new_new_for_you")}</span>
                         </>
                       )}
@@ -166,7 +165,7 @@ export function WhatsNewPage({ title }: { title: string }) {
               {seenAtOpen !== null &&
                 !isUnreleased(current) &&
                 (isReadRelease(current, seenAtOpen) ? (
-                  <span className="text-muted-foreground text-xs">{t("whats_new_read")}</span>
+                  <span className="text-muted-foreground text-sm">{t("whats_new_read")}</span>
                 ) : (
                   <Badge variant="outline" className="border-success/30 bg-success/10 text-success">
                     {t("whats_new_new_for_you")}
@@ -176,7 +175,8 @@ export function WhatsNewPage({ title }: { title: string }) {
                 <Button
                   size="sm"
                   variant={isReadRelease(current, seenAtOpen) ? "outline" : "default"}
-                  className="ml-auto"
+                  // On a phone it wraps under the heading and starts on the page's line.
+                  className="sm:ml-auto"
                   aria-busy={(running && tourFrom === "release") || undefined}
                   onClick={() =>
                     void startEntries("release", tourEntries(current, can), current.version)
@@ -253,7 +253,7 @@ export function WhatsNewPage({ title }: { title: string }) {
                     )}
                   </div>
                   <h3 className="font-medium">{entry.title[locale] ?? entry.title.en}</h3>
-                  <p className="text-muted-foreground text-sm leading-relaxed">
+                  <p className="text-muted-foreground max-w-prose text-sm leading-relaxed">
                     {entry.body[locale] ?? entry.body.en}
                   </p>
                   {entry.showMe && (
@@ -292,7 +292,7 @@ export function WhatsNewPage({ title }: { title: string }) {
         href="https://docs.eneo.ai/about/release-notes"
         target="_blank"
         rel="noreferrer"
-        className="text-muted-foreground hover:text-foreground text-sm underline underline-offset-2"
+        className="text-muted-foreground hover:text-foreground inline-flex items-center self-start text-sm underline underline-offset-2 pointer-coarse:min-h-11"
       >
         {t("whats_new_docs_link")}
       </a>
@@ -314,7 +314,7 @@ function FilterButton({
       type="button"
       aria-pressed={selected}
       onClick={onClick}
-      className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground rounded-full border px-3 py-1 text-xs font-medium transition-colors"
+      className="hover:bg-accent aria-pressed:bg-primary aria-pressed:text-primary-foreground inline-flex items-center justify-center rounded-full border px-3 py-1 text-xs font-medium transition-colors pointer-coarse:min-h-11 pointer-coarse:min-w-11"
     >
       {children}
     </button>

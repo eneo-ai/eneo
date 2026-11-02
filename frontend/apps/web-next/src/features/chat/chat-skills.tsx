@@ -1,5 +1,3 @@
-"use client";
-
 import { BottomSheet } from "@astryxdesign/core/BottomSheet";
 import { Button } from "@astryxdesign/core/Button";
 import { useMediaQuery } from "@astryxdesign/core/hooks";
@@ -7,7 +5,7 @@ import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";
 import { BookOpenCheck, Lock, Plus, RefreshCw, Search, Settings, X } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import {
   useEffect,
   useLayoutEffect,
@@ -33,6 +31,7 @@ import { SkillDependencies } from "@/features/skills/skill-dependencies";
 import { useFocusRescue } from "@/lib/focus-rescue";
 import { cn } from "@/lib/utils";
 import { COMPOSER_PILL_CLASS, COMPOSER_PILL_COUNT_CLASS } from "./mcp-controls";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 
 type PersonalChatSkills = ReturnType<typeof usePersonalChatSkills>;
 /** The library search: as typed, and the query the rows follow after a pause. */
@@ -216,6 +215,7 @@ function OwnSkills({
             value={search.value}
             onChange={search.onChange}
             startIcon={Search}
+            {...KEYBOARD.search}
             hasClear
             size="sm"
             width="100%"

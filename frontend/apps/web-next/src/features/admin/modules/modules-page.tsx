@@ -1,20 +1,22 @@
-"use client";
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { CircleAlert, Pencil, Plus, Trash2 } from "lucide-react";
-import Link from "next/link";
-import { useTranslations } from "next-intl";
-import { useEffect, useRef, useState } from "react";
-import { flushSync } from "react-dom";
-import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
+import Link from "@/lib/link";
+import { useTranslations } from "use-intl";
+import { useRef, useState } from "react";
+import {
+  FieldProblem,
+  fieldProblemProps,
+  revealProblems
+} from "@/components/composites/field-problem";
 import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog";
 import { PageHeader } from "@/components/composites/page-header";
+import { QueryStateBoundary } from "@/components/composites/query-state";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -59,7 +61,6 @@ export function ModulesPage({ title }: { title: string }) {
     queryFn: listCompatibleServiceKeys
   });
   const loading = installations.isPending || serviceKeys.isPending;
-  const loadError = installations.error ?? serviceKeys.error;
   const keys = serviceKeys.data ?? [];
   const redirectUris = parseRedirectUris(redirectUrisInput);
   const trimmedKey = moduleKey.trim();
@@ -71,10 +72,6 @@ export function ModulesPage({ title }: { title: string }) {
   const redirectUrisProblem = redirectUris.length > 0 ? null : t("required_field");
   const serviceKeyProblem = serviceKeyId ? null : t("required_field");
   const shown = (problem: string | null) => (submitted ? problem : null);
-
-  useEffect(() => {
-    if (loadError) toastApiError(loadError, t);
-  }, [loadError, t]);
 
   function resetForm() {
     setSubmitted(false);
@@ -92,7 +89,7 @@ export function ModulesPage({ title }: { title: string }) {
     setServiceKeyId(selected.selection);
     setBoundKeyMissing(selected.missing);
     setEditingModuleKey(installation.module_key);
-    formRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    formRef.current?.scrollIntoView({ block: "start" });
   }
 
   // Problems show at their fields on submit, and focus moves to the first.
@@ -107,9 +104,7 @@ export function ModulesPage({ title }: { title: string }) {
           ? serviceKeyRef
           : null;
     if (firstProblem) {
-      // Rendered before focus moves, so the field is read with its error.
-      flushSync(() => setSubmitted(true));
-      firstProblem.current?.focus();
+      revealProblems(() => setSubmitted(true), firstProblem.current);
       return;
     }
     const key = trimmedKey;
@@ -157,93 +152,91 @@ export function ModulesPage({ title }: { title: string }) {
 
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
-      <PageHeader title={title} tour="admin-modules" />
+      <PageHeader title={title} description={t("module_admin_description")} tour="admin-modules" />
       <section className="space-y-4" aria-labelledby="installed-modules-title">
-        <div>
-          <h2 id="installed-modules-title" className="text-lg font-semibold">
-            {t("module_admin_installed_title")}
-          </h2>
-          <p className="text-muted-foreground mt-1 text-sm">{t("module_admin_description")}</p>
-        </div>
-        {loadError && (
-          <Alert variant="destructive" role="alert">
-            <CircleAlert className="size-4" />
-            <AlertDescription>{loadError.message}</AlertDescription>
-          </Alert>
-        )}
-        {loading ? (
-          <div className="space-y-3" aria-label={t("loading")}>
-            <Skeleton className="h-12 w-full" />
-            <Skeleton className="h-12 w-full" />
-          </div>
-        ) : (installations.data ?? []).length === 0 ? (
-          <div className="rounded-lg border border-dashed px-6 py-10 text-center">
-            <p className="font-medium">{t("module_admin_empty_title")}</p>
-            <p className="text-muted-foreground mt-1 text-sm">
-              {t("module_admin_empty_description")}
-            </p>
-          </div>
-        ) : (
-          <ul className="grid gap-3">
-            {(installations.data ?? []).map((installation) => {
-              const boundKey = keys.find((key) => key.id === installation.service_key_id);
-              return (
-                <li key={installation.module_id} className="rounded-lg border p-4">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0 space-y-1">
-                      <h3 className="font-mono text-sm font-semibold">{installation.module_key}</h3>
-                      <Badge variant={installation.configured ? "default" : "destructive"}>
-                        {installation.configured
-                          ? t("module_admin_configured")
-                          : t("module_admin_incomplete")}
-                      </Badge>
-                    </div>
-                    <div className="flex gap-2">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => editInstallation(installation)}
-                      >
-                        <Pencil className="size-4" /> {t("edit")}
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="destructive"
-                        onClick={() => setPendingRemoval(installation)}
-                      >
-                        <Trash2 className="size-4" /> {t("remove")}
-                      </Button>
-                    </div>
-                  </div>
-                  <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
-                    <div className="min-w-0">
-                      <dt className="text-muted-foreground">{t("module_admin_callback_urls")}</dt>
-                      <dd className="mt-1 space-y-1">
-                        {(installation.redirect_uris ?? []).length > 0
-                          ? installation.redirect_uris?.map((uri) => (
-                              <div key={uri} className="truncate" title={uri}>
-                                {uri}
-                              </div>
-                            ))
-                          : "—"}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt className="text-muted-foreground">{t("module_admin_service_key")}</dt>
-                      <dd className="mt-1">
-                        {boundKey
-                          ? serviceKeyLabel(boundKey)
-                          : installation.service_key_id
-                            ? `${installation.service_key_id.slice(0, 8)}…`
-                            : "—"}
-                      </dd>
-                    </div>
-                  </dl>
-                </li>
-              );
-            })}
-          </ul>
-        )}
+        <h2 id="installed-modules-title" className="text-lg font-semibold">
+          {t("module_admin_installed_title")}
+        </h2>
+        <QueryStateBoundary queries={[installations, serviceKeys]} rows={2} height={48}>
+          {() =>
+            (installations.data ?? []).length === 0 ? (
+              <div className="border-ax-border-strong rounded-lg border border-dashed px-6 py-10 text-center">
+                <p className="font-medium">{t("module_admin_empty_title")}</p>
+                <p className="text-muted-foreground mt-1 text-sm">
+                  {t("module_admin_empty_description")}
+                </p>
+              </div>
+            ) : (
+              <ul className="grid gap-3">
+                {(installations.data ?? []).map((installation) => {
+                  const boundKey = keys.find((key) => key.id === installation.service_key_id);
+                  return (
+                    <li key={installation.module_id} className="rounded-lg border p-4">
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <h3 className="font-mono text-sm font-semibold">
+                            {installation.module_key}
+                          </h3>
+                          <Badge variant={installation.configured ? "default" : "destructive"}>
+                            {installation.configured
+                              ? t("module_admin_configured")
+                              : t("module_admin_incomplete")}
+                          </Badge>
+                        </div>
+                        <div className="flex gap-2">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => editInstallation(installation)}
+                          >
+                            <Pencil className="size-4" /> {t("edit")}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="destructive"
+                            onClick={() => setPendingRemoval(installation)}
+                          >
+                            <Trash2 className="size-4" /> {t("remove")}
+                          </Button>
+                        </div>
+                      </div>
+                      <dl className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
+                        <div className="min-w-0">
+                          <dt className="text-muted-foreground">
+                            {t("module_admin_callback_urls")}
+                          </dt>
+                          <dd className="mt-1 space-y-1">
+                            {(installation.redirect_uris ?? []).length > 0
+                              ? installation.redirect_uris?.map((uri) => (
+                                  <div
+                                    key={uri}
+                                    className="truncate pointer-coarse:break-words pointer-coarse:whitespace-normal"
+                                    title={uri}
+                                  >
+                                    {uri}
+                                  </div>
+                                ))
+                              : "—"}
+                          </dd>
+                        </div>
+                        <div>
+                          <dt className="text-muted-foreground">{t("module_admin_service_key")}</dt>
+                          <dd className="mt-1">
+                            {boundKey
+                              ? serviceKeyLabel(boundKey)
+                              : installation.service_key_id
+                                ? `${installation.service_key_id.slice(0, 8)}…`
+                                : "—"}
+                          </dd>
+                        </div>
+                      </dl>
+                    </li>
+                  );
+                })}
+              </ul>
+            )
+          }
+        </QueryStateBoundary>
       </section>
 
       <section className="space-y-4 border-t pt-6" aria-labelledby="module-form-title">
@@ -261,6 +254,7 @@ export function ModulesPage({ title }: { title: string }) {
               required
               disabled={editingModuleKey !== null || saving}
               autoComplete="off"
+              {...KEYBOARD.identifier}
               placeholder={t("module_admin_module_key_placeholder")}
               {...fieldProblemProps("module-key", shown(moduleKeyProblem), "module-key-help")}
             />
@@ -274,6 +268,8 @@ export function ModulesPage({ title }: { title: string }) {
             <Textarea
               ref={redirectUrisRef}
               id="redirect-uris"
+              {...KEYBOARD.identifier}
+              inputMode="url"
               value={redirectUrisInput}
               onChange={(event) => setRedirectUrisInput(event.target.value)}
               required
@@ -304,7 +300,7 @@ export function ModulesPage({ title }: { title: string }) {
               }}
               required
               disabled={saving || loading}
-              className="bg-background border-input focus-visible:ring-ring h-9 w-full rounded-md border px-3 text-sm focus-visible:ring-2 focus-visible:outline-none"
+              className="border-input focus-visible:ring-ring h-9 w-full rounded-md border bg-transparent px-3 text-base focus-visible:ring-2 focus-visible:outline-none pointer-coarse:min-h-11 md:pointer-fine:text-sm"
             >
               <option value="" disabled>
                 {t("module_admin_service_key_placeholder")}
@@ -321,13 +317,13 @@ export function ModulesPage({ title }: { title: string }) {
               {t("module_admin_service_key_help")}
             </p>
             {boundKeyMissing && !serviceKeyId && (
-              <Alert variant="destructive" role="alert">
+              <Alert variant="destructive">
                 <CircleAlert className="size-4" />
                 <AlertDescription>{t("module_admin_bound_key_missing")}</AlertDescription>
               </Alert>
             )}
           </div>
-          {!loading && keys.length === 0 && (
+          {serviceKeys.data?.length === 0 && (
             <Alert>
               <CircleAlert className="size-4" />
               <AlertTitle>{t("module_admin_no_service_keys_title")}</AlertTitle>

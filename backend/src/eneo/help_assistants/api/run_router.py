@@ -68,6 +68,7 @@ from eneo.main.models import ResourcePermission
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
 from eneo.server.protocol.sse import ClosingEventSourceResponse, closing
+from eneo.spaces.space_service import TENANT_HUB_ON_GET
 
 router = APIRouter()
 logger = get_logger(__name__)
@@ -301,6 +302,7 @@ async def update_helper_run_status(
     authentication=Authentication.USER,
     authorization=Authorization.AUTHENTICATED,
     reason="HelperRunService requires edit access to the target and ownership of the run.",
+    effect_on_get=TENANT_HUB_ON_GET,
 )
 async def get_helper_availability(
     kind: HelperKind,

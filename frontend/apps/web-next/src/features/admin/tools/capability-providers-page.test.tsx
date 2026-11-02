@@ -1,14 +1,16 @@
 // @vitest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpServer } from "../mcp/mcp";
 
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
-vi.mock("next-intl", () => ({ useTranslations: () => (key: string) => key }));
-vi.mock("next/link", () => ({
+const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn(), error: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ toast }));
+vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key, useLocale: () => "en" }));
+vi.mock("@/lib/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
     <a href={href}>{children}</a>
   )
@@ -84,10 +86,49 @@ function show() {
 }
 
 describe("admin function sources", () => {
+  it.each([false, true])(
+    "shows the template library only inside a file-creation card with a provider (%s)",
+    async (hasProvider) => {
+      get.mockImplementation((path: string) => {
+        if (path === "/api/v1/mcp-servers/settings/")
+          return ok({
+            items: hasProvider
+              ? [
+                  {
+                    ...source,
+                    id: "file-creation",
+                    name: "Document source",
+                    purpose: "file_creation"
+                  }
+                ]
+              : []
+          });
+        if (path === "/api/v1/mcp-servers/bundled/") return ok(bundled);
+        if (path === "/api/v1/document-templates/")
+          return ok({ items: [], runtime_configured: false });
+        return ok({ items: [] });
+      });
+      show();
+      await screen.findByRole("heading", { name: "file_creation" });
+      if (hasProvider) {
+        const heading = await screen.findByRole("heading", { name: "document_templates" });
+        const card = screen.getByRole("heading", { name: "file_creation" }).closest("section")!;
+        expect(card.contains(heading)).toBe(true);
+        expect(within(card).getByRole("button", { name: "document_template_upload" })).toBeTruthy();
+      } else {
+        expect(screen.queryByRole("heading", { name: "document_templates" })).toBeNull();
+        expect(get.mock.calls.some(([path]) => path === "/api/v1/document-templates/")).toBe(false);
+      }
+    }
+  );
   it("shows both functions before either has a source and saves a search source inactive", async () => {
     show();
     expect(await screen.findByRole("heading", { name: "web_search" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "image_generation" })).toBeTruthy();
+    // A card holding only its header draws no second line on its bottom edge.
+    expect(
+      screen.getByRole("heading", { name: "web_search" }).closest("header")?.className
+    ).toContain("last:border-b-0");
     fireEvent.click(screen.getAllByRole("button", { name: "capability_configure" })[0]!);
     fireEvent.change(screen.getByLabelText("name"), { target: { value: "Search source" } });
     fireEvent.change(screen.getByLabelText("url"), {
@@ -163,6 +204,42 @@ describe("admin function sources", () => {
       })
     );
     expect(await screen.findByText("tools_builtin_turned_on")).toBeTruthy();
+  });
+
+  it("toasts a refused built-in provider with its message and support references", async () => {
+    post.mockResolvedValue({
+      error: { message: "Runtime unavailable", eneo_error_code: 9036, error_id: "error-1" },
+      response: new Response("{}", { status: 502, headers: { "x-trace-id": "trace-1" } })
+    });
+    show();
+    fireEvent.click((await screen.findAllByRole("button", { name: "tools_builtin_turn_on" }))[0]!);
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("eneo_error_9036", {
+        description: "error_id: error-1 · trace_id: trace-1"
+      })
+    );
+    expect(screen.queryByText("tools_builtin_turned_on")).toBeNull();
+  });
+
+  it("refreshes the sources and the built-in catalogue with one request each after a save", async () => {
+    const requests = (path: string) => get.mock.calls.filter(([read]) => read === path).length;
+    show();
+    const turnOn = await screen.findAllByRole("button", { name: "tools_builtin_turn_on" });
+    expect(requests("/api/v1/mcp-servers/bundled/")).toBe(1);
+    fireEvent.click(turnOn[0]!);
+    expect(await screen.findByText("tools_builtin_turned_on")).toBeTruthy();
+    await waitFor(() => expect(requests("/api/v1/mcp-servers/settings/")).toBe(2));
+    expect(requests("/api/v1/mcp-servers/bundled/")).toBe(2);
+  });
+
+  it("gives the external server's button a 44 px row on a touch screen", async () => {
+    show();
+    const connect = await screen.findAllByRole("button", { name: "tools_connect_external" });
+    expect(connect.length).toBeGreaterThan(0);
+    for (const button of connect) {
+      expect(button.className.split(/\s+/)).toContain("pointer-coarse:min-h-11");
+      expect(button.parentElement!.className.split(/\s+/)).toContain("items-center");
+    }
   });
 
   it("names a bundled source after its function and keeps it out of the edit form", async () => {

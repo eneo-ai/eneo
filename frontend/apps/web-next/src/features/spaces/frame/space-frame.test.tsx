@@ -3,6 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { setViewport } from "@/test/setup-dom";
 import {
   spaceHasPermission,
   type ResourcePermission,
@@ -17,8 +18,8 @@ const state = vi.hoisted(() => ({
   routeId: "space-1"
 }));
 
-vi.mock("next/navigation", () => ({
-  useSelectedLayoutSegments: () => state.segments,
+vi.mock("@/lib/navigation", () => ({
+  useSpaceSegments: () => state.segments,
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/spaces/space-1"
 }));
@@ -90,7 +91,8 @@ describe("SpaceFrame", () => {
 
     expect(screen.getByRole("heading", { level: 1, name: "Upphandling" })).toBeTruthy();
     expect(screen.getByText("Stöd för kommunens upphandlare.")).toBeTruthy();
-    expect(screen.getByText("Klass 2 · Intern").textContent).toBe(
+    // ClassificationToken: read with its prefix.
+    expect(screen.getByText("Klass 2 · Intern").parentElement!.textContent).toBe(
       "Säkerhetsklass: Klass 2 · Intern"
     );
 
@@ -108,7 +110,6 @@ describe("SpaceFrame", () => {
       "/spaces/space-1/apps",
       "/spaces/space-1/knowledge",
       "/spaces/space-1/skills",
-      "/spaces/space-1/services",
       "/spaces/space-1/members",
       "/spaces/space-1/settings"
     ]);
@@ -126,6 +127,17 @@ describe("SpaceFrame", () => {
     expect(screen.getByText("Sidans innehåll")).toBeTruthy();
 
     await expectNoAxeViolations(container);
+  });
+
+  it("centres the name on the tile when no description runs under it", () => {
+    const column = () =>
+      screen.getByRole("heading", { level: 1, name: "Upphandling" }).closest(".flex-col")!;
+    show(sharedSpace(), ["overview"]);
+    // A description under the name: both start at the tile's top edge.
+    expect(column().className).not.toContain("self-center");
+    cleanup();
+    show(makeSpace({ overrides: { description: null } }), ["overview"]);
+    expect(column().className).toContain("self-center");
   });
 
   it("scrolls with the page panel instead of a scroll container of its own", () => {
@@ -177,7 +189,7 @@ describe("SpaceFrame", () => {
     expect(within(tabs).queryByRole("link", { name: "Inställningar" })).toBeNull();
   });
 
-  it("keeps the organization space to its four tabs, named by the h1 on its Skills tab", () => {
+  it("keeps the organization space to its three tabs, named by the h1 on its Skills tab", () => {
     show(makeSpace({ overrides: { organization: true } }), ["skills"], "organization");
 
     // The Skills page is a tab like any other: its own title is an h2.
@@ -191,7 +203,6 @@ describe("SpaceFrame", () => {
     ).toEqual([
       "/spaces/organization/knowledge",
       "/spaces/organization/skills",
-      "/spaces/organization/services",
       "/spaces/organization/settings"
     ]);
     expect(within(tabs).getByRole("link", { name: "Skills" }).getAttribute("aria-current")).toBe(
@@ -252,5 +263,120 @@ describe("SpaceFrame", () => {
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     await waitFor(() => expect(document.activeElement).toBe(invite));
+  });
+});
+
+describe("SpaceFrame on a phone (decision 24)", () => {
+  const phoneHeader = () => document.querySelector<HTMLElement>("[data-own-phone-header]");
+  const tabHrefs = () =>
+    within(screen.getByRole("navigation", { name: "Ytans innehåll" }))
+      .getAllByRole("link")
+      .map((link) => link.getAttribute("href"));
+
+  it("pushes a shared space: back to Ytor, its name and class, the content tabs only", async () => {
+    setViewport("phone");
+    const { container } = show(sharedSpace(), ["overview"]);
+
+    const back = screen.getByRole("link", { name: "Tillbaka till Ytor" });
+    expect(back.getAttribute("href")).toBe("/spaces/list");
+    expect(phoneHeader()?.contains(back)).toBe(true);
+    expect(screen.getByRole("heading", { level: 1, name: "Upphandling" })).toBeTruthy();
+    expect(screen.getByText("Säkerhetsklass:").parentElement?.textContent).toContain(
+      "Klass 2 · Intern"
+    );
+    expect(tabHrefs()).toEqual([
+      "/spaces/space-1/overview",
+      "/spaces/space-1/assistants",
+      "/spaces/space-1/apps",
+      "/spaces/space-1/knowledge"
+    ]);
+    // The chat is one tap away in the bar; the breadcrumbs and the member stack are not here.
+    expect(
+      within(phoneHeader()!).getByRole("link", { name: "Ny chatt" }).getAttribute("href")
+    ).toBe("/spaces/space-1/chat");
+    expect(screen.queryByRole("navigation", { name: /brödsmulor|breadcrumb/i })).toBeNull();
+    expect(screen.queryByRole("group", { name: /medlemmar/ })).toBeNull();
+    await expectNoAxeViolations(container);
+  });
+
+  it("keeps the menu for the personal space, which the menu leads to", () => {
+    setViewport("phone");
+    show(
+      makeSpace({
+        overrides: { personal: true, members: { items: [], count: 0, permissions: [] } },
+        permissions: ["read"]
+      }),
+      ["assistants"],
+      "personal"
+    );
+    expect(screen.queryByRole("link", { name: /^Tillbaka till/ })).toBeNull();
+    expect(phoneHeader()).toBeNull();
+    expect(screen.getByRole("heading", { level: 1, name: "Personligt" })).toBeTruthy();
+    expect(tabHrefs()).toEqual([
+      "/spaces/personal/overview",
+      "/spaces/personal/assistants",
+      "/spaces/personal/apps",
+      "/spaces/personal/knowledge"
+    ]);
+  });
+
+  it("keeps every tab of the organisation space, which has no Översikt (F4)", () => {
+    setViewport("phone");
+    show(makeSpace({ overrides: { organization: true } }), ["knowledge"], "organization");
+    expect(phoneHeader()).toBeNull();
+    expect(tabHrefs()).toEqual([
+      "/spaces/organization/knowledge",
+      "/spaces/organization/skills",
+      "/spaces/organization/settings"
+    ]);
+  });
+
+  it("pushes Medlemmar from the space: back to the space, no tabs", () => {
+    setViewport("phone");
+    show(sharedSpace(), ["members"]);
+    const back = screen.getByRole("link", { name: "Tillbaka till Upphandling" });
+    expect(back.getAttribute("href")).toBe("/spaces/space-1/overview");
+    expect(screen.queryByRole("navigation", { name: "Ytans innehåll" })).toBeNull();
+    // The page's own heading follows the space's.
+    expect(screen.getByRole("heading", { level: 1, name: "Upphandling" })).toBeTruthy();
+  });
+
+  it("pushes a page below a tab: back to the tab, its own heading", () => {
+    setViewport("phone");
+    show(sharedSpace(), ["knowledge", "collections", "c1"]);
+    const back = screen.getByRole("link", { name: "Tillbaka till Kunskap" });
+    expect(back.getAttribute("href")).toBe("/spaces/space-1/knowledge");
+    expect(screen.queryByRole("navigation", { name: "Ytans innehåll" })).toBeNull();
+    expect(screen.queryByRole("heading", { level: 1 })).toBeNull();
+  });
+
+  it("gives a section root outside the tabs its h1, and keeps the menu for the organisation space", () => {
+    setViewport("phone");
+    // /spaces/organization redirects here, though the organisation space has no Översikt.
+    show(makeSpace({ overrides: { organization: true } }), ["overview"], "organization");
+    expect(screen.getAllByRole("heading", { level: 1 }).map((h) => h.textContent)).toEqual([
+      "Organisation"
+    ]);
+    expect(phoneHeader()).toBeNull();
+  });
+
+  it("goes back from an app's result to the app, the screen it was opened from", () => {
+    setViewport("phone");
+    show(makeSpace({ apps: [{ id: "p1", name: "Bygglovsguiden" }] }), [
+      "apps",
+      "p1",
+      "results",
+      "r1"
+    ]);
+    expect(
+      screen.getByRole("link", { name: "Tillbaka till Bygglovsguiden" }).getAttribute("href")
+    ).toBe("/spaces/space-1/apps/p1");
+  });
+
+  it("is not on a tablet, which keeps the header with every tab", () => {
+    setViewport("tablet-portrait");
+    show(sharedSpace(), ["overview"]);
+    expect(phoneHeader()).toBeNull();
+    expect(tabHrefs()).toHaveLength(7);
   });
 });

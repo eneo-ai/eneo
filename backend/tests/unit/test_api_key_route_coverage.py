@@ -110,8 +110,9 @@ INTENTIONALLY_UNGUARDED = {
     "/settings": "Admin settings endpoints are mounted on a dedicated router with admin scope + admin key guards",
     "/users": "Admin mutation endpoints (POST /admin/invite/, PATCH /admin/{id}/, DELETE /admin/{id}/) are on users_admin_router with admin scope + admin key guards. GET / carries route-level admin scope + admin key guards (no-op for bearer tokens) so scoped API keys cannot enumerate the tenant directory while space-admin bearer users still populate member pickers. /me/ and /tenant/ safe for any scoped key.",
     "/admin": "Admin endpoints are mounted with admin scope + admin key guards, "
-    "except /admin/modules which is session-only (Authentication.SESSION + "
-    "Permission.MODULES) and rejects API keys outright",
+    "except /admin/modules (Permission.MODULES) and /admin/federation "
+    "(Permission.ADMIN), which are session-only (Authentication.SESSION) and "
+    "reject API keys outright",
     "/dashboard": "Read-only aggregation endpoint with scope guard",
     "/icons": "Public static assets",
     "/limits": "Authenticated limit info (with_user=True)",

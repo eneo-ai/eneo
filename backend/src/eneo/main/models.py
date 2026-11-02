@@ -152,11 +152,22 @@ class PaginatedPermissions(PaginatedResponse[T], ResourcePermissionsMixin, Gener
 
 class GeneralError(BaseModel):
     message: str
-    eneo_error_code: ErrorCodes
+    # Absent when a route raised a plain-text HTTPException: a status-default
+    # category would make clients replace its specific message with generic text.
+    eneo_error_code: ErrorCodes | None = None
     code: str | None = None
     context: dict[str, object] | None = None
     request_id: str | None = None
     details: dict[str, Any] | None = None
+    detail: Any = Field(
+        default=None,
+        description=(
+            "Deprecated: the raised HTTPException detail (a string or an object), "
+            "kept for one release for clients that read it. Read the top-level "
+            "fields instead."
+        ),
+        json_schema_extra={"deprecated": True},
+    )
 
 
 class DeleteResponse(BaseModel):

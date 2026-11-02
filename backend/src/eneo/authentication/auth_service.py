@@ -117,7 +117,9 @@ class AuthService:
         )
         payload = token_payload.model_dump(mode="json")
         if extra_claims:
-            reserved = set(extra_claims) & set(payload)
+            # Includes sid, which the dump leaves out: only a browser sign-in
+            # adds it (add_session_id).
+            reserved = set(extra_claims) & set(JWTPayload.model_fields)
             if reserved:
                 raise ValueError(
                     f"extra_claims may not override reserved claims: {sorted(reserved)}"
@@ -233,6 +235,19 @@ class AuthService:
             raise AuthenticationException("Could not validate token credentials.")
 
         return payload, claims
+
+    def add_session_id(self, token: str, sid: str) -> str:
+        """A session token this process just issued, re-signed with ``sid``.
+
+        Every other claim stays, the expiry included. Only
+        ``BrowserSessionService.start`` calls it, after recording the session.
+        """
+        settings = get_settings()
+        key = str(settings.jwt_secret)
+        claims = self.get_verified_claims(
+            token, key=key, aud=settings.jwt_audience, algs=[settings.jwt_algorithm]
+        )
+        return jwt.encode({**claims, "sid": sid}, key, algorithm=settings.jwt_algorithm)
 
     def get_payload_from_openid_jwt(
         self,

@@ -224,7 +224,7 @@ Eneo does **not** resolve tenants from subdomains or hostnames. A dedicated host
 
 ### Tenant Selector
 
-The selector lists every **active tenant that has a slug** - it does not check whether federation is configured for the tenant. A tenant listed without an IdP configuration fails at `/api/v1/auth/initiate` with `500 No identity provider configured for tenant '{slug}'`. Configure every tenant with a slug, or remove the slug from tenants that should not appear.
+With federation enabled, the selector lists **active tenants that have a slug and an IdP configuration** with a client ID and discovery endpoint. Tenants without an IdP are omitted. When only one tenant is eligible, it is selected automatically. Configure an organisation's IdP before directing its users to the selector.
 
 ---
 

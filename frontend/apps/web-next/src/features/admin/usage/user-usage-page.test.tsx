@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+
+vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 
 const model = {
   model_id: "model-1",
@@ -16,9 +18,17 @@ const model = {
   request_count: 4
 };
 
+const apiState = vi.hoisted(() => ({ failSummary: false }));
+
 vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     GET: (path: string) => {
+      if (apiState.failSummary && path === "/api/v1/token-usage/users/{user_id}/summary") {
+        return Promise.resolve({
+          error: { message: "Database unavailable" },
+          response: new Response(null, { status: 503 })
+        });
+      }
       const data =
         path === "/api/v1/token-usage/users/{user_id}/summary"
           ? {
@@ -50,9 +60,27 @@ vi.mock("@/lib/api/browser", () => ({
 
 import { UserUsagePage } from "./user-usage-page";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  apiState.failSummary = false;
+});
 
 describe("UserUsagePage", () => {
+  it("leads back to the users list it was opened from", async () => {
+    renderInApp(
+      <UserUsagePage userId="user-1" initialRange={{ from: "2026-09-01", to: "2026-09-25" }} />,
+      {
+        route:
+          "/admin/usage/users/user-1?tab=users&from=2026-09-01&to=2026-09-25&page=3&sortBy=requests&sortOrder=asc&userSearch=anna"
+      }
+    );
+
+    await screen.findByRole("table", { name: "Fullständig modelluppdelning" });
+    expect(screen.getByRole("link", { name: "Tillbaka" }).getAttribute("href")).toBe(
+      "/admin/usage?tab=users&from=2026-09-01&to=2026-09-25&page=3&sortBy=requests&sortOrder=asc&userSearch=anna"
+    );
+  });
+
   it("names the model table by its heading", async () => {
     renderInApp(
       <UserUsagePage userId="user-1" initialRange={{ from: "2026-09-01", to: "2026-09-25" }} />
@@ -71,5 +99,20 @@ describe("UserUsagePage", () => {
     expect(screen.getByRole("progressbar", { name: "Azure" })).toBeTruthy();
     expect(screen.getByRole("progressbar", { name: "GPT-5" })).toBeTruthy();
     await expectNoAxeViolations(container);
+  });
+
+  it("reports a failed read as an error with a retry, not as a missing user", async () => {
+    apiState.failSummary = true;
+    renderInApp(
+      <UserUsagePage userId="user-1" initialRange={{ from: "2026-09-01", to: "2026-09-25" }} />
+    );
+
+    const message = await screen.findByText("Database unavailable");
+    expect(message.closest('[role="alert"]')).not.toBeNull();
+    expect(screen.queryByText("Användaren hittades inte")).toBeNull();
+
+    apiState.failSummary = false;
+    fireEvent.click(screen.getByRole("button", { name: "Försök igen" }));
+    expect(await screen.findByRole("table", { name: "Fullständig modelluppdelning" })).toBeTruthy();
   });
 });

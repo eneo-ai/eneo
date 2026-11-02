@@ -147,7 +147,7 @@ class TestGetPolicy:
         mock_result_none = MagicMock()
         mock_result_none.scalar_one_or_none.return_value = None
 
-        # Second call returns created policy
+        # The race-safe insert, then the re-read returns the created policy
         created_policy = MagicMock(
             tenant_id=tenant_id,
             retention_days=365,
@@ -161,12 +161,18 @@ class TestGetPolicy:
         mock_result_created = MagicMock()
         mock_result_created.scalar_one.return_value = created_policy
 
-        mock_session.execute.side_effect = [mock_result_none, mock_result_created]
+        mock_session.execute.side_effect = [
+            mock_result_none,
+            MagicMock(),
+            mock_result_created,
+        ]
 
         result = await retention_service.get_policy(tenant_id)
 
-        # Verify default policy was created with 365 days
+        # Verify default policy was created with 365 days, race-safe on a GET
         assert result.retention_days == 365
+        insert = str(mock_session.execute.await_args_list[1].args[0])
+        assert "ON CONFLICT (tenant_id) DO NOTHING" in insert
 
 
 class TestUpdatePolicy:

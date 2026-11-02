@@ -1,11 +1,20 @@
-"use client";
-
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { TextInput } from "@/components/astryx/text-input";
 import { Search } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useEffect, useRef, type Ref } from "react";
+import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
+import { KEYBOARD } from "@/components/astryx/keyboard-hints";
+
+/** A phone shows a list's filter from this many items: with fewer, it only takes room from the list. */
+export const PHONE_FILTER_FROM = 7;
+
+/** Whether a list of `count` items shows its filter: always but on a phone, which needs many items. */
+export function useFilterShown(count: number): boolean {
+  const phone = useMediaMatch(PHONE_QUERY);
+  return !phone || count >= PHONE_FILTER_FROM;
+}
 
 /**
  * Filter field above a resource grid or table: Astryx TextInput with a search
@@ -61,6 +70,7 @@ export function ResourceFilterInput({
         onChange={(next) => onChange(next)}
         placeholder={placeholder}
         startIcon={Search}
+        {...KEYBOARD.search}
         hasClear
         width="100%"
       />

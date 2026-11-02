@@ -1,26 +1,32 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
+import { API_BASE } from "@/lib/api/base";
+import { toast } from "@/lib/toast";
 import type { InfoBlob } from "./knowledge";
 
 const api = vi.hoisted(() => ({
-  GET: () => Promise.resolve({ data: { text: "" }, response: new Response("{}") }),
+  GET: vi.fn(),
   POST: vi.fn()
 }));
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 
 import { recordFinishedJob, resetRecentResults } from "@/features/jobs/recent-results";
 import type { Job } from "@/features/jobs/jobs";
-import { AddTextDialog, BlobTable } from "./blobs";
+import { AddTextDialog, BlobPreviewDialog, BlobTable } from "./blobs";
 
 afterEach(() => {
   cleanup();
   resetRecentResults();
   vi.clearAllMocks();
+  vi.restoreAllMocks();
+  api.GET.mockReset();
 });
+
+const apiResult = (data: unknown) => ({ data, response: new Response("{}") });
 
 const blob = (id: string, title: string, size: number) =>
   ({ id, metadata: { title, size } }) as unknown as InfoBlob;
@@ -29,6 +35,123 @@ const names = () =>
   within(screen.getByRole("table"))
     .getAllByRole("button", { name: /^\S+\.pdf$/ })
     .map((button) => button.textContent);
+
+describe("BlobPreviewDialog downloads", () => {
+  it("shows a refused original download and permits retry without closing the preview", async () => {
+    api.GET.mockResolvedValue(apiResult({ text: "text", original_available: true }));
+    api.POST.mockResolvedValueOnce({
+      error: { message: "Forbidden" },
+      response: new Response("", { status: 403 })
+    });
+    const error = vi.spyOn(toast, "error");
+    const close = vi.fn();
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderInApp(
+      <BlobPreviewDialog blob={blob("1", "rapport.pdf", 10)} open onOpenChange={close} />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Ladda ner original" }));
+    await waitFor(() => expect(error).toHaveBeenCalled());
+    expect(close).not.toHaveBeenCalled();
+    expect(click).not.toHaveBeenCalled();
+    api.POST.mockResolvedValueOnce(
+      apiResult({
+        url: "http://backend:8000/api/v1/info-blobs/1/original/download/?token=capability"
+      })
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Ladda ner original" }));
+    await waitFor(() => expect(click).toHaveBeenCalledTimes(1));
+  });
+  it("downloads the available original once, with a busy button that retains focus", async () => {
+    api.GET.mockResolvedValue(apiResult({ text: "text", original_available: true }));
+    let finish!: (value: unknown) => void;
+    api.POST.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderInApp(
+      <BlobPreviewDialog blob={blob("1", "rapport.pdf", 10)} open onOpenChange={() => {}} />
+    );
+    const download = await screen.findByRole("button", { name: "Ladda ner original" });
+    download.focus();
+    fireEvent.click(download);
+    await waitFor(() => expect(download.getAttribute("aria-busy")).toBe("true"));
+    expect(document.activeElement).toBe(download);
+    expect(download.hasAttribute("disabled")).toBe(false);
+    fireEvent.click(download);
+    expect(api.POST).toHaveBeenCalledTimes(1);
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/info-blobs/{id}/original/signed-url/", {
+      params: { path: { id: "1" } },
+      body: { expires_in: 3600, content_disposition: "attachment" },
+      signal: expect.any(AbortSignal)
+    });
+    await act(async () =>
+      finish(
+        apiResult({
+          url: "http://backend:8000/api/v1/info-blobs/1/original/download/?token=capability"
+        })
+      )
+    );
+    expect(click).toHaveBeenCalledTimes(1);
+    expect((click.mock.contexts[0] as HTMLAnchorElement).getAttribute("href")).toBe(
+      `${API_BASE}/api/v1/info-blobs/1/original/download/?token=capability`
+    );
+  });
+
+  it("does not start a late original download after the preview unmounts", async () => {
+    api.GET.mockResolvedValue(apiResult({ text: "text", original_available: true }));
+    let finish!: (value: unknown) => void;
+    api.POST.mockReturnValue(
+      new Promise((resolve) => {
+        finish = resolve;
+      })
+    );
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const view = renderInApp(
+      <BlobPreviewDialog blob={blob("1", "rapport.pdf", 10)} open onOpenChange={() => {}} />
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Ladda ner original" }));
+    const signal = api.POST.mock.calls[0]![1].signal as AbortSignal;
+    view.unmount();
+    expect(signal.aborted).toBe(true);
+    await act(async () =>
+      finish(
+        apiResult({
+          url: "http://backend:8000/api/v1/info-blobs/1/original/download/?token=capability"
+        })
+      )
+    );
+    expect(click).not.toHaveBeenCalled();
+  });
+
+  it("saves extracted text as plain UTF-8 with a single txt extension", async () => {
+    api.GET.mockResolvedValue(
+      apiResult({ text: "Årsrapport <script>text</script>", original_available: false })
+    );
+    const create = vi.spyOn(URL, "createObjectURL").mockReturnValue("blob:extracted");
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    renderInApp(
+      <BlobPreviewDialog blob={blob("1", "rapport.txt", 10)} open onOpenChange={() => {}} />
+    );
+    const download = await screen.findByRole("button", { name: "Ladda ner extraherad text" });
+    await waitFor(() => expect(download.hasAttribute("disabled")).toBe(false));
+    fireEvent.click(download);
+    expect(click).toHaveBeenCalledTimes(1);
+    const anchor = click.mock.contexts[0] as HTMLAnchorElement;
+    expect(anchor.download).toBe("rapport.txt");
+    expect(anchor.getAttribute("href")).toBe("blob:extracted");
+    const file = create.mock.calls[0]![0] as Blob;
+    expect(file.type).toBe("text/plain;charset=utf-8");
+    const text = await new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.readAsText(file);
+    });
+    expect(text).toBe("Årsrapport <script>text</script>");
+    expect(screen.queryByRole("button", { name: "Ladda ner original" })).toBeNull();
+  });
+});
 
 describe("BlobTable", () => {
   it("marks the file a job just produced as newly added", () => {
@@ -50,6 +173,42 @@ describe("BlobTable", () => {
     const marks = within(container).getAllByRole("img", { name: "Nyss tillagd" });
     expect(marks).toHaveLength(1);
     expect(marks[0]?.closest("tr")?.textContent).toContain("Ny.pdf");
+  });
+
+  it("fits an upright tablet, its name held in view where a phone scrolls it", () => {
+    renderInApp(<BlobTable blobs={[blob("1", "a.pdf", 1)]} canEdit labelledBy="files" />);
+    const table = screen.getByRole("table");
+    // The Created column stays available on a phone through horizontal scrolling.
+    expect(Number.parseFloat(table.style.minWidth)).toBeLessThanOrEqual(700);
+    // The row-status gutter (Astryx offsets pinned cells from the start) and the name.
+    const pinned = within(table)
+      .getAllByRole("columnheader")
+      .filter((cell) => cell.style.insetInlineStart);
+    expect(pinned.at(-1)?.textContent).toBe("Namn");
+  });
+
+  it("sorts by Created and shows a website URL below its title or as its fallback", () => {
+    const dated = (id: string, title: string, date: string, url: string) => ({
+      ...blob(id, title, 10),
+      created_at: date,
+      metadata: { ...blob(id, title, 10).metadata, url }
+    });
+    renderInApp(
+      <BlobTable
+        blobs={[
+          dated("new", "Ny.pdf", "2026-10-30T10:00:00Z", "https://example.test/new"),
+          dated("old", "", "2026-10-01T10:00:00Z", "https://example.test/old")
+        ]}
+        canEdit={false}
+        labelledBy="files"
+      />
+    );
+    expect(screen.getByRole("button", { name: "https://example.test/old" })).toBeTruthy();
+    expect(screen.getByText("https://example.test/new")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Sortera efter Skapad" }));
+    const rows = within(screen.getByRole("table")).getAllByRole("row");
+    expect(rows[1]!.textContent).toContain("https://example.test/old");
+    expect(rows[2]!.querySelector("time")?.dateTime).toBe("2026-10-30T10:00:00.000Z");
   });
 
   it("keeps the upload order until a header sorts it", async () => {
@@ -126,10 +285,10 @@ describe("BlobTable", () => {
 
   it("explains an empty list, one level below the page's h1", () => {
     // Both pages render the table straight under their h1 (1.3.1 heading order).
-    renderInApp(<BlobTable blobs={[]} canEdit labelledBy="files" />);
-    expect(
-      screen.getByRole("heading", { level: 2, name: "Du har inga filer uppladdade ännu" })
-    ).toBeTruthy();
+    const { container } = renderInApp(<BlobTable blobs={[]} canEdit labelledBy="files" />);
+    // Worded and tinted like the collections' own empty state ("Inga samlingar ännu").
+    expect(screen.getByRole("heading", { level: 2, name: "Inga filer ännu" })).toBeTruthy();
+    expect(container.querySelector(".bg-ax-blue-muted")).toBeTruthy();
   });
 });
 

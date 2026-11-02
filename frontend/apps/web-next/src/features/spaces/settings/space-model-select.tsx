@@ -1,8 +1,7 @@
-"use client";
-
+import { Badge } from "@astryxdesign/core/Badge";
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Brain, ChevronDown, ChevronRight, Eye, Wrench } from "lucide-react";
-import { useTranslations } from "next-intl";
+import { useTranslations } from "use-intl";
 import { useId, useMemo, useRef, useState } from "react";
 import { ProviderLogo } from "@/components/ai-elements/provider-logo";
 import { Button } from "@/components/ui/button";
@@ -11,8 +10,11 @@ import { Switch } from "@/components/ui/switch";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   formatCostPerMillionTokens,
-  formatCostPerMinute
+  formatCostPerMinute,
+  modelLifecycle,
+  type ModelLifecycle
 } from "@/features/ai-models/format-model-stats";
+import { matchesSearch } from "@/lib/search";
 import { cn } from "@/lib/utils";
 import { ResourceFilterInput } from "../resource-filter-input";
 
@@ -20,6 +22,8 @@ export type SelectableModel = {
   id: string;
   name: string;
   nickname?: string | null;
+  is_deprecated?: boolean;
+  deprecation_date?: string | null;
   meets_security_classification?: boolean | null;
   org?: string | null;
   provider_type?: string | null;
@@ -55,6 +59,21 @@ function costText(model: SelectableModel, kind: ModelKind): string | null {
   if (!input && !output) return null;
   if (input && output && input !== output) return `${input} / ${output}`;
   return input ?? output ?? null;
+}
+
+function ModelLifecycleStatus({ lifecycle }: { lifecycle: ModelLifecycle }) {
+  const t = useTranslations();
+  if (lifecycle.kind === "active") return null;
+  return lifecycle.kind === "retiring" ? (
+    <span className="text-ax-warning text-xs">
+      {t("model_label_retiring", { date: lifecycle.date })}
+    </span>
+  ) : (
+    <span className="inline-flex flex-wrap items-center gap-1.5">
+      <Badge variant="error" label={t("model_label_deprecated")} />
+      {lifecycle.date && <span className="text-ax-text-secondary text-xs">{lifecycle.date}</span>}
+    </span>
+  );
 }
 
 function CapabilityIcons({ model }: { model: SelectableModel }) {
@@ -93,6 +112,7 @@ export function SpaceModelSelect({
   title,
   description,
   kind,
+  isOrganization = false,
   onChange
 }: {
   models: SelectableModel[];
@@ -100,6 +120,7 @@ export function SpaceModelSelect({
   title: string;
   description: string;
   kind: ModelKind;
+  isOrganization?: boolean;
   onChange: (change: ModelSelectionChange) => void;
 }) {
   const t = useTranslations();
@@ -113,8 +134,7 @@ export function SpaceModelSelect({
   const selectedModels = models.filter((model) => selected.has(model.id));
   const selectedPreview = selectedModels.slice(0, 2);
   const moreSelected = selectedIds.length - selectedPreview.length;
-  const query = search.trim().toLowerCase();
-  const searching = query !== "";
+  const searching = search.trim() !== "";
   const otherProvider = t("space_models_other_provider");
 
   const groups = useMemo(() => {
@@ -130,18 +150,15 @@ export function SpaceModelSelect({
   const visibleGroups = groups
     .map((group) => ({
       ...group,
-      visible:
-        !searching || group.name.toLowerCase().includes(query)
-          ? group.models
-          : group.models.filter(
-              (model) =>
-                label(model).toLowerCase().includes(query) ||
-                (model.provider_type?.toLowerCase().includes(query) ?? false)
-            )
+      visible: matchesSearch([group.name], search)
+        ? group.models
+        : group.models.filter((model) => matchesSearch([label(model), model.provider_type], search))
     }))
     .filter((group) => group.visible.length > 0);
 
   function toggleOne(id: string, group: string) {
+    const model = models.find((item) => item.id === id);
+    if (!model || (modelLifecycle(model).kind === "deprecated" && !selected.has(id))) return;
     // Keep the focused switch mounted when this was the group's last selection.
     setOpenOverride((prev) => ({ ...prev, [group]: true }));
     onChange((current) =>
@@ -151,12 +168,20 @@ export function SpaceModelSelect({
 
   function setWholeGroup(groupModels: SelectableModel[]) {
     const ids = groupModels
-      .filter((model) => model.meets_security_classification ?? true)
+      .filter(
+        (model) =>
+          (model.meets_security_classification ?? true) &&
+          modelLifecycle(model).kind !== "deprecated"
+      )
       .map((model) => model.id);
     onChange((current) => {
       const selected = new Set(current);
       if (ids.every((id) => selected.has(id))) {
-        const remove = new Set(ids);
+        const remove = new Set(
+          groupModels
+            .filter((model) => model.meets_security_classification ?? true)
+            .map((model) => model.id)
+        );
         return current.filter((id) => !remove.has(id));
       }
       ids.forEach((id) => selected.add(id));
@@ -167,7 +192,8 @@ export function SpaceModelSelect({
   return (
     <Collapsible open={isOpen} onOpenChange={setIsOpen} className="border-border rounded-lg border">
       <div className="flex flex-wrap items-start justify-between gap-3 p-4">
-        <div className="min-w-0 flex-1">
+        {/* A basis, not flex-1 (0): on a phone the actions wrap under the text instead of squeezing it to a word a line. */}
+        <div className="min-w-0 flex-[1_1_14rem]">
           <h3 className="text-base font-semibold">{title}</h3>
           <p className="text-muted-foreground mt-1 text-sm">{description}</p>
         </div>
@@ -196,13 +222,37 @@ export function SpaceModelSelect({
             </CollapsibleTrigger>
           ) : null}
         </div>
+        {selectedIds.length === 0 && (
+          <p className="text-ax-text-secondary w-full text-sm">
+            {t(
+              kind === "completion"
+                ? "enable_completion_model_for_assistants"
+                : kind === "embedding"
+                  ? "embedding_models_hint"
+                  : "transcription_models_hint"
+            )}
+          </p>
+        )}
+        {kind === "embedding" && selectedIds.length > 1 && (
+          <p className="text-ax-text-secondary w-full text-sm">
+            {t(
+              isOrganization
+                ? "embedding_models_multiple_warning_organization"
+                : "embedding_models_multiple_warning"
+            )}
+          </p>
+        )}
         {models.length === 0 ? (
           <p className="text-muted-foreground w-full text-sm">{t("no_models_found")}</p>
         ) : selectedPreview.length > 0 ? (
           <ul className="flex w-full flex-wrap gap-1.5 text-xs">
             {selectedPreview.map((model) => (
-              <li key={model.id} className="bg-muted rounded-md px-2 py-1 font-medium break-all">
+              <li
+                key={model.id}
+                className="bg-muted flex flex-wrap items-center gap-2 rounded-md px-2 py-1 font-medium break-all"
+              >
                 {label(model)}
+                <ModelLifecycleStatus lifecycle={modelLifecycle(model)} />
               </li>
             ))}
             {moreSelected > 0 ? (
@@ -246,10 +296,16 @@ export function SpaceModelSelect({
           {visibleGroups.map((group) => {
             const selectedCount = group.models.filter((model) => selected.has(model.id)).length;
             const selectable = group.models.filter(
-              (model) => model.meets_security_classification ?? true
+              (model) =>
+                (model.meets_security_classification ?? true) &&
+                modelLifecycle(model).kind !== "deprecated"
             );
+            const hasRemovable = group.models.some(
+              (model) => (model.meets_security_classification ?? true) && selected.has(model.id)
+            );
+            const canToggleGroup = selectable.length > 0 || hasRemovable;
             const allSelected =
-              selectable.length > 0 && selectable.every((model) => selected.has(model.id));
+              selectable.every((model) => selected.has(model.id)) && canToggleGroup;
             const isOpen = searching
               ? true
               : (openOverride[group.name] ?? (groups.length === 1 || selectedCount > 0));
@@ -290,9 +346,11 @@ export function SpaceModelSelect({
                     type="button"
                     variant="ghost"
                     size="sm"
-                    className="shrink-0"
-                    disabled={selectable.length === 0}
-                    onClick={() => setWholeGroup(group.models)}
+                    className="aria-disabled:text-ax-text-disabled shrink-0"
+                    aria-disabled={!canToggleGroup || undefined}
+                    onClick={() => {
+                      if (canToggleGroup) setWholeGroup(group.models);
+                    }}
                   >
                     {allSelected ? t("deselect_all") : t("select_all")}
                   </Button>
@@ -303,20 +361,37 @@ export function SpaceModelSelect({
                     {group.visible.map((model) => {
                       const meets = model.meets_security_classification ?? true;
                       const cost = costText(model, kind);
+                      const lifecycle = modelLifecycle(model);
+                      const deprecated = lifecycle.kind === "deprecated";
                       const reasonId = meets ? undefined : `${reasonPrefix}-${model.id}`;
+                      const lifecycleId =
+                        lifecycle.kind === "active"
+                          ? undefined
+                          : `${reasonPrefix}-${model.id}-lifecycle`;
+                      const reasons =
+                        [reasonId, lifecycleId].filter(Boolean).join(" ") || undefined;
                       return (
                         <div
                           key={model.id}
                           className="flex items-center gap-3 border-b px-3 py-2 last:border-b-0"
                         >
                           <div className="min-w-0 flex-1">
-                            <span className="block truncate text-sm font-medium">
+                            <span className="block text-sm font-medium break-words">
                               {label(model)}
                             </span>
-                            {reasonId && (
-                              <p id={reasonId} className="text-ax-text-secondary mt-0.5 text-xs">
-                                {t("model_does_not_meet_security_classification")}
-                              </p>
+                            {(reasonId || lifecycleId) && (
+                              <div className="mt-0.5 flex flex-col gap-1">
+                                {lifecycleId && (
+                                  <span id={lifecycleId}>
+                                    <ModelLifecycleStatus lifecycle={lifecycle} />
+                                  </span>
+                                )}
+                                {reasonId && (
+                                  <p id={reasonId} className="text-ax-text-secondary text-xs">
+                                    {t("model_does_not_meet_security_classification")}
+                                  </p>
+                                )}
+                              </div>
                             )}
                           </div>
                           <CapabilityIcons model={model} />
@@ -328,9 +403,10 @@ export function SpaceModelSelect({
                           <Switch
                             checked={selected.has(model.id)}
                             disabled={!meets}
+                            aria-disabled={(deprecated && !selected.has(model.id)) || undefined}
                             onCheckedChange={() => toggleOne(model.id, group.name)}
                             aria-label={label(model)}
-                            aria-describedby={reasonId}
+                            aria-describedby={reasons}
                           />
                         </div>
                       );

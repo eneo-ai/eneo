@@ -1,11 +1,14 @@
-"use client";
-
 import { Tab, TabList } from "@astryxdesign/core/TabList";
-import { useTranslations } from "next-intl";
+import { useQuery } from "@tanstack/react-query";
+import { useTranslations } from "use-intl";
 import { PageHeader } from "@/components/composites/page-header";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { McpServersPage } from "../mcp/mcp-page";
 import { CapabilityProvidersPage } from "./capability-providers-page";
 import { TOOLS_TAB_HREF, type ToolsTab } from "./tools-tabs";
+import { bundledToolsQueryOptions } from "../mcp/mcp";
+import { browserApi } from "@/lib/api/browser";
+import { RuntimeStatusArea, RuntimeStatusCard, RuntimeStatusPlaceholder } from "./runtime-status";
 
 // Links navigate; the TabList only needs the value to mark the current tab.
 function ignoreSelection() {}
@@ -19,9 +22,31 @@ function ignoreSelection() {}
  */
 export function ToolsPage({ tab }: { tab: ToolsTab }) {
   const t = useTranslations();
+  const bundledTools = useQuery(bundledToolsQueryOptions(browserApi));
   return (
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
       <PageHeader title={t("tools")} tour="admin-tools" />
+      {/* The catalogue of Eneo's built-in tools belongs to this page: both tabs offer from it, so
+          its failure shows once, here, with a retry, in the place of the runtime status it also
+          carries. A 404 means the deployment has neither, and the place goes. */}
+      {bundledTools.data?.runtime !== null && (
+        <RuntimeStatusArea>
+          {blockingError(bundledTools) ? (
+            <ListError
+              compact
+              title={t("tools_bundled_unavailable")}
+              error={bundledTools.error}
+              onRetry={() => void bundledTools.refetch()}
+              isRetrying={bundledTools.isFetching}
+            />
+          ) : bundledTools.isPending ? (
+            <RuntimeStatusPlaceholder />
+          ) : (
+            <RuntimeStatusCard status={bundledTools.data?.runtime} />
+          )}
+        </RuntimeStatusArea>
+      )}
+      <RefreshError queries={[bundledTools]} />
       <TabList
         value={tab}
         onChange={ignoreSelection}

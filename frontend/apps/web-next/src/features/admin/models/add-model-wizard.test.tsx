@@ -18,11 +18,13 @@ vi.mock("@/lib/toast", () => ({ toast }));
 import { AddModelWizard } from "./add-model-wizard";
 import {
   CAPABILITIES_KEY,
+  OUTBOUND_HEADER_OPTIONS_KEY,
   FAVORITES_KEY,
   type ModelProvider,
   PROVIDERS_KEY
 } from "./model-providers";
 import { type AdminModel, MODELS_KEY } from "./models";
+import type { ModelKind } from "./models";
 
 const ok = (data: unknown) => Promise.resolve({ data, response: new Response("{}") });
 
@@ -94,7 +96,12 @@ function renderWizard({
   initialProviderId,
   models = [],
   providersLoaded = true,
-  caps = capabilities
+  caps = capabilities,
+  fixedKind,
+  onCreated,
+  imageModels = liveImageModels,
+  providerList = [existing],
+  capsLoaded = true
 }: {
   initialProviderId?: string;
   models?: AdminModel[];
@@ -103,17 +110,27 @@ function renderWizard({
     providers: Record<string, typeof capabilities.providers.openai>;
     default_fields: typeof capabilities.default_fields;
   };
+  fixedKind?: ModelKind;
+  onCreated?: (ids: string[]) => void;
+  imageModels?: typeof liveImageModels;
+  providerList?: ModelProvider[];
+  capsLoaded?: boolean;
 } = {}) {
   api.GET.mockImplementation(
     (path: string, options?: { params?: { query?: { mode?: string } } }) => {
       if (path.endsWith("/models/")) {
         const mode = options?.params?.query?.mode;
-        if (mode === "image") return ok(liveImageModels);
+        if (mode === "image") return ok(imageModels);
         if (mode === "rerank") return ok(liveRerankModels);
+        if (mode === "embedding")
+          return ok([
+            { name: "multilingual-e5-large", mode: "embedding", output_vector_size: 1024 }
+          ]);
         return ok(liveModels);
       }
       if (path.endsWith("/model-defaults/")) return ok({ error: "not found" });
-      if (path === "/api/v1/admin/model-providers/") return ok([existing]);
+      if (path === "/api/v1/admin/model-providers/") return ok(providerList);
+      if (path === "/api/v1/admin/model-providers/capabilities/") return new Promise(() => {});
       return ok([]);
     }
   );
@@ -123,8 +140,13 @@ function renderWizard({
     return ok({});
   });
   const queryClient = testQueryClient();
-  if (providersLoaded) queryClient.setQueryData(PROVIDERS_KEY, [existing]);
-  queryClient.setQueryData(CAPABILITIES_KEY, caps);
+  if (providersLoaded) queryClient.setQueryData(PROVIDERS_KEY, providerList);
+  if (capsLoaded) queryClient.setQueryData(CAPABILITIES_KEY, caps);
+  queryClient.setQueryData(OUTBOUND_HEADER_OPTIONS_KEY, {
+    dynamic_values: [],
+    supported_provider_types: ["hosted_vllm"],
+    max_headers: 10
+  });
   queryClient.setQueryData(FAVORITES_KEY, []);
   queryClient.setQueryData(MODELS_KEY, {
     completion_models: models,
@@ -138,10 +160,20 @@ function renderWizard({
   });
   const onOpenChange = vi.fn();
   renderInApp(
-    <AddModelWizard open onOpenChange={onOpenChange} initialProviderId={initialProviderId} />,
+    <AddModelWizard
+      open
+      onOpenChange={onOpenChange}
+      initialProviderId={initialProviderId}
+      fixedKind={fixedKind}
+      onCreated={onCreated}
+    />,
     { queryClient }
   );
-  return { dialog: screen.getByRole("dialog", { name: "Lägg till modell" }), onOpenChange };
+  return {
+    dialog: screen.getByRole("dialog", { name: "Lägg till modell" }),
+    onOpenChange,
+    queryClient
+  };
 }
 
 const field = (name: RegExp) => screen.getByLabelText(name) as HTMLInputElement;
@@ -221,9 +253,9 @@ describe("the add-provider wizard's credentials", () => {
         }
       }
     ]);
-    const search = await within(dialog).findByRole("textbox", { name: "Filtrera katalogen" });
-    // The step's first control, not the page.
-    await waitFor(() => expect(document.activeElement).toBe(search));
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    // Focus follows the step's first setting.
+    await waitFor(() => expect(document.activeElement).toBe(hosting));
     expect(within(dialog).getByText("Modeller")).toBeTruthy();
   });
 
@@ -318,6 +350,194 @@ describe("the add-provider wizard's credentials", () => {
 });
 
 describe("the add-model wizard's catalog", () => {
+  it.each(["validation", "creation"])(
+    "allows closing again after model %s fails",
+    async (phase) => {
+      const { dialog, onOpenChange } = renderWizard({
+        initialProviderId: "p-vllm",
+        fixedKind: "image",
+        caps: {
+          ...capabilities,
+          providers: { openai: { ...capabilities.providers.openai, modes: ["image"] } }
+        }
+      });
+      api.POST.mockImplementation((path: string) =>
+        path.endsWith("/validate-model/")
+          ? phase === "validation"
+            ? ok({ success: false, error: "fixture refusal" })
+            : ok({ success: true })
+          : Promise.resolve({
+              error: { message: "fixture refusal" },
+              response: new Response("{}", { status: 400 })
+            })
+      );
+      fireEvent.click(await within(dialog).findByRole("checkbox", { name: /GPT Image 1/ }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+      if (phase === "creation") await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      else await within(dialog).findByText("fixture refusal");
+      fireEvent.click(within(dialog).getByRole("button", { name: "Stäng" }));
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    }
+  );
+  it.each(["validation", "creation"])(
+    "keeps the image wizard open during model %s",
+    async (phase) => {
+      const { dialog, onOpenChange } = renderWizard({
+        initialProviderId: "p-vllm",
+        fixedKind: "image",
+        caps: {
+          ...capabilities,
+          providers: { openai: { ...capabilities.providers.openai, modes: ["image"] } }
+        }
+      });
+      let finish!: (response: unknown) => void;
+      const pending = new Promise((resolve) => {
+        finish = resolve;
+      });
+      api.POST.mockImplementation((path: string) =>
+        path.endsWith("/validate-model/")
+          ? phase === "validation"
+            ? pending
+            : ok({ success: true })
+          : phase === "creation"
+            ? pending
+            : ok({ id: "created-image" })
+      );
+      fireEvent.click(await within(dialog).findByRole("checkbox", { name: /GPT Image 1/ }));
+      fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+      await waitFor(() =>
+        expect(
+          api.POST.mock.calls.some(([path]) =>
+            phase === "validation"
+              ? path.endsWith("/validate-model/")
+              : path.endsWith("/tenant-models/image/")
+          )
+        ).toBe(true)
+      );
+      fireEvent.click(within(dialog).getByRole("button", { name: "Stäng" }));
+      expect(onOpenChange).not.toHaveBeenCalled();
+      await act(async () =>
+        finish(
+          phase === "validation"
+            ? { data: { success: true }, response: new Response() }
+            : { data: { id: "created-image" }, response: new Response() }
+        )
+      );
+      await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    }
+  );
+  it.each([0, 1, 2])("reports only fulfilled IDs when %s image creations fail", async (failed) => {
+    const onCreated = vi.fn();
+    const { dialog, onOpenChange } = renderWizard({
+      initialProviderId: "p-vllm",
+      fixedKind: "image",
+      onCreated,
+      imageModels: [
+        ...liveImageModels,
+        { name: "gpt-image-2", display_name: "GPT Image 2", mode: "image", cost_per_image: 0.04 }
+      ],
+      caps: {
+        ...capabilities,
+        providers: { openai: { ...capabilities.providers.openai, modes: ["completion", "image"] } }
+      }
+    });
+    api.POST.mockImplementation((path: string, { body }: { body: { name: string } }) => {
+      if (path.endsWith("/validate-model/")) return ok({ success: true });
+      if (failed === 2 || (failed === 1 && body.name === "gpt-image-1"))
+        return Promise.resolve({
+          error: { message: "fixture refusal" },
+          response: new Response("{}", { status: 400 })
+        });
+      return ok({ id: body.name });
+    });
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /GPT Image 1/ }));
+    fireEvent.click(within(dialog).getByRole("checkbox", { name: /GPT Image 2/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 2 modeller" }));
+    if (failed === 2) {
+      await waitFor(() => expect(toast.error).toHaveBeenCalled());
+      expect(onCreated).not.toHaveBeenCalled();
+      expect(onOpenChange).not.toHaveBeenCalled();
+      expect(
+        (within(dialog).getByRole("checkbox", { name: /GPT Image 1/ }) as HTMLInputElement).checked
+      ).toBe(true);
+    } else {
+      await waitFor(() =>
+        expect(onCreated).toHaveBeenCalledWith(
+          failed === 1 ? ["gpt-image-2"] : ["gpt-image-1", "gpt-image-2"]
+        )
+      );
+      expect(onOpenChange).toHaveBeenCalledWith(false);
+      if (failed === 1) expect(toast.warning).toHaveBeenCalledWith("La till 1 av 2 modeller");
+    }
+  });
+
+  it("filters both provider choices to image-capable types", async () => {
+    const { dialog } = renderWizard({
+      fixedKind: "image",
+      providerList: [
+        existing,
+        { ...existing, id: "chat-only", name: "Endast chatt", provider_type: "anthropic" }
+      ],
+      caps: {
+        ...capabilities,
+        providers: {
+          openai: { ...capabilities.providers.openai, modes: ["completion", "image"] },
+          anthropic: { ...capabilities.providers.openai, modes: ["completion"] }
+        }
+      }
+    });
+    expect(within(dialog).getByRole("button", { name: "Lägg till OpenAI" })).toBeTruthy();
+    expect(within(dialog).queryByRole("button", { name: /Lägg till Anthropic/ })).toBeNull();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Välj en befintlig leverantör" }));
+    fireEvent.keyDown(within(dialog).getByRole("combobox", { name: /^Leverantör/ }), {
+      key: "Enter"
+    });
+    expect(await screen.findByRole("option", { name: existing.name })).toBeTruthy();
+    expect(screen.queryByRole("option", { name: "Endast chatt" })).toBeNull();
+  });
+
+  it("waits for capabilities without starting a completion catalog in an image flow", async () => {
+    const { dialog, queryClient } = renderWizard({
+      initialProviderId: "p-vllm",
+      fixedKind: "image",
+      capsLoaded: false
+    });
+    expect(api.GET.mock.calls.some(([path]) => path.endsWith("/models/"))).toBe(false);
+    await act(async () =>
+      queryClient.setQueryData(CAPABILITIES_KEY, {
+        ...capabilities,
+        providers: { openai: { ...capabilities.providers.openai, modes: ["completion", "image"] } }
+      })
+    );
+    expect(await within(dialog).findByRole("checkbox", { name: /GPT Image 1/ })).toBeTruthy();
+    expect(
+      api.GET.mock.calls
+        .filter(([path]) => path.endsWith("/models/"))
+        .every(([, options]) => options.params.query.mode === "image")
+    ).toBe(true);
+  });
+  it("locks image creation to image-capable providers and reports the created IDs", async () => {
+    const onCreated = vi.fn();
+    const { dialog } = renderWizard({
+      initialProviderId: "p-vllm",
+      fixedKind: "image",
+      onCreated,
+      caps: {
+        ...capabilities,
+        providers: { openai: { ...capabilities.providers.openai, modes: ["completion", "image"] } }
+      }
+    });
+    api.POST.mockImplementation((path: string) =>
+      path.endsWith("/validate-model/") ? ok({ success: true }) : ok({ id: "new-image" })
+    );
+    const pick = await within(dialog).findByRole("checkbox", { name: /GPT Image 1/ });
+    expect(within(dialog).queryByRole("combobox", { name: /^Modelltyp/ })).toBeNull();
+    expect(within(dialog).queryByRole("checkbox", { name: /gpt-5/ })).toBeNull();
+    fireEvent.click(pick);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+    await waitFor(() => expect(onCreated).toHaveBeenCalledWith(["new-image"]));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/image/", expect.anything());
+  });
   it("lists the provider's models with their capabilities and price", async () => {
     const { dialog } = await toModels();
 
@@ -520,7 +740,7 @@ describe("the add-model wizard's catalog", () => {
         name: "gpt-image-1",
         display_name: "GPT Image 1",
         family: "openai",
-        hosting: "swe",
+        hosting: "usa",
         cost_per_image: 0.04,
         default_size: "auto",
         default_quality: "auto",
@@ -528,6 +748,31 @@ describe("the add-model wizard's catalog", () => {
       }
     });
     expect(toast.success).toHaveBeenCalledWith("1 modell tillagd");
+  });
+
+  it("lets an embedding model use E5 and an explicitly chosen hosting region", async () => {
+    const { dialog, onOpenChange } = renderWizard({
+      initialProviderId: "p-vllm",
+      fixedKind: "embedding",
+      caps: {
+        ...capabilities,
+        providers: { openai: { ...capabilities.providers.openai, modes: ["embedding"] } }
+      }
+    });
+    const hosting = await within(dialog).findByRole("combobox", { name: /^Hosting-region/ });
+    expect(hosting.textContent).toContain("USA");
+    fireEvent.keyDown(hosting, { key: "Enter" });
+    fireEvent.click(await screen.findByRole("option", { name: "Frankrike" }));
+    fireEvent.keyDown(within(dialog).getByRole("combobox", { name: /^Modellfamilj/ }), {
+      key: "Enter"
+    });
+    fireEvent.click(await screen.findByRole("option", { name: "E5 (HuggingFace)" }));
+    fireEvent.click(await within(dialog).findByRole("checkbox", { name: /multilingual-e5-large/ }));
+    fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till 1 modell" }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
+    expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/tenant-models/embedding/", {
+      body: expect.objectContaining({ family: "e5", hosting: "fra" })
+    });
   });
 
   it("creates a rerank model, leaving factor and cap to the backend's defaults", async () => {
@@ -566,7 +811,7 @@ describe("the add-model wizard's catalog", () => {
         name: "Qwen/Qwen3-Reranker-4B",
         display_name: "Qwen/Qwen3-Reranker-4B",
         family: "openai",
-        hosting: "swe",
+        hosting: "usa",
         security_classification: null
       }
     });
@@ -584,5 +829,53 @@ describe("the add-model wizard's catalog", () => {
 
     await act(async () => {});
     expect(within(dialog).getByText("2 modeller valda")).toBeTruthy();
+  });
+});
+
+it("creates supported providers with validated headers and keeps rejected input for retry", async () => {
+  const { dialog } = renderWizard({
+    caps: {
+      providers: {
+        hosted_vllm: {
+          modes: ["completion"],
+          models: {},
+          fields: [{ name: "endpoint", required: true, secret: false, in: "config" }]
+        }
+      },
+      default_fields: []
+    }
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till vLLM" }));
+  fireEvent.change(field(/^Endpoint-URL/), { target: { value: "https://gateway.example/v1" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Lägg till header" }));
+  fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+  expect(api.POST).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(field(/^Headernamn/));
+  fireEvent.change(field(/^Headernamn/), { target: { value: "X-Region" } });
+  fireEvent.change(field(/^Värde/), { target: { value: "north" } });
+  api.POST.mockResolvedValueOnce({
+    error: { message: "Header is reserved", eneo_error_code: 9007 },
+    response: new Response("{}", { status: 400 })
+  });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+  const error = await within(dialog).findByText("Header is reserved");
+  expect(document.activeElement?.getAttribute("aria-describedby")).toContain(error.id);
+  expect(field(/^Värde/).value).toBe("north");
+  fireEvent.change(field(/^Headernamn/), { target: { value: "X-Custom-Region" } });
+  fireEvent.click(within(dialog).getByRole("button", { name: "Nästa" }));
+  await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+  expect(api.POST.mock.calls[1]![1].body).toMatchObject({
+    provider_type: "hosted_vllm",
+    config: { endpoint: "https://gateway.example/v1" },
+    outbound_headers: [
+      {
+        name: "X-Custom-Region",
+        value: "north",
+        secret: false,
+        encoding: "percent",
+        on_missing: "omit",
+        fallback: null
+      }
+    ]
   });
 });
