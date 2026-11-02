@@ -206,7 +206,8 @@ class SessionWatch:
         if time.monotonic() >= self._next_check:
             self._next_check = time.monotonic() + RECHECK_SECONDS
             self._admitted = await self._recheck()
-        return self._admitted
+        # The check can finish after the token expired.
+        return self._admitted and time.time() < self._payload.exp
 
     async def _recheck(self) -> bool:
         # The container module imports this one.

@@ -229,6 +229,24 @@ async def test_a_job_that_arrives_after_the_session_ended_is_not_sent(
 
 
 @pytest.mark.asyncio
+async def test_a_check_that_succeeds_only_after_the_expiry_admits_nothing(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    # The check is due at once and is still running when the token expires;
+    # it then succeeds, but the session has ended by the time it answers.
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.0)
+
+    async def slow_success(self: SessionWatch) -> bool:
+        await asyncio.sleep(0.3)
+        return True
+
+    monkeypatch.setattr(SessionWatch, "_recheck", slow_success)
+    watch = SessionWatch(browser_session(0.1), MagicMock())
+
+    assert await watch() is False
+
+
+@pytest.mark.asyncio
 async def test_job_route_releases_auth_database_session_before_streaming(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
