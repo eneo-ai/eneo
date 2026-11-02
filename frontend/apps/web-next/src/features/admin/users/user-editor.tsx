@@ -183,7 +183,9 @@ function UserEditorForm({
         browserApi.POST("/api/v1/admin/users/{username}/", {
           params: { path: { username: user.username } },
           body: {
-            email,
+            // Sent only when changed, as in the Svelte app: the dialog's copy
+            // must not write back over one changed since it opened.
+            email: email !== user.email ? email : undefined,
             // Sent only when changed: a new username signs the user out.
             username: username.trim() !== user.username ? username.trim() : undefined,
             password: password ?? undefined,

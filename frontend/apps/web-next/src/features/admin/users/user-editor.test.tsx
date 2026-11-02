@@ -251,7 +251,7 @@ describe("UserEditorDialog", () => {
     await waitFor(() =>
       expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
         params: { path: { username: "bo.ek" } },
-        body: expect.objectContaining({ email: "bo.ek@example.se", password: undefined })
+        body: expect.objectContaining({ password: undefined })
       })
     );
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] }));
@@ -443,6 +443,32 @@ describe("UserEditorDialog username", () => {
       expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
         params: { path: { username: "bo.ek" } },
         body: expect.objectContaining({ username: "bo.lind" })
+      })
+    );
+  });
+
+  it("sends an existing user's email only when it changed", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog } = await renderEditor(existing);
+
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    expect(
+      (api.POST.mock.calls[0]?.[1] as { body: { email?: string } }).body.email
+    ).toBeUndefined();
+  });
+
+  it("sends a changed email, trimmed", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog } = await renderEditor(existing);
+    type(dialog, /^E-post/, " bo.lind@example.se ");
+
+    submit(dialog);
+
+    await waitFor(() =>
+      expect(api.POST).toHaveBeenCalledWith("/api/v1/admin/users/{username}/", {
+        params: { path: { username: "bo.ek" } },
+        body: expect.objectContaining({ email: "bo.lind@example.se" })
       })
     );
   });
