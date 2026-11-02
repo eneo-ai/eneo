@@ -38,6 +38,45 @@ describe("useSecretMutation", () => {
     expect(cachedText(queryClient)).not.toContain("sk-synthetic-other-5678");
   });
 
+  it("keeps each call's variables with that call when a second starts before the first is pending", async () => {
+    const first = { name: "Första", api_key: "sk-synthetic-first-1111" };
+    const second = { name: "Andra", api_key: "sk-synthetic-second-2222" };
+    const mutationFn = vi.fn((sent: Body) =>
+      sent === first
+        ? Promise.resolve({ ...saved, name: sent.name })
+        : Promise.reject(new Error("Refused"))
+    );
+    const onSuccess = vi.fn();
+    const onError = vi.fn();
+    const onSettled = vi.fn();
+    const { result, queryClient } = renderHookInApp(() =>
+      useSecretMutation({ mutationFn, onSuccess, onError, onSettled })
+    );
+
+    act(() => {
+      result.current.mutate(first);
+      result.current.mutate(second);
+    });
+
+    await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(2));
+    expect(mutationFn.mock.calls.map(([sent]) => sent)).toEqual([first, second]);
+    expect(onSuccess).toHaveBeenCalledWith(
+      { ...saved, name: "Första" },
+      first,
+      undefined,
+      expect.anything()
+    );
+    expect(onError).toHaveBeenCalledWith(expect.any(Error), second, undefined, expect.anything());
+    const text = cachedText(queryClient);
+    expect(text).not.toContain(first.api_key);
+    expect(text).not.toContain(second.api_key);
+
+    // Nothing is left behind for the next call.
+    act(() => result.current.mutate(first));
+    await waitFor(() => expect(onSettled).toHaveBeenCalledTimes(3));
+    expect(mutationFn).toHaveBeenLastCalledWith(first, expect.anything());
+  });
+
   it("hands a failure its variables, and none to the cache", async () => {
     const failure = new Error("Refused");
     const onError = vi.fn();

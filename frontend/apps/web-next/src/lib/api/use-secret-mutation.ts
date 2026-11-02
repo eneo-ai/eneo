@@ -15,7 +15,7 @@ type SecretMutationOptions<TData, TError, TVariables, TOnMutateResult> = Omit<
 };
 
 type SecretMutationResult<TData, TError, TVariables, TOnMutateResult> = Omit<
-  UseMutationResult<TData, TError, void, TOnMutateResult>,
+  UseMutationResult<TData, TError, number, TOnMutateResult>,
   "mutate" | "mutateAsync" | "variables"
 > & {
   mutate: (variables: TVariables) => void;
@@ -25,9 +25,11 @@ type SecretMutationResult<TData, TError, TVariables, TOnMutateResult> = Omit<
 /**
  * `useMutation` for a call whose variables carry a secret (an API key, a
  * password, a client secret, a token). React Query keeps a mutation's
- * variables in its cache after it has settled, so these never reach it:
- * `mutate(variables)` holds them here while the call runs, the options'
- * callbacks get them as usual, and they are dropped once it has settled.
+ * variables in its cache after it has settled, so these never reach it: each
+ * `mutate(variables)` gets its own id, React Query sees only that id, and the
+ * variables are held here under it while the call runs. The options'
+ * callbacks get them as usual, each call its own, also when a second call
+ * starts before the first has settled; they are dropped once it has settled.
  * A secret in the response is the caller's to keep out (`withoutSecret`).
  */
 export function useSecretMutation<
@@ -48,35 +50,35 @@ export function useSecretMutation<
   TVariables,
   TOnMutateResult
 > {
-  // ponytail: one call at a time, as every caller ignores presses while one
-  // runs; a call started meanwhile would take over the first one's variables.
-  const held = useRef<{ variables: TVariables } | null>(null);
-  const variables = () => held.current!.variables;
-  const { mutate, mutateAsync, ...mutation } = useMutation<TData, TError, void, TOnMutateResult>({
+  const held = useRef(new Map<number, TVariables>());
+  const lastCall = useRef(0);
+  const variables = (call: number) => held.current.get(call) as TVariables;
+  const { mutate, mutateAsync, ...mutation } = useMutation<TData, TError, number, TOnMutateResult>({
     ...options,
-    mutationFn: (_, context) => mutationFn(variables(), context),
-    onMutate: onMutate && ((_, context) => onMutate(variables(), context)),
+    mutationFn: (call, context) => mutationFn(variables(call), context),
+    onMutate: onMutate && ((call, context) => onMutate(variables(call), context)),
     onSuccess:
-      onSuccess && ((data, _, result, context) => onSuccess(data, variables(), result, context)),
+      onSuccess &&
+      ((data, call, result, context) => onSuccess(data, variables(call), result, context)),
     onError:
-      onError && ((error, _, result, context) => onError(error, variables(), result, context)),
-    onSettled: async (data, error, _, result, context) => {
+      onError &&
+      ((error, call, result, context) => onError(error, variables(call), result, context)),
+    onSettled: async (data, error, call, result, context) => {
       try {
-        await onSettled?.(data, error, variables(), result, context);
+        await onSettled?.(data, error, variables(call), result, context);
       } finally {
-        held.current = null;
+        held.current.delete(call);
       }
     }
   });
+  const start = (next: TVariables) => {
+    const call = ++lastCall.current;
+    held.current.set(call, next);
+    return call;
+  };
   return {
     ...mutation,
-    mutate: (next) => {
-      held.current = { variables: next };
-      mutate();
-    },
-    mutateAsync: (next) => {
-      held.current = { variables: next };
-      return mutateAsync();
-    }
+    mutate: (next) => mutate(start(next)),
+    mutateAsync: (next) => mutateAsync(start(next))
   };
 }
