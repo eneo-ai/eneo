@@ -36,7 +36,7 @@ vi.mock("@/features/admin/help-assistants/help-assistants-page", () => ({
 }));
 
 const GENERATION = "Eneo-Session-Generation";
-const context = testAppContext({ permissions: ["admin"] });
+const context = testAppContext({ permissions: ["admin"], settings: { using_templates: true } });
 let replies: Map<string, unknown>;
 let fetcher: ReturnType<typeof vi.fn<typeof fetch>>;
 
@@ -242,6 +242,15 @@ it("fails governance when a required read cannot refresh older cached data", asy
     expect(router.state.matches.some((match) => match.status === "error")).toBe(true)
   );
   expect(screen.queryByRole("heading", { name: "Governance" })).toBeNull();
+});
+
+it("sends /admin/templates to /admin before anything renders while the organisation does not use templates", async () => {
+  replies.set("/api/v1/settings/", { ...context.settings, using_templates: false });
+  const { router } = await renderRoute("/admin/templates");
+  await waitFor(() => expect(router.state.location.pathname).toBe("/admin"));
+  expect(screen.queryByRole("heading", { name: "Templates", level: 1 })).toBeNull();
+  expect(requestedPaths()).not.toContain("/api/v1/admin/templates/assistants/");
+  expect(requestedPaths()).not.toContain("/api/v1/admin/templates/apps/");
 });
 
 it("keeps a required template-list failure with the route error boundary", async () => {

@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { router } from "@/test/navigation";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp, testAppContext } from "@/test/render";
 
@@ -76,12 +75,6 @@ function names(table: HTMLElement) {
 }
 
 describe("TemplatesPage", () => {
-  it("sends the admin to /admin while the organisation does not use templates", () => {
-    const { container } = renderInApp(<TemplatesPage />);
-    expect(router.replace).toHaveBeenCalledWith("/admin");
-    expect(container.textContent).toBe("");
-  });
-
   it("names each tab's table after the tab", async () => {
     const { container } = renderInApp(<TemplatesPage />, withTemplates);
 
