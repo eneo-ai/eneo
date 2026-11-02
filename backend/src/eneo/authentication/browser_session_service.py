@@ -43,9 +43,11 @@ class BrowserSessionService:
         Returns the token the session cookie carries: the same claims and
         expiry with a new ``sid``. Runs in the sign-in's transaction, so the
         cookie is sent only once the row is committed. The user's expired
-        rows are deleted here too; sign-out deletes the others.
+        rows are deleted here too.
         """
         payload = self._verified_payload(token)
+        # ponytail: a user who never signs in again keeps expired rows until
+        # the user is deleted; join a daily maintenance job if that grows.
         await self.session.execute(
             sa.delete(BrowserSessions).where(
                 BrowserSessions.user_id == payload.user_id,
