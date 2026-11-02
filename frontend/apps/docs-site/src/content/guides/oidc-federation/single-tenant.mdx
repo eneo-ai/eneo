@@ -56,6 +56,7 @@ https://your-domain.com/login/callback
     5. Go to **Certificates & secrets** → **New client secret** and copy the value immediately (you won't see it again)
     6. Go to **API permissions** → **Add a permission** → **Microsoft Graph** → **Delegated permissions** and add `openid`, `profile`, `email`, `User.Read`
     7. Click **Grant admin consent**
+    8. Go to **Token configuration** → **Add optional claim** → **ID** and add `email` and `xms_edov`. Entra ID does not send `email_verified` for organisational accounts; `xms_edov` (email domain owner verified) is the claim Eneo accepts instead when it creates accounts on first sign-in.
 
     **Discovery URL:**
     ```
@@ -286,7 +287,7 @@ For deployments without SCIM, JIT can create a user on first sign-in only when a
 
 - Tenant `provisioning` is explicitly `true`.
 - A non-empty domain list admits the user's email domain: `OIDC_ALLOWED_DOMAINS` for environment-variable configuration, or `allowed_domains` for API configuration.
-- The validated ID token carries the claim `email_verified: true` for its `email` address. For identity providers that can only send claims as text, the strings `"true"` and `"1"` (and the number `1`) are also accepted. A missing claim or any other value does not satisfy this check.
+- The validated ID token carries the claim `email_verified: true` for its `email` address. For identity providers that can only send claims as text, the strings `"true"` and `"1"` (and the number `1`) are also accepted. Microsoft Entra ID does not send `email_verified` for organisational accounts; its optional claim `xms_edov: true` (email domain owner verified) is accepted in its place, so add `xms_edov` as an optional ID-token claim in the app registration. A missing claim or any other value does not satisfy this check.
 
 Existing active accounts do not require `email_verified` to sign in. Inactive or removed accounts cannot be reactivated or recreated through JIT; SCIM or an administrator must restore them. If the IdP does not supply verified-email claims, provision accounts through SCIM or administration.
 
@@ -371,6 +372,12 @@ curl -X PATCH "https://your-domain.com/api/v1/sysadmin/tenants/{tenant_id}/feder
 The user authenticated successfully but doesn't exist in Eneo (`403`).
 
 **Fix:** Provision the account through SCIM, create or invite the user, or configure all [JIT requirements](#user-provisioning). Do not enable JIT as a workaround for a SCIM sync failure.
+
+### "Automatic account creation requires a verified email address"
+
+JIT is enabled and the domain is allowed, but the ID token carries no accepted verification claim (`403`).
+
+**Fix:** Make the IdP send `email_verified: true` for the `email` claim. On Azure Entra ID, which never sends `email_verified` for organisational accounts, add `xms_edov` under **Token configuration** → **Add optional claim** → **ID** instead. Otherwise provision the account through SCIM or administration.
 
 ### "Email claim not found in ID token"
 
