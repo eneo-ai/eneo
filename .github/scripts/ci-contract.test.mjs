@@ -263,11 +263,23 @@ test("unmapped runtime and root configuration paths run the full suite", () => {
   }
 });
 
+test("the release-notes check runs on every change, in the scope job", () => {
+  // It reads the Svelte app, web-next and the backend's legacy-page map: a job
+  // scoped to one app would let a change in another break the next release.
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  const jobs = workflow.split("\njobs:\n")[1].split(/\n(?=  [a-z][a-z0-9-]*:\n)/);
+  const owners = jobs.filter((job) => job.includes("scripts/check_whats_new.py"));
+  assert.equal(owners.length, 1);
+  assert.match(owners[0], /^  changes:\n/);
+  const step = owners[0].split("- name: Check What's new release notes\n")[1].split(/\n      - name: /)[0];
+  assert.doesNotMatch(step, /\n        if:/);
+});
+
 test("contract inputs select their consumers and developer tooling", () => {
   const cases = [
     ["backend/src/eneo/roles/permissions.py", ["backend", "scripts", "route_metadata"]],
     ["scripts/backend_test_shard.py", ["backend", "scripts"]],
-    ["scripts/check_whats_new.py", ["frontend", "scripts"]],
+    ["scripts/check_whats_new.py", ["scripts"]],
     ["frontend/packages/whats-new/version-order.cases.json", ["backend", "frontend", "scripts"]],
     ["frontend/apps/web-next/src/lib/auth/safe-next.cases.json", ["backend", "web_next", "web_next_e2e"]],
     ["frontend/packages/whats-new/releases.schema.json", ["backend", "frontend", "scripts"]],
