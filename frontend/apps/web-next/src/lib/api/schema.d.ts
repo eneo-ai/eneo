@@ -14863,6 +14863,11 @@ export interface components {
        */
       download_url?: string | null;
       /**
+       * Signed Download Url
+       * @description Link valid for 60 seconds that streams the file without credentials, for browsers (when completed)
+       */
+      signed_download_url?: string | null;
+      /**
        * Created At
        * Format: date-time
        */

@@ -103,9 +103,9 @@ export function ExportDialog({
           params: { path: { job_id: jobId as string } }
         })
       );
-      if (!latest.download_url)
+      if (!latest.signed_download_url)
         throw new EneoApiError("Export is no longer available", { status: 404 });
-      const url = new URL(latest.download_url, window.location.origin);
+      const url = new URL(latest.signed_download_url, window.location.origin);
       if (
         url.pathname !==
           `/api/v1/audit/logs/export/${encodeURIComponent(jobId as string)}/signed-download` ||
