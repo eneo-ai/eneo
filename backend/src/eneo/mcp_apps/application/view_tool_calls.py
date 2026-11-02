@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
         McpAppViewRepo,
     )
+    from eneo.mcp_servers.domain.capabilities import CapabilityPurpose
     from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
         MCPProxySessionFactory,
@@ -65,7 +66,10 @@ def _switched_off(settings: "ConversationSettings", server: "MCPServer") -> bool
     """A general server is chosen by id; a capability provider by its purpose."""
     if server.purpose == "general":
         return settings.mcp_server_states.get(server.id) is False
-    return settings.capability_states.get(server.purpose) is False
+    return (
+        settings.capability_states.get(cast("CapabilityPurpose", server.purpose))
+        is False
+    )
 
 
 class ViewCallNotReady(Exception):
