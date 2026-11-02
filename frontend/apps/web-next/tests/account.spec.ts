@@ -55,18 +55,13 @@ test.describe("Konto on a phone (decision 22)", { tag: "@vite" }, () => {
     ).toBeVisible();
   });
 
-  test("logs out", async ({ page, context }) => {
-    // Ends this test's session only: the stored state is read, never written.
+  // Sign-out revokes the session on the server, so this test ends one of its own.
+  test("logs out", async ({ page, ownSession }) => {
     await page.goto("/account");
-    const sessionNames = new Set(["eneo_web", "__Host-eneo_web"]);
-    expect(
-      (await context.cookies()).filter((cookie) => sessionNames.has(cookie.name))
-    ).toHaveLength(1);
+    expect(await ownSession.cookies()).toHaveLength(1);
     await page.getByRole("button", { name: "Logga ut" }).click();
     await expect(page).toHaveURL(/\/login\?message=logout/);
-    expect(
-      (await context.cookies()).filter((cookie) => sessionNames.has(cookie.name))
-    ).toHaveLength(0);
+    expect(await ownSession.cookies()).toHaveLength(0);
     const protectedRead = await page.request.get("/api/v1/users/me/", {
       headers: { "Sec-Fetch-Site": "same-origin" }
     });
