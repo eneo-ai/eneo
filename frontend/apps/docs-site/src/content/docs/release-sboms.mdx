@@ -59,6 +59,18 @@ its image scan. Updating a base-image tag does not update existing Eneo images
 or running containers; runtime fixes require a new application release and
 deployment.
 
+Application image provenance is attested immediately after the build, before
+runtime and vulnerability checks. An attestation proves build provenance; it
+does not mean those checks passed or that a completed release bundle exists.
+Retries reuse an image only when its version, source revision, platforms, and
+attestation verify. If provenance verification fails for an otherwise matching
+image, the workflow rebuilds it from the checked-out source and attests the new
+build. A version, source, or platform mismatch still stops publication. Frontend
+build cache and temporary build swap are released before verification to leave
+room for the vulnerability database. Every frontend image, including reused
+images, must pass the runtime and vulnerability checks before the bundle can
+be published.
+
 The SeaweedFS image is built and attested by Eneo from a pinned upstream source
 commit by its own workflow, which runs only when the image inputs change and
 publishes one immutable tag per `docker/seaweedfs/VERSION`. These attestations
