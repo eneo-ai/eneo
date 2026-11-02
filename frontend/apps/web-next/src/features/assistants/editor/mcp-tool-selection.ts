@@ -59,19 +59,28 @@ function serverToolSettings(
   return (server.tools ?? []).map((tool) => ({ tool_id: tool.id, is_enabled: isEnabled }));
 }
 
+/** Switches `server` on or off; `servers` are the servers the picker lists. */
 export function toggleMcpServerSelection(
   selectedIds: Set<string>,
   settings: AssistantMcpToolSetting[],
-  server: AssistantMcpServer
+  server: AssistantMcpServer,
+  servers: AssistantMcpServer[]
 ): { selectedIds: Set<string>; settings: AssistantMcpToolSetting[] } {
   const nextIds = new Set(selectedIds);
-  const serverToolIds = new Set((server.tools ?? []).map((tool) => tool.id));
 
   if (nextIds.has(server.id)) {
     nextIds.delete(server.id);
+    // Only overrides for tools of the servers still selected remain (the
+    // backend refuses others): a listed server leaves out the tools the space
+    // disabled, so their saved overrides cannot be matched to it.
+    const keptToolIds = new Set(
+      selectedMcpServers(servers, nextIds).flatMap((kept) =>
+        (kept.tools ?? []).map((tool) => tool.id)
+      )
+    );
     return {
       selectedIds: nextIds,
-      settings: settings.filter((setting) => !serverToolIds.has(setting.tool_id))
+      settings: settings.filter((setting) => keptToolIds.has(setting.tool_id))
     };
   }
 

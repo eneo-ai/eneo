@@ -109,7 +109,7 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   function toggleServer(server: AssistantMcpServer) {
     const previousSelected = selected;
     const previousToolSettings = toolSettings;
-    const next = toggleMcpServerSelection(selected, toolSettings, server);
+    const next = toggleMcpServerSelection(selected, toolSettings, server, available);
     setSelected(next.selectedIds);
     setToolSettings(next.settings);
     persist(next.selectedIds, next.settings, previousSelected, previousToolSettings);
