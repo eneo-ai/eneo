@@ -133,8 +133,8 @@ new steps and a new step order in one revision, fenced on `expected_revision`.
 The authoring chat (`POST /api/v1/flows/{id}/authoring-chat/`) is an ordinary
 conversation with a hidden assistant whose tools come from Eneo's loopback
 `flows` server and reach only that flow. Every tool that changes the draft calls
-the same operations (`apply_editor_update`, `publish_flow`, `unpublish_flow`) on
-top of `FlowService`, so access checks, revision fencing, classification,
+the same operations (`apply_editor_update`, `publish_flow`) on top of
+`FlowService`, so access checks, revision fencing, classification,
 snapshots and audit are the editor's. The chat starts in view mode: its writing
 tools are refused until the user turns edit mode on, and the mode switch is
 itself fenced on the draft revision.

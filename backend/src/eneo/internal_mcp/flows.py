@@ -49,6 +49,15 @@ JSON, contract_from_example gives the step the contract the example implies; the
 example itself is not kept.
 Read pages until next_offset is null before claiming you reviewed the whole value.
 Credentials belong in the editor and must never be requested or placed in tools.
+An HTTP step's config (input_config for http_get, output_config for http_post)
+holds url, auth, timeout_seconds, body ({"mode": "auto"|"json_template"|
+"text_template"|"none", "template"}), custom_headers ([{"name", "value", "secret"}])
+and response_format ("text"|"json"). auth is {"mode": "none"},
+{"mode": "bearer_token"}, {"mode": "api_key", "header_name": "X-API-Key"} or
+{"mode": "basic_auth", "username": "..."}: declare the mode the service needs and
+leave token, key and password out; the person enters them in the editor, and until
+then read_flow shows the connection's credential as missing. A secret custom header
+is declared as {"name": "...", "secret": true} without its value.
 A completion step whose input may exceed its model's window can set
 input_config.long_material = {"mode": "digest"}: such input is read in parts with
 the step's own model and the answer is written over the notes. The step result
@@ -129,7 +138,9 @@ async def _call(
                     lock=editing or changes_draft,
                 )
                 if editing or changes_draft:
-                    await require_authoring_edit(scope.container, chat)
+                    await require_authoring_edit(
+                        scope.container, chat, draft=changes_draft
+                    )
                 request = scoped_request(chat.space_id)
                 if not changes_draft:
                     return await operation(scope.container, chat, request)
@@ -485,29 +496,60 @@ async def read_step_assistant(
 def require_safe_model_configuration(
     changes: dict[str, Any], saved: dict[str, Any]
 ) -> None:
-    """Never let a model send a credential or retarget a retained credential."""
+    """Never let a model send a credential or retarget a retained credential.
+
+    The auth mode and the fields beside its secret (a header name, a username)
+    are configuration the model writes; the token, key or password is entered
+    in the editor. A config that declares a mode with its credential empty
+    passes, one that carries a value or a stored credential's sentinel does
+    not."""
     from eneo.flows.http_transport import (
         HTTP_CONFIG_KEYS,
         HttpAuthoredConfig,
         contains_secret_sentinel,
     )
+    from eneo.flows.http_transport.authored_config import (
+        HttpAuthApiKey,
+        HttpAuthBasicAuth,
+        HttpAuthBearer,
+    )
 
-    def declares_secret_material(value: dict[str, Any]) -> bool:
-        # Read without the core model, for configs it refuses: any auth other
-        # than none, any auth field besides its mode, or any custom header.
+    def present(value: Any) -> bool:
+        return value not in (None, "", {}, [])
+
+    def holds_credential(authored: HttpAuthoredConfig) -> bool:
+        match authored.auth:
+            case HttpAuthBearer(token=secret):
+                pass
+            case HttpAuthApiKey(key=secret):
+                pass
+            case HttpAuthBasicAuth(password=secret):
+                pass
+            case _:
+                secret = ""
+        return present(secret) or any(
+            header.secret and present(header.value)
+            for header in authored.custom_headers
+        )
+
+    def declares_credential(value: dict[str, Any]) -> bool:
+        # Read without the core model, for configs it refuses: any auth field
+        # besides the mode and its public companions, or a header with a value.
         auth = value.get("auth")
         if isinstance(auth, dict):
-            if auth.get("mode", auth.get("type")) not in (None, "", "none"):
-                return True
             if any(
-                item not in (None, "", {}, [])
+                present(item)
                 for key, item in auth.items()
-                if key not in ("mode", "type")
+                if key not in ("mode", "type", "header_name", "username")
             ):
                 return True
         elif auth not in (None, "", "none"):
             return True
-        return value.get("custom_headers") not in (None, "", {}, [])
+        headers = value.get("custom_headers")
+        return isinstance(headers, list) and any(
+            isinstance(header, dict) and present(header.get("value"))
+            for header in headers
+        )
 
     def contains_credential(value: Any) -> bool:
         if contains_secret_sentinel(value):
@@ -525,10 +567,10 @@ def require_safe_model_configuration(
                 except ValidationError:
                     # A malformed config without credentials goes on to the
                     # core, whose refusal names the fields to fix.
-                    if declares_secret_material(value):
+                    if declares_credential(value):
                         return True
                 else:
-                    if authored.has_declared_credentials:
+                    if holds_credential(authored):
                         return True
             return any(
                 (
@@ -541,7 +583,7 @@ def require_safe_model_configuration(
                         "api_key",
                         "authorization",
                     }
-                    and item not in (None, {}, [], "")
+                    and present(item)
                 )
                 or contains_credential(item)
                 for key, item in value.items()
@@ -555,7 +597,10 @@ def require_safe_model_configuration(
             contains_credential(changes[key]) or contains_credential(saved.get(key))
         ):
             raise BadRequestException(
-                "Configure credentials and destinations that use them directly in the flow editor."
+                "A credential never passes the chat: declare the auth mode with its "
+                "token, key or password left empty for the person to enter in the "
+                "flow editor, and leave a configuration that holds a stored "
+                "credential to the editor."
             )
 
 
@@ -1066,27 +1111,6 @@ async def publish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
 
 
 @mcp.tool()
-async def unpublish_flow(ctx: Context, expected_revision: int) -> CallToolResult:
-    """Unpublish the flow after the user explicitly requests editing a published flow."""
-
-    async def operation(container, chat, request):
-        from eneo.flows.application.flow_authoring_operations import (
-            unpublish_flow as unpublish,
-        )
-
-        flow = await unpublish(
-            chat.flow_id, request, container, expected_revision=expected_revision
-        )
-        return page_result(
-            {"published_version": flow.published_version},
-            flow_id=chat.flow_id,
-            revision=flow.draft_revision,
-        )
-
-    return await _call(ctx, operation, editing=True)
-
-
-@mcp.tool()
 async def read_tool_options(ctx: Context, offset: int = 0) -> CallToolResult:
     """Read the MCP tools a tool step may call unattended, and why others are
     refused, with pagination. It says nothing about HTTP steps: http_get and
@@ -1390,17 +1414,20 @@ async def read_run(
         steps = await list_flow_run_steps(
             id=chat.flow_id, run_id=run_id, request=request, container=container
         )
-        graph = await get_flow_graph(
-            id=chat.flow_id, request=request, run_id=run_id, container=container
-        )
+        # The graph and checkpoint reads run on the chat's session, which does
+        # not begin a transaction by itself as a request's session does.
+        async with container.session().begin():
+            graph = await get_flow_graph(
+                id=chat.flow_id, request=request, run_id=run_id, container=container
+            )
+            checkpoints = await container.flow_run_review_checkpoint_repo().list_review_checkpoints_for_run(
+                run_id=run_id, tenant_id=container.user().tenant_id
+            )
         labels = {
             node.step_order: node.label
             for node in graph.nodes
             if node.step_order is not None
         }
-        checkpoints = await container.flow_run_review_checkpoint_repo().list_review_checkpoints_for_run(
-            run_id=run_id, tenant_id=container.user().tenant_id
-        )
         page = page_result(
             run_summary(result, steps, labels, checkpoints),
             flow_id=chat.flow_id,
@@ -1521,7 +1548,6 @@ EDIT_MODE_TOOLS = frozenset(
         "move_step",
         "remove_step",
         "publish_flow",
-        "unpublish_flow",
         "apply_flow_suggestions",
         "dismiss_flow_suggestion",
     }

@@ -266,13 +266,15 @@ def draft_step_refusals(
     """Every refusal the step rules give a draft save of ``steps``, in the
     order the save meets them; the save refuses with the first. The step
     graph's issues come first, then a step name the run reserves or a form
-    field takes."""
+    field takes. A connection's auth mode may be declared before its
+    credential is entered in the editor; publish requires the credential."""
     refusals = [
         _to_exception(issue)
         for issue in collect_step_graph_issues(
             flow_step_validation_views_from_flow_steps(steps),
             metadata_json=metadata_json,
             retained=retained,
+            credentials_required=False,
         )
     ]
     try:
@@ -328,6 +330,7 @@ def collect_step_graph_issues(
     metadata_json: FlowPersistedJsonObject | None = None,
     require_complete_template_fill_config: bool = False,
     retained: frozenset[tuple[int, str]] = frozenset(),
+    credentials_required: bool = True,
 ) -> list[FlowStepGraphIssue]:
     if not steps:
         return []
@@ -448,7 +451,9 @@ def collect_step_graph_issues(
                 issues,
                 FlowGraphIssueCode.FLOW_STEP_INVALID,
                 step_order=step.step_order,
-                validate=lambda: validate_http_input_config(step=step),
+                validate=lambda: validate_http_input_config(
+                    step=step, credentials_required=credentials_required
+                ),
             )
         if step.input_source == "tool":
             _capture_flow_step_validation(
@@ -483,6 +488,7 @@ def collect_step_graph_issues(
                     FlowGraphIssueCode.FLOW_STEP_INVALID,
                     step_order=step.step_order,
                     validate=lambda: validate_http_output_config(
+                        credentials_required=credentials_required,
                         step=replace(
                             step,
                             output_config={
@@ -490,7 +496,7 @@ def collect_step_graph_issues(
                                 for key, value in (step.output_config or {}).items()
                                 if key != FLOW_STEP_RETRIEVAL_POLICY_KEY
                             },
-                        )
+                        ),
                     ),
                 )
         transcribe_only_error = transcribe_only_violation(

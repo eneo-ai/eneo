@@ -345,7 +345,8 @@ ends over one core path, not separate engines.
   Flow only through the loopback flow tools
   (`backend/src/eneo/internal_mcp/flows.py`): `read_flow`,
   `update_flow_settings`, `read_step_assistant`, `update_step`, `add_step`,
-  `move_step`, `remove_step`, `publish_flow`, `unpublish_flow`,
+  `move_step`, `remove_step`, `publish_flow` (unpublishing stays the editor's
+  action; the chat has no tool for it),
   `read_tool_options`, `read_flow_suggestions`, `apply_flow_suggestions`,
   `dismiss_flow_suggestion`, and the run tools `run_flow`, `read_run`,
   `cancel_run`, `read_review` and `review_run`. The chat starts in view mode; tools that
@@ -374,6 +375,10 @@ Important authoring rules:
   adding runtime repair layers. A Flow is built once and may run many times.
 - Credentials stay with the editor. The chat's tools refuse step configuration
   that carries a credential, or that changes an HTTP configuration holding one.
+  The chat may declare a connection's auth mode with the credential left
+  empty (`api_key` with its header name, `basic_auth` with its username); a
+  draft saves that way, `read_flow` shows the credential as missing, and
+  publish refuses until the person has entered it in the editor.
 
 ## Suggestions
 

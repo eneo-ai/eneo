@@ -8,6 +8,7 @@
  * the space allows and what they require) and its classification preview.
  * Pure and unit-tested.
  */
+import { stepConnections } from "./chat/connections";
 import { removedReads } from "./editor/reference-repair";
 import {
   hasHttpConfig,
@@ -42,6 +43,7 @@ export type StepProblem =
   | { code: "output_mode"; issue: OutputModeIssue }
   | { code: "name_missing" }
   | { code: "http_url_missing" }
+  | { code: "http_credential_missing" }
   | { code: "tool_missing" }
   | { code: "tool_unavailable" }
   | { code: "tool_refused"; refusal: NonNullable<ToolOption["refusal"]> }
@@ -128,6 +130,11 @@ function stepProblems(
       ? readHttpConfig(step.output_config, "output").url
       : "";
     if (!url.trim()) problems.push({ code: "http_url_missing" });
+  }
+  // The auth mode is declared before the credential exists (the chat builds
+  // it that way); publish waits for the key, token or password.
+  if (stepConnections(step).some((connection) => connection.host && !connection.configured)) {
+    problems.push({ code: "http_credential_missing" });
   }
 
   if (step.input_source === "tool") {

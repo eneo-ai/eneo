@@ -406,6 +406,7 @@ def test_a_steps_connections_name_the_service_and_whether_its_secret_is_stored()
         "field": "input_config.http",
         "url": "https://api.example.se/cases",
         "auth_mode": "api_key",
+        "header_name": "X-Key",
         "credential": "stored",
         "secret_headers": 1,
         "configured": True,

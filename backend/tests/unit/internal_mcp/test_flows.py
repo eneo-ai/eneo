@@ -57,6 +57,68 @@ def test_model_can_change_an_uncredentialed_destination():
     )
 
 
+@pytest.mark.parametrize(
+    "auth",
+    [
+        {"mode": "api_key", "header_name": "X-API-Key"},
+        {"mode": "api_key", "header_name": "X-API-Key", "key": ""},
+        {"mode": "bearer_token"},
+        {"mode": "basic_auth", "username": "service-user", "password": ""},
+    ],
+)
+def test_model_declares_how_a_connection_signs_in_and_leaves_the_secret_empty(auth):
+    # The step is built with the auth mode the service needs; the person
+    # enters the key in the editor afterwards.
+    flows.require_safe_model_configuration(
+        {
+            "input_config": {
+                "url": "https://api.test/cases",
+                "auth": auth,
+                "custom_headers": [{"name": "X-Signature", "secret": True}],
+            }
+        },
+        {},
+    )
+
+
+@pytest.mark.parametrize(
+    "auth",
+    [
+        {"mode": "api_key", "header_name": "X-API-Key", "key": "sk-live"},
+        {"mode": "bearer_token", "token": "abc"},
+        {"mode": "basic_auth", "username": "svc", "password": "pw"},
+    ],
+)
+def test_a_declared_mode_that_carries_its_secret_is_refused(auth):
+    with pytest.raises(BadRequestException):
+        flows.require_safe_model_configuration(
+            {"input_config": {"url": "https://api.test/cases", "auth": auth}}, {}
+        )
+
+
+def test_a_declared_mode_without_its_credential_stays_editable_after_save():
+    saved = {
+        "url": "https://api.test/cases",
+        "auth": {"mode": "api_key", "header_name": "X-Key", "key": ""},
+    }
+    flows.require_safe_model_configuration(
+        {
+            "input_config": {
+                **saved,
+                "auth": {**saved["auth"], "header_name": "Api-Key"},
+            }
+        },
+        {"input_config": saved},
+    )
+    # Once the person has stored the key, the configuration is the editor's.
+    stored = {**saved, "auth": {**saved["auth"], "key": {"$secret": "stored"}}}
+    with pytest.raises(BadRequestException):
+        flows.require_safe_model_configuration(
+            {"input_config": {**saved, "url": "https://elsewhere.test"}},
+            {"input_config": stored},
+        )
+
+
 def _transaction_container(order: list[str]) -> MagicMock:
     """A container whose session records how its transaction ends."""
 
@@ -882,6 +944,16 @@ async def test_a_turn_in_ask_mode_gets_no_tool_that_changes_the_flow():
     assert offered.isdisjoint(flows.EDIT_MODE_TOOLS)
     assert {"read_flow", "run_flow", "read_flow_suggestions"} <= offered
     assert {tool.name for tool in editing.tools} - offered == flows.EDIT_MODE_TOOLS
+
+
+async def test_the_chat_has_no_tool_to_unpublish_a_flow():
+    """Taking a published flow out of service is the person's action in the
+    editor; the chat can only say so and wait."""
+    editing = await flows.build_flows_mcp_server(
+        token="t", tenant_id=uuid4(), editing=True
+    )
+    assert "unpublish_flow" not in {tool.name for tool in editing.tools}
+    assert "publish_flow" in {tool.name for tool in editing.tools}
 
 
 # --- Reading the flow by section ---------------------------------------------

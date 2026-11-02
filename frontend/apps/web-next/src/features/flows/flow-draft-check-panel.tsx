@@ -67,6 +67,8 @@ function stepProblemText(problem: StepProblem, t: Translate): string {
       return t("flow_step_editor_name_required");
     case "http_url_missing":
       return t("flow_step_editor_http_url_missing");
+    case "http_credential_missing":
+      return t("flow_editor_tools_check_http_credential_missing");
     case "tool_missing":
       return t("flow_step_editor_tool_required");
     case "tool_unavailable":

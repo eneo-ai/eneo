@@ -3,10 +3,10 @@ from __future__ import annotations
 import json
 
 from eneo.flows.http_transport.authored_config import (
+    HttpAuth,
     HttpAuthApiKey,
     HttpAuthBasicAuth,
     HttpAuthBearer,
-    HttpAuthNone,
     HttpAuthoredConfig,
     HttpBodyMode,
     is_secret_sentinel,
@@ -20,14 +20,33 @@ from eneo.flows.http_transport.effective_url import (
 from eneo.flows.http_transport.errors import HttpTransportError
 
 
+def credential_missing(auth: HttpAuth) -> bool:
+    """Whether the auth mode needs a credential that is neither entered nor
+    stored (a stored one reads as its sentinel)."""
+    match auth:
+        case HttpAuthBearer(token=token):
+            return not token and not is_secret_sentinel(token)
+        case HttpAuthApiKey(key=key):
+            return not key and not is_secret_sentinel(key)
+        case HttpAuthBasicAuth(username=username, password=password):
+            return not username and not password and not is_secret_sentinel(password)
+        case _:
+            return False
+
+
 def validate_authored_config(
     config: HttpAuthoredConfig,
     *,
     direction: str,
     method: str,
     max_timeout: float,
+    credentials_required: bool = True,
 ) -> list[HttpTransportError]:
-    """Validate authored config. Returns list of error codes (empty = valid)."""
+    """Validate authored config. Returns list of error codes (empty = valid).
+
+    ``credentials_required`` False accepts an auth mode whose token, key or
+    password is not entered yet: a draft is saved before the person enters it
+    in the editor. Publishing and testing a connection require it."""
     errors: list[HttpTransportError] = []
 
     url_error = authored_url_error(config.url)
@@ -40,19 +59,8 @@ def validate_authored_config(
         except InvalidHttpUrl:
             errors.append(HttpTransportError.CREDENTIALS_REQUIRE_HTTPS)
 
-    # Auth credentials validation (skip sentinel values — already stored)
-    match config.auth:
-        case HttpAuthBearer(token=token):
-            if not token and not is_secret_sentinel(token):
-                errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
-        case HttpAuthApiKey(key=key):
-            if not key and not is_secret_sentinel(key):
-                errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
-        case HttpAuthBasicAuth(username=username, password=password):
-            if not username and not password and not is_secret_sentinel(password):
-                errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
-        case HttpAuthNone():
-            pass
+    if credentials_required and credential_missing(config.auth):
+        errors.append(HttpTransportError.MISSING_AUTH_CREDENTIALS)
 
     # Body validation
     if method.upper() == "GET" and config.body.mode not in (

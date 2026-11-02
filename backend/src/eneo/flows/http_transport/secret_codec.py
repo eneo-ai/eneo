@@ -348,21 +348,27 @@ def decrypt_authored_config(
     return config.model_copy(update={"auth": auth, "custom_headers": custom_headers})
 
 
+def _hidden(value: SecretValue) -> SecretValue:
+    """The sentinel for a stored secret. An empty value has nothing to hide and
+    stays empty, so a reader sees that the credential is still missing."""
+    return SECRET_SENTINEL if value else value
+
+
 def redact_authored_config(config: HttpAuthoredConfig) -> HttpAuthoredConfig:
-    """Replace sensitive fields with sentinel for API responses."""
+    """Replace stored secrets with the sentinel for API responses."""
     auth = config.auth
     match auth:
-        case HttpAuthBearer():
-            auth = auth.model_copy(update={"token": SECRET_SENTINEL})
-        case HttpAuthApiKey():
-            auth = auth.model_copy(update={"key": SECRET_SENTINEL})
-        case HttpAuthBasicAuth():
-            auth = auth.model_copy(update={"password": SECRET_SENTINEL})
+        case HttpAuthBearer(token=token):
+            auth = auth.model_copy(update={"token": _hidden(token)})
+        case HttpAuthApiKey(key=key):
+            auth = auth.model_copy(update={"key": _hidden(key)})
+        case HttpAuthBasicAuth(password=pwd):
+            auth = auth.model_copy(update={"password": _hidden(pwd)})
         case HttpAuthNone():
             pass
 
     custom_headers = [
-        h.model_copy(update={"value": SECRET_SENTINEL}) if h.secret else h
+        h.model_copy(update={"value": _hidden(h.value)}) if h.secret else h
         for h in config.custom_headers
     ]
 

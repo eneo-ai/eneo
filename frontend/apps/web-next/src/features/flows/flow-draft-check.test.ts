@@ -48,6 +48,30 @@ describe("checkDraft", () => {
     expect(problemCount(check)).toBe(5);
   });
 
+  it("says a connection still waits for its credential", () => {
+    const flow = makeFlow({
+      steps: [
+        makeStep(1, {
+          input_source: "http_get",
+          input_config: {
+            url: "https://api.example.se/cases",
+            auth: { mode: "api_key", header_name: "X-API-Key", key: "" }
+          }
+        }),
+        makeStep(2, {
+          output_mode: "http_post",
+          output_config: {
+            url: "https://hooks.example.se/in",
+            auth: { mode: "bearer_token", token: { $secret: "stored" } }
+          }
+        })
+      ]
+    });
+    expect(
+      checkDraft(flow, none).steps.map(({ step, problems }) => [step.step_order, problems])
+    ).toEqual([[1, [{ code: "http_credential_missing" }]]]);
+  });
+
   it("judges with what the core answered: models, tools and the classification", () => {
     const flow = makeFlow({
       steps: [
