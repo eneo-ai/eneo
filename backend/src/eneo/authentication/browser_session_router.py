@@ -132,9 +132,10 @@ async def create_browser_session(
         password=form_data.password,
         container=container,
     )
+    session_token = await container.browser_session_service().start(token.access_token)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     # A new token every time, never one the request brought (session fixation).
-    set_session_cookie(response, token.access_token, settings=get_settings())
+    set_session_cookie(response, session_token, settings=get_settings())
     return response
 
 
@@ -145,12 +146,14 @@ async def create_browser_session(
     response_model=None,
     name="Sign out the browser",
     description=(
-        "Clear the browser's session cookies. Sign-out is local: the token is "
-        "not revoked. With `Eneo-Session-Generation`, a session other than "
-        "the one named is left in place (401). Only for requests from the "
+        "End the browser's Eneo session on the server and clear its cookies: "
+        "a copy of the session token stops working at once. The identity "
+        "provider's session stays. With `Eneo-Session-Generation`, a session "
+        "other than the one named is left in place (401). When the session "
+        "cannot be ended, nothing is cleared (503). Only for requests from the "
         "site's own pages."
     ),
-    responses=responses.get_responses([401, 403, 404]),
+    responses=responses.get_responses([401, 403, 404, 503]),
 )
 @endpoint_access(
     authentication=Authentication.PUBLIC,
@@ -159,11 +162,14 @@ async def create_browser_session(
 )
 async def end_browser_session(
     request: Request,
+    # The deletion commits before the response says signed out.
+    container: Annotated[Container, Depends(get_container(with_transaction=False))],
 ) -> Response:
     settings = get_settings()
     token = session_cookie(request, settings)
     if token is not None:
         refuse_superseded_session(request, token)
+        await container.browser_session_service().end(token)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     clear_session_cookies(response, settings=settings)
     return response
@@ -470,6 +476,9 @@ async def complete_browser_federation(
         # The function-scoped transaction must roll back before the ASGI owner
         # turns the public HTTP failure into a redirect.
         raise
+    session_token = await container.browser_session_service().start(
+        token["access_token"]
+    )
     response = RedirectResponse(diagnostics.next_path, status_code=303)
-    set_session_cookie(response, token["access_token"], settings=settings)
+    set_session_cookie(response, session_token, settings=settings)
     return response
