@@ -540,6 +540,33 @@ def test_assets_are_immutable_and_missing_assets_404(
     assert missing.headers["content-type"] == "application/json"
 
 
+@pytest.mark.parametrize("method", ["GET", "HEAD"])
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/assets/nope-123.js",
+        "/favicon.svg",
+        "/index.html",
+        "/assets/%2E%2E/%2E%2E/secret.txt",
+    ],
+)
+def test_missing_build_files_are_never_cached(
+    monkeypatch: pytest.MonkeyPatch, dist: Path, path: str, method: str
+):
+    # A file missing now may exist after the next release swap.
+    client = _client(monkeypatch, dist)
+    request_id = {"X-Request-ID": "req-missing-file"}
+
+    response = client.request(method, path, headers=request_id)
+
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "no-store"
+    if method == "GET":
+        # The envelope of a routing miss.
+        miss = client.get("/api/v1/does-not-exist", headers=request_id)
+        assert response.json() == miss.json()
+
+
 @pytest.mark.parametrize(
     "path", ["/flows/pcm16-worklet.js", "/assets/%2E%2E/flows/pcm16-worklet.js"]
 )

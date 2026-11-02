@@ -6,7 +6,8 @@ its 307 and 405 answers (``Mount("/")`` would take both over):
 
 - a reserved prefix, or the MCP content host, gets the API's JSON 404;
 - a path with a file extension is a build file: hashed ``/assets/`` are
-  immutable, other files revalidate. ``index.html`` is never served raw;
+  immutable, other files revalidate, a missing one is not stored.
+  ``index.html`` is never served raw;
 - legacy pages and English-prefixed URLs redirect to their canonical pages;
 - any other GET or HEAD gets ``index.html`` with a fresh nonce, its CSP and
   ``<html lang>``, never stored.
@@ -27,6 +28,7 @@ from urllib.parse import quote, quote_from_bytes
 
 from fastapi import FastAPI, HTTPException
 from fastapi.routing import APIRoute
+from starlette.exceptions import HTTPException as StarletteHTTPException
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, RedirectResponse, Response
 from starlette.staticfiles import StaticFiles
@@ -72,6 +74,8 @@ _PATH_HEADERS = {
 }
 
 _IMMUTABLE = "public, max-age=31536000, immutable"
+# A build file missing now may exist after the next release swap.
+_NOT_STORED = {"Cache-Control": "no-store"}
 
 
 def build_content_security_policy(nonce: str, frame_origins: Sequence[str]) -> str:
@@ -226,12 +230,17 @@ def install_web_app(app: FastAPI) -> None:
         suffix = PurePosixPath(path).suffix.lower()
         if suffix == ".html":
             # Raw index.html would carry no CSP and the literal placeholders.
-            raise HTTPException(status_code=404)
+            raise HTTPException(status_code=404, headers=_NOT_STORED)
         if suffix:
             # Normalized; StaticFiles refuses traversal out of dist and
             # methods other than GET and HEAD.
             file = static.get_path(scope)
-            response = await static.get_response(file, scope)
+            try:
+                response = await static.get_response(file, scope)
+            except StarletteHTTPException as exc:
+                if exc.status_code != 404:
+                    raise
+                raise HTTPException(status_code=404, headers=_NOT_STORED) from None
             hashed = PurePath(file).parts[:1] == ("assets",)
             response.headers["Cache-Control"] = _IMMUTABLE if hashed else "no-cache"
             await response(scope, receive, send)
