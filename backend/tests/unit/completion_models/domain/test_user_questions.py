@@ -133,3 +133,11 @@ def test_the_tool_results_tell_the_model_what_happened() -> None:
         "reason": "question_pending",
         "retryable": True,
     }
+
+
+def test_the_tool_tells_the_model_a_click_is_the_answer_and_typed_values_are_asked_in_text():
+    description = ask_user_function_definition().description
+
+    assert "Each option is a complete answer" in description
+    assert "do not call this tool: ask in your message" in description
+    assert "Never offer an option that stands for typing a value" in description

@@ -11,6 +11,7 @@ from eneo.flows.domain.flow_suggestions import (
     FLOW_SUGGESTION_AUTHORING_RULES,
     FlowSuggestionCode,
 )
+from eneo.flows.enums import FlowInputSource, FlowOutputDelivery, FlowOutputMode
 from eneo.mcp_servers.domain.capabilities import CapabilityAvailability
 
 
@@ -62,6 +63,25 @@ def test_the_instructions_ask_one_shaping_question_at_a_time() -> None:
     assert "instructions to follow, an example of what a run gets as input" in (
         instructions
     )
+
+
+def test_the_instructions_offer_only_what_a_flow_can_do() -> None:
+    instructions = _unwrapped(AUTHORING_INSTRUCTIONS)
+
+    # Every building block is named, so the model knows the whole list.
+    for member in (*FlowInputSource, *FlowOutputMode, *FlowOutputDelivery):
+        assert f"{member.value}:" in instructions
+    assert "A result leaves a flow in these ways and no other" in instructions
+    assert "There is no email, no messaging" in instructions
+    assert "Never offer it as a choice" in instructions
+    assert "never a product or service the flow has no tool for" in instructions
+    assert "A choice is a complete answer, sent when it is clicked" in instructions
+    assert (
+        "How the result is delivered is never a question with choices" in instructions
+    )
+    assert "E-post, SMS, Teams and the like are never choices" in instructions
+    assert "never offer a choice that stands for typing it" in instructions
+    assert "An answer already given is settled" in instructions
 
 
 def test_the_instructions_take_a_contract_from_an_example() -> None:

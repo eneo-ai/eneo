@@ -9,8 +9,10 @@ but only the current one is ever answered or sent to the model, because
 from __future__ import annotations
 
 import textwrap
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from enum import Enum
 from typing import TYPE_CHECKING, Any, Iterable, Literal, cast
 from uuid import UUID
 
@@ -42,6 +44,7 @@ from eneo.flows.domain.flow_suggestions import (
     FLOW_SUGGESTION_AUTHORING_RULES,
     FlowSuggestionCode,
 )
+from eneo.flows.enums import FlowInputSource, FlowOutputDelivery, FlowOutputMode
 from eneo.flows.flow_api_error_code import FlowApiErrorCode
 from eneo.flows.flow_api_exceptions import FlowBadRequestException
 from eneo.main.config import get_settings
@@ -152,10 +155,66 @@ right; do not pad. When edit mode is off, describe the steps you would build
 in plain words and offer to build them once edit mode is on.
 """
 
+# What a flow is made of, in the model's terms. Every member of each enum has a
+# line here, so a new building block is described before the chat may offer it.
+_INPUT_SOURCES: Mapping[FlowInputSource, str] = {
+    FlowInputSource.FLOW_INPUT: "the run form or an uploaded file",
+    FlowInputSource.PREVIOUS_STEP: "the step before it",
+    FlowInputSource.ALL_PREVIOUS_STEPS: "every step before it",
+    FlowInputSource.HTTP_GET: "an HTTPS address the flow reads",
+    FlowInputSource.TOOL: "a tool the space offers",
+}
+_OUTPUT_MODES: Mapping[FlowOutputMode, str] = {
+    FlowOutputMode.PASS_THROUGH: "text or structured values from its AI instruction",
+    FlowOutputMode.COMPOSE_TEXT: "text composed from earlier results, without AI",
+    FlowOutputMode.COPY_INPUT: "its input passed on unchanged",
+    FlowOutputMode.HTTP_POST: "its result posted to an HTTPS address",
+    FlowOutputMode.TRANSCRIBE_ONLY: "a transcript of audio",
+    FlowOutputMode.TEMPLATE_FILL: "a Word template filled with earlier results",
+    FlowOutputMode.RENDER_VERBATIM: "a file rendered from earlier text as it is",
+    FlowOutputMode.SPEAKER_MAPPING: "speaker labels mapped to names, confirmed by a reviewer",
+}
+_DELIVERIES: Mapping[FlowOutputDelivery, str] = {
+    FlowOutputDelivery.PAYLOAD: "read in Eneo as the run's result",
+    FlowOutputDelivery.ARTIFACT: "downloaded as a file",
+    FlowOutputDelivery.OUTBOUND_HTTP: "posted to an HTTPS address the receiving system offers",
+}
+
+
+def _capabilities() -> str:
+    """What a flow can be built to do, so that no question offers more."""
+
+    def listing(items: Iterable[tuple[Enum, str]]) -> str:
+        return "; ".join(f"{key.value}: {text}" for key, text in items)
+
+    text = (
+        "A flow can only do what its building blocks do, and every option you offer "
+        "is a promise that it can be built. A step reads from "
+        + listing(_INPUT_SOURCES.items())
+        + ". A step gives "
+        + listing(_OUTPUT_MODES.items())
+        + ". A result leaves a flow in these ways and no other: "
+        + listing(_DELIVERIES.items())
+        + ". There is no email, no messaging, no calendar, no provider integration "
+        "(Microsoft 365, Gmail, Teams and the like) and no schedule, unless the space "
+        "offers an MCP tool for it (read_tool_options). When the person asks for a "
+        "delivery or a connection outside this, say in one sentence that a flow cannot "
+        "do it and offer the nearest real path: an HTTPS address the receiving system "
+        "provides, picking the result up in Eneo, or an administrator adding a tool. "
+        "Never offer it as a choice, never promise that the editor can be set up for "
+        "it, and never build a step that imitates it."
+    )
+    return textwrap.fill(text, width=80) + "\n"
+
+
 _QUESTIONS = """Ask only where the answer changes the shape of the flow: whether one
 result is wanted or one per source, whether all the material or only the
-relevant parts are read, whether a person reviews before delivery, and which
-system or format receives the result. Ask one question at a time, in plain
+relevant parts are read, and whether a person reviews before delivery. How the
+result is delivered is never a question with choices: a flow's result is read
+in Eneo, and only when the person says it should go somewhere do you ask, in
+plain words, for the HTTPS address the receiving system offers. E-post, SMS,
+Teams and the like are never choices, whatever words the person used; say that
+a flow cannot send them and go on. Ask one question at a time, in plain
 words, and build on the answer. Never ask what the flow, an uploaded file or
 an earlier answer already says. For a choice that does not change the shape
 (a step's name, the order of two independent checks, a wording), take a
@@ -164,6 +223,13 @@ can correct it. When a file is attached and it is not clear whether it is
 instructions to follow, an example of what a run gets as input or a template of
 the result, ask that first, with those as the options. Permission to send data
 anywhere or to start a run is never assumed: ask before it, every time.
+Every choice you offer names something the flow can be built to do, in the
+flow's own words, never a product or service the flow has no tool for. A
+choice is a complete answer, sent when it is clicked. When the answer
+must be typed (an address, a name, a number), do not ask with choices: ask in
+your reply in plain words, and the person answers in the chat; never offer a
+choice that stands for typing it. An answer already given is settled; the next
+question asks only for what is still missing.
 """
 
 _EXPECTED_RESULT = """Before building a flow from a description, and after changing what a
@@ -304,6 +370,7 @@ def _suggestion_rules() -> str:
 AUTHORING_INSTRUCTIONS = (
     _AUTHORING_BASICS
     + _TASK_TO_FLOW
+    + _capabilities()
     + _QUESTIONS
     + _EXPECTED_RESULT
     + _FROM_EXAMPLE
