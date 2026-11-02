@@ -48,6 +48,9 @@ update_steps call. When the person shows an example of what a step should give a
 JSON, contract_from_example gives the step the contract the example implies; the
 example itself is not kept.
 Read pages until next_offset is null before claiming you reviewed the whole value.
+A flow delivers its result in Eneo, as a file, or by posting it to an HTTPS
+address (http_post on the last step); it cannot send e-mail, messages or anything
+else, and a question never offers those as choices.
 Credentials belong in the editor and must never be requested or placed in tools.
 An HTTP step's config (input_config for http_get, output_config for http_post)
 holds url, auth, timeout_seconds, body ({"mode": "auto"|"json_template"|

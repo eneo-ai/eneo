@@ -42,7 +42,12 @@ _DESCRIPTION = (
     "your turn: write what you know so far in your message, call this tool "
     "once, and stop. The answer arrives as the next user message. Never ask "
     "what the person, a file or an earlier answer already says, never ask "
-    "several questions at once, and never ask for passwords or keys."
+    "several questions at once, and never ask for passwords or keys. Each "
+    "option is a complete answer, sent when the person clicks it, so offer "
+    "only what you can do with it. When the answer must be typed, such as an "
+    "address, a name or a number, do not call this tool: ask in your message, "
+    "and the person answers in the chat. Never offer an option that stands "
+    "for typing a value."
 )
 
 
