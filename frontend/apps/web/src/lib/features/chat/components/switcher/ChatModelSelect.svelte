@@ -18,6 +18,7 @@
   import Cpu from "@lucide/svelte/icons/cpu";
   import Lock from "@lucide/svelte/icons/lock";
   import ChatModelDetails from "./ChatModelDetails.svelte";
+  import { settingsControlsDisabled } from "../conversation/conversationInputState";
 
   const chat = getChatService();
   const { onNewConversation }: { onNewConversation: () => void } = $props();
@@ -31,6 +32,15 @@
     savedModelUnavailable
       ? m.conversation_settings_model_unavailable()
       : (selectedModel?.nickname ?? m.select_a_model())
+  );
+  // Not gated on an unavailable model: the picker is how a replacement is chosen.
+  const disabled = $derived(
+    settingsControlsDisabled({
+      hasSettings: Boolean(chat.settings),
+      isLoading: chat.askQuestion.isLoading,
+      settingsCompatible: chat.settingsResolution?.settings_compatible !== false,
+      modelUnavailable: false
+    }).model
   );
   let selectorOpen = $state(false);
   let pendingModelId = $state<string | null>(null);
@@ -59,19 +69,15 @@
     pendingModelId = null;
     // Capture the model before resetting clears the current resolution/catalog.
     if (newConversation) onNewConversation();
+    // The pick belongs to the conversation shown when it was made.
+    const conversation = chat.currentConversation;
     await chat.loadSettings();
+    if (chat.currentConversation !== conversation) return;
     await chat.selectPersonalModel(model);
   }
 
   function selectModel(id: string) {
-    if (
-      !id ||
-      id === selectedId ||
-      chat.askQuestion.isLoading ||
-      chat.settingsBusy ||
-      !chat.settings
-    )
-      return;
+    if (!id || id === selectedId || disabled) return;
     selectorOpen = false;
     if (chat.currentConversation.messages.length > 0) {
       pendingModelId = id;
@@ -106,10 +112,7 @@
 {:else}
   <ModelSelector.Root bind:open={selectorOpen}>
     <ModelSelector.Trigger
-      disabled={chat.settingsBusy ||
-        !chat.settings ||
-        chat.askQuestion.isLoading ||
-        chat.settingsResolution?.settings_compatible === false}
+      {disabled}
       class="min-w-0 gap-1 px-2 @[36rem]/composer:gap-1.5 @[36rem]/composer:px-2.5 [&>svg:last-child]:hidden @[26rem]/composer:[&>svg:last-child]:block"
       aria-label={`${m.choose_a_completion_model()}: ${selectedLabel}`}
       title={selectedLabel}

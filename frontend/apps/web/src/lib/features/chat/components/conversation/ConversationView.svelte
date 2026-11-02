@@ -2,6 +2,8 @@
   import { conversationUploadGroups } from "../../conversationUploads";
   import { opensFilePanel } from "../../toolFileInputs";
   import { getEneo } from "$lib/core/Eneo";
+  import { getAppContext } from "$lib/core/AppContext";
+  import { canUseCapability } from "$lib/features/mcp/capabilities";
   import {
     initAttachmentManager,
     matchesUpload
@@ -49,6 +51,7 @@
   let { children, onNewConversation }: Props = $props();
 
   const chat = getChatService();
+  const { user } = getAppContext();
   const uploadGroups = $derived(conversationUploadGroups(chat.currentConversation.messages ?? []));
   const uploads = $derived(uploadGroups.flatMap((group) => group.files));
 
@@ -57,8 +60,8 @@
   // are rejected instantly with a clear message instead of silently failing the
   // server-side request. Group-chat partners have no completion_model, so vision
   // formats are simply omitted from the accepted set. Images are also accepted
-  // when image generation is available: the model can hand them to the image
-  // tool as reference images even without seeing them itself.
+  // when image generation is available to this user: the model can hand them
+  // to the image tool as reference images even without seeing them itself.
   const attachmentRules = getAttachmentRulesStore(
     toStore(() => {
       const partner = chat.partner;
@@ -70,12 +73,13 @@
         completion_model,
         acceptsImageAttachments:
           completion_model?.vision === true ||
-          chat.settingsResolution?.capabilities?.some(
-            (capability) =>
-              capability.purpose === "image_generation" &&
-              capability.available &&
-              capability.selected
-          ) === true
+          (canUseCapability(user, "image_generation") &&
+            chat.settingsResolution?.capabilities?.some(
+              (capability) =>
+                capability.purpose === "image_generation" &&
+                capability.available &&
+                capability.selected
+            ) === true)
       };
     })
   );

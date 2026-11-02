@@ -29,6 +29,51 @@ describe("ChatMcpServers", () => {
     expect(selectionSnapshots).toEqual([["server-a"]]);
   });
 
+  it("shows the saved value until the selection changes, never the click", async () => {
+    const disabledServerIds = new SvelteSet<string>();
+    const reported: string[][] = [];
+
+    render(ChatMcpServers, {
+      servers: [{ id: "server-a", name: "Server A" }],
+      disabledServerIds,
+      autoAcceptTools: true,
+      onSelectionChange: (ids) => reported.push([...ids])
+    });
+
+    await page
+      .getByRole("button", { name: m.mcp_servers_status_aria({ active: 1, total: 1 }) })
+      .click();
+    const server = page.getByRole("switch", { name: "Server A" });
+    await server.click();
+
+    // A save that fails leaves the selection as it was: so does the switch.
+    expect(reported).toEqual([["server-a"]]);
+    await expect.element(server).toHaveAttribute("aria-checked", "true");
+
+    disabledServerIds.add("server-a");
+    await expect.element(server).toHaveAttribute("aria-checked", "false");
+  });
+
+  it("shows the saved approval choice until it changes, never the click", async () => {
+    const reported: boolean[] = [];
+
+    render(ChatMcpServers, {
+      servers: [{ id: "server-a", name: "Server A" }],
+      disabledServerIds: new SvelteSet<string>(),
+      autoAcceptTools: true,
+      onAutoAcceptChange: (enabled) => reported.push(enabled)
+    });
+
+    await page
+      .getByRole("button", { name: m.mcp_servers_status_aria({ active: 1, total: 1 }) })
+      .click();
+    const auto = page.getByRole("switch", { name: m.mcp_run_tools_automatically() });
+    await auto.click();
+
+    expect(reported).toEqual([false]);
+    await expect.element(auto).toHaveAttribute("aria-checked", "true");
+  });
+
   it("renders capability providers by capability name and excludes them from all-off", async () => {
     const disabledServerIds = new SvelteSet<string>();
 

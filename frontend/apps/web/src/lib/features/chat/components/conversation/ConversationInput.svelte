@@ -28,9 +28,14 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import X from "@lucide/svelte/icons/x";
   import { getErrorMessage } from "$lib/core/errors/getErrorMessage";
-  import { getCapability, canUseCapability } from "$lib/features/mcp/capabilities";
+  import { canUseCapability } from "$lib/features/mcp/capabilities";
   import { getPartnerKnowledgeSources, hasKnowledgeSources } from "../../knowledgeSources";
-  import { getContextErrorInfo, isConversationSubmitDisabled } from "./conversationInputState";
+  import {
+    getContextErrorInfo,
+    isConversationSubmitDisabled,
+    settingsControlsDisabled,
+    toolSelectionUpdate
+  } from "./conversationInputState";
   import { getFilePreview } from "$lib/features/file-preview/FilePreview.svelte";
   import { getMcpAppPane } from "../../mcp-apps/McpAppPane.svelte";
   import { composeQuotedQuestion, tableQuoteSummary } from "../../questionQuote";
@@ -99,10 +104,12 @@
   let abortController: AbortController | undefined;
   const autoAcceptTools = $derived(!chat.settings?.require_tool_approval);
   const settingsDisabled = $derived(
-    !chat.settings ||
-      chat.settingsBusy ||
-      chat.askQuestion.isLoading ||
-      chat.settingsResolution?.settings_compatible === false
+    settingsControlsDisabled({
+      hasSettings: Boolean(chat.settings),
+      isLoading: chat.askQuestion.isLoading,
+      settingsCompatible: chat.settingsResolution?.settings_compatible !== false,
+      modelUnavailable: chat.settingsResolution?.model_unavailable === true
+    })
   );
 
   $effect(() => {
@@ -113,16 +120,12 @@
   });
 
   function persistMcpServerSelection(disabledServerIds: ReadonlySet<string>) {
-    const mcp_server_states = { ...chat.settings?.mcp_server_states };
-    const capability_states = { ...chat.settings?.capability_states };
-    for (const id of availableMcpServerIds) {
-      const purpose = getCapability(
-        id.startsWith("capability:") ? id.slice("capability:".length) : null
-      )?.purpose;
-      if (purpose) capability_states[purpose] = !disabledServerIds.has(id);
-      else mcp_server_states[id] = !disabledServerIds.has(id);
-    }
-    void chat.updateSettings({ mcp_server_states, capability_states });
+    const update = toolSelectionUpdate(
+      chat.settings,
+      [...generalMcpServers, ...capabilityServers],
+      disabledServerIds
+    );
+    if (update) void chat.updateSettings(update);
   }
 
   function queueUploadsFromClipboard(event: ClipboardEvent) {
@@ -306,10 +309,6 @@
         reason: capability.reason ?? null
       }))
   );
-  const availableMcpServerIds = $derived(
-    [...generalMcpServers, ...capabilityServers].map((s) => s.id)
-  );
-
   const disabledMcpServerIds = $derived.by(() => {
     const disabled = new SvelteSet<string>();
     for (const tool of [...generalMcpServers, ...capabilityServers]) {
@@ -385,7 +384,8 @@
       isLoading: chat.askQuestion.isLoading,
       sendPending:
         sendPending ||
-        settingsDisabled ||
+        settingsDisabled.model ||
+        chat.settingsBusy ||
         Boolean(chat.settingsError) ||
         Boolean(chat.settingsResolution?.model_unavailable),
       hasContent: $question !== "" || $attachments.length > 0,
@@ -485,6 +485,9 @@
         disabled={chat.settingsBusy || chat.askQuestion.isLoading}
         onclick={() => void chat.loadSettings(true)}>{m.conversation_settings_reload()}</Button
       >
+      <Button variant="ghost" size="sm" onclick={startNewConversation}
+        >{m.new_conversation()}</Button
+      >
     </div>
   {/if}
 
@@ -536,7 +539,12 @@
     </div>
   {/if}
 
-  <PromptInput.Footer class="flex-wrap gap-1 px-1.5 @[36rem]/composer:gap-2 @[36rem]/composer:px-2">
+  <!-- The controls stay usable while a change is being saved; a change made
+       meanwhile is saved after it. -->
+  <PromptInput.Footer
+    class="flex-wrap gap-1 px-1.5 @[36rem]/composer:gap-2 @[36rem]/composer:px-2"
+    aria-busy={chat.settingsBusy}
+  >
     <PromptInput.Tools
       class={[
         "shrink-0 gap-0.5 @[36rem]/composer:gap-1",
@@ -566,7 +574,7 @@
           disabledServerIds={disabledMcpServerIds}
           onSelectionChange={persistMcpServerSelection}
           {autoAcceptTools}
-          disabled={settingsDisabled}
+          disabled={settingsDisabled.modelDependent}
           showApproval={chat.partner.type !== "group-chat"}
           onAutoAcceptChange={(enabled) =>
             void chat.updateSettings({ require_tool_approval: !enabled })}

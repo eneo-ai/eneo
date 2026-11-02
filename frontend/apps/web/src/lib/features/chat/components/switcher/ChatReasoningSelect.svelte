@@ -2,6 +2,7 @@
   import * as Select from "$lib/components/ui/select/index.js";
   import { getChatService } from "../../ChatService.svelte";
   import { getModelKwargOptionLabel } from "$lib/features/ai-models/ModelKwargCapabilities";
+  import { settingsControlsDisabled } from "../conversation/conversationInputState";
   import { m } from "$lib/paraglide/messages";
   import Brain from "@lucide/svelte/icons/brain";
 
@@ -23,6 +24,14 @@
       ? `${VALUE_PREFIX}${storedEffort}`
       : DEFAULT_VALUE
   );
+  const disabled = $derived(
+    settingsControlsDisabled({
+      hasSettings: Boolean(chat.settings),
+      isLoading: chat.askQuestion.isLoading,
+      settingsCompatible: chat.settingsResolution?.settings_compatible !== false,
+      modelUnavailable: chat.settingsResolution?.model_unavailable === true
+    }).modelDependent
+  );
 
   function selectEffort(value: string) {
     const reasoningEffort = value.startsWith(VALUE_PREFIX)
@@ -33,12 +42,11 @@
 </script>
 
 {#if options.length > 0}
-  <Select.Root type="single" value={selectedValue} onValueChange={selectEffort}>
+  <!-- The value is read from the saved choices each time: a pick is shown
+       while it is saved and falls back when the save fails. -->
+  <Select.Root type="single" bind:value={() => selectedValue, selectEffort}>
     <Select.Trigger
-      disabled={chat.settingsBusy ||
-        !chat.settings ||
-        chat.askQuestion.isLoading ||
-        chat.settingsResolution?.settings_compatible === false}
+      {disabled}
       size="sm"
       class="hover:bg-muted h-8 min-w-0 max-w-40 shrink-0 gap-1 border-transparent bg-transparent px-2 font-medium shadow-none [&>svg:last-child]:hidden @[26rem]/composer:[&>svg:last-child]:block"
       aria-label={`${m.reasoning_effort()}: ${effectiveEffort ? getModelKwargOptionLabel(effectiveEffort) : m.default_behavior()}`}

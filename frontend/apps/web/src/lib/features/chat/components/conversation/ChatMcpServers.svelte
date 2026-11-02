@@ -4,7 +4,9 @@
     MCP server controls for the chat input toolbar: pick which of the partner's
     MCP servers are active for this conversation and whether tool calls run
     automatically or require per-call approval. ChatService owns the saved
-    choices; this component renders them and reports requested changes. Eneo's own internal (loopback) servers are
+    choices; this component renders them and reports requested changes, so a
+    switch shows what is saved (or being saved) and never a value of its own.
+    Eneo's own internal (loopback) servers are
     listed too, but they are always active and cannot be toggled. The tenant's
     capability providers (web search, image generation) are real MCP servers
     under the hood but are presented as togglable capability rows, not servers.
@@ -213,8 +215,7 @@
                 >{/if}
             </span>
             <Switch
-              checked={on}
-              onCheckedChange={(value) => setServer(server.id, value)}
+              bind:checked={() => on, (value) => setServer(server.id, value)}
               aria-label={label}
               disabled={disabled || server.available === false}
             />
@@ -261,8 +262,7 @@
               {/if}
             </span>
             <Switch
-              checked={on}
-              onCheckedChange={(value) => setServer(server.id, value)}
+              bind:checked={() => on, (value) => setServer(server.id, value)}
               aria-label={server.name}
               aria-describedby={descId}
               disabled={disabled || server.available === false}
@@ -289,8 +289,7 @@
             </span>
           </span>
           <Switch
-            checked={autoAcceptTools}
-            onCheckedChange={onAutoAcceptChange}
+            bind:checked={() => autoAcceptTools, (value) => onAutoAcceptChange?.(value)}
             {disabled}
             aria-label={m.mcp_run_tools_automatically()}
             aria-describedby="mcp-auto-accept-desc"

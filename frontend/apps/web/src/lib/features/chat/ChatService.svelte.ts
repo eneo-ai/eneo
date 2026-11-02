@@ -108,9 +108,47 @@ export class ChatService {
   currentConversation = $state<Conversation>(emptyConversation());
   #modelCatalog = $state<SparseCompletionModel[]>([]);
   #draftSettings = $state<ConversationSettings | null>(null);
-  settings = $derived(this.currentConversation.settings?.settings ?? this.#draftSettings);
-  settingsResolution = $state<ConversationSettingsResolution | null>(null);
-  settingsBusy = $state(false);
+  #savedSettings = $derived(this.currentConversation.settings?.settings ?? this.#draftSettings);
+  // Changes still being saved, oldest first. Each is shown at once and
+  // dropped when its save has landed or failed, so a control never shows a
+  // value the server rejected.
+  #pendingUpdates = $state<Partial<ConversationSettings>[]>([]);
+  settings = $derived.by(() => {
+    const saved = this.#savedSettings;
+    if (!saved) return saved;
+    return this.#pendingUpdates.reduce((settings, update) => ({ ...settings, ...update }), saved);
+  });
+  #resolution = $state<ConversationSettingsResolution | null>(null);
+  settingsResolution = $derived.by(() => {
+    const resolution = this.#resolution;
+    if (!resolution || this.#pendingUpdates.length === 0) return resolution;
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- built and read within one derivation
+    const servers = new Map<string, boolean>();
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- built and read within one derivation
+    const capabilities = new Map<string, boolean>();
+    for (const update of this.#pendingUpdates) {
+      for (const [id, on] of Object.entries(update.mcp_server_states ?? {})) servers.set(id, on);
+      for (const [purpose, on] of Object.entries(update.capability_states ?? {}))
+        capabilities.set(purpose, on);
+    }
+    return {
+      ...resolution,
+      mcp_servers: resolution.mcp_servers?.map((server) => ({
+        ...server,
+        selected: servers.get(server.id) ?? server.selected
+      })),
+      capabilities: resolution.capabilities?.map((capability) => ({
+        ...capability,
+        selected: capabilities.get(capability.purpose) ?? capability.selected
+      }))
+    };
+  });
+  // Loads and saves of one conversation's settings run one at a time, each on
+  // the revision the previous one left behind. Null while nothing runs, so
+  // the next request starts at once.
+  #settingsQueue: Promise<void> | null = null;
+  #settingsPending = $state(0);
+  settingsBusy = $derived(this.#settingsPending > 0);
   settingsError = $state<unknown>(null);
   #settingsEnabled = false;
   #draftOwner?: { tenantId: string; userId: string };
@@ -360,13 +398,30 @@ export class ChatService {
 
   #resetSettings() {
     this.#draftSettings = null;
-    this.settingsResolution = null;
-    this.settingsBusy = false;
+    this.#resolution = null;
+    this.#pendingUpdates = [];
+    this.#settingsQueue = null;
+    this.#settingsPending = 0;
     this.settingsError = null;
   }
 
+  #queueSettings(conversation: Conversation, task: () => Promise<void>): Promise<void> {
+    this.#settingsPending += 1;
+    const previous = this.#settingsQueue;
+    const run = (previous ? previous.then(task) : task()).finally(() => {
+      if (conversation === this.currentConversation) this.#settingsPending -= 1;
+    });
+    const chained: Promise<void> = run
+      .catch(() => {})
+      .then(() => {
+        if (this.#settingsQueue === chained) this.#settingsQueue = null;
+      });
+    this.#settingsQueue = chained;
+    return run;
+  }
+
   #setResolvedSettings(conversation: Conversation, resolution: ConversationSettingsResolution) {
-    this.settingsResolution = resolution;
+    this.#resolution = resolution;
     if (conversation.id && resolution.revision > 0) {
       conversation.settings = { revision: resolution.revision, settings: resolution.settings };
     } else {
@@ -376,8 +431,8 @@ export class ChatService {
   }
 
   // The browser's start choices for new chats follow what the user set up:
-  // a draft, or a change made in a conversation. Opening an older
-  // conversation only reads its saved choices and leaves the draft alone.
+  // a draft, or a change made in a conversation. Opening a conversation or a
+  // new draft only reads and leaves the start choices alone.
   #rememberDraft(resolution: ConversationSettingsResolution) {
     const scope = this.#draftScope();
     if (
@@ -392,78 +447,88 @@ export class ChatService {
 
   async loadSettings(force = false) {
     this.#settingsEnabled = true;
-    if (this.settingsBusy || (this.settingsResolution && !force)) return;
+    if (this.#resolution && !force) return;
     const conversation = this.currentConversation;
     const partner = this.#chatPartner;
-    this.settingsBusy = true;
-    try {
-      const resolve = (settings?: ConversationSettings) =>
-        this.#eneo.conversations.resolveSettings({ chatPartner: partner, conversation, settings });
-      const scope = this.#draftScope();
-      let resolution = conversation.id
-        ? await resolve()
-        : await resolveConversationDraft(
-            resolve,
-            this.settings ?? (browser && scope ? readConversationDraft(scope) : undefined)
-          );
-      if (conversation.id && resolution.revision === 0 && !resolution.model_unavailable) {
-        try {
-          await this.#eneo.conversations.updateSettings(conversation, resolution.settings, 0);
-        } catch (error) {
-          if (!(error instanceof EneoError) || error.status !== 409) throw error;
+    await this.#queueSettings(conversation, async () => {
+      if (conversation !== this.currentConversation || (this.#resolution && !force)) return;
+      try {
+        const resolve = (settings?: ConversationSettings) =>
+          this.#eneo.conversations.resolveSettings({
+            chatPartner: partner,
+            conversation,
+            settings
+          });
+        const scope = this.#draftScope();
+        let resolution = conversation.id
+          ? await resolve()
+          : await resolveConversationDraft(
+              resolve,
+              this.settings ?? (browser && scope ? readConversationDraft(scope) : undefined)
+            );
+        if (conversation.id && resolution.revision === 0 && !resolution.model_unavailable) {
+          try {
+            await this.#eneo.conversations.updateSettings(conversation, resolution.settings, 0);
+          } catch (error) {
+            if (!(error instanceof EneoError) || error.status !== 409) throw error;
+          }
+          resolution = await this.#eneo.conversations.resolveSettings({
+            chatPartner: partner,
+            conversation
+          });
         }
-        resolution = await this.#eneo.conversations.resolveSettings({
-          chatPartner: partner,
-          conversation
-        });
+        if (conversation !== this.currentConversation) return;
+        this.settingsError = null;
+        this.#setResolvedSettings(conversation, resolution);
+      } catch (error) {
+        if (conversation === this.currentConversation) this.settingsError = error;
       }
-      if (conversation !== this.currentConversation) return;
-      this.settingsError = null;
-      this.#setResolvedSettings(conversation, resolution);
-      if (!conversation.id) this.#rememberDraft(resolution);
-    } catch (error) {
-      if (conversation === this.currentConversation) this.settingsError = error;
-    } finally {
-      if (conversation === this.currentConversation) this.settingsBusy = false;
-    }
+    });
   }
 
   async updateSettings(update: Partial<ConversationSettings>) {
-    if (
-      !this.settings ||
-      this.settingsBusy ||
-      this.askQuestion.isLoading ||
-      this.settingsResolution?.settings_compatible === false
-    )
-      return;
     const conversation = this.currentConversation;
-    const settings = { ...this.settings, ...update };
-    this.settingsBusy = true;
-    this.settingsError = null;
-    try {
-      const state: ConversationSettingsState | null = conversation.id
-        ? await this.#eneo.conversations.updateSettings(
-            conversation,
-            settings,
-            conversation.settings?.revision ?? 0
-          )
-        : null;
-      if (conversation !== this.currentConversation) return;
-      if (state) conversation.settings = state;
-      if (!state) this.#draftSettings = settings;
-      const resolution = await this.#eneo.conversations.resolveSettings({
-        chatPartner: this.#chatPartner,
-        conversation,
-        settings: conversation.id ? undefined : settings
-      });
-      if (conversation !== this.currentConversation) return;
-      this.#setResolvedSettings(conversation, resolution);
-      this.#rememberDraft(resolution);
-    } catch (error) {
-      if (conversation === this.currentConversation) this.settingsError = error;
-    } finally {
-      if (conversation === this.currentConversation) this.settingsBusy = false;
+    if (!this.settings) {
+      // The choice has nothing to apply to; a load that failed has said why.
+      this.settingsError ??= new Error(m.conversation_settings_loading());
+      return;
     }
+    if (this.askQuestion.isLoading || this.settingsResolution?.settings_compatible === false)
+      return;
+    this.#pendingUpdates = [...this.#pendingUpdates, update];
+    this.settingsError = null;
+    await this.#queueSettings(conversation, async () => {
+      try {
+        // An earlier save of this conversation failed: its revision is stale
+        // and the user has been asked to reload, so this change is dropped.
+        if (conversation !== this.currentConversation || this.settingsError) return;
+        const saved = this.#savedSettings;
+        if (!saved) return;
+        const settings = { ...saved, ...update };
+        const state: ConversationSettingsState | null = conversation.id
+          ? await this.#eneo.conversations.updateSettings(
+              conversation,
+              settings,
+              conversation.settings?.revision ?? 0
+            )
+          : null;
+        if (conversation !== this.currentConversation) return;
+        if (state) conversation.settings = state;
+        if (!state) this.#draftSettings = settings;
+        const resolution = await this.#eneo.conversations.resolveSettings({
+          chatPartner: this.#chatPartner,
+          conversation,
+          settings: conversation.id ? undefined : settings
+        });
+        if (conversation !== this.currentConversation) return;
+        this.#setResolvedSettings(conversation, resolution);
+        this.#rememberDraft(resolution);
+      } catch (error) {
+        if (conversation === this.currentConversation) this.settingsError = error;
+      } finally {
+        this.#pendingUpdates = this.#pendingUpdates.filter((pending) => pending !== update);
+      }
+    });
   }
 
   #partnerModelTokenLimit(): number | undefined {
@@ -913,10 +978,11 @@ export class ChatService {
     this.#chatPartner = newPartner;
     if (partnerChanged) {
       this.newConversation();
-    }
-
-    if (partnerChanged) {
       this.reloadHistory();
+    } else if (this.#settingsEnabled) {
+      // Same partner, changed runtime (models, tools, capabilities): the
+      // composer lists these from the resolution, so it is read again.
+      void this.loadSettings(true);
     }
   }
 
