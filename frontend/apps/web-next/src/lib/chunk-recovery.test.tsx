@@ -86,6 +86,17 @@ it("preserves the rejection and shares the budget with the next document", () =>
   expect(reload).toHaveBeenCalledOnce();
 });
 
+it("does not reload while offline, and keeps the budget for a removed deployment", () => {
+  const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  const event = preloadError(new TypeError("Failed to fetch dynamically imported module"));
+  expect(event.defaultPrevented).toBe(false);
+  expect(reload).not.toHaveBeenCalled();
+
+  online.mockReturnValue(true);
+  preloadError(new TypeError("Failed to fetch dynamically imported module"));
+  expect(reload).toHaveBeenCalledOnce();
+});
+
 it.each(["getItem", "setItem"] as const)(
   "leaves the original failure visible without reloading when storage %s fails",
   (method) => {
