@@ -3,6 +3,7 @@
   "releases": [
     {
       "version": "2.3.0",
+      "date": "2026-11-02",
       "entries": [
         {
           "id": "file-creation-progress",
