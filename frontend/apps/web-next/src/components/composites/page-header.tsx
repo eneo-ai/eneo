@@ -46,8 +46,8 @@ export type PageHeaderProps = {
   tour?: string;
   /**
    * A space tab on a phone, where the active tab of the space's strip already
-   * names the page: below 768 px the title and description stay for screen
-   * readers only and the header takes no room in the page. Its actions are
+   * names the page: on a phone's layout (`phone:`) the title and description
+   * stay for screen readers only and the header takes no room in the page. Its actions are
    * expected to be `DockedActions`, fixed at the bottom there.
    */
   isTitleHiddenOnPhone?: boolean;
@@ -89,17 +89,17 @@ export function PageHeader({
 }: PageHeaderProps) {
   const actionSlot = actions ?? children;
   // A pushed screen's page bar says the same ("‹ Administration"): it replaces the trail
-  // below 1024 px, or below 768 px on a space's pages.
+  // below 1024 px, or on a phone's layout on a space's pages.
 
   return (
     <div
       data-tour={tour}
-      className={cn("flex flex-col gap-2", isTitleHiddenOnPhone && "max-md:contents", className)}
+      className={cn("flex flex-col gap-2", isTitleHiddenOnPhone && "phone:contents", className)}
     >
       {breadcrumbs && breadcrumbs.length > 0 ? (
         <Breadcrumbs
           variant="supporting"
-          className="group-has-[[data-own-mobile-header]]/shell:max-lg:hidden max-md:group-has-[[data-own-phone-header]]/shell:hidden"
+          className="phone:group-has-[[data-own-phone-header]]/shell:hidden group-has-[[data-own-mobile-header]]/shell:max-lg:hidden"
         >
           {breadcrumbs.map((crumb, index) => (
             <BreadcrumbItem
@@ -120,12 +120,10 @@ export function PageHeader({
           // Under a description the actions stand on the title's line, not halfway
           // down the paragraph (a three-line one put "Skapa roll" beside its middle).
           description ? "items-start" : "items-center",
-          isTitleHiddenOnPhone && "max-md:contents"
+          isTitleHiddenOnPhone && "phone:contents"
         )}
       >
-        <div
-          className={cn("flex min-w-0 flex-col gap-1", isTitleHiddenOnPhone && "max-md:sr-only")}
-        >
+        <div className={cn("flex min-w-0 flex-col gap-1", isTitleHiddenOnPhone && "phone:sr-only")}>
           <Heading
             level={headingLevel}
             id={headingId}
@@ -148,7 +146,7 @@ export function PageHeader({
           <div
             className={cn(
               "flex flex-wrap items-center gap-2",
-              isTitleHiddenOnPhone && "max-md:contents"
+              isTitleHiddenOnPhone && "phone:contents"
             )}
           >
             {actionSlot}

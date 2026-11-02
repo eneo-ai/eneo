@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useTranslations } from "use-intl";
+import { PageFrame } from "@/components/composites/page-frame";
 import { SpacesList } from "@/features/spaces/list/spaces-list";
 import { spacesListQueryOptions } from "@/features/spaces/space";
 import { browserApi } from "@/lib/api/browser";
@@ -15,8 +16,8 @@ export const Route = createFileRoute("/_app/spaces/list")({
 function SpacesListPage() {
   const t = useTranslations();
   return (
-    <div className="flex w-full flex-col gap-6 p-4 md:p-6">
+    <PageFrame className="gap-6">
       <SpacesList title={t("spaces")} />
-    </div>
+    </PageFrame>
   );
 }

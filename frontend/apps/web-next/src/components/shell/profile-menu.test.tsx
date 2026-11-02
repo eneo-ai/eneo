@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { expectNoAxeViolations } from "@/test/axe";
+import { expectNameToHoldVisibleText, expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { renderInApp, testAppContext } from "@/test/render";
 import { ProfileMenu, profileDisplayName, profileInitials } from "./profile-menu";
@@ -32,6 +32,8 @@ describe("ProfileMenu", () => {
     const trigger = screen.getByRole("button", { name: TRIGGER });
     expect(trigger.textContent).toContain("Anna Lind");
     expect(trigger.textContent).toContain("Sundsvalls kommun");
+    // The initials are not part of what the name repeats: they are drawn, not text (WCAG 2.5.3).
+    expectNameToHoldVisibleText(trigger, TRIGGER);
   });
 
   it("holds the account pages, what's new, language, theme and logout", async () => {

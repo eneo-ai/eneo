@@ -4,7 +4,7 @@ import { Text } from "@astryxdesign/core/Text";
 import { ChevronRight } from "lucide-react";
 import { createContext, use, useRef } from "react";
 import { useFocusAcrossLayouts } from "@/lib/hooks/use-focus-across-layouts";
-import { PHONE_QUERY, useMediaMatch } from "@/lib/hooks/use-media-match";
+import { usePhoneScreen } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 
 /**
@@ -24,15 +24,14 @@ export function useResourceLayout(): ResourceLayout {
 }
 
 /**
- * A collection of resources (decision 9): list rows on a phone, cards from
- * 768 px. Its children are `ResourceCard`s (or items that read
- * `useResourceLayout`); each renders its own list item. CSS picks the
- * layout from the first render; once the width is known, the other
- * goes. `trailing` (a create card) follows the cards, or the rows.
+ * A collection of resources (decision 9): list rows on a phone, held either
+ * way, cards otherwise (from 768 px). Its children are `ResourceCard`s (or
+ * items that read `useResourceLayout`); each renders its own list item.
+ * `trailing` (a create card) follows the cards, or the rows.
  *
- * Crossing 768 px (a phone turned) replaces every item, and an open menu or
- * dialog with it: the focus they had goes to the same resource's link in
- * the new layout (useFocusAcrossLayouts).
+ * Changing between the two (a phone turned) replaces every item, and an open
+ * menu or dialog with it: the focus they had goes to the same resource's link
+ * in the new layout (useFocusAcrossLayouts).
  */
 export function ResourceCollection({
   children,
@@ -46,15 +45,15 @@ export function ResourceCollection({
   /** Optional table for a chosen desktop List view; phones keep their resource rows. */
   desktopList?: React.ReactNode;
 }) {
-  const phone = useMediaMatch(PHONE_QUERY);
+  const phone = usePhoneScreen();
   const box = useRef<HTMLDivElement>(null);
-  const layout = phone === null ? "pending" : phone ? "phone" : desktopList ? "table" : "cards";
+  const layout = phone ? "phone" : desktopList ? "table" : "cards";
   useFocusAcrossLayouts(box, layout);
 
   return (
     <div ref={box} className="contents">
-      {phone !== false ? (
-        <div className="flex flex-col gap-3 md:hidden">
+      {phone ? (
+        <div className="flex flex-col gap-3">
           <ResourceLayoutContext value="rows">
             <List hasDividers edge="outset">
               {children}
@@ -62,17 +61,16 @@ export function ResourceCollection({
           </ResourceLayoutContext>
           {trailing}
         </div>
-      ) : null}
-      {phone !== true && desktopList ? (
-        <div className="max-md:hidden">{desktopList}</div>
-      ) : phone !== true ? (
+      ) : desktopList ? (
+        desktopList
+      ) : (
         <ResourceLayoutContext value="cards">
-          <ul className={cn(gridClassName, "max-md:hidden")}>
+          <ul className={gridClassName}>
             {children}
             {trailing ? <li className="min-w-0">{trailing}</li> : null}
           </ul>
         </ResourceLayoutContext>
-      ) : null}
+      )}
     </div>
   );
 }

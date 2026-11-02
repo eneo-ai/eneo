@@ -2,7 +2,10 @@ import { MobileNav } from "@astryxdesign/core/MobileNav";
 import { SideNav, SideNavRenderContext } from "@astryxdesign/core/SideNav";
 import Link from "@/lib/link";
 import { useTranslations } from "use-intl";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { MEDIA } from "@/lib/breakpoints";
+import { useFocusRescue } from "@/lib/focus-rescue";
+import { useMediaMatch } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { AdminSections, AdminTopContent } from "./admin-nav";
 import { EneoWordMark } from "./eneo-logo";
@@ -19,24 +22,50 @@ function navLabelKey(variant: NavVariant) {
 }
 
 /**
- * The desktop SideNav (md and up): a named `nav` landmark that collapses to an
- * icon rail. The collapsed state is a per-browser preference: the server
- * layout reads it (`defaultCollapsed`) and a change stores it again.
+ * The desktop SideNav (from 768 px, but not on a phone turned sideways): a
+ * named `nav` landmark that collapses to an icon rail. Below 1280 px (an iPad either way, a small laptop) it is the rail
+ * unless the user chose otherwise, so the page keeps its room; the rail's
+ * items keep their names (accessible name and tooltip). The choice is a
+ * per-browser preference: the layout reads it (`defaultCollapsed`, undefined
+ * when none was made), a change stores it, and a stored choice wins at every
+ * width.
  */
 export function DesktopSideNav({
   variant,
   navId,
-  defaultCollapsed = false
+  defaultCollapsed
 }: {
   variant: NavVariant;
   navId: string;
   defaultCollapsed?: boolean;
 }) {
   const t = useTranslations();
-  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const [chosen, setChosen] = useState(defaultCollapsed);
+  const isNarrow = useMediaMatch(`not all and ${MEDIA.xl}`);
+  const collapsed = chosen ?? isNarrow;
+
+  // The width collapsing or expanding the nav removes whole sections (Senaste
+  // in the icon rail). If the focused link was one of them, focus goes to the
+  // toggle, which stays; focus anywhere else is left alone. Read while the
+  // focused element is still in the page, before this render commits.
+  const rescueFocus = useFocusRescue();
+  const [shown, setShown] = useState({ collapsed, focusInNav: false });
+  if (shown.collapsed !== collapsed) {
+    const focusInNav =
+      chosen === undefined && !!document.getElementById(navId)?.contains(document.activeElement);
+    setShown({ collapsed, focusInNav });
+  }
+  useEffect(() => {
+    if (!shown.focusInNav) return;
+    rescueFocus(
+      () =>
+        document.getElementById(navId)?.querySelector<HTMLElement>(`[aria-controls="${navId}"]`) ??
+        null
+    );
+  }, [shown, navId, rescueFocus]);
 
   function changeCollapsed(next: boolean) {
-    setCollapsed(next);
+    setChosen(next);
     storeSideNavCollapsed(next);
   }
 
@@ -57,7 +86,7 @@ export function DesktopSideNav({
 }
 
 /**
- * Phone layouts: the same navigation in an Astryx MobileNav drawer (a modal
+ * Phones, held either way: the same navigation in an Astryx MobileNav drawer (a modal
  * dialog: focus moves in, Escape and the close button close it, focus returns
  * to the button that opened it). Items close the drawer when activated.
  */

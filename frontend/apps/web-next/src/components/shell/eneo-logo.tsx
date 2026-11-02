@@ -1,5 +1,10 @@
+/**
+ * The brand blue, and in dark mode the theme's dark accent blue (--color-icon-accent):
+ * the brand blue is about 2.4:1 on a dark surface, and the mark alone is the
+ * home link in the collapsed rail, so it needs 3:1 (1.4.11).
+ */
 // eslint-disable-next-line eneo/no-raw-color -- fixed brand color in the SVG mark
-const ENEO_BRAND_BLUE = "#055594";
+const MARK_FILL = { fill: "light-dark(#055594, #4D94F2)" };
 
 const MARK_PATH =
   "M58.907 25.2079C92.3974 -8.28227 146.632 -7.74821 180.04 25.6601C213.448 59.0684 213.981 113.302 180.491 146.792C147.001 180.282 92.7675 179.749 59.3591 146.341L42.3884 129.37L102.728 69.0302C112.101 59.6577 127.297 59.6577 136.67 69.0302C146.042 78.4027 146.042 93.5982 136.67 102.971L116.21 123.431C127.132 124.616 138.361 121.04 146.55 112.852C160.964 98.4371 161.094 74.5971 146.098 59.6015C131.103 44.6059 107.262 44.7349 92.8474 59.1493L75.8767 76.1191L41.9362 42.1786L58.907 25.2079ZM66.3328 85.7548L32.5876 119.5L1.67155 88.583C0.109466 87.0209 0.109504 84.4888 1.67155 82.9267L32.5876 52.0097L66.3328 85.7548Z";
@@ -26,7 +31,7 @@ export function EneoWordMark({ className }: LogoProps) {
       className={className}
     >
       <path d={WORDMARK_TEXT_PATH} fill="currentColor" />
-      <path d={MARK_PATH} fill={ENEO_BRAND_BLUE} />
+      <path d={MARK_PATH} style={MARK_FILL} />
     </svg>
   );
 }
@@ -42,7 +47,7 @@ export function EneoIcon({ className }: LogoProps) {
       aria-hidden="true"
       className={className}
     >
-      <path d={MARK_PATH} fill={ENEO_BRAND_BLUE} />
+      <path d={MARK_PATH} style={MARK_FILL} />
     </svg>
   );
 }

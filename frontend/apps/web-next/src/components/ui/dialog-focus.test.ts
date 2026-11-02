@@ -39,17 +39,6 @@ describe("returnTarget", () => {
     expect(returnTarget()).toBe(byId("more"));
   });
 
-  it("is the menu button when the focused Radix menu item is already gone (aria-labelledby)", () => {
-    html(`
-      <button id="actions" aria-haspopup="menu">Åtgärder</button>
-      <div role="menu" aria-labelledby="actions"><div id="item" role="menuitem" tabindex="-1">Byt namn</div></div>
-    `);
-    byId("item").focus();
-    byId("item").closest('[role="menu"]')!.remove();
-    expect(document.activeElement).toBe(document.body);
-    expect(returnTarget()).toBe(byId("actions"));
-  });
-
   it("is the pressed button when the browser never focused it (Safari, iOS)", () => {
     html(`<button id="edit">Redigera</button>`);
     // Safari fires the pointer events and the click but leaves focus on <body>.

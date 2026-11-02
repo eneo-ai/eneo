@@ -58,7 +58,8 @@ function useProfile() {
   return {
     name,
     organisation,
-    // Starts with the visible name and organisation (WCAG 2.5.3).
+    // Starts with the visible name and organisation (WCAG 2.5.3); the space between their
+    // spans keeps them apart for axe, which joins text with no separator.
     label: t("shell_profile_button_label", { name, organisation }),
     avatar: (
       <EntityAvatar
@@ -89,7 +90,7 @@ export function ProfileLink() {
     >
       {avatar}
       <span className="flex min-w-0 flex-1 flex-col leading-tight">
-        <span className="truncate font-semibold">{name}</span>
+        <span className="truncate font-semibold">{name}</span>{" "}
         <span className="text-ax-text-secondary truncate text-xs">{organisation}</span>
       </span>
       <ChevronRight aria-hidden="true" className="text-ax-text-secondary size-4 shrink-0" />
@@ -133,7 +134,7 @@ export function ProfileMenu() {
           <span className="flex min-w-0 items-center gap-2.5">
             {avatar}
             <span className="flex min-w-0 flex-col leading-tight">
-              <span className="truncate font-semibold">{name}</span>
+              <span className="truncate font-semibold">{name}</span>{" "}
               <span className="text-ax-text-secondary truncate text-xs font-normal">
                 {organisation}
               </span>

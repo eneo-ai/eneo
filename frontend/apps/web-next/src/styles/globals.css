@@ -285,6 +285,23 @@
 /* A short viewport: a phone turned sideways (a browser's own bars leave about
    280 px) or its keyboard open. */
 @custom-variant short (@media (height < 30rem));
+/* A phone's layout: narrower than 768 px, or a touch screen under 500 px tall and under 1024 px
+   wide (a phone turned sideways). Keep in step with PHONE_SCREEN_QUERY (use-media-match.ts; a test
+   compares them). Block form: a one-line media list would split at its comma. */
+@custom-variant phone {
+  @media (width < 48rem), (pointer: coarse) and (height < 31.25rem) and (width < 64rem) {
+    @slot;
+  }
+}
+/* Not a phone's layout, exactly: a media list cannot be negated, so `not-phone:` emits nothing. */
+@custom-variant wide {
+  @media (width >= 64rem),
+    (width >= 48rem) and (height >= 31.25rem),
+    (width >= 48rem) and (pointer: fine),
+    (width >= 48rem) and (pointer: none) {
+    @slot;
+  }
+}
 
 /*
  * 3. Tailwind theme. `inline` makes every utility reference the token itself,
@@ -356,6 +373,9 @@
   --color-ax-pressed: var(--color-overlay-pressed);
   --color-ax-selected: var(--color-neutral);
   --color-ax-scrim: var(--color-overlay);
+  /* the selected segment's raised plate and its edge (Astryx segments, legacy tabs) */
+  --color-ax-segment-selected: var(--eneo-color-segment-selected);
+  --color-ax-segment-selected-edge: var(--eneo-color-segment-selected-edge);
   /* borders: border/-strong are decorative edges; -control (3:1) outlines form controls */
   --color-ax-border: var(--color-border);
   --color-ax-border-strong: var(--color-border-emphasized);
@@ -787,6 +807,13 @@
     outline-offset: -2px;
   }
 
+  /* A selected Astryx segment is a Highlight fill (Astryx), opted out of
+     forced colours: keep it over the theme's raised plate and edge. */
+  .astryx-segmented-control-item[data-selected="selected"] {
+    background-color: Highlight;
+    box-shadow: none;
+  }
+
   /* The current page and the legacy active tab: a Highlight fill, like a
      selected Astryx segment, opted out so there is no backplate. */
   .astryx-pagination [aria-current="page"],
@@ -800,8 +827,10 @@
      own colour, and a primary action reads as plain text. Give it the border a
      native button has. Both libraries' buttons carry data-variant and data-size
      (a legacy one used as a trigger loses its data-slot to Radix's Slot). Ghost
-     buttons are text, outline ones have a border already. */
-  :is(button, a)[data-variant][data-size]:not([data-variant="ghost"], [data-variant="link"]) {
+     buttons are text, outline ones have a border already, but a ghost raised into
+     a plate by its elevation (the rail's "Ny konversation") is a fill too. */
+  :is(button, a)[data-variant][data-size]:not([data-variant="ghost"], [data-variant="link"]),
+  :is(button, a)[data-variant="ghost"][data-elevation]:not([data-elevation="none"]) {
     border: 1px solid ButtonText;
   }
 
@@ -925,6 +954,38 @@
     :is(a, button, input, select, textarea, [role="button"]):not(.astryx-item > a) {
     position: relative;
     z-index: 1;
+  }
+}
+
+/*
+ * 12c. A list with edge compensation (Astryx List `edge="outset"`)
+ *     cancels its rows' 8 px inset only as far as --container-padding-inline-*
+ *     allows, which only Astryx Layout, Card and Section publish; on our pages
+ *     it was 0, so row content sat 8 px inside the text line. The list
+ *     publishes the 16 px page gutter (as TableFrame does on a phone): a row's
+ *     content starts on the line of the heading above it, and its own surface
+ *     (hover, selection, focus ring, divider) reaches 8 px into the gutter.
+ *     Rows of a list without edge compensation do not read it.
+ */
+@layer components {
+  .astryx-list {
+    --container-padding-inline-start: 1rem;
+    --container-padding-inline-end: 1rem;
+  }
+}
+
+/*
+ * 12d. A menu row's label wraps (every Astryx DropdownMenu and MoreMenu, as a
+ *     popover or a bottom sheet). Astryx ends a string label in an ellipsis,
+ *     and a menu has no other place to read the rest: on a narrow screen or
+ *     at 200% text a long label ("Kopiera som formaterad text") was cut off.
+ *     The menu is as wide as its longest label up to the screen less its
+ *     gutters (Astryx); only past that does a label take a second line.
+ */
+@layer components {
+  .astryx-dropdown-menu .astryx-item span {
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 }
 
@@ -1209,7 +1270,7 @@
   /* A phone's space settings open a section as a screen of its own, with a page bar back to
      the index: the space's bar above gives way, so two bars do not stack. A space from the menu
      (the organisation's) has no such bar, only its tab strip, which gives way the same. */
-  @media (width < 48rem) {
+  @variant phone {
     main:has([data-editor-view="section"]) [data-space-tabs],
     main:has([data-editor-view="section"]) [data-phone-page-bar]:not([data-editor-view] *),
     main:has([data-editor-view="section"])
@@ -1295,7 +1356,7 @@
  *     !important).
  */
 @layer components {
-  @media (width < 48rem) {
+  @variant phone {
     body:has([data-docked-actions]) [data-sonner-toaster] {
       --offset-bottom: calc(
         var(--docked-actions-height, calc(4.5rem + env(safe-area-inset-bottom, 0px))) + 8px

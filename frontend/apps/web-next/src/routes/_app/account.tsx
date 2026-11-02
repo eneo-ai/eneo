@@ -3,7 +3,7 @@ import { AccountFrame } from "@/features/account/account-frame";
 import { routeTitle } from "@/lib/route-head";
 
 export const Route = createFileRoute("/_app/account")({
-  head: routeTitle("my_account"),
+  head: routeTitle("account"),
   component: () => (
     <AccountFrame>
       <Outlet />

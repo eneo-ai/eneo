@@ -27,7 +27,8 @@ export const OWN_MOBILE_HEADER = { "data-own-mobile-header": "" } as const;
 
 /**
  * The same, for a header that replaces the top bar on phones only (below
- * 768 px): a space, which tablets show with breadcrumbs under the top bar.
+ * 768 px, or turned sideways: the `phone:` variant): a space, which tablets
+ * show with breadcrumbs under the top bar.
  */
 export const OWN_PHONE_HEADER = { "data-own-phone-header": "" } as const;
 

@@ -1,6 +1,7 @@
 /**
  * Whether the desktop SideNav is collapsed to its icon rail: a per-browser
- * cookie preference, read on first mount and updated by the SideNav.
+ * cookie preference, read on first mount and updated by the SideNav. With no
+ * choice stored, the SideNav follows the width (side-nav.tsx).
  *
  * SideNav's resizable.autoSaveId would also add a drag-to-resize handle;
  * this preference controls only the icon rail toggle.
@@ -10,13 +11,13 @@ export const SIDE_NAV_COLLAPSED_COOKIE = "eneo_sidenav_collapsed";
 
 const ONE_YEAR_IN_SECONDS = 60 * 60 * 24 * 365;
 
-/** The stored preference; anything but "1" (including no cookie) is expanded. */
-export function isSideNavCollapsed(cookieValue: string | undefined): boolean {
-  return cookieValue === "1";
+/** The stored choice: "1" collapsed, "0" expanded, anything else (no cookie) none. */
+export function isSideNavCollapsed(cookieValue: string | undefined): boolean | undefined {
+  return cookieValue === "1" ? true : cookieValue === "0" ? false : undefined;
 }
 
 /** Read before the SPA's first shell render, using the server's value parser. */
-export function readSideNavCollapsedCookie(cookie = document.cookie): boolean {
+export function readSideNavCollapsedCookie(cookie = document.cookie): boolean | undefined {
   const value = cookie
     .split(";")
     .map((part) => part.trim())

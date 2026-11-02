@@ -1,3 +1,4 @@
+import { SideNavItem, SideNavSection } from "@astryxdesign/core/SideNav";
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -16,8 +17,10 @@ import {
   type MouseEvent,
   type ReactNode
 } from "react";
+import { NAV_ITEM_CLASSES } from "@/components/shell/nav-styles";
 import { PageBar } from "@/components/shell/page-bar";
-import { PHONE_QUERY } from "@/lib/hooks/use-media-match";
+import { MEDIA } from "@/lib/breakpoints";
+import { PHONE_SCREEN_QUERY } from "@/lib/hooks/use-media-match";
 import { cn } from "@/lib/utils";
 import { IndexGroup, IndexRow } from "./index-rows";
 import { inPlaceLink } from "./in-place-link";
@@ -30,7 +33,7 @@ export type SettingsSection = {
   node: ReactNode;
   /** On a phone's index: what the section holds now, in a few words ("3 källor"). */
   summary?: string;
-  /** On a phone's index: the heading the section is listed under. */
+  /** On a phone's index and in the list beside the form: the heading the section is listed under. */
   group?: string;
 };
 
@@ -59,6 +62,11 @@ type SectionedSettingsProps = {
    * the tablet's page.
    */
   phone?: SettingsPhoneIndex;
+  /**
+   * A frame's header sits above (a space's settings): the editor starts on the line of the
+   * header's content, the pages' shared column, instead of centring.
+   */
+  isFramed?: boolean;
 };
 
 /**
@@ -68,9 +76,13 @@ type SectionedSettingsProps = {
  * marked current). All sections stay visible, so the links are native
  * anchors, not a `role="tablist"`. A strip narrower than its links scrolls
  * with edge fades and keeps the current link in view; arrow keys move
- * through it, so no label is ever truncated. The editor owns the page
- * surface (`data-space-full-bleed`): the space frame drops its inset and,
- * on editor routes, its header, so the sticky header is the only chrome.
+ * through it, so no label is ever truncated. From 1024 px the links leave
+ * the header for a list beside the form, under the sections' groups, that
+ * stays in view while the form scrolls: every section is named at once. The
+ * header's height is measured, so anchors land below it at either size. The
+ * editor owns the page surface (`data-space-full-bleed`): the space frame
+ * drops its inset and, on editor routes, its header, so the sticky header is
+ * the only chrome.
  *
  * With `phone`, a phone shows an index of the sections instead, and one
  * section at a time. The index and the sections are views of one mounted
@@ -217,14 +229,15 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
     return () => document.removeEventListener("focusin", onFocusIn);
   }, []);
 
-  // Turned across 768 px, CSS hides what the other layout showed: a tablet's
-  // strip and the sections a phone does not show, or a phone's index and bar.
+  // Turned between a phone's layout and a tablet's, CSS hides what the other
+  // layout showed: a tablet's strip and the sections a phone does not show, or
+  // a phone's index and bar.
   // Focus that was there goes somewhere logical (ACCESSIBILITY.md): a field
   // in a section the phone does not show opens that section, the field kept;
   // an index row goes to its section's heading; anything else to the section
   // in view, else to the index row or the first section.
   useEffect(() => {
-    const list = window.matchMedia(PHONE_QUERY);
+    const list = window.matchMedia(PHONE_SCREEN_QUERY);
     const turned = () => {
       const element = lastFocus.current;
       const root = rootRef.current;
@@ -260,6 +273,30 @@ function usePhoneView(ids: readonly string[], openFirst: string | undefined) {
     return () => list.removeEventListener("change", turned);
   }, []);
 
+  // Across 1024 px the section links move between the header's strip and the
+  // list beside the form: a link that had focus hands it to its twin.
+  useEffect(() => {
+    const list = window.matchMedia(MEDIA.lg);
+    const turned = () => {
+      const element = lastFocus.current;
+      const root = rootRef.current;
+      const href = element?.closest("a[href^='#']")?.getAttribute("href");
+      const active = document.activeElement;
+      if (!element || !root || !href || (active !== element && active !== document.body)) return;
+      if (element.getClientRects().length > 0) return;
+      [...root.querySelectorAll<HTMLElement>("a[href^='#']")]
+        .find(
+          (link) =>
+            link !== element &&
+            link.getAttribute("href") === href &&
+            link.getClientRects().length > 0
+        )
+        ?.focus();
+    };
+    list.addEventListener("change", turned);
+    return () => list.removeEventListener("change", turned);
+  }, []);
+
   // A view opened from a control takes focus to what it shows: a section to
   // its heading, the index to the row it was opened from. Not on arrival: a
   // resource just created focuses its name field itself.
@@ -280,6 +317,7 @@ function SettingsLayout({
   header,
   navigationLabel,
   sections,
+  isFramed = false,
   views
 }: Omit<SectionedSettingsProps, "phone"> & { views?: PhoneViews }) {
   const [activeId, setActiveId] = useState(sections[0]?.id ?? "");
@@ -306,6 +344,25 @@ function SettingsLayout({
     return () => observer.disconnect();
   }, [sectionIds]);
 
+  // The header's height, for the anchors' scroll margin and the list's sticky
+  // offset: taller with the strip below 1024 px than without it. A phone hides
+  // the header (no size): the last height stays.
+  const headerRef = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const element = headerRef.current;
+    const root = element?.parentElement;
+    if (!element || !root || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => {
+      const height = Math.ceil(entry?.borderBoxSize?.[0]?.blockSize ?? 0);
+      if (height > 0) root.style.setProperty("--editor-header-h", `${height}px`);
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  // Centred on its own page; under a frame's header, the pages' column (72rem) with this
+  // layout's own px-6 on each side, so its text starts on the header's line.
+  const width = isFramed ? "mx-auto max-w-[75rem]" : "mx-auto max-w-4xl lg:max-w-[74rem]";
+
   const view = views?.view ?? null;
   const shown = sections.find((section) => section.id === view);
 
@@ -313,7 +370,7 @@ function SettingsLayout({
   // section out of view, so the link opens that section first, and either
   // way focuses the field in place rather than adding a history entry.
   const openFailedField = (event: MouseEvent) => {
-    if (!views || !window.matchMedia(PHONE_QUERY).matches) return;
+    if (!views || !window.matchMedia(PHONE_SCREEN_QUERY).matches) return;
     const link = (event.target as Element).closest?.('a[href^="#"]');
     const field = link ? document.getElementById(link.getAttribute("href")!.slice(1)) : null;
     const section = field?.closest<HTMLElement>("[data-editor-section]")?.dataset.editorSection;
@@ -335,7 +392,7 @@ function SettingsLayout({
         <>
           {shown ? (
             <PageBar
-              until="md"
+              until="phone"
               parent={{
                 label: views.phone.title,
                 ...inPlaceLink(views.href(null), views.back)
@@ -350,7 +407,7 @@ function SettingsLayout({
             />
           ) : views.phone.parent ? (
             <PageBar
-              until="md"
+              until="phone"
               parent={views.phone.parent}
               title={views.phone.title}
               isTitleShown
@@ -364,17 +421,17 @@ function SettingsLayout({
               the h1 for assistive technology, and the save state: here on
               the index, in the bar on a section, where it stays in view. */}
           {views.phone.parent ? (
-            <h1 className="sr-only md:hidden">{views.phone.title}</h1>
+            <h1 className="wide:hidden sr-only">{views.phone.title}</h1>
           ) : shown ? null : (
             // The page's frame has the h1 (the space) and a bar whose title shows only once
             // the page has scrolled: the index names itself.
-            <h2 className="text-ax-text m-0 px-4 pt-4 text-2xl leading-tight font-semibold md:hidden">
+            <h2 className="text-ax-text wide:hidden m-0 px-4 pt-4 text-2xl leading-tight font-semibold">
               {views.phone.title}
             </h2>
           )}
           <div
             data-editor-strip
-            className={cn("flex min-h-11 items-center px-4 pt-2 md:hidden", shown && "hidden")}
+            className={cn("wide:hidden flex min-h-11 items-center px-4 pt-2", shown && "hidden")}
           >
             <SaveStatusIndicator isQuiet />
           </div>
@@ -383,19 +440,20 @@ function SettingsLayout({
       {/* Under a space's page bar on a phone (it sticks there too); main's
           scroll padding for the bar adds to the anchors' scroll margin. */}
       <header
+        ref={headerRef}
         className={cn(
-          "bg-ax-surface border-ax-border sticky top-0 z-30 border-b max-md:group-has-[[data-phone-page-bar]]/shell:top-14",
-          views && "max-md:hidden"
+          "bg-ax-surface border-ax-border phone:group-has-[[data-phone-page-bar]]/shell:top-14 sticky top-0 z-30 border-b",
+          views && "phone:hidden"
         )}
       >
-        <div className="mx-auto flex w-full max-w-4xl flex-col gap-1 px-6">
+        <div className={cn("flex w-full flex-col gap-1 px-6", width)}>
           {header}
           <TabList
             value={visibleActiveId}
             onChange={setActiveId}
             overflow="scroll"
             aria-label={navigationLabel}
-            className="-mb-px"
+            className="-mb-px lg:hidden"
           >
             {sections.map((section) => (
               <Tab
@@ -415,28 +473,61 @@ function SettingsLayout({
           sections={sections}
           href={views.href}
           open={views.open}
-          className={cn("md:hidden", shown && "hidden")}
+          className={cn("wide:hidden", shown && "hidden")}
         />
       ) : null}
       {/* Keep anchor targets and focused controls below the sticky header. */}
       <div
         className={cn(
-          "mx-auto flex w-full max-w-4xl flex-col gap-8 px-6 py-8 [&_*]:scroll-mt-40",
-          views && "max-md:px-4 max-md:py-4 max-md:[&_*]:scroll-mt-4",
-          views && !shown && "max-md:hidden"
+          "flex w-full flex-col px-6 py-8 lg:grid lg:grid-cols-[13rem_minmax(0,1fr)] lg:items-start lg:gap-x-8 [&_*]:scroll-mt-[calc(var(--editor-header-h,9.5rem)+0.5rem)]",
+          width,
+          views && "phone:px-4 phone:py-4 phone:[&_*]:scroll-mt-4",
+          views && !shown && "phone:hidden"
         )}
       >
-        {sections.map((section) => (
-          <div
-            key={section.id}
-            id={section.id}
-            data-editor-section={views ? section.id : undefined}
-            data-current={views && section === shown ? "" : undefined}
-            className={cn(views && section !== shown && "max-md:hidden")}
-          >
-            {section.node}
-          </div>
-        ))}
+        {/* Its top includes the content's padding: the gap above it stays the same once it sticks.
+            A short window scrolls it on its own; its padding keeps the focus ring inside that
+            scroll box, and the side margins keep the items on the line. */}
+        <nav
+          data-editor-rail
+          aria-label={navigationLabel}
+          className="sticky top-[calc(var(--editor-header-h,9.5rem)+2rem)] -mx-1 flex max-h-[calc(100svh-var(--editor-header-h,9.5rem)-5rem)] flex-col gap-2 overflow-y-auto p-1 max-lg:hidden"
+        >
+          {groupSections(sections).map((group, index) => {
+            const items = group.sections.map((section) => (
+              <SideNavItem
+                key={section.id}
+                label={section.label}
+                icon={section.icon}
+                href={`#${section.id}`}
+                isSelected={section.id === visibleActiveId}
+                onClick={() => setActiveId(section.id)}
+              />
+            ));
+            return group.label ? (
+              <SideNavSection key={group.label} title={group.label} className={NAV_ITEM_CLASSES}>
+                {items}
+              </SideNavSection>
+            ) : (
+              <div key={index} className={NAV_ITEM_CLASSES}>
+                {items}
+              </div>
+            );
+          })}
+        </nav>
+        <div className="flex max-w-4xl min-w-0 flex-col gap-8">
+          {sections.map((section) => (
+            <div
+              key={section.id}
+              id={section.id}
+              data-editor-section={views ? section.id : undefined}
+              data-current={views && section === shown ? "" : undefined}
+              className={cn(views && section !== shown && "phone:hidden")}
+            >
+              {section.node}
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -460,20 +551,13 @@ function PhoneIndex({
   open: (id: string) => void;
   className?: string;
 }) {
-  const groups: { label?: string; sections: SettingsSection[] }[] = [];
-  for (const section of sections) {
-    const last = groups.at(-1);
-    if (last && last.label === section.group) last.sections.push(section);
-    else groups.push({ label: section.group, sections: [section] });
-  }
-
   return (
     <nav
       data-editor-index
       aria-label={label}
       className={cn("flex flex-col gap-6 pt-2 pb-8", className)}
     >
-      {groups.map((group, index) => (
+      {groupSections(sections).map((group, index) => (
         <IndexGroup key={group.label ?? index} title={group.label}>
           {group.sections.map((section) => (
             <IndexRow
@@ -490,4 +574,15 @@ function PhoneIndex({
       ))}
     </nav>
   );
+}
+
+/** Runs of sections that share a group, in the editor's order; an ungrouped run has no label. */
+function groupSections(sections: readonly SettingsSection[]) {
+  const groups: { label?: string; sections: SettingsSection[] }[] = [];
+  for (const section of sections) {
+    const last = groups.at(-1);
+    if (last && last.label === section.group) last.sections.push(section);
+    else groups.push({ label: section.group, sections: [section] });
+  }
+  return groups;
 }
