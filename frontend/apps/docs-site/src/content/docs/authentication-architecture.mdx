@@ -111,9 +111,9 @@ deletion cannot be confirmed within 5 seconds, logout returns 503 and keeps the
 cookie for a retry. Requests admitted before logout may finish. The job-event stream
 (`GET /api/v1/jobs/events/`) is the exception, since it stays open until the
 client leaves: for a browser session it authenticates the token again every
-30 seconds and ends at the token's expiry, so it closes within 30 seconds of
-logout, a password change, signing out everywhere or the account's
-deactivation. A browser session's token cannot open a WebSocket. Logout does not
+30 seconds (each check waits at most 5 seconds) and ends at the token's
+expiry, so after logout, a password change, signing out everywhere or the
+account's deactivation it closes at the next check. A browser session's token cannot open a WebSocket. Logout does not
 end the identity provider's session, and a password change still ends every
 session of the user. Other Eneo tokens carry no `sid`.
 
