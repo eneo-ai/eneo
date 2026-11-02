@@ -7,7 +7,7 @@ import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import type { ToolCallRecord } from "@/features/chat/side-panel/message-tool-calls";
 import { makeRunDetail, makeRunGraph, makeRunSummary } from "../runs/run-fixtures";
-import type { RunDetail, RunSummary } from "../runs/runs-api";
+import { runKeys, type RunDetail, type RunSummary } from "../runs/runs-api";
 
 const state = vi.hoisted(() => ({
   announce: vi.fn(),
@@ -184,6 +184,50 @@ describe("FlowRunCard", () => {
     expect(within(card).getByRole("link", { name: "Visa hela körningen" })).toBeTruthy();
     expect(within(card).queryByRole("button", { name: messages.flow_runs_cancel })).toBeNull();
     await expectNoAxeViolations(container);
+  });
+
+  it("keeps a finished run's result when reading it again after it moved fails, and retries it", async () => {
+    const steps = [{ order: 1, label: "Sammanfatta", status: "completed" }];
+    answerRun(makeRunSummary(), steps);
+    const { container, queryClient } = renderCard();
+    const card = await screen.findByRole("region", { name: "Körning av Förslagstest A" });
+    expect(await within(card).findByText("Beslutet är fattat.")).toBeTruthy();
+    expect(within(card).getByText(/Version 3 · 1 steg · .* · .*token/)).toBeTruthy();
+
+    // The run settled again under a newer version; its detail cannot be read.
+    const moved = makeRunSummary({ revision: 4 });
+    answerRun(moved, steps);
+    state.routes[DETAIL] = () => ({
+      status: 503,
+      body: { message: "Busy", code: "service_unavailable" }
+    });
+    await act(() =>
+      queryClient.invalidateQueries({ queryKey: runKeys.progress("flow-1", "run-1") })
+    );
+    await waitFor(() => expect(calls(DETAIL)).toHaveLength(2));
+    expect(await within(card).findByText(messages.query_error_refresh_title)).toBeTruthy();
+    expect(within(card).getByText("Beslutet är fattat.")).toBeTruthy();
+    expect(within(card).getByText(/Version 3 · 1 steg · .* · .*token/)).toBeTruthy();
+    await expectNoAxeViolations(container);
+
+    // A retry that answers shows the run as it is now.
+    answerRun(
+      moved,
+      steps,
+      makeRunDetail({ ...moved, result: { kind: "inline_text", text: "Ett nytt svar." } })
+    );
+    fireEvent.click(
+      within(card).getByRole("button", {
+        name: messages.query_error_retry_named.replace(
+          "{section}",
+          messages.query_error_refresh_title
+        )
+      })
+    );
+    expect(await within(card).findByText("Ett nytt svar.")).toBeTruthy();
+    expect(within(card).queryByText("Beslutet är fattat.")).toBeNull();
+    expect(within(card).queryByText(messages.query_error_refresh_title)).toBeNull();
+    expect(calls(DETAIL)).toHaveLength(3);
   });
 
   it("says why a run failed, naming the step", async () => {

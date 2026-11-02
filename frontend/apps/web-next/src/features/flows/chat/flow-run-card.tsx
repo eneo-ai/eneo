@@ -2,11 +2,12 @@
 
 import { Button } from "@astryxdesign/core/Button";
 import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Check, CircleAlert, Copy, Play } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { IconTile } from "@/components/composites/icon-tile";
+import { RefreshError } from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { browserApi } from "@/lib/api/browser";
 import { pollEvery } from "@/lib/api/query";
@@ -41,6 +42,7 @@ import {
   type RunGraph,
   type RunSummary
 } from "../runs/runs-api";
+import { useShownRead } from "../runs/use-shown-read";
 
 /** The tools of the flow chat that start a run: a new one, or a failed one again. */
 const RUN_STARTING_TOOLS = new Set(["run_flow", "retry_run"]);
@@ -139,12 +141,13 @@ export function FlowRunCard({
     ? progressSignature(progress.data.status, progress.data.graph)
     : null;
   // The audited detail (the result, the error, what it used): read once the
-  // run has ended, and again only if it moved.
-  const detail = useQuery({
-    ...runDetailQueryOptions(browserApi, flowId, runId, signature ?? ""),
-    enabled: signature !== null && settled,
-    placeholderData: keepPreviousData
-  });
+  // run has ended, and again only if it moved; a failed read again keeps it.
+  const detail = useShownRead(
+    useQuery({
+      ...runDetailQueryOptions(browserApi, flowId, runId, signature ?? ""),
+      enabled: signature !== null && settled
+    })
+  );
   const steps = progress.data ? runStepViews(progress.data.graph, null) : [];
 
   useEffect(() => {
@@ -208,6 +211,7 @@ export function FlowRunCard({
       {progress.isError ? (
         <p className="text-ax-error m-0 text-sm">{t("flows_run_card_unavailable")}</p>
       ) : null}
+      <RefreshError queries={[detail]} />
 
       {summary && !settled ? (
         <>
