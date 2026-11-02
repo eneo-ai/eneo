@@ -3,7 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeSpace } from "@/features/spaces/testing/space-fixture";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp, testQueryClient } from "@/test/render";
+import { cachedText, renderInApp, testQueryClient } from "@/test/render";
 import messages from "@/lib/i18n/messages/sv.json";
 import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
 import { flowEditorKeys } from "./editor-api";
@@ -1027,6 +1027,50 @@ describe("FlowStepEditor", () => {
     });
     await expectNoAxeViolations(container);
   }, 20_000);
+
+  it.each([
+    ["saved", () => ({ body: makeFlow({ draft_revision: 5 }) })],
+    ["refused", () => ({ status: 500, body: { message: "Internal error", error_id: "error-1" } })]
+  ])(
+    "keeps a typed credential out of React Query and the classification preview when it is %s",
+    async (_outcome, answer) => {
+      const secret = "sk-synthetic-token-4711";
+      const preview = "/api/v1/flows/{id}/security-classification/preview";
+      api.routes[EDITOR] = answer;
+      const { container, queryClient } = renderEditor(
+        httpFlow({ mode: "bearer_token", token: { $secret: "stored" } })
+      );
+      fireEvent.click(await screen.findByRole("button", { name: "Ersätt: Token" }));
+      const token = container.querySelector("input[type=password]") as HTMLInputElement;
+      fireEvent.change(token, { target: { value: secret } });
+      // A name change asks for a new classification preview, with the token in the draft.
+      fireEvent.change(await nameField(), { target: { value: "Hämta ärendet" } });
+      await waitFor(() =>
+        expect(
+          api.stub.calls.some(
+            (call) => call.path === preview && JSON.stringify(call.init).includes("Hämta ärendet")
+          )
+        ).toBe(true)
+      );
+      fireEvent.click(screen.getByRole("button", { name: messages.flow_step_editor_save }));
+
+      await waitFor(() =>
+        expect(
+          queryClient
+            .getMutationCache()
+            .getAll()
+            .some((mutation) => ["success", "error"].includes(mutation.state.status))
+        ).toBe(true)
+      );
+      // The save sends it; the preview, which has no use for it, does not.
+      expect(JSON.stringify(patchBodies())).toContain(secret);
+      expect(JSON.stringify(api.stub.calls.filter((call) => call.path === preview))).not.toContain(
+        secret
+      );
+      expect(cachedText(queryClient)).not.toContain(secret);
+    },
+    20_000
+  );
 
   it("tests the HTTP call with the step's settings as they stand, credentials kept as stored", async () => {
     api.routes["POST /api/v1/flows/{id}/http-test"] = () => ({

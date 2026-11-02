@@ -19,6 +19,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { SuccessMark } from "@/components/composites/success-mark";
 import { SpaceProvider, useSpace } from "@/features/spaces/use-space";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import type { SuggestionDismissal, SuggestionFix } from "../flow-suggestion-item";
 import { StepSuggestions } from "../flow-suggestions-section";
 import {
@@ -402,7 +403,9 @@ function StepEditorSession({
     preview.data?.steps.find((item) => item.step_order === session?.stepOrder) ??
     null;
 
-  const save = useMutation({
+  // The session's draft can hold a credential typed in the form, so it is
+  // never the mutation's variables (React Query keeps those in its cache).
+  const save = useSecretMutation({
     mutationFn: async (current: Session) => {
       const update = buildEditorUpdate({
         flow: current.flow,
