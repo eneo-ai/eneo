@@ -60,6 +60,22 @@ it.each([
   expect(navigateTo).not.toHaveBeenCalled();
 });
 
+it("treats a form the backend refused (HTTP 422) as rejected credentials", async () => {
+  fetchMock.mockResolvedValue(
+    Response.json(
+      { detail: [{ loc: ["body", "username"], msg: "Invalid email" }] },
+      { status: 422 }
+    )
+  );
+  expect(await submitPasswordLogin(undefined, {}, credentials())).toEqual({
+    error: "invalid_credentials",
+    email: "user@example.test",
+    attemptsRemaining: null,
+    retryAfterSeconds: null
+  });
+  expect(navigateTo).not.toHaveBeenCalled();
+});
+
 it.each([
   [403, { eneo_error_code: 9019, message: "Disabled" }, "deactivated"],
   [403, { eneo_error_code: 9025, message: "Disabled" }, "deactivated"],

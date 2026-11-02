@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import messages from "@/lib/i18n/messages/sv.json";
 import { renderInApp } from "@/test/render";
 import { submitPasswordLogin } from "./password-login";
 import { LoginForm } from "./login-form";
@@ -32,6 +33,15 @@ it("submits credentials and next, preserves email and focuses a rejected attempt
       .map((id) => document.getElementById(id)?.textContent)
       .join(" ")
   ).toMatch(/2/);
+});
+
+it("says sign-in is unavailable when the credentials were never checked", async () => {
+  vi.mocked(submitPasswordLogin).mockResolvedValue({ error: "unavailable" });
+  renderInApp(<LoginForm />);
+  fireEvent.change(screen.getByLabelText(/^E-post/), { target: { value: "person@example.test" } });
+  fireEvent.change(screen.getByLabelText(/^Lösenord/), { target: { value: "secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "Logga in" }));
+  expect(await screen.findByText(messages.login_unavailable)).toBeTruthy();
 });
 
 it("reveals a password without submitting the form", async () => {

@@ -12,7 +12,7 @@ const ERROR_KEYS: Record<NonNullable<LoginFormState["error"]>, string> = {
   missing_fields: "invalid_credentials",
   too_many_attempts: "login_too_many_attempts_later",
   deactivated: "login_account_deactivated",
-  unavailable: "login_failed"
+  unavailable: "login_unavailable"
 };
 
 export function LoginForm({ next }: { next?: string }) {

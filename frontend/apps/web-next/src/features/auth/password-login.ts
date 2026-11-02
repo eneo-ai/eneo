@@ -33,9 +33,10 @@ export async function submitPasswordLogin(
     return { error: "unavailable", email };
   }
 
-  if (response.status === 401 || response.status === 429) {
+  // 422 is a form the backend refused (a malformed email): the user's input, as 401.
+  if (response.status === 401 || response.status === 422 || response.status === 429) {
     return {
-      error: response.status === 401 ? "invalid_credentials" : "too_many_attempts",
+      error: response.status === 429 ? "too_many_attempts" : "invalid_credentials",
       email,
       ...(await readAttemptLimit(response))
     };
