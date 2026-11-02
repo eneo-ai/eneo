@@ -30,6 +30,7 @@ import { browserApi } from "@/lib/api/browser";
 import { flattenPages } from "@/lib/api/pagination";
 import { formatBytes } from "@/lib/format";
 import { useSpace } from "@/features/spaces/use-space";
+import { SourceStateLabel } from "../integrations/source-status";
 import { VendorIcon } from "../integrations/vendor";
 import {
   collectionBlobsQueryOptions,
@@ -45,6 +46,7 @@ import {
   byOrigin,
   collectionInfoBlobCount,
   integrationOptions,
+  integrationSyncFlag,
   selectedIntegrationDisplay,
   websiteFailedPageCount,
   websiteIndexedResultCount,
@@ -670,25 +672,33 @@ export function KnowledgePicker({
                             </CommandItem>
                           );
                         })}
-                        {section.integration.map((entry) => (
-                          <CommandItem
-                            key={entry.key}
-                            value={entry.key}
-                            onSelect={() => selectAndClose(() => addIntegration(entry))}
-                          >
-                            <VendorIcon
-                              type={
-                                entry.type === "wrapper"
-                                  ? entry.wrapper.integration_type
-                                  : entry.knowledge.integration_type
-                              }
-                            />
-                            <span className="flex-1 truncate">
-                              {entry.type === "wrapper" ? entry.wrapper.name : entry.knowledge.name}
-                            </span>
-                            <IntegrationBadges entry={entry} />
-                          </CommandItem>
-                        ))}
+                        {section.integration.map((entry) => {
+                          const syncFlag = integrationSyncFlag(entry);
+                          return (
+                            <CommandItem
+                              key={entry.key}
+                              value={entry.key}
+                              onSelect={() => selectAndClose(() => addIntegration(entry))}
+                            >
+                              <VendorIcon
+                                type={
+                                  entry.type === "wrapper"
+                                    ? entry.wrapper.integration_type
+                                    : entry.knowledge.integration_type
+                                }
+                              />
+                              <span className="flex-1 truncate">
+                                {entry.type === "wrapper"
+                                  ? entry.wrapper.name
+                                  : entry.knowledge.name}
+                              </span>
+                              <IntegrationBadges entry={entry} />
+                              {syncFlag ? (
+                                <SourceStateLabel state={syncFlag} className="shrink-0" />
+                              ) : null}
+                            </CommandItem>
+                          );
+                        })}
                       </>
                     )}
                   </CommandGroup>

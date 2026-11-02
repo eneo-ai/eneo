@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 import { expectNoAxeViolations } from "@/test/axe";
@@ -89,6 +89,43 @@ describe("KnowledgePicker", () => {
     expect(screen.getByText("Gemensam")).toBeTruthy();
     expect(screen.queryByText("Egen")).toBeNull();
     expect(screen.queryByText("Lånad")).toBeNull();
+  });
+
+  it("flags a source to add whose last sync failed or that holds nothing", () => {
+    const synced = (status: string, document_count: number) => ({
+      size: 0,
+      last_synced_at: "2026-09-20T08:00:00Z",
+      last_sync_status: status,
+      document_count
+    });
+    state.space = makeSpace({
+      integrations: [
+        makeIntegration({ id: "failed", name: "Trasig", metadata: synced("error", 2) }),
+        makeIntegration({ id: "empty", name: "Tomrum", metadata: synced("success", 0) }),
+        makeIntegration({ id: "healthy", name: "Frisk", metadata: synced("success", 3) }),
+        ...["ok", "error"].map((status) =>
+          makeIntegration({
+            id: `wrapped-${status}`,
+            wrapper_id: "wrapper",
+            wrapper_name: "Byggnad",
+            metadata: synced(status, 1)
+          })
+        )
+      ]
+    });
+    renderInApp(
+      <KnowledgePicker
+        origin="personal"
+        selections={{ collections: [], websites: [], integrationKnowledge: [] }}
+        onChange={() => {}}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Lägg till kunskap (den här ytan)" }));
+    const option = (name: string) => screen.getByRole("option", { name: new RegExp(name) });
+    expect(within(option("Trasig")).getByText("Synk misslyckades")).toBeTruthy();
+    expect(within(option("Byggnad")).getByText("Synk misslyckades")).toBeTruthy();
+    expect(within(option("Tomrum")).getByText("Tom")).toBeTruthy();
+    expect(option("Frisk").textContent).toBe("Frisk");
   });
 
   it("counts the selected knowledge with plural forms", () => {

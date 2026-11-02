@@ -1,4 +1,5 @@
 import type { Collection, IntegrationKnowledge, Website } from "../knowledge";
+import { summarizeSource } from "../integrations/sources";
 import { matchesSearch } from "@/lib/search";
 
 /**
@@ -119,6 +120,15 @@ export function integrationOptions(
     options.push({ type: "single", key: `integration:${knowledge.id}`, knowledge });
   }
   return sortEntries(options);
+}
+
+/** Flags an option whose last sync failed (for a wrapper: any item's) or that synced but holds nothing. */
+export function integrationSyncFlag(entry: IntegrationEntry): "error" | "empty" | null {
+  const { state } = summarizeSource(
+    entry.type === "wrapper" ? entry.wrapper.items : [entry.knowledge],
+    {}
+  );
+  return state === "attention" ? "error" : state === "empty" ? "empty" : null;
 }
 
 /**
