@@ -294,6 +294,19 @@ describe("UserEditorDialog", () => {
     within(reveal).getByText(sentPassword(0));
   });
 
+  it("hands a replaced password over to the account's saved e-mail, also after a refreshed row", async () => {
+    api.POST.mockImplementation(() => ok({ ...existing, email: "bo.ny@example.se" }));
+    const { dialog, rerender } = await renderEditor(existing);
+    // Another administrator changed the email while this dialog was open.
+    rerender(<Harness user={{ ...existing, email: "bo.ny@example.se" } as AdminUser} />);
+
+    fireEvent.click(replaceSwitch(dialog));
+    submit(dialog);
+
+    const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
+    within(reveal).getByText(/^Lämna lösenordet till bo\.ny@example\.se\./);
+  });
+
   it("hands the password over to the e-mail that was saved, not one typed meanwhile", async () => {
     let release: () => void = () => {};
     api.POST.mockImplementation(

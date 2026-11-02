@@ -159,7 +159,10 @@ function UserEditorForm({
   const saveCallbacks = {
     onMutate: () => onPendingChange(true),
     onSettled: () => onPendingChange(false),
-    onSuccess: (_data: unknown, save: Save) => finish(save),
+    // The saved account names the e-mail: an untouched field can hold an older
+    // one than the account has (another administrator changed it meanwhile).
+    onSuccess: (saved: { email?: string } | undefined, save: Save) =>
+      finish({ ...save, email: saved?.email ?? save.email }),
     onError: (error: Error) => toastApiError(error, t)
   };
 
