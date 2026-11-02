@@ -224,6 +224,7 @@ export function SpaceChat() {
       iconId: groupChat.icon_id ?? null,
       ...spaceInfo,
       showResponseLabel: groupChat.show_response_label,
+      assistantCount: groupChat.tools.assistants.length,
       mentionableAssistants: groupChat.allow_mentions
         ? groupChat.tools.assistants.map((assistant) => ({
             id: assistant.id,

@@ -74,6 +74,7 @@ import {
 import { ContextUsageBar } from "./context-usage-bar";
 import { ChatTools, mcpConversationOptions } from "./mcp-controls";
 import type { PendingUpload } from "./message-files";
+import { partnerCannotAnswer } from "./partner-model";
 import { awaitPartnerUpdates, hasPendingPartnerUpdates } from "./partner-updates";
 import { historyQueryKey } from "./session-actions";
 import { StartState } from "./start-state";
@@ -929,6 +930,7 @@ function ConversationView({
     onChange: setInput,
     onSubmit: () => sendQuestion(input.trim(), undefined, true),
     sendBlocked,
+    unavailable: partnerCannotAnswer(partner) ? t("no_completion_model_description") : null,
     busy: sending,
     // A stop while the question still waits for its uploads takes it back.
     onStop: () => (pendingAbort.current ? pendingAbort.current.abort() : void stop()),

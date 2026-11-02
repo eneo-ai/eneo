@@ -493,6 +493,28 @@ describe("ChatView offline", () => {
   });
 });
 
+describe("ChatView with nobody to answer", () => {
+  it.each([
+    ["an assistant without a usable model", { ...partner, completionModel: null }],
+    [
+      "a group chat without assistants",
+      { type: "group-chat", id: "group-1", name: "Gruppen", assistantCount: 0 }
+    ]
+  ] satisfies [string, ChatPartner][])(
+    "says so at the field and sends nothing: %s",
+    (_, chatPartner) => {
+      spies.mode = "answer";
+      renderInApp(<Harness chatPartner={chatPartner} />);
+      const notice =
+        "Ingen AI-modell tillgänglig. Kontakta din administratör för att aktivera modeller.";
+      expect(screen.getByText(notice)).toBeTruthy();
+      ask("Vilken gräns gäller?");
+      expect(spies.sent).toHaveLength(0);
+      expect(spies.announce).toHaveBeenCalledWith(notice);
+    }
+  );
+});
+
 describe("ChatView when generation fails", () => {
   it("says the session expired when the request is refused, with status and trace id for support", async () => {
     spies.mode = "refused";

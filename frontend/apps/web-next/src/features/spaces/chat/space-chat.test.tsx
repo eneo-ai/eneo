@@ -150,7 +150,9 @@ describe("SpaceChat", () => {
       permissions: ["read", "insight_view"],
       groups: [],
       websites: [],
-      integration_knowledge_list: []
+      integration_knowledge_list: [],
+      // A group chat always lists its member assistants (GroupChatPublic.tools).
+      ...(type === "group-chat" && { tools: { assistants: [{ id: "member-1", handle: "avtal" }] } })
     });
     renderInApp(<SpaceChat />, {
       route: `/spaces/space-1/chat?type=${type}&id=partner-9`,
