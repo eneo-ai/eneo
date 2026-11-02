@@ -159,7 +159,8 @@ export async function openRoute(page: Page, url: string, signedIn: boolean) {
  * its document on its own (a session refusal, a chunk reload, a hand-off); the
  * bare error names neither the screen nor the cause. `begin` after the route
  * has opened, `explain` for the error: it names the route and what the page
- * did since (navigations, refused or failed requests, console errors).
+ * did since (navigations, refused or failed requests, a changed session
+ * generation, a chunk that failed to load, console errors).
  */
 export function watchDocument(page: Page) {
   const events: string[] = [];
@@ -171,11 +172,28 @@ export function watchDocument(page: Page) {
   page.on("framenavigated", (frame) => {
     if (frame === page.mainFrame()) note(`navigated to ${frame.url()}`);
   });
+  // A changed session generation sends the app to sign in again, whatever the status was.
+  let generation: string | undefined;
   page.on("response", (response) => {
     const { pathname } = new URL(response.url());
     const ours = pathname.startsWith("/api/") || pathname.startsWith("/assets/");
     if (ours && response.status() >= 400) note(`${response.status()} ${pathname}`);
+    if (pathname.startsWith("/api/")) {
+      const next = response.headers()["eneo-session-generation"];
+      if (next !== undefined && generation !== undefined && next !== generation)
+        note(`session generation changed on ${pathname}`);
+      if (next !== undefined) generation = next;
+    }
   });
+  // A route chunk that fails to load reloads the page (chunk recovery).
+  page
+    .addInitScript(() => {
+      window.addEventListener("vite:preloadError", (event) => {
+        const payload = (event as Event & { payload?: { message?: string } }).payload;
+        console.error(`vite:preloadError ${payload?.message ?? ""}`);
+      });
+    })
+    .catch(() => {});
   page.on("requestfailed", (request) => {
     const { pathname } = new URL(request.url());
     const reason = request.failure()?.errorText ?? "failed";
