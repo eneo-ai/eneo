@@ -1,5 +1,3 @@
-"use client";
-
 import { hasUnseenRelease, latestRelease, releases, visibleEntries } from "@eneo/whats-new";
 import type { Release } from "@eneo/whats-new";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";

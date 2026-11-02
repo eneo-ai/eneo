@@ -1,5 +1,3 @@
-"use client";
-
 import { DateRangeInput, type DateRangePreset } from "@astryxdesign/core/DateRangeInput";
 import { useTranslations } from "use-intl";
 import { useMemo } from "react";

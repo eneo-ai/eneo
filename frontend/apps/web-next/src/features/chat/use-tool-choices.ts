@@ -1,5 +1,3 @@
-"use client";
-
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { modelSupportsToolCalling, type Capability } from "@/features/capabilities/capabilities";

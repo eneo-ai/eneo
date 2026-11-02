@@ -1,5 +1,3 @@
-"use client";
-
 import { invalidateSpaces } from "@/features/spaces/space";
 
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";

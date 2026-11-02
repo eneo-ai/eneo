@@ -1,5 +1,3 @@
-"use client";
-
 import { ProgressBar } from "@astryxdesign/core/ProgressBar";
 import { Spinner } from "@astryxdesign/core/Spinner";
 import { ArrowUpRight, Check, ChevronDown, ChevronUp, Files } from "lucide-react";

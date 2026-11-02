@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { ChatMessage as AxChatMessage, ChatMessageBubble } from "@astryxdesign/core/Chat";
 import { useAnnounce, useClipboard } from "@astryxdesign/core/hooks";

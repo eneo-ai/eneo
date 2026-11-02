@@ -1,5 +1,3 @@
-"use client";
-
 import { Card } from "@astryxdesign/core/Card";
 import { useQuery } from "@tanstack/react-query";
 import { ThumbsDown, ThumbsUp } from "lucide-react";

@@ -1,5 +1,3 @@
-"use client";
-
 import { Tooltip } from "@astryxdesign/core/Tooltip";
 import { TriangleAlert } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";

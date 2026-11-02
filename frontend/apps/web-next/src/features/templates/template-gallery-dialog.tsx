@@ -1,5 +1,3 @@
-"use client";
-
 import { useQuery } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, FileUp, Loader2, Paperclip, X } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";

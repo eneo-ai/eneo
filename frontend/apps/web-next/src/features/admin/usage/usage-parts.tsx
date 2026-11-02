@@ -1,5 +1,3 @@
-"use client";
-
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import { RotateCcw } from "lucide-react";
 import { useTranslations } from "use-intl";

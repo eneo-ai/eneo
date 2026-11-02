@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, type MutationKey } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { createContext, use, useMemo, useRef, type RefObject } from "react";

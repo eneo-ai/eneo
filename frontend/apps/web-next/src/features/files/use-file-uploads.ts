@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { browserApi } from "@/lib/api/browser";

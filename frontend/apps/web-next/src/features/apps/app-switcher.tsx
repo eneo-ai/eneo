@@ -1,5 +1,3 @@
-"use client";
-
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { useCollator } from "@astryxdesign/core/i18n";

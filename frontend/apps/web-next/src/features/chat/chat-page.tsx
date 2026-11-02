@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useQuery } from "@tanstack/react-query";
 import { replaceUrl, useRouter, useSearchParams, type UrlOptions } from "@/lib/navigation";

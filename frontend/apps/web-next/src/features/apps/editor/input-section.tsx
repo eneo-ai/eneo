@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";

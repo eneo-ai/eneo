@@ -1,5 +1,3 @@
-"use client";
-
 import { DropdownMenu } from "@astryxdesign/core/DropdownMenu";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { BookOpen, FolderClosed, Globe, Plug, Upload, type LucideIcon } from "lucide-react";

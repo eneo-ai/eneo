@@ -1,5 +1,3 @@
-"use client";
-
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Copy } from "lucide-react";

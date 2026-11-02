@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useState } from "react";

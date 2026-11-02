@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { KeyRound, ListChecks, MoreHorizontal, Settings2, Shield, Trash2 } from "lucide-react";
 import { usePathname, useRouter } from "@/lib/navigation";

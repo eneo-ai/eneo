@@ -1,5 +1,3 @@
-"use client";
-
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import type { CursorPage } from "@/lib/api/pagination";

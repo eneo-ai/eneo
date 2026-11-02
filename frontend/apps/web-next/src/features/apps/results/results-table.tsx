@@ -1,5 +1,3 @@
-"use client";
-
 import { List, ListItem } from "@astryxdesign/core/List";
 import { useJobEventsConnected } from "@/features/jobs/job-events";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";

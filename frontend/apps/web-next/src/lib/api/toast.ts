@@ -1,5 +1,3 @@
-"use client";
-
 import { toast } from "@/lib/toast";
 import { errorReferenceLines, getErrorMessage } from "./errors";
 

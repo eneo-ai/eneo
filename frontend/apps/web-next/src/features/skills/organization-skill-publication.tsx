@@ -1,5 +1,3 @@
-"use client";
-
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";

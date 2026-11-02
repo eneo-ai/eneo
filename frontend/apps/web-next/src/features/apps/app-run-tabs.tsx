@@ -1,5 +1,3 @@
-"use client";
-
 import { replaceUrl, useSearchParams } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";

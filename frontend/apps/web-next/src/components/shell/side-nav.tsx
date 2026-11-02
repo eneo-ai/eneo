@@ -1,5 +1,3 @@
-"use client";
-
 import { MobileNav } from "@astryxdesign/core/MobileNav";
 import { SideNav, SideNavRenderContext } from "@astryxdesign/core/SideNav";
 import Link from "@/lib/link";

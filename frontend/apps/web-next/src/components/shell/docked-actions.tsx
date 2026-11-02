@@ -1,5 +1,3 @@
-"use client";
-
 import { useLayoutEffect, useRef, type ReactNode } from "react";
 
 /**

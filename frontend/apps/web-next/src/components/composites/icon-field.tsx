@@ -1,5 +1,3 @@
-"use client";
-
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { Button as ActionButton } from "@astryxdesign/core/Button";
 import { saveUrl } from "@/features/files/signed-file-url";

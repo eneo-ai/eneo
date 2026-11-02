@@ -1,5 +1,3 @@
-"use client";
-
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Popover } from "@astryxdesign/core/Popover";
 import { ChevronDown, Maximize2, Minimize2, X } from "lucide-react";

@@ -1,5 +1,3 @@
-"use client";
-
 import { Selector } from "@astryxdesign/core/Selector";
 import { useTranslations } from "use-intl";
 import { SettingsGroup, SettingsRow } from "@/components/composites/settings-rows";

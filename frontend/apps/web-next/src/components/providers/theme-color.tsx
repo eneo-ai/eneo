@@ -1,5 +1,3 @@
-"use client";
-
 import { useTheme } from "next-themes";
 import { useEffect } from "react";
 import { surfaceColors } from "@/theme/surface-colors";

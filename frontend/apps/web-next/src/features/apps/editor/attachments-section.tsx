@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { ResourceAttachmentsSection } from "@/features/files/resource-attachments-section";
 import type { App } from "../apps";

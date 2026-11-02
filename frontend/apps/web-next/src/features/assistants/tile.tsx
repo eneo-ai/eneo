@@ -1,5 +1,3 @@
-"use client";
-
 import { Users } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";

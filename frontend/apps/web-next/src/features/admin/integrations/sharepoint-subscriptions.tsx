@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { ConfirmDialog } from "@/components/composites/confirm-dialog";

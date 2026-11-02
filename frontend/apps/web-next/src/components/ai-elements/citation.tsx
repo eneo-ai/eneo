@@ -1,5 +1,3 @@
-"use client";
-
 import { FileText, Globe2 } from "lucide-react";
 import { useTranslations } from "use-intl";
 import {

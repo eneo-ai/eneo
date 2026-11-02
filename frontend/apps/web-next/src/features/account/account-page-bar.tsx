@@ -1,5 +1,3 @@
-"use client";
-
 import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { PageBar } from "@/components/shell/page-bar";

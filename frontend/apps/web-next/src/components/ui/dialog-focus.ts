@@ -1,5 +1,3 @@
-"use client";
-
 import * as React from "react";
 import { isFocusLost, notifyFocusLost } from "@/lib/focus-rescue";
 

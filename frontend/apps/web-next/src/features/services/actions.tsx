@@ -1,5 +1,3 @@
-"use client";
-
 import type { DropdownMenuOption } from "@astryxdesign/core/DropdownMenu";
 import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useQueryClient } from "@tanstack/react-query";

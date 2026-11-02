@@ -1,5 +1,3 @@
-"use client";
-
 import { UNRELEASED, type Locale, type ReleaseEntry } from "@eneo/whats-new";
 import { useLocale, useTranslations } from "use-intl";
 import { usePathname, useRouter } from "@/lib/navigation";

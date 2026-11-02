@@ -1,5 +1,3 @@
-"use client";
-
 import { Loader2, Upload, X } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { useRef } from "react";

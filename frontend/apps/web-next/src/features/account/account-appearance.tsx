@@ -1,5 +1,3 @@
-"use client";
-
 import { Icon } from "@astryxdesign/core/Icon";
 import { RadioList, RadioListItem } from "@astryxdesign/core/RadioList";
 import { SegmentedControl, SegmentedControlItem } from "@astryxdesign/core/SegmentedControl";

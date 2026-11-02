@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { toastApiError } from "@/lib/api/toast";

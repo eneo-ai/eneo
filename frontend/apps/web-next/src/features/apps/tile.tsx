@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { iconUrl } from "@/components/composites/icon-field";

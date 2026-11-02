@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { useId, useState, type Ref } from "react";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";

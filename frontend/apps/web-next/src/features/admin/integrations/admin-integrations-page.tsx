@@ -1,5 +1,3 @@
-"use client";
-
 import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { Card as AstryxCard } from "@astryxdesign/core/Card";
 import { QueryStateBoundary } from "@/components/composites/query-state";

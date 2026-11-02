@@ -1,5 +1,3 @@
-"use client";
-
 import { notFound } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";

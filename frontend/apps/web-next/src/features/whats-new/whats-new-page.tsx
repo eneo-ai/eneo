@@ -1,5 +1,3 @@
-"use client";
-
 import { isUnreleased, visibleEntries } from "@eneo/whats-new";
 import type { EntryArea, Locale, Release, ReleaseEntry } from "@eneo/whats-new";
 import { useAnnounce } from "@astryxdesign/core/hooks";

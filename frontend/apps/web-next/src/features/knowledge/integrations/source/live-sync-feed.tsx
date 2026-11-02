@@ -1,5 +1,3 @@
-"use client";
-
 import { Check, Equal, Loader2, TriangleAlert } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { describeSkipReason } from "../skip-reasons";

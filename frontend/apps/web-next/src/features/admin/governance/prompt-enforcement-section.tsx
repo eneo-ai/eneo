@@ -1,5 +1,3 @@
-"use client";
-
 import { AlertCircle, Info, Sparkles } from "lucide-react";
 import { useTranslations } from "use-intl";
 import Link from "@/lib/link";

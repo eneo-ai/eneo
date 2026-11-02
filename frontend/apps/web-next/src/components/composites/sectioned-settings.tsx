@@ -1,5 +1,3 @@
-"use client";
-
 import { Tab, TabList } from "@astryxdesign/core/TabList";
 import type { LucideIcon } from "lucide-react";
 import {

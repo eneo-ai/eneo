@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { useLayoutEffect, useRef, useState, type DragEvent } from "react";
 import { toast } from "@/lib/toast";

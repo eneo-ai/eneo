@@ -1,5 +1,3 @@
-"use client";
-
 import { Selector } from "@astryxdesign/core/Selector";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";

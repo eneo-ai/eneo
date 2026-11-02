@@ -1,5 +1,3 @@
-"use client";
-
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
 import { Bot, Play, Send, SlidersHorizontal, Wrench } from "lucide-react";
 import Link from "@/lib/link";

@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { runtimeMessageKeys, type RuntimeStatus } from "./bundled";
 

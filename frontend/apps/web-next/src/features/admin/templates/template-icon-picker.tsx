@@ -1,5 +1,3 @@
-"use client";
-
 import { Check, Sparkles } from "lucide-react";
 import type { IconName } from "lucide-react/dynamic";
 import { useTranslations } from "use-intl";

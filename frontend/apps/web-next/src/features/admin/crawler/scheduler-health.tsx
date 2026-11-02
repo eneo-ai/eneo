@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { useId } from "react";
 import { useClientTimeText } from "@/components/composites/client-time";

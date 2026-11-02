@@ -1,5 +1,3 @@
-"use client";
-
 import { ChevronRight, CircleAlert, CircleCheck, LoaderCircle } from "lucide-react";
 import { useLocale, useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";

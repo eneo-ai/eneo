@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useQueryErrorResetBoundary } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";

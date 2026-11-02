@@ -1,5 +1,3 @@
-"use client";
-
 import { Button } from "@astryxdesign/core/Button";
 import { useTranslations } from "use-intl";
 import { PublicPage } from "./public-page";

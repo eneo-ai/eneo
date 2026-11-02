@@ -1,5 +1,3 @@
-"use client";
-
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Download, FileText } from "lucide-react";
 import { useTranslations } from "use-intl";

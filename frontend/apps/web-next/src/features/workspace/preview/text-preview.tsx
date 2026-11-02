@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 
 /** A plain-text file, with a notice when only its beginning was read. */

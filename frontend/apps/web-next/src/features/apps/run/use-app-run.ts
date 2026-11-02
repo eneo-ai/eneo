@@ -1,5 +1,3 @@
-"use client";
-
 import { useState } from "react";
 import { useLocale, useTranslations } from "use-intl";
 import { toastUploadRejection } from "@/features/files/upload-rejection-toast";

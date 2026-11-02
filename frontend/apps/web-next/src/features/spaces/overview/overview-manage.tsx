@@ -1,5 +1,3 @@
-"use client";
-
 import { List, ListItem } from "@astryxdesign/core/List";
 import { ChevronRight, Settings2, Sparkles, Users, Webhook, type LucideIcon } from "lucide-react";
 import { useId } from "react";

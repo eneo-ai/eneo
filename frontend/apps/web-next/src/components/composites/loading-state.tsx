@@ -1,5 +1,3 @@
-"use client";
-
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { useTranslations } from "use-intl";
 import { cn } from "@/lib/utils";

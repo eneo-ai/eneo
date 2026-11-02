@@ -1,5 +1,3 @@
-"use client";
-
 import { useTranslations } from "use-intl";
 import { KEYBOARD } from "@/components/astryx/keyboard-hints";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";

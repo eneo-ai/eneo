@@ -1,5 +1,3 @@
-"use client";
-
 import { Button as AxButton } from "@astryxdesign/core/Button";
 import { Dialog, DialogHeader } from "@astryxdesign/core/Dialog";
 import { HStack, Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";

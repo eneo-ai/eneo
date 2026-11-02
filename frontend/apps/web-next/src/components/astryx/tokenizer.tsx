@@ -1,5 +1,3 @@
-"use client";
-
 import { Tokenizer as AstryxTokenizer, type TokenizerProps } from "@astryxdesign/core/Tokenizer";
 import type { SearchableItem } from "@astryxdesign/core/Typeahead";
 import { useAriaInvalidOnError } from "./use-aria-invalid-on-error";

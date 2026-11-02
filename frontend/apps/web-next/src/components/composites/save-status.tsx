@@ -1,5 +1,3 @@
-"use client";
-
 import { CircleAlert, Loader2, OctagonX } from "lucide-react";
 import { SuccessMark } from "./success-mark";
 import { useTranslations } from "use-intl";

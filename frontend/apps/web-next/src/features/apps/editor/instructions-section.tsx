@@ -1,5 +1,3 @@
-"use client";
-
 import { History } from "lucide-react";
 import { useTranslations } from "use-intl";
 import { useState } from "react";

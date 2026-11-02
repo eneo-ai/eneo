@@ -1,5 +1,3 @@
-"use client";
-
 import { InternationalizationProvider, type MessagesByLocale } from "@astryxdesign/core/i18n";
 import { LinkProvider } from "@astryxdesign/core/Link";
 import { Theme } from "@astryxdesign/core/theme";

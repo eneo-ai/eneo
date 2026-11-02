@@ -1,5 +1,3 @@
-"use client";
-
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useState } from "react";
