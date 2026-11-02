@@ -125,7 +125,8 @@ test("a shared space is pushed on a phone; the personal and organisation spaces 
     await expect(page.locator(TOP_BAR)).toBeVisible();
     await expect(page.locator("[data-own-phone-header]")).toHaveCount(0);
   }
-  await expect(tabs.getByRole("link")).toHaveCount(4);
+  // The organisation space: knowledge, skills and settings (legacy services are hidden).
+  await expect(tabs.getByRole("link")).toHaveCount(3);
 });
 
 test("a long space name in the back link never makes a 320 px page scroll sideways", async ({
