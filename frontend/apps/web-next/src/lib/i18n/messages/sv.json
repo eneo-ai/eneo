@@ -6096,6 +6096,7 @@
   "flow_editor_tools_check_speaker_participants_missing": "Välj ett formulärfält med deltagarna, eller låt AI gissa namnen.",
   "flow_editor_tools_check_model_missing": "Välj en AI-modell för steget.",
   "flow_editor_tools_check_deleted_reference": "Steget hänvisar till ett steg som har tagits bort. Ändra eller ta bort hänvisningen.",
+  "flow_editor_tools_check_http_credential_missing": "Ange inloggningsuppgifterna som tjänsten kräver i steget.",
   "flow_editor_tools_repair_from": "Hänvisningen {token} gäller ett steg som inte finns längre.",
   "flow_editor_tools_repair_choose": "Välj vad som ska användas i stället",
   "flow_editor_tools_repair_choose_named": "Välj vad som ska användas i stället för {token} i {step}",
