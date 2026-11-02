@@ -2275,8 +2275,20 @@ class UserService:
         own row), which counts as a self-service change.
         """
 
-        await self._validate_email(user_update_public.email)
-        await self._validate_username(user_update_public.username)
+        # Repeating the user's own email or username is no change, so only a
+        # new value can be taken (email compares case-insensitively, as the
+        # uniqueness lookup does).
+        email = user_update_public.email
+        username = user_update_public.username
+        if email is not None or username is not None:
+            target = await self.repo.get_user_by_id(user_id, with_deleted=True)
+            if target is not None:
+                if email is not None and email.lower() == target.email.lower():
+                    email = None
+                if username is not None and username == target.username:
+                    username = None
+        await self._validate_email(email)
+        await self._validate_username(username)
 
         # If roles are being changed, check admin safety
         if user_update_public.roles is not None:
