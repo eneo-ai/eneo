@@ -1084,7 +1084,7 @@ for (const colorScheme of ["light", "dark"] as const) {
         );
 
         test(
-          "space app pages, group-chat editor and service pages",
+          "space app pages, app editor and group-chat editor",
           { tag: "@vite" },
           async ({ page }) => {
             const work = await spaceWithWork(
@@ -1094,10 +1094,6 @@ for (const colorScheme of ["light", "dark"] as const) {
             const groupName = uniqueName("E2E Grupp");
             const group = await apiPost(page, `${work.space}/applications/group-chats/`, {
               name: groupName
-            });
-            const serviceName = uniqueName("E2E Service");
-            const service = await apiPost(page, `${work.space}/applications/services/`, {
-              name: serviceName
             });
             await scan(page, work.app, async () => {
               await expect(page.getByRole("tab", { name: /^(Resultat|Results)$/ })).toBeVisible();
@@ -1118,26 +1114,6 @@ for (const colorScheme of ["light", "dark"] as const) {
             await scan(page, `${work.space}/group-chats/${group}/edit`, async () => {
               await expect(page.getByRole("heading", { level: 1, name: groupName })).toBeVisible();
             });
-            await scan(page, `${work.space}/services`, async () => {
-              await expect(
-                page.getByRole("heading", { level: 2, name: /^(Tjänster|Services)$/ })
-              ).toBeVisible();
-            });
-            for (const tab of ["playground", "settings"]) {
-              await scan(page, `${work.space}/services/${service}?tab=${tab}`, async () => {
-                await expect(
-                  page.getByRole("heading", { level: 1, name: serviceName })
-                ).toBeVisible();
-                await expect(
-                  page.getByRole("tab", {
-                    name:
-                      tab === "settings"
-                        ? /^(Inställningar|Settings)$/
-                        : /^(Testområde|Playground)$/
-                  })
-                ).toHaveAttribute("aria-selected", "true");
-              });
-            }
           }
         );
 

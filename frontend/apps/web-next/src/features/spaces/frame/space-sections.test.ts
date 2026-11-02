@@ -31,7 +31,6 @@ describe("spaceSections", () => {
       "apps",
       "knowledge",
       "skills",
-      "services",
       "members",
       "settings"
     ]);
@@ -42,7 +41,6 @@ describe("spaceSections", () => {
       // The collection shared in from another space is not this space's knowledge.
       knowledge: 2,
       skills: undefined,
-      services: undefined,
       members: 2,
       settings: undefined
     });
@@ -58,13 +56,13 @@ describe("spaceSections", () => {
       }
     });
     const ids = spaceSections(space, canFor(space), "personal").map((section) => section.id);
-    expect(ids).toEqual(["overview", "assistants", "apps", "knowledge", "skills", "services"]);
+    expect(ids).toEqual(["overview", "assistants", "apps", "knowledge", "skills"]);
   });
 
-  it("limits the organization space to knowledge, skills, services and settings", () => {
+  it("limits the organization space to knowledge, skills and settings", () => {
     const space = makeSpace({ overrides: { organization: true } });
     const ids = spaceSections(space, canFor(space), "organization").map((section) => section.id);
-    expect(ids).toEqual(["knowledge", "skills", "services", "settings"]);
+    expect(ids).toEqual(["knowledge", "skills", "settings"]);
     expect(
       spaceLandingHref(spaceSections(space, canFor(space), "organization"), "organization")
     ).toBe("/spaces/organization/knowledge");
@@ -135,7 +133,7 @@ describe("phoneSections (decision 24)", () => {
     const space = makeSpace();
     const { tabs, manage } = phoneSections(spaceSections(space, canFor(space), "space-1"));
     expect(ids(tabs)).toEqual(["overview", "assistants", "apps", "knowledge"]);
-    expect(ids(manage)).toEqual(["members", "settings", "skills", "services"]);
+    expect(ids(manage)).toEqual(["members", "settings", "skills"]);
   });
 
   it("lists only what the user may manage", () => {
@@ -144,13 +142,13 @@ describe("phoneSections (decision 24)", () => {
       permissions: ["read"]
     });
     const { manage } = phoneSections(spaceSections(space, canFor(space), "personal"));
-    expect(ids(manage)).toEqual(["skills", "services"]);
+    expect(ids(manage)).toEqual(["skills"]);
   });
 
   it("keeps every tab of a space without Översikt, the organisation space (F4)", () => {
     const space = makeSpace({ overrides: { organization: true } });
     const { tabs, manage } = phoneSections(spaceSections(space, canFor(space), "organization"));
-    expect(ids(tabs)).toEqual(["knowledge", "skills", "services", "settings"]);
+    expect(ids(tabs)).toEqual(["knowledge", "skills", "settings"]);
     expect(manage).toEqual([]);
   });
 });

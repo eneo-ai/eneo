@@ -41,10 +41,5 @@
     "jsx-a11y/media-has-caption": {
       "count": 1
     }
-  },
-  "src/features/services/editor/service-editor.tsx": {
-    "eneo/no-literal-accessible-name": {
-      "count": 1
-    }
   }
 }

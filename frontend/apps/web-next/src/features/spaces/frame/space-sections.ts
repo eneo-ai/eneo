@@ -10,7 +10,6 @@ export const SPACE_SECTION_IDS = [
   "apps",
   "knowledge",
   "skills",
-  "services",
   "members",
   "settings"
 ] as const;
@@ -42,7 +41,7 @@ export function ownKnowledgeCount(space: Space): number {
 
 /**
  * The tabs a user may see, gated exactly like the former space sidebar: the
- * organization space only has knowledge, skills, services and settings, and
+ * organization space only has knowledge, skills and settings, and
  * every tab needs the matching read (or, for settings, edit) permission.
  */
 export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): SpaceSection[] {
@@ -64,7 +63,6 @@ export function spaceSections(space: Space, can: Can, routeId: SpaceRouteId): Sp
     add("knowledge", ownKnowledgeCount(space));
   }
   if (can("read", "skill")) add("skills");
-  if (can("read", "service")) add("services");
   if (!isOrg && can("read", "member")) add("members", space.members.items.length);
   if (can("edit", "space")) add("settings");
   return sections;
@@ -119,7 +117,7 @@ const CONTENT_SECTION_IDS: readonly SpaceSectionId[] = [
   "knowledge"
 ];
 /** What manages the space, in the order "Hantera ytan" lists it. */
-const MANAGE_SECTION_IDS: readonly SpaceSectionId[] = ["members", "settings", "skills", "services"];
+const MANAGE_SECTION_IDS: readonly SpaceSectionId[] = ["members", "settings", "skills"];
 
 /**
  * The sections as a phone shows them (decision 24): the content as tabs, the

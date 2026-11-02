@@ -289,7 +289,7 @@ open), so the index has no bar of its own and names itself with a heading.
   decision 14: the conversation keeps 480 px), not from a media query; the
   chat page owns that row and the history gives way to a panel that opens
   where both do not fit. Widths in that rule are px, set inline.
-- **Collections of resources** (spaces, assistants, apps, services, the
+- **Collections of resources** (spaces, assistants, apps and the
   catalog) render through `ResourceCollection` (`resource-tile.tsx`): list
   rows on a phone (`PHONE_QUERY`), cards from 768 px in a grid that fits as
   many columns as the page has room for. A list row with a link is one
@@ -298,7 +298,7 @@ open), so the index has no bar of its own and names itself with a heading.
   delete) are not in the item: `createResourceActions`
   (`resource-action-scope.tsx`) puts them in one scope above the collection,
   the menus only ask to open one, and an open dialog survives the turn. Follow
-  `services/actions.tsx` for a new resource.
+  `apps/actions.tsx` for a new resource.
 - **Navigation and links**: app code imports `@/lib/navigation` and
   `@/lib/link`, which own the TanStack adapters.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
@@ -483,8 +483,8 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
   on the first render. Where the text
   must go into a label (an accessible name), `useClientTimeText` returns the
   same string.
-- `ResourceCard` (`resource-tile.tsx`) — the card for assistants, apps and
-  services (Astryx `ClickableCard`; its action menu is a sibling, so actions
+- `ResourceCard` (`resource-tile.tsx`) — the card for assistants and apps
+  (Astryx `ClickableCard`; its action menu is a sibling, so actions
   never open the card).
 - `ConfirmDialog` / `ConfirmDialogControlled` — confirmations; put the
   controlled one outside menus.
