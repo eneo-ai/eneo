@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from datetime import datetime, timezone
 from types import SimpleNamespace
@@ -14,6 +15,9 @@ from fastapi import FastAPI, Request
 from httpx import ASGITransport, AsyncClient
 from sse_starlette import ServerSentEvent
 
+from eneo.authentication import browser_session_service
+from eneo.authentication.auth_models import JWTPayload
+from eneo.authentication.browser_session_service import SessionWatch
 from eneo.database.database import get_session_with_transaction
 from eneo.jobs import job_events, job_router
 from eneo.jobs.job_models import JobInDb
@@ -165,6 +169,63 @@ async def test_stream_ends_when_its_browser_session_does():
     ]
 
     assert len(events) == 1
+
+
+class HeldPubSub(FakePubSub):
+    """A pubsub whose reads wait ``hold`` seconds, then bring a valid job."""
+
+    def __init__(self, hold: float):
+        super().__init__([])
+        self.hold = hold
+
+    async def get_message(self, ignore_subscribe_messages: bool, timeout: float):
+        await asyncio.sleep(self.hold)
+        return {"data": job_events.job_event_payload(make_job())}
+
+
+def browser_session(expires_in: float) -> JWTPayload:
+    now = time.time()
+    return JWTPayload(
+        iss="eneo",
+        aud="eneo",
+        iat=now,
+        exp=now + expires_in,
+        token_version=2,
+        user_id=uuid4(),
+        tenant_id=uuid4(),
+        credential_version=0,
+        sub="stream@example.com",
+        sid="s" * 43,
+    )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("ending", ["expiry", "refused check"])
+async def test_a_job_that_arrives_after_the_session_ended_is_not_sent(
+    monkeypatch: pytest.MonkeyPatch, ending: str
+):
+    # The read waits across the session's expiry, or past its next check,
+    # which refuses it; only then does a valid job event arrive.
+    expires_in = 60.0
+    if ending == "expiry":
+        expires_in = 0.1
+    else:
+        monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.1)
+        monkeypatch.setattr(SessionWatch, "_recheck", AsyncMock(return_value=False))
+    redis = MagicMock()
+    redis.pubsub = MagicMock(return_value=HeldPubSub(hold=0.3))
+
+    events = [
+        event
+        async for event in job_events.stream_job_events(
+            uuid4(),
+            make_request(disconnect_after=5),
+            redis=redis,
+            admitted=SessionWatch(browser_session(expires_in), MagicMock()),
+        )
+    ]
+
+    assert events == []
 
 
 @pytest.mark.asyncio

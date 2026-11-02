@@ -86,11 +86,13 @@ async def stream_job_events(
     async with pubsub:
         await pubsub.subscribe(job_updates_channel(user_id))
         while not await request.is_disconnected():
-            if admitted is not None and not await admitted():
-                return
             message = await pubsub.get_message(
                 ignore_subscribe_messages=True, timeout=_POLL_SECONDS
             )
+            # After the wait, which can cross the session's expiry or its next
+            # check, and before what it brought is sent; a quiet stream too.
+            if admitted is not None and not await admitted():
+                return
             if message is None:
                 continue
             data = message.get("data")
