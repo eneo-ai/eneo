@@ -5,7 +5,13 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ShellContext } from "@/components/shell/shell-context";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { expectNoAxeViolations } from "@/test/axe";
-import { noopShell, recordAnnouncements, renderInApp, testAppContext } from "@/test/render";
+import {
+  flushAnnouncements,
+  noopShell,
+  recordAnnouncements,
+  renderInApp,
+  testAppContext
+} from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -212,7 +218,7 @@ describe("SpacesList", () => {
     await waitFor(() => expect(said).toEqual(["1 träff", "Inga träffar", "Inga träffar"]));
     filter("");
     await waitFor(() => expect(status()?.textContent).toBe(""));
-    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    await flushAnnouncements();
     expect(said).toEqual(["1 träff", "Inga träffar", "Inga träffar"]);
   });
 

@@ -6,7 +6,7 @@
  * context. Not imported by app code.
  */
 import { QueryClientProvider, type QueryClient } from "@tanstack/react-query";
-import { render, renderHook } from "@testing-library/react";
+import { act, render, renderHook } from "@testing-library/react";
 import { AppIntlProvider } from "@/components/providers/intl-provider";
 import { AppContextProvider, type AppContextData } from "@/components/providers/app-context";
 import { AstryxProvider } from "@/components/providers/astryx-provider";
@@ -198,4 +198,14 @@ export function recordAnnouncements(): string[] {
     }
   }).observe(document.body, { childList: true, subtree: true });
   return said;
+}
+
+/**
+ * Lets Astryx's live region take what has been announced: it writes on the
+ * next animation frame, joining everything said before then into one
+ * message. Call it between something announced on its own (a list that
+ * loaded) and the action whose announcement the test reads.
+ */
+export function flushAnnouncements(): Promise<void> {
+  return act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
 }

@@ -627,8 +627,6 @@ describe("KnowledgePage", () => {
     state.space = makeSpace({
       integrations: [avtal, makeIntegration({ id: "i2", name: "Bygglov", metadata: signInRefused })]
     });
-    // What the previous test said reaches the shared region on the next frame.
-    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
     const said = recordAnnouncements();
     await act(() => queryClient.invalidateQueries({ queryKey: ["spaces", "space-1"] }));
 
