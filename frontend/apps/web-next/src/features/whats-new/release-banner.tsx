@@ -15,7 +15,8 @@ import { useOptionalWhatsNew } from "./whats-new-provider";
  * The one-time release notice: a dismissible banner above the start page's
  * composer the first time a user is here after a release (it is recorded as
  * announced when it mounts; the unseen dot in the account menu stays until
- * the Nyheter page is opened). It never blocks the page.
+ * the Nyheter page is opened). It never blocks the page. "Later" brings it back
+ * a day later while the release is unread.
  */
 export function WhatsNewBanner() {
   const whatsNew = useOptionalWhatsNew();
@@ -25,6 +26,7 @@ export function WhatsNewBanner() {
     <ReleaseBanner
       pendingRelease={whatsNew.pendingRelease ?? null}
       markLatestAnnounced={whatsNew.markLatestAnnounced}
+      snoozeLatest={whatsNew.snoozeLatest}
       tour={tour}
     />
   );
@@ -33,10 +35,12 @@ export function WhatsNewBanner() {
 function ReleaseBanner({
   pendingRelease,
   markLatestAnnounced,
+  snoozeLatest,
   tour
 }: {
   pendingRelease: Release | null;
   markLatestAnnounced: () => Promise<void>;
+  snoozeLatest: () => void;
   tour: NonNullable<ReturnType<typeof useOptionalTour>>;
 }) {
   const t = useTranslations();
@@ -78,6 +82,15 @@ function ReleaseBanner({
     }
   }
 
+  function remindLater() {
+    try {
+      snoozeLatest();
+      setOpen(false);
+    } catch {
+      toast.error(t("whats_new_reminder_failed"));
+    }
+  }
+
   return (
     <div className="w-full">
       <Banner
@@ -99,6 +112,12 @@ function ReleaseBanner({
                 onClick={() => void startTour()}
               />
             )}
+            <Button
+              variant="secondary"
+              size="sm"
+              label={t("whats_new_announcement_later")}
+              onClick={remindLater}
+            />
             <Link href="/whats-new" hasUnderline>
               {t("whats_new_announcement_all", { count: entries.length })}
             </Link>

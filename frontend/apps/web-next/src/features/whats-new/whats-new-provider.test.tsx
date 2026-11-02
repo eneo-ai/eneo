@@ -22,6 +22,7 @@ function Probe() {
       <span data-testid="announcement">{state.pendingRelease?.version ?? "none"}</span>
       <button onClick={() => void state.markLatestSeen()}>Seen</button>
       <button onClick={() => void state.markLatestAnnounced()}>Announced</button>
+      <button onClick={() => void state.resetState()}>Reset</button>
     </div>
   );
 }
@@ -56,6 +57,7 @@ function renderWithMarkers(
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
   vi.clearAllMocks();
 });
 
@@ -85,6 +87,22 @@ describe("What's new markers", () => {
       body: { version: candidate }
     });
     expect(put).toHaveBeenCalledWith("/api/v1/whats-new/seen/", { body: { version: candidate } });
+  });
+
+  it("forgets this browser's Later reminder on a reset", async () => {
+    const reminderKey = `eneo:whats-new:remind-after:user-1:${latestVersion}`;
+    localStorage.setItem(reminderKey, String(Date.now() + 60_000));
+    remove.mockResolvedValue({
+      data: { seen_version: null, announced_version: null },
+      response: new Response("{}", { status: 200 })
+    });
+    renderWithMarkers({ seen_version: null, announced_version: latestVersion });
+    expect(screen.getByTestId("announcement").textContent).toBe("none");
+
+    fireEvent.click(screen.getByText("Reset"));
+
+    await waitFor(() => expect(screen.getByTestId("announcement").textContent).toBe(latestVersion));
+    expect(localStorage.getItem(reminderKey)).toBeNull();
   });
 
   it("does not treat an unavailable state endpoint as a first visit", () => {

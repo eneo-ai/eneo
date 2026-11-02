@@ -2,6 +2,7 @@
 import { latestRelease, visibleEntries } from "@eneo/whats-new";
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { toast } from "@/lib/toast";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { sessionKeys } from "@/lib/api/session";
@@ -38,13 +39,19 @@ const count = visibleEntries(latest, () => false).length;
 
 afterEach(() => {
   cleanup();
+  localStorage.clear();
+  vi.restoreAllMocks();
   vi.clearAllMocks();
 });
+
+/** Where this browser keeps the "Later" reminder for the test user and the latest release. */
+const reminderKey = `eneo:whats-new:remind-after:user-1:${latest.version}`;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** The banner, found by its title (the harness has live regions of its own). */
 const banner = () => screen.queryByText("Nytt i Eneo")?.closest('[role="status"]') ?? null;
 
-function renderBanner(announced: string | null = null) {
+function renderBanner(announced: string | null = null, seen: string | null = null) {
   put.mockImplementation(() =>
     Promise.resolve({
       data: { seen_version: null, announced_version: latest.version },
@@ -53,7 +60,7 @@ function renderBanner(announced: string | null = null) {
   );
   const queryClient = testQueryClient();
   queryClient.setQueryData(sessionKeys.whatsNew, {
-    seen_version: null,
+    seen_version: seen,
     announced_version: announced
   });
   return renderInApp(
@@ -90,6 +97,56 @@ describe("WhatsNewBanner", () => {
     fireEvent.click(screen.getByRole("button", { name: "Stäng nyhetsbannern" }));
 
     await waitFor(() => expect(banner()).toBeNull());
+  });
+
+  it("comes back a day later when put off, until the release is read", async () => {
+    renderBanner();
+
+    fireEvent.click(screen.getByRole("button", { name: "Senare" }));
+
+    await waitFor(() => expect(banner()).toBeNull());
+    const remindAt = Number(localStorage.getItem(reminderKey));
+    expect(remindAt - Date.now()).toBeGreaterThan(DAY_MS - 60_000);
+    expect(remindAt - Date.now()).toBeLessThanOrEqual(DAY_MS);
+
+    // The next app load, before the reminder is due: no banner.
+    cleanup();
+    renderBanner(latest.version);
+    expect(banner()).toBeNull();
+
+    // Once it is due, the banner is back and recorded again, which uses the reminder up.
+    cleanup();
+    put.mockClear();
+    localStorage.setItem(reminderKey, String(Date.now() - 1));
+    renderBanner(latest.version);
+    expect(banner()).not.toBeNull();
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith("/api/v1/whats-new/announced/", {
+        body: { version: latest.version }
+      })
+    );
+    expect(localStorage.getItem(reminderKey)).toBeNull();
+  });
+
+  it("drops a due reminder once the release has been read", () => {
+    localStorage.setItem(reminderKey, String(Date.now() - 1));
+    renderBanner(latest.version, latest.version);
+
+    expect(banner()).toBeNull();
+    expect(put).not.toHaveBeenCalled();
+  });
+
+  it("stays open and says so when the reminder cannot be saved", async () => {
+    const error = vi.spyOn(toast, "error");
+    renderBanner();
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
+      throw new Error("QuotaExceededError");
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Senare" }));
+
+    expect(error).toHaveBeenCalledWith("Kunde inte spara påminnelsen. Försök igen.");
+    expect(banner()).not.toBeNull();
   });
 
   it("offers the tour and falls back to the Nyheter page when it cannot run", async () => {
