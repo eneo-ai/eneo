@@ -1481,9 +1481,8 @@ it("holds a cache-only navigation for the resume check and blocks a changed sess
     await check;
     await navigation;
   });
-  expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fdoes-not-exist", {
-    replace: true
-  });
+  // Another credential: sign-in starts over instead of resuming this page as it.
+  expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
   expect(queryClient.getQueryData(sessionKeys.me)).toBeUndefined();
   expect(document.getElementById("main-content")).toBeNull();
 });

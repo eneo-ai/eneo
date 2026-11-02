@@ -135,14 +135,27 @@ describe("immutable document session", () => {
     expect(request.signal.aborted).toBe(true);
     expect(clear).toHaveBeenCalledTimes(1);
     expect(cancelQueries).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fspaces%2Fx%3Fa%3D1", {
-      replace: true
-    });
+    // Another sign-in holds the cookie: never resume this page's deep link as it.
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
     await expect(
       owner.prepareBrowserRequest(new Request("https://eneo.test/api", { method: "POST" }))
     ).rejects.toMatchObject({ code: 9090 });
     expect(fetcher).not.toHaveBeenCalled();
     expect(owner.getSessionSnapshot().status).toBe("stale");
+  });
+
+  it("sends a page whose session another sign-in replaced to sign-in, not to its deep link", async () => {
+    await bound();
+    fetcher.mockResolvedValueOnce(probe("another-account"));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
+  });
+
+  it("sends a page the server names as superseded (9090) to sign-in, not to its deep link", async () => {
+    await bound();
+    fetcher.mockResolvedValueOnce(refusal(9090));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
   });
 
   it("navigates once for concurrent refusals and remains blocked when navigation returns", async () => {
@@ -155,9 +168,7 @@ describe("immutable document session", () => {
     expect(owner.getSessionSnapshot().status).toBe("stale");
     await expect(owner.handleRefusal(probe(), "/api")).rejects.toMatchObject({ code: 9090 });
     owner.reloadSession();
-    expect(navigate).toHaveBeenLastCalledWith("/login?next=%2Fspaces%2Fx%3Fa%3D1", {
-      replace: true
-    });
+    expect(navigate).toHaveBeenLastCalledWith("/login", { replace: true });
   });
 
   it("processes mismatch before audit and public-page exemptions", async () => {

@@ -67,6 +67,10 @@ function resumePath(): string {
   return safeNextPath(window.location.pathname + window.location.search);
 }
 
+// Another sign-in now holds the cookie. The page cannot know whose it is, so it
+// never resumes its own deep link (another person's conversation, say).
+const REPLACED_SESSION_DESTINATION = "/login";
+
 function makeStale(
   destination = loginPathToResume(resumePath()),
   error = staleError(),
@@ -98,7 +102,7 @@ export const handleRefusal: (response: Response, requestUrl: string) => Promise<
   assertCurrent();
   const generation = response.headers.get(SESSION_GENERATION_HEADER);
   if (snapshot.status === "bound" && generation !== null && generation !== snapshot.generation) {
-    makeStale();
+    makeStale(snapshot.generation === null ? undefined : REPLACED_SESSION_DESTINATION);
   }
   if (response.ok) {
     if (generation === null) {
@@ -117,7 +121,7 @@ export const handleRefusal: (response: Response, requestUrl: string) => Promise<
   }
   const error = apiErrorFromResponse(response, body);
   assertCurrent();
-  if (error.code === SESSION_MISMATCH) makeStale(undefined, error);
+  if (error.code === SESSION_MISMATCH) makeStale(REPLACED_SESSION_DESTINATION, error);
   const restriction = response.status === 403 ? restrictionOf(error.code) : undefined;
   if (restriction) makeStale("/deactivated", error, restriction);
   if (response.status === 403 && error.code === 9070)
@@ -205,7 +209,8 @@ async function probeSession(): Promise<void> {
       if (!generation)
         throw new EneoApiError("The session probe returned no generation.", { status: 502 });
     } else if (response.status === 401) {
-      if ((await errorCodeFromResponse(response)) === SESSION_MISMATCH) makeStale();
+      if ((await errorCodeFromResponse(response)) === SESSION_MISMATCH)
+        makeStale(REPLACED_SESSION_DESTINATION);
       generation = null;
       // An expired cookie still needs a binding for logout. It never grants
       // authenticated reads or lets this document adopt a later session.
@@ -241,7 +246,10 @@ async function probeSession(): Promise<void> {
       before.status === "bound" &&
       (before.generation !== generation || before.logoutGeneration !== logoutGeneration)
     )
-      makeStale();
+      // Expiry or sign-out (no generation now) resumes the page; another credential does not.
+      makeStale(
+        before.generation !== null && generation !== null ? REPLACED_SESSION_DESTINATION : undefined
+      );
     publish({ status: "bound", generation, ...(logoutGeneration ? { logoutGeneration } : {}) });
   } catch (error) {
     if (snapshot.status === "bound") publish({ ...snapshot, checkError: error });
