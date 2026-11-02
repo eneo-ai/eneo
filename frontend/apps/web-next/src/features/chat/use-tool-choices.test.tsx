@@ -282,4 +282,83 @@ describe("conversation choices", () => {
     );
     expect(view.current.settings.resolution?.revision).toBe(3);
   });
+
+  it("pins only the tool the user toggled; the others keep following the administrator's default", async () => {
+    saved = {
+      revision: 2,
+      settings: { ...defaults, mcp_server_states: {}, capability_states: {} }
+    };
+    const view = renderChoices(personal, "saved");
+    await ready(view);
+    await act(async () => view.current.tools.toggleCapability("web_search"));
+    await ready(view);
+    expect(saved.settings.capability_states).toEqual({ web_search: false });
+    expect(saved.settings.mcp_server_states).toEqual({});
+    await act(async () => view.current.tools.setDisabledMcpServerIds(new Set(["kalender"])));
+    await ready(view);
+    expect(saved.settings.mcp_server_states).toEqual({ kalender: false });
+    expect(saved.settings.capability_states).toEqual({ web_search: false });
+  });
+
+  it("leaves the browser's start choices alone until the user changes something", async () => {
+    const draftKeys = () =>
+      Object.keys(window.localStorage).filter((key) => key.startsWith("eneo:conversation-draft:"));
+    const view = renderChoices();
+    await ready(view);
+    expect(draftKeys()).toEqual([]);
+    await act(async () => view.current.settings.update({ completion_model_id: "model-2" }));
+    expect(draftKeys()).toHaveLength(1);
+  });
+
+  it("saves two quick changes one after another, each on the revision the first produced", async () => {
+    saved = { revision: 1, settings: structuredClone(defaults) };
+    const view = renderChoices(personal, "saved");
+    await ready(view);
+    await act(async () => {
+      void view.current.settings.update({ require_tool_approval: true });
+      void view.current.settings.update({ reasoning_effort: "high" });
+    });
+    await ready(view);
+    expect(api.PATCH.mock.calls.map(([, init]) => init.body.expected_revision)).toEqual([1, 2]);
+    expect(saved).toMatchObject({
+      revision: 3,
+      settings: { require_tool_approval: true, reasoning_effort: "high" }
+    });
+    expect(view.current.settings.error).toBeNull();
+    expect(view.current.settings.resolution?.revision).toBe(3);
+  });
+
+  it("refreshes in the background without going busy, and ignores a failed refresh", async () => {
+    const view = renderChoices(personal, "saved");
+    await ready(view);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    api.POST.mockImplementationOnce(async () => {
+      await held;
+      return { data: { ...saved, revision: 5 }, response: new Response() };
+    });
+    let refreshed!: Promise<void>;
+    await act(async () => {
+      refreshed = view.current.settings.refresh();
+    });
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(2));
+    expect(view.current.settings.busy).toBe(false);
+    expect(view.current.settings.resolution?.revision).toBe(2);
+    await act(async () => {
+      release();
+      await refreshed;
+    });
+    expect(view.current.settings.resolution?.revision).toBe(5);
+
+    api.POST.mockResolvedValueOnce({
+      error: { message: "Gone" },
+      response: new Response(null, { status: 500 })
+    });
+    await act(async () => view.current.settings.refresh());
+    expect(view.current.settings.error).toBeNull();
+    expect(view.current.settings.busy).toBe(false);
+    expect(view.current.settings.resolution?.revision).toBe(5);
+  });
 });

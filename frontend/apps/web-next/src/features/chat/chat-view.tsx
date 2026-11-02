@@ -21,7 +21,7 @@ import {
   type ReactNode
 } from "react";
 import { useAppContext } from "@/components/providers/app-context";
-import { EneoApiError } from "@/lib/api/errors";
+import { EneoApiError, getErrorMessage } from "@/lib/api/errors";
 import { browserApi } from "@/lib/api/browser";
 import { invalidateConversationLists } from "@/lib/api/conversations";
 import { describeChatFailure } from "@/lib/chat/chat-error";
@@ -187,6 +187,7 @@ export function ChatView(props: ChatViewProps) {
       partner={props.partner}
       initialSessionId={props.initialSessionId}
       hasHistory={Boolean(props.initialMessages?.length)}
+      onNewConversation={props.onNewConversation}
     >
       <SidePanelProvider>
         <ConversationView {...props} />
@@ -418,7 +419,7 @@ function ConversationView({
           }
         }
         invalidateConversationLists(queryClient, historyQueryKey(partner));
-        if (mounted.current && !isError) void conversationSettings.reload();
+        if (mounted.current && !isError) void conversationSettings.refresh();
       }
     });
 
@@ -816,13 +817,11 @@ function ConversationView({
     ) : null;
 
   const tools = (
+    // A save never disables the switches: a disabled control drops keyboard
+    // focus (WCAG 2.4.3), and presses made during a save are saved after it.
     <fieldset
-      disabled={
-        conversationSettings.busy ||
-        sending ||
-        !resolution ||
-        resolution.settings_compatible === false
-      }
+      disabled={sending || !resolution || resolution.settings_compatible === false}
+      aria-busy={conversationSettings.busy}
     >
       <ChatTools
         capabilities={toolChoices.capabilities}
@@ -898,48 +897,39 @@ function ConversationView({
   // question and, for support, the technical facts behind "Visa detaljer".
   // Shown in both layouts: a first question that fails before streaming
   // starts puts the view back in the start state.
-  const settingsNotice =
-    conversationSettings.error ||
-    resolution?.model_unavailable ||
-    resolution?.settings_compatible === false ? (
-      <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>
-        <span className="flex flex-wrap items-center justify-center gap-2">
-          <span>
-            {t(
-              conversationSettings.error
-                ? "conversation_settings_save_failed"
-                : resolution?.settings_compatible === false
-                  ? "conversation_settings_incompatible"
-                  : "conversation_settings_model_unavailable"
-            )}
-          </span>
-          <Button
-            label={t("conversation_settings_reload")}
-            size="sm"
-            variant="secondary"
-            isDisabled={sending}
-            isLoading={conversationSettings.busy}
-            isInterruptible
-            onClick={async () => {
-              await conversationSettings.reload();
-              rescue((started ? dockTextareaRef : startTextareaRef).current);
-            }}
-          />
-        </span>
-      </ChatSystemMessage>
-    ) : null;
+  // A revision conflict (9065) says what happened and what to do; any other
+  // failure gets the general sentence.
+  const settingsNoticeText = conversationSettings.error
+    ? conversationSettings.error instanceof EneoApiError && conversationSettings.error.code === 9065
+      ? getErrorMessage(conversationSettings.error, t)
+      : t("conversation_settings_save_failed")
+    : resolution?.settings_compatible === false
+      ? t("conversation_settings_incompatible")
+      : resolution?.model_unavailable
+        ? t("conversation_settings_model_unavailable")
+        : null;
+  const settingsNotice = settingsNoticeText ? (
+    <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>
+      <span className="flex flex-wrap items-center justify-center gap-2">
+        <span>{settingsNoticeText}</span>
+        <Button
+          label={t("conversation_settings_reload")}
+          size="sm"
+          variant="secondary"
+          isDisabled={sending}
+          isLoading={conversationSettings.busy}
+          isInterruptible
+          onClick={async () => {
+            await conversationSettings.reload();
+            rescue((started ? dockTextareaRef : startTextareaRef).current);
+          }}
+        />
+      </span>
+    </ChatSystemMessage>
+  ) : null;
   useEffect(() => {
-    if (conversationSettings.error) announce(t("conversation_settings_save_failed"));
-    else if (resolution?.settings_compatible === false)
-      announce(t("conversation_settings_incompatible"));
-    else if (resolution?.model_unavailable) announce(t("conversation_settings_model_unavailable"));
-  }, [
-    conversationSettings.error,
-    resolution?.model_unavailable,
-    resolution?.settings_compatible,
-    announce,
-    t
-  ]);
+    if (settingsNoticeText) announce(settingsNoticeText);
+  }, [settingsNoticeText, announce]);
 
   const errorNotice = failure ? (
     <ChatSystemMessage icon={<CircleAlert aria-hidden="true" className="text-ax-error size-4" />}>

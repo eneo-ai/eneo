@@ -31,10 +31,11 @@ const COMPOSER_PICKER_CLASS =
 
 function ModelSwitcher() {
   const { tenant } = useAppContext();
-  const { resolution, update, busy, running, hasMessages } = useConversationSettings();
+  const { resolution, update, running, hasMessages, startConversation } = useConversationSettings();
   const t = useTranslations();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const models = resolution?.available_models ?? [];
+  const choice = (id: string) => ({ completion_model_id: id, reasoning_effort: null });
   return (
     <>
       <ModelSelector
@@ -44,9 +45,12 @@ function ModelSwitcher() {
         }
         onSelect={(id) => {
           if (hasMessages) setPendingId(id);
-          else return update({ completion_model_id: id, reasoning_effort: null });
+          else return update(choice(id));
         }}
-        disabled={busy || running || !resolution || resolution.settings_compatible === false}
+        locked={resolution?.model_locked ? (resolution.effective_model ?? null) : null}
+        // The trigger shows its own spinner while a choice saves; disabling
+        // it would drop keyboard focus.
+        disabled={running || !resolution || resolution.settings_compatible === false}
         size="sm"
         showPricing={tenant.show_model_pricing}
         className={COMPOSER_PICKER_CLASS}
@@ -59,16 +63,25 @@ function ModelSwitcher() {
       >
         <DialogHeader title={t("personal_chat_model_change_title")} />
         <p>{t("personal_chat_model_change_description")}</p>
-        <div className="mt-4 flex justify-end gap-2">
+        <div className="mt-4 flex flex-wrap justify-end gap-2">
           <Button label={t("cancel")} variant="secondary" onClick={() => setPendingId(null)} />
           <Button
             label={t("personal_chat_model_change_anyway")}
+            variant="secondary"
             onClick={() => {
-              if (pendingId)
-                void update({ completion_model_id: pendingId, reasoning_effort: null });
+              if (pendingId) void update(choice(pendingId));
               setPendingId(null);
             }}
           />
+          {startConversation && (
+            <Button
+              label={t("personal_chat_model_new_conversation")}
+              onClick={() => {
+                if (pendingId) startConversation(choice(pendingId));
+                setPendingId(null);
+              }}
+            />
+          )}
         </div>
       </Dialog>
     </>
@@ -76,11 +89,11 @@ function ModelSwitcher() {
 }
 
 function ReasoningSwitcher() {
-  const { resolution, update, busy, running } = useConversationSettings();
+  const { resolution, update, running } = useConversationSettings();
   const options = resolution?.reasoning_effort_options ?? [];
   if (options.length === 0) return null;
   return (
-    <fieldset disabled={busy || running || resolution?.settings_compatible === false}>
+    <fieldset disabled={running || resolution?.settings_compatible === false}>
       <ReasoningEffortSelector
         options={options}
         stored={resolution?.settings.reasoning_effort ?? null}

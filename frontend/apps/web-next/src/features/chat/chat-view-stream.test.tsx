@@ -17,7 +17,11 @@ const spies = vi.hoisted(() => ({
   titled: [] as string[],
   rated: [] as { path: string; params: unknown; body: unknown }[],
   /** While set, the files upload waits for the test to finish it. */
-  holdUpload: null as null | ((upload: { id: string; name: string }) => void)
+  holdUpload: null as null | ((upload: { id: string; name: string }) => void),
+  /** The conversation's choices re-read for a saved session wait for this, or fail. */
+  holdResolve: null as Promise<void> | null,
+  failResolve: false,
+  resolves: [] as (string | null)[]
 }));
 
 // Fails before streaming starts, or streams a short answer (AI SDK UI chunks).
@@ -90,7 +94,15 @@ vi.mock("@/lib/api/browser", () => ({
         path: string,
         init: { params?: { path?: { session_id?: string } }; body?: { session_id?: string } }
       ) => {
-        if (path.endsWith("/settings/resolve/"))
+        if (path.endsWith("/settings/resolve/")) {
+          spies.resolves.push(init?.body?.session_id ?? null);
+          if (init?.body?.session_id && spies.holdResolve) await spies.holdResolve;
+          if (init?.body?.session_id && spies.failResolve)
+            return {
+              data: undefined,
+              error: { message: "Gone" },
+              response: new Response(null, { status: 500 })
+            };
           return {
             data: {
               revision: init?.body?.session_id ? 1 : 0,
@@ -101,6 +113,7 @@ vi.mock("@/lib/api/browser", () => ({
             },
             response: new Response()
           };
+        }
         if (path === "/api/v1/files/") {
           const uploaded = (upload: { id: string; name: string }) => ({
             data: { ...upload, mimetype: "application/pdf", size: 2048 },
@@ -139,6 +152,9 @@ afterEach(() => {
   spies.rated.length = 0;
   spies.mode = "fail";
   spies.holdUpload = null;
+  spies.holdResolve = null;
+  spies.failResolve = false;
+  spies.resolves.length = 0;
 });
 
 const partner: ChatPartner = {
@@ -197,6 +213,51 @@ describe("ChatView streaming an answer", () => {
     expect(spies.titled).toEqual(["session-1"]);
     // A new assistant-first send sends the assistant id, not a session.
     expect(spies.sent[0]?.body).toMatchObject({ assistant_id: "assistant-1", session_id: null });
+  });
+
+  it("takes the next question while the conversation's choices refresh after the answer", async () => {
+    spies.mode = "answer";
+    let release!: () => void;
+    spies.holdResolve = new Promise((resolve) => {
+      release = resolve;
+    });
+    renderInApp(<Harness />);
+    await ask("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret är klart"));
+    await waitFor(() => expect(spies.resolves).toContain("session-1"));
+
+    const textarea = screen.getByRole("textbox", { name: /Meddelande till/ });
+    fireEvent.change(textarea, { target: { value: "Gäller det kommuner?" } });
+    fireEvent.keyDown(textarea, { key: "Enter" });
+    await waitFor(() =>
+      expect(spies.sent.map((question) => question.text)).toEqual([
+        "Vilken gräns gäller?",
+        "Gäller det kommuner?"
+      ])
+    );
+    release();
+  });
+
+  it("shows no settings error when the refresh after an answer fails", async () => {
+    spies.mode = "answer";
+    spies.failResolve = true;
+    renderInApp(<Harness />);
+    await ask("Vilken gräns gäller?");
+    await waitFor(() => expect(spies.announce).toHaveBeenCalledWith("Svaret är klart"));
+    await waitFor(() => expect(spies.resolves).toContain("session-1"));
+    await act(async () => {
+      await Promise.all(vi.mocked(browserApi.POST).mock.results.map((result) => result.value));
+    });
+    expect(screen.queryByText("Inställningarna kunde inte sparas eller hämtas.")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Läs in sparade val" })).toBeNull();
+    fireEvent.change(screen.getByRole("textbox", { name: /Meddelande till/ }), {
+      target: { value: "Gäller det kommuner?" }
+    });
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")
+      ).toBe(false)
+    );
   });
 
   it("refreshes the partner's history and the recent list once the answer is saved", async () => {

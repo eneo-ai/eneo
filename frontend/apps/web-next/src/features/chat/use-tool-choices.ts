@@ -28,12 +28,19 @@ export function useToolChoices() {
   );
 
   function setTools(mcpDisabled: Set<string>, capabilityDisabled: Set<Capability>) {
-    // Keep dormant choices for removed/disabled tools, so re-enabling restores the user's choice.
+    // Only what the user changed gets an explicit state: a tool never touched
+    // stays out of the maps and keeps following the administrator's default.
+    // Dormant choices for removed/disabled tools stay, so re-enabling restores them.
     const mcp_server_states = { ...settings?.mcp_server_states };
     const capability_states = { ...settings?.capability_states };
-    for (const server of mcpServers) mcp_server_states[server.id] = !mcpDisabled.has(server.id);
-    for (const { purpose } of allCapabilities)
-      capability_states[purpose] = !capabilityDisabled.has(purpose);
+    for (const server of mcpServers) {
+      const selected = !mcpDisabled.has(server.id);
+      if (selected !== server.selected) mcp_server_states[server.id] = selected;
+    }
+    for (const capability of allCapabilities) {
+      const selected = !capabilityDisabled.has(capability.purpose);
+      if (selected !== capability.selected) capability_states[capability.purpose] = selected;
+    }
     void update({ mcp_server_states, capability_states });
   }
   return {

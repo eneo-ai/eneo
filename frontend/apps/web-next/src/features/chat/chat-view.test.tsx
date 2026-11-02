@@ -35,19 +35,24 @@ const api = vi.hoisted(() => ({
     }
     return { data: undefined, error: { message: "unexpected" }, response: new Response() };
   }),
-  POST: vi.fn(async (path: string, init?: { body?: { session_id?: string } }) => ({
-    data: path.endsWith("/settings/resolve/")
-      ? {
-          revision: init?.body?.session_id ? 1 : 0,
-          settings: {},
-          supports_tool_calling: true,
-          settings_compatible: true,
-          mcp_servers: [],
-          capabilities: []
-        }
-      : undefined,
-    response: new Response()
-  })),
+  POST: vi.fn(
+    async (
+      path: string,
+      init?: { body?: { session_id?: string } }
+    ): Promise<{ data: unknown; response: Response }> => ({
+      data: path.endsWith("/settings/resolve/")
+        ? {
+            revision: init?.body?.session_id ? 1 : 0,
+            settings: {},
+            supports_tool_calling: true,
+            settings_compatible: true,
+            mcp_servers: [],
+            capabilities: []
+          }
+        : undefined,
+      response: new Response()
+    })
+  ),
   PUT: vi.fn(async (_path: string, init: { body: unknown }) => ({
     data: init.body,
     response: new Response()
@@ -192,6 +197,89 @@ describe("ChatView conversation", () => {
       false
     );
   });
+  /** A saved conversation whose only tool is one MCP server, on. */
+  const withServer = (selected: boolean) => ({
+    data: {
+      revision: 2,
+      settings: {
+        require_tool_approval: true,
+        mcp_server_states: selected ? {} : { diarium: false }
+      },
+      supports_tool_calling: true,
+      settings_compatible: true,
+      mcp_servers: [{ id: "diarium", name: "Diarium", available: true, selected, reason: null }],
+      capabilities: []
+    },
+    response: new Response()
+  });
+
+  it("keeps a tool switch enabled and focused while its change saves", async () => {
+    api.POST.mockResolvedValueOnce(withServer(true)).mockResolvedValueOnce(withServer(false));
+    const save = deferred<{ data: unknown; response: Response }>();
+    api.PATCH.mockReturnValueOnce(save.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    const trigger = await screen.findByRole("button", { name: "Verktyg: 1 av 1 aktiva" });
+    fireEvent.click(trigger);
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    const diarium = within(popover).getByRole("switch", { name: "Diarium" });
+    diarium.focus();
+    fireEvent.click(diarium);
+    await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
+    expect(trigger.closest("fieldset")?.getAttribute("aria-busy")).toBe("true");
+    expect(trigger.hasAttribute("disabled")).toBe(false);
+    expect(diarium.hasAttribute("disabled")).toBe(false);
+    expect(document.activeElement).toBe(diarium);
+
+    await act(async () =>
+      save.resolve({
+        data: { revision: 3, settings: withServer(false).data.settings },
+        response: new Response()
+      })
+    );
+    await waitFor(() =>
+      expect(trigger.closest("fieldset")?.getAttribute("aria-busy")).toBe("false")
+    );
+    expect(document.activeElement).toBe(diarium);
+    expect((diarium as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("explains a change made in another tab with the backend's own message", async () => {
+    api.POST.mockResolvedValueOnce(withServer(true));
+    api.PATCH.mockResolvedValueOnce({
+      data: undefined,
+      error: { message: "Conflict", eneo_error_code: 9065 },
+      response: new Response(null, { status: 409 })
+    });
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole("button", { name: "Verktyg: 1 av 1 aktiva" }));
+    const popover = await screen.findByRole("dialog", { name: "Verktyg" });
+    fireEvent.click(within(popover).getByRole("switch", { name: "Diarium" }));
+    const notice = await screen.findByText(
+      "Valen för den här konversationen ändrades någon annanstans, till exempel i en annan flik. Läs in de sparade valen och försök igen."
+    );
+    expect(spies.announce).toHaveBeenCalledWith(notice.textContent);
+    expect(screen.queryByText("Inställningarna kunde inte sparas eller hämtas.")).toBeNull();
+    expect(screen.getByRole("button", { name: "Läs in sparade val" })).toBeTruthy();
+  });
+
+  it("holds sends until the conversation's choices have loaded", async () => {
+    const load = deferred<{ data: unknown; response: Response }>();
+    api.POST.mockReturnValueOnce(load.promise);
+    renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
+    fireEvent.change(screen.getByRole("textbox", { name: /Meddelande till/ }), {
+      target: { value: "Fortsätt" }
+    });
+    expect(screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")).toBe(
+      true
+    );
+    await act(async () => load.resolve(withServer(true)));
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Skicka meddelande" }).hasAttribute("disabled")
+      ).toBe(false)
+    );
+  });
+
   it("names the message list and keeps it out of live announcements", () => {
     renderInApp(<Harness partner={assistant} messages={history} sessionId="session-1" />);
     const log = screen.getByRole("log", { name: "Konversation" });

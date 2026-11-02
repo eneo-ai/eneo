@@ -24,8 +24,12 @@ type ConversationSettingsContext = {
   running: boolean;
   setRunning: (running: boolean) => void;
   reload: () => Promise<void>;
+  /** Re-reads in the background: the shown choices stay until the new ones land, and a failure is ignored. */
+  refresh: () => Promise<void>;
   update: (patch: Partial<Settings>) => Promise<void>;
   adoptSession: (id: string, state: State | null | undefined) => void;
+  /** Starts a new conversation whose draft begins with these choices on top of the current ones. */
+  startConversation: ((patch: Partial<Settings>) => void) | null;
 };
 const Context = createContext<ConversationSettingsContext | null>(null);
 
@@ -34,11 +38,13 @@ export function ConversationSettingsProvider({
   partner,
   initialSessionId,
   hasHistory = false,
+  onNewConversation,
   children
 }: {
   partner: ChatPartner;
   initialSessionId?: string | null;
   hasHistory?: boolean;
+  onNewConversation?: () => void;
   children: ReactNode;
 }) {
   const { user, tenant } = useAppContext();
@@ -55,7 +61,10 @@ export function ConversationSettingsProvider({
   const [running, setRunning] = useState(false);
   const sessionId = useRef(initialSessionId ?? null);
   const current = useRef<Resolution | null>(null);
-  const locked = useRef(false);
+  // Reads and saves run one after another, each on top of the latest
+  // revision, so a change made during a save is sent after it, not dropped.
+  const chain = useRef<Promise<void>>(Promise.resolve());
+  const saving = useRef(0);
   const mounted = useRef(false);
   function target() {
     return sessionId.current
@@ -71,9 +80,9 @@ export function ConversationSettingsProvider({
     setResolution(next);
   }
 
-  // The browser's start choices follow what the user set up: a draft, or a
-  // change made in a conversation. Opening an older conversation only reads
-  // its saved choices and leaves the draft alone.
+  // The browser's start choices follow what the user set up: a change made
+  // in a draft or in a conversation. Opening a conversation or a draft only
+  // reads choices and leaves the browser's alone.
   function remember(next: Resolution) {
     if (next.settings_compatible !== false && !next.model_unavailable) {
       rememberConversationDraft(scope, next.settings);
@@ -111,31 +120,43 @@ export function ConversationSettingsProvider({
     return next;
   }
 
+  /** Queues work behind what is already running; `quiet` work never shows as busy. */
+  function enqueue(task: () => Promise<void>, { quiet = false } = {}) {
+    if (!quiet) {
+      saving.current += 1;
+      if (mounted.current) setBusy(true);
+    }
+    const run = chain.current.then(task).finally(() => {
+      if (quiet) return;
+      saving.current -= 1;
+      if (saving.current === 0 && mounted.current) setBusy(false);
+    });
+    chain.current = run.catch(() => {});
+    return run;
+  }
+
   function load() {
-    if (locked.current) return Promise.resolve();
-    locked.current = true;
-    const draft = !sessionId.current;
-    return readSettings()
-      .then(
+    return enqueue(() =>
+      readSettings().then(
         (next) => {
           install(next);
-          if (draft) remember(next);
           if (mounted.current) setError(null);
         },
         (cause: unknown) => {
           if (mounted.current) setError(cause);
         }
       )
-      .finally(() => {
-        locked.current = false;
-        if (mounted.current) setBusy(false);
-      });
+    );
   }
 
-  async function reload() {
-    if (locked.current) return;
-    setBusy(true);
-    await load();
+  function reload() {
+    return load();
+  }
+
+  // Nothing was saved, so a failure changes nothing: the next send or save
+  // reads again if the revision moved (409).
+  function refresh() {
+    return enqueue(() => readSettings().then(install, () => {}), { quiet: true });
   }
 
   useEffect(() => {
@@ -148,37 +169,29 @@ export function ConversationSettingsProvider({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function update(patch: Partial<Settings>) {
-    if (
-      locked.current ||
-      running ||
-      !current.current ||
-      current.current.settings_compatible === false
-    )
-      return;
-    locked.current = true;
-    setBusy(true);
-    setError(null);
-    const settings = { ...current.current.settings, ...patch };
-    try {
-      if (sessionId.current) {
-        const state = await unwrap(
-          browserApi.PATCH("/api/v1/conversations/{session_id}/settings/", {
-            params: { path: { session_id: sessionId.current } },
-            body: { expected_revision: current.current.revision, settings }
-          })
-        );
-        install({ ...current.current, ...state });
+  function update(patch: Partial<Settings>) {
+    if (running) return Promise.resolve();
+    return enqueue(async () => {
+      if (!current.current || current.current.settings_compatible === false) return;
+      if (mounted.current) setError(null);
+      const settings = { ...current.current.settings, ...patch };
+      try {
+        if (sessionId.current) {
+          const state = await unwrap(
+            browserApi.PATCH("/api/v1/conversations/{session_id}/settings/", {
+              params: { path: { session_id: sessionId.current } },
+              body: { expected_revision: current.current.revision, settings }
+            })
+          );
+          install({ ...current.current, ...state });
+        }
+        const next = await resolve(settings);
+        install(next);
+        remember(next);
+      } catch (cause) {
+        if (mounted.current) setError(cause);
       }
-      const next = await resolve(settings);
-      install(next);
-      remember(next);
-    } catch (cause) {
-      if (mounted.current) setError(cause);
-    } finally {
-      locked.current = false;
-      if (mounted.current) setBusy(false);
-    }
+    });
   }
 
   function adoptSession(id: string, state: State | null | undefined) {
@@ -187,6 +200,14 @@ export function ConversationSettingsProvider({
     if (state && current.current) install({ ...current.current, ...state });
     else void reload();
   }
+
+  const startConversation = onNewConversation
+    ? (patch: Partial<Settings>) => {
+        if (current.current)
+          rememberConversationDraft(scope, { ...current.current.settings, ...patch });
+        onNewConversation();
+      }
+    : null;
 
   return (
     <Context
@@ -198,8 +219,10 @@ export function ConversationSettingsProvider({
         running,
         setRunning,
         reload,
+        refresh,
         update,
-        adoptSession
+        adoptSession,
+        startConversation
       }}
     >
       {children}
