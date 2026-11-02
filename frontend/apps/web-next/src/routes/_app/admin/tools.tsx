@@ -4,19 +4,18 @@ import { securityClassificationsQueryOptions } from "@/features/admin/security-c
 import { ToolsPage } from "@/features/admin/tools/tools-page";
 import { toolsTabOf } from "@/features/admin/tools/tools-tabs";
 import { browserApi } from "@/lib/api/browser";
-import { readFirstAnswer, readFresh } from "@/lib/api/query";
+import { readFresh, warmQuery } from "@/lib/api/query";
 import { useSearchParams } from "@/lib/navigation";
 import { routeTitle } from "@/lib/route-head";
 
 export const Route = createFileRoute("/_app/admin/tools")({
   loader: async ({ context: { queryClient } }) => {
+    // The runtime status waits for the backend's probe of the tool runtime:
+    // the page keeps its place above the tabs instead of waiting for it.
+    warmQuery(queryClient, bundledToolsQueryOptions(browserApi));
     await Promise.all([
       readFresh(queryClient, mcpServersQueryOptions(browserApi)),
-      readFresh(queryClient, securityClassificationsQueryOptions(browserApi)),
-      // The runtime status sits above the tabs: shown before it answered, it
-      // arrived over them and pushed the tabs and the list down (layout shift
-      // on a phone). A failed read shows no status card.
-      readFirstAnswer(queryClient, bundledToolsQueryOptions(browserApi))
+      readFresh(queryClient, securityClassificationsQueryOptions(browserApi))
     ]);
   },
   head: routeTitle("tools"),
