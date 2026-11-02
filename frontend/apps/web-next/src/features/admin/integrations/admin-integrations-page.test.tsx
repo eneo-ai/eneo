@@ -97,3 +97,23 @@ it.each([
     expect(within(section).queryByRole("button", { name: "Konfigurera" })).toBeNull();
   }
 );
+it("offers SharePoint only to enable, as production does", () => {
+  api.GET.mockImplementation(() => ok(null));
+  const queryClient = testQueryClient();
+  const provider = (integration_type: string, name: string) => ({
+    id: null,
+    integration_id: integration_type,
+    name,
+    description: "",
+    integration_type,
+    is_linked_to_tenant: false
+  });
+  queryClient.setQueryData(TENANT_INTEGRATIONS_KEY, [
+    provider("sharepoint", "SharePoint / OneDrive"),
+    provider("confluence", "Confluence")
+  ]);
+  renderInApp(<AdminIntegrationsPage />, { queryClient });
+  expect(screen.getByText("SharePoint / OneDrive")).toBeTruthy();
+  expect(screen.queryByText("Confluence")).toBeNull();
+  expect(screen.getAllByRole("button", { name: "Aktivera" })).toHaveLength(1);
+});

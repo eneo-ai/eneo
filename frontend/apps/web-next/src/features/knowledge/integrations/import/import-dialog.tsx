@@ -34,9 +34,7 @@ export function useImportableIntegrations() {
   const { space } = useSpace();
   const query = useQuery(availableIntegrationsQueryOptions(browserApi, space.id));
 
-  const importable = (query.data ?? []).filter(
-    (entry) => entry.integration_type === "sharepoint" || entry.integration_type === "confluence"
-  );
+  const importable = (query.data ?? []).filter((entry) => entry.integration_type === "sharepoint");
   const integrations = space.personal
     ? importable.filter((entry) => entry.auth_type === "user_oauth" || !entry.connected)
     : importable.filter((entry) => entry.connected && entry.auth_type === "tenant_app");
