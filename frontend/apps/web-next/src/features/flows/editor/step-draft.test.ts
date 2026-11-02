@@ -196,6 +196,57 @@ describe("classificationPreviewRequest", () => {
     ]);
   });
 
+  it("sends every credential of the draft's HTTP calls as stored, the rest as drafted", () => {
+    const flow = makeFlow({ steps: [makeStep()] });
+    const stored = { $secret: "stored" };
+    const draft = draftStep(stepConfigOf(flow.steps[0]!), {
+      input_source: "http_get",
+      output_mode: "http_post",
+      input_config: {
+        url: "https://api.example.org/{{flow_input.id}}",
+        auth: { mode: "basic_auth", username: "anna", password: "pw-typed-1" },
+        custom_headers: [
+          { name: "X-Secret", value: "header-typed-2", secret: true },
+          { name: "X-Case", value: "{{flow_input.id}}", secret: false }
+        ],
+        runtime_input: { enabled: false }
+      },
+      output_config: {
+        url: "https://hook.example.org/",
+        auth: { mode: "api_key", header_name: "X-API-Key", key: "key-typed-3" }
+      }
+    });
+
+    const request = classificationPreviewRequest({
+      flow,
+      stepId: "step-1",
+      draft,
+      assistantId: "assistant-1",
+      assistant: null,
+      savedAssistant: null
+    });
+
+    const [step] = request.steps as unknown as Pick<
+      typeof draft,
+      "input_config" | "output_config"
+    >[];
+    expect(step?.input_config).toEqual({
+      url: "https://api.example.org/{{flow_input.id}}",
+      auth: { mode: "basic_auth", username: "anna", password: stored },
+      custom_headers: [
+        { name: "X-Secret", value: stored, secret: true },
+        { name: "X-Case", value: "{{flow_input.id}}", secret: false }
+      ],
+      runtime_input: { enabled: false }
+    });
+    expect(step?.output_config).toEqual({
+      url: "https://hook.example.org/",
+      auth: { mode: "api_key", header_name: "X-API-Key", key: stored }
+    });
+    // The draft itself, which the save sends, keeps what was typed.
+    expect(JSON.stringify(draft)).toContain("pw-typed-1");
+  });
+
   it("sends the references a drafted prompt reads, as the rule reads them", () => {
     const flow = makeFlow({ steps: [makeStep()] });
     const saved = { ...assistantConfigOf(makeAssistant()), prompt: "Läs {{step_1.output.text}}." };

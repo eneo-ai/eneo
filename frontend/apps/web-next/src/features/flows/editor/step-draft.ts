@@ -3,7 +3,7 @@ import {
   type ModelWithKwargs
 } from "@/features/assistants/editor/model-kwargs";
 import { tokensOf } from "../flow-steps";
-import { readRuntimeInput } from "./step-configs";
+import { readRuntimeInput, withStoredSecrets } from "./step-configs";
 import {
   EDITABLE_STEP_FIELDS,
   objectOf,
@@ -140,7 +140,11 @@ export function buildEditorUpdate(params: {
 
 type StepUpdateRequest = Omit<FlowStep, "created_at" | "updated_at"> & { assistant_id: string };
 
-/** A step as a full update would send it: the fields a flow update accepts. */
+/**
+ * A step as a preview sends it: the fields a flow update accepts, with every
+ * credential as stored. The classification never reads one, and the request
+ * is the preview's query key, which a secret must never enter.
+ */
 function updateRequestOf(
   step: FlowStep,
   config: StepConfig = stepConfigOf(step)
@@ -149,7 +153,9 @@ function updateRequestOf(
     id: step.id ?? null,
     assistant_id: step.assistant_id,
     step_order: step.step_order,
-    ...config
+    ...config,
+    input_config: withStoredSecrets(config.input_config),
+    output_config: withStoredSecrets(config.output_config)
   };
 }
 

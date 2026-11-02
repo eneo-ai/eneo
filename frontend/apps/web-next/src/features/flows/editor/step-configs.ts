@@ -404,6 +404,32 @@ export function withHttpConfig(config: unknown, http: HttpConfig): JsonObject {
   return next;
 }
 
+/**
+ * `config` with each credential of its HTTP call (the auth token, key or
+ * password, a secret header's value) as the stored sentinel and the rest as
+ * it is: for a request that has no use for a credential, so one typed in the
+ * editor stays out of it. Only the save sends what was typed.
+ */
+export function withStoredSecrets(config: JsonObject | null): JsonObject | null {
+  if (!config) return config;
+  const next = { ...config };
+  if (isJsonObject(config.auth)) {
+    const auth = { ...config.auth };
+    for (const field of ["token", "key", "password"]) {
+      if (field in auth) auth[field] = { $secret: "stored" };
+    }
+    next.auth = auth;
+  }
+  if (Array.isArray(config.custom_headers)) {
+    next.custom_headers = config.custom_headers.map((header: unknown) =>
+      isJsonObject(header) && header.secret === true
+        ? { ...header, value: { $secret: "stored" } }
+        : header
+    );
+  }
+  return next;
+}
+
 /** True when the config already holds an authored HTTP config (an `auth` key). */
 export function hasHttpConfig(config: unknown): boolean {
   return isJsonObject(config) && "auth" in config;

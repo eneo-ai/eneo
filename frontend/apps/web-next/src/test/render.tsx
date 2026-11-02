@@ -35,7 +35,7 @@ export function testQueryClient(): QueryClient {
 }
 
 /**
- * Everything React Query holds, as text: each query's state and each
+ * Everything React Query holds, as text: each query's key and state and each
  * mutation's state and options (functions drop out). A secret the UI sends
  * or receives must never appear in it.
  */
@@ -44,7 +44,7 @@ export function cachedText(queryClient: QueryClient): string {
     queryClient
       .getQueryCache()
       .getAll()
-      .map((query) => query.state),
+      .map((query) => [query.queryKey, query.state]),
     queryClient
       .getMutationCache()
       .getAll()
