@@ -91,6 +91,18 @@ it.each([
   expect(navigateTo).not.toHaveBeenCalled();
 });
 
+it.each([401, 403, 422, 429, 503])(
+  "hands the trace id of a refused login (HTTP %s) to the form for support",
+  async (status) => {
+    fetchMock.mockResolvedValue(
+      Response.json({}, { status, headers: { "X-Correlation-ID": "trace-abc" } })
+    );
+    expect(await submitPasswordLogin(undefined, {}, credentials())).toMatchObject({
+      traceId: "trace-abc"
+    });
+  }
+);
+
 it("keeps a failed network attempt on the form", async () => {
   fetchMock.mockRejectedValue(new TypeError("Offline"));
   expect(await submitPasswordLogin(undefined, {}, credentials())).toEqual({

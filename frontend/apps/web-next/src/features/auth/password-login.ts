@@ -1,4 +1,4 @@
-import { errorCodeFromResponse } from "@/lib/api/errors";
+import { errorCodeFromResponse, extractTraceId } from "@/lib/api/errors";
 import { readAttemptLimit, type LoginAttemptLimit } from "@/lib/auth/login-attempt-limit";
 import { safeNextPath } from "@/lib/auth/safe-next";
 import { navigateTo } from "@/lib/navigate-to";
@@ -7,6 +7,7 @@ export type LoginFormState = Partial<LoginAttemptLimit> & {
   error?:
     "missing_fields" | "invalid_credentials" | "too_many_attempts" | "deactivated" | "unavailable";
   email?: string;
+  traceId?: string;
 };
 
 export async function submitPasswordLogin(
@@ -33,19 +34,26 @@ export async function submitPasswordLogin(
     return { error: "unavailable", email };
   }
 
+  // The id support needs to find a failed attempt in the backend log.
+  const traceId = extractTraceId(response.headers);
   // 422 is a form the backend refused (a malformed email): the user's input, as 401.
   if (response.status === 401 || response.status === 422 || response.status === 429) {
     return {
       error: response.status === 429 ? "too_many_attempts" : "invalid_credentials",
       email,
+      traceId,
       ...(await readAttemptLimit(response))
     };
   }
   if (response.status === 403) {
     const code = await errorCodeFromResponse(response);
-    return { error: code === 9019 || code === 9025 ? "deactivated" : "unavailable", email };
+    return {
+      error: code === 9019 || code === 9025 ? "deactivated" : "unavailable",
+      email,
+      traceId
+    };
   }
-  if (!response.ok) return { error: "unavailable", email };
+  if (!response.ok) return { error: "unavailable", email, traceId };
 
   navigateTo(safeNextPath(next));
   return {};

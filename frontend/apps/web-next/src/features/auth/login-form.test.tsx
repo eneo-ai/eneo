@@ -44,6 +44,16 @@ it("says sign-in is unavailable when the credentials were never checked", async 
   expect(await screen.findByText(messages.login_unavailable)).toBeTruthy();
 });
 
+it("shows the trace id of a failed attempt with a copy button for support", async () => {
+  vi.mocked(submitPasswordLogin).mockResolvedValue({ error: "unavailable", traceId: "trace-abc" });
+  renderInApp(<LoginForm />);
+  fireEvent.change(screen.getByLabelText(/^E-post/), { target: { value: "person@example.test" } });
+  fireEvent.change(screen.getByLabelText(/^Lösenord/), { target: { value: "secret" } });
+  fireEvent.click(screen.getByRole("button", { name: "Logga in" }));
+  expect(await screen.findByText("trace-abc")).toBeTruthy();
+  expect(screen.getByRole("button", { name: messages.copy_correlation_id })).toBeTruthy();
+});
+
 it("reveals a password without submitting the form", async () => {
   renderInApp(<LoginForm />);
   const field = screen.getByLabelText(/^Lösenord/);
