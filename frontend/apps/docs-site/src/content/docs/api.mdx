@@ -177,8 +177,10 @@ settings do not replace them.
   A concurrent change returns `409` instead of overwriting it.
 - Preflight and sending accept `settings_revision: 0` for an existing conversation
   that has no saved settings yet. Sending checks that observed revision before
-  initializing revision one. A concurrent initialization still returns `409`;
-  an existing nonzero revision must match exactly.
+  initializing revision one. A concurrent initialization returns `409` to a
+  caller that sent revision zero; a send without `settings_revision` continues
+  with the choices that were saved first. An existing nonzero revision must
+  match exactly.
 - Each returned MCP server and capability has `selected` and `available`.
   `selected` represents user intent resolved against current defaults;
   `available` represents current eligibility. A selected but unavailable tool
@@ -189,13 +191,17 @@ The backend checks ownership, current permissions, model eligibility and tool
 availability on each new request. Saved choices are never authorization grants.
 `disabled_mcp_server_ids` and `disabled_capabilities` remain optional per-turn
 restrictions, and request-level approval can require more confirmation. None can
-widen the permissions or undo a saved restriction. Group chats retain their
-assistant-routing and model policy; model/reasoning overrides and tool approval
-are not supported for them.
+widen the permissions or undo a saved restriction. A tool call made from an
+interactive view follows the same rule: a server switched off in the
+conversation's settings is rejected even when its view is still open. Group
+chats retain their assistant-routing and model policy; model/reasoning overrides
+and tool approval are not supported for them.
 
 Older conversations without settings adopt current defaults when first opened by
-the clients or continued through the API. Historical choices cannot be
-reconstructed from old browser preferences. Explicit selections are saved; a tool
+the clients or continued through the API: the personal chat's current model and,
+when the policy lets users choose and the model accepts it, the assistant's own
+reasoning preference. Historical choices cannot be reconstructed from old
+browser preferences. Explicit selections are saved; a tool
 introduced later follows its current policy default until explicitly selected.
 A turn already running uses the configuration with which it started.
 
