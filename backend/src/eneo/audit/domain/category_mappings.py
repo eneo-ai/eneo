@@ -164,8 +164,11 @@ CATEGORY_MAPPINGS = {
     ActionType.HELP_ASSISTANT_ROLE_TOGGLED_VISIBLE.value: "admin_actions",
     ActionType.HELP_ASSISTANT_INSTALLED.value: "admin_actions",
     ActionType.HELP_ASSISTANT_UNINSTALLED.value: "admin_actions",
-    # System Actions (3 actions)
+    # System Actions (6 actions)
     ActionType.RETENTION_POLICY_APPLIED.value: "system_actions",
+    ActionType.DATA_RETENTION_BATCH.value: "system_actions",
+    ActionType.DATA_RETENTION_RUN.value: "system_actions",
+    ActionType.DATA_RETENTION_SKIPPED.value: "system_actions",
     ActionType.ENCRYPTION_KEY_ROTATED.value: "system_actions",
     ActionType.SYSTEM_MAINTENANCE.value: "system_actions",
     # Audit Access (3 actions)

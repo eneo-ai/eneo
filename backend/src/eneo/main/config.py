@@ -430,6 +430,45 @@ class Settings(BaseSettings):
     export_max_concurrent_per_tenant: int = 2  # Max concurrent exports per tenant
     export_progress_interval: int = 5000  # Update progress every N records
 
+    # Scheduled retention shares one bounded runner across domain adopters.
+    retention_cron_hour: int = Field(default=3, ge=0, le=23)
+    retention_cron_minute: int = Field(default=30, ge=0, le=59)
+    retention_conversations_history_enabled: bool = True
+    retention_empty_sessions_enabled: bool = True
+    retention_unused_files_enabled: bool = True
+    retention_job_history_enabled: bool = True
+    retention_overdue_window_days: int = Field(default=1, ge=1, le=365)
+    retention_overdue_max_rows: int = Field(default=1000, gt=0)
+    retention_max_rows_per_run: int = Field(default=50_000, gt=0)
+    retention_conversations_max_rows_per_run: int = Field(default=250_000, gt=0)
+    # A question with a session and its help-assistant helper charges four unit
+    # rows (root DELETE, the session's lock and proof, the session, the helper);
+    # a smaller cap would block every such question as unit_exceeds_budget.
+    retention_conversations_max_unit_rows: int = Field(default=5000, ge=4)
+    retention_max_files_per_run: int = Field(default=10_000, gt=0)
+    retention_max_seconds_per_run: int = Field(default=1800, gt=0)
+    # Steps reserve a share of a chunk per unit (empty sessions a quarter, job
+    # history a half); with chunks below four rows they would defer every night.
+    # At four, a chunk holds one conversation root per transaction.
+    retention_chunk_rows: int = Field(default=500, ge=4, le=2000)
+    # A chunk stops admitting conversation roots and File families after this
+    # long, so the row locks it holds do not keep users waiting.
+    retention_chunk_gather_seconds: float = Field(default=1.0, gt=0)
+    # A singleton needs one lock, one fresh proof and one deleted row.
+    retention_max_family_rows: int = Field(default=5000, ge=3, le=100_000)
+    retention_unused_file_grace_hours: int = Field(default=24, gt=0)
+    # A session without a question is kept this long after it was created, so
+    # a chat that was just opened is not deleted before its first question.
+    retention_empty_session_grace_hours: int = Field(default=24, gt=0)
+    retention_chunk_statement_timeout_ms: int = Field(default=30_000, gt=0)
+    retention_chunk_lock_timeout_ms: int = Field(default=2_000, gt=0)
+    # A running execution whose heartbeat is older than this has lost its lease:
+    # the next run takes the task over and health reads it as abandoned.
+    retention_lease_stale_seconds: int = Field(default=3600, gt=0)
+    retention_health_timeout_seconds: float = Field(default=1.0, gt=0)
+    # /api/healthz is public: one database read per window, however many probes.
+    retention_health_cache_seconds: float = Field(default=30, gt=0)
+
     # Federation feature flag. Supports both single-tenant and multi-tenant setups.
     federation_enabled: bool = False
     federation_per_tenant_enabled: Optional[bool] = Field(
@@ -769,6 +808,30 @@ class Settings(BaseSettings):
                 "sharepoint_catch_up_after_hours must be 0 (off) or a number of hours"
             )
         return v
+
+    @model_validator(mode="after")
+    def validate_retention_unit_budgets(self):
+        from eneo.data_retention.constants import validate_conversation_unit_budget
+
+        if self.retention_max_family_rows + 1 > self.retention_max_rows_per_run:
+            raise ValueError(
+                "RETENTION_MAX_FAMILY_ROWS plus discovery must fit "
+                "RETENTION_MAX_ROWS_PER_RUN."
+            )
+        # Each File member charges at least three rows (lock, fresh proof,
+        # delete). A family cap above three rows per budgeted file would admit a
+        # family with more members than the file budget: refused as
+        # insufficient_budget every pass, never as family_exceeds_budget.
+        if self.retention_max_family_rows > 3 * self.retention_max_files_per_run:
+            raise ValueError(
+                "RETENTION_MAX_FAMILY_ROWS must not exceed three times "
+                "RETENTION_MAX_FILES_PER_RUN."
+            )
+        validate_conversation_unit_budget(
+            unit_rows=self.retention_conversations_max_unit_rows,
+            execution_rows=self.retention_conversations_max_rows_per_run,
+        )
+        return self
 
     @model_validator(mode="after")
     def resolve_deprecated_federation_flag(self):

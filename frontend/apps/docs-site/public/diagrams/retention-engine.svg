@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="860" height="420" viewBox="0 0 860 420" role="img" aria-labelledby="t d" style="font-family: Inter, 'Segoe UI', Helvetica, Arial, sans-serif; color-scheme: light dark;">
+  <title id="t">One retention engine for Eneo</title>
+  <desc id="d">Chats, Apps and later Flows hand their due records to one retention engine. The engine runs bounded, atomic units and writes an audit event for every disposal. The Files owner decides if a file is still in use. Object content storage deletes the bytes. Health and the audit log report the outcome without content.</desc>
+  <defs>
+    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker>
+  </defs>
+  <style>
+    .box{fill:#f8f9fa;stroke:#555;stroke-width:1.5}
+    .core{fill:#e8f5e9;stroke:#2e7d32;stroke-width:2}
+    .owner{fill:#fff3e0;stroke:#b26a00;stroke-width:1.5}
+    .out{fill:#e3f2fd;stroke:#1565c0;stroke-width:1.5}
+    .t{fill:#222;font-size:14px}
+    .h{fill:#222;font-size:15px;font-weight:600}
+    .s{fill:#444;font-size:12px}
+    .edge{stroke:#555;stroke-width:1.5;fill:none;marker-end:url(#a)}
+    .later{stroke-dasharray:6 4}
+  </style>
+  <!-- domains -->
+  <rect class="box" x="20" y="30" width="150" height="54" rx="8"/><text class="h" x="95" y="53" text-anchor="middle">Chats</text><text class="s" x="95" y="72" text-anchor="middle">questions past their period</text>
+  <rect class="box" x="20" y="100" width="150" height="54" rx="8"/><text class="h" x="95" y="123" text-anchor="middle">Apps</text><text class="s" x="95" y="142" text-anchor="middle">runs past their period</text>
+  <rect class="box" x="20" y="170" width="150" height="54" rx="8"/><text class="h" x="95" y="193" text-anchor="middle">Uploads</text><text class="s" x="95" y="212" text-anchor="middle">files nothing uses</text>
+  <rect class="box later" x="20" y="240" width="150" height="54" rx="8"/><text class="h" x="95" y="263" text-anchor="middle">Flows</text><text class="s" x="95" y="282" text-anchor="middle">later adopter</text>
+  <!-- engine -->
+  <rect class="core" x="250" y="30" width="300" height="264" rx="10"/>
+  <text class="h" x="400" y="58" text-anchor="middle">One retention engine</text>
+  <text class="t" x="270" y="90">1. Claim the task, one run at a time</text>
+  <text class="t" x="270" y="116">2. Work in bounded chunks and budgets</text>
+  <text class="t" x="270" y="142">3. Lock, prove, check again, delete</text>
+  <text class="t" x="270" y="168">4. Roll a unit back as a whole on refusal</text>
+  <text class="t" x="270" y="194">5. Audit every disposal, never content</text>
+  <text class="t" x="270" y="220">6. Store progress, resume next night</text>
+  <text class="s" x="270" y="252">Each domain only selects its records</text>
+  <text class="s" x="270" y="270">and names its reasons. Nothing else.</text>
+  <!-- owners -->
+  <rect class="owner" x="630" y="30" width="210" height="80" rx="8"/><text class="h" x="735" y="56" text-anchor="middle">Files owner</text><text class="s" x="735" y="76" text-anchor="middle">Is the file still in use anywhere?</text><text class="s" x="735" y="94" text-anchor="middle">Release only when nothing uses it</text>
+  <rect class="owner" x="630" y="130" width="210" height="80" rx="8"/><text class="h" x="735" y="156" text-anchor="middle">Object content storage</text><text class="s" x="735" y="176" text-anchor="middle">Deletes the bytes in PostgreSQL</text><text class="s" x="735" y="194" text-anchor="middle">or S3 and writes a tombstone</text>
+  <rect class="out" x="620" y="230" width="230" height="64" rx="8"/><text class="h" x="735" y="256" text-anchor="middle">Audit log and health</text><text class="s" x="735" y="276" text-anchor="middle">what was removed, what was kept, and why</text>
+  <!-- edges -->
+  <path class="edge" d="M170,57 H250"/><path class="edge" d="M170,127 H250"/><path class="edge" d="M170,197 H250"/><path class="edge later" d="M170,267 H250"/>
+  <path class="edge" d="M550,70 H630"/><path class="edge" d="M735,110 V130"/><path class="edge" d="M550,262 H630"/>
+  <!-- two decisions -->
+  <rect class="box" x="20" y="320" width="820" height="80" rx="8"/>
+  <text class="h" x="40" y="346">Two different decisions, never mixed</text>
+  <text class="t" x="40" y="370">Expiry removes a record whose period has passed, with its links. A shared file stays until its last use is gone.</text>
+  <text class="t" x="40" y="390">Erasure of one file from every place is an explicit decision with its own scope and its own report (planned, eneo-s55b.36).</text>
+</svg>

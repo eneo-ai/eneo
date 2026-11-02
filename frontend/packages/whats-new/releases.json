@@ -359,6 +359,20 @@
             "en": "Under What's new in the account menu you can read what has changed in each release, and Show me points out a new feature where you find it. After an update, a short announcement highlights the most important news: choose Later to see it again after 24 hours, or Not interested to dismiss it for this version. You only see news about features your role can use, and administrators can turn What's new off for the organisation.",
             "sv": "Under Nyheter i kontomenyn kan du läsa vad som har ändrats i varje version, och Visa mig pekar ut en ny funktion där du hittar den. Efter en uppdatering lyfter ett kort meddelande fram de viktigaste nyheterna: välj Senare för att se det igen efter 24 timmar, eller Inte intresserad för att stänga det för den här versionen. Du ser bara nyheter om funktioner som din roll kan använda, och administratörer kan stänga av Nyheter för organisationen."
           }
+        },
+        {
+          "id": "retention-runs-in-audit-log",
+          "type": "improved",
+          "area": "admin",
+          "audience": "admin",
+          "title": {
+            "en": "Follow retention runs in the audit log",
+            "sv": "Följ gallringskörningar i granskningsloggen"
+          },
+          "body": {
+            "en": "Every nightly retention run writes to the audit log: how many questions, app runs, sessions and files were removed, what was kept and why, and whether the run finished or stopped at its limit. The log never contains the content itself. Your operator can pause each retention task and set its limits.",
+            "sv": "Varje nattlig gallringskörning skriver till granskningsloggen: hur många frågor, appkörningar, sessioner och filer som togs bort, vad som behölls och varför, och om körningen blev klar eller stoppade vid sin gräns. Loggen innehåller aldrig själva innehållet. Driftansvarig kan pausa varje gallringsuppgift och ställa in dess gränser."
+          }
         }
       ]
     },
