@@ -730,10 +730,14 @@ class FederatedIdentity(BaseModel):
         # xms_edov ("email domain owner verified") instead. A domain the
         # tenant owner has verified is as authoritative for the address as the
         # standard flag, and the mandatory domain allowlist still applies.
-        # An explicit email_verified: false has already been rejected above.
-        verified = _is_verified_claim(
-            claims.get("email_verified")
-        ) or _is_verified_claim(claims.get("xms_edov"))
+        # xms_edov is only a fallback for a missing email_verified: any value
+        # the IdP does send, negative or unrecognised, keeps its own verdict.
+        email_verified = claims.get("email_verified")
+        verified = (
+            _is_verified_claim(email_verified)
+            if email_verified is not None
+            else _is_verified_claim(claims.get("xms_edov"))
+        )
         try:
             return cls(
                 email=email,
