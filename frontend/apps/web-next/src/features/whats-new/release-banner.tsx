@@ -49,13 +49,13 @@ function ReleaseBanner({
   // Captured once: recording the release as announced clears pendingRelease,
   // and the banner must stay until the user leaves or dismisses it.
   const [release] = useState<Release | null>(() =>
-    pendingRelease &&
-    visibleEntries(pendingRelease, can).length > 0 &&
-    shouldShowAnnouncement(pendingRelease, user.created_at)
-      ? pendingRelease
-      : null
+    pendingRelease && visibleEntries(pendingRelease, can).length > 0 ? pendingRelease : null
   );
-  const [open, setOpen] = useState(release !== null);
+  // An account created after the release was never "here" before it: the
+  // release is recorded as announced without showing "since you were last here".
+  const [open, setOpen] = useState(
+    () => release !== null && shouldShowAnnouncement(release, user.created_at)
+  );
   const announced = useRef<string | null>(null);
 
   useEffect(() => {

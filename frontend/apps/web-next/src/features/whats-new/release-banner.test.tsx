@@ -6,7 +6,7 @@ import { toast } from "@/lib/toast";
 import { expectNoAxeViolations } from "@/test/axe";
 import { router } from "@/test/navigation";
 import { sessionKeys } from "@/lib/api/session";
-import { renderInApp, testQueryClient } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { WhatsNewBanner } from "./release-banner";
 import { TourProvider } from "./tour-provider";
 import { WhatsNewProvider } from "./whats-new-provider";
@@ -51,7 +51,11 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 /** The banner, found by its title (the harness has live regions of its own). */
 const banner = () => screen.queryByText("Nytt i Eneo")?.closest('[role="status"]') ?? null;
 
-function renderBanner(announced: string | null = null, seen: string | null = null) {
+function renderBanner(
+  announced: string | null = null,
+  seen: string | null = null,
+  appContext = testAppContext()
+) {
   put.mockImplementation(() =>
     Promise.resolve({
       data: { seen_version: null, announced_version: latest.version },
@@ -69,7 +73,7 @@ function renderBanner(announced: string | null = null, seen: string | null = nul
         <WhatsNewBanner />
       </TourProvider>
     </WhatsNewProvider>,
-    { queryClient }
+    { queryClient, appContext }
   );
 }
 
@@ -156,6 +160,18 @@ describe("WhatsNewBanner", () => {
 
     await waitFor(() => expect(router.push).toHaveBeenCalledWith("/whats-new"));
     expect(banner()).toBeNull();
+  });
+
+  it("records the release without telling an account created after it", async () => {
+    expect(latest.date).toBeDefined();
+    renderBanner(null, null, testAppContext({ user: { created_at: "2999-01-01T00:00:00Z" } }));
+
+    expect(banner()).toBeNull();
+    await waitFor(() =>
+      expect(put).toHaveBeenCalledWith("/api/v1/whats-new/announced/", {
+        body: { version: latest.version }
+      })
+    );
   });
 
   it("stays away once the release has been announced", () => {
