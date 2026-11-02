@@ -68,7 +68,9 @@ describe("Konto on a phone (decision 22)", () => {
     expect(row(/^Utseende och språk ?, System · Svenska$/).getAttribute("href")).toBe(
       "/account/appearance"
     );
-    expect(row(/^Kopieringsformat ?, Markdown$/).getAttribute("href")).toBe("/account/copy-format");
+    expect(row(/^Kopieringsformat ?, Formaterad text$/).getAttribute("href")).toBe(
+      "/account/copy-format"
+    );
     expect(row("Byt lösenord").getAttribute("href")).toBe("/account/password");
     // What's new's "Visa mig" finds both here (packages/whats-new).
     expect(row("Byt lösenord").dataset.tour).toBe("account-password");
@@ -138,6 +140,35 @@ describe("Konto on a phone (decision 22)", () => {
     renderHome();
     expect(screen.getByRole("heading", { level: 1, name: "Konto" })).toBeTruthy();
     expect(screen.queryByRole("navigation", { name: "Kontoinställningar" })).toBeNull();
+    // From 768 px a readable column, its groups inset cards as in iPad Settings
+    // (CSS, which jsdom does not apply; tests/account.spec.ts measures it).
+    expect(konto().className).toMatch(/\bmd:max-w-2xl\b/);
+    for (const list of konto().querySelectorAll("ul"))
+      expect(list.className).toMatch(/\bmd:rounded-xl\b/);
+  });
+
+  it("docks no Spara below 1024 px, where the password form is hidden", () => {
+    setViewport("phone");
+    const { container } = renderHome(
+      testAppContext({
+        user: {
+          password_change: {
+            source: "eneo",
+            policy: {
+              min_length: 12,
+              max_bytes: 72,
+              requires_uppercase: false,
+              requires_lowercase: false,
+              requires_number: false,
+              requires_symbol: false
+            }
+          }
+        } as never
+      })
+    );
+    // A hidden bar would still make the shell and the toasts reserve room for it.
+    expect(screen.getByRole("heading", { name: "Byt lösenord" })).toBeTruthy();
+    expect(container.querySelector("[data-docked-actions]")).toBeNull();
   });
 });
 

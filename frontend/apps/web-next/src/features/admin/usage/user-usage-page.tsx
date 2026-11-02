@@ -291,12 +291,13 @@ export function UserUsagePage({
   const userRow = user.data?.user;
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader title={userRow?.username ?? t("usage")}>
         <Button variant="outline" asChild>
           <Link href={usageListHref(searchParams)}>
             <ArrowLeft className="size-4" />
-            {t("back")}
+            {/* Names where it leads, like every back link. */}
+            {t("usage")}
           </Link>
         </Button>
       </PageHeader>

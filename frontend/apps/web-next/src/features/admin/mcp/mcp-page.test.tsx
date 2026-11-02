@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { openMenuOnRelease } from "@/test/menus";
+import { router } from "@/test/navigation";
 import { renderInApp } from "@/test/render";
 
 type Tool = {
@@ -107,6 +109,12 @@ it("refreshes the servers and the bundled catalogue with one request each after 
   await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
   await waitFor(() => expect(requests("/api/v1/mcp-servers/settings/")).toBe(2));
   expect(requests("/api/v1/mcp-servers/bundled/")).toBe(2);
+});
+
+it("adds a server from an outline button, not a filled one", async () => {
+  renderInApp(<McpServersPage />);
+  const add = await screen.findByRole("button", { name: "Lägg till MCP-server" });
+  expect(add.dataset.variant).toBe("outline");
 });
 
 it("keeps the function-server filter reachable when the tenant has only function sources", async () => {
@@ -237,6 +245,22 @@ describe("McpServersPage", () => {
 
     expect(await screen.findByRole("button", { name: "Fler åtgärder för Diariet" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fler åtgärder för Kartan" })).toBeTruthy();
+  });
+
+  it("opens a server's menu on release; its items open the server or its tools", async () => {
+    renderInApp(<McpServersPage />);
+    const more = await screen.findByRole("button", { name: "Fler åtgärder för Diariet" });
+    const menu = await openMenuOnRelease(more);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "MCP-serververktyg" }));
+    expect(router.push).toHaveBeenCalledWith("/admin/mcp-servers/diariet?tab=tools");
+
+    fireEvent.click(more);
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Hantera" }));
+    expect(router.push).toHaveBeenLastCalledWith("/admin/mcp-servers/diariet");
+
+    fireEvent.click(more);
+    fireEvent.click(await within(menu).findByRole("menuitem", { name: "Ta bort" }));
+    expect(await screen.findByRole("alertdialog", { name: "Ta bort MCP-server" })).toBeTruthy();
   });
 
   it("keeps focus on a switch while it saves, and saves each press once", async () => {

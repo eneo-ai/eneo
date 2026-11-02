@@ -648,7 +648,7 @@ export function TemplatesPage() {
   const edit = (row: TemplateRow) => setEditor({ kind: row.kind, template: row.template });
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader title={t("templates")} headingRef={headingRef} />
       {/* A removed row's focus goes to the heading. */}
       <RemovalFocusScope target={headingRef}>

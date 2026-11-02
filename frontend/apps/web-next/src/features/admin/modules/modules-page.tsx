@@ -151,7 +151,7 @@ export function ModulesPage({ title }: { title: string }) {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-8">
+    <div className="flex w-full flex-col gap-8">
       <PageHeader title={title} description={t("module_admin_description")} tour="admin-modules" />
       <section className="space-y-4" aria-labelledby="installed-modules-title">
         <h2 id="installed-modules-title" className="text-lg font-semibold">

@@ -18,7 +18,7 @@ type ModelsTab = "models" | "history" | "settings";
 const TABS: ModelsTab[] = ["models", "history", "settings"];
 
 /**
- * Admin model management. "Modeller" groups the models by provider (API-key
+ * Admin model management. "Leverantörer" groups the models by provider (API-key
  * status, enable/disable, default, security classification, edit, migrate);
  * "Migreringshistorik" lists past migrations; "Inställningar" holds the
  * org-wide pricing visibility. "Lägg till leverantör" and each provider's
@@ -42,7 +42,7 @@ export function ModelsPage() {
   const tabId = (value: ModelsTab) => `${baseId}-tab-${value}`;
   const tabLabel = (value: ModelsTab) =>
     value === "models"
-      ? t("models")
+      ? t("admin_models_providers_tab")
       : value === "history"
         ? t("migration_history_title")
         : t("settings");
@@ -63,14 +63,10 @@ export function ModelsPage() {
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-5">
+    <div className="flex w-full flex-col gap-5">
       <PageHeader
         title={t("models")}
         description={t("admin_models_description")}
-        breadcrumbs={[
-          { label: t("admin_breadcrumb_root"), href: "/admin" },
-          { label: t("admin_section_connections") }
-        ]}
         tour="admin-models"
         actions={
           <Button

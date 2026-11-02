@@ -101,6 +101,8 @@ describe("AdminUserGroupsPage", () => {
     ]);
 
     expect(screen.getByRole("heading", { level: 1, name: "Användargrupper" })).toBeTruthy();
+    // No "Administration / Organisation" trail: the admin menu already says where this is.
+    expect(screen.queryByRole("link", { name: "Administration" })).toBeNull();
     expect(rowNames()).toEqual(["Arkiv", "Bygglov", "Ekonomi"]);
     const [, arkiv] = screen.getAllByRole("row");
     expect(within(arkiv!).getByText("3 medlemmar")).toBeTruthy();

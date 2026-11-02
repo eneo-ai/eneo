@@ -19,9 +19,11 @@ const AREAS = adminNavGroups({
   .filter((item) => item.href !== "/admin");
 
 /**
- * The PageBar of the admin areas: an area goes back to Administration, a page
- * below an area back to that area. The overview (`/admin`) keeps the shell's
- * top bar and its menu.
+ * The PageBar of the admin areas on a phone: an area goes back to
+ * Administration, a page below an area back to that area. The overview
+ * (`/admin`) keeps the shell's top bar and its menu. Where the side
+ * navigation shows (from 768 px, not on a phone turned sideways) it lists
+ * every area, with breadcrumbs above the page.
  */
 export function AdminPageBar() {
   const t = useTranslations();
@@ -34,6 +36,7 @@ export function AdminPageBar() {
   if (pathname === areaHref) {
     return (
       <PageBar
+        until="phone"
         parent={{ label: t("shell_administration"), href: "/admin" }}
         title={item ? t(item.labelKey) : undefined}
       />
@@ -42,6 +45,7 @@ export function AdminPageBar() {
   const parent = item ?? LISTED_UNDER[areaHref];
   return (
     <PageBar
+      until="phone"
       parent={
         parent
           ? { label: t(parent.labelKey), href: parent.href }

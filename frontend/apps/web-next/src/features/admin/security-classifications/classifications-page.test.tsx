@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { openMenuOnRelease } from "@/test/menus";
 import { renderInApp } from "@/test/render";
 
 const post = vi.hoisted(() => vi.fn());
@@ -36,6 +37,22 @@ describe("SecurityClassificationsPage", () => {
       await screen.findByRole("button", { name: "Fler åtgärder för Klass 2 · Intern" })
     ).toBeTruthy();
     expect(screen.getByRole("button", { name: "Fler åtgärder för Klass 1 · Öppen" })).toBeTruthy();
+  });
+
+  it("opens a classification's menu on release, not on press (2.5.2)", async () => {
+    renderInApp(<SecurityClassificationsPage />);
+    const menu = await openMenuOnRelease(
+      await screen.findByRole("button", { name: "Fler åtgärder för Klass 2 · Intern" })
+    );
+
+    // The highest classification cannot move up; deleting it asks first.
+    expect(
+      within(menu).getByRole("menuitem", { name: "Flytta upp" }).getAttribute("aria-disabled")
+    ).toBe("true");
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Ta bort" }));
+    expect(
+      await screen.findByRole("alertdialog", { name: "Ta bort säkerhetsklassificering" })
+    ).toBeTruthy();
   });
 
   it("names the create button short enough to stay one line on a 320 px phone", async () => {

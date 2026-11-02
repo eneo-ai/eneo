@@ -63,7 +63,7 @@ export function FederationPage() {
     query.error instanceof EneoApiError && query.error.reason === "federation_disabled";
 
   return (
-    <div className="mx-auto flex w-full max-w-3xl flex-col gap-6">
+    <div className="flex w-full max-w-3xl flex-col gap-6">
       <PageHeader
         title={t("federation_admin_title")}
         description={t("federation_admin_description")}

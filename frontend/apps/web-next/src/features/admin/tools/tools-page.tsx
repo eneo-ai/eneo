@@ -24,7 +24,7 @@ export function ToolsPage({ tab }: { tab: ToolsTab }) {
   const t = useTranslations();
   const bundledTools = useQuery(bundledToolsQueryOptions(browserApi));
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
+    <div className="flex w-full flex-col gap-6 pb-16">
       <PageHeader title={t("tools")} tour="admin-tools" />
       {/* The catalogue of Eneo's built-in tools belongs to this page: both tabs offer from it, so
           its failure shows once, here, with a retry, in the place of the runtime status it also

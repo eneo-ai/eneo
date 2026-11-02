@@ -1,5 +1,6 @@
+import { MoreMenu } from "@astryxdesign/core/MoreMenu";
 import { useMutation, useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { KeyRound, ListChecks, MoreHorizontal, Settings2, Shield, Trash2 } from "lucide-react";
+import { KeyRound, ListChecks, Settings2, Shield, Trash2 } from "lucide-react";
 import { usePathname, useRouter } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useEffect, useState } from "react";
@@ -7,13 +8,6 @@ import { ConfirmDialogControlled } from "@/components/composites/confirm-dialog"
 import { BackLink } from "@/components/composites/back-link";
 import { PageHeader } from "@/components/composites/page-header";
 import { SaveStatusIndicator, SaveStatusProvider } from "@/components/composites/save-status";
-import { Button } from "@/components/ui/button";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger
-} from "@/components/ui/dropdown-menu";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -107,7 +101,7 @@ export function McpServerDetail({
 
   return (
     <SaveStatusProvider>
-      <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">
+      <div className="flex w-full max-w-4xl flex-col gap-6">
         <div className="flex flex-col gap-1">
           <BackLink href={listHref}>
             {t(listHref === "/admin/tools" ? "tools" : "mcp_servers")}
@@ -134,22 +128,18 @@ export function McpServerDetail({
                     : t("mcp_toggle_to_enable")}
               </TooltipContent>
             </Tooltip>
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  aria-label={t("ui_more_actions_for", { name: server.name })}
-                >
-                  <MoreHorizontal className="size-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end">
-                <DropdownMenuItem variant="destructive" onSelect={() => setShowDelete(true)}>
-                  <Trash2 className="size-4" /> {t("delete")}
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+            <MoreMenu
+              label={t("ui_more_actions_for", { name: server.name })}
+              alignment="end"
+              items={[
+                {
+                  label: t("delete"),
+                  icon: <Trash2 aria-hidden="true" />,
+                  variant: "destructive",
+                  onClick: () => setShowDelete(true)
+                }
+              ]}
+            />
           </PageHeader>
         </div>
 

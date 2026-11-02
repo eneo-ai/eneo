@@ -106,7 +106,8 @@ function ModelTable({
   // column takes what is left and long ids truncate instead of widening the
   // table. Below the min width the table scrolls inside its own region.
   // Each set width is also a min width (AGENTS.md → Tables). Without the
-  // security column the table fits an iPad held upright (770 px).
+  // security column the table fits an iPad held sideways; held upright,
+  // beside the icon rail, it scrolls.
   return (
     <Table
       aria-labelledby={labelledBy}

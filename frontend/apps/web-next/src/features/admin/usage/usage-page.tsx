@@ -2,6 +2,7 @@ import { Button as AstryxButton } from "@astryxdesign/core/Button";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import { useCollator } from "@astryxdesign/core/i18n";
 import { Pagination } from "@astryxdesign/core/Pagination";
+import { Tab, TabList } from "@astryxdesign/core/TabList";
 import {
   pixel,
   proportional,
@@ -22,7 +23,6 @@ import { PageHeader } from "@/components/composites/page-header";
 import { blockingError, QueryStateBoundary } from "@/components/composites/query-state";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { storageQueryOptions, type StorageModel } from "@/features/storage/storage";
 import { browserApi } from "@/lib/api/browser";
 import { formatBytes } from "@/lib/format";
@@ -41,6 +41,7 @@ import {
   tokenUsageQueryOptions,
   type UsageIntensity,
   USAGE_TABS,
+  type UsageTab,
   usageIntensity,
   type UsageRange,
   usageThresholds,
@@ -774,32 +775,40 @@ export function UsagePage() {
     replaceUrl(
       `${pathname}${usageViewSearch({ ...view, page: 1, ...next }, searchParams.toString())}`
     );
+  const baseId = useId();
+  const panelId = `${baseId}-panel`;
+  const tabId = (value: UsageTab) => `${baseId}-tab-${value}`;
 
   return (
-    <div className="mx-auto flex w-full max-w-5xl flex-col gap-6">
+    <div className="flex w-full flex-col gap-6">
       <PageHeader title={t("usage")} />
-      <Tabs
-        value={view.tab}
-        onValueChange={(value) => {
-          const tab = USAGE_TABS.find((candidate) => candidate === value);
-          if (tab) change({ tab });
-        }}
-      >
-        <TabsList>
-          <TabsTrigger value="tokens">{t("tokens")}</TabsTrigger>
-          <TabsTrigger value="users">{t("users")}</TabsTrigger>
-          <TabsTrigger value="storage">{t("storage")}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="tokens" className="pt-4">
-          <TokensTab range={view.range} onRangeChange={(range) => change({ range })} />
-        </TabsContent>
-        <TabsContent value="users" className="pt-4">
-          <UsersTab view={view} onChange={change} />
-        </TabsContent>
-        <TabsContent value="storage" className="pt-4">
-          <StorageTab />
-        </TabsContent>
-      </Tabs>
+      <div className="flex flex-col">
+        <TabList
+          role="tablist"
+          aria-label={t("admin_usage_tabs_label")}
+          value={view.tab}
+          onChange={(value) => {
+            const tab = USAGE_TABS.find((candidate) => candidate === value);
+            if (tab) change({ tab });
+          }}
+          hasDivider
+        >
+          {USAGE_TABS.map((value) => (
+            <Tab key={value} id={tabId(value)} value={value} label={t(value)} panelId={panelId} />
+          ))}
+        </TabList>
+        {/* One panel whose content follows the selected tab, so every tab's
+            aria-controls points at an element that exists. */}
+        <div role="tabpanel" id={panelId} aria-labelledby={tabId(view.tab)} className="pt-4">
+          {view.tab === "tokens" ? (
+            <TokensTab range={view.range} onRangeChange={(range) => change({ range })} />
+          ) : view.tab === "users" ? (
+            <UsersTab view={view} onChange={change} />
+          ) : (
+            <StorageTab />
+          )}
+        </div>
+      </div>
     </div>
   );
 }

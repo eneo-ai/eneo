@@ -76,7 +76,7 @@ describe("UserUsagePage", () => {
     );
 
     await screen.findByRole("table", { name: "Fullständig modelluppdelning" });
-    expect(screen.getByRole("link", { name: "Tillbaka" }).getAttribute("href")).toBe(
+    expect(screen.getByRole("link", { name: "Användning" }).getAttribute("href")).toBe(
       "/admin/usage?tab=users&from=2026-09-01&to=2026-09-25&page=3&sortBy=requests&sortOrder=asc&userSearch=anna"
     );
   });

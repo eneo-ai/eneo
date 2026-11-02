@@ -61,7 +61,7 @@ export function AuditTable({ logs }: { logs: AuditLog[] }) {
       {
         key: "event",
         header: t("audit_event"),
-        width: proportional(1, { minWidth: 240 }),
+        width: proportional(1, { minWidth: 216 }),
         renderCell: (log) => (
           <button
             type="button"

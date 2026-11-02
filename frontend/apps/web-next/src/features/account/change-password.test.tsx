@@ -14,7 +14,7 @@ const toast = vi.hoisted(() => ({
 vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
 vi.mock("@/lib/toast", () => ({ toast }));
 
-import { ChangePasswordCard } from "@/features/account/change-password";
+import { ChangePasswordCard, ChangePasswordForm } from "@/features/account/change-password";
 
 /** The backend's local policy, with two character classes switched on. */
 const eneo = {
@@ -266,5 +266,32 @@ describe("ChangePasswordCard", () => {
       )
     ).toBeTruthy();
     expect(screen.queryByLabelText(/^Nytt lösenord/)).toBeNull();
+  });
+
+  it("docks Spara, inside the form, as the screen's one primary action", () => {
+    renderInApp(<ChangePasswordCard docked />, {
+      appContext: testAppContext({ user: { password_change: eneo } as never })
+    });
+    const save = screen.getByRole("button", { name: "Spara" });
+    const bar = screen.getByRole("group", { name: "Byt lösenord, åtgärder" });
+    expect(bar.hasAttribute("data-docked-actions")).toBe(true);
+    expect(bar.contains(save)).toBe(true);
+    expect(save.closest("form")).toBeTruthy();
+  });
+
+  it("keeps Spara in the form where no shell reserves room for a docked bar", () => {
+    // As the forced password change outside the shell renders it.
+    const policy = {
+      minLength: 12,
+      maxBytes: 72,
+      requiresUppercase: true,
+      requiresLowercase: false,
+      requiresNumber: true,
+      requiresSymbol: false
+    };
+    renderInApp(<ChangePasswordForm policy={policy} email="anna@kommun.se" />);
+    expect(
+      screen.getByRole("button", { name: "Spara" }).closest("[data-docked-actions]")
+    ).toBeNull();
   });
 });

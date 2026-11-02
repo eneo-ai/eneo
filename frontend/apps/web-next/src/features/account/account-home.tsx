@@ -33,8 +33,8 @@ import { AccountVersions } from "./account-versions";
 
 /**
  * /account: below 1024 px, where the drawer is, Konto as one page (decision
- * 22); from there the profile and the password form under "Mitt konto" and
- * its tabs. CSS shows one. Konto holds no state and comes and goes with the
+ * 22); from there the profile and the password form under the same title and
+ * the account tabs. CSS shows one. Konto holds no state and comes and goes with the
  * width; the profile and the password form stay mounted, so what was typed
  * outlives a turn of an iPad across 1024 px.
  */
@@ -72,7 +72,8 @@ function Konto() {
   const themeKey = THEMES.find((option) => option.value === theme)?.labelKey;
 
   return (
-    <div className="flex flex-col gap-6 lg:hidden">
+    // From 768 px a readable column (42 rem), not a phone's rows stretched wide.
+    <div className="flex flex-col gap-6 md:mx-auto md:w-full md:max-w-2xl lg:hidden">
       <div className="flex flex-col gap-4">
         <PageHeader title={t("account")} />
         <div className="flex items-start gap-3">
@@ -95,8 +96,9 @@ function Konto() {
         </div>
       </div>
 
-      {/* Edge to edge, out of the page's gutter; the rows' text keeps to it. */}
-      <div className="-mx-4 flex flex-col gap-6 sm:-mx-6 sm:[--index-inset:1.5rem]">
+      {/* Edge to edge on a phone, out of the page's gutter; the rows' text keeps
+          to it. From 768 px the groups are cards inside the column. */}
+      <div className="-mx-4 flex flex-col gap-6 sm:-mx-6 sm:[--index-inset:1.5rem] md:mx-0 md:[--index-inset:1rem]">
         <IndexGroup title={t("settings")}>
           <IndexRow
             href="/account/appearance"
