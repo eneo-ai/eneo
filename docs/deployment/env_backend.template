@@ -588,7 +588,8 @@ OAUTH_CALLBACK_URLS=[]
 # to a localhost URL, e.g. http://localhost:3101.
 # BROWSER_SESSION_ENABLED=false
 # WEB_APP_ENABLED: serve the web app from the backend; /healthz then answers
-# like /api/healthz.
+# like /api/healthz. It needs BROWSER_SESSION_ENABLED, the web app's only
+# sign-in; the backend refuses to start with the web app on and the session off.
 # WEB_APP_ENABLED=false
 # Outside development, either flag turns off the /docs and /redoc pages (and
 # SCIM's): they load third-party scripts on the session's host. /openapi.json stays.
