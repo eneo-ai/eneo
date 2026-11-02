@@ -1328,6 +1328,22 @@ it("preloads the session using only GET requests", async () => {
   expect(navigate).not.toHaveBeenCalled();
 });
 
+it("a signed-out page that preloads an app route sends nobody to sign in", async () => {
+  fetcher.mockImplementation(async () => new Response(null, { status: 401 }));
+  const { router } = await createRouteRouter("/integrations/callback/token");
+  fetcher.mockClear();
+  // A link focused or hovered on a public page: speculative, not followed.
+  await router.preloadRoute({ to: "/admin/integrations" });
+  expect(navigate).not.toHaveBeenCalled();
+  expect(fetcher).not.toHaveBeenCalled();
+
+  // Following it does (this memory history leaves window.location on the public page).
+  await act(() => router.navigate({ to: "/admin/integrations" }));
+  expect(navigate).toHaveBeenCalledExactlyOnceWith(expect.stringMatching(/^\/login\?next=/), {
+    replace: true
+  });
+});
+
 it("waits for a fresh existence check before re-entering a cached space route", async () => {
   replies.set("/api/v1/spaces/space-1/", makeSpace());
   const { router, queryClient } = await renderRoute(
