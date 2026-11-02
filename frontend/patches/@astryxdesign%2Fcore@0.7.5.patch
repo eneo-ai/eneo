@@ -1,10 +1,10 @@
 diff --git a/dist/CommandPalette/CommandPaletteItem.js b/dist/CommandPalette/CommandPaletteItem.js
-index 1dd88060de007c19f2208a558233f4ff24db5252..f50199e8aee2fe32c67d1298fa98a57c7bd62ff1 100644
+index 7a953f718ccf3c24611a459441e4f22ef495b115..18f733c2c1512bd649774f3fe83da9a7b907ebe5 100644
 --- a/dist/CommandPalette/CommandPaletteItem.js
 +++ b/dist/CommandPalette/CommandPaletteItem.js
-@@ -141,7 +141,10 @@ export function CommandPaletteItem({
+@@ -142,7 +142,10 @@ export function CommandPaletteItem({
      ...props,
-     id: ctx && itemIndex >= 0 ? ctx.getItemId(itemIndex) : undefined,
+     id: ctx && itemIndex >= 0 ? ctx.getItemId(itemIndex) : idProp,
      role: "option",
 -    "aria-selected": isSelected,
 +    // Eneo patch: selection follows the highlight (APG combobox pattern). Astryx
@@ -13,14 +13,14 @@ index 1dd88060de007c19f2208a558233f4ff24db5252..f50199e8aee2fe32c67d1298fa98a57c
 +    "aria-selected": controlledSelected ?? isHighlighted,
      "aria-disabled": isDisabled || undefined,
      "data-value": value,
-     onClick: composeEventHandlers(onClickProp, handleClick),
+     ...pressable,
 diff --git a/src/CommandPalette/CommandPaletteItem.tsx b/src/CommandPalette/CommandPaletteItem.tsx
-index 3279efd70e44b5b35b77b3b653b0b2b02a3421e2..60d3b19cce20b2f78c688d57f45fe605dbd0e4c4 100644
+index cac88d5d83a1e56e77899ca9cd49d11624a24b23..4adee6b0be5688f5f7f627c255b67d2f796a236d 100644
 --- a/src/CommandPalette/CommandPaletteItem.tsx
 +++ b/src/CommandPalette/CommandPaletteItem.tsx
-@@ -188,7 +188,10 @@ export function CommandPaletteItem({
+@@ -194,7 +194,10 @@ export function CommandPaletteItem({
        {...props}
-       id={ctx && itemIndex >= 0 ? ctx.getItemId(itemIndex) : undefined}
+       id={ctx && itemIndex >= 0 ? ctx.getItemId(itemIndex) : idProp}
        role="option"
 -      aria-selected={isSelected}
 +      // Eneo patch: selection follows the highlight (APG combobox pattern). Astryx
@@ -29,4 +29,4 @@ index 3279efd70e44b5b35b77b3b653b0b2b02a3421e2..60d3b19cce20b2f78c688d57f45fe605
 +      aria-selected={controlledSelected ?? isHighlighted}
        aria-disabled={isDisabled || undefined}
        data-value={value}
-       onClick={composeEventHandlers(onClickProp, handleClick)}
+       {...pressable}
