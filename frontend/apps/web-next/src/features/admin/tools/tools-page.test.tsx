@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { flushAnnouncements, recordAnnouncements, renderInApp } from "@/test/render";
 
 const get = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: vi.fn() } }));
@@ -93,6 +93,7 @@ describe("Verktyg", () => {
         return ok({ security_enabled: false, security_classifications: [] });
       return ok({ items: [] });
     });
+    const said = recordAnnouncements();
     const { container } = renderInApp(<ToolsPage tab="functions" />);
     expect(await screen.findByRole("heading", { name: "Webbsökning" })).toBeTruthy();
     const area = container.querySelector('[data-slot="runtime-status"]');
@@ -101,10 +102,12 @@ describe("Verktyg", () => {
     // Decorative while pending: no heading, no busy announcement.
     expect(area!.firstElementChild!.getAttribute("aria-hidden")).toBe("true");
     expect(within(area as HTMLElement).queryByRole("heading")).toBeNull();
-    // Astryx keeps its own (empty) live regions on the page; none of the page's own.
-    expect(
-      screen.queryAllByRole("status").filter((el) => !el.closest("[data-astryx-live-region]"))
-    ).toEqual([]);
+    // Nothing busy is said while the status is read, politely or assertively.
+    await flushAnnouncements();
+    expect(said).toEqual([]);
+    expect(document.querySelector("[data-astryx-live-region='assertive']")?.textContent ?? "").toBe(
+      ""
+    );
 
     answer(
       await ok({

@@ -1,3 +1,4 @@
+import { onTestFinished } from "vitest";
 /**
  * Test-only: renders UI inside the app's providers, in Swedish (the default
  * locale), so tests query what users see and hear: use-intl with the real
@@ -186,7 +187,7 @@ export function renderHookInApp<Result>(hook: () => Result, options: RenderInApp
  */
 export function recordAnnouncements(): string[] {
   const said: string[] = [];
-  new MutationObserver((records) => {
+  const observer = new MutationObserver((records) => {
     for (const { target } of records) {
       if (
         target instanceof HTMLElement &&
@@ -196,7 +197,10 @@ export function recordAnnouncements(): string[] {
         said.push(target.textContent);
       }
     }
-  }).observe(document.body, { childList: true, subtree: true });
+  });
+  observer.observe(document.body, { childList: true, subtree: true });
+  // Stops with the test, before the document it watches is torn down.
+  onTestFinished(() => observer.disconnect());
   return said;
 }
 
