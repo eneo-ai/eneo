@@ -37,7 +37,6 @@ import {
   approveToolChanges,
   MCP_KEY,
   mcpServerToolsQueryOptions,
-  mcpToolsKey,
   type McpServerTool,
   type McpServer,
   rejectToolChanges,
@@ -285,10 +284,8 @@ export function ToolsTab({
   const heading = useRef<HTMLHeadingElement>(null);
   const rescue = useFocusRescue();
 
-  const invalidate = () => {
-    void queryClient.invalidateQueries({ queryKey: mcpToolsKey(serverId) });
-    void queryClient.invalidateQueries({ queryKey: MCP_KEY });
-  };
+  // The servers and, under them, this server's tools.
+  const invalidate = () => void queryClient.invalidateQueries({ queryKey: MCP_KEY });
 
   const sync = useMutation({
     mutationFn: () => syncMcpServerTools(browserApi, serverId),

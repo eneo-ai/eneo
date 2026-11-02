@@ -221,6 +221,17 @@ describe("admin function sources", () => {
     expect(screen.queryByText("tools_builtin_turned_on")).toBeNull();
   });
 
+  it("refreshes the sources and the built-in catalogue with one request each after a save", async () => {
+    const requests = (path: string) => get.mock.calls.filter(([read]) => read === path).length;
+    show();
+    const turnOn = await screen.findAllByRole("button", { name: "tools_builtin_turn_on" });
+    expect(requests("/api/v1/mcp-servers/bundled/")).toBe(1);
+    fireEvent.click(turnOn[0]!);
+    expect(await screen.findByText("tools_builtin_turned_on")).toBeTruthy();
+    await waitFor(() => expect(requests("/api/v1/mcp-servers/settings/")).toBe(2));
+    expect(requests("/api/v1/mcp-servers/bundled/")).toBe(2);
+  });
+
   it("gives the external server's button a 44 px row on a touch screen", async () => {
     show();
     const connect = await screen.findAllByRole("button", { name: "tools_connect_external" });

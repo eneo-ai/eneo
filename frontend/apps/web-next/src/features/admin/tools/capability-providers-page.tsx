@@ -22,7 +22,6 @@ import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
 import { cn } from "@/lib/utils";
 import {
-  BUNDLED_KEY,
   bundledToolsQueryOptions,
   createBundledMcpServer,
   deleteMcpServer,
@@ -189,7 +188,6 @@ export function CapabilityProvidersPage({ embedded = false }: { embedded?: boole
   const invalidate = async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: MCP_KEY }),
-      queryClient.invalidateQueries({ queryKey: BUNDLED_KEY }),
       invalidateSpaces(queryClient)
     ]);
   };

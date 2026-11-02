@@ -47,7 +47,6 @@ import { cn } from "@/lib/utils";
 import { McpServerDialog } from "./mcp-dialog";
 import { activationState, hostFromUrl, initials, pendingTools } from "./mcp-helpers";
 import {
-  BUNDLED_KEY,
   bundledToolsQueryOptions,
   createBundledMcpServer,
   deleteMcpServer,
@@ -333,10 +332,7 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
     mutationFn: (tool: string) => createBundledMcpServer(browserApi, tool, false),
     onSuccess: async (_, tool) => {
       toast.success(t("tools_bundled_added", { name: t(BUNDLED_SERVERS[tool]?.label ?? tool) }));
-      await Promise.all([
-        queryClient.invalidateQueries({ queryKey: MCP_KEY }),
-        queryClient.invalidateQueries({ queryKey: BUNDLED_KEY })
-      ]);
+      await queryClient.invalidateQueries({ queryKey: MCP_KEY });
     },
     onError: (cause) => toastApiError(cause, t)
   });

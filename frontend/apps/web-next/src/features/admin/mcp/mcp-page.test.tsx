@@ -26,6 +26,9 @@ const server = (id: string, name: string, tools: Tool[] = []) => ({
 const servers = vi.hoisted(() => ({ items: [] as unknown[] }));
 /** The servers built into Eneo that the runtime offers this tenant. */
 const bundled = vi.hoisted(() => ({ items: [] as unknown[] }));
+/** Every path the page has read, in order. */
+const requested = vi.hoisted(() => [] as string[]);
+const requests = (path: string) => requested.filter((read) => read === path).length;
 const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn(), error: vi.fn() }));
 vi.mock("@/lib/toast", () => ({ toast }));
 
@@ -36,8 +39,9 @@ vi.mock("@/lib/api/browser", () => ({
   browserApi: {
     DELETE: remove,
     POST: post,
-    GET: (path: string) =>
-      Promise.resolve({
+    GET: (path: string) => {
+      requested.push(path);
+      return Promise.resolve({
         data:
           path === "/api/v1/mcp-servers/settings/"
             ? { items: servers.items }
@@ -45,7 +49,8 @@ vi.mock("@/lib/api/browser", () => ({
               ? { items: bundled.items, count: bundled.items.length, runtime: null }
               : { security_enabled: false, security_classifications: [] },
         response: new Response("{}")
-      })
+      });
+    }
   }
 }));
 
@@ -54,6 +59,7 @@ import { McpServersPage } from "./mcp-page";
 beforeEach(() => {
   servers.items = [server("diariet", "Diariet"), server("kartan", "Kartan")];
   bundled.items = [];
+  requested.length = 0;
 });
 
 afterEach(() => {
@@ -91,6 +97,16 @@ it("toasts a refused bundled server with its message and support reference", asy
       description: "Spårnings-ID: trace-1"
     })
   );
+});
+
+it("refreshes the servers and the bundled catalogue with one request each after adding one", async () => {
+  bundled.items = [{ tool: "charts", purpose: "general", available: true, mcp_server_id: null }];
+  post.mockResolvedValue({ data: {}, response: new Response("{}") });
+  renderInApp(<McpServersPage />);
+  await addBundled("Diagram");
+  await waitFor(() => expect(toast.success).toHaveBeenCalledTimes(1));
+  await waitFor(() => expect(requests("/api/v1/mcp-servers/settings/")).toBe(2));
+  expect(requests("/api/v1/mcp-servers/bundled/")).toBe(2);
 });
 
 it("keeps the function-server filter reachable when the tenant has only function sources", async () => {

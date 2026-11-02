@@ -14,8 +14,9 @@ export type McpServerUpdatePayload = Schema<"MCPServerUpdate">;
 export type McpServerCreateResponse = Schema<"MCPServerCreateResponse">;
 
 export const MCP_KEY = ["admin-mcp-servers"];
+// Both under MCP_KEY: invalidating MCP_KEY refreshes them too.
 export const mcpToolsKey = (serverId: string) => ["admin-mcp-servers", serverId, "tools"];
-export const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
+const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
 
 /**
  * The servers the bundled tool runtime offers this tenant, each with whether
