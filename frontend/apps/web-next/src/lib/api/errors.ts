@@ -172,6 +172,22 @@ export async function unwrap<T>(
 }
 
 /**
+ * A read whose missing resource (404) means `fallback`, such as an empty
+ * history or a backend without the endpoint; a refusal, a server failure or
+ * a network error still rejects, so the reader shows it and can retry:
+ *
+ *   queryFn: () => orOn404(unwrap(api.GET("/api/v1/document-templates/")), null)
+ */
+export async function orOn404<T, F>(read: Promise<T>, fallback: F): Promise<T | F> {
+  try {
+    return await read;
+  } catch (error) {
+    if (error instanceof EneoApiError && error.status === 404) return fallback;
+    throw error;
+  }
+}
+
+/**
  * Backend error code → i18n message key. Mirrors the SvelteKit app's
  * getErrorMessage mapping; codes without an entry fall back to the backend's
  * English message. When the backend adds a code, add the `eneo_error_{code}`

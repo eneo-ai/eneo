@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
-import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { orOn404, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 
 export type DocumentTemplate = Schema<"DocumentTemplatePublic">;
@@ -19,14 +19,8 @@ export function availableDocumentTemplatesQueryOptions(api: EneoClient) {
 export function documentTemplatesQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: DOCUMENT_TEMPLATES_KEY,
-    queryFn: async ({ signal }): Promise<Schema<"DocumentTemplateList"> | null> => {
-      try {
-        return await unwrap(api.GET("/api/v1/document-templates/", { signal }));
-      } catch (error) {
-        if (error instanceof EneoApiError && error.status === 404) return null;
-        throw error;
-      }
-    },
+    queryFn: ({ signal }): Promise<Schema<"DocumentTemplateList"> | null> =>
+      orOn404(unwrap(api.GET("/api/v1/document-templates/", { signal })), null),
     retry: false
   });
 }

@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { orOn404, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 
 export type McpServer = Schema<"MCPServerSettingsPublic">;
@@ -25,11 +25,12 @@ export const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
 export function bundledToolsQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: BUNDLED_KEY,
-    queryFn: async (): Promise<Schema<"BundledToolList">> => {
-      const { data, response } = await api.GET("/api/v1/mcp-servers/bundled/");
-      if (response.status === 404 || !data) return { items: [], count: 0, runtime: null };
-      return data;
-    }
+    queryFn: (): Promise<Schema<"BundledToolList">> =>
+      orOn404(unwrap(api.GET("/api/v1/mcp-servers/bundled/")), {
+        items: [],
+        count: 0,
+        runtime: null
+      })
   });
 }
 

@@ -503,3 +503,13 @@ it("shows an unsupported backend separately from an ordinary failure that can be
   fireEvent.click(screen.getByRole("button", { name: "query_error_retry_named" }));
   expect(await screen.findByText("document_template_empty")).toBeTruthy();
 });
+
+it("shows a refused library as an error, not as an unsupported backend", async () => {
+  get.mockResolvedValue({
+    error: { message: "Forbidden" },
+    response: new Response("{}", { status: 403 })
+  });
+  show();
+  expect(await screen.findByText("Forbidden")).toBeTruthy();
+  expect(screen.queryByText("document_template_not_supported")).toBeNull();
+});
