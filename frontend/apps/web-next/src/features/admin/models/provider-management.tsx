@@ -6,7 +6,7 @@ import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { Layout, LayoutContent, LayoutFooter } from "@astryxdesign/core/Layout";
 import { Text } from "@astryxdesign/core/Text";
 import { TextInput } from "@/components/astryx/text-input";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState } from "react";
 import { flushSync } from "react-dom";
@@ -14,6 +14,7 @@ import { Switch } from "@/components/astryx/switch";
 import { useReturnFocus } from "@/components/ui/dialog-focus";
 import { browserApi } from "@/lib/api/browser";
 import { toastApiError } from "@/lib/api/toast";
+import { useSecretMutation } from "@/lib/api/use-secret-mutation";
 import { toast } from "@/lib/toast";
 import { OutboundHeadersEditor } from "./outbound-headers-editor";
 import { OutboundHeadersPreview } from "./outbound-headers-preview";
@@ -355,7 +356,8 @@ export function ProviderEditDialog({
   const [keyRefusal, setKeyRefusal] = useState<KeyRefusal | null>(null);
   const [formRefusal, setFormRefusal] = useState<{ message: string } | null>(null);
 
-  const save = useMutation({
+  // The body can hold a new API key and secret header values.
+  const save = useSecretMutation({
     mutationFn: (body: ModelProviderUpdate) => updateProvider(browserApi, provider.id, body),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: PROVIDERS_KEY });
