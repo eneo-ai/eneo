@@ -301,6 +301,9 @@ class UserInDB(UserInDBBase):
     # The session's ``auth_method`` claim (eneo.users.password_lifecycle).
     # Request-scoped like active_api_key; never persisted or returned.
     session_auth_method: Optional[str] = Field(default=None, exclude=True, repr=False)
+    # The session's admitted ``sid`` claim (eneo.authentication.
+    # browser_session_service), request-scoped in the same way.
+    browser_session_id: Optional[str] = Field(default=None, exclude=True, repr=False)
     roles: list[RoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(

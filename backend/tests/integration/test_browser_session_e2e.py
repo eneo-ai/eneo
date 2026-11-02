@@ -5,13 +5,28 @@ over http, so each request carries the session in an explicit Cookie header.
 """
 
 from collections.abc import Iterator
-from uuid import uuid4
+from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
+from urllib.parse import parse_qs, urlsplit
+from uuid import UUID, uuid4
 
+import jwt
 import pytest
+import sqlalchemy as sa
+from httpx import ASGITransport, AsyncClient
 
+from eneo.authentication import browser_session_service
+from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import session_generation
 from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
+from eneo.database.database import sessionmanager
+from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.main.config import Settings, get_settings, set_settings
+from tests.integration.test_federation_tenant_admin import (
+    _discovery,
+    _idp,
+    _register,
+)
 from tests.unit.browser_session_test_utils import expected_set_cookie
 
 PASSWORD = "OriginalPassword1!"
@@ -92,6 +107,35 @@ def _without_request_id(response) -> dict:
     body = response.json()
     body.pop("request_id", None)
     return body
+
+
+def _claims(token: str) -> dict:
+    return jwt.decode(token, options={"verify_signature": False})
+
+
+def _signed(claims: dict) -> str:
+    settings = get_settings()
+    return jwt.encode(claims, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def _bearer(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+async def _rows(user_id: str) -> dict[str, tuple[UUID, UUID, datetime]]:
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.execute(
+            sa.select(BrowserSessions).where(BrowserSessions.user_id == UUID(user_id))
+        )
+        return {
+            row.sid: (row.user_id, row.tenant_id, row.expires_at)
+            for row in rows.scalars()
+        }
+
+
+async def _execute(statement) -> None:
+    async with sessionmanager.session() as session, session.begin():
+        await session.execute(statement)
 
 
 @pytest.mark.integration
@@ -338,3 +382,241 @@ async def test_session_login_does_not_reveal_which_names_exist(
 
     assert known.status_code == nobody.status_code == 401
     assert _without_request_id(known) == _without_request_id(nobody)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_each_browser_sign_in_records_its_own_session(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+
+    first, second = [
+        _claims(_session_token(await _login(client, SESSION_LOGIN, email, PASSWORD)))
+        for _ in range(2)
+    ]
+    issued = await _login(client, TOKEN_LOGIN, email, PASSWORD)
+    ordinary = _claims(issued.json()["access_token"])
+
+    # The token login keeps its contract; a browser sign-in adds only sid.
+    assert "sid" not in ordinary
+    for browser in (first, second):
+        assert browser.keys() - ordinary.keys() == {"sid"}
+        assert browser["auth_method"] == ordinary["auth_method"] == "password"
+    assert first["sid"] != second["sid"]
+    rows = await _rows(first["user_id"])
+    assert rows.keys() == {first["sid"], second["sid"]}
+    for browser in (first, second):
+        assert rows[browser["sid"]] == (
+            UUID(browser["user_id"]),
+            UUID(browser["tenant_id"]),
+            datetime.fromtimestamp(browser["exp"], timezone.utc),
+        )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_session_token_without_its_session_is_refused(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    other = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    cookie = SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+    assert (await client.get("/api/v1/users/me/", headers=cookie)).status_code == 200
+
+    # The setting governs the cookie, not admission: a sid Bearer token is
+    # checked against its row with the setting off too.
+    set_settings(get_settings().model_copy(update={"browser_session_enabled": False}))
+    me = await client.get("/api/v1/users/me/", headers=_bearer(token))
+    assert me.status_code == 200, me.text
+
+    await _execute(
+        sa.delete(BrowserSessions).where(BrowserSessions.sid == _claims(token)["sid"])
+    )
+    refused = await client.get("/api/v1/users/me/", headers=_bearer(token))
+    assert refused.status_code == 401
+    still_in = await client.get("/api/v1/users/me/", headers=_bearer(other))
+    assert still_in.status_code == 200
+
+    set_settings(get_settings().model_copy(update={"browser_session_enabled": True}))
+    refused = await client.get("/api/v1/users/me/", headers=cookie)
+    assert refused.status_code == 401
+    assert GENERATION not in refused.headers
+    assert (await client.get(PROBE, headers=cookie)).status_code == 401
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "sid", [None, "", 7, "not-a-session-id", "a" * 42 + "!"], ids=repr
+)
+async def test_a_present_sid_must_name_a_session(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    sid,
+):
+    # Signed with the real key: only the claim's value is wrong. A null or
+    # malformed sid must not read as a token without one.
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    claims = _claims(token)
+    claims["sid"] = sid
+
+    refused = await client.get("/api/v1/users/me/", headers=_bearer(_signed(claims)))
+    assert refused.status_code == 401
+    del claims["sid"]
+    ordinary = await client.get("/api/v1/users/me/", headers=_bearer(_signed(claims)))
+    assert ordinary.status_code == 200
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sign_in_deletes_the_users_expired_sessions(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    other_email = await _create_local_user(client, super_admin_token)
+    expired, live = [
+        _claims(_session_token(await _login(client, SESSION_LOGIN, email, PASSWORD)))
+        for _ in range(2)
+    ]
+    others = _claims(
+        _session_token(await _login(client, SESSION_LOGIN, other_email, PASSWORD))
+    )
+    past = datetime.now(timezone.utc) - timedelta(minutes=1)
+    for sid in (expired["sid"], others["sid"]):
+        await _execute(
+            sa.update(BrowserSessions)
+            .where(BrowserSessions.sid == sid)
+            .values(expires_at=past)
+        )
+
+    latest = await _login(client, SESSION_LOGIN, email, PASSWORD)
+    latest_sid = _claims(_session_token(latest))["sid"]
+
+    assert (await _rows(expired["user_id"])).keys() == {live["sid"], latest_sid}
+    # Only the signing-in user's rows: another user's go at their next sign-in.
+    assert (await _rows(others["user_id"])).keys() == {others["sid"]}
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_session_that_cannot_be_recorded_sends_no_cookie(
+    app,
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    taken = _claims(token)
+    # The next insert collides with the row above.
+    monkeypatch.setattr(
+        browser_session_service,
+        "secrets",
+        SimpleNamespace(token_urlsafe=lambda _: taken["sid"]),
+    )
+
+    # The response the server error handler sends, not the raised error.
+    transport = ASGITransport(app=app, raise_app_exceptions=False)
+    async with AsyncClient(transport=transport, base_url="http://test.local") as raw:
+        refused = await _login(raw, SESSION_LOGIN, email, PASSWORD)
+
+    assert refused.status_code == 500, refused.text
+    assert refused.headers.get_list("set-cookie") == []
+    assert (await _rows(taken["user_id"])).keys() == {taken["sid"]}
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_federated_browser_sign_in_records_a_session(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    oidc_mock,
+    jwks_mock,
+    db_container,
+    test_tenant,
+    monkeypatch,
+):
+    idp = _idp("browser")
+    oidc_mock(
+        discovery=_discovery(idp),
+        tokens={
+            (idp["token_endpoint"], code): {"id_token": "id", "access_token": "at"}
+            for code in ("code-1", "code-2")
+        },
+    )
+    jwks_mock()
+    monkeypatch.setattr(
+        AuthService,
+        "get_payload_from_openid_jwt",
+        lambda self, **kwargs: {"email": "test@example.com", "email_verified": True},
+    )
+    await _register(
+        client,
+        super_admin_token,
+        test_tenant.id,
+        idp,
+        canonical_public_origin="https://test.local",
+    )
+    async with db_container() as container:
+        slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
+
+    async def sign_in(code: str) -> dict:
+        initiated = await client.get(
+            "/api/v1/auth/browser/initiate",
+            params={"tenant": slug, "next": "/dashboard"},
+            headers=SAME_ORIGIN,
+        )
+        assert initiated.status_code == 303, initiated.text
+        [state] = parse_qs(urlsplit(initiated.headers["location"]).query)["state"]
+        [txn] = initiated.headers.get_list("set-cookie")
+        callback = await client.get(
+            "/login/callback",
+            params={"code": code, "state": state},
+            headers={"Cookie": txn.split(";", 1)[0], "Sec-Fetch-Site": "cross-site"},
+        )
+        assert callback.status_code == 303, callback.text
+        assert callback.headers["location"] == "/dashboard"
+        [session] = [
+            cookie
+            for cookie in callback.headers.get_list("set-cookie")
+            if cookie.startswith(f"{SESSION}=")
+        ]
+        token = session.removeprefix(f"{SESSION}=").split(";", 1)[0]
+        me = await client.get(
+            "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+        )
+        assert me.status_code == 200, me.text
+        return _claims(token)
+
+    first = await sign_in("code-1")
+    second = await sign_in("code-2")
+
+    assert first["sid"] != second["sid"]
+    assert first["auth_method"] is None
+    rows = await _rows(first["user_id"])
+    assert {first["sid"], second["sid"]} <= rows.keys()
+    assert rows[first["sid"]][:2] == (UUID(first["user_id"]), test_tenant.id)

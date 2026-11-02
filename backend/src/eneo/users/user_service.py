@@ -91,6 +91,7 @@ from eneo.users.user import (
 from eneo.users.user_repo import UsersRepository
 
 if TYPE_CHECKING:
+    from eneo.authentication.browser_session_service import BrowserSessionService
     from eneo.database.database import AsyncSession
     from eneo.feature_flag.feature_flag_service import FeatureFlagService
     from eneo.spaces.space_service import SpaceService
@@ -282,6 +283,7 @@ class UserService:
         api_key_rate_limiter: Optional[ApiKeyRateLimiter] = None,
         feature_flag_service: Optional["FeatureFlagService"] = None,
         session: Optional["AsyncSession"] = None,
+        browser_session_service: Optional["BrowserSessionService"] = None,
     ):
         super().__init__()
         self.repo = user_repo
@@ -296,6 +298,8 @@ class UserService:
         self.api_key_rate_limiter = api_key_rate_limiter
         self.feature_flag_service = feature_flag_service
         self._session = session
+        # Without it, a browser session's token is refused.
+        self.browser_session_service = browser_session_service
 
     async def _validate_email(self, email: str | None):
         if email is None:
@@ -780,6 +784,11 @@ class UserService:
         )
 
     async def _get_user_from_payload(self, payload: JWTPayload):
+        if payload.sid is not None:
+            # A browser session's token, as the cookie or as Bearer.
+            if self.browser_session_service is None:
+                raise AuthenticationException("Could not validate token credentials.")
+            await self.browser_session_service.admit(payload)
         user = await self.repo.get_user_by_id_and_tenant_id(
             payload.user_id, tenant_id=payload.tenant_id
         )
@@ -788,6 +797,7 @@ class UserService:
                 payload.credential_version, user
             )
             user.session_auth_method = payload.auth_method
+            user.browser_session_id = payload.sid
         return user
 
     async def _get_user_from_token(self, token: str):

@@ -28,6 +28,7 @@ from eneo.authentication.browser_session_router import (
     end_browser_session,
     get_browser_session,
 )
+from eneo.authentication.browser_session_service import BrowserSessionService
 from eneo.authentication.endpoint_access import (
     Authentication,
     Authorization,
@@ -94,6 +95,11 @@ def mint(minutes: float = 15) -> str:
     return AuthService().create_access_token_for_user(TEST_USER, expires_in=minutes)
 
 
+def with_session(token: str) -> str:
+    """What the session store's ``start`` returns for a sign-in's token."""
+    return AuthService().add_session_id(token, "s" * 43)
+
+
 @dataclass
 class Endpoints:
     client: TestClient
@@ -101,6 +107,7 @@ class Endpoints:
     count: AsyncMock
     user: UserInDB
     valid_tokens: set[str]
+    sessions: AsyncMock
 
 
 @pytest.fixture
@@ -108,14 +115,18 @@ def endpoints(
     monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
 ) -> Iterator[Endpoints]:
     """The real app. Password login stops at UserService.login and the attempt
-    counter; canonical authentication stops at the token lookup."""
+    counter, the session store at BrowserSessionService; canonical
+    authentication stops at the token lookup."""
     service = AsyncMock(spec=UserService)
     count = AsyncMock(return_value=LoginAttempt(True, 4, 600))
     monkeypatch.setattr(user_router, "count_login_attempt", count)
     monkeypatch.setattr(user_router, "clear_login_attempts", AsyncMock())
+    sessions = AsyncMock(spec=BrowserSessionService)
+    sessions.start.side_effect = with_session
     login_container = Container(
         user_service=providers.Object(service),
         redis_client=providers.Object(object()),
+        browser_session_service=providers.Object(sessions),
     )
 
     user = make_user()
@@ -164,7 +175,7 @@ def endpoints(
         logger.addHandler(caplog.handler)
     client = TestClient(app, client=("10.0.0.1", 50000))
     try:
-        yield Endpoints(client, service.login, count, user, valid_tokens)
+        yield Endpoints(client, service.login, count, user, valid_tokens, sessions)
     finally:
         client.close()
         for logger in loggers:
@@ -205,11 +216,14 @@ def test_password_session_sets_cookie_without_token_in_body(
         )
 
         response = endpoints.client.post(SESSION_LOGIN, data=FORM, headers=SAME_ORIGIN)
+        session_token = with_session(token)
 
     assert response.status_code == 204
     assert response.content == b""
+    # The cookie carries the login's token once the store recorded its session.
+    endpoints.sessions.start.assert_awaited_once_with(token)
     assert set_cookies(response) == [
-        expected_set_cookie(SESSION, token, 15 * 60, production=True)
+        expected_set_cookie(SESSION, session_token, 15 * 60, production=True)
     ]
     assert response.headers["cache-control"] == "no-store"
     # Sign-in ends the document that sent it; no page adopts its generation.
@@ -218,6 +232,7 @@ def test_password_session_sets_cookie_without_token_in_body(
     assert endpoints.login.await_args is not None
     assert endpoints.login.await_args.args[:2] == (EMAIL, PASSWORD)
     assert token not in all_logs(caplog)
+    assert session_token not in all_logs(caplog)
     assert PASSWORD not in all_logs(caplog)
 
 
@@ -234,7 +249,7 @@ def test_password_session_replaces_a_planted_session(endpoints: Endpoints):
 
     assert response.status_code == 204
     [cookie] = set_cookies(response)
-    assert cookie.startswith(f"{SESSION}={issued};")
+    assert cookie.startswith(f"{SESSION}={with_session(issued)};")
     assert planted not in cookie
 
 

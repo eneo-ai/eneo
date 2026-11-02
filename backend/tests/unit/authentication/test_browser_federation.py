@@ -12,13 +12,16 @@ from urllib.parse import parse_qs, urlsplit
 
 import jwt
 import pytest
+from dependency_injector import providers
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from eneo.authentication import browser_session_router as routes
 from eneo.authentication.browser_session import safe_next_path, txn_cookie_name
+from eneo.authentication.browser_session_service import BrowserSessionService
 from eneo.authentication.federation_router import InitiateAuthResponse
 from eneo.main.config import Settings, get_settings, set_settings
+from eneo.main.container.container import Container
 from eneo.server.endpoint_routes import endpoint_routes
 from eneo.server.main import get_application
 from tests.unit.browser_session_test_utils import expected_set_cookie
@@ -81,6 +84,10 @@ class Federation:
     client: TestClient
     initiate: AsyncMock
     callback: AsyncMock
+    # The callback's token, and the one the session store returns for it.
+    token: str
+    start: AsyncMock
+    session_token: str
 
 
 @pytest.fixture
@@ -91,23 +98,28 @@ def federation(monkeypatch: pytest.MonkeyPatch) -> Iterator[Federation]:
             state="server-state",
         )
     )
-    token = jwt.encode(
-        {"exp": int(time.time()) + 900}, get_settings().jwt_secret, algorithm="HS256"
-    )
+    exp = int(time.time()) + 900
+    secret = get_settings().jwt_secret
+    token = jwt.encode({"exp": exp}, secret, algorithm="HS256")
+    session_token = jwt.encode({"exp": exp, "sid": "s" * 43}, secret, algorithm="HS256")
     callback = AsyncMock(
         return_value={"access_token": token, "frontend_state": "ignored"}
     )
+    start = AsyncMock(return_value=session_token)
     monkeypatch.setattr(routes, "initiate_auth", initiate, raising=False)
     monkeypatch.setattr(routes, "auth_callback", callback, raising=False)
+    monkeypatch.setattr(BrowserSessionService, "start", start)
     app = get_application()
     for route in endpoint_routes(app.routes):
         if route.path in (INITIATE, *CALLBACKS) and route.dependant:
             for dependency in route.dependant.dependencies:
                 if dependency.name == "container":
-                    app.dependency_overrides[dependency.call] = lambda: object()
+                    app.dependency_overrides[dependency.call] = lambda: Container(
+                        session=providers.Object(object())
+                    )
     client = TestClient(app, base_url="https://beta.example.se", follow_redirects=False)
     try:
-        yield Federation(client, initiate, callback)
+        yield Federation(client, initiate, callback, token, start, session_token)
     finally:
         client.close()
 
@@ -218,6 +230,9 @@ def test_callback_sets_session_and_clears_transaction(
     for cookie in cookies:
         parsed.load(cookie)
     assert 0 < int(parsed["__Host-eneo_web"]["max-age"]) <= 900
+    # The cookie carries the callback's token once the store recorded it.
+    federation.start.assert_awaited_once_with(federation.token)
+    assert parsed["__Host-eneo_web"].value == federation.session_token
     assert any(
         cookie.startswith("__Host-eneo_web=")
         and "; Secure" in cookie
@@ -573,6 +588,9 @@ async def test_real_federation_admits_one_callback_and_fails_closed(
     monkeypatch.setattr(
         container._auth_service, "create_access_token_for_user", lambda user: token
     )
+    sessions = AsyncMock(spec=BrowserSessionService)
+    sessions.start.side_effect = lambda issued: issued
+    container.browser_session_service = lambda: sessions
     app = get_application()
     for route in endpoint_routes(app.routes):
         if route.path in CALLBACKS and route.dependant:

@@ -404,8 +404,59 @@ async def test_legacy_session_is_rejected_even_when_its_username_is_unique(
         await service.authenticate(token=sign_claims(claims))
 
 
+SID = "s" * 43
+
+
+def test_ordinary_tokens_name_no_browser_session(auth_service: AuthService):
+    token = auth_service.create_access_token_for_user(TEST_USER)
+    assert "sid" not in token_claims(token)
+
+    bound = auth_service.add_session_id(token, SID)
+    assert token_claims(bound) == token_claims(token) | {"sid": SID}
+
+
+async def test_a_browser_session_token_needs_its_session(session_service):
+    service, users = session_service
+    # A copy: authentication records the session on the user it returns.
+    users[TEST_USER.id] = TEST_USER.model_copy()
+    auth = service.auth_service
+    token = auth.add_session_id(auth.create_access_token_for_user(TEST_USER), SID)
+    with pytest.raises(AuthenticationException):
+        await service.authenticate(token=token)
+
+    sessions = AsyncMock()
+    service.browser_session_service = sessions
+    user = await service.authenticate(token=token)
+    assert user.browser_session_id == SID
+    [payload] = sessions.admit.await_args.args
+    assert (payload.sid, payload.user_id) == (SID, TEST_USER.id)
+
+    sessions.admit.side_effect = AuthenticationException("ended")
+    with pytest.raises(AuthenticationException):
+        await service.authenticate(token=token)
+    sessions.admit.reset_mock()
+    ordinary = await service.authenticate(
+        token=auth.create_access_token_for_user(TEST_USER)
+    )
+    assert ordinary.browser_session_id is None
+    sessions.admit.assert_not_awaited()
+
+
+@pytest.mark.parametrize("sid", [None, "", 7, ["s"], "short", "s" * 42 + "!"])
+async def test_a_present_sid_is_a_session_id(session_service, sid: object):
+    service, users = session_service
+    users[TEST_USER.id] = TEST_USER
+    service.browser_session_service = AsyncMock()
+    claims = token_claims(service.auth_service.create_access_token_for_user(TEST_USER))
+    claims["sid"] = sid
+    with pytest.raises(AuthenticationException):
+        await service.authenticate(token=sign_claims(claims))
+    service.browser_session_service.admit.assert_not_awaited()
+
+
 @pytest.mark.parametrize(
-    "field", ["user_id", "tenant_id", "credential_version", "token_version", "sub"]
+    "field",
+    ["user_id", "tenant_id", "credential_version", "token_version", "sub", "sid"],
 )
 def test_extra_claims_cannot_override_session_identity(
     auth_service: AuthService, field: str

@@ -132,9 +132,10 @@ async def create_browser_session(
         password=form_data.password,
         container=container,
     )
+    session_token = await container.browser_session_service().start(token.access_token)
     response = Response(status_code=status.HTTP_204_NO_CONTENT)
     # A new token every time, never one the request brought (session fixation).
-    set_session_cookie(response, token.access_token, settings=get_settings())
+    set_session_cookie(response, session_token, settings=get_settings())
     return response
 
 
@@ -470,6 +471,9 @@ async def complete_browser_federation(
         # The function-scoped transaction must roll back before the ASGI owner
         # turns the public HTTP failure into a redirect.
         raise
+    session_token = await container.browser_session_service().start(
+        token["access_token"]
+    )
     response = RedirectResponse(diagnostics.next_path, status_code=303)
-    set_session_cookie(response, token["access_token"], settings=settings)
+    set_session_cookie(response, session_token, settings=settings)
     return response
