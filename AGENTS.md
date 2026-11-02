@@ -21,6 +21,32 @@ folders, or duplicate What's new entries in MDX. Keep the documentation change
 with its behaviour change. In the PR, state the intended release line and the
 page changed, or explain why documentation is unaffected.
 
+# What's new (in-app release notes)
+
+`frontend/packages/whats-new/releases.json` feeds the What's new page inside
+the app and the release-notes page on the docs site. Read
+[its playbook](frontend/packages/whats-new/PLAYBOOK.md) before touching it.
+
+An entry describes something a person sees or does differently **inside
+Eneo** after the change: a new or changed screen, control, behaviour or
+message. Ask that question before writing one; if the answer is no, write
+`No` in the PR's `## User-facing` section and add no entry.
+
+Not news, however important: configuration done outside the app (identity
+provider claims, environment variables, deployment files, database
+migrations), operator-only fixes, performance work, dependency bumps, CI and
+tests. Those belong in the GitHub release notes and in the guides on the docs
+site. An administrator audience does not change this: an `audience: admin`
+entry is for a change an administrator meets in Eneo's own administration
+pages.
+
+Put entries for unreleased work in the `next` block on `develop`; a fix that
+ships from a release branch gets its notes in that branch's block with the
+same id. A hotfix tag needs no block of its own. Order a block for readers:
+news for everyone first, administrator-only entries last. The announcement
+dialog shows the first entries of the newest release, and tests pin that
+order.
+
 # Frontend accessibility
 
 UI work in `frontend/apps/web-next` must meet WCAG 2.2 AA; follow [its accessibility standard](frontend/apps/web-next/ACCESSIBILITY.md).
