@@ -21,7 +21,6 @@ import { useSpace } from "@/features/spaces/use-space";
 import { availableIntegrationsQueryOptions, type UserIntegration } from "../queries";
 import { VENDOR, VendorIcon } from "../vendor";
 import { integrationSetupAction } from "../setup-action";
-import { ConfluenceImportDialog } from "./confluence-import";
 import { SharePointImportDialog } from "./sharepoint-import";
 
 /**
@@ -156,28 +155,17 @@ export function ImportKnowledgeDialog({
         </DialogContent>
       </Dialog>
 
-      {selected &&
-        (selected.integration_type === "confluence" ? (
-          <ConfluenceImportDialog
-            open={open && step === "import"}
-            onOpenChange={(next) => {
-              if (!next) setStep("select");
-              onOpenChange(next);
-            }}
-            onBack={() => setStep("select")}
-            integration={selected}
-          />
-        ) : (
-          <SharePointImportDialog
-            open={open && step === "import"}
-            onOpenChange={(next) => {
-              if (!next) setStep("select");
-              onOpenChange(next);
-            }}
-            onBack={() => setStep("select")}
-            integration={selected}
-          />
-        ))}
+      {selected && (
+        <SharePointImportDialog
+          open={open && step === "import"}
+          onOpenChange={(next) => {
+            if (!next) setStep("select");
+            onOpenChange(next);
+          }}
+          onBack={() => setStep("select")}
+          integration={selected}
+        />
+      )}
     </>
   );
 }
