@@ -208,6 +208,22 @@ it("opens the overview once the reads that decide what needs action have answere
   await screen.findByRole("heading", { name: "Administration", level: 1 });
 });
 
+it("opens the tools once the runtime status above the tabs has answered, also with a failure", async () => {
+  let answer!: (reply: Response) => void;
+  replies.set(
+    "/api/v1/mcp-servers/bundled/",
+    new Promise<Response>((resolve) => (answer = resolve))
+  );
+  const opened = renderRoute("/admin/tools");
+  await waitFor(() => expect(requestedPaths()).toContain("/api/v1/mcp-servers/bundled/"));
+  await act(() => new Promise((resolve) => setTimeout(resolve, 50)));
+  expect(screen.queryByRole("heading", { name: "Tools functions" })).toBeNull();
+
+  answer(failure(500));
+  await opened;
+  await screen.findByRole("heading", { name: "Tools functions", level: 1 });
+});
+
 it("reports an unknown MCP server before requesting its tools", async () => {
   replies.set("/api/v1/mcp-servers/unknown/tools/", failure(422));
   const { router } = await renderRoute("/admin/mcp-servers/unknown");
