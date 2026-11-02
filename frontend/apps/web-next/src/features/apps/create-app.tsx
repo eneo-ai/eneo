@@ -118,7 +118,10 @@ export function CreateAppButton() {
         onOpenChange={(next) => setDialog(next ? "template" : null)}
         pending={create.isPending}
         onCreate={(fromTemplate, templateName) =>
-          create.mutateAsync({ appName: templateName, fromTemplate }).then(() => undefined)
+          // A model can go while the gallery is open; a rejection keeps its draft.
+          blocked()
+            ? Promise.reject(new Error("The space lacks a model an app needs"))
+            : create.mutateAsync({ appName: templateName, fromTemplate }).then(() => undefined)
         }
       />
     </>

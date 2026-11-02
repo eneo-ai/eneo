@@ -138,6 +138,41 @@ describe("CreateAppButton", () => {
     expect(api.POST).not.toHaveBeenCalled();
   });
 
+  it("creates nothing from the gallery once the space loses a model, and keeps the draft", async () => {
+    const view = renderInApp(<CreateAppButton />, {
+      appContext: testAppContext({ settings: { using_templates: true } })
+    });
+    fireEvent.keyDown(screen.getByRole("button", { name: "Fler sätt att skapa" }), {
+      key: "Enter"
+    });
+    fireEvent.click(screen.getByRole("menuitem", { name: "Börja med en mall..." }));
+    const dialog = await screen.findByRole("dialog", { name: "Välj en mall" });
+    fireEvent.click(await within(dialog).findByRole("button", { name: /Protokollsammanfattning/ }));
+
+    // The space data refreshes while the gallery is open: its last
+    // transcription model is gone.
+    spaceModels.current = { transcription_models: [] };
+    view.rerender(<CreateAppButton />);
+    fireEvent.click(within(dialog).getByRole("button", { name: "Skapa app" }));
+
+    await waitFor(() =>
+      expect(toast.warning).toHaveBeenCalledWith(
+        "Denna yta har för närvarande inga transkriptionsmodeller aktiverade. Aktivera minst en transkriptionsmodell för att kunna skapa en app.",
+        expect.anything()
+      )
+    );
+    expect(api.POST).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "Välj en mall" })).toBe(dialog);
+    expect((within(dialog).getByLabelText("Namn") as HTMLInputElement).value).toBe(
+      "Protokollsammanfattning"
+    );
+    expect(
+      within(dialog)
+        .getByRole("button", { name: /Protokollsammanfattning/ })
+        .getAttribute("aria-pressed")
+    ).toBe("true");
+  });
+
   it("says a template is needed, then its name, when creating from a template", async () => {
     renderInApp(<CreateAppButton />, {
       appContext: testAppContext({ settings: { using_templates: true } })
