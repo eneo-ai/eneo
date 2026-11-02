@@ -663,6 +663,24 @@ describe("FlowRunPage", () => {
     expect(screen.getByRole("heading", { level: 1 })).toBeTruthy();
   });
 
+  it("opens with the review in place when the run moves into review while it loads", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(running, makeRunDetail({ ...running, result: null }));
+    delayAnswers(DETAIL, 3_000);
+    renderRun(["flows_view", "flows_manage"]);
+    await waitFor(() => expect(calls(STATUS)).toHaveLength(1));
+
+    const waiting = makeRunSummary({ status: "awaiting_review", finished_at: null, revision: 3 });
+    answerRun(waiting, makeRunDetail({ ...waiting, result: null }));
+    state.routes[REVIEW] = () => ({ body: makeCheckpoint() });
+    await act(() => vi.advanceTimersByTimeAsync(5_000));
+
+    expect(await screen.findByRole("region", { name: "Granska steg 2: Skriv svar" })).toBeTruthy();
+    // The review read is the page's own, not asked again once the page shows.
+    expect(calls(REVIEW)).toHaveLength(1);
+  });
+
   it("shows the run with its error when the detail cannot be read", async () => {
     answerRun(makeRunSummary());
     state.routes[DETAIL] = () => ({ status: 500, body: { message: "Down", code: "internal" } });

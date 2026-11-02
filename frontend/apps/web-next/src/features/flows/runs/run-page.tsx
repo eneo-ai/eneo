@@ -324,8 +324,10 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const signature = progress.data
     ? progressSignature(progress.data.status, progress.data.graph)
     : null;
-  // Until the run shows, its first reads keep the signature they began with: a run that moves on
-  // faster than they answer would otherwise start them over each time and never show.
+  // Until the run shows, its detail and steps keep the signature they began with: a run that moves
+  // on faster than they answer would otherwise start them over each time and never show. The review
+  // follows the live signature: a run waiting for review does not move, and a review keyed by an
+  // older signature would be read again, and its panel arrive late, once the page shows.
   const [shown, setShown] = useState(false);
   const [firstSignature, setFirstSignature] = useState<string | null>(null);
   if (firstSignature === null && signature !== null) setFirstSignature(signature);
@@ -343,7 +345,7 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   });
   const awaitingReview = progress.data ? isAwaitingReview(progress.data.status.status) : false;
   const review = useQuery({
-    ...activeReviewQueryOptions(flowId, runId, readSignature ?? ""),
+    ...activeReviewQueryOptions(flowId, runId, signature ?? ""),
     enabled: awaitingReview
   });
   // The run shows once its first reads are in, and stays shown: the status and graph, then the
