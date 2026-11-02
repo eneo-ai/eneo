@@ -29,7 +29,7 @@ ALL_CATEGORIES = [
 EXPECTED_CATEGORY_COUNTS = {
     "admin_actions": 56,
     "user_actions": 52,
-    "security_events": 12,
+    "security_events": 13,
     "file_operations": 8,
     "integration_events": 24,
     "system_actions": 3,
@@ -646,10 +646,10 @@ class TestAllCategoriesHaveCorrectActionCounts:
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "user_actions")
         assert count == 52
 
-    def test_security_events_has_12_actions(self):
-        """Verify security_events has 12 action types."""
+    def test_security_events_has_13_actions(self):
+        """Verify security_events has 13 action types."""
         count = sum(1 for cat in CATEGORY_MAPPINGS.values() if cat == "security_events")
-        assert count == 12
+        assert count == 13
 
     def test_file_operations_has_8_actions(self):
         """Verify file_operations has 8 action types."""

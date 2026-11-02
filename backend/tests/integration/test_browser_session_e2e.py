@@ -6,15 +6,19 @@ over http, so each request carries the session in an explicit Cookie header.
 
 import asyncio
 import contextlib
+import logging
+import time
 from collections.abc import AsyncIterator, Iterator
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
+from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID, uuid4
 
 import jwt
 import pytest
 import sqlalchemy as sa
+from dependency_injector import providers
 from fastapi import WebSocketException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
@@ -23,15 +27,20 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
 from starlette.status import WS_1008_POLICY_VIOLATION
 
+from eneo.audit.infrastructure.audit_log_repo_impl import AuditLogRepositoryImpl
 from eneo.authentication import browser_session_service
+from eneo.authentication.auth_models import JWTPayload
 from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import session_generation
 from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
 from eneo.database.database import SafeAsyncSession, sessionmanager
+from eneo.database.tables.audit_log_table import AuditLog
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.database.tables.users_table import Users
 from eneo.jobs.job_events import job_updates_channel
 from eneo.main.config import Settings, get_settings, set_settings
+from eneo.main.container.container import Container
+from eneo.main.exceptions import AuthenticationException
 from eneo.server.dependencies.container import get_user_from_websocket
 from eneo.server.websockets import websocket_router
 from eneo.users.user import UserState
@@ -730,7 +739,8 @@ async def test_sign_out_clears_a_cookie_that_names_no_session(
         cleared = await _sign_out(client, dead)
         assert cleared.status_code == 204, cleared.text
         assert cleared.headers.get_list("set-cookie")[0].startswith(f'{SESSION}="";')
-    # An expired token is not trusted to name the session it once had.
+    # A token that expired before it was even issued is not trusted to name
+    # the session it once had.
     still_in = await client.get(
         "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
     )
@@ -1052,3 +1062,552 @@ async def test_a_job_event_stream_ends_when_its_session_expires(
         )
     assert ended.status_code == 200
     assert datetime.now(timezone.utc).timestamp() >= soon
+
+
+EXTEND = "/api/v1/auth/session/extend/"
+INVALIDATE = "/api/v1/users/me/sessions/invalidate/"
+
+
+async def _extension_audit_rows(user_id: str) -> list[dict[str, Any]]:
+    async with sessionmanager.session() as session, session.begin():
+        rows = await session.scalars(
+            sa.select(AuditLog)
+            .where(AuditLog.actor_id == user_id)
+            .where(AuditLog.action == "session_extended")
+        )
+        return [
+            {"tenant_id": str(row.tenant_id), "metadata": row.log_metadata}
+            for row in rows
+        ]
+
+
+@pytest.fixture
+async def raw_client(app) -> AsyncIterator[AsyncClient]:
+    """A client that receives the 500 instead of the server's exception."""
+    async with AsyncClient(
+        transport=ASGITransport(app=app, raise_app_exceptions=False),
+        base_url="http://test.local",
+    ) as client:
+        yield client
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_browser_session_extends_itself_and_is_audited(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    current = SAME_ORIGIN | {
+        "Cookie": f"{SESSION}={token}",
+        GENERATION: session_generation(token),
+    }
+
+    probe = await client.get(PROBE, headers=current)
+    assert probe.status_code == 204, probe.text
+    assert int(probe.headers["Eneo-Session-Expires-In"]) > 0
+    # A fresh session has all of the lifetime it was issued for left.
+    assert int(probe.headers["Eneo-Session-Lifetime"]) >= int(
+        probe.headers["Eneo-Session-Expires-In"]
+    )
+
+    extended = await client.post(EXTEND, headers=current)
+
+    assert extended.status_code == 200, extended.text
+    renewed = _session_token(extended)
+    assert renewed not in extended.text
+    # The page keeps its generation: the renewed cookie names the same one.
+    assert (
+        extended.json()["generation"]
+        == session_generation(renewed)
+        == session_generation(token)
+    )
+
+    # So a page that never read the answer still acts with the new cookie.
+    after = SAME_ORIGIN | {
+        "Cookie": f"{SESSION}={renewed}",
+        GENERATION: session_generation(token),
+    }
+    me = await client.get("/api/v1/users/me/", headers=after)
+    assert me.status_code == 200, me.text
+    assert me.json()["email"] == email
+    # Written with the renewal, not queued behind it.
+    [row] = await _extension_audit_rows(me.json()["id"])
+    assert (
+        row["tenant_id"]
+        == jwt.decode(token, options={"verify_signature": False})["tenant_id"]
+    )
+    assert row["metadata"]["success"] is True
+    assert token not in repr(row) and renewed not in repr(row)
+    # The renewed session is still a password session for the lifecycle gate,
+    # and keeps the original sign-in time.
+    original = _claims(token)
+    claims = _claims(renewed)
+    assert claims["auth_method"] == original["auth_method"] == "password"
+    assert claims["auth_time"] == original["iat"]
+    # It is the same session: no new row, and the row now ends with it.
+    assert claims["sid"] == original["sid"]
+    assert await _rows(original["user_id"]) == {
+        original["sid"]: (
+            UUID(original["user_id"]),
+            UUID(original["tenant_id"]),
+            datetime.fromtimestamp(claims["exp"], timezone.utc),
+        )
+    }
+
+    # Signing in again, even as the same person, starts another session: the
+    # page's generation does not name it.
+    again = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    superseded = await client.post(
+        "/api/v1/auth/session/logout/", headers=after | {"Cookie": f"{SESSION}={again}"}
+    )
+    assert superseded.status_code == 401, superseded.text
+    assert superseded.json()["eneo_error_code"] == 9090
+
+    # Signing out ends the renewed session, the token it replaced too, and a
+    # session that was signed out cannot renew itself.
+    signed_out = await client.post("/api/v1/auth/session/logout/", headers=after)
+    assert signed_out.status_code == 204, signed_out.text
+    for ended in (token, renewed):
+        refused = await client.get("/api/v1/users/me/", headers=_bearer(ended))
+        assert refused.status_code == 401
+    refused = await client.post(EXTEND, headers=after)
+    assert refused.status_code == 401, refused.text
+    assert refused.headers.get_list("set-cookie") == []
+    assert len(await _extension_audit_rows(me.json()["id"])) == 1
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_only_a_usable_browser_session_can_extend_itself(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    login = await _login(client, TOKEN_LOGIN, email, PASSWORD)
+    bearer = SAME_ORIGIN | {"Authorization": f"Bearer {login.json()['access_token']}"}
+    refused_bearer = await client.post(EXTEND, headers=bearer)
+    assert refused_bearer.status_code == 401, refused_bearer.text
+    assert refused_bearer.headers.get_list("set-cookie") == []
+
+    pending = await _create_local_user(
+        client, super_admin_token, must_change_password=True
+    )
+    token = _session_token(await _login(client, SESSION_LOGIN, pending, PASSWORD))
+    cookie = {"Cookie": f"{SESSION}={token}", GENERATION: session_generation(token)}
+    blocked = await client.post(EXTEND, headers=cookie | SAME_ORIGIN)
+    assert blocked.status_code == 403, blocked.text
+    assert blocked.json()["eneo_error_code"] == 9070
+    assert blocked.headers.get_list("set-cookie") == []
+
+    cross_site = await client.post(
+        EXTEND, headers=cookie | {"Sec-Fetch-Site": "cross-site"}
+    )
+    assert cross_site.status_code == 403
+    assert cross_site.headers.get_list("set-cookie") == []
+
+    # Invalidating the account's sessions ends this one too.
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    cookie = SAME_ORIGIN | {
+        "Cookie": f"{SESSION}={token}",
+        GENERATION: session_generation(token),
+    }
+    assert (await client.post(INVALIDATE, headers=cookie)).status_code == 204
+    invalidated = await client.post(EXTEND, headers=cookie)
+    assert invalidated.status_code == 401, invalidated.text
+    assert invalidated.headers.get_list("set-cookie") == []
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_renewal_that_cannot_be_audited_does_not_happen(
+    raw_client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+):
+    email = await _create_local_user(raw_client, super_admin_token)
+    token = _session_token(await _login(raw_client, SESSION_LOGIN, email, PASSWORD))
+    current = SAME_ORIGIN | {
+        "Cookie": f"{SESSION}={token}",
+        GENERATION: session_generation(token),
+    }
+
+    async def _fail(self, audit_log):
+        raise RuntimeError("audit store down")
+
+    sid = _claims(token)["sid"]
+    [before] = (await _rows(_claims(token)["user_id"])).values()
+
+    monkeypatch.setattr(AuditLogRepositoryImpl, "create", _fail)
+    refused = await raw_client.post(EXTEND, headers=current)
+
+    # Answered like any store failure, and the page can try again.
+    assert refused.status_code == 503
+    assert refused.headers.get_list("set-cookie") == []
+    # The session's end did not move either.
+    assert await _rows(_claims(token)["user_id"]) == {sid: before}
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_renewal_the_store_cannot_record_answers_503_and_logs_no_session_id(
+    raw_client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+    caplog,
+):
+    email = await _create_local_user(raw_client, super_admin_token)
+    token = _session_token(await _login(raw_client, SESSION_LOGIN, email, PASSWORD))
+    sid = _claims(token)["sid"]
+    [before] = (await _rows(_claims(token)["user_id"])).values()
+
+    # A store error, as SQLAlchemy raises it, carries the statement's
+    # parameters, the session id among them.
+    def unavailable(state) -> None:
+        if state.is_update and state.statement.table.name == "browser_sessions":
+            raise OperationalError(
+                "UPDATE browser_sessions", {"sid_1": sid}, TimeoutError("lock timeout")
+            )
+
+    event.listen(Session, "do_orm_execute", unavailable)
+    root = logging.getLogger()
+    root.addHandler(caplog.handler)
+    browser_session_service.logger.addHandler(caplog.handler)
+    try:
+        refused = await raw_client.post(EXTEND, headers=_cookie(token))
+    finally:
+        event.remove(Session, "do_orm_execute", unavailable)
+        root.removeHandler(caplog.handler)
+        browser_session_service.logger.removeHandler(caplog.handler)
+
+    assert refused.status_code == 503, refused.text
+    assert refused.json()["code"] == "session_extend_unavailable"
+    assert refused.headers.get_list("set-cookie") == []
+    assert await _rows(_claims(token)["user_id"]) == {sid: before}
+    formatted = [logging.Formatter().format(record) for record in caplog.records]
+    assert any("browser_session_extend_unavailable" in line for line in formatted)
+    assert not any(sid in line or token in line for line in formatted)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_signing_in_again_ends_the_session_the_browser_held(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    first = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    user_id = _claims(first)["user_id"]
+
+    # Signing in again (a session at its maximum age offers it) replaces the
+    # browser's session: the one its cookie named ends, and is not left behind.
+    again = await client.post(
+        SESSION_LOGIN,
+        data={"username": email, "password": PASSWORD},
+        headers=FORM | SAME_ORIGIN | {"Cookie": f"{SESSION}={first}"},
+    )
+    second = _session_token(again)
+    assert (await _rows(user_id)).keys() == {_claims(second)["sid"]}
+    me = await client.get("/api/v1/users/me/", headers=_cookie(first))
+    assert me.status_code == 401
+    assert (
+        await client.get("/api/v1/users/me/", headers=_cookie(second))
+    ).status_code == 200
+
+    # A sign-in that fails ends nothing: the browser keeps its session.
+    failed = await client.post(
+        SESSION_LOGIN,
+        data={"username": email, "password": "not-the-password"},
+        headers=FORM | SAME_ORIGIN | {"Cookie": f"{SESSION}={second}"},
+    )
+    assert failed.status_code == 401, failed.text
+    assert (await _rows(user_id)).keys() == {_claims(second)["sid"]}
+
+    # A cookie that names no session of its own (forged) ends nothing.
+    forged = jwt.encode(
+        _claims(second), "x" * 64, algorithm=get_settings().jwt_algorithm
+    )
+    third = _session_token(
+        await client.post(
+            SESSION_LOGIN,
+            data={"username": email, "password": PASSWORD},
+            headers=FORM | SAME_ORIGIN | {"Cookie": f"{SESSION}={forged}"},
+        )
+    )
+    assert (await _rows(user_id)).keys() == {
+        _claims(second)["sid"],
+        _claims(third)["sid"],
+    }
+
+
+def _cookie(token: str) -> dict[str, str]:
+    return SAME_ORIGIN | {
+        "Cookie": f"{SESSION}={token}",
+        GENERATION: session_generation(token),
+    }
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_signing_out_with_the_token_a_renewal_replaced_ends_the_session(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    # A renewal keeps the sid, so a sign-out sent with the token it replaced,
+    # which expires on the way, must still end the renewed session.
+    email = await _create_local_user(client, super_admin_token)
+    claims = _claims(
+        _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    )
+    bearer = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    now = int(time.time())
+    # A short session: its token and its row end two seconds from now.
+    original = _signed(claims | {"iat": now - 60, "exp": now + 2})
+    await _execute(
+        sa.update(BrowserSessions)
+        .where(BrowserSessions.sid == claims["sid"])
+        .values(expires_at=datetime.fromtimestamp(now + 2, timezone.utc))
+    )
+    extended = await client.post(EXTEND, headers=_cookie(original))
+    assert extended.status_code == 200, extended.text
+    renewed = _session_token(extended)
+    expired_bearer = _signed(_claims(bearer) | {"iat": now - 60, "exp": now + 2})
+    await asyncio.sleep(now + 2 - time.time() + 0.2)
+
+    # Only sign-out takes an expired token: authentication, renewal and a
+    # WebSocket still refuse one.
+    for refused in (_cookie(original), _bearer(original)):
+        me = await client.get("/api/v1/users/me/", headers=refused)
+        assert me.status_code == 401, me.text
+    not_renewed = await client.post(EXTEND, headers=_cookie(original))
+    assert not_renewed.status_code == 401, not_renewed.text
+    assert not_renewed.headers.get_list("set-cookie") == []
+    websocket = SimpleNamespace(scope={"endpoint": websocket_router.connect})
+    with pytest.raises(WebSocketException):
+        await get_user_from_websocket(
+            websocket=websocket, token=expired_bearer, session=None
+        )
+    assert (
+        await client.get("/api/v1/users/me/", headers=_cookie(renewed))
+    ).status_code == 200
+
+    signed_out = await _sign_out(client, original)
+
+    assert signed_out.status_code == 204, signed_out.text
+    me = await client.get("/api/v1/users/me/", headers=_cookie(renewed))
+    assert me.status_code == 401, me.text
+    assert await _rows(claims["user_id"]) == {}
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_only_a_genuine_recently_expired_token_signs_its_session_out(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+    caplog,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    claims = _claims(token)
+    now = int(time.time())
+    # Issued a minute ago, expired a second ago.
+    recent = claims | {"iat": now - 61, "exp": now - 1}
+    refused = {
+        "forged": jwt.encode(recent, "x" * 64, algorithm=get_settings().jwt_algorithm),
+        "unsigned": jwt.encode(recent, None, algorithm="none"),
+        "another audience": _signed(recent | {"aud": "another-audience"}),
+        "another issuer": _signed(recent | {"iss": "https://another.example"}),
+        "untyped": _signed(recent | {"credential_version": "0"}),
+        "without a session": _signed(
+            {name: value for name, value in recent.items() if name != "sid"}
+        ),
+        "another user's": _signed(recent | {"user_id": str(uuid4())}),
+        # Expired longer ago than it was valid for.
+        "expired too long ago": _signed(claims | {"iat": now - 121, "exp": now - 61}),
+    }
+
+    for name, dead in refused.items():
+        signed_out = await _sign_out(client, dead)
+        assert signed_out.status_code == 204, (name, signed_out.text)
+        assert (await _rows(claims["user_id"])).keys() == {claims["sid"]}, name
+    me = await client.get("/api/v1/users/me/", headers=_cookie(token))
+    assert me.status_code == 200, me.text
+
+    # The genuine token ends it; a failure to do so is logged without it.
+    genuine = _signed(recent)
+    monkeypatch.setattr(browser_session_service, "STORE_DEADLINE_SECONDS", 1.0)
+    browser_session_service.logger.addHandler(caplog.handler)
+    try:
+        async with _deletion_fails(claims["sid"]):
+            unavailable = await _sign_out(client, genuine)
+    finally:
+        browser_session_service.logger.removeHandler(caplog.handler)
+    assert unavailable.status_code == 503, unavailable.text
+    assert caplog.records
+    assert not any(genuine in repr(vars(record)) for record in caplog.records)
+
+    assert (await _sign_out(client, genuine)).status_code == 204
+    assert await _rows(claims["user_id"]) == {}
+    me = await client.get("/api/v1/users/me/", headers=_cookie(token))
+    assert me.status_code == 401, me.text
+
+
+def _payload(token: str) -> JWTPayload:
+    settings = get_settings()
+    return AuthService().get_jwt_payload(
+        token,
+        key=str(settings.jwt_secret),
+        aud=settings.jwt_audience,
+        algs=[settings.jwt_algorithm],
+    )
+
+
+async def _issue(current: JWTPayload, seconds: float) -> str:
+    """A token for the session's user, as a renewal issues it."""
+    async with sessionmanager.session() as session, session.begin():
+        container = Container(session=providers.Object(session))
+        user = await container.user_repo().get_user_by_id_and_tenant_id(
+            current.user_id, tenant_id=current.tenant_id
+        )
+        return AuthService().create_access_token_for_user(user, expires_in=seconds / 60)
+
+
+async def _renew(current: JWTPayload, issued: str) -> str:
+    """BrowserSessionService.renew in a database session of its own."""
+    async with sessionmanager.session() as session:
+        container = Container(session=providers.Object(session))
+        async with session.begin():
+            user = await container.user_repo().get_user_by_id_and_tenant_id(
+                current.user_id, tenant_id=current.tenant_id
+            )
+        return await container.browser_session_service().renew(current, issued, user)
+
+
+async def _renewal_waits_for_the_row() -> None:
+    async with asyncio.timeout(5):
+        while True:
+            async with sessionmanager.session() as session, session.begin():
+                if await session.scalar(
+                    sa.text(
+                        "SELECT count(*) FROM pg_stat_activity"
+                        " WHERE wait_event_type = 'Lock'"
+                        " AND query LIKE 'UPDATE browser_sessions%'"
+                    )
+                ):
+                    return
+            await asyncio.sleep(0.05)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_renewal_issued_earlier_but_recorded_later_keeps_the_later_end(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    monkeypatch,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    current = _payload(token)
+    # The session ends in a minute; both renewals move that end.
+    await _execute(
+        sa.update(BrowserSessions)
+        .where(BrowserSessions.sid == current.sid)
+        .values(expires_at=datetime.now(timezone.utc) + timedelta(minutes=1))
+    )
+    # Issued first, so it ends first.
+    earlier = await _issue(current, 3)
+    later = await _issue(current, 120)
+
+    # The later renewal updates the row and holds it, uncommitted, in its
+    # audit write; the earlier one waits for the row, then updates it last.
+    create = AuditLogRepositoryImpl.create
+    held, release = asyncio.Event(), asyncio.Event()
+
+    async def hold_the_first(self, audit_log):
+        created = await create(self, audit_log)
+        if not held.is_set():
+            held.set()
+            await release.wait()
+        return created
+
+    monkeypatch.setattr(AuditLogRepositoryImpl, "create", hold_the_first)
+    later_renewal = asyncio.create_task(_renew(current, later))
+    earlier_renewal: asyncio.Task | None = None
+    try:
+        # A renewal that fails before its audit write must fail the test, not hang it.
+        held_or_failed = asyncio.create_task(held.wait())
+        async with asyncio.timeout(30):
+            await asyncio.wait(
+                {held_or_failed, later_renewal}, return_when=asyncio.FIRST_COMPLETED
+            )
+        held_or_failed.cancel()
+        if later_renewal.done():
+            later_renewal.result()
+        earlier_renewal = asyncio.create_task(_renew(current, earlier))
+        async with asyncio.timeout(30):
+            await _renewal_waits_for_the_row()
+    finally:
+        release.set()
+    async with asyncio.timeout(30):
+        renewed_later = await later_renewal
+        renewed_earlier = await earlier_renewal
+
+    ends = _claims(renewed_earlier)["exp"], _claims(renewed_later)["exp"]
+    assert ends[0] < ends[1]
+    [(_, _, expires_at)] = (await _rows(str(current.user_id))).values()
+    assert expires_at == datetime.fromtimestamp(ends[1], timezone.utc)
+    # Between the two ends, the later token still authenticates.
+    await asyncio.sleep(ends[0] - time.time() + 0.2)
+    me = await client.get("/api/v1/users/me/", headers=_cookie(renewed_later))
+    assert me.status_code == 200, me.text
+    me = await client.get("/api/v1/users/me/", headers=_cookie(renewed_earlier))
+    assert me.status_code == 401, me.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_renewal_after_sign_out_does_not_bring_the_session_back(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    # A renewal admitted before a sign-out that deletes the row first.
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    current = _payload(token)
+    issued = await _issue(current, 120)
+
+    assert (await _sign_out(client, token)).status_code == 204
+
+    with pytest.raises(AuthenticationException):
+        await _renew(current, issued)
+    assert await _rows(str(current.user_id)) == {}
+    assert await _extension_audit_rows(str(current.user_id)) == []

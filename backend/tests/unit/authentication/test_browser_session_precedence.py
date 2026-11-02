@@ -17,6 +17,7 @@ from starlette.requests import Request
 
 from eneo.authentication import browser_session
 from eneo.authentication.api_key_v2_repo import ApiKeysV2Repository
+from eneo.authentication.auth_service import AuthService
 from eneo.authentication.browser_session import (
     SESSION_GENERATION_HEADER,
     SessionGenerationMismatchError,
@@ -35,6 +36,7 @@ from eneo.server.dependencies.auth_definitions import OAUTH2_SCHEME
 from eneo.server.main import get_application
 from eneo.users.user import UserInDB
 from eneo.users.user_service import UserService
+from tests.fixtures import TEST_USER
 from tests.unit.test_endpoint_access import make_user
 
 BEARER = "bearer-token-A"
@@ -183,6 +185,39 @@ async def test_cookie_request_is_bound_to_the_sending_document(
     else:
         with pytest.raises(SessionGenerationMismatchError):
             await credential(method, headers, WITH_COOKIE)
+
+
+async def test_a_renewed_session_keeps_its_generation_and_another_does_not():
+    auth = AuthService()
+
+    def browser_token(sid: str, minutes: float = 15) -> str:
+        token = auth.create_access_token_for_user(TEST_USER, expires_in=minutes)
+        return auth.add_session_id(token, sid)
+
+    signed_in, renewed = browser_token("a" * 43), browser_token("a" * 43, 60)
+    another_sign_in = browser_token("b" * 43)
+    assert renewed != signed_in
+
+    # The page loaded under the first token writes with the renewed cookie.
+    page = SAME_ORIGIN | {SESSION_GENERATION_HEADER: session_generation(signed_in)}
+    assert await credential("POST", page, {SESSION: renewed}) == renewed
+    # Another sign-in, of this account or another, is another session.
+    with pytest.raises(SessionGenerationMismatchError):
+        await credential("POST", page, {SESSION: another_sign_in})
+    # It names the session without revealing the token or its id.
+    assert "a" * 43 not in session_generation(signed_in)
+
+    # Tokens without a session id keep a generation per token, and so do
+    # tokens whose sid is not one sign-in writes.
+    first, second = (
+        auth.create_access_token_for_user(TEST_USER, expires_in=minutes)
+        for minutes in (15, 60)
+    )
+    assert session_generation(first) != session_generation(second)
+    odd = "a" * 42 + "!"
+    assert session_generation(auth.add_session_id(first, odd)) != session_generation(
+        auth.add_session_id(second, odd)
+    )
 
 
 @pytest.mark.parametrize(

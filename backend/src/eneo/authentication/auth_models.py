@@ -30,6 +30,10 @@ class JWTMeta(BaseModel):
     exp: float
 
 
+# A browser session id: 256 random bits, as secrets.token_urlsafe(32) writes them.
+SESSION_ID_PATTERN = r"^[A-Za-z0-9_-]{43}$"
+
+
 class JWTCreds(BaseModel):
     """Immutable Eneo session identity, shared by API, MCP and module tokens."""
 
@@ -49,7 +53,7 @@ class JWTCreds(BaseModel):
     # minting never dumps it. A present claim is a session id: null or any
     # other value is refused, never read as a token without one.
     sid: Optional[str] = Field(
-        default=None, exclude=True, strict=True, pattern=r"^[A-Za-z0-9_-]{43}$"
+        default=None, exclude=True, strict=True, pattern=SESSION_ID_PATTERN
     )
 
     @field_validator("sid", mode="before")
@@ -69,6 +73,17 @@ class JWTPayload(JWTMeta, JWTCreds):
 class AccessToken(BaseModel):
     access_token: str
     token_type: str
+
+
+class BrowserSessionExtension(BaseModel):
+    """The renewed browser session; its token travels only in the cookie."""
+
+    generation: str = Field(
+        description="The session's `Eneo-Session-Generation`, which a renewal keeps."
+    )
+    expires_in: int = Field(
+        ge=0, description="Whole seconds until the renewed session ends."
+    )
 
 
 class ApiKeyOwnership(str, Enum):
