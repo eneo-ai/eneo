@@ -2,7 +2,8 @@ import {
   QueryClient,
   type DefaultError,
   type QueryExecuteOptions,
-  type QueryKey
+  type QueryKey,
+  type QueryState
 } from "@tanstack/react-query";
 import { EneoApiError, isFinalError } from "./errors";
 
@@ -129,12 +130,25 @@ export function warmQuery<
 }
 
 /**
+ * Whether a read has answered for the first time, as a page laid out around
+ * it sees it: it has data or a final error, or a failed attempt is being
+ * retried (counted before the backoff starts). The route loader
+ * (`readFirstAnswer`) and the pages that hold their layout until their first
+ * reads have answered share this one rule. It reads only these two fields of
+ * a query result: reading `fetchStatus` too would render a polled page again
+ * on every poll.
+ */
+export function hasAnswered(read: { isPending: boolean; failureCount: number }): boolean {
+  return !read.isPending || read.failureCount > 0;
+}
+
+/**
  * Display data the page is laid out around but can show without: waits for
- * its first answer, the data or one failed request, and never rejects. What
- * is cached answers at once, as with `readCached`. The query's own retries go
- * on for the component that shows it (as with `warmQuery`), so a failing read
- * holds the page for one request, not for the retry backoff; nor does a read
- * that waits for the network, which starts when the connection is back.
+ * its first answer (`hasAnswered`) and never rejects. What is cached answers
+ * at once, as with `readCached`. The query's own retries go on for the
+ * component that shows it (as with `warmQuery`), so a failing read holds the
+ * page for one request, not for the retry backoff; nor does a read that waits
+ * for the network, which starts when the connection is back.
  */
 export function readFirstAnswer<
   TQueryFnData,
@@ -151,10 +165,9 @@ export function readFirstAnswer<
   );
   const cache = queryClient.getQueryCache();
   const query = cache.find({ queryKey: options.queryKey, exact: true });
-  // A failed attempt is counted before its backoff starts; a read that already failed is retrying
-  // in the background, and one that waits for the network is not going to answer soon: both answered.
-  const answered = (state: { fetchFailureCount: number; fetchStatus: string }) =>
-    state.fetchFailureCount > 0 || state.fetchStatus === "paused";
+  const answered = ({ status, fetchFailureCount, fetchStatus }: QueryState) =>
+    hasAnswered({ isPending: status === "pending", failureCount: fetchFailureCount }) ||
+    fetchStatus === "paused";
   if (query === undefined || answered(query.state)) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {

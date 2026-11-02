@@ -3,6 +3,7 @@ import { QueryClient, QueryObserver, onlineManager } from "@tanstack/react-query
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EneoApiError } from "./errors";
 import {
+  hasAnswered,
   makeQueryClient,
   pollWhile,
   readCached,
@@ -245,6 +246,19 @@ describe("warmQuery", () => {
     expect(observer.getCurrentResult().error).toMatchObject({ status: 503 });
     expect(backend.requests()).toBe(1);
     unsubscribe();
+  });
+});
+
+describe("hasAnswered", () => {
+  it("has not, while the first request is on its way", () => {
+    expect(hasAnswered({ isPending: true, failureCount: 0 })).toBe(false);
+  });
+
+  it.each([
+    ["has data or a final error", { isPending: false, failureCount: 0 }],
+    ["failed once and is retried", { isPending: true, failureCount: 1 }]
+  ])("has, when it %s", (_, read) => {
+    expect(hasAnswered(read)).toBe(true);
   });
 });
 
