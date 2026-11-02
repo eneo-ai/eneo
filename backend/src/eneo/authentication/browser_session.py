@@ -25,11 +25,9 @@ SAFE_METHODS = frozenset({"GET", "HEAD"})
 SESSION_COOKIE = "__Host-eneo_web"
 DEV_SESSION_COOKIE = "eneo_web"
 TXN_COOKIE = "__Host-eneo_oidc_txn"
-# Not eneo_oidc_txn: localhost cookies are shared across ports, so it would
-# collide with web-next's own txn cookie.
+# Localhost cookies are shared across ports, so the development names carry
+# this app's eneo_web prefix.
 DEV_TXN_COOKIE = "eneo_web_txn"
-# web-next's session and txn cookies, also cleared at logout.
-NEXT_ERA_COOKIES = ("eneo_session", "eneo_oidc_txn", "eneo_federation_txn")
 
 DEFAULT_LANDING = "/spaces/personal/chat"
 _BAD_ESCAPE = re.compile(r"%(?![0-9a-fA-F]{2})")
@@ -289,8 +287,7 @@ def clear_transaction_cookie(response: Response, *, settings: Settings) -> None:
 
 
 def clear_session_cookies(response: Response, *, settings: Settings) -> None:
-    """Delete the session, txn and web-next cookies with the attributes they
-    were set with, so the browser matches and drops each one."""
-    names = (session_cookie_name(settings), txn_cookie_name(settings))
-    for name in (*names, *NEXT_ERA_COOKIES):
+    """Delete the session and txn cookies with the attributes they were set
+    with, so the browser matches and drops each one."""
+    for name in (session_cookie_name(settings), txn_cookie_name(settings)):
         _set_cookie(response, name, "", 0, settings)

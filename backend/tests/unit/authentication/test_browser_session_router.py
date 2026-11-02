@@ -74,7 +74,6 @@ FORM = {"username": EMAIL, "password": PASSWORD}
 NOW = "2026-10-28 12:00:00"
 REFUSING_SITES = [{}, {"Sec-Fetch-Site": "cross-site"}]
 REFUSING_SITES += [{"Sec-Fetch-Site": "same-site"}, {"Sec-Fetch-Site": "none"}]
-NEXT_ERA = ("eneo_session", "eneo_oidc_txn", "eneo_federation_txn")
 # SimpleCookie renders an empty value as a quoted empty string.
 EMPTY = '""'
 
@@ -371,7 +370,7 @@ def test_password_session_keeps_login_error_contract(
         ("development", "eneo_web", "eneo_web_txn", False),
     ],
 )
-def test_logout_clears_session_txn_and_next_era_cookies(
+def test_logout_clears_session_and_txn_cookies(
     endpoints: Endpoints,
     browser_settings: Settings,
     environment: str,
@@ -392,7 +391,7 @@ def test_logout_clears_session_txn_and_next_era_cookies(
     assert response.content == b""
     assert set_cookies(response) == [
         expected_set_cookie(name, EMPTY, 0, production=production)
-        for name in (session, txn, *NEXT_ERA)
+        for name in (session, txn)
     ]
 
 
@@ -583,19 +582,19 @@ def test_a_refused_cookie_session_names_no_generation(
     assert GENERATION not in response.headers
 
 
-def test_retired_next_cookie_does_not_authenticate(endpoints: Endpoints):
+def test_only_the_session_cookie_name_authenticates(endpoints: Endpoints):
     token = mint()
     endpoints.valid_tokens.add(token)
 
-    retired = endpoints.client.get(
-        ME, headers=SAME_ORIGIN | {"Cookie": f"eneo_session={token}"}
+    other = endpoints.client.get(
+        ME, headers=SAME_ORIGIN | {"Cookie": f"other_session={token}"}
     )
     current = endpoints.client.get(
         ME, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
     )
 
-    assert retired.status_code == 401
-    assert GENERATION not in retired.headers
+    assert other.status_code == 401
+    assert GENERATION not in other.headers
     assert current.status_code == 200
     assert current.headers[GENERATION] == session_generation(token)
 
