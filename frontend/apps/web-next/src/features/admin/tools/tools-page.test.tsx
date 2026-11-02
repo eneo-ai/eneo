@@ -163,7 +163,7 @@ describe("Verktyg", () => {
     );
   });
 
-  it("shows no error when the deployment has no built-in tools (404)", async () => {
+  it("shows a 404 in the runtime status's place, like any failed read", async () => {
     get.mockImplementation((path?: string) => {
       if (path === "/api/v1/mcp-servers/bundled/")
         return Promise.resolve({
@@ -176,7 +176,10 @@ describe("Verktyg", () => {
     });
     renderInApp(<ToolsPage tab="functions" />);
     expect(await screen.findByRole("heading", { name: "Webbsökning" })).toBeTruthy();
-    expect(screen.queryByText("Det gick inte att läsa Eneos inbyggda verktyg")).toBeNull();
+    const area = document.querySelector('[data-slot="runtime-status"]');
+    expect(
+      await within(area as HTMLElement).findByText("Det gick inte att läsa Eneos inbyggda verktyg")
+    ).toBeTruthy();
   });
 
   it("reads the tab from the address and opens the functions by default", () => {

@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
-import { orOn404, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 
 export type McpServer = Schema<"MCPServerSettingsPublic">;
@@ -20,18 +20,13 @@ const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
 
 /**
  * The servers the bundled tool runtime offers this tenant, each with whether
- * it was added, and the runtime's state. A backend without the runtime
- * endpoint offers none.
+ * it was added, and the runtime's state (also when no runtime is configured).
  */
 export function bundledToolsQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: BUNDLED_KEY,
     queryFn: (): Promise<Schema<"BundledToolList">> =>
-      orOn404(unwrap(api.GET("/api/v1/mcp-servers/bundled/")), {
-        items: [],
-        count: 0,
-        runtime: null
-      })
+      unwrap(api.GET("/api/v1/mcp-servers/bundled/"))
   });
 }
 
