@@ -3517,13 +3517,16 @@ async def test_save_accepts_a_config_that_reads_only_what_the_step_is_cleared_fo
 @pytest.mark.parametrize(
     ("config", "reported"),
     [
+        # A credential with its value left empty is not malformed in a draft:
+        # the person enters it in the editor and publish requires it. One sent
+        # over plain HTTP is refused at once.
         pytest.param(
             _authored_http(
-                url=f"https://example.org/{_READ_STEP_1}",
-                auth={"mode": "bearer_token", "token": ""},
+                url=f"http://example.org/{_READ_STEP_1}",
+                auth={"mode": "bearer_token", "token": "abc"},
             ),
-            "HTTP_MISSING_AUTH",
-            id="missing-credentials",
+            "HTTP_CREDENTIALS_REQUIRE_HTTPS",
+            id="credentials-over-plain-http",
         ),
         pytest.param(
             {"url": f"https://example.org/{_READ_STEP_1}"},
