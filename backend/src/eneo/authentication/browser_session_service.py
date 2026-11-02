@@ -19,6 +19,7 @@ import secrets
 from datetime import datetime, timezone
 
 import sqlalchemy as sa
+from fastapi import HTTPException, status
 
 from eneo.authentication.auth_models import JWTPayload
 from eneo.authentication.auth_service import AuthService
@@ -26,6 +27,9 @@ from eneo.database.database import AsyncSession
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.main.config import get_settings
 from eneo.main.exceptions import AuthenticationException
+from eneo.main.logging import get_logger
+
+logger = get_logger(__name__)
 
 
 class BrowserSessionService:
@@ -77,6 +81,51 @@ class BrowserSessionService:
         )
         if found is None:
             raise AuthenticationException("Could not validate token credentials.")
+
+    async def end(self, token: str) -> None:
+        """Delete the session a sign-out's cookie names.
+
+        Only a token that meets the whole local-token contract (signature,
+        issuer, audience, expiry, typed claims) names a session; any other
+        cookie, or a token without ``sid``, has nothing to revoke. The account
+        is not checked, so a restricted user can still sign out. A row already
+        gone is success: a retry after a lost response still signs out.
+
+        Commits on its own, outside any request transaction. When the deletion
+        cannot be confirmed, raises 503: the cookie stays, as the handle for a
+        retry.
+        """
+        try:
+            payload = self._verified_payload(token)
+        except AuthenticationException:
+            return
+        if payload.sid is None:
+            return
+        try:
+            async with self.session.begin():
+                await self.session.execute(
+                    sa.delete(BrowserSessions).where(
+                        BrowserSessions.sid == payload.sid,
+                        BrowserSessions.user_id == payload.user_id,
+                        BrowserSessions.tenant_id == payload.tenant_id,
+                    )
+                )
+        except Exception as exc:
+            logger.error(
+                "browser_sign_out_unavailable",
+                extra={
+                    "user_id": str(payload.user_id),
+                    "tenant_id": str(payload.tenant_id),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise HTTPException(
+                status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "code": "sign_out_unavailable",
+                    "message": "Sign-out could not be completed. Try again.",
+                },
+            ) from exc
 
     def _verified_payload(self, token: str) -> JWTPayload:
         settings = get_settings()

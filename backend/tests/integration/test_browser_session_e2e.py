@@ -4,6 +4,7 @@ The client talks to http://test.local and httpx does not send Secure cookies
 over http, so each request carries the session in an explicit Cookie header.
 """
 
+import asyncio
 from collections.abc import Iterator
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
@@ -14,6 +15,9 @@ import jwt
 import pytest
 import sqlalchemy as sa
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
+from sqlalchemy.exc import OperationalError
+from sqlalchemy.orm import Session
 
 from eneo.authentication import browser_session_service
 from eneo.authentication.auth_service import AuthService
@@ -148,6 +152,8 @@ async def test_session_cookie_signs_the_browser_in_and_out(
     browser_session_on,
 ):
     email = await _create_local_user(client, super_admin_token)
+    # The same user in another browser.
+    elsewhere = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
 
     signed_in = await _login(client, SESSION_LOGIN, email, PASSWORD)
     assert signed_in.status_code == 204, signed_in.text
@@ -201,6 +207,27 @@ async def test_session_cookie_signs_the_browser_in_and_out(
     assert signed_out.status_code == 204
     cleared = signed_out.headers.get_list("set-cookie")
     assert cleared[0].startswith(f'{SESSION}=""; HttpOnly; Max-Age=0; Path=/')
+
+    # The server ended the session: a copy of the cookie made before sign-out
+    # no longer works, as the cookie or as Bearer.
+    for replay in (cookie | SAME_ORIGIN, _bearer(token)):
+        refused = await client.get("/api/v1/users/me/", headers=replay)
+        assert refused.status_code == 401, refused.text
+        assert GENERATION not in refused.headers
+    assert (await client.get(PROBE, headers=cookie | SAME_ORIGIN)).status_code == 401
+    # Another session of the same user is not ended.
+    other = await client.get(
+        "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={elsewhere}"}
+    )
+    assert other.status_code == 200, other.text
+
+    # A retry, as after a lost response, still clears the cookie.
+    retried = await client.post(
+        "/api/v1/auth/session/logout/",
+        headers=cookie | SAME_ORIGIN | {GENERATION: generation},
+    )
+    assert retried.status_code == 204
+    assert retried.headers.get_list("set-cookie") == cleared
 
 
 @pytest.mark.integration
@@ -620,3 +647,97 @@ async def test_federated_browser_sign_in_records_a_session(
     rows = await _rows(first["user_id"])
     assert {first["sid"], second["sid"]} <= rows.keys()
     assert rows[first["sid"]][:2] == (UUID(first["user_id"]), test_tenant.id)
+
+
+async def _sign_out(client, token: str):
+    return await client.post(
+        "/api/v1/auth/session/logout/",
+        headers=SAME_ORIGIN
+        | {"Cookie": f"{SESSION}={token}", GENERATION: session_generation(token)},
+    )
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sign_out_clears_a_cookie_that_names_no_session(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    expired = _signed(_claims(token) | {"exp": 1})
+
+    for dead in (expired, "not-a-token"):
+        cleared = await _sign_out(client, dead)
+        assert cleared.status_code == 204, cleared.text
+        assert cleared.headers.get_list("set-cookie")[0].startswith(f'{SESSION}="";')
+    # An expired token is not trusted to name the session it once had.
+    still_in = await client.get(
+        "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+    )
+    assert still_in.status_code == 200, still_in.text
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_sign_out_that_cannot_reach_the_store_keeps_the_session(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    cookie = SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+
+    def unavailable(state) -> None:
+        if state.is_delete and state.statement.table.name == "browser_sessions":
+            raise OperationalError("DELETE", {}, ConnectionError("store unavailable"))
+
+    event.listen(Session, "do_orm_execute", unavailable)
+    try:
+        refused = await _sign_out(client, token)
+    finally:
+        event.remove(Session, "do_orm_execute", unavailable)
+
+    # Not signed out: the cookie stays as the handle for a retry.
+    assert refused.status_code == 503, refused.text
+    assert refused.json()["code"] == "sign_out_unavailable"
+    assert refused.headers.get_list("set-cookie") == []
+    assert (await client.get("/api/v1/users/me/", headers=cookie)).status_code == 200
+
+    assert (await _sign_out(client, token)).status_code == 204
+    assert (await client.get("/api/v1/users/me/", headers=cookie)).status_code == 401
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_signing_in_while_signing_out_keeps_the_new_session(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    email = await _create_local_user(client, super_admin_token)
+
+    for _ in range(5):
+        old = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+        signed_out, signed_in = await asyncio.gather(
+            _sign_out(client, old), _login(client, SESSION_LOGIN, email, PASSWORD)
+        )
+        assert signed_out.status_code == 204, signed_out.text
+        new = _session_token(signed_in)
+
+        def me(token: str):
+            return client.get(
+                "/api/v1/users/me/",
+                headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"},
+            )
+
+        assert (await me(old)).status_code == 401
+        assert (await me(new)).status_code == 200

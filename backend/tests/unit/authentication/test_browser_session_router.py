@@ -2,8 +2,9 @@
 
 Sign-in sets the session cookie and answers 204 with an empty body; its
 errors are exactly those of ``/users/login/token/``. Both run the Sec-Fetch-Site
-gate first. Sign-out clears the cookies, but not a session the page did not
-expect. The probe names the generation of the cookie session it admitted.
+gate first. Sign-out ends the cookie's session in the store and clears the
+cookies, but not a session the page did not expect. The probe names the
+generation of the cookie session it admitted.
 """
 
 import logging
@@ -13,6 +14,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 from dependency_injector import providers
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from freezegun import freeze_time
 from httpx import Response
@@ -156,7 +158,7 @@ def endpoints(
     app.dependency_overrides[get_session] = session
     app.dependency_overrides[get_session_with_transaction] = session
     for route in endpoint_routes(app.routes):
-        if route.path in (SESSION_LOGIN, TOKEN_LOGIN):
+        if route.path in (SESSION_LOGIN, TOKEN_LOGIN, LOGOUT):
             assert route.dependant is not None
             [container] = [
                 dependency
@@ -405,10 +407,29 @@ def test_logout_clears_session_txn_and_next_era_cookies(
 
     assert response.status_code == 204
     assert response.content == b""
+    # The server ends the session the cookie names before clearing it.
+    endpoints.sessions.end.assert_awaited_once_with(token)
     assert set_cookies(response) == [
         expected_set_cookie(name, EMPTY, 0, production=production)
         for name in (session, txn, *NEXT_ERA)
     ]
+
+
+def test_logout_that_cannot_end_the_session_keeps_the_cookie(endpoints: Endpoints):
+    token = mint()
+    endpoints.sessions.end.side_effect = HTTPException(
+        503, detail={"code": "sign_out_unavailable", "message": "Try again."}
+    )
+
+    response = endpoints.client.post(
+        LOGOUT,
+        headers=SAME_ORIGIN
+        | {"Cookie": f"{SESSION}={token}", GENERATION: session_generation(token)},
+    )
+
+    assert response.status_code == 503
+    assert response.json()["code"] == "sign_out_unavailable"
+    assert set_cookies(response) == []
 
 
 @pytest.mark.parametrize("site", REFUSING_SITES)
@@ -420,6 +441,7 @@ def test_logout_refuses_cross_site(endpoints: Endpoints, site: dict[str, str]):
     assert response.status_code == 403
     assert response.json()["code"] == "browser_origin_refused"
     assert set_cookies(response) == []
+    endpoints.sessions.end.assert_not_awaited()
 
 
 @pytest.mark.parametrize("expected", [None, "stale"])
@@ -442,6 +464,7 @@ def test_logout_keeps_a_session_the_page_did_not_expect(
     assert body["code"] == "session_generation_mismatch"
     assert body["message"] == "The browser session changed after this page was loaded."
     assert set_cookies(response) == []
+    endpoints.sessions.end.assert_not_awaited()
     # Logged once, by the shared domain-exception handler.
     assert [
         (r.name, r.levelno) for r in caplog.records if r.name.startswith("eneo.")
@@ -466,6 +489,10 @@ def test_logout_clears_what_the_page_expects_or_cannot_use(
     assert set_cookies(response)[0] == expected_set_cookie(
         SESSION, EMPTY, 0, production=True
     )
+    if case == "no session":
+        endpoints.sessions.end.assert_not_awaited()
+    else:
+        endpoints.sessions.end.assert_awaited_once_with(token)
 
 
 @pytest.mark.parametrize("path", [SESSION_LOGIN, LOGOUT, PROBE])

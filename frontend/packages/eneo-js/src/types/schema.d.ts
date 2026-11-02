@@ -9546,7 +9546,7 @@ export interface paths {
     put?: never;
     /**
      * Sign Out The Browser
-     * @description Clear the browser's session cookies. Sign-out is local: the token is not revoked. With `Eneo-Session-Generation`, a session other than the one named is left in place (401). Only for requests from the site's own pages.
+     * @description End the browser's Eneo session on the server and clear its cookies: a copy of the session token stops working at once. The identity provider's session stays. With `Eneo-Session-Generation`, a session other than the one named is left in place (401). When the session cannot be ended, nothing is cleared (503). Only for requests from the site's own pages.
      */
     post: operations["Sign_out_the_browser_api_v1_auth_session_logout__post"];
     delete?: never;
@@ -58330,6 +58330,15 @@ export interface operations {
       };
       /** @description Not Found */
       404: {
+        headers: {
+          [name: string]: unknown;
+        };
+        content: {
+          "application/json": components["schemas"]["GeneralError"];
+        };
+      };
+      /** @description Service Unavailable */
+      503: {
         headers: {
           [name: string]: unknown;
         };
