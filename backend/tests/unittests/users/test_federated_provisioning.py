@@ -312,6 +312,27 @@ def test_entra_domain_verification_does_not_override_an_explicit_negative():
     assert identity.email_verified is False
 
 
+@pytest.mark.parametrize("email_verified", ["false", "0", 0, "", "yes", 2, "true1"])
+async def test_entra_domain_verification_is_only_a_fallback_for_a_missing_claim(
+    monkeypatch, tenant, entrypoint, email_verified
+):
+    """A sent email_verified keeps its own verdict; xms_edov never overrides
+    a negative or unrecognised value, only fills in for an absent one."""
+    claims = {**CLAIMS, "email_verified": email_verified, "xms_edov": True}
+    assert FederatedIdentity.from_claims(claims).email_verified is False
+    users = UsersInMemory(tenant)
+    with pytest.raises(FederatedLoginDenied, match="verified email"):
+        await sign_in(monkeypatch, tenant, users, claims, ["example.com"], entrypoint)
+    assert users.created == []
+
+
+def test_entra_domain_verification_fills_in_for_a_null_claim():
+    identity = FederatedIdentity.from_claims(
+        {**CLAIMS, "email_verified": None, "xms_edov": True}
+    )
+    assert identity.email_verified is True
+
+
 @pytest.mark.parametrize(
     "verified",
     [None, False, "false", "0", 0, 2, "yes", "", "true1", 1.0, ["true"]],
