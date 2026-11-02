@@ -152,3 +152,54 @@ export async function openRoute(page: Page, url: string, signedIn: boolean) {
     .catch(() => {});
   await page.waitForTimeout(400);
 }
+
+/**
+ * What happens to a page's document while a sweep is on one route. A sweep's
+ * `evaluate` dies with "Execution context was destroyed" when the page leaves
+ * its document on its own (a session refusal, a chunk reload, a hand-off); the
+ * bare error names neither the screen nor the cause. `begin` after the route
+ * has opened, `explain` for the error: it names the route and what the page
+ * did since (navigations, refused or failed requests, console errors).
+ */
+export function watchDocument(page: Page) {
+  const events: string[] = [];
+  let route = "";
+  let watching = false;
+  const note = (what: string) => {
+    if (watching) events.push(`${new Date().toISOString().slice(11, 23)} ${what}`);
+  };
+  page.on("framenavigated", (frame) => {
+    if (frame === page.mainFrame()) note(`navigated to ${frame.url()}`);
+  });
+  page.on("response", (response) => {
+    const { pathname } = new URL(response.url());
+    const ours = pathname.startsWith("/api/") || pathname.startsWith("/assets/");
+    if (ours && response.status() >= 400) note(`${response.status()} ${pathname}`);
+  });
+  page.on("requestfailed", (request) => {
+    const { pathname } = new URL(request.url());
+    const reason = request.failure()?.errorText ?? "failed";
+    // A request a navigation or a closed stream cuts off is not a failure of the server.
+    if (reason === "net::ERR_ABORTED") return;
+    if (pathname.startsWith("/api/") || pathname.startsWith("/assets/"))
+      note(`${reason} ${pathname}`);
+  });
+  page.on("console", (message) => {
+    if (message.type() === "error") note(`console: ${message.text().slice(0, 160)}`);
+  });
+  return {
+    begin(pattern: string) {
+      route = pattern;
+      events.length = 0;
+      watching = true;
+    },
+    explain(error: unknown) {
+      watching = false;
+      const seen = events.length > 0 ? events.join("\n  ") : "nothing seen";
+      return new Error(
+        `${route}: ${String(error).split("\n")[0]}\n  since the route opened:\n  ${seen}`,
+        { cause: error }
+      );
+    }
+  };
+}
