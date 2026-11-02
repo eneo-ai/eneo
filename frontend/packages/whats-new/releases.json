@@ -5,20 +5,6 @@
       "version": "next",
       "entries": [
         {
-          "id": "entra-jit-domain-verified",
-          "type": "fixed",
-          "area": "admin",
-          "audience": "admin",
-          "title": {
-            "en": "Entra ID users get their account on first sign-in again",
-            "sv": "Entra ID-användare får sitt konto vid inloggning igen"
-          },
-          "body": {
-            "en": "Entra ID does not send the verified-email flag that automatic account creation has required since 2.2, so new users were refused on their first sign-in. Eneo now accepts Entra's own verified-domain claim instead. Add it as an optional ID-token claim in the app registration, as described in the OIDC guide; the allowed-domain list and the provisioning setting still apply.",
-            "sv": "Entra ID skickar inte den flagga för verifierad e-post som automatisk kontoskapning kräver sedan 2.2, så nya användare nekades vid sin första inloggning. Eneo godtar nu Entras eget claim för verifierad domän i stället. Lägg till det som valfritt ID-token-claim i appregistreringen enligt OIDC-guiden; listan över tillåtna domäner och provisioneringsinställningen gäller fortfarande."
-          }
-        },
-        {
           "id": "sharepoint-sync-status",
           "type": "improved",
           "area": "knowledge",
