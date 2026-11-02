@@ -121,6 +121,17 @@ describe("ResultDetail", () => {
     expect(document.activeElement).toBe(results);
   });
 
+  it("renders the output and each transcription as Eneo markdown, code blocks as named regions", () => {
+    const markdown = "```python\nprint(1)\n```";
+    const file = { ...makeRun().input.files[0]!, transcription: markdown };
+    renderResult(makeRun({ output: markdown, input: { text: null, files: [file] } }));
+    for (const tab of ["Resultat", "Transkription"]) {
+      fireEvent.click(screen.getByRole("tab", { name: tab }));
+      const panel = screen.getByRole("tabpanel", { name: tab });
+      expect(within(panel).getByRole("region", { name: "Kodblock (python)" })).toBeTruthy();
+    }
+  });
+
   it("keeps its back link on a phone unless the space's page bar has one", () => {
     renderResult(makeRun());
     const back = screen.getByRole("link", { name: "Tillbaka" });
