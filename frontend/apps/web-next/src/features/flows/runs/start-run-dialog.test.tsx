@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { act, cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
+import { focusManager } from "@tanstack/react-query";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { initializeBrowserSession, SESSION_GENERATION_HEADER } from "@/lib/api/refusal";
@@ -9,7 +10,7 @@ import { renderInApp } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { makeFlow } from "../flow-fixtures";
 import { makeContract, makeInput, makeRunDetail, makeRunSummary } from "./run-fixtures";
-import type { RunContract, RunPublic } from "./runs-api";
+import { runKeys, type RunContract, type RunPublic } from "./runs-api";
 
 const api = vi.hoisted(() => ({
   routes: {} as Record<string, (init: never) => { status?: number; body: unknown }>,
@@ -121,11 +122,11 @@ async function openDialog(
 ) {
   api.routes[CONTRACT] = () => ({ body: withContract });
   const onStarted = vi.fn();
-  renderInApp(<Harness onStarted={onStarted} metadata={metadata} />);
+  const { queryClient } = renderInApp(<Harness onStarted={onStarted} metadata={metadata} />);
   fireEvent.click(screen.getByRole("button", { name: "Kör" }));
   const dialog = await screen.findByRole("dialog", { name: "Kör Medborgarbrev" });
   await within(dialog).findByLabelText(/^Ärende/);
-  return { dialog, onStarted };
+  return { dialog, onStarted, queryClient };
 }
 
 function button(dialog: HTMLElement, name: string) {
@@ -424,6 +425,32 @@ describe("StartRunDialog", () => {
       expect(screen.queryByRole("dialog", { name: "Kör Medborgarbrev" })).toBeNull()
     );
     expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("keeps the form and what was filled in when the contract cannot be read again", async () => {
+    const { dialog, queryClient } = await openDialog();
+    fireEvent.change(within(dialog).getByLabelText(/^Ärende/), { target: { value: "Bygglov" } });
+
+    api.routes[CONTRACT] = () => ({ status: 503, body: { message: "Busy" } });
+    await act(() => queryClient.invalidateQueries({ queryKey: runKeys.contract("flow-1") }));
+
+    expect(await within(dialog).findByText(messages.query_error_refresh_title)).toBeTruthy();
+    expect((within(dialog).getByLabelText(/^Ärende/) as HTMLInputElement).value).toBe("Bygglov");
+    expect(within(dialog).queryByText(messages.flow_runs_contract_failed)).toBeNull();
+  });
+
+  it("reads the contract once per opening, not again when the person comes back to the tab", async () => {
+    await openDialog();
+    const reads = () => api.stub.calls.filter((call) => `${call.method} ${call.path}` === CONTRACT);
+    expect(reads()).toHaveLength(1);
+
+    act(() => {
+      focusManager.setFocused(false);
+      focusManager.setFocused(true);
+    });
+    focusManager.setFocused(undefined);
+    await act(async () => {});
+    expect(reads()).toHaveLength(1);
   });
 
   it("says before starting that a sensitive flow limits who may see its material", async () => {

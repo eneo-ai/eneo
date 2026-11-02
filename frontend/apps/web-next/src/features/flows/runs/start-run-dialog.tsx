@@ -13,7 +13,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { useId, useImperativeHandle, useRef, useState, type Ref } from "react";
 import { flushSync } from "react-dom";
-import { ListError } from "@/components/composites/query-state";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { LoadingState } from "@/components/composites/loading-state";
 import {
   HANDHELD_QUERY,
@@ -613,7 +613,13 @@ export function StartRunDialog({
   }
   const summaryHeading = useRef<HTMLHeadingElement>(null);
   const form = useRef<StartRunFormHandle>(null);
-  const contract = useQuery({ ...runContractQueryOptions(flow.id), enabled: open });
+  // Read once per opening: a read when the person comes back to the tab (a phone that was locked
+  // mid-recording) would only risk the form; a start the republished flow refuses reads it again.
+  const contract = useQuery({
+    ...runContractQueryOptions(flow.id),
+    enabled: open,
+    refetchOnWindowFocus: false
+  });
 
   function review(next: StartSummary | null) {
     flushSync(() => setSummary(next));
@@ -643,8 +649,7 @@ export function StartRunDialog({
 
   let content: React.ReactNode = null;
   if (open) {
-    if (contract.isPending) content = <LoadingState label={t("flow_runs_contract_loading")} />;
-    else if (contract.isError) {
+    if (blockingError(contract)) {
       content = (
         <ListError
           error={contract.error}
@@ -653,9 +658,14 @@ export function StartRunDialog({
           isRetrying={contract.isFetching}
         />
       );
+    } else if (contract.data === undefined) {
+      content = <LoadingState label={t("flow_runs_contract_loading")} />;
     } else {
+      // A failed read again keeps the form: unmounting it would stop a recording and drop what
+      // was filled in.
       content = (
         <>
+          <RefreshError queries={[contract]} />
           {summary ? (
             <StartRunSummary
               summary={summary}
