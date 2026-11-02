@@ -681,6 +681,7 @@ def test_healthz_alias_serves_the_api_healthz_endpoint(
     response = TestClient(app).get("/healthz")
     assert response.status_code == 200
     assert response.json() == {"status": "HEALTHY"}
+    assert TestClient(app).head("/healthz").status_code == 200
     assert "/healthz" not in app.openapi()["paths"]
 
 

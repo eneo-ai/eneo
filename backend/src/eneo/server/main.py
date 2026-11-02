@@ -315,6 +315,9 @@ def get_application():
 
     app.openapi = custom_openapi
 
+    # The probes answer HEAD (load balancers, uptime monitors) like GET. FastAPI
+    # adds no HEAD to a GET route; outside the schema, one operation per probe.
+    @app.head("/api/livez", include_in_schema=False, response_model=None)
     @app.get(
         "/api/livez",
         include_in_schema=False,
@@ -330,6 +333,7 @@ def get_application():
     async def get_livez():
         return {"detail": {"status": "HEALTHY"}}
 
+    @app.head("/api/healthz", include_in_schema=False, response_model=None)
     @app.get(
         "/api/healthz",
         description="Report backend and worker health for deployment probes.",
@@ -412,6 +416,7 @@ def get_application():
 
         return response_data
 
+    @app.head("/api/readyz", include_in_schema=False, response_model=None)
     @app.get(
         "/api/readyz",
         include_in_schema=False,

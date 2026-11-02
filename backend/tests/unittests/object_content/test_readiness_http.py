@@ -108,6 +108,33 @@ def test_liveness_stays_green_while_object_store_readiness_recovers(
     }
 
 
+def test_probes_answer_head_like_get(monkeypatch) -> None:
+    # Load balancers and uptime monitors may probe with HEAD.
+    monkeypatch.setattr(
+        worker_redis,
+        "get_worker_health",
+        AsyncMock(return_value=WorkerHealth("HEALTHY", None, "ready")),
+    )
+    monkeypatch.setattr(
+        object_content_runtime,
+        "readiness",
+        AsyncMock(
+            return_value=ObjectContentReadiness(
+                ready=True, code=ObjectContentReadinessCode.READY
+            )
+        ),
+    )
+    app = get_application()
+    client = TestClient(app)
+
+    for path in ("/api/livez", "/api/healthz", "/api/readyz"):
+        response = client.head(path)
+        assert response.status_code == 200, path
+        assert response.content == b"", path
+    # The schema keeps one operation for the documented probe.
+    assert set(app.openapi()["paths"]["/api/healthz"]) == {"get"}
+
+
 def test_readiness_is_healthy_when_object_store_is_not_configured(
     monkeypatch,
 ) -> None:

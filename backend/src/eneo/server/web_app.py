@@ -163,7 +163,7 @@ def _alias_healthz(app: FastAPI) -> None:
     app.add_api_route(
         "/healthz",
         route.endpoint,
-        methods=["GET"],
+        methods=["GET", "HEAD"],
         include_in_schema=False,
         response_model=None,
         description=route.description,
