@@ -106,8 +106,12 @@ class ReleaseRequest:
             raise ReleaseError("A release request requires its full base commit")
 
     @property
+    def branch_prefix(self) -> str:
+        return f"chore/release-{self.version.tag}-"
+
+    @property
     def branch(self) -> str:
-        return f"automation/release-{self.version.tag}-{self.base_sha[:12]}"
+        return self.branch_prefix + self.base_sha[:12]
 
     def content(self) -> str:
         return (
@@ -400,12 +404,11 @@ class Releases:
     def supersede(self, version: Version, request: ReleaseRequest, pr: Object) -> None:
         """Close earlier preparation PRs for this version once a newer base exists."""
         query = urlencode({"state": "open", "base": version.branch})
-        prefix = f"automation/release-{version.tag}-"
         for stale in self.github.pages("/pulls?" + query):
             head = obj(stale["head"])
             if (
                 obj(head["repo"])["full_name"] != self.github.repository
-                or not text(head["ref"]).startswith(prefix)
+                or not text(head["ref"]).startswith(request.branch_prefix)
                 or head["ref"] == request.branch
             ):
                 continue
@@ -779,7 +782,7 @@ class Releases:
                 print("Develop already records this release.")
                 return
         self.notes_pr(
-            f"automation/port-{version.tag}",
+            f"docs/port-{version.tag}",
             "develop",
             {str(RELEASES_PATH): content},
             f"docs(whats-new): record the published {version.tag} release",

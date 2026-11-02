@@ -38,6 +38,8 @@ jobs:
        github.event.workflow_run.head_repository.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      RELEASE_MANAGED: ${{ vars.RELEASE_MANAGED }}
     permissions:
       contents: read
       packages: write
@@ -53,7 +55,6 @@ jobs:
         id: plan
         env:
           RELEASE_VERSION: ${{ inputs.version }}
-          RELEASE_MANAGED: ${{ vars.RELEASE_MANAGED }}
           GH_TOKEN: ${{ github.token }}
         run: python3 -m scripts.release_workflow plan
 

@@ -9,9 +9,12 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import subprocess
+import sys
 import tempfile
+import textwrap
 import threading
 from contextlib import redirect_stdout
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -27,6 +30,7 @@ from scripts.release_workflow import (
     Json,
     Object,
     ReleaseError,
+    ReleaseRequest,
     Releases,
     Run,
     Version,
@@ -37,7 +41,7 @@ from scripts.release_workflow import (
     request_at,
     text,
 )
-from scripts.tests.test_check_whats_new import ENTRY, _RepoCase
+from scripts.tests.test_check_whats_new import ENTRY, REPO_ROOT, _RepoCase
 
 NOTES = "frontend/packages/whats-new/releases.json"
 REPOSITORY = "eneo-ai/eneo"
@@ -279,15 +283,16 @@ class ReleaseWorkflowTests(_RepoCase):
         self.root = self.make_repo(
             {"releases": [{"version": "2.4.0", "entries": [ENTRY]}, self.history]}
         )
-        repository = Path(__file__).resolve().parents[2]
         for name in [
             ".github/workflows/build_and_push_images.yml",
             "scripts/release_workflow.py",
             "scripts/check_whats_new.py",
+            "scripts/release_notes.py",
+            "scripts/release_bundle.py",
         ]:
             target = self.root / name
             target.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copyfile(repository / name, target)
+            shutil.copyfile(REPO_ROOT / name, target)
         self.state = GitHubFixture(self.root)
         self.state.git("init", "-q", "-b", "release/v2.4")
         self.state.git("config", "user.name", "Release test")
@@ -351,6 +356,83 @@ class ReleaseWorkflowTests(_RepoCase):
         self.server.shutdown()
         self.thread.join(timeout=2)
         self.server.server_close()
+
+    def assert_ci_accepts_branch(self, pr: Object) -> None:
+        workflow = (REPO_ROOT / ".github/workflows/ci.yml").read_text()
+        step = workflow.split("- name: Check branch name\n", 1)[1].split(
+            "\n      - name:", 1
+        )[0]
+        program = textwrap.dedent(step.split("        run: |\n", 1)[1])
+        result = subprocess.run(
+            ["bash", "--noprofile", "--norc", "-eo", "pipefail", "-c", program],
+            env={**os.environ, "BRANCH_NAME": text(obj(pr["head"])["ref"])},
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def workflow_step(
+        self, command: str, event_name: str, event: Object, managed: str = "true"
+    ) -> subprocess.CompletedProcess[str]:
+        """Run the real CLI with env from its workflow, job and selected step."""
+        workflow = (REPO_ROOT / ".github/workflows/release.yml").read_text()
+        configuration, steps = workflow.split("\n    steps:\n", 1)
+        step = next(
+            block
+            for block in steps.split("\n      - name:")
+            if f"        run: python3 -m scripts.release_workflow {command}\n" in block
+        )
+        contexts = {
+            "${{ vars.RELEASE_MANAGED }}": managed,
+            "${{ inputs.version }}": self.version.value
+            if event_name == "workflow_dispatch"
+            else "",
+            "${{ github.token }}": "offline-test-token",
+            "${{ steps.app.outputs.token }}": "offline-test-token",
+        }
+        # Do not inherit the fixture's enabled flag: each process must receive
+        # the same setting its actual Actions step declares.
+        env = {
+            key: value
+            for key, value in os.environ.items()
+            if key not in {"RELEASE_MANAGED", "RELEASE_VERSION", "GH_TOKEN"}
+        }
+        event_path = self.root / "workflow-event.json"
+        event_path.write_text(json.dumps(event))
+        env.update(
+            {
+                "GITHUB_EVENT_PATH": str(event_path),
+                "GITHUB_EVENT_NAME": event_name,
+                "GITHUB_REPOSITORY": REPOSITORY,
+                "GITHUB_REF": "refs/heads/develop",
+                "GITHUB_OUTPUT": str(self.root / "workflow-output.txt"),
+                "GITHUB_API_URL": f"http://127.0.0.1:{self.server.server_port}",
+            }
+        )
+        for block, indent in [
+            (configuration.split("\njobs:\n", 1)[0], 0),
+            (configuration.split("\n  reconcile:\n", 1)[1], 4),
+            (step, 8),
+        ]:
+            # These workflow env maps contain scalar values only. Read their
+            # declarations without adding a YAML dependency to tooling tests.
+            declaration = re.search(
+                rf"(?m)^{' ' * indent}env:\n((?:{' ' * (indent + 2)}[A-Z_]+: [^\n]+\n)+)",
+                block,
+            )
+            if declaration:
+                for line in declaration[1].splitlines():
+                    key, value = line.strip().split(": ", 1)
+                    env[key] = contexts[value] if value.startswith("${{") else value
+        return subprocess.run(
+            [sys.executable, "-m", "scripts.release_workflow", command],
+            cwd=self.root,
+            env=env,
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
 
     def prepared(self) -> tuple[Object, str]:
         self.releases.prepare(self.version)
@@ -436,6 +518,7 @@ class ReleaseWorkflowTests(_RepoCase):
     def test_prepare_dates_once_reuses_the_pr_and_does_not_tag(self) -> None:
         self.releases.prepare(self.version)
         pr = self.state.prs[0]
+        self.assert_ci_accepts_branch(pr)
         first = copy.deepcopy(pr)
         candidate = text(obj(pr["head"])["sha"])
         notes = json.loads(self.state.git("show", candidate + ":" + NOTES))
@@ -448,14 +531,71 @@ class ReleaseWorkflowTests(_RepoCase):
         self.assertIsNone(self.github.tag_sha(self.version))
         self.assertEqual(self.state.releases, [])
 
+    def test_workflow_dispatch_prepares_with_its_declared_environment(self) -> None:
+        result = self.workflow_step("plan", "workflow_dispatch", {})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Release operation: prepare", result.stdout)
+        result = self.workflow_step("run", "workflow_dispatch", {})
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.state.prs), 1)
+        candidate = text(obj(self.state.prs[0]["head"])["sha"])
+        self.assertEqual(request_at(self.root, candidate).version, self.version)
+        self.assertIsNone(self.github.tag_sha(self.version))
+
+    def test_ci_workflow_step_tags_the_reviewed_commit(self) -> None:
+        _, sha = self.prepared()
+        event = {"workflow_run": self.state.ci(sha)}
+        result = self.workflow_step("plan", "workflow_run", event)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertIn("Release operation: tag", result.stdout)
+        result = self.workflow_step("run", "workflow_run", event)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.github.tag_sha(self.version), sha)
+        self.assertTrue(self.state.releases[0]["draft"])
+
+    def test_image_workflow_steps_publish_and_port_release_history(self) -> None:
+        sha, _ = self.built()
+        event = {"workflow_run": self.state.runs[-1]}
+        with self.offline_attestation(sha):
+            result = self.workflow_step("plan", "workflow_run", event)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertIn("Release operation: complete", result.stdout)
+            result = self.workflow_step("run", "workflow_run", event)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertFalse(self.state.releases[0]["draft"])
+            result = self.workflow_step("port", "workflow_run", event)
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(len(self.state.prs), 2)
+        self.assertEqual(obj(self.state.prs[1]["base"])["ref"], "develop")
+
+    def test_workflow_steps_keep_managed_publication_disabled(self) -> None:
+        for managed in ["", "false"]:
+            for command in ["plan", "run"]:
+                with self.subTest(managed=managed, command=command):
+                    result = self.workflow_step(
+                        command, "workflow_dispatch", {}, managed
+                    )
+                    self.assertNotEqual(result.returncode, 0)
+                    self.assertIn("Managed publication is off", result.stderr)
+            sha = self.state.git("rev-parse", "release/v2.4")
+            event = {"workflow_run": self.state.ci(sha)}
+            for command in ["run", "port"]:
+                with self.subTest(managed=managed, command=command):
+                    result = self.workflow_step(command, "workflow_run", event, managed)
+                    self.assertEqual(
+                        result.returncode, 0, result.stdout + result.stderr
+                    )
+        self.assertEqual(self.state.prs, [])
+        self.assertEqual(self.state.releases, [])
+
     def test_resume_after_branch_creation_preserves_the_same_candidate(self) -> None:
+        request = ReleaseRequest(
+            self.version, self.state.git("rev-parse", self.version.branch)
+        )
         self.state.fail = ("POST", "/pulls")
         with self.assertRaises(HTTPError):
             self.releases.prepare(self.version)
-        branch = self.state.git(
-            "for-each-ref", "--format=%(refname)", "refs/heads/automation/"
-        )
-        original = self.state.git("rev-parse", branch)
+        original = self.state.git("rev-parse", request.branch)
         self.releases.prepare(self.version)
         self.assertEqual(obj(self.state.prs[0]["head"])["sha"], original)
 
@@ -609,7 +749,7 @@ class ReleaseWorkflowTests(_RepoCase):
         self.state.fail = ("POST", "/pulls")
         with self.assertRaises(HTTPError):
             self.releases.port(self.version, sha)
-        interrupted = self.state.git("rev-parse", "refs/heads/automation/port-v2.4.0")
+        interrupted = self.state.git("rev-parse", "refs/heads/docs/port-v2.4.0")
         data = json.loads((self.root / NOTES).read_text())
         data["releases"][0]["entries"].append(
             {**copy.deepcopy(ENTRY), "id": "later-feature"}
@@ -659,6 +799,7 @@ class ReleaseWorkflowTests(_RepoCase):
         self.releases.port(self.version, sha)
         self.assertEqual(len(self.state.prs), 2)
         port_pr = self.state.prs[1]
+        self.assert_ci_accepts_branch(port_pr)
         notes = json.loads(
             self.state.git("show", text(obj(port_pr["head"])["sha"]) + ":" + NOTES)
         )["releases"]
