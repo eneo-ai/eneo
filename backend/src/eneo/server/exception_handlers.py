@@ -430,6 +430,8 @@ def _http_exception_body(
 
     The raised detail stays in `detail` for one release, so a client reading
     `body.detail.code` keeps working while it moves to the top-level fields.
+    A structured raise whose route answered something else before (a plain
+    string) names that in its own `detail` key, which is kept instead.
     """
     detail: object = exc.detail
     structured = cast(dict[str, Any], detail) if isinstance(detail, dict) else None
@@ -444,7 +446,7 @@ def _http_exception_body(
         )
         if request_id:
             body.setdefault("request_id", request_id)
-        body["detail"] = detail
+        body.setdefault("detail", detail)
         return body
 
     raised_message = structured.get("message") if structured is not None else detail

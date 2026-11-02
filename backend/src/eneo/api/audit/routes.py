@@ -314,10 +314,11 @@ async def create_access_session(
         )
         count = rate_limit_result.current_count
     except RateLimitExceededError as exc:
-        raise_rate_limited(
-            exc.result,
-            "Rate limit exceeded. Maximum 5 audit session creations per hour allowed.",
+        message = (
+            "Rate limit exceeded. Maximum 5 audit session creations per hour allowed."
         )
+        # This route answered the bare string before the envelope.
+        raise_rate_limited(exc.result, message, legacy_detail=message)
     except RateLimitServiceUnavailableError:
         raise HTTPException(
             status_code=503,

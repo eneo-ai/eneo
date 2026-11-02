@@ -131,17 +131,26 @@ async def enforce_rate_limit(
     return result
 
 
-def raise_rate_limited(result: RateLimitResult, message: str) -> NoReturn:
+def raise_rate_limited(
+    result: RateLimitResult, message: str, *, legacy_detail: str | None = None
+) -> NoReturn:
     """The 429 every client reads: a flat `rate_limit_exceeded` body whose
     `retry_after_seconds` equals the `Retry-After` header, the time left in
-    the window."""
+    the window.
+
+    `legacy_detail` is what a route answered in `detail` before it used this
+    429; the envelope keeps that in the deprecated `detail` for one release.
+    """
     retry_after = result.retry_after_seconds
+    detail: dict[str, object] = {
+        "code": "rate_limit_exceeded",
+        "message": message,
+        "retry_after_seconds": retry_after,
+    }
+    if legacy_detail is not None:
+        detail["detail"] = legacy_detail
     raise HTTPException(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-        detail={
-            "code": "rate_limit_exceeded",
-            "message": message,
-            "retry_after_seconds": retry_after,
-        },
+        detail=detail,
         headers={"Retry-After": str(retry_after)},
     )
