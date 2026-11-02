@@ -64,7 +64,8 @@ function publicAuthPage(): boolean {
 }
 
 function resumePath(): string {
-  return safeNextPath(window.location.pathname + window.location.search);
+  // The fragment too: safeNextPath keeps it, so a section link survives sign-in.
+  return safeNextPath(window.location.pathname + window.location.search + window.location.hash);
 }
 
 // Another sign-in now holds the cookie. The page cannot know whose it is, so it

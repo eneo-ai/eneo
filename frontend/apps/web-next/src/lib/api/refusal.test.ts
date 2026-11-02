@@ -158,6 +158,17 @@ describe("immutable document session", () => {
     expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
   });
 
+  it("resumes an expired session at the same page, query and fragment", async () => {
+    window.history.replaceState({}, "", "/spaces/x?a=1#section");
+    await bound();
+    fetcher.mockResolvedValueOnce(refusal(9005));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      "/login?next=%2Fspaces%2Fx%3Fa%3D1%23section",
+      { replace: true }
+    );
+  });
+
   it("navigates once for concurrent refusals and remains blocked when navigation returns", async () => {
     await bound();
     await Promise.allSettled([
