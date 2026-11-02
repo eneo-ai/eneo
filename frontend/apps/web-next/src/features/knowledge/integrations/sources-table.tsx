@@ -317,7 +317,13 @@ export function SourcesList({
   const collator = useCollator();
   // A search that matches no source of a group, said by its table or rows.
   const noResults = (
-    <EmptyState title={t("no_results_found")} headingLevel={3} isCompact framed={false} />
+    <EmptyState
+      isAnnounced={false}
+      title={t("no_results_found")}
+      headingLevel={3}
+      isCompact
+      framed={false}
+    />
   );
   const headingIds = useId();
   const bannerRef = useRef<HTMLDivElement>(null);
@@ -418,7 +424,7 @@ export function SourcesList({
         </div>
       ) : shown.length === 0 ? (
         // Under the group headings (h3) and the page's "Kunskap" (h2).
-        <EmptyState title={t("no_results_found")} headingLevel={3} isCompact />
+        <EmptyState isAnnounced={false} title={t("no_results_found")} headingLevel={3} isCompact />
       ) : (
         shown.map((group) => {
           const headingId = group.heading === null ? null : `${headingIds}-${group.key}`;

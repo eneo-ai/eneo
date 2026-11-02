@@ -441,6 +441,7 @@ function TemplateListView({
         <EmptyState title={emptyTitle} />
       ) : filtered.length === 0 ? (
         <EmptyState
+          isAnnounced={false}
           title={t("no_results_found")}
           actions={
             <AstryxButton

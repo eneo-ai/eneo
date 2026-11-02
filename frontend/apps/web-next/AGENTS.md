@@ -474,7 +474,9 @@ focus-visible:outline-offset-2 focus-visible:outline-ring`);
 - `EmptyState` — `title`, `description?`, `icon?`, `hue?` (the area's hue for
   the icon tile, `AREA_HUES` from `icon-tile.tsx`; neutral for zero results),
   `actions?` (or `children`), `headingLevel?` (1–4, default 2), `isCompact?`,
-  `framed?` (dashed frame, default on).
+  `framed?` (dashed frame, default on), `isAnnounced?` (default on: Astryx
+  reads an empty state that appears after load; off where a result count
+  already says it, such as under `ResourceFilterInput`).
 - `IconTile` — the coloured icon tile of the start page's starter cards and
   the empty states: `icon`, `hue?` (`neutral` | categorical, `AREA_HUES` maps
   each area to one), `size?: sm|md|lg`. Decorative; the text beside it

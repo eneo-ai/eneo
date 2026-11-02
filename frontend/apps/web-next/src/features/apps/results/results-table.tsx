@@ -234,7 +234,7 @@ export function ResultsTable({
               resultCount={matched.length}
             />
             {matched.length === 0 ? (
-              <EmptyState title={t("no_results_found")} isCompact />
+              <EmptyState isAnnounced={false} title={t("no_results_found")} isCompact />
             ) : phone ? (
               <List hasDividers edge="outset" aria-label={t("results")}>
                 {sortedData.map((run) => (

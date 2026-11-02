@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ShellContext } from "@/components/shell/shell-context";
 import { CreateSpaceDialog } from "@/features/spaces/create-space-dialog";
 import { expectNoAxeViolations } from "@/test/axe";
-import { noopShell, renderInApp, testAppContext } from "@/test/render";
+import { noopShell, recordAnnouncements, renderInApp, testAppContext } from "@/test/render";
 import { setViewport } from "@/test/setup-dom";
 import { router } from "@/test/navigation";
 import messages from "@/lib/i18n/messages/sv.json";
@@ -192,20 +192,28 @@ describe("SpacesList", () => {
     expect(screen.getByRole("heading", { name: "Inga resultat hittades" })).toBeTruthy();
   });
 
-  it("announces how many spaces match the filter", async () => {
+  it("announces how many spaces match the filter, once for each query", async () => {
     api.spaces = [space({}), space({ id: "s2", name: "HR" })];
     await show();
+    const said = recordAnnouncements();
     const status = () => document.querySelector("[data-astryx-live-region='polite']");
+    const filter = (value: string) =>
+      fireEvent.change(screen.getByRole("textbox", { name: "Filtrera ytor" }), {
+        target: { value }
+      });
 
-    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera ytor" }), {
-      target: { value: "hr" }
-    });
-    await waitFor(() => expect(status()?.textContent).toBe("1 träff"));
-    fireEvent.change(screen.getByRole("textbox", { name: "Filtrera ytor" }), {
-      target: { value: "saknas" }
-    });
-    // Astryx's empty state says its own title in the same breath.
-    await waitFor(() => expect(status()?.textContent).toContain("Inga träffar"));
+    filter("hr");
+    await waitFor(() => expect(said).toEqual(["1 träff"]));
+    // The count owns the empty result: its empty state does not say it again.
+    filter("saknas");
+    await waitFor(() => expect(said).toEqual(["1 träff", "Inga träffar"]));
+    expect(screen.getByRole("heading", { name: "Inga resultat hittades" })).toBeTruthy();
+    filter("saknas ännu");
+    await waitFor(() => expect(said).toEqual(["1 träff", "Inga träffar", "Inga träffar"]));
+    filter("");
+    await waitFor(() => expect(status()?.textContent).toBe(""));
+    await act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    expect(said).toEqual(["1 träff", "Inga träffar", "Inga träffar"]);
   });
 
   it("deletes a space from its more-menu only after the name is typed", async () => {

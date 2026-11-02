@@ -3,7 +3,7 @@ import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { setViewport } from "@/test/setup-dom";
-import { renderInApp } from "@/test/render";
+import { recordAnnouncements, renderInApp } from "@/test/render";
 import type { Space } from "./space";
 import { makeAssistant, makeSpace } from "./testing/space-fixture";
 
@@ -81,18 +81,20 @@ describe("AssistantsPage", () => {
     ).toBeTruthy();
     await expectNoAxeViolations(container);
 
+    const said = recordAnnouncements();
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera assistenter" }), {
       target: { value: "avtal" }
     });
     expect(screen.queryByRole("link", { name: "Upphandlingsassistenten" })).toBeNull();
-    await waitFor(() => expect(liveRegion()?.textContent).toBe("1 träff"));
+    await waitFor(() => expect(said).toEqual(["1 träff"]));
     fireEvent.change(screen.getByRole("textbox", { name: "Filtrera assistenter" }), {
       target: { value: "saknas" }
     });
     // Under the tab's h2, the empty result is an h3.
     expect(screen.getByRole("heading", { level: 3, name: "Inga resultat hittades" })).toBeTruthy();
-    // Astryx's empty state says its own title in the same breath.
-    await waitFor(() => expect(liveRegion()?.textContent).toContain("Inga träffar"));
+    // The count owns the empty result: its empty state does not say it again.
+    await waitFor(() => expect(said).toEqual(["1 träff", "Inga träffar"]));
+    expect(liveRegion()?.textContent).toBe("Inga träffar");
   });
 
   it.each(["cards", "list"])("keeps each %s menu apart from the resource link", (view) => {

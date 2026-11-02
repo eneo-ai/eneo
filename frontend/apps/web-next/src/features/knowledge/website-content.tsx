@@ -97,6 +97,7 @@ export function WebsiteContent({
                 />
               ) : (
                 <EmptyState
+                  isAnnounced={false}
                   icon={<SearchX />}
                   title={
                     view.q || view.prefix ? t("no_results_found") : t("website_no_indexed_content")

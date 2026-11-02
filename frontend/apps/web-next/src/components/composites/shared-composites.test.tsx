@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { act, cleanup, render, screen, within } from "@testing-library/react";
 import { Bot, Inbox } from "lucide-react";
 import { IntlProvider } from "use-intl";
 import { afterEach, describe, expect, it } from "vitest";
 import { ENTITY_TONES, entityAccent, entityTone } from "@/lib/entity-accent";
 import { expectNoAxeViolations } from "@/test/axe";
+import { recordAnnouncements } from "@/test/render";
 import { EmptyState } from "./empty-state";
 import { EntityAvatar, entityInitials } from "./entity-avatar";
 import { AREA_HUES, IconTile } from "./icon-tile";
@@ -108,8 +109,26 @@ describe("EmptyState", () => {
       </EmptyState>
     );
     expect(screen.getByRole("heading", { level: 2, name: "Inga appar ännu" })).toBeTruthy();
-    expect(screen.getByRole("status")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Skapa app" })).toBeTruthy();
+  });
+
+  it("is announced when it appears, unless something else says it", async () => {
+    const nextFrame = () => act(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    await nextFrame(); // what earlier tests said
+    const said = recordAnnouncements();
+
+    const { rerender } = render(<EmptyState title="Inga appar ännu" description="Skapa en app" />);
+    await nextFrame();
+    expect(said).toEqual(["Inga appar ännu Skapa en app"]);
+
+    // A filter's result count says it (ResourceFilterInput): the message, changed, stays quiet.
+    rerender(<EmptyState title="Inga resultat hittades" isAnnounced={false} />);
+    await nextFrame();
+    cleanup();
+    render(<EmptyState title="Inga träffar" isAnnounced={false} />);
+    await nextFrame();
+    expect(said).toEqual(["Inga appar ännu Skapa en app"]);
+    expect(screen.getByRole("heading", { name: "Inga träffar" })).toBeTruthy();
   });
 
   it("skips the actions row for a falsy permission-gated slot", () => {

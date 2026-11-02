@@ -178,3 +178,24 @@ export function renderHookInApp<Result>(hook: () => Result, options: RenderInApp
   const { queryClient, Providers } = providers(options);
   return { queryClient, ...renderHook(hook, { wrapper: Providers }) };
 }
+
+/**
+ * Every text Astryx's polite live region is given from now on, in order: one
+ * entry per announcement, so a message said again appears again and two said
+ * in one frame appear joined, as a screen reader hears them.
+ */
+export function recordAnnouncements(): string[] {
+  const said: string[] = [];
+  new MutationObserver((records) => {
+    for (const { target } of records) {
+      if (
+        target instanceof HTMLElement &&
+        target.matches("[data-astryx-live-region='polite']") &&
+        target.textContent
+      ) {
+        said.push(target.textContent);
+      }
+    }
+  }).observe(document.body, { childList: true, subtree: true });
+  return said;
+}
