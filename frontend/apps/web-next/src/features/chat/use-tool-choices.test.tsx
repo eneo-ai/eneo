@@ -327,6 +327,40 @@ describe("conversation choices", () => {
     expect(view.current.tools.disabledCapabilities.has("web_search")).toBe(true);
   });
 
+  it("clears a reasoning level queued behind a model change to a model without it", async () => {
+    api.POST.mockImplementation(async (_path, { body }) => {
+      const settings = body.settings ?? structuredClone(defaults);
+      const reasoning = settings.completion_model_id === "model-1";
+      return {
+        data: {
+          revision: 0,
+          settings,
+          available_models: [{ id: "model-1" }, { id: "model-2" }],
+          effective_model: { id: settings.completion_model_id },
+          model_unavailable: false,
+          reasoning_effort_options: reasoning ? ["low", "high"] : [],
+          mcp_servers: [],
+          capabilities: []
+        },
+        response: new Response()
+      };
+    });
+    const view = renderChoices();
+    await ready(view);
+    await act(async () => {
+      void view.current.settings.update({ completion_model_id: "model-2", reasoning_effort: null });
+      void view.current.settings.update({ reasoning_effort: "high" });
+    });
+    await ready(view);
+    expect(view.current.settings.error).toBeNull();
+    expect(view.current.settings.resolution?.settings).toMatchObject({
+      completion_model_id: "model-2",
+      reasoning_effort: null
+    });
+    const sent = api.POST.mock.calls.map(([, init]) => init.body.settings?.reasoning_effort);
+    expect(sent.at(-1)).toBeNull();
+  });
+
   it("leaves the browser's start choices alone until the user changes something", async () => {
     const draftKeys = () =>
       Object.keys(window.localStorage).filter((key) => key.startsWith("eneo:conversation-draft:"));

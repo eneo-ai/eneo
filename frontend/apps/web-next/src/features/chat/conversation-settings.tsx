@@ -195,7 +195,11 @@ export function ConversationSettingsProvider({
           );
           install({ ...current.current, ...state });
         }
-        const next = await resolve(settings);
+        // A draft is normalized like a remembered one: a reasoning level
+        // queued behind a model change may not exist on the model that won.
+        const next = sessionId.current
+          ? await resolve(settings)
+          : await resolveConversationDraft(resolve, settings);
         install(next);
         remember(next);
       } catch (cause) {

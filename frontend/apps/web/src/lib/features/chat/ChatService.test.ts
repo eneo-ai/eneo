@@ -938,6 +938,27 @@ describe("ChatService saved conversation choices", () => {
     );
   });
 
+  it("clears a reasoning level queued behind a model change to a model without it", async () => {
+    const resolveSettings = vi.fn().mockImplementation(async ({ settings }) => {
+      const choices = settings ?? { completion_model_id: "model-1", reasoning_effort: null };
+      return {
+        revision: 0,
+        settings: choices,
+        available_models: [{ id: "model-1" }, { id: "model-2" }],
+        effective_model: { id: choices.completion_model_id, token_limit: 64000 },
+        reasoning_effort_options: choices.completion_model_id === "model-1" ? ["low", "high"] : []
+      };
+    });
+    const chat = chatService(vi.fn(), { resolveSettings });
+    await chat.loadSettings();
+    const first = chat.updateSettings({ completion_model_id: "model-2", reasoning_effort: null });
+    await chat.updateSettings({ reasoning_effort: "high" });
+    await first;
+    expect(chat.settingsError).toBeNull();
+    expect(chat.settings).toMatchObject({ completion_model_id: "model-2", reasoning_effort: null });
+    expect(resolveSettings.mock.lastCall?.[0].settings.reasoning_effort).toBeNull();
+  });
+
   it("lets an older conversation replace an unavailable default before initializing settings", async () => {
     const updateSettings = vi.fn().mockResolvedValue({
       revision: 1,

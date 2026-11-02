@@ -515,11 +515,17 @@ export class ChatService {
         if (conversation !== this.currentConversation) return;
         if (state) conversation.settings = state;
         if (!state) this.#draftSettings = settings;
-        const resolution = await this.#eneo.conversations.resolveSettings({
-          chatPartner: this.#chatPartner,
-          conversation,
-          settings: conversation.id ? undefined : settings
-        });
+        const resolve = (draft?: ConversationSettings) =>
+          this.#eneo.conversations.resolveSettings({
+            chatPartner: this.#chatPartner,
+            conversation,
+            settings: draft
+          });
+        // A draft is normalized like a remembered one: a reasoning level
+        // queued behind a model change may not exist on the model that won.
+        const resolution = conversation.id
+          ? await resolve()
+          : await resolveConversationDraft(resolve, settings);
         if (conversation !== this.currentConversation) return;
         this.#setResolvedSettings(conversation, resolution);
         this.#rememberDraft(resolution);
