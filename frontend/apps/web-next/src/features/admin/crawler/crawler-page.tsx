@@ -19,6 +19,7 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
 import { blockingError, ListError } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
+import { hasAnswered } from "@/lib/api/query";
 import { formatCalendarDate } from "@/lib/calendar-date";
 import { crawlRunState, crawlRunStateLabelKey } from "@/features/knowledge/crawl-run-state";
 import { CrawlRunCounts, CrawlRunStatusLabel } from "@/features/knowledge/crawl-run-ui";
@@ -319,8 +320,7 @@ export function CrawlerPage() {
   // also while it is retried, shows them with its error; a later view's read, even one
   // without data, keeps them.
   const [listReady, setListReady] = useState(false);
-  if (!listReady && (!overview.isPending || overview.failureCount > 0 || blockingError(overview)))
-    setListReady(true);
+  if (!listReady && hasAnswered(overview)) setListReady(true);
   const fetchedAt = useClientTimeText(data?.as_of, "date_time");
   const rows = isSchedule ? schedule : overview;
   const nextCursor = isSchedule ? schedule.data?.next_cursor : data?.next_cursor;
