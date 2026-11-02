@@ -58,13 +58,13 @@ async function renderEditor(
             roles: { items: [] }
           })
   );
-  const { queryClient } = renderInApp(<Harness user={user} />);
+  const { queryClient, rerender } = renderInApp(<Harness user={user} />);
   const invalidate = vi.spyOn(queryClient, "invalidateQueries");
   const dialog = screen.getByRole("dialog", {
     name: user ? "Redigera användare" : "Skapa en ny användare"
   });
   await within(dialog).findByLabelText("Användare");
-  return { dialog, invalidate, queryClient };
+  return { dialog, invalidate, queryClient, rerender };
 }
 
 /** The editor and, as the users page has it, the one-time password view. */
@@ -456,6 +456,25 @@ describe("UserEditorDialog username", () => {
     expect(
       (api.POST.mock.calls[0]?.[1] as { body: { email?: string } }).body.email
     ).toBeUndefined();
+  });
+
+  it("compares with the user as the dialog opened, not a row refreshed while it is open", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog, rerender } = await renderEditor(existing);
+    // Another administrator changed the email and username; the list refreshed.
+    rerender(
+      <Harness user={{ ...existing, email: "bo.ny@example.se", username: "bo.ny" } as AdminUser} />
+    );
+
+    submit(dialog);
+    await waitFor(() => expect(api.POST).toHaveBeenCalledTimes(1));
+    const { params, body } = api.POST.mock.calls[0]?.[1] as {
+      params: { path: { username: string } };
+      body: { email?: string; username?: string };
+    };
+    expect(body.email).toBeUndefined();
+    expect(body.username).toBeUndefined();
+    expect(params.path.username).toBe("bo.ny");
   });
 
   it("sends a changed email, trimmed", async () => {
