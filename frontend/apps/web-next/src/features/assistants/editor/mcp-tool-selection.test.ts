@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  availableAssistantMcpServers,
   enabledMcpToolCount,
   ensureSelectedMcpToolsTracked,
   isMcpToolEnabled,
@@ -67,5 +68,29 @@ describe("MCP tool selection", () => {
     ]);
     expect(isMcpToolEnabled(server, "tool-1", allOff)).toBe(false);
     expect(enabledMcpToolCount(server, allOff)).toBe(0);
+  });
+
+  it("offers the space's enabled tools and keeps a deactivated server the assistant still has", () => {
+    const offered: AssistantMcpServer[] = [
+      {
+        ...server,
+        tools: [...server.tools!, { id: "tool-3", name: "gone", removed_from_remote: true }]
+      }
+    ];
+    const deactivated: AssistantMcpServer = {
+      id: "server-2",
+      name: "Arkiv",
+      is_enabled: false,
+      tools: [{ id: "tool-4", name: "lookup", is_enabled: false }]
+    };
+    const attached = [
+      { ...server, is_enabled: false },
+      deactivated,
+      { ...deactivated, id: "x", is_enabled: true }
+    ];
+    expect(availableAssistantMcpServers(offered, attached)).toEqual([
+      { ...server, tools: [server.tools![0]] },
+      deactivated
+    ]);
   });
 });

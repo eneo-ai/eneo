@@ -19,13 +19,26 @@ export function mcpToolDefaultEnabled(tool: AssistantMcpTool): boolean {
   return tool.is_enabled ?? tool.is_enabled_by_default ?? false;
 }
 
+/**
+ * The servers the picker lists: those offered, with only the tools the space
+ * enabled (the assistant never gets the others), then any server an
+ * administrator deactivated that the assistant still has. That one has left
+ * the offer, but is listed as unavailable so it can be seen and switched off.
+ */
 export function availableAssistantMcpServers<Server extends AssistantMcpServer>(
-  servers: Server[]
+  offered: Server[],
+  attached: Server[] = []
 ): Server[] {
-  return servers.map((server) => ({
-    ...server,
-    tools: (server.tools ?? []).filter((tool) => !tool.removed_from_remote)
-  }));
+  const offeredIds = new Set(offered.map((server) => server.id));
+  return [
+    ...offered.map((server) => ({
+      ...server,
+      tools: (server.tools ?? []).filter(
+        (tool) => tool.is_enabled !== false && !tool.removed_from_remote
+      )
+    })),
+    ...attached.filter((server) => server.is_enabled === false && !offeredIds.has(server.id))
+  ];
 }
 
 export function isMcpToolEnabled(

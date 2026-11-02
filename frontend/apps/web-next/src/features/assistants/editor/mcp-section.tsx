@@ -44,7 +44,8 @@ export function McpSection({ assistant }: { assistant: Assistant }) {
   const mcpEnforced = isMcpEnforced(assistant.effective_config);
   const policyServers = policyMcpServers(assistant.effective_config);
   const available = availableAssistantMcpServers(
-    assistantMcpServersFromApi(mcpEnforced ? policyServers : (space.mcp_servers ?? []))
+    assistantMcpServersFromApi(mcpEnforced ? policyServers : (space.mcp_servers ?? [])),
+    assistantMcpServersFromApi(assistant.mcp_servers ?? [])
   );
   const savedIds = useMemo(
     () => (assistant.mcp_servers ?? []).map((server) => server.id),
