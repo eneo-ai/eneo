@@ -1,4 +1,4 @@
-import { AnnouncedBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { CheckboxInput } from "@astryxdesign/core/CheckboxInput";
 import { CheckboxList, CheckboxListItem } from "@astryxdesign/core/CheckboxList";
@@ -684,7 +684,8 @@ export function ModelCatalogStep({
       {validationFailures.length > 0 && (
         <div className="flex flex-col gap-3">
           {/* Mounted by the press on the create button: announced as an alert. */}
-          <AnnouncedBanner
+          <Banner
+            role="alert"
             status="warning"
             title={t("model_validation_warning_title")}
             collapsible={false}
@@ -697,7 +698,7 @@ export function ModelCatalogStep({
                 </li>
               ))}
             </ul>
-          </AnnouncedBanner>
+          </Banner>
           <CheckboxInput
             ref={acknowledgeRef}
             label={t("model_validation_create_anyway_ack")}

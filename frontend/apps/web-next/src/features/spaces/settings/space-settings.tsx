@@ -1,7 +1,7 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { IconButton } from "@astryxdesign/core/IconButton";
 import { Switch as SettingSwitch } from "@/components/astryx/switch";
-import { AnnouncedBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";
 import { useRouter } from "@/lib/navigation";
@@ -606,7 +606,7 @@ function ModelsSection() {
             onChange={(change) => changeModels("completion", change)}
           />
           {failedKind === "completion" && (
-            <AnnouncedBanner status="error" title={t("space_models_save_failed")} />
+            <Banner role="alert" status="error" title={t("space_models_save_failed")} />
           )}
           <SpaceModelSelect
             kind="embedding"
@@ -618,7 +618,7 @@ function ModelsSection() {
             onChange={(change) => changeModels("embedding", change)}
           />
           {failedKind === "embedding" && (
-            <AnnouncedBanner status="error" title={t("space_models_save_failed")} />
+            <Banner role="alert" status="error" title={t("space_models_save_failed")} />
           )}
           <SpaceModelSelect
             kind="transcription"
@@ -629,7 +629,7 @@ function ModelsSection() {
             onChange={(change) => changeModels("transcription", change)}
           />
           {failedKind === "transcription" && (
-            <AnnouncedBanner status="error" title={t("space_models_save_failed")} />
+            <Banner role="alert" status="error" title={t("space_models_save_failed")} />
           )}
         </>
       ) : null}

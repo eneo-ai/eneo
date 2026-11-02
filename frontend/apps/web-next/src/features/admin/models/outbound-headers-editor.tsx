@@ -8,7 +8,7 @@ import { useId, useRef } from "react";
 import { flushSync } from "react-dom";
 import { useTranslations } from "use-intl";
 import { Plus, Trash2 } from "lucide-react";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Switch } from "@/components/astryx/switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
@@ -192,11 +192,7 @@ export function OutboundHeadersEditor({
       <FieldProblem id={id} problem={problem} />
       {!options ? (
         optionsError ? (
-          <QuietBanner
-            status="warning"
-            title={t("outbound_headers_options_failed")}
-            collapsible={false}
-          >
+          <Banner status="warning" title={t("outbound_headers_options_failed")} collapsible={false}>
             <div className="flex flex-col items-start gap-2">
               <Text>
                 {t(
@@ -207,7 +203,7 @@ export function OutboundHeadersEditor({
               </Text>
               <Button label={t("retry")} onClick={onRetry} isLoading={loading} isInterruptible />
             </div>
-          </QuietBanner>
+          </Banner>
         ) : (
           <LoadingState rows={1} />
         )
@@ -280,7 +276,7 @@ export function OutboundHeadersEditor({
                 />
                 {row.onMissing === "fallback" && storedPart(row, "fallback", label)}
                 {row.onMissing === "fail" && (
-                  <QuietBanner status="warning" title={t("outbound_headers_fail_warning")} />
+                  <Banner status="warning" title={t("outbound_headers_fail_warning")} />
                 )}
                 <Switch
                   label={t("outbound_headers_secret")}
@@ -309,7 +305,7 @@ export function OutboundHeadersEditor({
             </Text>
           )}
           {classification && (
-            <QuietBanner
+            <Banner
               status="info"
               title={t(
                 classification === "identifying"
@@ -319,7 +315,7 @@ export function OutboundHeadersEditor({
             />
           )}
           {(classification || rows.some((row) => row.secret)) && isUnencryptedRemote(endpoint) && (
-            <QuietBanner status="warning" title={t("outbound_headers_plain_http_warning")} />
+            <Banner status="warning" title={t("outbound_headers_plain_http_warning")} />
           )}
           {rows.length > 0 && (
             <Text type="supporting">{t("outbound_headers_blocked_operations_note")}</Text>

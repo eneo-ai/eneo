@@ -1,4 +1,4 @@
-import { AnnouncedBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { useEffect, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
 import { LoadingState } from "@/components/composites/loading-state";
@@ -71,7 +71,7 @@ export function LogoutHandoff({
     <PublicPage title={t("logout")} accessibilityStatementUrl={accessibilityStatementUrl}>
       {failed ? (
         <>
-          <AnnouncedBanner status="error" title={t("logout_failed")} />
+          <Banner role="alert" status="error" title={t("logout_failed")} />
           <a
             href={switchOrganisation ? "/login/switch-organisation" : "/logout"}
             className="text-ax-text-accent inline-flex min-h-11 items-center justify-center underline underline-offset-4"

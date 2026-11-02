@@ -1,4 +1,4 @@
-import { AnnouncedBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -98,7 +98,8 @@ export function ListError({
   const heading = title ?? (compact ? message : t("query_error_title"));
 
   return (
-    <AnnouncedBanner
+    <Banner
+      role="alert"
       status="error"
       title={heading}
       description={error == null || heading === message ? undefined : message}
@@ -127,7 +128,7 @@ export function ListError({
           ))}
         </ul>
       ) : undefined}
-    </AnnouncedBanner>
+    </Banner>
   );
 }
 

@@ -1,4 +1,4 @@
-import { AnnouncedBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { Button } from "@astryxdesign/core/Button";
 import { useTranslations } from "use-intl";
 import { useEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
@@ -57,7 +57,8 @@ export function BrowserSessionBoundary({ children }: { children: ReactNode }) {
   return (
     <>
       {session.status === "bound" && session.checkError !== undefined && (
-        <AnnouncedBanner
+        <Banner
+          role="alert"
           status="error"
           container="section"
           title={t("session_check_failed")}

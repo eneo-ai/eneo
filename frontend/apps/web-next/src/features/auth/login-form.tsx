@@ -2,7 +2,7 @@ import { Button } from "@astryxdesign/core/Button";
 import { FormLayout } from "@astryxdesign/core/FormLayout";
 import { useActionState, useEffect, useId, useRef, useState } from "react";
 import { useTranslations } from "use-intl";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { PasswordInput } from "@/components/astryx/password-input";
 import { TextInput } from "@/components/astryx/text-input";
 import { CorrelationReference } from "./login-diagnostics-alert";
@@ -46,7 +46,7 @@ export function LoginForm({ next }: { next?: string }) {
     >
       {state.error ? (
         <div id={errorId} ref={errorRef} tabIndex={-1}>
-          <QuietBanner
+          <Banner
             status="error"
             title={
               blocked
@@ -61,7 +61,7 @@ export function LoginForm({ next }: { next?: string }) {
             collapsible={false}
           >
             {state.traceId ? <CorrelationReference id={state.traceId} /> : null}
-          </QuietBanner>
+          </Banner>
         </div>
       ) : null}
       {/* Both fields are required, the default and unmarked (decision 40). */}

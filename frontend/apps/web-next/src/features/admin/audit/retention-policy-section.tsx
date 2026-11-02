@@ -5,7 +5,7 @@ import { Pencil } from "lucide-react";
 import { useFormatter, useTranslations } from "use-intl";
 import { useEffect, useId, useRef, useState, type SubmitEvent } from "react";
 import { TextInput } from "@/components/astryx/text-input";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -202,7 +202,7 @@ export function RetentionPolicySection({ headingLevel = 2 }: { headingLevel?: 2 
               </div>
               {draftDays !== null && draftDays !== data.retention_days ? (
                 <div className="w-full">
-                  <QuietBanner
+                  <Banner
                     status={draftDays < data.retention_days ? "warning" : "info"}
                     title={t(
                       draftDays < data.retention_days

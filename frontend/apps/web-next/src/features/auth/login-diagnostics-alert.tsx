@@ -1,6 +1,6 @@
 import { useTranslations } from "use-intl";
 import { Button } from "@astryxdesign/core/Button";
-import { QuietBanner } from "@/components/astryx/banner";
+import { Banner } from "@astryxdesign/core/Banner";
 import { loginDiagnosticMessageKey, type LoginDiagnostics } from "@/lib/auth/login-diagnostics";
 import { useCopy } from "@/lib/hooks/use-copy";
 
@@ -28,7 +28,7 @@ export function CorrelationReference({ id }: { id: string }) {
 export function LoginDiagnosticsAlert({ diagnostics }: { diagnostics: LoginDiagnostics }) {
   const t = useTranslations();
   return (
-    <QuietBanner
+    <Banner
       status="error"
       title={t("authentication_failed")}
       description={t(loginDiagnosticMessageKey(diagnostics))}
@@ -41,6 +41,6 @@ export function LoginDiagnosticsAlert({ diagnostics }: { diagnostics: LoginDiagn
         {diagnostics.info ? <code>{diagnostics.info}</code> : null}
         {diagnostics.correlation ? <CorrelationReference id={diagnostics.correlation} /> : null}
       </div>
-    </QuietBanner>
+    </Banner>
   );
 }
