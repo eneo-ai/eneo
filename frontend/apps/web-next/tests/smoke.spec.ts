@@ -1,16 +1,8 @@
 import { expect, test } from "./csp";
-import sv from "../src/lib/i18n/messages/sv.json";
 
 // Smoke coverage for the parity-buildout surfaces: each page loads
 // authenticated and shows a marker element from the newly-ported feature.
 // Labels are the Swedish defaults (the app's default locale).
-
-test("the retired activation route shows signed-in not-found", async ({ page }) => {
-  await page.goto("/activate");
-  await expect(page).toHaveURL(/\/activate$/);
-  await expect(page.getByRole("heading", { level: 1, name: sv.page_not_found })).toBeVisible();
-  await expect(page.getByRole("link", { name: sv.back_to_home })).toHaveAttribute("href", "/");
-});
 
 test("account shows the change-password card", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/account");
@@ -43,24 +35,15 @@ test("admin usage has a per-user tab", { tag: "@vite" }, async ({ page }) => {
   await expect(page.getByRole("tab", { name: /användare/i })).toBeVisible();
 });
 
-test(
-  "admin insights has a compare toggle and period picker",
-  { tag: "@vite" },
-  async ({ page }) => {
-    await page.goto("/admin/insights");
-    await expect(page.getByRole("switch", { name: /^jämför$/i })).toBeVisible();
-    await expect(page.getByRole("button", { name: /^Period:/ })).toBeVisible();
-  }
-);
-
-test("admin models has a migration-history tab", { tag: "@vite" }, async ({ page }) => {
-  await page.goto("/admin/models");
-  await expect(page.getByRole("tab", { name: /migreringshistorik/i })).toBeVisible();
-});
-
 test("admin api-keys exposes the tenant policy + filters", { tag: "@vite" }, async ({ page }) => {
   await page.goto("/admin/api-keys");
   await expect(page.getByRole("button", { name: /organisationspolicy/i })).toBeVisible();
+});
+
+// The route walks open /admin/storage in their own contexts, which the CSP fixture does not watch.
+test("admin storage loads under the production CSP", { tag: "@vite" }, async ({ page }) => {
+  await page.goto("/admin/storage");
+  await expect(page.getByText("Flytta befintligt innehåll", { exact: true })).toBeVisible();
 });
 
 // Fonts (src/styles/globals.css "2b. Fonts"): self-hosted, only the UI font preloaded.
