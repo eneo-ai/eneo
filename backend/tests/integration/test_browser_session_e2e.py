@@ -579,20 +579,17 @@ async def test_a_session_that_cannot_be_recorded_sends_no_cookie(
     assert (await _rows(taken["user_id"])).keys() == {taken["sid"]}
 
 
-@pytest.mark.integration
-@pytest.mark.asyncio
-async def test_federated_browser_sign_in_records_a_session(
+@pytest.fixture
+async def federated_callback(
     client,
     super_admin_token,
-    patch_auth_service_jwt,
-    mock_transcription_models,
-    browser_session_on,
     oidc_mock,
     jwks_mock,
     db_container,
     test_tenant,
     monkeypatch,
 ):
+    """Run one browser SSO sign-in of test@example.com; returns the callback."""
     idp = _idp("browser")
     oidc_mock(
         discovery=_discovery(idp),
@@ -617,7 +614,7 @@ async def test_federated_browser_sign_in_records_a_session(
     async with db_container() as container:
         slug = await container.tenant_repo().generate_slug_for_tenant(test_tenant.id)
 
-    async def sign_in(code: str) -> dict:
+    async def callback(code: str):
         initiated = await client.get(
             "/api/v1/auth/browser/initiate",
             params={"tenant": slug, "next": "/dashboard"},
@@ -626,18 +623,38 @@ async def test_federated_browser_sign_in_records_a_session(
         assert initiated.status_code == 303, initiated.text
         [state] = parse_qs(urlsplit(initiated.headers["location"]).query)["state"]
         [txn] = initiated.headers.get_list("set-cookie")
-        callback = await client.get(
+        return await client.get(
             "/login/callback",
             params={"code": code, "state": state},
             headers={"Cookie": txn.split(";", 1)[0], "Sec-Fetch-Site": "cross-site"},
         )
+
+    return callback
+
+
+def _session_cookies(response) -> list[str]:
+    return [
+        cookie
+        for cookie in response.headers.get_list("set-cookie")
+        if cookie.startswith(f"{SESSION}=")
+    ]
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_federated_browser_sign_in_records_a_session(
+    client,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    test_tenant,
+):
+    async def sign_in(code: str) -> dict:
+        callback = await federated_callback(code)
         assert callback.status_code == 303, callback.text
         assert callback.headers["location"] == "/dashboard"
-        [session] = [
-            cookie
-            for cookie in callback.headers.get_list("set-cookie")
-            if cookie.startswith(f"{SESSION}=")
-        ]
+        [session] = _session_cookies(callback)
         token = session.removeprefix(f"{SESSION}=").split(";", 1)[0]
         me = await client.get(
             "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
@@ -653,6 +670,35 @@ async def test_federated_browser_sign_in_records_a_session(
     rows = await _rows(first["user_id"])
     assert {first["sid"], second["sid"]} <= rows.keys()
     assert rows[first["sid"]][:2] == (UUID(first["user_id"]), test_tenant.id)
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_federated_session_that_cannot_be_recorded_sends_no_cookie(
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    federated_callback,
+    monkeypatch,
+):
+    [session] = _session_cookies(await federated_callback("code-1"))
+    taken = _claims(session.removeprefix(f"{SESSION}=").split(";", 1)[0])
+    # The next insert collides with the row above.
+    monkeypatch.setattr(
+        browser_session_service,
+        "secrets",
+        SimpleNamespace(token_urlsafe=lambda _: taken["sid"]),
+    )
+
+    refused = await federated_callback("code-2")
+
+    # The sign-in failure page, without a session cookie.
+    assert refused.status_code == 303, refused.text
+    failure = urlsplit(refused.headers["location"])
+    assert failure.path == "/login"
+    assert parse_qs(failure.query)["message"] == ["oidc_callback_failed"]
+    assert _session_cookies(refused) == []
+    assert (await _rows(taken["user_id"])).keys() == {taken["sid"]}
 
 
 async def _sign_out(client, token: str):
