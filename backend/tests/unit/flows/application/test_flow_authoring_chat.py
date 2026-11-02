@@ -77,8 +77,9 @@ def test_the_instructions_offer_only_what_a_flow_can_do() -> None:
     assert "never a product or service the flow has no tool for" in instructions
     assert "A choice is a complete answer, sent when it is clicked" in instructions
     assert (
-        "How the result is delivered is never a question with choices" in instructions
+        "read here in Eneo, or received by a system at an HTTPS address" in instructions
     )
+    assert "never hold the build for the address" in instructions
     assert "E-post, SMS, Teams and the like are never choices" in instructions
     assert "never offer a choice that stands for typing it" in instructions
     assert "An answer already given is settled" in instructions

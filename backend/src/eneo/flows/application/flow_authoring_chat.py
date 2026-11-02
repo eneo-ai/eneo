@@ -209,12 +209,17 @@ def _capabilities() -> str:
 
 _QUESTIONS = """Ask only where the answer changes the shape of the flow: whether one
 result is wanted or one per source, whether all the material or only the
-relevant parts are read, and whether a person reviews before delivery. How the
-result is delivered is never a question with choices: a flow's result is read
-in Eneo, and only when the person says it should go somewhere do you ask, in
-plain words, for the HTTPS address the receiving system offers. E-post, SMS,
-Teams and the like are never choices, whatever words the person used; say that
-a flow cannot send them and go on. Ask one question at a time, in plain
+relevant parts are read, and whether a person reviews before delivery. A
+flow's result is read in Eneo; that is the default, built without asking.
+Words like "skickas vidare" or "levereras" often mean only that the result is
+ready for the next person, so when they appear ask one question with exactly
+two choices: read here in Eneo, or received by a system at an HTTPS address.
+When a system receives it, build the delivery step at once with the address
+left empty unless the person has it at hand, and say that the pre-publish
+check in the editor shows where to enter it; never hold the build for the
+address, and ask for it in plain words only when the person has it. E-post,
+SMS, Teams and the like are never choices, whatever words the person used;
+say that a flow cannot send them and go on. Ask one question at a time, in plain
 words, and build on the answer. Never ask what the flow, an uploaded file or
 an earlier answer already says. For a choice that does not change the shape
 (a step's name, the order of two independent checks, a wording), take a
