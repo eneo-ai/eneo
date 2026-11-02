@@ -132,6 +132,9 @@ function UserEditorForm({
 
   const [email, setEmail] = useState(user?.email ?? "");
   const [username, setUsername] = useState(user?.username ?? "");
+  // What the fields held when the dialog opened: the list can refresh `user`
+  // meanwhile, and an untouched field must not write that older value back.
+  const [opened] = useState({ email: user?.email, username: user?.username });
   const [replacePassword, setReplacePassword] = useState(false);
   const [roleIds, setRoleIds] = useState<Set<string>>(
     new Set((user?.roles ?? []).map((role) => role.id))
@@ -156,7 +159,10 @@ function UserEditorForm({
   const saveCallbacks = {
     onMutate: () => onPendingChange(true),
     onSettled: () => onPendingChange(false),
-    onSuccess: (_data: unknown, save: Save) => finish(save),
+    // The saved account names the e-mail: an untouched field can hold an older
+    // one than the account has (another administrator changed it meanwhile).
+    onSuccess: (saved: { email?: string } | undefined, save: Save) =>
+      finish({ ...save, email: saved?.email ?? save.email }),
     onError: (error: Error) => toastApiError(error, t)
   };
 
@@ -183,9 +189,11 @@ function UserEditorForm({
         browserApi.POST("/api/v1/admin/users/{username}/", {
           params: { path: { username: user.username } },
           body: {
-            email,
+            // Sent only when changed, as in the Svelte app: the dialog's copy
+            // must not write back over one changed since it opened.
+            email: email !== opened.email ? email : undefined,
             // Sent only when changed: a new username signs the user out.
-            username: username.trim() !== user.username ? username.trim() : undefined,
+            username: username.trim() !== opened.username ? username.trim() : undefined,
             password: password ?? undefined,
             roles: [...roleIds].map((id) => ({ id }))
           }

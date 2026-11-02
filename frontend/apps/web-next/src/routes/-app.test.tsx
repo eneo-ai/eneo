@@ -1423,7 +1423,9 @@ it("leaves a me 401 to the single refusal owner and never renders the shell", as
   );
   await renderRoute();
   await waitFor(() =>
-    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fdoes-not-exist")
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fdoes-not-exist", {
+      replace: true
+    })
   );
   expect(document.getElementById("main-content")).toBeNull();
 });
@@ -1479,7 +1481,8 @@ it("holds a cache-only navigation for the resume check and blocks a changed sess
     await check;
     await navigation;
   });
-  expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fdoes-not-exist");
+  // Another credential: sign-in starts over instead of resuming this page as it.
+  expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
   expect(queryClient.getQueryData(sessionKeys.me)).toBeUndefined();
   expect(document.getElementById("main-content")).toBeNull();
 });
@@ -1560,7 +1563,9 @@ it("returns a signed-out account visit to login with its destination preserved",
     })
   );
   await renderRoute("/account");
-  await waitFor(() => expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Faccount"));
+  await waitFor(() =>
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Faccount", { replace: true })
+  );
   expect(document.getElementById("main-content")).toBeNull();
 });
 

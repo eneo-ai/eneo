@@ -14,9 +14,10 @@ from eneo.users.user import (
     UserInDB,
     UserState,
     UserUpdate,
+    UserUpdatePublic,
 )
 from eneo.users.user_service import UserService
-from tests.fixtures import TEST_TENANT, TEST_USER
+from tests.fixtures import TEST_TENANT, TEST_USER, TEST_USER_2
 
 
 @pytest.fixture(name="service")
@@ -96,6 +97,46 @@ async def test_register_user_fails_if_username_is_taken(service: UserService):
         match="That username is already taken.",
     ):
         await service.register(new_user)
+
+
+async def test_update_user_accepts_the_users_own_email_and_username(
+    service: UserService,
+):
+    # The lookups find the user's own row: a repeated value is not taken.
+    service.repo.get_user_by_id.return_value = TEST_USER
+    service.repo.get_user_by_email.return_value = TEST_USER
+    service.repo.get_user_by_username.return_value = TEST_USER
+    service.repo.update.return_value = TEST_USER
+
+    for email in (TEST_USER.email, TEST_USER.email.upper()):
+        await service.update_user(
+            TEST_USER.id,
+            UserUpdatePublic(email=email, username=TEST_USER.username),
+        )
+
+    assert service.repo.update.await_count == 2
+
+
+async def test_update_user_refuses_another_users_email(service: UserService):
+    service.repo.get_user_by_id.return_value = TEST_USER
+    service.repo.get_user_by_email.return_value = TEST_USER_2
+
+    with pytest.raises(UniqueUserException, match="That email is already taken."):
+        await service.update_user(
+            TEST_USER.id, UserUpdatePublic(email=TEST_USER_2.email.upper())
+        )
+    service.repo.update.assert_not_awaited()
+
+
+async def test_update_user_refuses_another_users_username(service: UserService):
+    service.repo.get_user_by_id.return_value = TEST_USER
+    service.repo.get_user_by_username.return_value = TEST_USER_2
+
+    with pytest.raises(UniqueUserException, match="That username is already taken."):
+        await service.update_user(
+            TEST_USER.id, UserUpdatePublic(username=TEST_USER_2.username)
+        )
+    service.repo.update.assert_not_awaited()
 
 
 async def test_register_user_creates_a_user_and_settings(service: UserService):

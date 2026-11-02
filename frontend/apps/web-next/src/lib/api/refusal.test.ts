@@ -74,7 +74,7 @@ describe("immutable document session", () => {
     fetcher.mockResolvedValueOnce(probe("replacement-session"));
     await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9019 });
     expect(fetcher).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledExactlyOnceWith("/deactivated");
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/deactivated", { replace: true });
   });
 
   it("binds an unusable bootstrap cookie only for logout and refuses a replacement on resume", async () => {
@@ -135,7 +135,8 @@ describe("immutable document session", () => {
     expect(request.signal.aborted).toBe(true);
     expect(clear).toHaveBeenCalledTimes(1);
     expect(cancelQueries).toHaveBeenCalledTimes(1);
-    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fspaces%2Fx%3Fa%3D1");
+    // Another sign-in holds the cookie: never resume this page's deep link as it.
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
     await expect(
       owner.prepareBrowserRequest(new Request("https://eneo.test/api", { method: "POST" }))
     ).rejects.toMatchObject({ code: 9090 });
@@ -143,7 +144,32 @@ describe("immutable document session", () => {
     expect(owner.getSessionSnapshot().status).toBe("stale");
   });
 
-  it("navigates once for concurrent refusals and remains blocked when assign returns", async () => {
+  it("sends a page whose session another sign-in replaced to sign-in, not to its deep link", async () => {
+    await bound();
+    fetcher.mockResolvedValueOnce(probe("another-account"));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
+  });
+
+  it("sends a page the server names as superseded (9090) to sign-in, not to its deep link", async () => {
+    await bound();
+    fetcher.mockResolvedValueOnce(refusal(9090));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login", { replace: true });
+  });
+
+  it("resumes an expired session at the same page, query and fragment", async () => {
+    window.history.replaceState({}, "", "/spaces/x?a=1#section");
+    await bound();
+    fetcher.mockResolvedValueOnce(refusal(9005));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9090 });
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(
+      "/login?next=%2Fspaces%2Fx%3Fa%3D1%23section",
+      { replace: true }
+    );
+  });
+
+  it("navigates once for concurrent refusals and remains blocked when navigation returns", async () => {
     await bound();
     await Promise.allSettled([
       owner.handleRefusal(refusal(9090), "/api"),
@@ -152,6 +178,8 @@ describe("immutable document session", () => {
     expect(navigate).toHaveBeenCalledTimes(1);
     expect(owner.getSessionSnapshot().status).toBe("stale");
     await expect(owner.handleRefusal(probe(), "/api")).rejects.toMatchObject({ code: 9090 });
+    owner.reloadSession();
+    expect(navigate).toHaveBeenLastCalledWith("/login", { replace: true });
   });
 
   it("processes mismatch before audit and public-page exemptions", async () => {
@@ -278,7 +306,11 @@ describe("immutable document session", () => {
       owner.prepareBrowserRequest(new Request("https://eneo.test/api"))
     ).rejects.toMatchObject({ code: 9090 });
     expect(fetcher).not.toHaveBeenCalled();
-    expect(navigate).toHaveBeenCalledTimes(1);
+    // In place of the protected page: Back after logout must not reopen it and
+    // send the person to login again, so Back can leave Eneo.
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fspaces%2Fx%3Fa%3D1", {
+      replace: true
+    });
   });
 
   it("rejects a successful response without an admitted session header", async () => {
@@ -301,7 +333,7 @@ describe("refusal routing", () => {
     await expect(owner.handleRefusal(refusal(code, status), "/api")).rejects.toMatchObject({
       status
     });
-    expect(navigate).toHaveBeenCalledExactlyOnceWith(destination);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith(destination, { replace: true });
   });
 
   it.each([9019, 9025])(
