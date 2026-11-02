@@ -354,8 +354,8 @@ describe("AdminUsersPage", () => {
     serve((query) => ({ items: query.search_email ? [users[0]] : users }));
     renderUsers();
     await screen.findByText("2 användare");
-    // Not on first load.
-    expect(liveRegion()).toBe("");
+    // Not on first load. Astryx's spinner may still say "Läser in" there.
+    expect(liveRegion()).not.toContain("användare");
 
     fireEvent.change(screen.getByRole("textbox", { name: "E-post" }), {
       target: { value: "anna" }

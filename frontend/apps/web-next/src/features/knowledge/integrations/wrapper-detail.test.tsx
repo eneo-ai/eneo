@@ -1044,8 +1044,8 @@ describe("WrapperDetail documents", () => {
     state.documents.i1 = documentPages(() => 60);
     show([mall, protokoll], "/spaces/space-1/knowledge/integrations/wrapper/w1?folder=i1");
     await screen.findByRole("button", { name: /Dokument 1\.docx/ });
-    // The first load is no result to announce.
-    expect(liveRegion()).toBe("");
+    // The first load is no result to announce. Astryx's spinner may still say "Läser in".
+    expect(liveRegion()).not.toContain("Visar");
 
     fireEvent.change(screen.getByLabelText("Sök dokument på namn eller sökväg"), {
       target: { value: "dokument" }
