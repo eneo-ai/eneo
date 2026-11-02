@@ -288,7 +288,17 @@ it("accepts retirement after develop squash-merges the migration, whose commit d
   // develop squash-merges: one new commit on develop's own history, with the migration's tree
   // but none of its commits, so the source revision is never an ancestor of the upstream.
   const commitTree = (tree: string, ...parents: string[]) =>
-    f.git("commit-tree", tree, ...parents.flatMap((parent) => ["-p", parent]), "-m", "develop");
+    f.git(
+      "-c",
+      "user.name=Parity test",
+      "-c",
+      "user.email=parity@example.invalid",
+      "commit-tree",
+      tree,
+      ...parents.flatMap((parent) => ["-p", parent]),
+      "-m",
+      "develop"
+    );
   const upstreamRevision = commitTree(`${f.sourceRevision}^{tree}`);
   f.git("update-ref", "refs/remotes/origin/develop", commitTree("HEAD^{tree}", upstreamRevision));
   f.write(
