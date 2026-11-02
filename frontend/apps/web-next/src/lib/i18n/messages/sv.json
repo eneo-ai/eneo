@@ -5312,6 +5312,8 @@
   "account_choice_announced": "{setting}: {value}",
   "account_copy_format": "Kopieringsformat",
   "account_identity_line": "{organisation} · {roles}",
+  "account_inactive": "Kontot är inaktivt",
+  "account_inactive_description": "Ditt konto är inaktivt. Kontakta din administratör för att få åtkomst igen, eller logga ut och logga in med ett annat konto.",
   "account_security_group": "Säkerhet och åtkomst",
   "account_settings": "Kontoinställningar",
   "account_theme_system_hint": "System följer inställningen på din enhet.",

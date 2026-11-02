@@ -48,12 +48,33 @@ describe("immutable document session", () => {
     window.history.replaceState({}, "", "/deactivated");
     fetcher.mockResolvedValueOnce(refusal(9025, 403, { [GENERATION]: "suspended" }));
     await owner.initializeBrowserSession();
-    expect(owner.getSessionSnapshot()).toEqual({ status: "deactivated", generation: "suspended" });
+    expect(owner.getSessionSnapshot()).toEqual({
+      status: "deactivated",
+      generation: "suspended",
+      restriction: 9025
+    });
     await expect(owner.requireBrowserSession()).rejects.toMatchObject({ code: 9025 });
     fetcher.mockResolvedValueOnce(probe("reactivated-session"));
     await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9025 });
     expect(fetcher).toHaveBeenCalledTimes(1);
     expect(navigate).not.toHaveBeenCalled();
+  });
+
+  it("keeps an inactive account's bootstrap identity-free and sends it to its recovery", async () => {
+    window.history.replaceState({}, "", "/login");
+    fetcher.mockResolvedValueOnce(refusal(9019, 403, { [GENERATION]: "inactive" }));
+    await owner.initializeBrowserSession();
+    expect(owner.getSessionSnapshot()).toEqual({
+      status: "deactivated",
+      generation: "inactive",
+      restriction: 9019
+    });
+    await expect(owner.requireBrowserSession()).rejects.toMatchObject({ status: 403, code: 9019 });
+    // A later cookie (another tab signed in) is never adopted by this document.
+    fetcher.mockResolvedValueOnce(probe("replacement-session"));
+    await expect(owner.checkBrowserSession()).rejects.toMatchObject({ code: 9019 });
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(navigate).toHaveBeenCalledExactlyOnceWith("/deactivated");
   });
 
   it("binds an unusable bootstrap cookie only for logout and refuses a replacement on resume", async () => {
@@ -272,6 +293,7 @@ describe("immutable document session", () => {
 describe("refusal routing", () => {
   it.each<[number | undefined, number, string]>([
     [undefined, 401, "/login?next=%2Fspaces%2Fx%3Fa%3D1"],
+    [9019, 403, "/deactivated"],
     [9025, 403, "/deactivated"],
     [9070, 403, "/password-change?next=%2Fspaces%2Fx%3Fa%3D1"]
   ])("routes %s/%s through a document load", async (code, status, destination) => {
@@ -281,6 +303,26 @@ describe("refusal routing", () => {
     });
     expect(navigate).toHaveBeenCalledExactlyOnceWith(destination);
   });
+
+  it.each([9019, 9025])(
+    "blocks an admitted document refused as restricted (%s) and names the restriction",
+    async (code) => {
+      await bound();
+      await expect(
+        owner.handleRefusal(refusal(code, 403), "/api/v1/users/me/")
+      ).rejects.toMatchObject({ status: 403, code });
+      expect(owner.getSessionSnapshot()).toEqual({
+        status: "stale",
+        destination: "/deactivated",
+        restriction: code
+      });
+      expect(clear).toHaveBeenCalledTimes(1);
+      await expect(
+        owner.prepareBrowserRequest(new Request("https://eneo.test/api", { method: "POST" }))
+      ).rejects.toMatchObject({ code: 9090 });
+      expect(fetcher).not.toHaveBeenCalled();
+    }
+  );
 
   it("exempts explicit audit refusals, never arbitrary 401s at audit URLs", async () => {
     await bound();

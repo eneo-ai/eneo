@@ -5312,6 +5312,8 @@
   "account_choice_announced": "{setting}: {value}",
   "account_copy_format": "Copy format",
   "account_identity_line": "{organisation} · {roles}",
+  "account_inactive": "Account inactive",
+  "account_inactive_description": "Your account is inactive. Contact your administrator to regain access, or sign out and sign in with another account.",
   "account_security_group": "Security and access",
   "account_settings": "Account Settings",
   "account_theme_system_hint": "System follows the setting on your device.",

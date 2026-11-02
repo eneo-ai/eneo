@@ -6,24 +6,28 @@ import { LoadingState } from "@/components/composites/loading-state";
 import { QueryStateBoundary } from "@/components/composites/query-state";
 import { browserApi } from "@/lib/api/browser";
 import { EneoApiError } from "@/lib/api/errors";
-import { getSessionSnapshot } from "@/lib/api/refusal";
+import { getSessionSnapshot, type Restriction } from "@/lib/api/refusal";
 import { sessionQueries } from "@/lib/api/session";
 import { DEFAULT_LANDING } from "@/lib/auth/safe-next";
 import { navigateTo } from "@/lib/navigate-to";
 import { DocumentLink } from "./document-link";
 import { PublicPage } from "./public-page";
 
+/** Names what is restricted: the account itself, or its organisation. */
 export function DeactivatedNotice({
+  restriction,
   accessibilityStatementUrl,
   headingRef
 }: {
+  restriction?: Restriction;
   accessibilityStatementUrl: string | null;
   headingRef?: Ref<HTMLHeadingElement>;
 }) {
   const t = useTranslations();
+  const inactive = restriction === 9019;
   return (
     <PublicPage
-      title={t("organisation_deactivated")}
+      title={inactive ? t("account_inactive") : t("organisation_deactivated")}
       width="md"
       accessibilityStatementUrl={accessibilityStatementUrl}
       headingRef={headingRef}
@@ -34,7 +38,9 @@ export function DeactivatedNotice({
         </>
       }
     >
-      <p className="text-ax-text-secondary text-sm">{t("access_disabled")}</p>
+      <p className="text-ax-text-secondary text-sm">
+        {inactive ? t("account_inactive_description") : t("access_disabled")}
+      </p>
     </PublicPage>
   );
 }
