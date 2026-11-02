@@ -719,10 +719,17 @@ BROWSER_FLAGS = (
 def test_documentation_pages_are_404_when_the_web_app_is_on(
     monkeypatch: pytest.MonkeyPatch, dist: Path, path: str, flags: dict[str, bool]
 ):
-    response = TestClient(_app(monkeypatch, dist, documented=True, **flags)).get(path)
+    client = TestClient(_app(monkeypatch, dist, documented=True, **flags))
+    request_id = {"X-Request-ID": "req-docs-off"}
+
+    response = client.get(path, headers=request_id)
 
     assert response.status_code == 404
     assert response.headers["content-type"] == "application/json"
+    # The envelope of a routing miss, its deprecated `detail` included.
+    miss = client.get("/api/v1/does-not-exist", headers=request_id)
+    assert response.json() == miss.json()
+    assert response.json()["detail"] == "Not Found"
 
 
 @pytest.mark.parametrize("flags", BROWSER_FLAGS)

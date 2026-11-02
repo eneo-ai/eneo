@@ -21,7 +21,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.routing import APIRoute
 from fastapi.security import OAuth2PasswordRequestForm
 from starlette.datastructures import MutableHeaders
-from starlette.responses import JSONResponse, RedirectResponse
+from starlette.responses import RedirectResponse
 from starlette.types import Message, Receive, Scope, Send
 
 from eneo.authentication.auth_dependencies import get_current_active_user
@@ -54,6 +54,7 @@ from eneo.main.exceptions import AuthenticationException
 from eneo.main.logging import get_logger
 from eneo.main.request_context import ensure_correlation_id
 from eneo.server.dependencies.container import get_container
+from eneo.server.exception_handlers import http_exception_response
 from eneo.server.protocol import responses
 from eneo.users.user import UserInDB
 from eneo.users.user_router import login_with_password
@@ -359,7 +360,10 @@ class _BrowserCallbackRoute(APIRoute):
             await send(message)
 
         if not settings.browser_session_enabled:
-            response = JSONResponse({"detail": "Not Found"}, status_code=404)
+            # The envelope a routing miss answers, sent through the cleanup.
+            response = http_exception_response(
+                Request(scope), HTTPException(status.HTTP_404_NOT_FOUND)
+            )
             await response(scope, receive, send_callback)
             return
         try:

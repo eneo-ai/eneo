@@ -11,7 +11,8 @@ still wrap the whole user stack, so unhandled-exception 500s do not get it.
 """
 
 from fastapi import FastAPI
-from starlette.responses import JSONResponse
+from starlette.exceptions import HTTPException
+from starlette.requests import Request
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from eneo.authentication.browser_session_router import (
@@ -21,6 +22,7 @@ from eneo.authentication.browser_session_router import (
     router as browser_session_router,
 )
 from eneo.main.config import get_settings
+from eneo.server.exception_handlers import http_exception_response
 from eneo.server.middleware.compression import SelectiveGZipMiddleware
 from eneo.server.middleware.response_headers import ResponseHeadersMiddleware
 from eneo.server.runtime_config_router import log_unlinked_runtime_values
@@ -54,7 +56,9 @@ class _DocumentationOff:
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] == "http" and scope["path"] in _DOCUMENTATION_PAGES:
-            await JSONResponse({"detail": "Not Found"}, 404)(scope, receive, send)
+            # The envelope a routing miss answers.
+            response = http_exception_response(Request(scope), HTTPException(404))
+            await response(scope, receive, send)
             return
         await self.app(scope, receive, send)
 

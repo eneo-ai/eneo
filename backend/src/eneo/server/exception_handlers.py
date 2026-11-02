@@ -464,21 +464,26 @@ def _http_exception_body(
     ).model_dump(exclude_none=True)
 
 
+def http_exception_response(request: Request, exc: StarletteHTTPException) -> Response:
+    """The answer to an `HTTPException`, also for a refusal sent outside the
+    exception middleware (an ASGI middleware, a route's own `handle`)."""
+    # The raiser's headers win; otherwise carry the request's correlation
+    # id like the canonical handlers do, so the header matches the logs.
+    headers = {**(correlation_headers() or {}), **(exc.headers or {})}
+    if exc.status_code in {204, 304}:
+        return Response(status_code=exc.status_code, headers=headers)
+    return JSONResponse(
+        status_code=exc.status_code,
+        content=_http_exception_body(exc, extract_request_id(request)),
+        headers=headers,
+    )
+
+
 def add_exception_handlers(app: FastAPI):
     async def http_exception_handler(request: Request, exc: Exception) -> Response:
         # Registered on Starlette's class, so routing misses (404, 405) answer
         # in the same envelope as a route's own raise.
-        http_exc = cast(StarletteHTTPException, exc)
-        # The raiser's headers win; otherwise carry the request's correlation
-        # id like the canonical handlers do, so the header matches the logs.
-        headers = {**(correlation_headers() or {}), **(http_exc.headers or {})}
-        if http_exc.status_code in {204, 304}:
-            return Response(status_code=http_exc.status_code, headers=headers)
-        return JSONResponse(
-            status_code=http_exc.status_code,
-            content=_http_exception_body(http_exc, extract_request_id(request)),
-            headers=headers,
-        )
+        return http_exception_response(request, cast(StarletteHTTPException, exc))
 
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
 

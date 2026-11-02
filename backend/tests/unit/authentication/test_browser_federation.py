@@ -397,8 +397,13 @@ def test_disabled_browser_session_has_no_federation(
     federation: Federation, path: str, browser_settings: Settings
 ) -> None:
     browser_settings.browser_session_enabled = False
-    response = federation.client.get(path)
+    request_id = {"X-Request-ID": "req-federation-off"}
+    response = federation.client.get(path, headers=request_id)
     assert response.status_code == 404
+    # The envelope of a routing miss, its deprecated `detail` included.
+    miss = federation.client.get("/api/v1/does-not-exist", headers=request_id)
+    assert response.json() == miss.json()
+    assert response.json()["detail"] == "Not Found"
     if path in CALLBACKS:
         assert expected_set_cookie(
             "__Host-eneo_oidc_txn", '""', 0, production=True
