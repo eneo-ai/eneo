@@ -118,8 +118,14 @@ class _Assistants:
         return self.attachments
 
 
-def _setup(*, reachable: bool = True, offered: bool = True, result: dict | None = None):
-    server = SimpleNamespace(id=SERVER_ID) if reachable else None
+def _setup(
+    *,
+    reachable: bool = True,
+    offered: bool = True,
+    result: dict | None = None,
+    purpose: str = "general",
+):
+    server = SimpleNamespace(id=SERVER_ID, purpose=purpose) if reachable else None
     proxy = _Proxy(
         {"refresh_weather": "weather__refresh_weather"} if offered else {},
         result
@@ -479,3 +485,28 @@ async def test_server_switched_off_in_the_conversation_is_refused_from_an_open_v
     )
     result = await _run(conversation, assistants, factory)
     assert result.text == "13 degrees"
+
+
+async def test_capability_switched_off_in_the_conversation_is_refused_from_its_view():
+    from eneo.sessions.conversation_settings import (
+        ConversationSettings,
+        ConversationSettingsState,
+    )
+
+    conversation = _conversation([_call()])
+    conversation.settings = ConversationSettingsState(
+        revision=2,
+        settings=ConversationSettings(capability_states={"file_analysis": False}),
+    )
+    assistants, factory, proxy = _setup(purpose="file_analysis")
+    with pytest.raises(BadRequestException, match="switched off"):
+        await _run(conversation, assistants, factory)
+    assert proxy.called == []
+    assert factory.created_with == {}
+
+    # The provider's id never stands in for the capability choice.
+    conversation.settings = ConversationSettingsState(
+        revision=3,
+        settings=ConversationSettings(mcp_server_states={SERVER_ID: False}),
+    )
+    assert (await _run(conversation, assistants, factory)).text == "13 degrees"

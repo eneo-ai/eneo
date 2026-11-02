@@ -192,8 +192,8 @@ availability on each new request. Saved choices are never authorization grants.
 `disabled_mcp_server_ids` and `disabled_capabilities` remain optional per-turn
 restrictions, and request-level approval can require more confirmation. None can
 widen the permissions or undo a saved restriction. A tool call made from an
-interactive view follows the same rule: a server switched off in the
-conversation's settings is rejected even when its view is still open. Group
+interactive view follows the same rule: a server or capability switched off in
+the conversation's settings is rejected even when its view is still open. Group
 chats retain their assistant-routing and model policy; model/reasoning overrides
 and tool approval are not supported for them.
 

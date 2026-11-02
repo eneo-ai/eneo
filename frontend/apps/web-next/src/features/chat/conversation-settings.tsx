@@ -33,6 +33,16 @@ type ConversationSettingsContext = {
 };
 const Context = createContext<ConversationSettingsContext | null>(null);
 
+/** A patch carries only the tool states it changes; the maps are merged, not replaced. */
+function withPatch(settings: Settings, patch: Partial<Settings>): Settings {
+  const next = { ...settings, ...patch };
+  if (patch.mcp_server_states)
+    next.mcp_server_states = { ...settings.mcp_server_states, ...patch.mcp_server_states };
+  if (patch.capability_states)
+    next.capability_states = { ...settings.capability_states, ...patch.capability_states };
+  return next;
+}
+
 /** Saved conversations own their choices; browser preferences seed only new drafts. */
 export function ConversationSettingsProvider({
   partner,
@@ -174,7 +184,7 @@ export function ConversationSettingsProvider({
     return enqueue(async () => {
       if (!current.current || current.current.settings_compatible === false) return;
       if (mounted.current) setError(null);
-      const settings = { ...current.current.settings, ...patch };
+      const settings = withPatch(current.current.settings, patch);
       try {
         if (sessionId.current) {
           const state = await unwrap(
@@ -204,7 +214,7 @@ export function ConversationSettingsProvider({
   const startConversation = onNewConversation
     ? (patch: Partial<Settings>) => {
         if (current.current)
-          rememberConversationDraft(scope, { ...current.current.settings, ...patch });
+          rememberConversationDraft(scope, withPatch(current.current.settings, patch));
         onNewConversation();
       }
     : null;

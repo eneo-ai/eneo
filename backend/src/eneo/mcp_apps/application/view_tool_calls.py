@@ -41,10 +41,12 @@ if TYPE_CHECKING:
     from eneo.mcp_apps.infrastructure.repo_impl.mcp_app_view_repo_impl import (
         McpAppViewRepo,
     )
+    from eneo.mcp_servers.domain.entities.mcp_server import MCPServer
     from eneo.mcp_servers.infrastructure.proxy.mcp_proxy_factory import (
         MCPProxySessionFactory,
     )
     from eneo.questions.question import ToolCallInfo
+    from eneo.sessions.conversation_settings import ConversationSettings
     from eneo.sessions.session import SessionInDB
 
 logger = get_logger(__name__)
@@ -57,6 +59,13 @@ MAX_ARGUMENT_BYTES = 1024 * 1024
 _NOT_FOUND = "The view cannot call this tool"
 # The one exception names a choice the user made in this conversation.
 _SERVER_SWITCHED_OFF = "This tool is switched off in the conversation's settings."
+
+
+def _switched_off(settings: "ConversationSettings", server: "MCPServer") -> bool:
+    """A general server is chosen by id; a capability provider by its purpose."""
+    if server.purpose == "general":
+        return settings.mcp_server_states.get(server.id) is False
+    return settings.capability_states.get(server.purpose) is False
 
 
 class ViewCallNotReady(Exception):
@@ -206,11 +215,10 @@ async def call_tool_from_view(
     )
     if server is None:
         raise NotFoundException(_NOT_FOUND)
-    if (
-        conversation.settings is not None
-        and conversation.settings.settings.mcp_server_states.get(server.id) is False
+    if conversation.settings is not None and _switched_off(
+        conversation.settings.settings, server
     ):
-        # The view was opened while the server was on; the saved choice
+        # The view was opened while the tool was on; the saved choice
         # narrows what the conversation may run from now on.
         raise BadRequestException(_SERVER_SWITCHED_OFF)
 

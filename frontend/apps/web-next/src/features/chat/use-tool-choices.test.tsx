@@ -300,6 +300,33 @@ describe("conversation choices", () => {
     expect(saved.settings.capability_states).toEqual({ web_search: false });
   });
 
+  it("keeps an earlier tool change when another toggle is queued behind its save", async () => {
+    const view = renderChoices(personal, "saved");
+    await ready(view);
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    api.PATCH.mockImplementationOnce(async (_path, { body }) => {
+      await held;
+      saved = { revision: saved.revision + 1, settings: body.settings };
+      return { data: saved, response: new Response() };
+    });
+    await act(async () => {
+      view.current.tools.setDisabledMcpServerIds(new Set(["diarium", "kalender"]));
+    });
+    await act(async () => {
+      view.current.tools.toggleCapability("web_search");
+    });
+    await act(async () => release());
+    await ready(view);
+    expect(api.PATCH.mock.calls.map(([, init]) => init.body.expected_revision)).toEqual([2, 3]);
+    expect(saved.settings.mcp_server_states).toEqual({ diarium: false, kalender: false });
+    expect(saved.settings.capability_states).toEqual({ web_search: false, image_generation: true });
+    expect(view.current.tools.disabledMcpServerIds.has("diarium")).toBe(true);
+    expect(view.current.tools.disabledCapabilities.has("web_search")).toBe(true);
+  });
+
   it("leaves the browser's start choices alone until the user changes something", async () => {
     const draftKeys = () =>
       Object.keys(window.localStorage).filter((key) => key.startsWith("eneo:conversation-draft:"));
