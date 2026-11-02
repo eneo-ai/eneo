@@ -275,6 +275,43 @@ async def test_jit_accepts_text_forms_of_a_positive_verification(
     assert user.email_verified is True
 
 
+@pytest.mark.parametrize("domain_verified", [True, "true", "1", 1])
+async def test_jit_accepts_entra_domain_owner_verification(
+    monkeypatch, tenant, entrypoint, domain_verified
+):
+    """Entra ID omits email_verified for organisational accounts; its optional
+    xms_edov claim is the equivalent signal for the standard email."""
+    claims = {**CLAIMS, "xms_edov": domain_verified}
+    claims.pop("email_verified")
+    users = UsersInMemory(tenant)
+    user, created, _ = await sign_in(
+        monkeypatch, tenant, users, claims, ["example.com"], entrypoint
+    )
+    assert created is True
+    assert user.email_verified is True
+
+
+@pytest.mark.parametrize("domain_verified", [False, "false", "0", 0, "", None])
+async def test_jit_rejects_a_negative_or_missing_entra_domain_verification(
+    monkeypatch, tenant, entrypoint, domain_verified
+):
+    claims = {**CLAIMS, "xms_edov": domain_verified}
+    claims.pop("email_verified")
+    if domain_verified is None:
+        claims.pop("xms_edov")
+    users = UsersInMemory(tenant)
+    with pytest.raises(FederatedLoginDenied, match="verified email"):
+        await sign_in(monkeypatch, tenant, users, claims, ["example.com"], entrypoint)
+    assert users.created == []
+
+
+def test_entra_domain_verification_does_not_override_an_explicit_negative():
+    with pytest.raises(ValueError, match="not verified"):
+        FederatedIdentity.from_claims(
+            {**CLAIMS, "email_verified": False, "xms_edov": True}
+        )
+
+
 @pytest.mark.parametrize(
     "verified", [None, "false", "0", 0, 2, "yes", "", "true1", 1.0, ["true"]]
 )
@@ -374,13 +411,15 @@ async def test_inactive_tenant_cannot_admit_users(
     assert users.created == []
 
 
+@pytest.mark.parametrize("verification_claim", ["email_verified", "xms_edov"])
 @pytest.mark.parametrize("verified", [True, "true"])
 @pytest.mark.parametrize("mapped_email", ["user@example.com", "someone@example.com"])
-def test_verification_must_cover_the_selected_email(mapped_email, verified):
-    identity = FederatedIdentity.from_claims(
-        {**CLAIMS, "email_verified": verified, "mail": mapped_email},
-        email_claim="mail",
-    )
+def test_verification_must_cover_the_selected_email(
+    mapped_email, verified, verification_claim
+):
+    claims = {"sub": "subject", "email": CLAIMS["email"], "mail": mapped_email}
+    claims[verification_claim] = verified
+    identity = FederatedIdentity.from_claims(claims, email_claim="mail")
     assert identity.email_verified is (mapped_email == CLAIMS["email"])
 
 
