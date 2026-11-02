@@ -60,6 +60,37 @@ describe("KnowledgePicker", () => {
     expect(screen.getByText(emptyLabel)).toBeTruthy();
   });
 
+  it("keeps every selected source in exactly one picker, by the space that owns it", () => {
+    const own = makeCollection({ id: "own", name: "Egen" });
+    const org = makeCollection({ id: "org", name: "Gemensam", space_id: "org-space" });
+    const legacy = makeCollection({ id: "legacy", name: "Lånad", space_id: "third-space" });
+    state.space = makeSpace({
+      collections: [own, org],
+      overrides: { organization_space_id: "org-space" }
+    });
+    const selections = {
+      collections: [own, org, legacy] as unknown as Collection[],
+      websites: [],
+      integrationKnowledge: []
+    };
+    const onChange = vi.fn();
+    const view = (origin: "personal" | "organization") =>
+      renderInApp(<KnowledgePicker origin={origin} selections={selections} onChange={onChange} />);
+
+    view("personal");
+    expect(screen.getByText("Egen")).toBeTruthy();
+    expect(screen.getByText("Lånad")).toBeTruthy();
+    expect(screen.queryByText("Gemensam")).toBeNull();
+    fireEvent.click(screen.getAllByRole("button", { name: "Ta bort" })[1]!);
+    expect(onChange).toHaveBeenCalledExactlyOnceWith({ ...selections, collections: [own, org] });
+    cleanup();
+
+    view("organization");
+    expect(screen.getByText("Gemensam")).toBeTruthy();
+    expect(screen.queryByText("Egen")).toBeNull();
+    expect(screen.queryByText("Lånad")).toBeNull();
+  });
+
   it("counts the selected knowledge with plural forms", () => {
     const collection = makeCollection({ metadata: { num_info_blobs: 1, size: 10 } });
     const website = makeWebsite({

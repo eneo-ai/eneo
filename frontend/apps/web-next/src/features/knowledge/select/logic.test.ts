@@ -3,10 +3,9 @@ import type { Collection, IntegrationKnowledge, Website } from "../knowledge";
 import {
   availableKnowledge,
   byOrigin,
+  classifyKnowledgeOrigin,
   collectionInfoBlobCount,
   integrationOptions,
-  isOrgItem,
-  isPersonalItem,
   selectedIntegrationDisplay,
   websiteFailedPageCount,
   websiteIndexedResultCount
@@ -49,24 +48,28 @@ function integration(
 }
 
 describe("origin", () => {
-  it("treats unowned or current-space items as personal", () => {
-    expect(isPersonalItem({ space_id: null }, "current")).toBe(true);
-    expect(isPersonalItem({ space_id: "current" }, "current")).toBe(true);
-    expect(isPersonalItem({ space_id: "other" }, "current")).toBe(false);
+  it("files only what the organization space owns under the organization", () => {
+    expect(classifyKnowledgeOrigin({ space_id: "org" }, "current", "org")).toBe("organization");
+    expect(classifyKnowledgeOrigin({ space_id: null }, "current", "org")).toBe("personal");
+    expect(classifyKnowledgeOrigin({ space_id: "current" }, "current", "org")).toBe("personal");
+    expect(classifyKnowledgeOrigin({ space_id: "other" }, "current", "org")).toBe("personal");
+    expect(classifyKnowledgeOrigin({ space_id: "other" }, "current", undefined)).toBe("personal");
   });
 
-  it("matches org by the configured org space, else any foreign space", () => {
-    expect(isOrgItem({ space_id: "org" }, "current", "org")).toBe(true);
-    expect(isOrgItem({ space_id: "other" }, "current", "org")).toBe(false);
-    expect(isOrgItem({ space_id: "other" }, "current", undefined)).toBe(true);
+  it("keeps the organization space's own knowledge in one section there", () => {
+    expect(classifyKnowledgeOrigin({ space_id: "org" }, "org", "org")).toBe("personal");
   });
 
-  it("filters lists by origin", () => {
+  it("puts every item in exactly one section", () => {
     const items = [
       { id: "a", space_id: "current" },
-      { id: "b", space_id: "org" }
+      { id: "b", space_id: "org" },
+      { id: "c", space_id: "other" }
     ];
-    expect(byOrigin(items, "personal", "current", "org").map((item) => item.id)).toEqual(["a"]);
+    expect(byOrigin(items, "personal", "current", "org").map((item) => item.id)).toEqual([
+      "a",
+      "c"
+    ]);
     expect(byOrigin(items, "organization", "current", "org").map((item) => item.id)).toEqual(["b"]);
   });
 });

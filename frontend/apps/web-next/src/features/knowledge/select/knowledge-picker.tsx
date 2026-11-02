@@ -29,7 +29,6 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { browserApi } from "@/lib/api/browser";
 import { flattenPages } from "@/lib/api/pagination";
 import { formatBytes } from "@/lib/format";
-import { spacesListQueryOptions } from "@/features/spaces/space";
 import { useSpace } from "@/features/spaces/use-space";
 import { VendorIcon } from "../integrations/vendor";
 import {
@@ -53,12 +52,6 @@ import {
   type KnowledgeOrigin,
   type KnowledgeSelections
 } from "./logic";
-
-/** The organization space id, used to bucket shared knowledge by origin. */
-function useOrgSpaceId(): string | undefined {
-  const { data: spaces } = useQuery(spacesListQueryOptions(browserApi));
-  return spaces?.find((space) => space.organization)?.id;
-}
 
 function SelectedRow({
   icon,
@@ -439,7 +432,8 @@ export function KnowledgePicker({
 }) {
   const t = useTranslations();
   const { space } = useSpace();
-  const orgSpaceId = useOrgSpaceId();
+  // The organization space's identity, known even to spaces whose members cannot see it.
+  const orgSpaceId = space.organization_space_id ?? undefined;
   const [open, setOpen] = useState(false);
   const [filter, setFilter] = useState("");
   const addLabel =
