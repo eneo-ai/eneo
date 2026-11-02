@@ -674,6 +674,7 @@ function ConversationView({
         : undefined;
     const mcpOptions = mcpConversationOptions({
       servers: toolChoices.mcpServers,
+      capabilities: toolChoices.capabilities,
       disabledServerIds: toolChoices.disabledMcpServerIds,
       autoAcceptTools: toolChoices.autoAcceptTools,
       supportsToolApproval: partner.type !== "group-chat"
