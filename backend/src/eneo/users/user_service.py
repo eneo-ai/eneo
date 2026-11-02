@@ -797,7 +797,7 @@ class UserService:
                 payload.credential_version, user
             )
             user.session_auth_method = payload.auth_method
-            user.browser_session_id = payload.sid
+            user.browser_session = payload if payload.sid is not None else None
         return user
 
     async def _get_user_from_token(self, token: str):
@@ -1982,18 +1982,39 @@ class UserService:
         elif api_key is not None:
             user_in_db, _ = await self._resolve_api_key(api_key, request=request)
 
-        if user_in_db is None:
-            raise AuthenticationException("No authenticated user.")
-
-        await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
-
-        authorize_user(request, user_in_db)
+        user_in_db = await self._admit_user(user_in_db, request)
 
         if with_quota_used:
             user_in_db.quota_used = await self.info_blob_repo.get_total_size_of_user(
                 user_id=user_in_db.id
             )
 
+        return user_in_db
+
+    async def authenticate_payload(
+        self, payload: JWTPayload, request: Request | None = None
+    ) -> "UserInDB":
+        """``authenticate`` for a local token verified earlier.
+
+        A response that stays open after its request authenticated (the
+        job-event stream) asks again with the token's claims, so what refuses
+        a new request ends it too: its browser session ended, the user's
+        credentials were invalidated (a password change, signing out
+        everywhere), or the account or tenant is restricted.
+        """
+        return await self._admit_user(
+            await self._get_user_from_payload(payload), request
+        )
+
+    async def _admit_user(
+        self, user_in_db: "UserInDB | None", request: Request | None
+    ) -> "UserInDB":
+        if user_in_db is None:
+            raise AuthenticationException("No authenticated user.")
+
+        await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
+
+        authorize_user(request, user_in_db)
         return user_in_db
 
     async def _check_user_and_tenant_state(
@@ -2114,13 +2135,7 @@ class UserService:
                 )
                 raise
 
-        if user_in_db is None:
-            raise AuthenticationException("No authenticated user.")
-
-        await self._check_user_and_tenant_state(user_in_db, correlation_id="api-auth")
-
-        authorize_user(request, user_in_db)
-        return user_in_db
+        return await self._admit_user(user_in_db, request)
 
     async def update_used_tokens(self, user_id: UUID, tokens_to_add: int):
         user_in_db = await self.repo.get_user_by_id(user_id)

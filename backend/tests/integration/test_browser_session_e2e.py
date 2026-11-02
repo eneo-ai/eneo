@@ -27,10 +27,12 @@ from eneo.authentication.browser_session import session_generation
 from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
 from eneo.database.database import sessionmanager
 from eneo.database.tables.browser_sessions_table import BrowserSessions
+from eneo.database.tables.users_table import Users
 from eneo.jobs.job_events import job_updates_channel
 from eneo.main.config import Settings, get_settings, set_settings
 from eneo.server.dependencies.container import get_user_from_websocket
 from eneo.server.websockets import websocket_router
+from eneo.users.user import UserState
 from tests.integration.test_federation_tenant_admin import (
     _discovery,
     _idp,
@@ -870,6 +872,63 @@ async def test_sign_out_ends_an_open_job_event_stream(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "revocation", ["sessions invalidated", "password changed", "account deactivated"]
+)
+async def test_what_refuses_a_request_ends_an_open_job_event_stream(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+    redis_client,
+    monkeypatch,
+    revocation,
+):
+    # None of these deletes the stream's session row; each refuses a new
+    # request with its token, and must end the stream it opened as well.
+    monkeypatch.setattr(browser_session_service, "RECHECK_SECONDS", 0.5)
+    email = await _create_local_user(client, super_admin_token)
+    token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    bearer = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    cookie = SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+    stream = asyncio.create_task(client.get(JOB_EVENTS, headers=cookie))
+    try:
+        await _subscribers(redis_client, _claims(token)["user_id"], 1)
+
+        if revocation == "sessions invalidated":
+            done = await client.post(
+                "/api/v1/users/me/sessions/invalidate/", headers=_bearer(bearer)
+            )
+            assert done.status_code == 204, done.text
+        elif revocation == "password changed":
+            done = await client.post(
+                "/api/v1/users/me/password/",
+                json={
+                    "current_password": PASSWORD,
+                    "new_password": "ReplacedPassword1!",
+                },
+                headers=_bearer(bearer),
+            )
+            assert done.status_code == 204, done.text
+        else:
+            await _execute(
+                sa.update(Users)
+                .where(Users.email == email)
+                .values(state=UserState.INACTIVE.value)
+            )
+
+        async with asyncio.timeout(5):
+            ended = await stream
+        assert ended.status_code == 200
+        refused = await client.get("/api/v1/users/me/", headers=cookie)
+        assert refused.status_code in (401, 403), refused.text
+    finally:
+        stream.cancel()
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
 async def test_a_job_event_stream_ends_when_its_session_expires(
     client,
     super_admin_token,
@@ -878,20 +937,16 @@ async def test_a_job_event_stream_ends_when_its_session_expires(
     browser_session_on,
     redis_client,
 ):
-    # Between checks too: the stream ends at the session's expiry, which is
-    # the token's.
+    # Between checks too: the stream ends at its token's expiry, which is the
+    # session's.
     email = await _create_local_user(client, super_admin_token)
     token = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
-    soon = datetime.now(timezone.utc) + timedelta(seconds=2)
-    await _execute(
-        sa.update(BrowserSessions)
-        .where(BrowserSessions.sid == _claims(token)["sid"])
-        .values(expires_at=soon)
-    )
+    soon = int(datetime.now(timezone.utc).timestamp()) + 2
+    expiring = _signed(_claims(token) | {"exp": soon})
 
     async with asyncio.timeout(6):
         ended = await client.get(
-            JOB_EVENTS, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={token}"}
+            JOB_EVENTS, headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={expiring}"}
         )
     assert ended.status_code == 200
-    assert datetime.now(timezone.utc) >= soon
+    assert datetime.now(timezone.utc).timestamp() >= soon

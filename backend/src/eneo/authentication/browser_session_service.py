@@ -13,18 +13,18 @@ after a crash, and restoring a Redis snapshot can bring a deleted key back.
 Admission is checked when a request authenticates. Finite HTTP and SSE work
 admitted before sign-out may still finish. The job-event stream
 (``GET /jobs/events/``) stays open until the client leaves, so while it serves
-a browser session it re-runs admission (``SessionWatch``) and ends at the
-session's expiry. A WebSocket keeps its user for as long as it is open, so a
+a browser session it re-runs authentication (``SessionWatch``) and ends at the
+token's expiry. A WebSocket keeps its user for as long as it is open, so a
 browser session's token cannot open one.
 """
 
 import secrets
 import time
 from datetime import datetime, timezone
-from uuid import UUID
 
 import sqlalchemy as sa
-from fastapi import HTTPException, status
+from dependency_injector import providers
+from fastapi import HTTPException, Request, status
 
 from eneo.authentication.auth_models import JWTPayload
 from eneo.authentication.auth_service import AuthService
@@ -81,25 +81,19 @@ class BrowserSessionService:
         unexpired. Independent of ``BROWSER_SESSION_ENABLED``: a ``sid`` token
         presented as Bearer is checked all the same.
         """
-        sid = payload.sid
         if (
-            sid is None
-            or await self.expires_at(sid, payload.user_id, payload.tenant_id) is None
+            payload.sid is None
+            or await self.session.scalar(
+                sa.select(BrowserSessions.sid).where(
+                    BrowserSessions.sid == payload.sid,
+                    BrowserSessions.user_id == payload.user_id,
+                    BrowserSessions.tenant_id == payload.tenant_id,
+                    BrowserSessions.expires_at > datetime.now(timezone.utc),
+                )
+            )
+            is None
         ):
             raise AuthenticationException("Could not validate token credentials.")
-
-    async def expires_at(
-        self, sid: str, user_id: UUID, tenant_id: UUID
-    ) -> datetime | None:
-        """When an admitted session ends (its token's ``exp``); None once it has."""
-        return await self.session.scalar(
-            sa.select(BrowserSessions.expires_at).where(
-                BrowserSessions.sid == sid,
-                BrowserSessions.user_id == user_id,
-                BrowserSessions.tenant_id == tenant_id,
-                BrowserSessions.expires_at > datetime.now(timezone.utc),
-            )
-        )
 
     async def end(self, token: str) -> None:
         """Delete the session a sign-out's cookie names.
@@ -157,43 +151,54 @@ class BrowserSessionService:
 
 
 class SessionWatch:
-    """Whether the browser session a response that stays open was admitted
-    under still lasts.
+    """Whether a response that stays open may still serve the browser session
+    its request was admitted under.
 
-    The response asks between messages. Every ``RECHECK_SECONDS``, the first
-    time included, admission's query runs again in a database session of its
-    own, held only for that query; in between, the answer is the clock against
-    the session's expiry. A refusal, the expiry or a check that fails ends the
-    response, and the client reconnects through ordinary admission.
+    The response asks between messages. Every ``RECHECK_SECONDS`` the
+    request's authentication runs again for the token's claims
+    (``UserService.authenticate_payload``), in a database session of its own
+    held only for that check, so what refuses a new request ends the response
+    too: sign-out, a password change, signing out everywhere, a deactivated
+    account or a suspended tenant. In between, the answer is the clock against
+    the token's expiry. A refusal, the expiry or a check that fails ends the
+    response, and the client reconnects through ordinary authentication.
     """
 
-    def __init__(self, sid: str, user_id: UUID, tenant_id: UUID):
-        self._session = (sid, user_id, tenant_id)
-        self._expires_at: datetime | None = None
-        self._next_check = float("-inf")
+    def __init__(self, payload: JWTPayload, request: Request):
+        self._payload = payload
+        self._request = request
+        self._admitted = True
+        # The request has just authenticated.
+        self._next_check = time.monotonic() + RECHECK_SECONDS
 
     async def __call__(self) -> bool:
+        if not self._admitted or time.time() >= self._payload.exp:
+            return False
         if time.monotonic() >= self._next_check:
             self._next_check = time.monotonic() + RECHECK_SECONDS
-            self._expires_at = await self._recheck()
-        return (
-            self._expires_at is not None
-            and datetime.now(timezone.utc) < self._expires_at
-        )
+            self._admitted = await self._recheck()
+        return self._admitted
 
-    async def _recheck(self) -> datetime | None:
+    async def _recheck(self) -> bool:
+        # The container module imports this one.
+        from eneo.main.container.container import Container
+
         try:
             async with sessionmanager.session() as session, session.begin():
-                service = BrowserSessionService(session, AuthService())
-                return await service.expires_at(*self._session)
+                container = Container(session=providers.Object(session))
+                await container.user_service().authenticate_payload(
+                    self._payload, self._request
+                )
+            return True
+        except AuthenticationException:
+            return False
         except Exception as exc:
-            _, user_id, tenant_id = self._session
             logger.warning(
                 "browser_session_recheck_failed",
                 extra={
-                    "user_id": str(user_id),
-                    "tenant_id": str(tenant_id),
+                    "user_id": str(self._payload.user_id),
+                    "tenant_id": str(self._payload.tenant_id),
                     "error_type": type(exc).__name__,
                 },
             )
-            return None
+            return False

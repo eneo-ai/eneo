@@ -200,7 +200,7 @@ async def get_user_from_websocket(
             user = await container.user_service().authenticate(token=token)
             # A socket keeps its user after sign-out, so a browser session's
             # token cannot open one; web-next opens none.
-            if user.browser_session_id is not None:
+            if user.browser_session is not None:
                 raise AuthenticationException("A browser session cannot open a socket")
             authorize_user(websocket, user)
         except Exception as e:

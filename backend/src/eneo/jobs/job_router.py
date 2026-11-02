@@ -47,8 +47,9 @@ async def get_running_jobs(
         "Stream the current user's job updates as server-sent events. Each "
         "`job` event carries the job as GET /jobs/ returns it, sent whenever "
         "its status changes; the connection stays open until the client closes "
-        "it. A browser session's stream also ends when the session does "
-        "(sign-out or expiry), within 30 seconds of sign-out."
+        "it. A browser session's stream also ends, within 30 seconds, once its "
+        "token no longer authenticates (sign-out, a password change, signing "
+        "out everywhere, a deactivated account), and at the token's expiry."
     ),
     responses=responses.streaming_response(models=[JobPublic]),
 )
@@ -67,11 +68,12 @@ async def job_events(
     # Authentication needs the database; the long-lived Redis stream only
     # needs this user ID. Release the transaction before sending the body.
     user = container.user()
-    # A browser session can end while the stream is open (sign-out, expiry);
-    # other tokens keep it until the client leaves.
+    # A browser session can stop authenticating while the stream is open
+    # (sign-out, a password change, expiry); other tokens keep it until the
+    # client leaves.
     admitted = None
-    if user.browser_session_id is not None:
-        admitted = SessionWatch(user.browser_session_id, user.id, user.tenant_id)
+    if user.browser_session is not None:
+        admitted = SessionWatch(user.browser_session, request)
     return EventSourceResponse(
         stream_job_events(user.id, request, admitted=admitted),
         ping=15,

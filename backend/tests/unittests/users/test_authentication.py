@@ -427,9 +427,9 @@ async def test_a_browser_session_token_needs_its_session(session_service):
     sessions = AsyncMock()
     service.browser_session_service = sessions
     user = await service.authenticate(token=token)
-    assert user.browser_session_id == SID
     [payload] = sessions.admit.await_args.args
     assert (payload.sid, payload.user_id) == (SID, TEST_USER.id)
+    assert user.browser_session == payload
 
     sessions.admit.side_effect = AuthenticationException("ended")
     with pytest.raises(AuthenticationException):
@@ -438,7 +438,7 @@ async def test_a_browser_session_token_needs_its_session(session_service):
     ordinary = await service.authenticate(
         token=auth.create_access_token_for_user(TEST_USER)
     )
-    assert ordinary.browser_session_id is None
+    assert ordinary.browser_session is None
     sessions.admit.assert_not_awaited()
 
 

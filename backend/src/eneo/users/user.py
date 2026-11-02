@@ -16,6 +16,7 @@ from pydantic import (
 from eneo.authentication.auth_models import (
     AccessToken,
     ApiKeyV2InDB,
+    JWTPayload,
 )
 from eneo.main.models import BaseModel, InDB, ModelId, partial_model
 from eneo.roles.permissions import Permission
@@ -301,9 +302,12 @@ class UserInDB(UserInDBBase):
     # The session's ``auth_method`` claim (eneo.users.password_lifecycle).
     # Request-scoped like active_api_key; never persisted or returned.
     session_auth_method: Optional[str] = Field(default=None, exclude=True, repr=False)
-    # The session's admitted ``sid`` claim (eneo.authentication.
-    # browser_session_service), request-scoped in the same way.
-    browser_session_id: Optional[str] = Field(default=None, exclude=True, repr=False)
+    # The verified claims of the browser session (a token with ``sid``,
+    # eneo.authentication.browser_session_service) the request was admitted
+    # under, request-scoped in the same way.
+    browser_session: Optional[JWTPayload] = Field(
+        default=None, exclude=True, repr=False
+    )
     roles: list[RoleInDB] = []
     quota_used: int = 0
     deleted_at: Optional[datetime] = Field(
