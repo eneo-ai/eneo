@@ -23,6 +23,7 @@ import {
   type ClipboardEvent,
   type DragEvent,
   type KeyboardEvent,
+  type MouseEvent,
   type ReactNode,
   type Ref
 } from "react";
@@ -288,6 +289,18 @@ function ComposerQuoteCard({ quote }: { quote: ComposerQuote }) {
 }
 
 /**
+ * The Astryx shell focuses its input on any click in its body that is not on
+ * a button or link, so a switch, option or field inside a popover opened from
+ * the footer would hand focus to the textarea on every toggle (WCAG 2.4.3).
+ * Layers listen on the document in the capture phase, so stopping the bubble
+ * here does not affect their dismissal.
+ */
+function keepFocusInsideLayers(event: MouseEvent<HTMLElement>) {
+  if ((event.target as Element).closest('[role="dialog"], [role="listbox"], input, label'))
+    event.stopPropagation();
+}
+
+/**
  * The chat composer (Astryx ChatComposer): drawer with attachment cards,
  * a textarea, and a row with attach, the knowledge pill (accent tint, clearly
  * lighter than Send), tools, the model picker and send/stop. Files
@@ -374,7 +387,13 @@ export function Composer({
             />
           }
           footerActions={
-            <div className="flex min-w-0 flex-wrap items-center gap-1">
+            // Propagation control only, not an interaction of its own: the
+            // controls inside keep their native keyboard behaviour.
+            // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+            <div
+              className="flex min-w-0 flex-wrap items-center gap-1"
+              onClick={keepFocusInsideLayers}
+            >
               {partnerToken}
               {canAttach && (
                 <button
@@ -396,7 +415,12 @@ export function Composer({
               {mention}
             </div>
           }
-          sendActions={modelSelector}
+          sendActions={
+            // eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions
+            <span className="contents" onClick={keepFocusInsideLayers}>
+              {modelSelector}
+            </span>
+          }
           sendButton={
             <Button
               label={busy ? t("stop_generating") : t("send_message")}

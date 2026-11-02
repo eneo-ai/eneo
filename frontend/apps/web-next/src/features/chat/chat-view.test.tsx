@@ -224,6 +224,8 @@ describe("ChatView conversation", () => {
     const diarium = within(popover).getByRole("switch", { name: "Diarium" });
     diarium.focus();
     fireEvent.click(diarium);
+    // The composer shell's click-to-focus must not take the switch's focus.
+    expect(document.activeElement).toBe(diarium);
     await waitFor(() => expect(api.PATCH).toHaveBeenCalledTimes(1));
     expect(trigger.closest("fieldset")?.getAttribute("aria-busy")).toBe("true");
     expect(trigger.hasAttribute("disabled")).toBe(false);
