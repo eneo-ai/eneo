@@ -318,6 +318,104 @@ vm.runInNewContext(process.argv[1], {
             self.assertIn("exists=true", output.read_text())
             self.assertIn("digest=sha256:" + "b" * 64, output.read_text())
 
+    def test_retry_rebuilds_instead_of_reusing_unverified_image(self):
+        for verification in (
+            "verified",
+            subprocess.CalledProcessError(1, ["gh", "attestation", "verify"]),
+            subprocess.CalledProcessError(4, ["gh", "attestation", "verify"]),
+        ):
+            with (
+                self.subTest(verification=verification),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                output = Path(directory) / "output"
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "GITHUB_REF": "refs/tags/v2.3.0",
+                            "GITHUB_SHA": "a" * 40,
+                            "GITHUB_OUTPUT": str(output),
+                            "GITHUB_REPOSITORY": "eneo-ai/eneo",
+                        },
+                    ),
+                    patch(
+                        "sys.argv",
+                        ["release_bundle.py", "reuse", "--component", "frontend"],
+                    ),
+                    patch.object(
+                        release, "verify_image", return_value="sha256:" + "b" * 64
+                    ),
+                    patch.object(release, "run", side_effect=[verification]),
+                ):
+                    release.main()
+                expected = (
+                    "exists=true\ndigest=sha256:" + "b" * 64 + "\n"
+                    if verification == "verified"
+                    else "exists=false\ndigest=\n"
+                )
+                self.assertEqual(output.read_text(), expected)
+
+    def test_retry_never_rebuilds_on_registry_or_identity_errors(self):
+        for failure in (
+            ValueError("Refusing to replace image: version or source revision differs"),
+            ValueError("Unexpected platforms"),
+            RuntimeError("Cannot verify registry image: access denied"),
+        ):
+            with (
+                self.subTest(failure=failure),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                output = Path(directory) / "output"
+                with (
+                    patch.dict(
+                        os.environ,
+                        {
+                            "GITHUB_REF": "refs/tags/v2.3.0",
+                            "GITHUB_SHA": "a" * 40,
+                            "GITHUB_OUTPUT": str(output),
+                        },
+                    ),
+                    patch(
+                        "sys.argv",
+                        ["release_bundle.py", "reuse", "--component", "frontend"],
+                    ),
+                    patch.object(release, "verify_image", side_effect=failure),
+                ):
+                    with self.assertRaises(type(failure)):
+                        release.main()
+                self.assertFalse(output.exists())
+
+    def test_failed_frontend_checks_leave_attested_image_for_retry(self):
+        workflow = (ROOT / ".github/workflows/application_image.yml").read_text()
+        self.assertLess(
+            workflow.index("Build immutable component image"),
+            workflow.index("Attest component provenance"),
+        )
+        self.assertLess(
+            workflow.index("Attest component provenance"),
+            workflow.index("Release build disk space"),
+        )
+        self.assertLess(
+            workflow.index("Release build disk space"),
+            workflow.index("Verify frontend runtime"),
+        )
+        self.assertLess(
+            workflow.index("Verify frontend runtime"),
+            workflow.index("Block frontend HIGH and CRITICAL vulnerabilities"),
+        )
+        # Reuse still has to pass both gates; attestation alone must not bypass them.
+        for name in (
+            "Verify frontend runtime",
+            "Block frontend HIGH and CRITICAL vulnerabilities",
+        ):
+            step = workflow.split(f"- name: {name}\n", 1)[1].split("\n      - ", 1)[0]
+            self.assertNotIn("steps.reuse.outputs.exists", step)
+        self.assertIn("fail-build: true", workflow)
+        self.assertIn("severity-cutoff: high", workflow)
+        self.assertIn("sudo swapoff /mnt/eneo-frontend.swap", workflow)
+        self.assertIn("docker buildx prune --all --force", workflow)
+
     def test_runtime_requires_both_supported_architectures(self):
         with (
             patch.object(release, "inspect", return_value={"manifests": []}),
