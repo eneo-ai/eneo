@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { sessionKeys } from "@/lib/api/session";
-import { renderInApp, testQueryClient } from "@/test/render";
+import { renderInApp, testAppContext, testQueryClient } from "@/test/render";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const put = vi.hoisted(() => vi.fn());
@@ -41,7 +41,8 @@ beforeEach(() => {
 
 /** The provider over the session's What's new markers (null: unavailable). */
 function renderWithMarkers(
-  state: { seen_version: string | null; announced_version: string | null } | null
+  state: { seen_version: string | null; announced_version: string | null } | null,
+  appContext = testAppContext()
 ) {
   const queryClient = testQueryClient();
   queryClient.setQueryData(sessionKeys.whatsNew, state);
@@ -49,7 +50,7 @@ function renderWithMarkers(
     <WhatsNewProvider>
       <Probe />
     </WhatsNewProvider>,
-    { queryClient }
+    { queryClient, appContext }
   );
 }
 
@@ -68,6 +69,22 @@ describe("What's new markers", () => {
     expect(screen.getByTestId("unseen").textContent).toBe("true");
     fireEvent.click(screen.getByText("Seen"));
     await waitFor(() => expect(screen.getByTestId("unseen").textContent).toBe("false"));
+  });
+
+  it("announces and records an installed release candidate under its own version", async () => {
+    const candidate = `${latestVersion}-rc.2`;
+    renderWithMarkers(
+      { seen_version: null, announced_version: null },
+      testAppContext({ versions: { frontend: `v${candidate}` } })
+    );
+    expect(screen.getByTestId("announcement").textContent).toBe(candidate);
+    fireEvent.click(screen.getByText("Announced"));
+    fireEvent.click(screen.getByText("Seen"));
+    await waitFor(() => expect(put).toHaveBeenCalledTimes(2));
+    expect(put).toHaveBeenCalledWith("/api/v1/whats-new/announced/", {
+      body: { version: candidate }
+    });
+    expect(put).toHaveBeenCalledWith("/api/v1/whats-new/seen/", { body: { version: candidate } });
   });
 
   it("does not treat an unavailable state endpoint as a first visit", () => {

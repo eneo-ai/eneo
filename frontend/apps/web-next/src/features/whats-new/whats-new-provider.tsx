@@ -1,7 +1,12 @@
-import { hasUnseenRelease, latestRelease, releases, visibleEntries } from "@eneo/whats-new";
+import {
+  hasUnseenRelease,
+  latestRelease,
+  releasesForVersion,
+  visibleEntries
+} from "@eneo/whats-new";
 import type { Release } from "@eneo/whats-new";
 import { useQueryClient, useSuspenseQuery } from "@tanstack/react-query";
-import { createContext, useCallback, useContext, useRef } from "react";
+import { createContext, useCallback, useContext, useMemo, useRef } from "react";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
 import { unwrap } from "@/lib/api/errors";
@@ -35,14 +40,16 @@ const markers = sessionQueries(browserApi).whatsNew;
  * what shows it and remounts nothing.
  */
 export function WhatsNewProvider({ children }: { children: React.ReactNode }) {
-  const { can, settings } = useAppContext();
+  const { can, settings, versions } = useAppContext();
   const enabled = settings.whats_new_enabled !== false;
   const queryClient = useQueryClient();
   const { data: state } = useSuspenseQuery(markers);
   const seenVersion: Marker = state?.seen_version;
   const announcedVersion: Marker = state?.announced_version;
-  const visibleReleases = releases.filter((release) => visibleEntries(release, can).length > 0);
-  const latest = latestRelease();
+  // An installed release candidate announces and records its own version.
+  const bundled = useMemo(() => releasesForVersion(versions.frontend), [versions.frontend]);
+  const visibleReleases = bundled.filter((release) => visibleEntries(release, can).length > 0);
+  const latest = latestRelease(bundled);
   const latestVisible = latest && visibleEntries(latest, can).length > 0;
   const seenInFlight = useRef<Promise<void> | null>(null);
 
@@ -64,7 +71,6 @@ export function WhatsNewProvider({ children }: { children: React.ReactNode }) {
   const markLatestSeen = useCallback((): Promise<void> => {
     if (!hasUnseen) return Promise.resolve();
     if (seenInFlight.current) return seenInFlight.current;
-    const latest = latestRelease();
     if (!latest) return Promise.resolve();
     const previous = seenVersion ?? null;
     setMarker("seen_version", latest.version);
@@ -83,18 +89,14 @@ export function WhatsNewProvider({ children }: { children: React.ReactNode }) {
       });
     seenInFlight.current = request;
     return request;
-  }, [hasUnseen, seenVersion, setMarker]);
+  }, [hasUnseen, latest, seenVersion, setMarker]);
 
   const markLatestAnnounced = useCallback((): Promise<void> => {
-    const latest = pendingAnnouncement(
-      enabled && !!latestVisible,
-      latestRelease(),
-      announcedVersion
-    );
-    if (!latest) return Promise.resolve();
-    setMarker("announced_version", latest.version);
+    const pending = pendingAnnouncement(enabled && !!latestVisible, latest, announcedVersion);
+    if (!pending) return Promise.resolve();
+    setMarker("announced_version", pending.version);
     return unwrap(
-      browserApi.PUT("/api/v1/whats-new/announced/", { body: { version: latest.version } })
+      browserApi.PUT("/api/v1/whats-new/announced/", { body: { version: pending.version } })
     )
       .then((answer) => {
         setMarker("announced_version", answer.announced_version);
@@ -102,7 +104,7 @@ export function WhatsNewProvider({ children }: { children: React.ReactNode }) {
       .catch((error: unknown) => {
         console.error("Could not record the What's new announcement", error);
       });
-  }, [announcedVersion, enabled, latestVisible, setMarker]);
+  }, [announcedVersion, enabled, latest, latestVisible, setMarker]);
 
   const resetState = useCallback(async () => {
     const answer = await unwrap(browserApi.DELETE("/api/v1/whats-new/state/"));
