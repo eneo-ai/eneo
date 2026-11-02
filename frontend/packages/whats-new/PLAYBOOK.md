@@ -105,9 +105,19 @@ of it.
 
 ## Release flow: versions and dates follow from git
 
+For final releases, use **Actions → Prepare and Publish Release** on `develop`
+and enter the version. It opens the dated preparation PR, waits for merged
+push CI before tagging, publishes only after the complete image/SBOM workflow,
+and opens the history PR to `develop`. Review the two PRs through the normal
+repository rules. Setup, recovery and older release-line prerequisites are in
+[`docs/DEPLOYMENT_WORKFLOW.md`](../../../docs/DEPLOYMENT_WORKFLOW.md#creating-a-production-release).
+
 `scripts/release_notes.py` edits only `releases.json`, runs the check with
 the rules of the branch it is meant for, restores the file when they fail
-and prints the git steps. It never commits, tags or pushes.
+and prints the git steps. It never commits, tags or pushes. The controller
+reuses this owner; the commands below are also available for focused local
+validation and explicit repairs. `finalize` preserves an existing date unless
+`--date YYYY-MM-DD` is deliberately supplied.
 
 | When                                 | Where                  | Command                                                                  | Result                                                                                                |
 | ------------------------------------ | ---------------------- | ------------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------- |

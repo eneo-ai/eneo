@@ -122,29 +122,84 @@ Once merged to develop:
 
 Every release goes through at least one RC tag for testing. See [Release Stabilization (RC Process)](#release-stabilization-rc-process) for the full flow.
 
-Before tagging, make sure the user-facing release notes are on the release branch and dated, reviewed by the release owner. Nobody types the version or the date into `frontend/packages/whats-new/releases.json`: on `develop` new entries go into the `next` block, `cut` names it when the release branch is created, and `finalize` dates it (see [`frontend/packages/whats-new/PLAYBOOK.md`](../frontend/packages/whats-new/PLAYBOOK.md)). The notes ship inside the frontend image as the in-app **What's new** page and are published on docs.eneo.ai; the GitHub release notes below remain the developer/operator-facing changelog.
+Once the RC is stable, run **Actions → Prepare and Publish Release → Run workflow**
+on `develop`, entering only the final version without `v`, for example `2.4.0`.
 
-On a branch from `release/vX.Y`, date the notes and run the tag rule the image build will run, then merge the change before creating the release:
+1. The controller uses `release_notes.py finalize` to date the existing notes
+   and validate them. The first preparation uses the Stockholm calendar date;
+   retries preserve that date. It opens a labelled PR to `release/v2.4`.
+2. Review and merge that PR through the normal repository rules. It changes
+   only `releases.json` and `.github/release-request.json`. The request records
+   the version and preparation base commit; a hotfix with no separate news
+   still gets a reviewable request.
+3. Successful **push CI on the merged commit** creates a draft GitHub release
+   and a create-only tag at that exact commit. A changed release-branch head
+   stops tagging and requires a fresh preparation and review.
+4. The existing image workflow builds, validates and attests the images, smoke
+   tests the complete bundle and attaches the bundle and SBOMs to the draft.
+5. Only success of that entire workflow allows the trusted controller to
+   verify the bundle's attestation, source commit and version, the derived
+   deployment environment and every SBOM asset against its signed checksum
+   inventory, then publish the release. It promotes `latest` if this is the newest **published** final
+   release, and opens a history PR to `develop` using `release_notes.py port`.
+6. Review and merge the history PR. Shipped entries move out of `next` while
+   later features stay upcoming; aliases, permissions and translations survive.
 
-```bash
-python3 scripts/release_notes.py finalize X.Y.Z
-```
+`releases.json` remains the single source of news and dates for the app and
+documentation. The request file contains no duplicate date or news. GitHub's
+generated release changelog remains developer/operator-facing. Dates record
+the first preparation, not the time of an eventual retry or publication.
 
-After the final release is published, bring its notes to `develop` in a pull request, which also moves its entries out of `next`:
+#### Release App setup (once)
 
-```bash
-python3 scripts/release_notes.py port X.Y.Z --from origin/release/vX.Y
-```
+The controller requires an installed GitHub App scoped to this repository.
+Configure repository variable `RELEASE_APP_CLIENT_ID` and repository secret
+`RELEASE_APP_PRIVATE_KEY`. The private key is never checked into the repository.
+Give the App **Contents, Pull requests and Issues: read/write**, and
+**Actions and Attestations: read**. Contents permits the preparation branch,
+tag and release; Issues permits the required PR labels. The ordinary job token
+retains only repository read access and package write access for alias promotion.
 
-Once the RC is stable, create the final release via GitHub UI:
+Allow this App to **create** `v*` tags in the repository tag rules. Keep tag
+updates/deletions protected and retain all PR, CI and merge-queue rules. The
+controller never merges its PRs and never force-updates or deletes a tag.
+Do not grant it a general branch-protection bypass or administrator access.
+If creation and tag immutability currently share one ruleset, separate the
+creation restriction first: allow the App to bypass only tag creation,
+and keep it out of the update/deletion ruleset's bypass list.
 
-1. Go to **Releases** → **Draft a new release**
-2. Click **Choose a tag** → type `v1.8.0` → select **Create new tag**
-3. Set **Target** to `release/v1.8`
-4. Set **Release title** to `v1.8.0`
-5. Write release notes (features, bug fixes, breaking changes)
-6. Leave **Set as pre-release** unchecked
-7. Click **Publish release**
+Use an App token because PR and tag events must trigger downstream checks and
+image workflows; the ordinary `GITHUB_TOKEN` does not drive this complete
+event chain. See [GitHub's event-triggering guidance](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
+Tokens are minted for one job and revoked by the pinned token action on exit.
+Privileged jobs always execute controller code from `develop`, never scripts
+from a PR, release checkout, artifact or event-supplied ref.
+
+#### Recovery and existing release lines
+
+| State | Recovery |
+| --- | --- |
+| Open preparation PR | Rerun preparation with the same version. Reuse its PR, commit and date. |
+| Branch created but PR creation failed | Rerun preparation. The existing branch is reused only when its content matches. |
+| Merged PR, CI still running or failed | Fix the CI failure. A successful push-CI event resumes tagging. Rerunning preparation also checks CI. |
+| Release branch advanced before tagging | Prepare the same version again. A new base commit produces a new request PR for review. |
+| Draft created, tag creation failed | Fix App/tag permissions and rerun the failed controller job or preparation. The same draft and commit are reused. |
+| Images, smoke tests or SBOM generation failed | Rerun failed jobs in **Build and Push Docker Images**. The release stays a draft and its `latest` aliases are not promoted. |
+| Publication, alias promotion or history PR failed | Rerun the failed **Prepare and Publish Release** reconciliation. It revalidates the tag and bundle, preserves publication metadata and reuses an open history PR. |
+| Existing tag names another commit | Stop. The controller refuses to replace it; use a new version. |
+
+Publication transitions and image builds use queued concurrency so a newer
+event does not replace a pending release. GitHub permits up to 100 pending
+runs per concurrency group; if that limit is reached, rerun a canceled event.
+
+This flow applies to release branches carrying the managed-publication changes
+in `build_and_push_images.yml` and the release scripts, including the existing
+`cut`/`finalize`/`port` tooling. Backport the complete automation and release-note
+tooling changes, with their checker, schema and tests, before preparing an older
+release line. Already shipped tags
+without a request keep their existing publication behavior; their tag-local
+workflows are never rewritten. RC publication is unchanged. Do not manually
+publish a managed draft or create its final tag in the Releases UI.
 
 GitHub Actions will automatically build production images:
 - `ghcr.io/eneo-ai/eneo-backend:v1.8.0`

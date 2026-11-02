@@ -143,13 +143,35 @@ def may_promote(
     )
 
 
+def environment(version: str, revision: str, images: dict[str, str]) -> str:
+    """The deployment environment is derived from the verified bundle."""
+    bundle(version, revision, images)
+    lines = [f"ENEO_VERSION={version}", f"ENEO_REVISION={revision}"]
+    lines += [
+        f"ENEO_{component.upper().replace('-', '_')}_IMAGE={images[component]}"
+        for component in COMPONENTS
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=["resolve", "reuse", "bundle", "promote"])
     parser.add_argument("--component", choices=COMPONENTS)
     parser.add_argument("--output", default="release-bundle")
+    parser.add_argument(
+        "--ref", help="Explicit source ref for default-branch release reconciliation"
+    )
+    parser.add_argument(
+        "--revision", help="Explicit source commit for default-branch release reconciliation"
+    )
+    parser.add_argument(
+        "--published-releases", action="store_true",
+        help="Promote among successfully published releases, excluding unfinished final tags",
+    )
     args = parser.parse_args()
-    ref, revision = os.environ["GITHUB_REF"], os.environ["GITHUB_SHA"]
+    ref = args.ref or os.environ["GITHUB_REF"]
+    revision = args.revision or os.environ["GITHUB_SHA"]
     release = resolve(ref, revision)
     version = release["version"]
     if args.command == "resolve":
@@ -184,23 +206,27 @@ def main() -> None:
         (output / "release.json").write_text(
             json.dumps(bundle(version, revision, images), indent=2) + "\n"
         )
-        lines = [f"ENEO_VERSION={version}", f"ENEO_REVISION={revision}"]
-        lines += [
-            f"ENEO_{component.upper().replace('-', '_')}_IMAGE={image}"
-            for component, image in images.items()
-        ]
-        (output / "release.env").write_text("\n".join(lines) + "\n")
+        (output / "release.env").write_text(environment(version, revision, images))
     else:
         head = None
         if ref.startswith("refs/heads/"):
             remote = run("git", "ls-remote", "origin", ref)
             head = remote.split()[0] if remote else None
-        tags = [
-            line.split("refs/tags/")[-1]
-            for line in run(
-                "git", "ls-remote", "--tags", "--refs", "origin"
+        if args.published_releases:
+            if not ref.startswith("refs/tags/"):
+                raise ValueError("Published release promotion requires a tag")
+            tags = run(
+                "gh", "api", "--paginate",
+                f"repos/{os.environ['GITHUB_REPOSITORY']}/releases",
+                "--jq", '.[] | select(.draft == false and .prerelease == false) | .tag_name',
             ).splitlines()
-        ]
+        else:
+            tags = [
+                line.split("refs/tags/")[-1]
+                for line in run(
+                    "git", "ls-remote", "--tags", "--refs", "origin"
+                ).splitlines()
+            ]
         if may_promote(ref, revision, tags, head):
             for component, image in images.items():
                 run(

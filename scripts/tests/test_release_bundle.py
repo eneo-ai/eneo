@@ -99,6 +99,27 @@ vm.runInNewContext(process.argv[1], {
             )
         )
 
+    def test_deployment_environment_is_derived_from_the_complete_bundle(self):
+        images = {c: release.REGISTRY + c + "@sha256:" + "b" * 64 for c in reversed(release.COMPONENTS)}
+        content = release.environment("2.4.0", "a" * 40, images)
+        values = dict(line.split("=", 1) for line in content.splitlines())
+        self.assertEqual(values["ENEO_VERSION"], "2.4.0")
+        self.assertEqual(values["ENEO_REVISION"], "a" * 40)
+        for component, image in images.items():
+            self.assertEqual(values[f"ENEO_{component.upper().replace('-', '_')}_IMAGE"], image)
+        with self.assertRaises(ValueError):
+            release.environment("2.4.0", "a" * 40, {})
+
+    def test_trusted_controller_resolves_the_tag_instead_of_its_default_branch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "outputs"
+            with patch.dict(os.environ, {"GITHUB_REF": "refs/heads/develop", "GITHUB_SHA": "b" * 40, "GITHUB_OUTPUT": str(output)}), patch(
+                "sys.argv", ["release_bundle.py", "resolve", "--ref", "refs/tags/v2.4.0", "--revision", "a" * 40]
+            ):
+                release.main()
+            self.assertIn("version=2.4.0\n", output.read_text())
+            self.assertIn("revision=" + "a" * 40 + "\n", output.read_text())
+
     def test_existing_image_source_must_match(self):
         manifest = {
             "manifests": [

@@ -161,14 +161,19 @@ def cut(notes: Notes, line: str) -> list[str]:
     ]
 
 
-def finalize(notes: Notes, version: str, date: str) -> list[str]:
+def finalize(notes: Notes, version: str, date: str | None = None) -> list[str]:
     match = FINAL_RE.match(version)
     if not match:
         raise Abort(f"finalize takes a final version like 2.4.0, not {version!r}")
-    if not DATE_RE.match(date):
-        raise Abort(f"--date must be YYYY-MM-DD, not {date!r}")
-    branch = f"release/v{match[1]}.{match[2]}"
     release = notes.find(version)
+    date = date or (release.get("date") if release else None) or datetime.date.today().isoformat()
+    if not DATE_RE.fullmatch(date):
+        raise Abort(f"--date must be YYYY-MM-DD, not {date!r}")
+    try:
+        datetime.date.fromisoformat(date)
+    except ValueError as error:
+        raise Abort(f"--date must be a calendar date, not {date!r}") from error
+    branch = f"release/v{match[1]}.{match[2]}"
     if release:
         notes.releases[notes.releases.index(release)] = _release(
             version, release["entries"], date
@@ -325,7 +330,7 @@ def main() -> int:
     command = commands.add_parser("finalize", help="date a release before its final tag")
     command.add_argument("version", help="final version, e.g. 2.4.0")
     command.add_argument(
-        "--date", default=datetime.date.today().isoformat(), help="YYYY-MM-DD (default: today)"
+        "--date", help="YYYY-MM-DD (default: preserve an existing date, otherwise today)"
     )
     command = commands.add_parser("port", help="bring a final release's notes to develop")
     command.add_argument("version", help="final version, e.g. 2.4.0")
