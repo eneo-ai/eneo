@@ -269,6 +269,7 @@ jobs:
           DOCKER_HOST: unix:///var/run/docker.sock
 
       - name: Verify crawler migration rollback
+        if: matrix.suite == 'migrations'
         # These tests own disposable databases and deliberately change their schema.
         run: >-
           uv run pytest -q -m migration_isolation
@@ -428,6 +429,10 @@ jobs:
         # with bun install and the web build. "Wait for the E2E stack" collects
         # the exit status before the tests start.
         run: |
+          df -h
+          # Docker build space is freed again before the stack is healthy, so a
+          # snapshot afterwards misses the peak; sample free space while it builds.
+          nohup bash -c 'while :; do df --output=avail -BM / | tail -n1; sleep 5; done' > "$RUNNER_TEMP/disk-free.txt" 2>&1 &
           nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
@@ -478,6 +483,9 @@ jobs:
             sleep 2
           done
           cat "$RUNNER_TEMP/e2e-stack.log"
+          df -h
+          docker system df
+          echo "Least free space on / since the stack started: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
           [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
 
       - name: Run E2E tests
@@ -494,6 +502,11 @@ jobs:
         if: ${{ failure() }}
         run: |
           mkdir -p e2e-artifacts
+          {
+            df -h
+            docker system df
+            echo "Least free space on /: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
+          } | tee e2e-artifacts/disk.txt
           docker compose -f docker-compose.e2e.ci.yml ps --all \
             > e2e-artifacts/compose-ps.txt
           docker compose -f docker-compose.e2e.ci.yml logs \
@@ -551,6 +564,10 @@ jobs:
         # browser setup. "Wait for the E2E stack" collects the exit status
         # before the tests start.
         run: |
+          df -h
+          # Docker build space is freed again before the stack is healthy, so a
+          # snapshot afterwards misses the peak; sample free space while it builds.
+          nohup bash -c 'while :; do df --output=avail -BM / | tail -n1; sleep 5; done' > "$RUNNER_TEMP/disk-free.txt" 2>&1 &
           nohup bash -c 'docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml up -d --build --wait; echo $? > "$RUNNER_TEMP/e2e-stack.exit"' \
             > "$RUNNER_TEMP/e2e-stack.log" 2>&1 &
 
@@ -569,6 +586,9 @@ jobs:
             sleep 2
           done
           cat "$RUNNER_TEMP/e2e-stack.log"
+          df -h
+          docker system df
+          echo "Least free space on / since the stack started: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
           [ "$(cat "$RUNNER_TEMP/e2e-stack.exit" 2>/dev/null)" = "0" ]
 
       - name: Copy browser asset map from the running backend
@@ -617,6 +637,11 @@ jobs:
         if: ${{ failure() }}
         run: |
           mkdir -p e2e-artifacts
+          {
+            df -h
+            docker system df
+            echo "Least free space on /: $(sort -n "$RUNNER_TEMP/disk-free.txt" | head -n1)"
+          } | tee e2e-artifacts/disk.txt
           docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml ps --all \
             > e2e-artifacts/compose-ps.txt
           docker compose -f docker-compose.e2e.ci.yml -f docker-compose.e2e.web-app.yml logs \
