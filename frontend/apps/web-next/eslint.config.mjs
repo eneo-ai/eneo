@@ -23,11 +23,6 @@ const notShippedUi = ["src/**/*.test.tsx"];
 // you build).
 const astryxWrappedImports = [
   {
-    name: "@astryxdesign/core/Switch",
-    message:
-      'Use `Switch` from "@/components/astryx/switch": Astryx\'s busy state announces an English "Loading".'
-  },
-  {
     name: "@astryxdesign/core/Table",
     importNames: ["Table"],
     message:

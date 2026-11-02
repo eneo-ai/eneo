@@ -1,6 +1,6 @@
 import { Badge } from "@astryxdesign/core/Badge";
 import { IconButton } from "@astryxdesign/core/IconButton";
-import { Switch as SettingSwitch } from "@/components/astryx/switch";
+import { Switch as SettingSwitch } from "@astryxdesign/core/Switch";
 import { Banner } from "@astryxdesign/core/Banner";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "@/lib/link";

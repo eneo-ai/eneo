@@ -130,14 +130,12 @@ ships must be release-ready: correct, accessible, tested and without dead ends.
   `src/components/astryx/` (lint sends imports there), or the bun patch for
   what a wrapper can't reach (How it is wired → Packages). Known gaps in
   Astryx 0.7.5:
-  - `Switch` announces a hard-coded English "Loading" in its busy state: use
-    `Switch` from `@/components/astryx/switch`, which leaves
-    `isLoading`/`changeAction` out.
-  - A `Banner` is never a live region. A banner for an outcome that just
-    happened (a list that failed to load, a save that failed) is
-    `AnnouncedBanner` from `@/components/astryx/banner`, an alert for an
-    error or warning (as Astryx 0.6 made every such banner). A notice about a state that lasts is a plain
-    `Banner` (or `QuietBanner`), and what is new is announced with `useAnnounce`.
+  - A `Banner` has no live region unless it is given one. A banner for
+    something that just happened (a refusal, a list that failed to load) gets
+    `role="alert"`; a page-level notice that may change gets `role="status"`;
+    a notice about a state that lasts, shown on every visit to its page or
+    tab, gets no role, and what is new is announced politely with
+    `useAnnounce`.
   - `Typeahead` and `Tokenizer` set no `aria-invalid` for an error status and
     leave the `KEYBOARD` attributes out of their types: use the wrappers in
     `@/components/astryx/`.

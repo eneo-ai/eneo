@@ -9,7 +9,7 @@ import { flushSync } from "react-dom";
 import { useTranslations } from "use-intl";
 import { Plus, Trash2 } from "lucide-react";
 import { Banner } from "@astryxdesign/core/Banner";
-import { Switch } from "@/components/astryx/switch";
+import { Switch } from "@astryxdesign/core/Switch";
 import { TextInput } from "@/components/astryx/text-input";
 import { FieldProblem, fieldProblemProps } from "@/components/composites/field-problem";
 import { LoadingState } from "@/components/composites/loading-state";
