@@ -39,6 +39,8 @@ export type SourceChip = {
   url?: string;
   sourceId: string;
   mcpSnippet?: McpSnippetSource;
+  /** A knowledge document: its info blob, which the Källor tab opens in the blob viewer. */
+  infoBlob?: { id: string; properties: Schema<"SourceMetadataEntry">[] };
 };
 
 type McpMeta = {
@@ -134,14 +136,18 @@ export function mergeSources(
   const docs: SourceChip[] = parts
     .filter((part) => part.type === "source-document")
     .map((source) => {
-      const eneo = (source.providerMetadata?.eneo ?? {}) as { metadata?: { url?: string | null } };
+      const eneo = (source.providerMetadata?.eneo ?? {}) as {
+        metadata?: { url?: string | null };
+        source_metadata?: Schema<"SourceMetadataEntry">[] | null;
+      };
       const url = eneo.metadata?.url;
       return {
         key: `doc-${source.sourceId}`,
         title: source.title || source.sourceId,
         // A document's stored url is whatever its editor wrote; only http(s) links out.
         url: sanitizeWebHref(url),
-        sourceId: source.sourceId
+        sourceId: source.sourceId,
+        infoBlob: { id: source.sourceId, properties: eneo.source_metadata ?? [] }
       };
     });
   const web: SourceChip[] = [...webReferencesFromParts(parts), ...(webReferences ?? [])].map(

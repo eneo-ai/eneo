@@ -6,7 +6,7 @@ import type { ComponentProps, MouseEvent } from "react";
  * folder, an editor's section on a phone), without a server round trip, and
  * keeps a real address: a modified click, "open in new
  * tab" and copying the link still use `href`. Its address is this page's own,
- * so it is never prefetched: next/link takes `prefetch={false}`, Astryx's
+ * so it is never prefetched: the app's Link takes `prefetch={false}`, Astryx's
  * Link and Button `as={SamePageLink}`.
  */
 export type InPlaceLink = { href: string; onClick: (event: MouseEvent) => void };
@@ -18,7 +18,7 @@ export function inPlaceLink(href: string, go: () => void): InPlaceLink {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
         return;
       }
-      // next/link (and Astryx links through it) skip their navigation for a prevented click.
+      // The app's Link (and Astryx links through it) skip their navigation for a prevented click.
       event.preventDefault();
       go();
     }
@@ -26,8 +26,8 @@ export function inPlaceLink(href: string, go: () => void): InPlaceLink {
 }
 
 /**
- * next/link without prefetching, for Astryx's `as`. Astryx passes the target
- * as both `href` and `to`; next/link would put `to` on the <a>.
+ * The app's Link without prefetching, for Astryx's `as`. Astryx passes the
+ * target as both `href` and `to`; the app's Link takes only `href`.
  */
 export function SamePageLink({
   children,

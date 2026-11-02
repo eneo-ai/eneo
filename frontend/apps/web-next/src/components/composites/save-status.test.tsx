@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { IntlProvider } from "use-intl";
 import { useState, type ReactNode } from "react";
 import { afterEach, expect, it, vi } from "vitest";
@@ -30,7 +30,11 @@ function withStatus(children: ReactNode) {
 }
 
 function renderWithStatus(children: ReactNode) {
-  return render(withStatus(children));
+  const view = render(withStatus(children));
+  // The indicator's text is announced through Astryx's shared live region as
+  // well, which lives outside the container and keeps the message for a
+  // while; text queries stay inside the container so they never match it.
+  return { ...view, status: within(view.container) };
 }
 
 function DirtyProbe({ dirty }: { dirty: boolean }) {
@@ -87,9 +91,9 @@ function setVisibilityState(value: DocumentVisibilityState) {
 }
 
 it("surfaces dirty drafts and guards unload", async () => {
-  const { rerender } = renderWithStatus(<DirtyProbe dirty={false} />);
+  const { rerender, status } = renderWithStatus(<DirtyProbe dirty={false} />);
 
-  expect(screen.getByText("All changes saved!")).toBeDefined();
+  expect(status.getByText("All changes saved!")).toBeDefined();
 
   rerender(
     <IntlProvider locale="en" messages={messages}>
@@ -100,7 +104,7 @@ it("surfaces dirty drafts and guards unload", async () => {
     </IntlProvider>
   );
 
-  expect(screen.getByText("1 unsaved change")).toBeDefined();
+  expect(status.getByText("1 unsaved change")).toBeDefined();
 
   await waitFor(() => {
     const event = new Event("beforeunload", { cancelable: true });
@@ -111,30 +115,32 @@ it("surfaces dirty drafts and guards unload", async () => {
 it("keeps saving visible until every save for the key has settled", async () => {
   const first = deferred();
   const second = deferred();
-  renderWithStatus(<AutosaveProbe saves={[() => first.promise, () => second.promise]} />);
+  const { status } = renderWithStatus(
+    <AutosaveProbe saves={[() => first.promise, () => second.promise]} />
+  );
 
   fireEvent.click(screen.getByRole("button", { name: "Run" }));
-  expect(screen.getByText("Saving...")).toBeDefined();
+  expect(status.getByText("Saving...")).toBeDefined();
 
   await act(async () => first.resolve());
-  expect(screen.getByText("Saving...")).toBeDefined();
+  expect(status.getByText("Saving...")).toBeDefined();
 
   await act(async () => second.resolve());
-  await waitFor(() => expect(screen.getByText("All changes saved!")).toBeDefined());
+  await waitFor(() => expect(status.getByText("All changes saved!")).toBeDefined());
 });
 
 it("pops the check mark in when a save lands, and not before", async () => {
   const first = deferred();
-  const { container } = renderWithStatus(<AutosaveProbe saves={[() => first.promise]} />);
+  const { container, status } = renderWithStatus(<AutosaveProbe saves={[() => first.promise]} />);
   const check = () => container.querySelector("[data-success-mark]");
 
   // At rest on first render: a plain check, nothing animates.
   expect(check()?.getAttribute("class")).not.toContain("animate-in");
 
   fireEvent.click(screen.getByRole("button", { name: "Run" }));
-  expect(screen.getByText("Saving...")).toBeDefined();
+  expect(status.getByText("Saving...")).toBeDefined();
   await act(async () => first.resolve());
-  await waitFor(() => expect(screen.getByText("All changes saved!")).toBeDefined());
+  await waitFor(() => expect(status.getByText("All changes saved!")).toBeDefined());
 
   // The landing animates (tw-animate-css enter utilities; the global
   // reduced-motion rule shortens them to nothing).
@@ -143,18 +149,18 @@ it("pops the check mark in when a save lands, and not before", async () => {
 
 it("commits a dirty autosave field when the document is hidden", async () => {
   const save = vi.fn(() => Promise.resolve());
-  renderWithStatus(<AutosaveFieldProbe save={save} />);
+  const { status } = renderWithStatus(<AutosaveFieldProbe save={save} />);
 
   fireEvent.change(screen.getByRole("textbox", { name: "Text field" }), {
     target: { value: "draft" }
   });
-  expect(screen.getByText("1 unsaved change")).toBeDefined();
+  expect(status.getByText("1 unsaved change")).toBeDefined();
 
   setVisibilityState("hidden");
   fireEvent(document, new Event("visibilitychange"));
 
   await waitFor(() => expect(save).toHaveBeenCalledWith("draft"));
-  await waitFor(() => expect(screen.getByText("1 unsaved change")).toBeDefined());
+  await waitFor(() => expect(status.getByText("1 unsaved change")).toBeDefined());
 });
 
 function DebouncedFieldProbe({
@@ -329,7 +335,7 @@ function RemovableField({ save }: { save: (value: string) => Promise<unknown> })
 it("keeps reporting a pending save after its field unmounts", async () => {
   const pending = deferred();
   const save = vi.fn(() => pending.promise);
-  renderWithStatus(<RemovableField save={save} />);
+  const { status } = renderWithStatus(<RemovableField save={save} />);
   const input = screen.getByRole("textbox", { name: "Text field" });
 
   fireEvent.change(input, { target: { value: "draft" } });
@@ -337,9 +343,9 @@ it("keeps reporting a pending save after its field unmounts", async () => {
   fireEvent.click(screen.getByRole("button", { name: "Remove field" }));
 
   expect(save).toHaveBeenCalledTimes(1);
-  expect(screen.getByText("Saving...")).toBeDefined();
+  expect(status.getByText("Saving...")).toBeDefined();
   await act(async () => pending.resolve());
-  await waitFor(() => expect(screen.getByText("All changes saved!")).toBeDefined());
+  await waitFor(() => expect(status.getByText("All changes saved!")).toBeDefined());
 });
 
 function NormalizedFieldProbe({ save }: { save: (value: string) => Promise<unknown> }) {

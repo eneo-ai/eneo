@@ -1,15 +1,78 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Schema } from "@/lib/api/models";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { SourceList } from "./activity-sources";
 import { mergeSources } from "./message-parts";
 
-afterEach(cleanup);
+const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn() }));
+vi.mock("@/lib/api/browser", () => ({ browserApi: api }));
+
+afterEach(() => {
+  cleanup();
+  api.GET.mockReset();
+});
+
+/** A knowledge document the answer cites, as the stream and the history give it. */
+function documentSources(url: string | null = null) {
+  return mergeSources([
+    {
+      type: "source-document",
+      sourceId: "blob-1",
+      mediaType: "text/plain",
+      title: "Upphandlingspolicy.pdf",
+      providerMetadata: {
+        eneo: { id: "blob-1", metadata: { title: "Upphandlingspolicy.pdf", url } }
+      }
+    }
+  ]).map((source) => ({ ...source, origin: "Upphandling", pageRange: null }));
+}
 
 describe("source list", () => {
+  it.each([true, false])(
+    "opens a cited knowledge document's text, with its original only when kept: %s",
+    async (originalAvailable) => {
+      api.GET.mockResolvedValue({
+        data: { text: "Gränsen är 700 000 kr.", original_available: originalAvailable },
+        response: new Response("{}")
+      });
+      renderInApp(<SourceList messageId="answer-doc" sources={documentSources()} />);
+      const trigger = screen.getByRole("button", { name: "Upphandlingspolicy.pdf" });
+      trigger.focus();
+      fireEvent.click(trigger);
+
+      const dialog = await screen.findByRole("dialog", { name: "Upphandlingspolicy.pdf" });
+      expect(await within(dialog).findByText("Gränsen är 700 000 kr.")).toBeTruthy();
+      expect(api.GET).toHaveBeenCalledWith(
+        "/api/v1/info-blobs/{id}/",
+        expect.objectContaining({ params: { path: { id: "blob-1" } } })
+      );
+      expect(
+        within(dialog).getByRole("button", { name: "Ladda ner extraherad text" })
+      ).toBeTruthy();
+      expect(within(dialog).queryByRole("button", { name: "Ladda ner original" }) !== null).toBe(
+        originalAvailable
+      );
+      await expectNoAxeViolations(dialog);
+
+      fireEvent.click(within(dialog).getAllByRole("button", { name: "Stäng" })[0]!);
+      await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
+      await waitFor(() => expect(document.activeElement).toBe(trigger));
+    }
+  );
+
+  it("links a cited document with a web address to it instead", () => {
+    renderInApp(
+      <SourceList messageId="answer-doc" sources={documentSources("https://example.com/p")} />
+    );
+    expect(screen.getByRole("link", { name: /Upphandlingspolicy\.pdf/ }).getAttribute("href")).toBe(
+      "https://example.com/p"
+    );
+    expect(screen.queryByRole("button", { name: "Upphandlingspolicy.pdf" })).toBeNull();
+  });
+
   it.each(["crawl-page", "web-search"])(
     "opens an MCP %s source as an external link",
     async (sourceType) => {

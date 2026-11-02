@@ -13,17 +13,8 @@ const catalogue = {
   runtime: null
 };
 
-it("reads a backend without the bundled runtime as an empty catalogue", async () => {
-  const fetch = vi.fn().mockResolvedValue(json(404, { detail: "Not Found" }));
-  const api = createClient<paths>({ baseUrl: "http://localhost", fetch });
-  expect(await new QueryClient().query(bundledToolsQueryOptions(api))).toEqual({
-    items: [],
-    count: 0,
-    runtime: null
-  });
-});
-
-it.each([403, 500])("keeps a %s an error instead of an empty catalogue", async (status) => {
+// The app is served by its own backend, which always has the endpoint.
+it.each([403, 404, 500])("keeps a %s an error instead of an empty catalogue", async (status) => {
   const fetch = vi.fn().mockResolvedValue(json(status, { message: "Refused" }));
   const api = createClient<paths>({ baseUrl: "http://localhost", fetch });
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

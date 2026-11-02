@@ -1558,7 +1558,9 @@ With `ENVIRONMENT=development`, the backend refuses to start with
 `BROWSER_SESSION_ENABLED=true` unless `PUBLIC_ORIGIN` is a `localhost` or
 `127.0.0.1` URL, so the development cookie, which is not marked Secure, never
 reaches a public host. The browser session lasts `JWT_EXPIRY_TIME`: an absolute
-lifetime with no inactivity limit, and logout is local.
+lifetime with no inactivity limit. Signing out ends the Eneo session on the
+server at once, so a copy of its cookie stops working; the identity provider's
+session stays. A password change still ends every session of the user.
 
 ### Enable the invitation banner
 

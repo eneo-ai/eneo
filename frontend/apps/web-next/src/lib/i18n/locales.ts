@@ -3,7 +3,10 @@ import type { AbstractIntlMessages } from "use-intl";
 export const locales = ["sv", "en"] as const;
 export type Locale = (typeof locales)[number];
 export const defaultLocale: Locale = "sv";
-export const LOCALE_COOKIE = "NEXT_LOCALE";
+export const LOCALE_COOKIE = "eneo_locale";
+/** This app's earlier name for the preference: adopted once, then cleared. */
+export const RETIRED_LOCALE_COOKIE = "NEXT_LOCALE";
+/** The SvelteKit app's preference, which that app still reads. */
 export const LEGACY_LOCALE_COOKIE = "PARAGLIDE_LOCALE";
 
 /** Each language in its own name, so every reader finds theirs (not translated). */

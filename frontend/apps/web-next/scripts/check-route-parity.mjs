@@ -21,7 +21,9 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const SECURITY_SOURCES = ["../proxy.ts", "../../next.config.ts"];
 export const RETIRED_NEXT_ROUTES = new Map([
-  ["/activate", "Next-only provisioning is retired; Vite serves signed-in not-found instead."]
+  ["/activate", "Next-only provisioning is retired; Vite serves signed-in not-found instead."],
+  ["/spaces/$/services", "Legacy services are hidden on develop (#928); not-found instead."],
+  ["/spaces/$/services/$", "Legacy services are hidden on develop (#928); not-found instead."]
 ]);
 export const VITE_ONLY = new Map([
   ["/*", "Signed-in not-found splat (P4 router shell)."],

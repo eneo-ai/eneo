@@ -147,7 +147,11 @@ function SharePointAdminSection() {
  */
 export function AdminIntegrationsPage() {
   const t = useTranslations();
-  const { data: integrations } = useSuspenseQuery(tenantIntegrationsQueryOptions(browserApi));
+  // SharePoint only, as production: the other providers are not ready to enable.
+  const { data: integrations } = useSuspenseQuery({
+    ...tenantIntegrationsQueryOptions(browserApi),
+    select: (items) => items.filter((integration) => integration.integration_type === "sharepoint")
+  });
 
   return (
     <div className="mx-auto flex w-full max-w-4xl flex-col gap-6">

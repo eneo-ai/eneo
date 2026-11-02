@@ -15,6 +15,7 @@ import {
   ShieldCheck,
   Square,
   TextQuote,
+  TriangleAlert,
   X
 } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -203,6 +204,12 @@ export type ComposerProps = {
    * stays enabled (ACCESSIBILITY.md, forms).
    */
   sendBlocked?: string | null;
+  /**
+   * Nobody can answer here (no usable AI model): said under the field from
+   * the start and read with it, and the reason every send stops. The field
+   * and the footer stay usable, so a model can still be picked.
+   */
+  unavailable?: string | null;
   busy: boolean;
   onStop: () => void;
   /** Persistent accessible name of the text field. */
@@ -297,6 +304,7 @@ export function Composer({
   onChange,
   onSubmit,
   sendBlocked = null,
+  unavailable = null,
   busy,
   onStop,
   label,
@@ -322,6 +330,7 @@ export function Composer({
   const announce = useAnnounce();
   const hintId = useId();
   const problemId = useId();
+  const unavailableId = useId();
   const field = useRef<HTMLTextAreaElement>(null);
   const fieldRef = useMergedRefs(field, textareaRef);
   // What stopped the last send, shown at the field until the draft changes.
@@ -341,6 +350,12 @@ export function Composer({
   // at the field, out loud, and leaves focus there to fix it.
   const send = () => {
     if (busy) return;
+    if (unavailable) {
+      // Already said at the field: said again out loud, with focus kept there.
+      field.current?.focus();
+      announce(unavailable);
+      return;
+    }
     const missing = value.trim() === "" ? t("chat_composer_empty") : sendBlocked;
     if (missing) {
       // Rendered first, so the field is read with its new description.
@@ -384,7 +399,9 @@ export function Composer({
             <ComposerTextarea
               ref={fieldRef}
               label={label}
-              describedBy={problem ? `${problemId} ${hintId}` : hintId}
+              describedBy={[problem && problemId, unavailable && unavailableId, hintId]
+                .filter(Boolean)
+                .join(" ")}
               invalid={problem !== null}
               placeholder={placeholder}
               rows={variant === "start" ? 2 : 1}
@@ -463,6 +480,15 @@ export function Composer({
         <p id={problemId} className="text-ax-error flex items-center gap-1.5 px-1 text-xs">
           <CircleAlert aria-hidden="true" className="size-3.5 shrink-0" />
           {problem}
+        </p>
+      )}
+      {unavailable && (
+        <p
+          id={unavailableId}
+          className="text-ax-text-secondary flex items-center gap-1.5 px-1 text-xs"
+        >
+          <TriangleAlert aria-hidden="true" className="size-3.5 shrink-0" />
+          {unavailable}
         </p>
       )}
       <span id={hintId} className="sr-only">

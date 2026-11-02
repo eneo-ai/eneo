@@ -60,6 +60,22 @@ it.each([
   expect(navigateTo).not.toHaveBeenCalled();
 });
 
+it("treats a form the backend refused (HTTP 422) as rejected credentials", async () => {
+  fetchMock.mockResolvedValue(
+    Response.json(
+      { detail: [{ loc: ["body", "username"], msg: "Invalid email" }] },
+      { status: 422 }
+    )
+  );
+  expect(await submitPasswordLogin(undefined, {}, credentials())).toEqual({
+    error: "invalid_credentials",
+    email: "user@example.test",
+    attemptsRemaining: null,
+    retryAfterSeconds: null
+  });
+  expect(navigateTo).not.toHaveBeenCalled();
+});
+
 it.each([
   [403, { eneo_error_code: 9019, message: "Disabled" }, "deactivated"],
   [403, { eneo_error_code: 9025, message: "Disabled" }, "deactivated"],
@@ -74,6 +90,18 @@ it.each([
   });
   expect(navigateTo).not.toHaveBeenCalled();
 });
+
+it.each([401, 403, 422, 429, 503])(
+  "hands the trace id of a refused login (HTTP %s) to the form for support",
+  async (status) => {
+    fetchMock.mockResolvedValue(
+      Response.json({}, { status, headers: { "X-Correlation-ID": "trace-abc" } })
+    );
+    expect(await submitPasswordLogin(undefined, {}, credentials())).toMatchObject({
+      traceId: "trace-abc"
+    });
+  }
+);
 
 it("keeps a failed network attempt on the form", async () => {
   fetchMock.mockRejectedValue(new TypeError("Offline"));

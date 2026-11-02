@@ -737,7 +737,12 @@ it("sorts a provider's models by name, activation and security classification", 
 it("shows an upcoming retirement notice with the model name before deprecation", async () => {
   renderPage({
     ...presentation,
-    completion_models: [completion({ deprecation_date: "2099-01-01" })]
+    completion_models: [
+      // Inside the six-month window in which a coming deprecation is shown.
+      completion({
+        deprecation_date: new Date(Date.now() + 30 * 86_400_000).toISOString().slice(0, 10)
+      })
+    ]
   } as ModelsPresentation);
   expect(await screen.findByText("1 modell kommer utfasas snart")).toBeTruthy();
   expect(

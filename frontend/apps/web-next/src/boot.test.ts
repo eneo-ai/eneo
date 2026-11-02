@@ -5,6 +5,7 @@ import { readCspNonce, resolveLocale, showBootError } from "./boot";
 afterEach(() => {
   vi.restoreAllMocks();
   document.documentElement.lang = "";
+  document.cookie = "eneo_locale=; Max-Age=0; Path=/";
   document.cookie = "NEXT_LOCALE=; Max-Age=0; Path=/";
   document.cookie = "PARAGLIDE_LOCALE=; Max-Age=0; Path=/";
   window.localStorage.removeItem("language");
@@ -15,14 +16,14 @@ it.each(["sv", "de", ""])(
   "never imports legacy preferences while current cookie %s is present",
   (current) => {
     document.documentElement.lang = "sv";
-    document.cookie = `NEXT_LOCALE=${current}; Path=/`;
+    document.cookie = `eneo_locale=${current}; Path=/`;
     document.cookie = "PARAGLIDE_LOCALE=en; Path=/";
     window.localStorage.setItem("language", "en");
     const readStorage = vi.spyOn(Storage.prototype, "getItem");
 
     expect(resolveLocale(document)).toBe("sv");
     expect(readStorage).not.toHaveBeenCalled();
-    expect(document.cookie).toContain(`NEXT_LOCALE=${current}`);
+    expect(document.cookie).toContain(`eneo_locale=${current}`);
   }
 );
 
@@ -33,10 +34,41 @@ it("migrates a valid legacy cookie ahead of storage without modifying legacy cho
   const readStorage = vi.spyOn(Storage.prototype, "getItem");
 
   expect(resolveLocale(document)).toBe("en");
-  expect(document.cookie).toContain("NEXT_LOCALE=en");
+  expect(document.cookie).toContain("eneo_locale=en");
   expect(document.cookie).toContain("PARAGLIDE_LOCALE=en");
   expect(readStorage).not.toHaveBeenCalled();
   expect(window.localStorage.getItem("language")).toBe("sv");
+});
+
+it("adopts the cookie's earlier name ahead of the other legacy choices, then clears it", () => {
+  document.documentElement.lang = "sv";
+  document.cookie = "NEXT_LOCALE=en; Path=/";
+  document.cookie = "PARAGLIDE_LOCALE=sv; Path=/";
+  window.localStorage.setItem("language", "sv");
+
+  expect(resolveLocale(document)).toBe("en");
+  expect(document.cookie).toContain("eneo_locale=en");
+  expect(document.cookie).not.toContain("NEXT_LOCALE=");
+  expect(document.cookie).toContain("PARAGLIDE_LOCALE=sv");
+});
+
+it.each(["de", ""])("clears an invalid earlier cookie %s and keeps looking", (retired) => {
+  document.documentElement.lang = "sv";
+  document.cookie = `NEXT_LOCALE=${retired}; Path=/`;
+  document.cookie = "PARAGLIDE_LOCALE=en; Path=/";
+
+  expect(resolveLocale(document)).toBe("en");
+  expect(document.cookie).toContain("eneo_locale=en");
+  expect(document.cookie).not.toContain("NEXT_LOCALE=");
+});
+
+it("clears the earlier cookie while the current one decides", () => {
+  document.documentElement.lang = "sv";
+  document.cookie = "eneo_locale=sv; Path=/";
+  document.cookie = "NEXT_LOCALE=en; Path=/";
+
+  expect(resolveLocale(document)).toBe("sv");
+  expect(document.cookie).not.toContain("NEXT_LOCALE=");
 });
 
 it("imports a valid stored language only without an eligible cookie", () => {
@@ -45,7 +77,7 @@ it("imports a valid stored language only without an eligible cookie", () => {
   window.localStorage.setItem("language", "en");
 
   expect(resolveLocale(document)).toBe("en");
-  expect(document.cookie).toContain("NEXT_LOCALE=en");
+  expect(document.cookie).toContain("eneo_locale=en");
   expect(document.cookie).toContain("PARAGLIDE_LOCALE=de");
   expect(window.localStorage.getItem("language")).toBe("en");
 });
@@ -54,13 +86,13 @@ it("ignores invalid or denied legacy storage without setting a current cookie", 
   document.documentElement.lang = "sv";
   window.localStorage.setItem("language", "de");
   expect(resolveLocale(document)).toBe("sv");
-  expect(document.cookie).not.toContain("NEXT_LOCALE=");
+  expect(document.cookie).not.toContain("eneo_locale=");
 
   vi.spyOn(window, "localStorage", "get").mockImplementation(() => {
     throw new DOMException("Storage denied", "SecurityError");
   });
   expect(resolveLocale(document)).toBe("sv");
-  expect(document.cookie).not.toContain("NEXT_LOCALE=");
+  expect(document.cookie).not.toContain("eneo_locale=");
 });
 
 it.each([
@@ -71,7 +103,7 @@ it.each([
   ["", "", "sv"]
 ])("resolves html language %s and cookie %s to %s", (html, cookie, expected) => {
   document.documentElement.lang = html;
-  document.cookie = `NEXT_LOCALE=${cookie}; Path=/`;
+  document.cookie = `eneo_locale=${cookie}; Path=/`;
   expect(resolveLocale(document)).toBe(expected);
 });
 

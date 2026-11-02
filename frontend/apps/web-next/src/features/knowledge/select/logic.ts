@@ -1,4 +1,5 @@
 import type { Collection, IntegrationKnowledge, Website } from "../knowledge";
+import { summarizeSource } from "../integrations/sources";
 import { matchesSearch } from "@/lib/search";
 
 /**
@@ -10,24 +11,22 @@ import { matchesSearch } from "@/lib/search";
 
 type SpaceOwned = { space_id?: string | null };
 
-export function isPersonalItem(item: SpaceOwned, currentSpaceId: string | undefined): boolean {
-  const owner = item.space_id ?? undefined;
-  return !owner || owner === currentSpaceId;
-}
+// "personal" is the legacy name for current-space items, including shared spaces.
+export type KnowledgeOrigin = "personal" | "organization";
 
-export function isOrgItem(
+/**
+ * Exhaustive: only what the organization space owns is "organization";
+ * everything else, legacy links from another space included, belongs to the
+ * current space, so every visible source has one section and stays removable.
+ */
+export function classifyKnowledgeOrigin(
   item: SpaceOwned,
   currentSpaceId: string | undefined,
   orgSpaceId: string | undefined
-): boolean {
+): KnowledgeOrigin {
   const owner = item.space_id ?? undefined;
-  if (orgSpaceId) return owner === orgSpaceId;
-  if (!currentSpaceId) return false;
-  return Boolean(owner) && owner !== currentSpaceId;
+  return owner && owner !== currentSpaceId && owner === orgSpaceId ? "organization" : "personal";
 }
-
-// "personal" is the legacy name for current-space items, including shared spaces.
-export type KnowledgeOrigin = "personal" | "organization";
 
 export function byOrigin<T extends SpaceOwned>(
   items: T[],
@@ -35,10 +34,8 @@ export function byOrigin<T extends SpaceOwned>(
   currentSpaceId: string | undefined,
   orgSpaceId: string | undefined
 ): T[] {
-  return items.filter((item) =>
-    origin === "personal"
-      ? isPersonalItem(item, currentSpaceId)
-      : isOrgItem(item, currentSpaceId, orgSpaceId)
+  return items.filter(
+    (item) => classifyKnowledgeOrigin(item, currentSpaceId, orgSpaceId) === origin
   );
 }
 
@@ -123,6 +120,15 @@ export function integrationOptions(
     options.push({ type: "single", key: `integration:${knowledge.id}`, knowledge });
   }
   return sortEntries(options);
+}
+
+/** Flags an option whose last sync failed (for a wrapper: any item's) or that synced but holds nothing. */
+export function integrationSyncFlag(entry: IntegrationEntry): "error" | "empty" | null {
+  const { state } = summarizeSource(
+    entry.type === "wrapper" ? entry.wrapper.items : [entry.knowledge],
+    {}
+  );
+  return state === "attention" ? "error" : state === "empty" ? "empty" : null;
 }
 
 /**

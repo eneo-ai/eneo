@@ -73,11 +73,14 @@ export function activeMcpServerCount(
 
 export function mcpConversationOptions({
   servers,
+  capabilities,
   disabledServerIds,
   autoAcceptTools,
   supportsToolApproval
 }: {
   servers: McpServerSummary[];
+  /** Web search, image generation, …: external tools the backend asks approval for too. */
+  capabilities: ChatCapability[];
   disabledServerIds: Set<string>;
   autoAcceptTools: boolean;
   supportsToolApproval: boolean;
@@ -87,7 +90,9 @@ export function mcpConversationOptions({
   );
   return {
     require_tool_approval:
-      supportsToolApproval && servers.length > 0 && !autoAcceptTools ? true : undefined,
+      supportsToolApproval && servers.length + capabilities.length > 0 && !autoAcceptTools
+        ? true
+        : undefined,
     disabled_mcp_server_ids: disabledIds.length > 0 ? disabledIds : undefined
   };
 }

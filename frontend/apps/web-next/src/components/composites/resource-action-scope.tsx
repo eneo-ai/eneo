@@ -18,7 +18,7 @@ import { useFocusRescue } from "@/lib/focus-rescue";
  * device swaps one for the other: every item in it is remounted. A dialog
  * that lived in an item's menu component went with it, with whatever was
  * chosen in it (a Move's destination) and the mutation it had started. Here
- * the menus only ask (`open("move", service)`), and the one scope above the
+ * the menus only ask (`open("move", assistant)`), and the one scope above the
  * collection holds what is open, so a turn across 768 px changes the layout
  * behind an open dialog and nothing else.
  *

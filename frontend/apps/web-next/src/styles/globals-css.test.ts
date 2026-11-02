@@ -421,9 +421,9 @@ describe("globals.css", () => {
     });
   });
 
-  it("names the fonts on :root with the metric-matched fallbacks Next generated", () => {
+  it("names the fonts on :root with their metric-matched fallbacks", () => {
     // The fallback faces size a local font to the web font's metrics, so the
-    // swap to the web font does not move text (the values Next's font loader generated).
+    // swap to the web font does not move text.
     const fallbacks = new Map<string, Record<string, string>>();
     postcss.parse(css).walkAtRules("font-face", (face: AtRule) => {
       const declarations: Record<string, string> = {};

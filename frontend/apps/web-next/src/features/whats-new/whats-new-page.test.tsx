@@ -15,7 +15,8 @@ vi.mock("@eneo/whats-new", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@eneo/whats-new")>();
   return {
     ...actual,
-    releases: catalog.releases,
+    // The test build is no release candidate: it lists the test's catalog as authored.
+    releasesForVersion: () => catalog.releases,
     // As the real one, over the test's catalog: the unreleased block is never the latest.
     latestRelease: (list = catalog.releases) => actual.latestRelease(list)
   };

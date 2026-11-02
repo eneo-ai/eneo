@@ -10,6 +10,8 @@ import { routeTitle } from "@/lib/route-head";
 
 export const Route = createFileRoute("/_app/admin/tools")({
   loader: async ({ context: { queryClient } }) => {
+    // The runtime status waits for the backend's probe of the tool runtime:
+    // the page keeps its place above the tabs instead of waiting for it.
     warmQuery(queryClient, bundledToolsQueryOptions(browserApi));
     await Promise.all([
       readFresh(queryClient, mcpServersQueryOptions(browserApi)),

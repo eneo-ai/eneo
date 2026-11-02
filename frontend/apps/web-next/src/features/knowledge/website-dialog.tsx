@@ -181,9 +181,9 @@ export function WebsiteDialog({
           update_interval: updateInterval,
           download_files: downloadFiles
         };
-        if (httpAuthEnabled && httpAuthUsername) {
+        if (httpAuthEnabled && httpAuthUsername && httpAuthPassword) {
           body.http_auth_username = httpAuthUsername;
-          if (httpAuthPassword) body.http_auth_password = httpAuthPassword;
+          body.http_auth_password = httpAuthPassword;
         } else if (!httpAuthEnabled && website.requires_http_auth) {
           body.http_auth_username = null;
           body.http_auth_password = null;
@@ -237,8 +237,10 @@ export function WebsiteDialog({
 
   const httpAuthPasswordTouched =
     httpAuthPassword.length > 0 || httpAuthPasswordConfirmation.length > 0;
+  // Saved credentials are kept or replaced as a pair: typing either half asks for the other.
   const httpAuthNeedsNewCredentials =
-    httpAuthEnabled && (!website?.requires_http_auth || httpAuthPasswordTouched);
+    httpAuthEnabled &&
+    (!website?.requires_http_auth || httpAuthUsername.trim().length > 0 || httpAuthPasswordTouched);
   const urlProblem = !url.trim()
     ? t("required_field")
     : isSupportedWebsiteUrl(url.trim())
@@ -401,7 +403,7 @@ export function WebsiteDialog({
                   description={
                     website?.requires_http_auth ? t("leave_blank_keep_password") : undefined
                   }
-                  isRequired={!website?.requires_http_auth}
+                  isRequired={httpAuthNeedsNewCredentials}
                   requiredMessage={t("required_field")}
                   showErrors={submitted}
                   valueRef={httpAuthPasswordRef}

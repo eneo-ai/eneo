@@ -15,7 +15,7 @@
  *   until a test reports a size with `reportResize`;
  * - scrolling as a no-op.
  *
- * The viewport, the observers and the fake next/navigation route
+ * The viewport, the observers and the fake app navigation route
  * (src/test/navigation.ts) reset after every test. A test can still stub any
  * of these itself (vi.stubGlobal, vi.spyOn). src/test/setup-dom.test.ts
  * checks the fakes against the browser behaviour they copy.

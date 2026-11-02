@@ -14,7 +14,6 @@ from eneo.main.config import Settings, get_settings
 from tests.fixtures import TEST_USER
 from tests.unit.browser_session_test_utils import expected_set_cookie
 
-NEXT_ERA = ("eneo_session", "eneo_oidc_txn", "eneo_federation_txn")
 # SimpleCookie renders an empty value as a quoted empty string.
 EMPTY = '""'
 
@@ -76,5 +75,5 @@ def test_clearing_matches_the_attributes_they_were_set_with(
 
     assert set_cookies(response) == [
         expected_set_cookie(name, EMPTY, 0, production=production)
-        for name in (session, txn, *NEXT_ERA)
+        for name in (session, txn)
     ]
