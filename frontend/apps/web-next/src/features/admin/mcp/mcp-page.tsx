@@ -40,7 +40,6 @@ import { securityClassificationsQueryOptions } from "@/features/admin/security-c
 import { useSettingSwitch } from "@/features/admin/use-setting-switch";
 import { BUNDLED_SERVERS, SOURCE_KINDS } from "@/features/admin/tools/bundled";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage } from "@/lib/api/errors";
 import { toastApiError } from "@/lib/api/toast";
 import { matchesSearch } from "@/lib/search";
 import { toast } from "@/lib/toast";
@@ -339,11 +338,7 @@ export function McpServersPage({ embedded = false }: { embedded?: boolean } = {}
         queryClient.invalidateQueries({ queryKey: BUNDLED_KEY })
       ]);
     },
-    onError: (cause, tool) =>
-      toast.error(
-        getErrorMessage(cause, t) ||
-          t("tools_bundled_add_failed", { name: t(BUNDLED_SERVERS[tool]?.label ?? tool) })
-      )
+    onError: (cause) => toastApiError(cause, t)
   });
   const { data: security } = useSuspenseQuery(securityClassificationsQueryOptions(browserApi));
   const securityEnabled = security.security_enabled;

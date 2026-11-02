@@ -43,7 +43,8 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { browserApi } from "@/lib/api/browser";
-import { getErrorMessage, unwrap } from "@/lib/api/errors";
+import { unwrap } from "@/lib/api/errors";
+import { toastApiError } from "@/lib/api/toast";
 import { toast } from "@/lib/toast";
 import { useAppContext } from "@/components/providers/app-context";
 import {
@@ -204,7 +205,7 @@ export function RolesPage() {
       setEditor(null);
       await queryClient.invalidateQueries({ queryKey: ROLES_KEY });
     } catch (error) {
-      toast.error(getErrorMessage(error, t));
+      toastApiError(error, t);
     } finally {
       setSaving(false);
     }
@@ -242,7 +243,7 @@ export function RolesPage() {
       setPending(null);
       await queryClient.invalidateQueries({ queryKey: ROLES_KEY });
     } catch (error) {
-      toast.error(getErrorMessage(error, t));
+      toastApiError(error, t);
     } finally {
       setActionBusy(false);
     }

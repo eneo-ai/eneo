@@ -39,4 +39,19 @@ describe("toastApiError", () => {
     // No hard-coded English label in the Swedish UI.
     expect(screen.queryByText(/Trace/)).toBeNull();
   });
+
+  it("offers the way out the error names beside its message and references", async () => {
+    const onClick = vi.fn();
+    toastApiError(
+      new EneoApiError("Model in use", { status: 409, code: 9039, traceId: "trace-9" }),
+      t,
+      { action: { label: "Migrera", onClick } }
+    );
+    await act(() => vi.advanceTimersByTimeAsync(300));
+
+    expect(screen.getByText(t("eneo_error_9039"))).toBeTruthy();
+    expect(screen.getByText("Spårnings-ID: trace-9")).toBeTruthy();
+    act(() => screen.getByRole("button", { name: "Migrera" }).click());
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
 });

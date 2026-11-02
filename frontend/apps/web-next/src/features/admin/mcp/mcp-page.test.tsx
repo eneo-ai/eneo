@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { renderInApp } from "@/test/render";
 
@@ -24,6 +24,10 @@ const server = (id: string, name: string, tools: Tool[] = []) => ({
 });
 
 const servers = vi.hoisted(() => ({ items: [] as unknown[] }));
+/** The servers built into Eneo that the runtime offers this tenant. */
+const bundled = vi.hoisted(() => ({ items: [] as unknown[] }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn(), error: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ toast }));
 
 vi.mock("@/lib/navigation", () => import("@/test/navigation"));
 const remove = vi.hoisted(() => vi.fn());
@@ -37,7 +41,9 @@ vi.mock("@/lib/api/browser", () => ({
         data:
           path === "/api/v1/mcp-servers/settings/"
             ? { items: servers.items }
-            : { security_enabled: false, security_classifications: [] },
+            : path === "/api/v1/mcp-servers/bundled/"
+              ? { items: bundled.items, count: bundled.items.length, runtime: null }
+              : { security_enabled: false, security_classifications: [] },
         response: new Response("{}")
       })
   }
@@ -47,12 +53,44 @@ import { McpServersPage } from "./mcp-page";
 
 beforeEach(() => {
   servers.items = [server("diariet", "Diariet"), server("kartan", "Kartan")];
+  bundled.items = [];
 });
 
 afterEach(() => {
   cleanup();
   remove.mockReset();
   post.mockReset();
+  vi.clearAllMocks();
+});
+
+/** Picks a server built into Eneo from the add menu. */
+async function addBundled(label: string) {
+  // A menu once the catalogue has loaded; a plain button before.
+  const trigger = await waitFor(() => {
+    const button = screen.getByRole("button", { name: "Lägg till MCP-server" });
+    expect(button.getAttribute("aria-controls")).toBeTruthy();
+    return button;
+  });
+  trigger.focus();
+  // jsdom does not turn Enter into a click; Astryx opens menus on the key.
+  fireEvent.keyDown(trigger, { key: "Enter" });
+  const menu = document.getElementById(trigger.getAttribute("aria-controls")!)!;
+  fireEvent.click(within(menu).getByRole("menuitem", { name: new RegExp(`^${label}`) }));
+}
+
+it("toasts a refused bundled server with its message and support reference", async () => {
+  bundled.items = [{ tool: "charts", purpose: "general", available: true, mcp_server_id: null }];
+  post.mockResolvedValue({
+    error: { message: "Runtime unavailable" },
+    response: new Response("{}", { status: 502, headers: { "x-trace-id": "trace-1" } })
+  });
+  renderInApp(<McpServersPage />);
+  await addBundled("Diagram");
+  await waitFor(() =>
+    expect(toast.error).toHaveBeenCalledWith("Runtime unavailable", {
+      description: "Spårnings-ID: trace-1"
+    })
+  );
 });
 
 it("keeps the function-server filter reachable when the tenant has only function sources", async () => {

@@ -7,6 +7,8 @@ import type { McpServer } from "../mcp/mcp";
 const get = vi.hoisted(() => vi.fn());
 const post = vi.hoisted(() => vi.fn());
 vi.mock("@/lib/api/browser", () => ({ browserApi: { GET: get, POST: post } }));
+const toast = vi.hoisted(() => ({ success: vi.fn(), info: vi.fn(), error: vi.fn() }));
+vi.mock("@/lib/toast", () => ({ toast }));
 vi.mock("use-intl", () => ({ useTranslations: () => (key: string) => key, useLocale: () => "en" }));
 vi.mock("@/lib/link", () => ({
   default: ({ children, href }: { children: React.ReactNode; href: string }) => (
@@ -202,6 +204,21 @@ describe("admin function sources", () => {
       })
     );
     expect(await screen.findByText("tools_builtin_turned_on")).toBeTruthy();
+  });
+
+  it("toasts a refused built-in provider with its message and support references", async () => {
+    post.mockResolvedValue({
+      error: { message: "Runtime unavailable", eneo_error_code: 9036, error_id: "error-1" },
+      response: new Response("{}", { status: 502, headers: { "x-trace-id": "trace-1" } })
+    });
+    show();
+    fireEvent.click((await screen.findAllByRole("button", { name: "tools_builtin_turn_on" }))[0]!);
+    await waitFor(() =>
+      expect(toast.error).toHaveBeenCalledWith("eneo_error_9036", {
+        description: "error_id: error-1 · trace_id: trace-1"
+      })
+    );
+    expect(screen.queryByText("tools_builtin_turned_on")).toBeNull();
   });
 
   it("gives the external server's button a 44 px row on a touch screen", async () => {
