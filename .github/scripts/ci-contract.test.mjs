@@ -135,6 +135,17 @@ test("apt has deadlines only on its network phase and installs nothing it did no
   }
 });
 
+test("both E2E jobs free disk before building their stack", () => {
+  // AWS-hosted runners ran out of space during the stack build (jobs 125460893789, 125544852231).
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
+  for (const [name, next] of [["frontend-e2e", "frontend-web-next-e2e"], ["frontend-web-next-e2e", "schema-drift"]]) {
+    const job = workflow.split(`\n  ${name}:\n`)[1].split(`\n  ${next}:\n`)[0];
+    const guard = job.indexOf("uses: ./.github/actions/free-disk");
+    assert.ok(guard > job.indexOf("- name: Checkout"), name);
+    assert.ok(guard < job.indexOf("- name: Start isolated E2E stack in the background"), name);
+  }
+});
+
 test("the Svelte build is checked against a memory budget below its heap limit", () => {
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/ci.yml"), "utf8");
   const stepBody = (name) => workflow.split(`- name: ${name}\n`)[1]?.split(/\n      - name: /)[0];
