@@ -15,8 +15,7 @@ The UI rules below apply to web-next.
 On `feat/web-next-vite` and its slice branches, the target is a Vite SPA with
 TanStack Router and Query; FastAPI is the only server. Build framework-neutral
 React in `src/features`, `src/components` and `src/lib`, with routes in
-`src/routes`. Next.js, its server routes and its standalone image are removed.
-Do not reintroduce `src/app`, Next imports or a frontend auth server. SvelteKit in `apps/web` is the production behaviour reference and
+`src/routes`. Do not reintroduce `src/app` or a frontend auth server. SvelteKit in `apps/web` is the production behaviour reference and
 must not be changed by migration slices.
 
 Follow the migration epic `eneo-web-next-vite-ded5` in Beads from the

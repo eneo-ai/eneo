@@ -8,7 +8,7 @@ import { renderInApp } from "@/test/render";
 import { AstryxProvider } from "./astryx-provider";
 
 describe("AstryxProvider", () => {
-  it("renders Astryx links with next/link and without Astryx's router prop `to`", () => {
+  it("renders Astryx links through the app's Link without Astryx's router prop `to`", () => {
     renderInApp(<Link href="/spaces/list">Ytor</Link>);
 
     const link = screen.getByRole("link", { name: "Ytor" });

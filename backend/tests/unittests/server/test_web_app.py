@@ -490,7 +490,7 @@ def test_template_is_filled_in_one_pass(monkeypatch: pytest.MonkeyPatch, dist: P
     assert '<html lang="sv">' in response.text
 
 
-def test_csp_matches_the_next_production_policy():
+def test_csp_matches_the_production_policy():
     policy = build_content_security_policy("abc", ())
 
     assert policy == (
