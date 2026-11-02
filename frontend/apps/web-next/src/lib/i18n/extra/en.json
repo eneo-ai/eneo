@@ -1893,5 +1893,6 @@
   "no_group_members_in_space": "No user groups have been added to this space",
   "user_groups_description": "Groups of users that have access to this space. All members of a group inherit the group's role.",
   "conversation_retention_space_description": "Applies to all assistants and apps in this space that don't have their own retention policy",
-  "insights_assistant_row_counts": "{questions, plural, one {# question} other {# questions}} · {sessions, plural, one {# session} other {# sessions}}"
+  "insights_assistant_row_counts": "{questions, plural, one {# question} other {# questions}} · {sessions, plural, one {# session} other {# sessions}}",
+  "tools_bundled_unavailable": "Eneo's built-in tools could not be read"
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
@@ -82,6 +82,46 @@ describe("Verktyg", () => {
       expect(runtime.compareDocumentPosition(tabs) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     }
   );
+  it("says when the built-in tools cannot be read, and reads them again on request", async () => {
+    let down = true;
+    get.mockImplementation((path?: string) => {
+      if (path === "/api/v1/mcp-servers/bundled/")
+        return down
+          ? Promise.resolve({
+              error: { message: "Down", code: "internal" },
+              response: new Response("{}", { status: 500 })
+            })
+          : ok({ items: [], count: 0, runtime: null });
+      if (path === "/api/v1/security-classifications/")
+        return ok({ security_enabled: false, security_classifications: [] });
+      return ok({ items: [] });
+    });
+    renderInApp(<ToolsPage tab="functions" />);
+    expect(await screen.findByText("Det gick inte att läsa Eneos inbyggda verktyg")).toBeTruthy();
+
+    down = false;
+    fireEvent.click(screen.getByRole("button", { name: /Försök igen/ }));
+    await waitFor(() =>
+      expect(screen.queryByText("Det gick inte att läsa Eneos inbyggda verktyg")).toBeNull()
+    );
+  });
+
+  it("shows no error when the deployment has no built-in tools (404)", async () => {
+    get.mockImplementation((path?: string) => {
+      if (path === "/api/v1/mcp-servers/bundled/")
+        return Promise.resolve({
+          error: { message: "Not Found", code: "http_404" },
+          response: new Response("{}", { status: 404 })
+        });
+      if (path === "/api/v1/security-classifications/")
+        return ok({ security_enabled: false, security_classifications: [] });
+      return ok({ items: [] });
+    });
+    renderInApp(<ToolsPage tab="functions" />);
+    expect(await screen.findByRole("heading", { name: "Webbsökning" })).toBeTruthy();
+    expect(screen.queryByText("Det gick inte att läsa Eneos inbyggda verktyg")).toBeNull();
+  });
+
   it("reads the tab from the address and opens the functions by default", () => {
     expect(toolsTabOf(undefined)).toBe("functions");
     expect(toolsTabOf("mcp-servers")).toBe("mcp-servers");
