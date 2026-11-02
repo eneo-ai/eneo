@@ -772,6 +772,53 @@ describe("FlowRunPage", () => {
     expect(calls(DETAIL)).toHaveLength(1);
   });
 
+  it("keeps the detail and steps on the page when reading them again after the run moved fails, and retries them", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });
+    answerRun(
+      running,
+      makeRunDetail({ ...running, result: { kind: "inline_text", text: "Ett första utkast." } })
+    );
+    renderRun();
+    expect(await screen.findByText("Ett första utkast.")).toBeTruthy();
+    expect(screen.getByRole("article", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
+
+    // The run moved on; its detail and steps cannot be read again.
+    const moved = makeRunSummary({ revision: 3 });
+    answerRun(moved);
+    const busy = () => ({ status: 503, body: { message: "Busy", code: "service_unavailable" } });
+    state.routes[DETAIL] = busy;
+    state.routes[STEPS] = busy;
+    await act(() => vi.advanceTimersByTimeAsync(2_100));
+    await waitFor(() => expect(calls(STEPS)).toHaveLength(2));
+    expect(await screen.findByText(messages.query_error_refresh_title)).toBeTruthy();
+    expect(screen.getByText("Ett första utkast.")).toBeTruthy();
+    expect(screen.getByRole("article", { name: "Steg 1: Sammanfatta" })).toBeTruthy();
+    expect(screen.queryByText(messages.flow_runs_detail_failed)).toBeNull();
+    expect(screen.queryByText(messages.flow_runs_steps_failed)).toBeNull();
+
+    // A retry that answers shows the run as it is now; while it is out, its button stays.
+    answerRun(moved);
+    const release = holdAnswers(DETAIL);
+    const retry = screen.getByRole("button", {
+      name: messages.query_error_retry_named.replace(
+        "{section}",
+        messages.query_error_refresh_title
+      )
+    });
+    fireEvent.click(retry);
+    await waitFor(() => expect(calls(DETAIL)).toHaveLength(3));
+    await act(() => vi.advanceTimersByTimeAsync(100));
+    expect(retry.isConnected).toBe(true);
+    expect(screen.getByText("Ett första utkast.")).toBeTruthy();
+    await act(async () => release());
+    expect(await screen.findByText("Beslutet är fattat.")).toBeTruthy();
+    expect(screen.queryByText("Ett första utkast.")).toBeNull();
+    expect(screen.queryByText(messages.query_error_refresh_title)).toBeNull();
+    expect(calls(DETAIL)).toHaveLength(3);
+    expect(calls(STEPS)).toHaveLength(3);
+  });
+
   it("stays on the run while the review it moved into loads", async () => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     const running = makeRunSummary({ status: "running", finished_at: null, revision: 2 });

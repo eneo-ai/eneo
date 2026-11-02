@@ -4,11 +4,11 @@ import { Button } from "@astryxdesign/core/Button";
 import { Collapsible } from "@astryxdesign/core/Collapsible";
 import { useAnnounce } from "@astryxdesign/core/hooks";
 import {
-  keepPreviousData,
   useMutation,
   useQuery,
   useQueryClient,
-  useSuspenseQuery
+  useSuspenseQuery,
+  type UseQueryResult
 } from "@tanstack/react-query";
 import { RefreshCw } from "lucide-react";
 import { useTranslations } from "use-intl";
@@ -18,7 +18,12 @@ import { Banner } from "@astryxdesign/core/Banner";
 import { ClientTime, useClientTimeText } from "@/components/composites/client-time";
 import { LoadingState } from "@/components/composites/loading-state";
 import { PageHeader } from "@/components/composites/page-header";
-import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
+import {
+  blockingError,
+  ListError,
+  RefreshError,
+  type QueryLike
+} from "@/components/composites/query-state";
 import { StatusLabel } from "@/components/composites/status-label";
 import { useAppContext } from "@/components/providers/app-context";
 import { browserApi } from "@/lib/api/browser";
@@ -74,6 +79,30 @@ import {
 import { useNowAt } from "./use-now-at";
 
 type Notice = RunActionNotice;
+
+/**
+ * A read keyed by the run's progress, as the page shows it: what it last answered stays while the
+ * read of a newer version is pending or has failed (`keepPreviousData` keeps it only while pending),
+ * and a failure beside it is a failed refresh (`RefreshError`) until a read answers, its retry
+ * included: React Query reports the retry of a read with nothing of its own as pending, without its
+ * error, which would take the refresh error, and its button under focus, away.
+ */
+function useShownRead<T>(read: UseQueryResult<T>): QueryLike<T> & { failureCount: number } {
+  const [last, setLast] = useState(read.data);
+  if (read.data !== undefined && read.data !== last) setLast(read.data);
+  return {
+    data: read.data ?? last,
+    isPending: read.isPending,
+    isError: read.isError || blockingError(read),
+    error: read.error,
+    isFetching: read.isFetching,
+    fetchStatus: read.fetchStatus,
+    errorUpdatedAt: read.errorUpdatedAt,
+    dataUpdatedAt: read.dataUpdatedAt,
+    failureCount: read.failureCount,
+    refetch: read.refetch
+  };
+}
 
 /** The files the run's final result carries. */
 function resultFileIds(result: RunDetail["result"]): Set<string> {
@@ -334,17 +363,19 @@ export function FlowRunPage({ flowId, runId }: { flowId: string; runId: string }
   const [firstSignature, setFirstSignature] = useState<string | null>(null);
   if (firstSignature === null && signature !== null) setFirstSignature(signature);
   const readSignature = shown ? signature : firstSignature;
-  const detail = useQuery({
-    ...runDetailQueryOptions(browserApi, flowId, runId, readSignature ?? ""),
-    enabled: readSignature !== null,
-    placeholderData: keepPreviousData
-  });
+  const detail = useShownRead(
+    useQuery({
+      ...runDetailQueryOptions(browserApi, flowId, runId, readSignature ?? ""),
+      enabled: readSignature !== null
+    })
+  );
   const settled = progress.data ? isTerminal(progress.data.status.status) : false;
-  const steps = useQuery({
-    ...runStepsQueryOptions(flowId, runId, readSignature ?? "", settled),
-    enabled: readSignature !== null,
-    placeholderData: keepPreviousData
-  });
+  const steps = useShownRead(
+    useQuery({
+      ...runStepsQueryOptions(flowId, runId, readSignature ?? "", settled),
+      enabled: readSignature !== null
+    })
+  );
   const awaitingReview = progress.data ? isAwaitingReview(progress.data.status.status) : false;
   const review = useQuery({
     ...activeReviewQueryOptions(flowId, runId, signature ?? ""),
