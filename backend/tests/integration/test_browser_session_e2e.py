@@ -14,10 +14,12 @@ from uuid import UUID, uuid4
 import jwt
 import pytest
 import sqlalchemy as sa
+from fastapi import WebSocketException
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import event
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import Session
+from starlette.status import WS_1008_POLICY_VIOLATION
 
 from eneo.authentication import browser_session_service
 from eneo.authentication.auth_service import AuthService
@@ -26,6 +28,8 @@ from eneo.authentication.login_attempts import LOGIN_ATTEMPT_LIMIT
 from eneo.database.database import sessionmanager
 from eneo.database.tables.browser_sessions_table import BrowserSessions
 from eneo.main.config import Settings, get_settings, set_settings
+from eneo.server.dependencies.container import get_user_from_websocket
+from eneo.server.websockets import websocket_router
 from tests.integration.test_federation_tenant_admin import (
     _discovery,
     _idp,
@@ -741,3 +745,32 @@ async def test_signing_in_while_signing_out_keeps_the_new_session(
 
         assert (await me(old)).status_code == 401
         assert (await me(new)).status_code == 200
+
+
+@pytest.mark.integration
+@pytest.mark.asyncio
+async def test_a_browser_session_cannot_open_a_websocket(
+    client,
+    super_admin_token,
+    patch_auth_service_jwt,
+    mock_transcription_models,
+    browser_session_on,
+):
+    # A socket keeps its user after sign-out; web-next opens none. The token
+    # login's Bearer token, which Svelte uses, still opens one.
+    email = await _create_local_user(client, super_admin_token)
+    session = _session_token(await _login(client, SESSION_LOGIN, email, PASSWORD))
+    bearer = (await _login(client, TOKEN_LOGIN, email, PASSWORD)).json()["access_token"]
+    websocket = SimpleNamespace(scope={"endpoint": websocket_router.connect})
+
+    user = await get_user_from_websocket(
+        websocket=websocket, token=bearer, session=None
+    )
+    assert user.email == email
+    with pytest.raises(WebSocketException) as refused:
+        await get_user_from_websocket(websocket=websocket, token=session, session=None)
+    assert refused.value.code == WS_1008_POLICY_VIOLATION
+    still_in = await client.get(
+        "/api/v1/users/me/", headers=SAME_ORIGIN | {"Cookie": f"{SESSION}={session}"}
+    )
+    assert still_in.status_code == 200
