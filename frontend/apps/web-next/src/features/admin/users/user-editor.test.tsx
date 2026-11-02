@@ -4,7 +4,7 @@ import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { brokenRule, readPasswordPolicy } from "@/features/auth/password-policy";
 import { expectNoAxeViolations } from "@/test/axe";
-import { renderInApp } from "@/test/render";
+import { cachedText, renderInApp } from "@/test/render";
 
 const api = vi.hoisted(() => ({ GET: vi.fn(), POST: vi.fn(), DELETE: vi.fn() }));
 const toast = vi.hoisted(() => ({
@@ -64,7 +64,7 @@ async function renderEditor(
     name: user ? "Redigera användare" : "Skapa en ny användare"
   });
   await within(dialog).findByLabelText("Användare");
-  return { dialog, invalidate };
+  return { dialog, invalidate, queryClient };
 }
 
 /** The editor and, as the users page has it, the one-time password view. */
@@ -326,6 +326,51 @@ describe("UserEditorDialog", () => {
     fireEvent.click(within(reveal).getByRole("button", { name: "Stäng" }));
 
     await waitFor(() => expect(invalidate).toHaveBeenCalledWith({ queryKey: ["admin-users"] }));
+  });
+
+  it("keeps a new user's password out of React Query's cache", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog, queryClient } = await renderEditor();
+    type(dialog, /^Användarnamn/, "anna.lind");
+    type(dialog, /^E-post/, "anna.lind@example.se");
+
+    submit(dialog);
+
+    const reveal = await screen.findByRole("dialog", { name: "Kontot har skapats" });
+    const password = sentPassword(0);
+    within(reveal).getByText(password);
+    expect(cachedText(queryClient)).not.toContain(password);
+  });
+
+  it("keeps a replaced password out of React Query's cache", async () => {
+    api.POST.mockImplementation(() => ok({}));
+    const { dialog, queryClient } = await renderEditor(existing);
+
+    fireEvent.click(replaceSwitch(dialog));
+    submit(dialog);
+
+    const reveal = await screen.findByRole("dialog", { name: "Nytt lösenord har satts" });
+    const password = sentPassword(0);
+    within(reveal).getByText(password);
+    expect(cachedText(queryClient)).not.toContain(password);
+  });
+
+  it("keeps the password out of React Query's cache after a refused save", async () => {
+    api.POST.mockImplementation(() =>
+      Promise.resolve({
+        error: { message: "Boom" },
+        response: new Response(null, { status: 500 })
+      })
+    );
+    const { dialog, queryClient } = await renderEditor();
+    type(dialog, /^Användarnamn/, "anna.lind");
+    type(dialog, /^E-post/, "anna.lind@example.se");
+
+    submit(dialog);
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(screen.getByRole("dialog", { name: "Skapa en ny användare" })).toBe(dialog);
+    expect(cachedText(queryClient)).not.toContain(sentPassword(0));
   });
 
   it("says so, and sends nothing, when no password can meet the policy", async () => {
