@@ -530,16 +530,18 @@ jobs:
     timeout-minutes: 60
     # The suite outgrew one 45-minute job (run 41297645205). Each leg runs one worker
     # on its own stack. Playwright's --shard balances test counts, but a whole-route
-    # walk is one test of 1.5-4 minutes, so two legs take the walks by tag and the
-    # rest leg excludes both tag lists: every case runs once, about 23-29 minutes of
-    # tests per leg. A new route walk adds its tag to a walk leg and to the rest leg.
+    # walk is one test of 1.5-13 minutes, so three legs take the walks by tag and the
+    # rest leg excludes all their tags: every case runs once. The split follows the
+    # measured test minutes of run 41491915398, about 22-23 per walk leg and 20 for
+    # the rest. A new route walk adds its tag to a walk leg and to the rest leg.
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { leg: walks-1, grep: "@a11y-routes|@layout-shift|@turn", grep_invert: "@upload-worker" }
-          - { leg: walks-2, grep: "@keyboard|@contract|@forced-colors|@text-size", grep_invert: "@upload-worker" }
-          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@layout-shift|@turn|@keyboard|@contract|@forced-colors|@text-size", upload_worker: true }
+          - { leg: walks-1, grep: "@a11y-routes|@a11y-light|@forced-colors", grep_invert: "@upload-worker" }
+          - { leg: walks-2, grep: "@layout-shift|@contract|@turn", grep_invert: "@upload-worker" }
+          - { leg: walks-3, grep: "@keyboard|@a11y-dark|@text-size", grep_invert: "@upload-worker" }
+          - { leg: rest, grep: ".", grep_invert: "@upload-worker|@a11y-routes|@a11y-light|@forced-colors|@layout-shift|@contract|@turn|@keyboard|@a11y-dark|@text-size", upload_worker: true }
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
