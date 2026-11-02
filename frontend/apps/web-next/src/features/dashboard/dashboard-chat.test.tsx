@@ -1,8 +1,7 @@
 // @vitest-environment jsdom
-import { cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { retryPartnerQuery } from "@/features/chat/chat-partner-state";
-import { EneoApiError } from "@/lib/api/errors";
+import { makeQueryClient } from "@/lib/api/query";
 import { expectNoAxeViolations } from "@/test/axe";
 import { renderInApp } from "@/test/render";
 import { DashboardChat } from "@/features/dashboard/dashboard-chat.client";
@@ -11,6 +10,8 @@ const api = vi.hoisted(() => ({
   assistantCalls: 0,
   /** Whether the assistant request fails (the assistant is gone). */
   missing: true,
+  /** The status it fails with. */
+  status: 404,
   permissions: [] as string[],
   insights: false,
   GET: vi.fn(async (path: string) => {
@@ -20,7 +21,7 @@ const api = vi.hoisted(() => ({
         return {
           data: undefined,
           error: { message: "Not found" },
-          response: new Response(null, { status: 404 })
+          response: new Response(null, { status: api.status })
         };
       }
       return {
@@ -55,6 +56,7 @@ afterEach(() => {
   cleanup();
   api.assistantCalls = 0;
   api.missing = true;
+  api.status = 404;
   api.permissions = [];
   api.insights = false;
 });
@@ -95,13 +97,22 @@ describe("DashboardChat", () => {
   });
 });
 
-describe("retryPartnerQuery", () => {
-  it("gives up at once on client errors and retries the rest three times", () => {
-    const missing = new EneoApiError("Not found", { status: 404 });
-    const down = new EneoApiError("Bad gateway", { status: 502 });
-    expect(retryPartnerQuery(0, missing)).toBe(false);
-    expect(retryPartnerQuery(0, down)).toBe(true);
-    expect(retryPartnerQuery(3, down)).toBe(false);
-    expect(retryPartnerQuery(1, new TypeError("Failed to fetch"))).toBe(true);
+describe("the assistant request under the app's retry policy", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it.each([
+    [403, 1],
+    [404, 1],
+    [503, 2]
+  ])("after a %s is sent %s time(s) in its first second", async (status, requests) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    api.status = status;
+    renderInApp(<DashboardChat assistantId="assistant-1" sessionId={null} />, {
+      queryClient: makeQueryClient()
+    });
+    await waitFor(() => expect(api.assistantCalls).toBe(1));
+    // The first retry waits one second, the next two more.
+    await act(() => vi.advanceTimersByTimeAsync(1_500));
+    expect(api.assistantCalls).toBe(requests);
   });
 });

@@ -75,6 +75,8 @@ it("reports a partial bulk-disable failure and reloads the successful changes", 
     "true"
   );
   expect(api.PUT).toHaveBeenCalledTimes(2);
+  // One refresh of the catalogue, not a request restarted by a second invalidation.
+  expect(api.GET).toHaveBeenCalledTimes(2);
 });
 
 it("marks schema-only changes as changed without an empty description diff", async () => {

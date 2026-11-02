@@ -2,6 +2,7 @@ import { Tab, TabList } from "@astryxdesign/core/TabList";
 import { useQuery } from "@tanstack/react-query";
 import { useTranslations } from "use-intl";
 import { PageHeader } from "@/components/composites/page-header";
+import { blockingError, ListError, RefreshError } from "@/components/composites/query-state";
 import { McpServersPage } from "../mcp/mcp-page";
 import { CapabilityProvidersPage } from "./capability-providers-page";
 import { TOOLS_TAB_HREF, type ToolsTab } from "./tools-tabs";
@@ -26,6 +27,19 @@ export function ToolsPage({ tab }: { tab: ToolsTab }) {
     <div className="mx-auto flex w-full max-w-5xl flex-col gap-6 pb-16">
       <PageHeader title={t("tools")} tour="admin-tools" />
       <RuntimeStatusCard status={bundledTools.data?.runtime} />
+      {/* The catalogue of Eneo's built-in tools belongs to this page: both tabs offer from it, so
+          its failure shows once, here, with a retry (a 404 means the deployment has none). */}
+      {blockingError(bundledTools) ? (
+        <ListError
+          compact
+          title={t("tools_bundled_unavailable")}
+          error={bundledTools.error}
+          onRetry={() => void bundledTools.refetch()}
+          isRetrying={bundledTools.isFetching}
+        />
+      ) : (
+        <RefreshError queries={[bundledTools]} />
+      )}
       <TabList
         value={tab}
         onChange={ignoreSelection}

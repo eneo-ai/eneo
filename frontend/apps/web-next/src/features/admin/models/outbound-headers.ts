@@ -234,15 +234,10 @@ export function supportsOutboundHeaders(
   return options?.supported_provider_types.includes(providerType.toLowerCase()) ?? false;
 }
 
-/** Client-side completeness only; the server validates everything else. */
-export function isRowComplete(
-  row: HeaderRow,
-  options: OutboundHeaderOptions | null = null
-): boolean {
-  return headerFieldProblem(row, options) === null;
-}
-
-/** First incomplete input, so create and edit share validation and focus order. */
+/**
+ * First incomplete input, so create and edit share validation and focus
+ * order. Client-side completeness only; the server validates everything else.
+ */
 export function headerFieldProblem(
   row: HeaderRow,
   options: OutboundHeaderOptions | null

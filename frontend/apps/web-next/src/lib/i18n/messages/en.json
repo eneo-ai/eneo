@@ -7110,5 +7110,6 @@
   "chat_announce_generating": "The assistant is writing a reply",
   "mcp_tags_placeholder_touch": "Add a tag",
   "chat_start_guidance": "Describe the task and the result you need.",
-  "insights_assistant_row_counts": "{questions, plural, one {# question} other {# questions}} · {sessions, plural, one {# session} other {# sessions}}"
+  "insights_assistant_row_counts": "{questions, plural, one {# question} other {# questions}} · {sessions, plural, one {# session} other {# sessions}}",
+  "tools_bundled_unavailable": "Eneo's built-in tools could not be read"
 }

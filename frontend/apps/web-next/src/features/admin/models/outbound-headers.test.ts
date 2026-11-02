@@ -9,9 +9,9 @@ import {
   canKeepStored,
   changeStored,
   headerClassification,
+  headerFieldProblem,
   headersPayload,
   insertToken,
-  isRowComplete,
   isUnencryptedRemote,
   keepStored,
   newHeaderRow,
@@ -125,7 +125,7 @@ describe("setSecret", () => {
     const row = setSecret(rowsFromHeaders([secretHeader])[0]!, false);
     expect(row.keepsStoredValue).toBe(false);
     expect(row.keepsStoredFallback).toBe(false);
-    expect(isRowComplete(row)).toBe(false);
+    expect(headerFieldProblem(row, null)).toBe("value");
   });
 
   it("returns to the stored secret when re-ticked before anything is typed", () => {
@@ -259,8 +259,8 @@ describe("tokenProblems", () => {
 
   it("makes the row incomplete", () => {
     const row = { ...newHeaderRow(), name: "X-A", value: "{{user.unknown}}" };
-    expect(isRowComplete(row, options)).toBe(false);
-    expect(isRowComplete({ ...row, value: "{{user.department}}" }, options)).toBe(true);
+    expect(headerFieldProblem(row, options)).toBe("value");
+    expect(headerFieldProblem({ ...row, value: "{{user.department}}" }, options)).toBeNull();
   });
 });
 
@@ -290,15 +290,16 @@ describe("supportsOutboundHeaders", () => {
   });
 });
 
-describe("isRowComplete", () => {
+describe("headerFieldProblem", () => {
   it("needs a name and a value", () => {
-    expect(isRowComplete(newHeaderRow())).toBe(false);
-    expect(isRowComplete({ ...newHeaderRow(), name: "X-A", value: "v" })).toBe(true);
+    expect(headerFieldProblem(newHeaderRow(), null)).toBe("name");
+    expect(headerFieldProblem({ ...newHeaderRow(), name: "X-A" }, null)).toBe("value");
+    expect(headerFieldProblem({ ...newHeaderRow(), name: "X-A", value: "v" }, null)).toBeNull();
   });
 
   it("needs a fallback for the fallback policy", () => {
     const row = { ...newHeaderRow(), name: "X-A", value: "v", onMissing: "fallback" as const };
-    expect(isRowComplete(row)).toBe(false);
-    expect(isRowComplete({ ...row, fallback: "unknown" })).toBe(true);
+    expect(headerFieldProblem(row, null)).toBe("fallback");
+    expect(headerFieldProblem({ ...row, fallback: "unknown" }, null)).toBeNull();
   });
 });

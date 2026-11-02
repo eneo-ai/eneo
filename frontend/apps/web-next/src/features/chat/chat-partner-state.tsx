@@ -1,17 +1,6 @@
 import { useTranslations } from "use-intl";
 import { LoadingState } from "@/components/composites/loading-state";
 import { ListError } from "@/components/composites/query-state";
-import { EneoApiError } from "@/lib/api/errors";
-
-/**
- * Retry policy for a chat route's partner (assistant or group chat) query:
- * a missing or forbidden partner won't appear on retry, so fail at once and
- * show the error; server and network failures get the usual three retries.
- */
-export function retryPartnerQuery(failureCount: number, error: unknown): boolean {
-  if (error instanceof EneoApiError && error.status >= 400 && error.status < 500) return false;
-  return failureCount < 3;
-}
 
 /** A chat route while its assistant or group chat loads; the page's h1 says so. */
 export function ChatPartnerLoading() {

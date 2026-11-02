@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
-import { unwrap } from "@/lib/api/errors";
+import { orOn404, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 
 export type McpServer = Schema<"MCPServerSettingsPublic">;
@@ -14,8 +14,9 @@ export type McpServerUpdatePayload = Schema<"MCPServerUpdate">;
 export type McpServerCreateResponse = Schema<"MCPServerCreateResponse">;
 
 export const MCP_KEY = ["admin-mcp-servers"];
+// Both under MCP_KEY: invalidating MCP_KEY refreshes them too.
 export const mcpToolsKey = (serverId: string) => ["admin-mcp-servers", serverId, "tools"];
-export const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
+const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
 
 /**
  * The servers the bundled tool runtime offers this tenant, each with whether
@@ -25,11 +26,12 @@ export const BUNDLED_KEY = ["admin-mcp-servers", "bundled"];
 export function bundledToolsQueryOptions(api: EneoClient) {
   return queryOptions({
     queryKey: BUNDLED_KEY,
-    queryFn: async (): Promise<Schema<"BundledToolList">> => {
-      const { data, response } = await api.GET("/api/v1/mcp-servers/bundled/");
-      if (response.status === 404 || !data) return { items: [], count: 0, runtime: null };
-      return data;
-    }
+    queryFn: (): Promise<Schema<"BundledToolList">> =>
+      orOn404(unwrap(api.GET("/api/v1/mcp-servers/bundled/")), {
+        items: [],
+        count: 0,
+        runtime: null
+      })
   });
 }
 

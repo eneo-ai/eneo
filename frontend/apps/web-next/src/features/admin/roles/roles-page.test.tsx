@@ -18,7 +18,11 @@ vi.mock("use-intl", () => ({
 }));
 vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 
+import { toast as sonner } from "sonner";
 import { RolesPage } from "./roles-page";
+
+/** What a support request quotes, under the user's language labels. */
+const REFERENCES = { description: "error_id: error-1 · trace_id: trace-1" };
 
 const ok = (data: unknown) =>
   Promise.resolve({ data, response: new Response("{}", { status: 200 }) });
@@ -144,6 +148,35 @@ describe("role administration", () => {
     );
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     expect(post).not.toHaveBeenCalled();
+  });
+
+  it("toasts a refused save or delete with its message and support references", async () => {
+    const refused = () =>
+      Promise.resolve({
+        error: { message: "Name taken", eneo_error_code: 9017, error_id: "error-1" },
+        response: new Response("{}", { status: 409, headers: { "x-trace-id": "trace-1" } })
+      });
+    const toastError = vi.mocked(sonner.error);
+    post.mockImplementation(refused);
+    remove.mockImplementation(refused);
+    show();
+    await screen.findByText("Everyone");
+    fireEvent.click(screen.getByRole("button", { name: "create_role" }));
+    fireEvent.change(screen.getByLabelText("role_name"), { target: { value: "Readers" } });
+    fireEvent.click(
+      within(screen.getByRole("dialog")).getByRole("button", { name: "create_role" })
+    );
+    const toasted = ["eneo_error_9017", expect.objectContaining(REFERENCES)];
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(...toasted));
+
+    toastError.mockClear();
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "cancel" }));
+    const { menu } = openActions(screen.getByText("Manager").closest("article")!);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "delete_role" }));
+    fireEvent.click(
+      within(screen.getByRole("alertdialog")).getByRole("button", { name: "delete" })
+    );
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(...toasted));
   });
 
   it("updates only changed fields and refreshes the role list", async () => {

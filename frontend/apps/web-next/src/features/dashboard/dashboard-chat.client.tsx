@@ -3,11 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import { browserApi } from "@/lib/api/browser";
 import { assistantQueryOptions } from "@/features/assistants/editor/use-assistant";
 import type { ChatPartner } from "@/lib/chat/types";
-import {
-  ChatPartnerError,
-  ChatPartnerLoading,
-  retryPartnerQuery
-} from "@/features/chat/chat-partner-state";
+import { ChatPartnerError, ChatPartnerLoading } from "@/features/chat/chat-partner-state";
 import { ChatPage } from "@/features/chat/chat-page";
 import { partnerKnowledge } from "@/features/chat/partner-knowledge";
 import { partnerCompletionModel } from "@/features/chat/partner-model";
@@ -19,10 +15,7 @@ export function DashboardChat({
   assistantId: string;
   sessionId: string | null;
 }) {
-  const assistantQuery = useQuery({
-    ...assistantQueryOptions(browserApi, assistantId),
-    retry: retryPartnerQuery
-  });
+  const assistantQuery = useQuery(assistantQueryOptions(browserApi, assistantId));
   const assistant = assistantQuery.data;
 
   if (!assistant) {

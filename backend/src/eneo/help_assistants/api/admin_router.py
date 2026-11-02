@@ -40,12 +40,7 @@ from eneo.main.models import PaginatedResponse
 from eneo.server import protocol
 from eneo.server.dependencies.container import get_container
 from eneo.server.protocol import responses
-
-_TENANT_HUB_ON_GET = (
-    "Resolving the tenant hub creates it when missing and makes its members exactly "
-    "the tenant's admins. Idempotent, and the outcome follows from tenant state, "
-    "not from the request."
-)
+from eneo.spaces.space_service import TENANT_HUB_ON_GET
 
 router = APIRouter()
 
@@ -101,7 +96,7 @@ async def _resolve_name(
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason="Organization administration requires the admin permission.",
-    effect_on_get=_TENANT_HUB_ON_GET,
+    effect_on_get=TENANT_HUB_ON_GET,
 )
 async def list_roles(container: AdminContainer):
     service = container.org_space_assistant_role_service()
@@ -125,7 +120,7 @@ async def list_roles(container: AdminContainer):
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason="Organization administration requires the admin permission.",
-    effect_on_get=_TENANT_HUB_ON_GET,
+    effect_on_get=TENANT_HUB_ON_GET,
 )
 async def list_templates(container: AdminContainer):
     """Shipped Help Assistant templates not yet installed for the tenant."""
@@ -149,7 +144,7 @@ async def list_templates(container: AdminContainer):
     authentication=Authentication.USER,
     authorization=Permission.ADMIN,
     reason="Organization administration requires the admin permission.",
-    effect_on_get=_TENANT_HUB_ON_GET,
+    effect_on_get=TENANT_HUB_ON_GET,
 )
 async def get_active_role(kind: HelperKind, container: AdminContainer):
     service = container.org_space_assistant_role_service()

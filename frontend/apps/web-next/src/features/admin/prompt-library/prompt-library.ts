@@ -1,6 +1,6 @@
 import { queryOptions } from "@tanstack/react-query";
 import type { EneoClient } from "@/lib/api/browser";
-import { EneoApiError, unwrap } from "@/lib/api/errors";
+import { orOn404, unwrap } from "@/lib/api/errors";
 import type { Schema } from "@/lib/api/models";
 import { matchesSearch } from "@/lib/search";
 
@@ -43,15 +43,13 @@ export function promptLibraryVersionsQueryOptions(api: EneoClient, id: string) {
   return queryOptions({
     queryKey: [...PROMPT_LIBRARY_KEY, id, "versions"],
     queryFn: async (): Promise<Version[]> => {
-      try {
-        const page = await unwrap(
+      const page = await orOn404(
+        unwrap(
           api.GET("/api/v1/admin/prompt-library/{id}/versions/", { params: { path: { id } } })
-        );
-        return [...page.items].sort((a, b) => b.version - a.version);
-      } catch (error) {
-        if (error instanceof EneoApiError && error.status === 404) return [];
-        throw error;
-      }
+        ),
+        { items: [] }
+      );
+      return [...page.items].sort((a, b) => b.version - a.version);
     }
   });
 }
