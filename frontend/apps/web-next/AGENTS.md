@@ -300,7 +300,7 @@ open), so the index has no bar of its own and names itself with a heading.
   the menus only ask to open one, and an open dialog survives the turn. Follow
   `services/actions.tsx` for a new resource.
 - **Navigation and links**: app code imports `@/lib/navigation` and
-  `@/lib/link`, which own the TanStack adapters. Next imports are lint errors.
+  `@/lib/link`, which own the TanStack adapters.
 - **Toasts**: only through `src/lib/toast.ts` (`no-restricted-imports` blocks
   `sonner` elsewhere). Errors and warnings don't time out; every toast has a
   close button; success and info close after 6 s. Sonner's stylesheet is

@@ -52,12 +52,6 @@ const astryxWrappedImports = [
   }
 ];
 
-const retiredFrameworkImports = [
-  { name: "next", message: "web-next is a Vite SPA; use its TanStack owners." },
-  { name: "next-intl", message: 'Use "use-intl".' },
-  { name: "server-only", message: "Server behavior belongs to FastAPI." }
-];
-
 const eslintConfig = defineConfig([
   react.configs.flat.recommended,
   reactHooks.configs.flat.recommended,
@@ -311,39 +305,20 @@ const eslintConfig = defineConfig([
     }
   },
   {
-    // Astryx parts we wrap (astryxWrappedImports). A separate rule from
-    // no-restricted-imports above, so neither block replaces the other's
-    // options.
+    // Astryx parts we wrap (astryxWrappedImports), and server code. A separate
+    // rule from no-restricted-imports above, so neither block replaces the
+    // other's options. Flat config replaces a rule's options per file instead
+    // of merging them: later restrictions extend this block's `paths`; never
+    // add a competing block with the same rule.
     files: ["src/**/*.{ts,tsx}"],
     ignores: ["src/components/astryx/**"],
     rules: {
       "@typescript-eslint/no-restricted-imports": [
         "error",
         {
-          paths: astryxWrappedImports
-        }
-      ]
-    }
-  },
-  {
-    // The framework seam, outside src/app (which keeps Next until it is
-    // ported). Flat config replaces a rule's options per file instead of
-    // merging them, so this block repeats the Astryx paths, and both blocks
-    // ignore src/components/astryx/**. Later restrictions extend this block's
-    // `paths`/`patterns`; never add a competing block with the same rule.
-    files: ["src/**/*.{ts,tsx}"],
-    ignores: ["src/components/astryx/**"],
-    rules: {
-      "@typescript-eslint/no-restricted-imports": [
-        "error",
-        {
-          paths: [...astryxWrappedImports, ...retiredFrameworkImports],
-          patterns: [
-            {
-              group: ["next/*", "next-intl/*", "@/app/*", "**/app/(app)/*", "**/app/(public)/*"],
-              message:
-                "Next is retired; use framework-neutral features and the TanStack navigation owner."
-            }
+          paths: [
+            ...astryxWrappedImports,
+            { name: "server-only", message: "Server behavior belongs to FastAPI." }
           ]
         }
       ]
