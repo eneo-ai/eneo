@@ -76,6 +76,25 @@ for (const size of TURNED) {
   });
 }
 
+test.describe("a docked bar on a phone turned sideways", () => {
+  test.use({ viewport: { width: 844, height: 390 }, hasTouch: true, isMobile: true });
+
+  test("gives way to a text field's keyboard, not to a switch", async ({ page }) => {
+    await page.goto("/account/api-keys");
+    const main = page.getByRole("main");
+    const bar = page.locator("[data-docked-actions]");
+    await expect(bar).toBeVisible();
+
+    await main.getByRole("switch").first().focus();
+    await expect(bar).toBeVisible();
+
+    await main.getByRole("textbox").first().focus();
+    await expect(bar).toBeHidden();
+    await main.getByRole("switch").first().focus();
+    await expect(bar).toBeVisible();
+  });
+});
+
 test.describe("a phone turned while an editor's section is open", () => {
   test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true });
 
