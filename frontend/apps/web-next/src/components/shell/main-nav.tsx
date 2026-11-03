@@ -12,10 +12,11 @@ import {
 } from "@astryxdesign/core/SideNav";
 import { Skeleton } from "@astryxdesign/core/Skeleton";
 import { Tooltip } from "@astryxdesign/core/Tooltip";
-import { Bot, LayoutGrid, Plus, RotateCcw, Search, SquarePen, User } from "lucide-react";
+import { Bot, Building2, LayoutGrid, Plus, RotateCcw, Search, SquarePen, User } from "lucide-react";
 import { usePathname } from "@/lib/navigation";
 import { useTranslations } from "use-intl";
 import { useEffect, useMemo, useRef } from "react";
+import { useTouchTablet } from "@/lib/hooks/use-media-match";
 import { EntityAvatar } from "@/components/composites/entity-avatar";
 import { useAppContext } from "@/components/providers/app-context";
 import type { RecentConversation } from "@/lib/api/conversations";
@@ -26,7 +27,7 @@ import { NAV_ITEM_CLASSES, SECONDARY_LINK_CLASSES } from "./nav-styles";
 import { conversationHref, NEW_CONVERSATION_HREF } from "./routes";
 import { useShell } from "./shell-context";
 
-/** Shared spaces shown before "Alla ytor" takes over. */
+/** Shared spaces shown before "Dina ytor" takes over. */
 const MAX_SPACES_IN_NAV = 8;
 
 function NewConversationButton() {
@@ -63,6 +64,7 @@ export function MainTopContent() {
   // it, so focus has somewhere to return to when the palette closes.
   const keepDrawerOpen = useMemo(() => ({ ...mobile, closeMobileNav: () => {} }), [mobile]);
   const isInDrawer = useSideNavRenderMode() === "drawer-content";
+  const tablet = useTouchTablet();
 
   return (
     // The design sets "Sök" (the only button row) in secondary text.
@@ -74,8 +76,8 @@ export function MainTopContent() {
       )}
     >
       <NewConversationButton />
-      {/* Beside the top bar, Sök is the top bar's (top-bar.tsx); the drawer keeps its own. */}
-      {isInDrawer && (
+      {/* Beside the top bar, Sök is the top bar's (top-bar.tsx); the drawer and a tablet keep their own. */}
+      {(isInDrawer || tablet) && (
         <AppShellMobileContext value={keepDrawerOpen}>
           <SideNavItem
             label={t("search")}
@@ -129,7 +131,7 @@ function SpacesSection() {
   useEffect(() => {
     if (!isError && focusAfterRetry.current) {
       // The retry button leaves the DOM after recovery. Give its focus to the
-      // newly available first space, or the stable "Alla ytor" link.
+      // newly available first space, or the stable "Dina ytor" link.
       (firstSpaceRef.current ?? allSpacesRef.current)?.focus();
       focusAfterRetry.current = false;
     }
@@ -142,7 +144,7 @@ function SpacesSection() {
 
   return (
     <SideNavSection
-      title={t("shell_spaces")}
+      title={t("shell_area_shared")}
       className={NAV_ITEM_CLASSES}
       endContent={
         !isCollapsed && can("shared_spaces") ? (
@@ -157,12 +159,6 @@ function SpacesSection() {
         ) : undefined
       }
     >
-      <SideNavItem
-        label={t("personal")}
-        icon={<PersonalTile />}
-        href="/spaces/personal/overview"
-        isSelected={currentRouteId === "personal"}
-      />
       {spaces.length === 0 && isPending && !isError && !isCollapsed ? (
         <div aria-hidden="true" className="flex flex-col gap-2 px-2 py-1.5">
           <Skeleton height={16} width="70%" radius={1} />
@@ -207,7 +203,7 @@ function SpacesSection() {
       ) : null}
       <SideNavItem
         ref={allSpacesRef}
-        label={t("shell_all_spaces")}
+        label={t("your_spaces")}
         icon={LayoutGrid}
         href="/spaces/list"
         isSelected={target.kind === "all-spaces"}
@@ -275,10 +271,37 @@ function RecentSection() {
   );
 }
 
+/**
+ * The areas in the top bar's order, for touch: Personligt, Delat with the
+ * shared spaces (most people's work: invited to a space), and Organisation
+ * for admins; then Senaste.
+ */
 export function MainSections() {
+  const t = useTranslations();
+  const target = useNavTarget();
+  const { can } = useAppContext();
   return (
     <div className="flex flex-col gap-3">
+      <div className={NAV_ITEM_CLASSES}>
+        <SideNavItem
+          label={t("personal")}
+          icon={<PersonalTile />}
+          href="/spaces/personal/overview"
+          isSelected={target.kind === "space" && target.routeId === "personal"}
+        />
+      </div>
       <SpacesSection />
+      {can("admin") ? (
+        <div className={NAV_ITEM_CLASSES}>
+          <SideNavItem
+            label={t("organization")}
+            icon={Building2}
+            href="/spaces/organization/knowledge"
+            // Not current while "Senaste" marks the conversation open in its chat.
+            isSelected={target.kind === "organization"}
+          />
+        </div>
+      ) : null}
       <RecentSection />
     </div>
   );
