@@ -149,16 +149,37 @@ describe("AuditFilterBar", () => {
     expect(onChange).toHaveBeenLastCalledWith({ userId: "u1", userLabel: "anna.lind@example.se" });
   });
 
-  it("opens the fields in a bottom sheet on a phone", async () => {
+  it("opens the fields in a bottom sheet on a phone and hands focus back on close", async () => {
     setViewport("phone");
     renderInApp(<AuditFilterBar filters={DEFAULT_AUDIT_FILTERS} onChange={vi.fn()} />);
 
     const button = screen.getByRole("button", { name: "Filter" });
     expect(button.getAttribute("aria-haspopup")).toBe("dialog");
+    // A tap focuses the button in Chromium; fireEvent.click alone does not.
+    button.focus();
     fireEvent.click(button);
     const sheet = await screen.findByRole("dialog", { name: "Filter" });
+    expect(sheet.tagName).toBe("DIALOG");
     expect(within(sheet).getByRole("combobox", { name: "Användare" })).toBeTruthy();
+    await expectNoAxeViolations(sheet);
     fireEvent.click(within(sheet).getByRole("button", { name: "Klar" }));
     await waitFor(() => expect(button.getAttribute("aria-expanded")).toBe("false"));
+    await waitFor(() => expect(document.activeElement).toBe(button));
+  });
+
+  // The sheet follows the touch rule of every other menu and selector: a
+  // compact touch screen in either orientation, never a mouse window.
+  it.each([
+    ["a phone turned sideways", "phone-landscape", "DIALOG"],
+    ["an iPad held upright", "tablet-portrait", "DIV"],
+    ["a narrow mouse window", { width: 600, height: 800, pointer: "fine" }, "DIV"]
+  ] as const)("on %s opens the fields in the matching surface", async (_, viewport, tagName) => {
+    setViewport(viewport);
+    renderInApp(<AuditFilterBar filters={DEFAULT_AUDIT_FILTERS} onChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Filter" }));
+    const dialog = await screen.findByRole("dialog", { name: "Filter" });
+    expect(dialog.tagName).toBe(tagName);
+    expect(within(dialog).getByRole("combobox", { name: "Användare" })).toBeTruthy();
   });
 });
