@@ -170,8 +170,20 @@ class AuditLogRepositoryImpl(AuditLogRepository):
         if search:
             safe_search = escape_like(search)
             search_pattern = f"%{safe_search}%"
+            # The trigram index is on lower(description); ILIKE cannot use it.
+            # Postgres lowercases both sides of ILIKE the same way, so this
+            # matches the same rows.
             query = query.where(
-                AuditLogTable.description.ilike(search_pattern, escape="\\")
+                sa.func.lower(AuditLogTable.description).like(
+                    sa.func.lower(search_pattern), escape="\\"
+                )
+            )
+            # A pooled connection reuses the prepared count and page. After
+            # five runs Postgres may plan them once for any pattern, and that
+            # plan scans the trigram index even for terms matching most of the
+            # log. Custom plans let the statistics on lower(description) choose.
+            await self.session.execute(
+                sa.text("SET LOCAL plan_cache_mode = force_custom_plan")
             )
 
         # Get total count
