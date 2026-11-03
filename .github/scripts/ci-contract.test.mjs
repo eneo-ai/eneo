@@ -343,6 +343,26 @@ test("publication reuses CI only through a full-suite receipt from the merge que
   assert.match(job("release-sbom"), /^    if: \$\{\{ !cancelled\(\) && needs\.bundle\.result == 'success' && startsWith\(github\.ref, 'refs\/tags\/v'\) \}\}$/m);
 });
 
+test("publication moves aliases only from its bundle, under the release controller's lock", () => {
+  const workflow = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
+  const job = (name) => workflow.split(`\n  ${name}:\n`)[1].split(/\n  [a-z-]+:\n/)[0];
+  assert.doesNotMatch(job("bundle"), /release_bundle\.py promote|packages: write/);
+  const promote = job("promote");
+  assert.match(promote, /^    needs: \[release, bundle, release-sbom\]$/m);
+  const lock = "    concurrency:\n      group: eneo-release-lifecycle\n      queue: max\n      cancel-in-progress: false\n";
+  assert.ok(promote.includes(lock));
+  // The controller takes the same lock on its job, so skipped completions never queue in it.
+  const release = fs.readFileSync(path.join(root, ".github/workflows/release.yml"), "utf8");
+  assert.doesNotMatch(release, /^concurrency:/m);
+  assert.ok(release.split("\n  reconcile:\n")[1].includes(lock));
+  assert.match(promote, /^    permissions:\n      contents: read\n      packages: write\n    steps:$/m);
+  // A final release moves latest after its SBOM; develop and branches, whose SBOM job is skipped, still move.
+  assert.ok(promote.includes("needs.release-sbom.result == 'success'"));
+  assert.ok(promote.includes("(needs.release-sbom.result == 'skipped' && !startsWith(github.ref, 'refs/tags/'))"));
+  assert.match(promote, /^        if: needs\.release\.outputs\.managed != 'true'\n        run: python3 scripts\/release_bundle\.py promote --bundle release-bundle\/release\.json$/m);
+  assert.equal(workflow.match(/release_bundle\.py promote/g).length, 1);
+});
+
 test("only develop pushes save the package download cache", () => {
   // Pull request and merge-queue refs saved their own ~610 MB copy that no other ref could restore.
   const action = fs.readFileSync(path.join(root, ".github/actions/setup-frontend/action.yml"), "utf8");
