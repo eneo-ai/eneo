@@ -868,8 +868,10 @@ jobs:
 
       # Evidence for image publication, written only once every required job passed:
       # which commit passed which scope, in which run and attempt of which workflow.
-      # Publication reuses a merge-queue run only through this receipt.
+      # Publication reuses a merge-queue run only through this receipt, so only those
+      # runs write one; elsewhere an artifact-service hiccup cannot turn CI red.
       - name: Write the validation receipt
+        if: github.event_name == 'merge_group'
         env:
           FULL: ${{ needs.changes.outputs.full }}
         run: |
@@ -882,6 +884,7 @@ jobs:
           cat ci-receipt.json
 
       - name: Keep the validation receipt
+        if: github.event_name == 'merge_group'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: ci-receipt

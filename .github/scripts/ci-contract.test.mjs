@@ -328,6 +328,10 @@ test("publication reuses CI only through a full-suite receipt from the merge que
   const gate = ci.slice(ci.indexOf("\n  ci:\n"));
   assert.ok(gate.indexOf("run: node .github/scripts/ci-gate.mjs") < gate.indexOf("- name: Write the validation receipt"));
   assert.match(gate, /FULL: \$\{\{ needs\.changes\.outputs\.full \}\}/);
+  // Only merge-queue runs write one: elsewhere an artifact-service failure must not fail CI.
+  for (const name of ["Write the validation receipt", "Keep the validation receipt"]) {
+    assert.match(gate.split(`- name: ${name}\n`)[1], /^        if: github\.event_name == 'merge_group'\n/, name);
+  }
   assert.match(gate, /name: ci-receipt\n {10}path: ci-receipt\.json\n {10}retention-days: 14\n {10}overwrite: true/);
 
   const workflow = fs.readFileSync(path.join(root, ".github/workflows/build_and_push_images.yml"), "utf8");
